@@ -8,8 +8,18 @@
     "test.test_ordered_dict.CPythonBuiltinDictTests.test_abc",
     "test.test_ordered_dict.CPythonGeneralMappingTests.test_read",
     "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_abc",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_linked_list_by_clear",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_linked_list_by_delete_key",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_size_by_clear",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_size_by_delete_key",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_iterators_pickling",
     "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_repr",
     "test.test_ordered_dict.CPythonOrderedDictTests.test_abc",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_linked_list_by_clear",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_linked_list_by_delete_key",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_size_by_clear",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_size_by_delete_key",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_iterators_pickling",
     "test.test_ordered_dict.CPythonOrderedDictTests.test_repr",
     "test.test_ordered_dict.CPythonSubclassMappingTests.test_read"
   ],
@@ -35,6 +45,60 @@
     "test.test_ordered_dict.CPythonGeneralMappingTests.test_update",
     "test.test_ordered_dict.CPythonGeneralMappingTests.test_values",
     "test.test_ordered_dict.CPythonGeneralMappingTests.test_write",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_delitem",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_delitem_hash_collision",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_detect_deletion_during_iteration",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_clear",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_setdefault",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_setitem",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_update",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_fromkeys",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_init",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_init_calls",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue24348",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue24667",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_iterators_empty",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_key_change_during_iteration",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_move_to_end",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_move_to_end_issue25406",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_overridden_init",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_override_update",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_popitem_last",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_reduce_not_too_fat",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_reinsert",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_repr_recursive",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_repr_recursive_values",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_setitem",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_sorted_iterators",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_update",
+    "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_yaml_linkage",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_delitem",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_delitem_hash_collision",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_detect_deletion_during_iteration",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_dict_clear",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_dict_setdefault",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_dict_setitem",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_dict_update",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_fromkeys",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_init",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_init_calls",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_issue24348",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_issue24667",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_iterators_empty",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_key_change_during_iteration",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_move_to_end",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_move_to_end_issue25406",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_overridden_init",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_override_update",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_popitem_last",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_reduce_not_too_fat",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_reinsert",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_repr_recursive",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_repr_recursive_values",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_setitem",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_sorted_iterators",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_update",
+    "test.test_ordered_dict.CPythonOrderedDictTests.test_yaml_linkage",
     "test.test_ordered_dict.CPythonSubclassMappingTests.test_bool",
     "test.test_ordered_dict.CPythonSubclassMappingTests.test_constructor",
     "test.test_ordered_dict.CPythonSubclassMappingTests.test_get",
@@ -53,8 +117,8 @@
     "test.test_ordered_dict.CSimpleLRUCacheTests.test_pop",
     "test.test_ordered_dict.CSimpleLRUCacheTests.test_popitem"
   ],
-  "historical_union_ordered": 235,
-  "historical_union_full": 535,
+  "historical_union_ordered": 245,
+  "historical_union_full": 545,
   "scope": "This union combines historical and public revisions. Public selections retain original method bodies and fixture classes. The intact-module result is recorded independently.",
   "rows": [
     {
@@ -695,7 +759,15 @@
         "sha256": "ab76bfaeaafb83d36f74adfb2fb529986f1a4a36b38d219e87256a49653a4966"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_delitem_hash_collision",
@@ -709,7 +781,15 @@
         "sha256": "8831b61b8a5af0123ffa1578e2d0706a098418fb250123c275e25e23e0002257"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_detect_deletion_during_iteration",
@@ -723,7 +803,15 @@
         "sha256": "0a17b4eb8508427d2623bb6876cf3c0e7d246391ac8971fe4cd11a77791d0fa4"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_clear",
@@ -737,7 +825,15 @@
         "sha256": "fab4dd5748b0a891553284dbe01bc1911da0a7da76dfa68f0158b7a90f58fcb1"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_delitem",
@@ -793,7 +889,15 @@
         "sha256": "1aada550b1fb14a0462eec6a0471940255611dc58c7db48d501ad4d3ada33437"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_setitem",
@@ -807,7 +911,15 @@
         "sha256": "8bc2a8bda080accdb9a8036e39a21683030926d710315427ffe5fdc1868d3777"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_dict_update",
@@ -821,7 +933,15 @@
         "sha256": "8051ce3e5f00492dc00f0e5b24864f25c76b9fc5b261117be855cf45b3ed5c8b"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_equality",
@@ -863,7 +983,15 @@
         "sha256": "f908fde9a2bed9140bc04b580dadf1af943533d39a9d6526c9fa9c4124a19b2c"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_highly_nested",
@@ -905,7 +1033,15 @@
         "sha256": "4a6ff11b712594ee2e6cc07ef57431e34d414650512081f92f5f65470e020080"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_init_calls",
@@ -919,7 +1055,15 @@
         "sha256": "4aacf80ce1756167fde9edcda2c96ff3c8c4df687fb2693c04d269051d0f2783"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_linked_list_by_clear",
@@ -933,7 +1077,15 @@
         "sha256": "4021cbd7a82eac6044334931ad1d04268421979213b3bfb30a893d256fe558f4"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-side-effects-2fd8a3f51e39.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_linked_list_by_delete_key",
@@ -947,7 +1099,15 @@
         "sha256": "3a62ae6bf839fd48a90d4a2c4b5a36fbbb55d747769c76fa5a885f3f3e2d0c83"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-side-effects-2fd8a3f51e39.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_size_by_clear",
@@ -961,7 +1121,15 @@
         "sha256": "71be7a0937a7fc854c2de68f2f833c2b311d6b46eb2f263c0c94f62d0e9f74c6"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-side-effects-2fd8a3f51e39.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_size_by_delete_key",
@@ -975,7 +1143,15 @@
         "sha256": "81521ba6e0935b63329654abccaae117864eccc8f99bd28c8db54ef3ea51dcb7"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-side-effects-2fd8a3f51e39.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue119004_change_size_by_delete_key_in_dict_eq",
@@ -1017,7 +1193,15 @@
         "sha256": "f9c32de3c8b44c7c893c0758aad0fdeca0f56241067afd25274cce028fc466bb"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_issue24667",
@@ -1031,7 +1215,15 @@
         "sha256": "fe3e9cd7a7bbb65a99163460fbab315ee054f60f03a4e7b909f40f309095ae74"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_iterators",
@@ -1059,7 +1251,15 @@
         "sha256": "c8ed3442c24e3812ce7884b690cadfacd799bdd3d7a17d5a6529804c16cf8d65"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_iterators_pickling",
@@ -1073,7 +1273,15 @@
         "sha256": "b81c920d36e79bd66f267a2982862a418b916b59e77c329afcde63a18601d8f7"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-iterators-public-339b626d950c.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_key_change_during_iteration",
@@ -1087,7 +1295,15 @@
         "sha256": "2380a1c65085f2864f1e0dd7e99526d7ddbf2b11b4224a5e5c87a4536ddfd577"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_merge_operator",
@@ -1115,7 +1331,15 @@
         "sha256": "1576960ee82ae3a54f64cbdcd179c8498b82074f4f56365ba6d781dff4ef7aba"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_move_to_end_issue25406",
@@ -1129,7 +1353,15 @@
         "sha256": "39bf11b735ba7f504926c0412613c9bf63b9e046bbd1a6c1a3295898c26f014e"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_ordered_dict_items_result_gc",
@@ -1157,7 +1389,15 @@
         "sha256": "f34158a3b65a94a050807d249af7afca544ee4459bef66caafae438a3ecbda7a"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_override_update",
@@ -1171,7 +1411,15 @@
         "sha256": "75def066c4de716a17b8d1644f147130ab7954b5e111e8920dd3de9f7633d4ed"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_pickle_recursive",
@@ -1227,7 +1475,15 @@
         "sha256": "2cc851210bf631b3db056d1249b513df7eafc8f9df08531287ec79bb7644ef25"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_reduce_not_too_fat",
@@ -1241,7 +1497,15 @@
         "sha256": "104e17f44a2d4845a8bd5f815db77dd5a4d7ce9fbe1ff55417de033acdcb5325"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_reference_loop",
@@ -1269,7 +1533,15 @@
         "sha256": "f56b28d38cabc859947a8886e144632d878b4c8d428a70756ce23f7321f5e613"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_repr",
@@ -1305,7 +1577,15 @@
         "sha256": "7bdc3d6c384ea42e315c004ca6929c3b212aba7758be23bc1235352da2b147f8"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_repr_recursive_values",
@@ -1319,7 +1599,15 @@
         "sha256": "627f406a268bb9710cf6644bd3af4142c12b70097d4280b63e73de0441adad9f"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_setdefault",
@@ -1347,7 +1635,15 @@
         "sha256": "a632ff4183ae01c7aa84d1ca95b0bfc8411994904576e6d73efca7dadaa7ef02"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_sizeof",
@@ -1389,7 +1685,15 @@
         "sha256": "b2fad1d1b97f8e3eaebcacbfc046ab4096b862bcbcb12da95a37178b0d1cd42a"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_update",
@@ -1403,7 +1707,15 @@
         "sha256": "38038821fcb6bfdc2a7ebdb71b01b2c87f3a5ceea3cd13f69e615f247f1954c8"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_views",
@@ -1445,7 +1757,15 @@
         "sha256": "77911c4eab98df7fd7cc5e7452a72ab083efe919cadf15a7ecd65afcd3e9ddda"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_468",
@@ -1523,7 +1843,15 @@
         "sha256": "ab76bfaeaafb83d36f74adfb2fb529986f1a4a36b38d219e87256a49653a4966"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_delitem_hash_collision",
@@ -1537,7 +1865,15 @@
         "sha256": "8831b61b8a5af0123ffa1578e2d0706a098418fb250123c275e25e23e0002257"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_detect_deletion_during_iteration",
@@ -1551,7 +1887,15 @@
         "sha256": "0a17b4eb8508427d2623bb6876cf3c0e7d246391ac8971fe4cd11a77791d0fa4"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_dict_clear",
@@ -1565,7 +1909,15 @@
         "sha256": "fab4dd5748b0a891553284dbe01bc1911da0a7da76dfa68f0158b7a90f58fcb1"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_dict_delitem",
@@ -1621,7 +1973,15 @@
         "sha256": "1aada550b1fb14a0462eec6a0471940255611dc58c7db48d501ad4d3ada33437"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_dict_setitem",
@@ -1635,7 +1995,15 @@
         "sha256": "8bc2a8bda080accdb9a8036e39a21683030926d710315427ffe5fdc1868d3777"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_dict_update",
@@ -1649,7 +2017,15 @@
         "sha256": "8051ce3e5f00492dc00f0e5b24864f25c76b9fc5b261117be855cf45b3ed5c8b"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_equality",
@@ -1691,7 +2067,15 @@
         "sha256": "f908fde9a2bed9140bc04b580dadf1af943533d39a9d6526c9fa9c4124a19b2c"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_highly_nested",
@@ -1733,7 +2117,15 @@
         "sha256": "4a6ff11b712594ee2e6cc07ef57431e34d414650512081f92f5f65470e020080"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_init_calls",
@@ -1747,7 +2139,15 @@
         "sha256": "4aacf80ce1756167fde9edcda2c96ff3c8c4df687fb2693c04d269051d0f2783"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_linked_list_by_clear",
@@ -1761,7 +2161,15 @@
         "sha256": "4021cbd7a82eac6044334931ad1d04268421979213b3bfb30a893d256fe558f4"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-side-effects-2fd8a3f51e39.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_linked_list_by_delete_key",
@@ -1775,7 +2183,15 @@
         "sha256": "3a62ae6bf839fd48a90d4a2c4b5a36fbbb55d747769c76fa5a885f3f3e2d0c83"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-side-effects-2fd8a3f51e39.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_size_by_clear",
@@ -1789,7 +2205,15 @@
         "sha256": "71be7a0937a7fc854c2de68f2f833c2b311d6b46eb2f263c0c94f62d0e9f74c6"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-side-effects-2fd8a3f51e39.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_size_by_delete_key",
@@ -1803,7 +2227,15 @@
         "sha256": "81521ba6e0935b63329654abccaae117864eccc8f99bd28c8db54ef3ea51dcb7"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-side-effects-2fd8a3f51e39.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_issue119004_change_size_by_delete_key_in_dict_eq",
@@ -1845,7 +2277,15 @@
         "sha256": "f9c32de3c8b44c7c893c0758aad0fdeca0f56241067afd25274cce028fc466bb"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_issue24667",
@@ -1859,7 +2299,15 @@
         "sha256": "fe3e9cd7a7bbb65a99163460fbab315ee054f60f03a4e7b909f40f309095ae74"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_iterators",
@@ -1887,7 +2335,15 @@
         "sha256": "c8ed3442c24e3812ce7884b690cadfacd799bdd3d7a17d5a6529804c16cf8d65"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_iterators_pickling",
@@ -1901,7 +2357,15 @@
         "sha256": "b81c920d36e79bd66f267a2982862a418b916b59e77c329afcde63a18601d8f7"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-iterators-public-339b626d950c.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_key_change_during_iteration",
@@ -1915,7 +2379,15 @@
         "sha256": "2380a1c65085f2864f1e0dd7e99526d7ddbf2b11b4224a5e5c87a4536ddfd577"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_merge_operator",
@@ -1943,7 +2415,15 @@
         "sha256": "1576960ee82ae3a54f64cbdcd179c8498b82074f4f56365ba6d781dff4ef7aba"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_move_to_end_issue25406",
@@ -1957,7 +2437,15 @@
         "sha256": "39bf11b735ba7f504926c0412613c9bf63b9e046bbd1a6c1a3295898c26f014e"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_ordered_dict_items_result_gc",
@@ -1985,7 +2473,15 @@
         "sha256": "f34158a3b65a94a050807d249af7afca544ee4459bef66caafae438a3ecbda7a"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_override_update",
@@ -1999,7 +2495,15 @@
         "sha256": "75def066c4de716a17b8d1644f147130ab7954b5e111e8920dd3de9f7633d4ed"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_pickle_recursive",
@@ -2055,7 +2559,15 @@
         "sha256": "2cc851210bf631b3db056d1249b513df7eafc8f9df08531287ec79bb7644ef25"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_reduce_not_too_fat",
@@ -2069,7 +2581,15 @@
         "sha256": "104e17f44a2d4845a8bd5f815db77dd5a4d7ce9fbe1ff55417de033acdcb5325"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_reference_loop",
@@ -2097,7 +2617,15 @@
         "sha256": "f56b28d38cabc859947a8886e144632d878b4c8d428a70756ce23f7321f5e613"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_repr",
@@ -2133,7 +2661,15 @@
         "sha256": "7bdc3d6c384ea42e315c004ca6929c3b212aba7758be23bc1235352da2b147f8"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_repr_recursive_values",
@@ -2147,7 +2683,15 @@
         "sha256": "627f406a268bb9710cf6644bd3af4142c12b70097d4280b63e73de0441adad9f"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_setdefault",
@@ -2175,7 +2719,15 @@
         "sha256": "a632ff4183ae01c7aa84d1ca95b0bfc8411994904576e6d73efca7dadaa7ef02"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_sizeof",
@@ -2217,7 +2769,15 @@
         "sha256": "b2fad1d1b97f8e3eaebcacbfc046ab4096b862bcbcb12da95a37178b0d1cd42a"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_update",
@@ -2231,7 +2791,15 @@
         "sha256": "38038821fcb6bfdc2a7ebdb71b01b2c87f3a5ceea3cd13f69e615f247f1954c8"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictTests.test_views",
@@ -2273,7 +2841,15 @@
         "sha256": "77911c4eab98df7fd7cc5e7452a72ab083efe919cadf15a7ecd65afcd3e9ddda"
       },
       "linux_reference": "pass",
-      "public_selected": []
+      "public_selected": [
+        {
+          "imre": "970523224326ccc85dd975b43c6bafdd459bd0f5",
+          "packet": "ordered-accelerated-regression-951e30c25b01.tar.gz",
+          "O0": "pass",
+          "O3": "pass",
+          "reference": "pass"
+        }
+      ]
     },
     {
       "id": "test.test_ordered_dict.CPythonOrderedDictWithSlotsCopyingTests.test_copying",
@@ -4551,10 +5127,19 @@
   "sha256": {
     "ordered-abc-4b3f1c19b1ef.tar.gz": "4b3f1c19b1efa5818a1d200b67f5c06d99198b7c20ec786497055d9ec9584757",
     "ordered-accelerated-abc-578f64fe5af5.tar.gz": "578f64fe5af52255e0682f160a0be7542321aa9aaa4eac56ec72f183ccef9bda",
+    "ordered-accelerated-regression-951e30c25b01.tar.gz": "951e30c25b018858d7a3ef8170c11275c174a37cfe2159fcb73e624027fc8b73",
     "ordered-builtin-regression-2a1d028.tar.gz": "efdd77bfe8453b2e1ca3d180b47021569a447e55fc858ede4d0e5eac37fe945e",
+    "ordered-copy-97052322-64ba0f4b8282.tar.gz": "64ba0f4b8282009a8a6b97bf3607a4cba29160e5f2d35172a41fbb73e9a29eb5",
+    "ordered-copy-before-f9740cf93cd5.tar.gz": "f9740cf93cd5d62d364a6096cac1a4fb3bc575366fd52222d2822e42ceded961",
+    "ordered-direct-dict-d421a43cef6a.tar.gz": "d421a43cef6a1cf4cea1ee7990a99273c988e8830d4f9d69a13c9f63c71c8057",
+    "ordered-iterators-before-e27ba5410ba3.tar.gz": "e27ba5410ba362945e06965794c7f3d4598d075e5d9ccaf8fc9b7fbb0fef447e",
+    "ordered-iterators-public-339b626d950c.tar.gz": "339b626d950cad9e015b4a1a1f380a1642fb8c1ac3f9ebe55d3b804dd5ba2383",
+    "ordered-keywords-public-3bd06442dcb6.tar.gz": "3bd06442dcb6a0e287d0975f7f8ea5d74df14daad1fdd4dd0b1b8c3fd69009de",
     "ordered-linux-reference-7c872b6204c6.tar.gz": "7c872b6204c67a6a4a50b6a2ca385d7e4fe765ccf972cbf2dc18f184b9092c32",
     "ordered-mapping-public-39127c3dd79f.tar.gz": "39127c3dd79f23bbe47a216b2db1ec961c01042218edd76f1b9495618c66cfad",
     "ordered-public-baseline-f64c25ec33f8.tar.gz": "f64c25ec33f82466150ae9d384b4f01147850fa879f41ab754d421c493efa075",
-    "ordered-repr-public-07671d856654.tar.gz": "07671d8566541e4c86b97cce5af48ca9fe976e3dfff767cc5bae508bf3724f17"
+    "ordered-public-intact-b85ef665aa7a.tar.gz": "b85ef665aa7abb31e6c9182a5e92b94713bc41925b3d878d9bb04dfee144b434",
+    "ordered-repr-public-07671d856654.tar.gz": "07671d8566541e4c86b97cce5af48ca9fe976e3dfff767cc5bae508bf3724f17",
+    "ordered-side-effects-2fd8a3f51e39.tar.gz": "2fd8a3f51e390553d6869a4acf8e541ad2f1e77d6f3e816a2ff4ac52ee53d9b9"
   }
 }
