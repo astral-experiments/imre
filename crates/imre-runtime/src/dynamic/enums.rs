@@ -102,7 +102,7 @@ impl Context {
         if self.has_base(class, "enum.IntFlag")
             && let Ok(bits) = self.as_int(*value)
         {
-            return self.flag_combination(class, values, bits);
+            return self.flag_combination(class, bits);
         }
         let name = if self.float_enum_names(class).is_some() {
             self.class_qualname(class)
@@ -113,7 +113,7 @@ impl Context {
     }
 
     /// Intern a combination without adding a new declaration to __members__.
-    fn flag_combination(&mut self, class: Id, values: Id, bits: crate::Int) -> Result<Id> {
+    fn flag_combination(&mut self, class: Id, bits: crate::Int) -> Result<Id> {
         use num_bigint::BigInt;
         use num_traits::{One, Signed, Zero};
 
@@ -155,6 +155,8 @@ impl Context {
         }
 
         let key = self.alloc(Value::Int(crate::Int::new(value.clone())));
+        let member = self.new_int(&[class, key], &[])?;
+        self.default_set_attr(member, "_value_", key)?;
         let mut names = Vec::new();
         let mut combined = BigInt::zero();
         for (name, bit) in singles {
@@ -189,17 +191,13 @@ impl Context {
             }
         };
 
-        // A formatter can call the class again and intern a result before us.
-        let member = if let Some(existing) = self.member_for_value(values, key) {
-            existing
-        } else {
-            let member = self.new_int(&[class, key], &[])?;
-            self.default_set_attr(member, "_name_", name)?;
-            self.default_set_attr(member, "_value_", key)?;
-            self.put_item(values, key, member)?;
-            member
-        };
+        self.default_set_attr(member, "_name_", name)?;
+        // A formatter can replace the map or intern this value recursively.
+        let values = self.lookup_attr(class, "_value2member_map_")?;
+        let setdefault = self.lookup_attr(values, "setdefault")?;
+        let member = self.call(setdefault, vec![key, member], Vec::new())?;
         if let Some(original) = negative_alias {
+            let values = self.lookup_attr(class, "_value2member_map_")?;
             self.put_item(values, original, member)?;
         }
         Ok(member)

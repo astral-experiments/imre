@@ -109,3 +109,11 @@ def current():
     member = Flags(3)
     assert member.name == "ONE|inner" and Flags(3) is member
     assert calls == [2, 2, 2]
+
+    old_map = Flags._value2member_map_
+    def replace_map(unknown):
+        Flags._value2member_map_ = {}
+        return str(unknown)
+    Flags._numeric_repr_ = staticmethod(replace_map)
+    member = Flags(5)
+    assert member.name == "ONE|4" and Flags(5) is member and 5 not in old_map
