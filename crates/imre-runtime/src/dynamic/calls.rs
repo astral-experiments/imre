@@ -2050,6 +2050,9 @@ impl Context {
                     "__text_signature__" if symbol == "_thread.start_new_thread" => {
                         return Ok(self.text("($module, function, args, kwargs={}, /)"));
                     }
+                    "__text_signature__" if symbol == "fcntl.fcntl" => {
+                        return Ok(self.text("($module, fd, cmd, arg=0, /)"));
+                    }
                     "__doc__" if symbol == "resource.getrlimit" => return Ok(NONE),
                     "__text_signature__" if symbol == "resource.getrlimit" => {
                         return Ok(self.text("($module, resource, /)"));

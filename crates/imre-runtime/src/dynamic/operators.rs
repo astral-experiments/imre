@@ -278,7 +278,7 @@ impl Context {
     }
 
     /// Preserve the integer object returned by the index protocol for type-sensitive errors.
-    fn index_result(&mut self, value: Id) -> Result<Option<(Id, crate::Int)>> {
+    pub(super) fn index_result(&mut self, value: Id) -> Result<Option<(Id, crate::Int)>> {
         if let Ok(integer) = self.as_int(value) {
             return Ok(Some((value, integer)));
         }
