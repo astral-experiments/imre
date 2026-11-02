@@ -1,4 +1,5 @@
 import inspect
+import sys
 from functools import update_wrapper
 from inspect import Parameter, Signature
 
@@ -69,6 +70,24 @@ try:
     inspect.signature(wrapper)
 except ValueError:
     print("wrapper loop")
+
+saved_limit = sys.getrecursionlimit()
+try:
+    sys.setrecursionlimit(80)
+    nested = original
+    for _ in range(sys.getrecursionlimit()):
+        layer = lambda: None
+        layer.__wrapped__ = nested
+        nested = layer
+    try:
+        inspect.signature(nested)
+    except ValueError as exc:
+        assert "wrapper loop" in str(exc)
+    else:
+        raise AssertionError("signature exceeded the wrapper limit")
+finally:
+    sys.setrecursionlimit(saved_limit)
+
 try:
     sig.bind()
 except TypeError as exc:

@@ -115,18 +115,8 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     if not callable(obj):
         raise TypeError(f"{obj!r} is not a callable object")
     if follow_wrapper_chains and not isinstance(obj, types.MethodType):
-        # Keep each object live while comparing identities. The boxed runtime
-        # caps nested calls at 1000, matching CPython's default recursion limit.
-        original = obj
-        seen = {id(obj): obj}
-        while not isinstance(obj, type) and hasattr(obj, "__wrapped__"):
-            if hasattr(obj, "__signature__") or isinstance(obj, types.MethodType):
-                break
-            obj = obj.__wrapped__
-            key = id(obj)
-            if key in seen or len(seen) >= 1000:
-                raise ValueError(f"wrapper loop when unwrapping {original!r}")
-            seen[key] = obj
+        obj = unwrap(obj, stop=lambda f: hasattr(f, "__signature__")
+                     or isinstance(f, types.MethodType))
     if isinstance(obj, types.MethodType):
         inner = _signature_from_callable(
             obj.__func__, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
