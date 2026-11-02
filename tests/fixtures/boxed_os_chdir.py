@@ -42,8 +42,8 @@ def current():
             assert error.errno == errno.ENOENT and error.filename is missing
         else:
             raise AssertionError("changed into a nonexistent directory")
-        child_cwd = subprocess.check_output(["/bin/pwd", "-P"])
-        assert child_cwd == os.fsencode(os.path.join(original, dirname)) + b"\n"
+        child = subprocess.run(["/bin/pwd", "-P"], stdout=subprocess.PIPE, check=True)
+        assert child.stdout == os.fsencode(os.path.join(original, dirname)) + b"\n"
         chdir("..")
         fd = os.open(__file__, os.O_RDONLY)
         try:
