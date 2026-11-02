@@ -4,9 +4,12 @@ use std::collections::HashMap;
 mod bytes_escape;
 mod raw_unicode_escape;
 mod surrogate_utf8;
+mod utf16;
+mod wide_unicode;
+pub(super) use utf16::extended as utf16_extended;
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::{Codec, CodecInfo, DecodeIssue, Object, StrEncoder, Utf16Order};
+use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEncoder, Utf16Order};
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
@@ -148,14 +151,20 @@ pub(super) fn builtin_handler(
     let start = ctx.lookup_attr(*exception, "start")?;
     let end = ctx.lookup_attr(*exception, "end")?;
     let (start, end) = (ctx.as_integer(start)?, ctx.as_integer(end)?);
-    let pass_utf8 = if name == "surrogatepass" {
+    let (pass_utf8, pass_wide) = if name == "surrogatepass" {
         let encoding = ctx.lookup_attr(*exception, "encoding")?;
-        let encoding = ctx.str_value(encoding)?;
-        ["utf-8", "utf_8", "utf8", "cp65001"]
+        // The C codec handler reads the encoding name up to its first NUL.
+        let encoding = ctx
+            .str_value(encoding)?
+            .split('\0')
+            .next()
+            .unwrap_or_default();
+        let utf8 = ["utf-8", "utf_8", "utf8", "cp65001"]
             .iter()
-            .any(|key| encoding.eq_ignore_ascii_case(key))
+            .any(|key| encoding.eq_ignore_ascii_case(key));
+        (utf8, wide_unicode::surrogate_encoding(encoding))
     } else {
-        false
+        (false, None)
     };
     let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(object)) else {
         return Err(type_error(
@@ -169,12 +178,17 @@ pub(super) fn builtin_handler(
     if name == "surrogatepass" {
         // The validator stops at the leading byte. The handler inspects the
         // complete three-byte representation, even when end - start == 1.
-        if pass_utf8
+        let replacement = if pass_utf8
             && let Some([0xed, b @ 0xa0..=0xbf, c @ 0x80..=0xbf]) = bytes.get(start..start + 3)
         {
             let codepoint = 0xd000 + (u32::from(*b & 0x3f) << 6) + u32::from(*c & 0x3f);
+            Some((codepoint, 3))
+        } else {
+            pass_wide.and_then(|format| wide_unicode::surrogate(format, &bytes[start..]))
+        };
+        if let Some((codepoint, width)) = replacement {
             let text = ctx.text_codepoints(vec![codepoint]);
-            let index = ctx.alloc(Value::Int(crate::Int::from_usize(start + 3)));
+            let index = ctx.alloc(Value::Int(crate::Int::from_usize(start + width)));
             return Ok(ctx.alloc(Value::Tuple(vec![text, index])));
         }
         return ctx.op("raise", *exception, NONE, NONE);
@@ -246,7 +260,12 @@ pub(super) fn lookup(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
         ctx.codec_entries.functions.insert(codec.name(), id);
         id
     };
-    let id = ctx.alloc(Value::CodecInfo { entry, decode });
+    let id = ctx.alloc(Value::CodecInfo {
+        entry,
+        decode,
+        // All codecs in the native lookup registry inherit CodecInfo's True default.
+        text_encoding_override: None,
+    });
     ctx.codec_entries.entries.insert(key, id);
     Ok(id)
 }
@@ -271,7 +290,7 @@ pub(in crate::dynamic) fn encode_text(
     }
     let errors = errors.to_owned();
     match encoder {
-        StrEncoder::Utf16(order) => encode_utf16_codepoints(ctx, id, order, &errors),
+        StrEncoder::Fixed(encoder) => encode_fixed_codepoints(ctx, id, encoder, &errors),
         StrEncoder::Registered(Codec::Utf8 { signature }) => {
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
@@ -296,46 +315,57 @@ pub(in crate::dynamic) fn encode_text(
     }
 }
 
-/// UTF-16 reports one surrogate at a time, even for consecutive high and low surrogates.
-fn encode_utf16_codepoints(
+/// The fixed-endian UTF encoders report one surrogate at a time, even for consecutive high and low surrogates.
+fn encode_fixed_codepoints(
     ctx: &mut Context,
     id: Id,
-    order: Utf16Order,
+    encoder: FixedUnicode,
     errors: &str,
 ) -> Result<Vec<u8>> {
     let points = ctx.string_codepoints(id)?;
     let mut bytes = Vec::new();
     for (i, &point) in points.iter().enumerate() {
-        if let Some(ch) = char::from_u32(point) {
-            order.append(&mut bytes, ch.encode_utf16(&mut [0; 2]).iter().copied())?;
+        if char::from_u32(point).is_some() {
+            encoder.append(&mut bytes, [point])?;
             continue;
         }
         if ctx.codec_entries.handlers.contains_key(errors) {
             return Err(Error::new(
                 "NotImplementedError",
-                "custom UTF-16 encoding error handlers are unsupported",
+                match encoder {
+                    FixedUnicode::Utf16(_) => {
+                        "custom UTF-16 encoding error handlers are unsupported"
+                    }
+                    FixedUnicode::Utf32Le | FixedUnicode::Utf32Be => {
+                        "custom UTF-32 encoding error handlers are unsupported"
+                    }
+                },
             ));
         }
         match errors {
             "strict" | "surrogateescape" => {
                 return Err(ctx.string_encoding_error(
                     id,
-                    order.name(),
+                    encoder.name(),
                     "surrogates not allowed",
                     point,
                     i..i + 1,
                 ));
             }
             "ignore" => (),
-            "replace" => order.append(&mut bytes, [u16::from(b'?')])?,
-            "surrogatepass" => order.append(&mut bytes, [point as u16])?,
-            "backslashreplace" | "namereplace" => order.append(
+            "replace" => encoder.append(&mut bytes, [u32::from(b'?')])?,
+            "surrogatepass" => encoder.append(&mut bytes, [point])?,
+            "backslashreplace" | "namereplace" => encoder.append(
                 &mut bytes,
-                compact_str::format_compact!("\\u{point:04x}").encode_utf16(),
+                compact_str::format_compact!("\\u{point:04x}")
+                    .chars()
+                    .map(u32::from),
             )?,
-            "xmlcharrefreplace" => order.append(
+            "xmlcharrefreplace" => encoder.append(
                 &mut bytes,
-                compact_str::format_compact!("&#{point};").encode_utf16(),
+                compact_str::format_compact!("&#{point};")
+                    .chars()
+                    .map(u32::from),
             )?,
             _ => return Err(crate::objects::unknown_handler(errors).into()),
         }
@@ -414,6 +444,12 @@ pub(in crate::dynamic) fn decode_named(
         return Err(Error::new("ValueError", "embedded null character"));
     }
     let key = crate::objects::normalize_codec(spelling)?;
+    if let Some((format, bom)) = wide_unicode::encoding(&key) {
+        let name = error_name(ctx, errors)?.to_owned();
+        return ctx.with_buffer_export(input, |ctx| {
+            wide_unicode::decode(ctx, input, &name, format, bom)
+        });
+    }
     if key == "raw_unicode_escape" {
         let name = error_name(ctx, errors)?.to_owned();
         return ctx.with_buffer_export(input, |ctx| raw_unicode_escape::decode(ctx, input, &name));

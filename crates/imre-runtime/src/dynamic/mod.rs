@@ -8,6 +8,7 @@ mod builtins;
 mod calls;
 mod class_annotations;
 mod complex;
+mod defaultdict;
 mod deque;
 mod dictionary;
 mod displayhook;
@@ -146,6 +147,7 @@ pub(crate) struct Context {
     // Python wrappers retain their registered logger for the lifetime of this heap.
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
+    native_type_dicts: HashMap<Id, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
     call_depth: usize,
     deque_comparison_repeats: usize,
@@ -1535,6 +1537,29 @@ impl Context {
         self.alloc(Value::MappingProxy(dictionary))
     }
 
+    /// Expose the implemented members of an immutable native type through ordinary class lookup.
+    fn native_class_dictionary(
+        &mut self,
+        class: Id,
+        storage: &'static str,
+        members: impl Iterator<Item = &'static str>,
+    ) -> Result<Id> {
+        let dictionary = if let Some(&dictionary) = self.builtins.get(storage) {
+            dictionary
+        } else {
+            let mut entries = Vec::with_capacity(members.size_hint().0 + 1);
+            for name in members.chain(["__module__"]) {
+                let key = self.heap.code_name(name);
+                let value = self.lookup_attr(class, name)?;
+                entries.push((key, value));
+            }
+            let dictionary = self.dict(entries);
+            self.builtins.insert(storage.into(), dictionary);
+            dictionary
+        };
+        Ok(self.alloc(Value::MappingProxy(dictionary)))
+    }
+
     /// Materialize a mutable class namespace for an annotation closure.
     fn class_namespace_dict(&mut self, scope: Id, building: bool) -> Id {
         let frame = self.scope_data(scope);
@@ -1888,6 +1913,9 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if let Some(owner) = stdlib::itertools::cursor_type(name) {
+            stdlib::itertools::install_namespace(self, value, owner);
+        }
         if builtins::is_enum_base(name) {
             self.install_enum_base(value, name);
         }
@@ -1899,6 +1927,11 @@ impl Context {
             }
         } else if matches!(name, "datetime.timezone" | stdlib::datetime::TZINFO) {
             stdlib::datetime::install_members(self, name);
+        }
+        if name == "typing.TypeVar" {
+            for field in typing::VARIANCE_FIELDS {
+                self.readonly_member("typing.TypeVar", field);
+            }
         }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
@@ -1919,22 +1952,22 @@ impl Context {
             ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
-            "collections.defaultdict" => {
+            defaultdict::CLASS => {
                 self.builtin("dict");
-                &[
-                    "__init__",
-                    "__missing__",
-                    "__repr__",
-                    "copy",
-                    "__copy__",
-                    "__reduce__",
-                ]
+                defaultdict::METHODS
             }
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__", "index"],
-            "set" => &["__repr__", "__reduce__", "difference", "issubset", "update"],
-            "frozenset" => &["__repr__", "__reduce__", "difference", "issubset"],
+            "set" => &[
+                "__repr__",
+                "__reduce__",
+                "difference",
+                "issubset",
+                "union",
+                "update",
+            ],
+            "frozenset" => &["__repr__", "__reduce__", "difference", "issubset", "union"],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS
@@ -2515,7 +2548,11 @@ impl Context {
                 self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
-            "posix" if source.is_none() => stdlib::os::scheduler::initialize(self, scope),
+            "posix" if source.is_none() => {
+                stdlib::os::scheduler::initialize(self, scope);
+                let tmpfile = self.int(i64::from(libc::O_TMPFILE));
+                self.bind(scope, "O_TMPFILE", tmpfile);
+            }
             #[cfg(unix)]
             "_signal" if source.is_none() => {
                 #[cfg(target_os = "linux")]
@@ -2578,6 +2615,7 @@ impl Context {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
             }
+            "_hashlib" if source.is_none() => stdlib::hashlib::install_openssl(self, scope)?,
             "hashlib" => {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
@@ -2777,6 +2815,7 @@ impl Context {
                 let deque = self.builtin(deque::CLASS);
                 self.bind(scope, "deque", deque);
                 let namedtuple = self.builtin("collections.namedtuple");
+                self.bind(scope, "_namedtuple_factory", namedtuple);
                 self.bind(scope, "namedtuple", namedtuple);
                 let abc = self.module("_collections_abc")?;
                 self.bind(scope, "abc", abc);

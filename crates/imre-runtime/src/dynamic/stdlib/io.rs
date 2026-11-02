@@ -15,6 +15,7 @@ pub(in crate::dynamic) use descriptor_buffer::{
 };
 mod bytes_io;
 mod bytes_writer;
+pub(in crate::dynamic) use bytes_writer::has_pending_callback_write;
 mod docstrings;
 mod file_io;
 pub(super) use file_io::{
@@ -714,6 +715,8 @@ pub(in super::super) fn call(
         Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair")
     ) {
         owner_kind
+    } else if owner_kind == Some("TextIOWrapper") && name == "__next__" {
+        Some("TextIOWrapper")
     } else if bytes_io {
         Some("BytesIO")
     } else {
@@ -726,6 +729,9 @@ pub(in super::super) fn call(
                 "__init__",
             ) => {
                 format!("descriptor '__init__' of '_io.{class}' object needs an argument")
+            }
+            (Some("TextIOWrapper"), "__next__") => {
+                "descriptor '__next__' of '_io.TextIOWrapper' object needs an argument".into()
             }
             (Some(class), _) => format!("unbound method {class}.{name}() needs an argument"),
             _ => format!("unbound I/O method {name} needs a receiver"),
@@ -750,6 +756,14 @@ pub(in super::super) fn call(
                     "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
                 )
             }
+            (Some("TextIOWrapper"), "__next__") => {
+                let actual = receiver_class
+                    .and_then(|class| ctx.heap.get(class).io_kind())
+                    .map_or_else(|| actual.to_string(), |_| format!("_io.{actual}"));
+                format!(
+                    "descriptor '__next__' requires a '_io.TextIOWrapper' object but received a '{actual}'"
+                )
+            }
             (Some(class), _) => format!(
                 "descriptor '{name}' for '_io.{class}' objects doesn't apply to a '{actual}' object"
             ),
@@ -758,6 +772,11 @@ pub(in super::super) fn call(
         return Err(Error::new("TypeError", message));
     };
     match owner_kind {
+        Some("TextIOWrapper")
+            if name == "__next__" && matches!(ctx.heap.get(receiver), Value::Instance { .. }) =>
+        {
+            return text_wrapper::next(ctx, receiver, receiver_class == owner, rest, kwargs);
+        }
         Some("BufferedReader") => return native_reader::call(ctx, receiver, name, rest, kwargs),
         Some("BufferedRWPair") => return rwpair::call(ctx, owner, receiver, name, rest, kwargs),
         Some("BufferedWriter") => return native_writer::call(ctx, receiver, name, rest, kwargs),

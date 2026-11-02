@@ -1,6 +1,7 @@
 from array import array
 import gc
 import io
+import os
 import sys
 from io import RawIOBase
 
@@ -169,6 +170,19 @@ def exercise(path):
             convert(elements())
         except ValueError:
             print(events)
+
+    text_path = path + ".text-input"
+    with open(text_path, "wb") as writer:
+        writer.write(b"A\xe9\r\nZ\n")
+    encoded_path = text_path.encode()
+    with open(encoded_path, "rt", encoding="latin-1") as reader:
+        assert reader.buffer.raw.closefd and reader.name == encoded_path
+        assert reader.fileno() == reader.buffer.raw.fileno()
+        assert reader.readline() == "A\xe9\n"
+        assert reader.read() == "Z\n"
+        assert reader.seek(0) == 0
+        assert reader.read() == "A\xe9\nZ\n"
+    assert reader.closed
 
     with open(path, "rb") as reader:
         reader.read(1)
@@ -415,6 +429,19 @@ def exercise(path):
     assert target.tobytes() == b"bccxxxxx"
     view.release()
     assert independent.tobytes() == b"xxxxxxxx"
+
+    read_fd, write_fd = os.pipe()
+    try:
+        os.set_blocking(read_fd, False)
+        with open(read_fd, "rb", closefd=False) as reader:
+            dest = bytearray(b"..")
+            assert reader.readinto(dest) is None
+            os.write(write_fd, b"Q")
+            assert reader.readinto(dest) == 1
+            assert bytes(dest) == b"Q."
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
 
     lines = path + ".lines"
     with open(lines, "w") as output:

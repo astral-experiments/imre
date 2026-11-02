@@ -1157,6 +1157,12 @@ impl IntrinsicModule {
             (Self::Gc, "enable") => Intrinsic::ObjectRuntimeExport("gc.enable"),
             (Self::Gc, "isenabled") => Intrinsic::ObjectRuntimeExport("gc.isenabled"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
+            (Self::Codecs, "utf_16_ex_decode") => {
+                Intrinsic::ObjectRuntimeExport("codecs.utf_16_ex_decode")
+            }
+            (Self::CodecsNative, "utf_16_ex_decode") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.utf_16_ex_decode")
+            }
             (Self::Codecs, "escape_decode") => {
                 Intrinsic::ObjectRuntimeExport("codecs.escape_decode")
             }
@@ -1390,6 +1396,15 @@ impl IntrinsicModule {
             }
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
+            }
+            (Self::ImportlibUtil, "module_from_spec") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.module_from_spec")
+            }
+            (Self::ImportlibUtil, "spec_from_file_location") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.spec_from_file_location")
+            }
+            (Self::ImportlibUtil, "spec_from_loader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.spec_from_loader")
             }
             (Self::ImportlibUtil, "find_spec") => {
                 Intrinsic::RegisteredImport("importlib.util.find_spec")
@@ -1691,6 +1706,7 @@ impl IntrinsicModule {
             (Self::Sys, "thread_info") => Intrinsic::SysThreadInfo,
             (Self::Sys, "stdlib_module_names") => Intrinsic::SysStdlibModuleNames,
             (Self::Sys, "version") => Intrinsic::SysVersion,
+            (Self::Sys, "maxunicode") => Intrinsic::IntConstant(0x10FFFF),
             (Self::Sys, "hexversion") => Intrinsic::SysHexversion,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
             (Self::Select, "poll") => Intrinsic::Readiness(crate::ir::Readiness::New),
@@ -1770,6 +1786,10 @@ impl IntrinsicModule {
             (Self::Typing, "Type") => Intrinsic::ObjectRuntimeExport("typing.Type"),
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
+            (Self::Typing, "Awaitable") => Intrinsic::ObjectRuntimeExport("typing.Awaitable"),
+            (Self::Typing, "AsyncIterator") => {
+                Intrinsic::ObjectRuntimeExport("typing.AsyncIterator")
+            }
             (Self::Typing, "Pattern") => Intrinsic::ObjectRuntimeExport("typing.Pattern"),
             (Self::Typing, "Match") => Intrinsic::ObjectRuntimeExport("typing.Match"),
             (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
@@ -1804,6 +1824,7 @@ impl IntrinsicModule {
             (Self::Typing, "Required") => Intrinsic::ObjectRuntimeExport("typing.Required"),
             (Self::Typing, "NotRequired") => Intrinsic::ObjectRuntimeExport("typing.NotRequired"),
             (Self::Typing, "ReadOnly") => Intrinsic::ObjectRuntimeExport("typing.ReadOnly"),
+            (Self::Typing, "NamedTuple") => Intrinsic::ObjectRuntimeExport("typing.NamedTuple"),
             (Self::Typing, "TypedDict") => Intrinsic::ObjectRuntimeExport("typing.TypedDict"),
             (Self::Typing, "is_typeddict") => Intrinsic::ObjectRuntimeExport("typing.is_typeddict"),
             (Self::Typing, "Final") => Intrinsic::Final,
@@ -1907,6 +1928,9 @@ impl IntrinsicModule {
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
             (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },
+            (Self::UnicodeData, "decomposition") => {
+                Intrinsic::ObjectRuntimeExport("unicodedata.decomposition")
+            }
             (Self::UnicodeData, "normalize") => Intrinsic::UnicodeNormalize { check: false },
             (Self::UnicodeData, "is_normalized") => Intrinsic::UnicodeNormalize { check: true },
             (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
@@ -2121,6 +2145,8 @@ impl IntrinsicModule {
             (Self::Binascii, "b2a_base64") => Intrinsic::BinasciiEncode,
             (Self::Binascii, "Error") => Intrinsic::BinasciiError,
             (Self::Binascii, "Incomplete") => Intrinsic::BinasciiIncomplete,
+            (Self::Hashlib, "pbkdf2_hmac") => Intrinsic::ObjectRuntimeExport("hashlib.pbkdf2_hmac"),
+            (Self::Hashlib, "scrypt") => Intrinsic::ObjectRuntimeExport("hashlib.scrypt"),
             (Self::Hashlib, "file_digest") => Intrinsic::HashFileDigest,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
             (Self::Hashlib, "__get_builtin_constructor") => {
@@ -2240,6 +2266,7 @@ impl IntrinsicModule {
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Math, "isqrt") => Intrinsic::ObjectRuntimeExport("math.isqrt"),
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Copy, "deepcopy") => Intrinsic::DeepCopy,
@@ -2323,6 +2350,7 @@ impl IntrinsicModule {
             (Self::Resource, "RLIM_INFINITY") => {
                 Intrinsic::ObjectRuntimeExport("resource.RLIM_INFINITY")
             }
+            (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },
             (Self::Random, "seed") => Intrinsic::Random(crate::ir::RandomOperation::Seed),
@@ -2528,12 +2556,22 @@ impl IntrinsicModule {
             (Self::UrllibParse, "urldefrag") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.urldefrag")
             }
+            (Self::UrllibParse, "ParseResult") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.ParseResult")
+            }
+            (Self::UrllibParse, "ParseResultBytes") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.ParseResultBytes")
+            }
             (Self::UrllibParse, "DefragResult") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.DefragResult")
             }
             (Self::UrllibParse, "DefragResultBytes") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.DefragResultBytes")
             }
+            (Self::UrllibParse, "clear_cache") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.clear_cache")
+            }
+            (Self::UrllibParse, "urlparse") => Intrinsic::ObjectRuntimeExport("urllib.parse.urlparse"),
             (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
             (Self::UrllibParse, "urlunsplit") => Intrinsic::UrlUnsplit,
             (Self::UrllibParse, "SplitResult") => Intrinsic::SplitResult { bytes: false },

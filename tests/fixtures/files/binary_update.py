@@ -25,6 +25,20 @@ with open(path, "xb+") as stream:
 assert path.calls == 1 and stream.closed
 
 try:
+    try:
+        stream.readinto(b"")
+    except TypeError as error:
+        assert str(error) == "readinto() argument must be read-write bytes-like object, not bytes"
+    else:
+        raise AssertionError("immutable readinto target accepted on a closed file")
+
+    try:
+        stream.flush()
+    except ValueError as error:
+        assert str(error) == "flush of closed file"
+    else:
+        raise AssertionError("flushed a closed update stream")
+
     with open(path, "w+b", buffering=3) as stream:
         assert stream.mode == "rb+" and os.fstat(stream.fileno()).st_size == 0
         stream.write(b"abcdef")
@@ -33,6 +47,33 @@ try:
         stream.write(b"Z")
         stream.seek(0)
         assert stream.read() == b"aZcdef"
+
+    with open(path, "r+b") as stream:
+        events = []
+
+        class Offset:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                events.append(self.value)
+                return self.value
+
+        def seekable():
+            events.append("seekable")
+            return True
+
+        stream.raw.seekable = seekable
+        assert stream.seek(Offset(2), Offset(os.SEEK_SET)) == 2
+        assert events == [os.SEEK_SET, "seekable", 2]
+        events.clear()
+        try:
+            stream.seek(Offset(2), Offset(8))
+        except ValueError as error:
+            assert str(error) == "whence value 8 unsupported"
+        else:
+            raise AssertionError("invalid whence accepted")
+        assert events == [8]
 
     fd = os.open(path, os.O_RDWR)
     try:
@@ -88,6 +129,33 @@ try:
             raise AssertionError("missing binary line-buffering warning")
     with open(path, "rb+") as stream:
         assert stream.read() == b"aXcdef"
+        stream.seek(1)
+        assert stream.read(2) == b"Xc"
+        assert stream.truncate() == stream.tell() == 3
+        assert stream.truncate(7) == 7 and stream.read() == bytes(4)
+
+        class Size:
+            def __index__(self):
+                assert os.fstat(stream.fileno()).st_size == 7
+                try:
+                    stream.close()
+                except RuntimeError as exc:
+                    assert "reentrant call" in str(exc)
+                else:
+                    raise AssertionError("closed during buffered truncate")
+                return 2
+
+        size = Size()
+        assert stream.truncate(size) is size
+        assert os.fstat(stream.fileno()).st_size == 2 and stream.tell() == 7
+
+        calls = []
+        def raw_truncate(pos):
+            calls.append(pos)
+            return size
+
+        stream.raw.truncate = raw_truncate
+        assert stream.truncate() is size and calls == [None]
 finally:
     os.unlink(path)
 

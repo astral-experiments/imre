@@ -376,8 +376,7 @@ pub(in crate::dynamic) fn open(
     }
     let update = mode_text.contains('+');
     let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
-    let text_input_with_newline =
-        buffering < 0 && newline.is_some() && matches!(mode_text, "r" | "rt" | "tr");
+    let text_input = buffering < 0 && matches!(mode_text, "r" | "rt" | "tr");
     let binary_bytes_path = binary
         && buffering < 0
         && !update
@@ -394,7 +393,7 @@ pub(in crate::dynamic) fn open(
     if opener.is_some()
         || fd.is_some()
         || text_output
-        || text_input_with_newline
+        || text_input
         || binary_bytes_path
         || update
         || (binary && buffering == 1)
@@ -504,15 +503,8 @@ pub(in crate::dynamic) fn open(
             "text files require UTF-8 encoding",
         ));
     }
-    let file = match mode {
-        "r" | "rt" | "tr" => crate::objects::TextFile::open(path, 0)
-            .map(|file| {
-                Value::TextFile(crate::dynamic::value::BoxedTextFile { file, buffer: None })
-            })
-            .map_err(Error::from),
-        _ => files::BinaryFile::open(path, filename, mode, writer_capacity)
-            .and_then(files::BinaryFile::into_value),
-    };
+    let file = files::BinaryFile::open(path, filename, mode, writer_capacity)
+        .and_then(files::BinaryFile::into_value);
     match file {
         Ok(file) => ctx.heap.alloc_file_writer(file),
         Err(error) => Err(ctx.with_open_filename(error, raw_arg)?),
@@ -1074,7 +1066,11 @@ pub(super) fn call(
             };
             truncate_fd(fd, size)?;
             raw.blksize.set(super::DEFAULT_BUFFER_SIZE);
-            Ok(ctx.int(size))
+            Ok(args
+                .first()
+                .copied()
+                .filter(|&id| id != NONE)
+                .unwrap_or_else(|| ctx.int(size)))
         });
     }
     raw.access(|fd| match name {

@@ -25,6 +25,7 @@ struct Imports {
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
     opcode_names: HashSet<String>,
+    hashlib_names: HashSet<String>,
     signal_names: HashMap<String, String>,
     unittest_names: HashSet<String>,
     boxed_mock_names: HashSet<String>,
@@ -105,6 +106,7 @@ impl Imports {
             && matches!(
                 name,
                 "_imp"
+                    | "_hashlib"
                     | "atexit"
                     | "code"
                     | "codeop"
@@ -157,6 +159,10 @@ fn boxed_signal_export(module: &str, name: &str) -> bool {
         provider.symbol(name),
         Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_)))
     )
+}
+
+fn boxed_hashlib_kdf(name: &str) -> bool {
+    matches!(name, "pbkdf2_hmac" | "scrypt")
 }
 
 fn boxed_unittest_cleanup(name: &str) -> bool {
@@ -228,6 +234,7 @@ impl<'a> Visitor<'a> for Imports {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
                         "_opcode" => self.opcode_names.insert(bound.to_string()),
+                        "hashlib" => self.hashlib_names.insert(bound.to_string()),
                         "signal" | "_signal" if cfg!(unix) => self
                             .signal_names
                             .insert(bound.to_string(), name.to_owned())
@@ -248,6 +255,7 @@ impl<'a> Visitor<'a> for Imports {
                     let suffix = a.name.as_str();
                     if imp.level == 0
                         && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                            || name == "hashlib" && (boxed_hashlib_kdf(suffix) || suffix == "*")
                             || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
                     {
@@ -360,6 +368,8 @@ impl<'a> Visitor<'a> for Imports {
             && let Expr::Name(module) = &*attr.value
             && ((boxed_operator(attr.attr.as_str())
                 && self.operator_names.contains(module.id.as_str()))
+                || (boxed_hashlib_kdf(attr.attr.as_str())
+                    && self.hashlib_names.contains(module.id.as_str()))
                 || (boxed_opcode(attr.attr.as_str())
                     && self.opcode_names.contains(module.id.as_str()))
                 || self
@@ -461,6 +471,7 @@ pub(crate) fn compile(
         && !(cfg!(unix) && src.contains("signal"))
         && ![
             "__future__",
+            "hashlib",
             "_imp",
             "atexit",
             "code",
@@ -845,7 +856,12 @@ pub(crate) fn compile(
         "command":in_memory,"module_entry":module_entry,"paths":paths,
     });
     check_returns()?;
-    let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
+    let llvm_ir = emit::emit(
+        &sources,
+        &config.to_string(),
+        keep_docstrings,
+        Path::new(bundled_root),
+    )?;
     Ok(Some(Compilation {
         llvm_ir,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),

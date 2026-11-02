@@ -115,6 +115,7 @@ fn close_parens(out: &mut String, count: usize) -> Result<()> {
 
 enum RenderRoot<'a> {
     Object(Id),
+    Cursor(Id),
     BuiltinContainer {
         object: Id,
         storage: Id,
@@ -132,6 +133,8 @@ enum FormatLookup {
 
 enum FormatPart {
     Value(Id, bool),
+    Cursor(Id),
+    CursorEnd,
     TypeArgument(Id, bool),
     TypeList(Id, usize, usize),
     TypeEnd(Id, &'static str, bool),
@@ -168,6 +171,7 @@ impl FormatPart {
     fn keep_alive(&mut self, heap: &mut Heap) {
         match self {
             Self::Value(id, _)
+            | Self::Cursor(id)
             | Self::TypeArgument(id, _)
             | Self::TypeList(id, _, _)
             | Self::TypeEnd(id, _, _)
@@ -188,6 +192,7 @@ impl FormatPart {
             Self::Suffix(_)
             | Self::Text(_)
             | Self::Closing(_)
+            | Self::CursorEnd
             | Self::SliceEnd
             | Self::NamedTupleEnd
             | Self::DefaultDictEnd(_) => {}
@@ -1260,6 +1265,11 @@ impl Context {
         )
     }
 
+    /// Bypass the receiver's override for an explicit count or repeat descriptor call.
+    pub(super) fn checked_cursor_slot_repr(&mut self, object: Id) -> Result<String> {
+        self.checked_render(RenderRoot::Cursor(object), true)
+    }
+
     /// Render the native defaultdict slot while looking up hooks on its live children.
     pub(super) fn checked_defaultdict_slot_repr(
         &mut self,
@@ -1331,6 +1341,15 @@ impl Context {
                 .dict_storage(object)
                 .filter(|&storage| matches!(self.heap.get(storage), Value::DefaultDict { .. }))
                 .map(|storage| (storage, true)),
+            "itertools.count.__repr__" | "itertools.repeat.__repr__" => {
+                let storage = self.scalar_value(object);
+                matches!(
+                    (name.as_str(), self.heap.get(storage)),
+                    ("itertools.count.__repr__", Value::Count { .. })
+                        | ("itertools.repeat.__repr__", Value::Repeat(_))
+                )
+                .then_some((storage, false))
+            }
             "list.__repr__" | "tuple.__repr__" | "set.__repr__" | "frozenset.__repr__" => {
                 let storage = self.scalar_value(object);
                 matches!(
@@ -1596,6 +1615,7 @@ impl Context {
         }
         match root {
             RenderRoot::Object(id) => push_frame(&mut work, Part::Value(id, quoted))?,
+            RenderRoot::Cursor(id) => push_frame(&mut work, Part::Cursor(id))?,
             RenderRoot::BuiltinContainer {
                 object,
                 storage,
@@ -1667,6 +1687,9 @@ impl Context {
             None
         };
         let mut extra_deque_words = 0usize;
+        // Stock count and repeat consume 1,088 native stack bytes per nested repr on x86-64.
+        const CURSOR_FRAME_WORDS: usize = 136;
+        let mut cursor_words = 0usize;
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
         // Pinned CPython 3.14 uses 192 native bytes per nested builtin alias with
@@ -1677,10 +1700,48 @@ impl Context {
         let mut typing_frames = 0usize;
         while let Some(part) = work.pop() {
             let remaining_sequence_words = sequence_stack_words.map(|limit| {
-                limit.saturating_sub(active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words)
+                limit.saturating_sub(
+                    active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words + cursor_words,
+                )
             });
             match part {
                 Part::Closing(count) => close_parens(&mut output, count)?,
+                Part::Cursor(id) => {
+                    if remaining_sequence_words
+                        .map_or(cursor_words >= 1024 * 1024, |n| n < CURSOR_FRAME_WORDS)
+                    {
+                        return Err(Error::new(
+                            "RecursionError",
+                            "maximum recursion depth exceeded while getting the repr of an object",
+                        ));
+                    }
+                    cursor_words += CURSOR_FRAME_WORDS;
+                    push_frame(&mut work, Part::CursorEnd)?;
+                    append_rendered_text(&mut output, ctx.type_name(id))?;
+                    append_rendered_text(&mut output, "(")?;
+                    // Snapshot both operands before a Python repr hook can advance the cursor.
+                    let first = match ctx.heap.get(ctx.scalar_value(id)) {
+                        Value::Count { current, step } => {
+                            if stdlib::itertools::machine_integer(&ctx, *step) != Some(1) {
+                                push_frame(&mut work, Part::Value(*step, true))?;
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                            *current
+                        }
+                        Value::Repeat(repeat) => {
+                            if let Some(count) = repeat.remaining {
+                                push_frame(&mut work, Part::Suffix(format!(", {count}")))?;
+                            }
+                            repeat.value
+                        }
+                        _ => unreachable!("native count or repeat repr slot"),
+                    };
+                    push_frame(&mut work, Part::Value(first, true))?;
+                }
+                Part::CursorEnd => {
+                    cursor_words -= CURSOR_FRAME_WORDS;
+                    append_rendered_text(&mut output, ")")?;
+                }
                 Part::Text(text) => append_rendered_text(&mut output, text)?,
                 Part::ContextEnd(id) => {
                     use std::fmt::Write;
@@ -2170,6 +2231,13 @@ impl Context {
                         }
                         _ => {}
                     }
+                    if matches!(
+                        ctx.heap.get(ctx.scalar_value(storage)),
+                        Value::Count { .. } | Value::Repeat(_)
+                    ) {
+                        push_frame(&mut work, Part::Cursor(id))?;
+                        continue;
+                    }
                     let (start, end, placeholder, contents) = match ctx.heap.get(storage) {
                         Value::Int(value) => {
                             let text = rendered_integer(value)?;
@@ -2412,6 +2480,12 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if matches!(
+            self.heap.get(self.scalar_value(id)),
+            Value::Count { .. } | Value::Repeat(_)
+        ) {
+            return self.repr(id);
+        }
         if let Value::HandlerLock(lock) = self.heap.get(self.scalar_value(id)) {
             let (state, owner, depth) = match lock.state() {
                 Some((owner, depth)) => ("locked", owner, depth),
@@ -2518,23 +2592,6 @@ impl Context {
             Value::RegexPattern(pattern) => pattern.repr(self),
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
-            Value::Repeat(repeat) => {
-                let value = self.format_value(repeat.value, true, active);
-                match repeat.remaining {
-                    Some(n) => format!("repeat({value}, {n})"),
-                    None => format!("repeat({value})"),
-                }
-            }
-            Value::Count { current, step } => {
-                let current = self.repr(*current);
-                if matches!(self.heap.get(*step), Value::Bool(true))
-                    || matches!(self.heap.get(*step), Value::Int(n) if n.as_small() == Some(1))
-                {
-                    format!("count({current})")
-                } else {
-                    format!("count({current}, {})", self.repr(*step))
-                }
-            }
             Value::Calendar { value, .. } if repr => value.repr(),
             Value::Calendar { value, .. } => value.text(),
             Value::NamedTuple {
@@ -2718,9 +2775,10 @@ impl Context {
                     self.format_value(*callable, true, active)
                 )
             }
+            Value::Cached { .. } => format!("<functools._lru_cache_wrapper object at {id:#x}>"),
             Value::Function { fields, .. } => {
                 format!(
-                    "<function {}>",
+                    "<function {} at {id:#x}>",
                     self.format_value(fields.qualname, false, active)
                 )
             }
@@ -3670,17 +3728,9 @@ impl Context {
                 (left, right)
             }
         } else {
-            let view_len = |id| match self.heap.get(id) {
-                Value::DictView {
-                    dict,
-                    kind: value::DictViewKind::Keys | value::DictViewKind::Items,
-                    ..
-                } => Some(
-                    self.dict_entries(*dict)
-                        .expect("dictionary view backing")
-                        .len(),
-                ),
-                _ => None,
+            let view_len = |id| {
+                self.set_view(id)
+                    .map(|(dict, _)| self.stored_entries(dict).len())
             };
             let (view, size, other) = if let Some(size) = view_len(left) {
                 (left, size, right)
@@ -3705,35 +3755,10 @@ impl Context {
             }
         };
         self.visit_set_operand(source, |ctx, key, hash| {
-            let present = match ctx.heap.get(container) {
-                Value::Set { .. } => ctx.find_dictionary_key(container, key, hash)?.1.is_some(),
-                Value::DictView {
-                    dict,
-                    kind: value::DictViewKind::Keys,
-                    ..
-                } => {
-                    let storage = ctx.dict_storage(*dict).expect("dictionary view backing");
-                    ctx.find_dictionary_key(storage, key, hash)?.1.is_some()
-                }
-                Value::DictView {
-                    dict,
-                    kind: value::DictViewKind::Items,
-                    ..
-                } => {
-                    let storage = ctx.dict_storage(*dict).expect("dictionary view backing");
-                    let Value::Tuple(parts) = ctx.heap.get(key) else {
-                        return Ok(());
-                    };
-                    let &[lookup, expected] = parts.as_slice() else {
-                        return Ok(());
-                    };
-                    let Some(index) = ctx.find_dictionary_key(storage, lookup, None)?.1 else {
-                        return Ok(());
-                    };
-                    let actual = ctx.stored_entries(storage)[index].1;
-                    actual == expected || ctx.checked_equal(actual, expected)?
-                }
-                _ => unreachable!("intersection with a set or dictionary view"),
+            let present = if let Some(view) = ctx.set_view(container) {
+                ctx.view_member(view, key, hash)?
+            } else {
+                ctx.find_dictionary_key(container, key, hash)?.1.is_some()
             };
             if present {
                 ctx.set_dictionary_key(result, key, NONE, hash, false)?;
@@ -3754,6 +3779,106 @@ impl Context {
             return Ok(left);
         }
         Ok(result)
+    }
+
+    /// Identify the dictionary views with set-like membership and comparison slots.
+    fn set_view(&self, id: Id) -> Option<(Id, DictViewKind)> {
+        match *self.heap.get(id) {
+            Value::DictView {
+                dict,
+                kind: kind @ (DictViewKind::Keys | DictViewKind::Items),
+                ..
+            } => Some((
+                self.dict_storage(dict).expect("dictionary view backing"),
+                kind,
+            )),
+            _ => None,
+        }
+    }
+
+    /// A set's native slots precede Python mixins appearing later in the MRO.
+    fn overrides_set_slot(&self, id: Id, name: &str) -> bool {
+        self.heap.get(id).instance_class().and_then(|class| {
+            self.find_in_mro(class, |base| match self.heap.get(base) {
+                Value::Native(kind) if matches!(kind.as_str(), "set" | "frozenset") => Some(false),
+                _ => self.own_class_attr(base, name).map(|_| true),
+            })
+        }) == Some(true)
+    }
+
+    fn view_member(
+        &mut self,
+        (dict, kind): (Id, DictViewKind),
+        item: Id,
+        hash: Option<i64>,
+    ) -> Result<bool> {
+        if matches!(kind, DictViewKind::Keys) {
+            return Ok(self.find_dictionary_key(dict, item, hash)?.1.is_some());
+        }
+        let Some(parts) = self.tuple_items(item)? else {
+            return Ok(false);
+        };
+        let &[key, expected] = parts.as_slice() else {
+            return Ok(false);
+        };
+        let Some(index) = self.find_dictionary_key(dict, key, None)?.1 else {
+            return Ok(false);
+        };
+        let actual = self.stored_entries(dict)[index].1;
+        self.heap.keep(actual);
+        self.checked_equal(actual, expected)
+    }
+
+    /// View equality iterates the view and probes the other operand, including its Python hooks.
+    fn equal_view(&mut self, view: Id, other: Id) -> Result<bool> {
+        let roots = self.heap.temporary_mark();
+        // A comparison callback can remove either view from its enclosing container.
+        self.heap.keep(view);
+        self.heap.keep(other);
+        let result: Result<bool> = (|| {
+            let size = self.stored_entries(self.set_view(view).unwrap().0).len();
+            let target = self.set_view(other);
+            let length_roots = self.heap.temporary_mark();
+            let other_size = if let Some((dict, _)) = target {
+                self.stored_entries(dict).len()
+            } else if self.overrides_set_slot(other, "__len__") {
+                self.instance_len(other)?.expect("set subclass length slot")
+            } else {
+                self.stored_entries(self.scalar_value(other)).len()
+            };
+            self.discard_truth(length_roots);
+            if size != other_size {
+                return Ok(false);
+            }
+            let it = self.iterator(view)?;
+            self.heap.keep(it);
+            let step = self.heap.temporary_mark();
+            while let Some(item) = self.next_item(it)? {
+                self.heap.keep(item);
+                let found = if let Some(target) = target {
+                    self.view_member(target, item, None)?
+                } else if self.overrides_set_slot(other, "__contains__") {
+                    self.contains(item, other)?
+                } else {
+                    builtins::set_member(self, other, item, true)?
+                };
+                self.discard_truth(step);
+                if !found {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })();
+        let collect = self.heap.discard_truth_operands(roots, self.modules);
+        if let Err(error) = &result {
+            for id in error.roots() {
+                self.heap.keep(id);
+            }
+        }
+        if collect {
+            self.collect_unreachable();
+        }
+        result
     }
 
     /// Return the original storage of an exact list or a list subclass.
@@ -4639,6 +4764,38 @@ impl Context {
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
+        if matches!(op, "==" | "!=") {
+            let set = |id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. });
+            let operands = if self.set_view(a).is_some() && self.set_view(b).is_some() {
+                let left_type = self.exact_type(a)?;
+                let right_type = self.exact_type(b)?;
+                // A right-hand OrderedDict view inherits the ordinary view's reflected slot.
+                if left_type != right_type && self.direct_subclass(right_type, left_type) {
+                    Some((b, a))
+                } else {
+                    Some((a, b))
+                }
+            } else if self.set_view(a).is_some() && set(b) {
+                Some((a, b))
+            } else if self.set_view(b).is_some() && set(a) {
+                // A set subclass can handle the comparison before the view's reflected slot.
+                if self.overrides_set_slot(a, left)
+                    && let Some(result) = self.operator_slot(a, left, b)?
+                {
+                    return Ok(Some(result));
+                }
+                Some((b, a))
+            } else {
+                None
+            };
+            if let Some((view, other)) = operands {
+                let equal = self
+                    .with_slot_depth("maximum recursion depth exceeded in comparison", |ctx| {
+                        ctx.equal_view(view, other)
+                    })?;
+                return Ok(Some(builtins::boolean(equal == (op == "=="))));
+            }
+        }
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
                 if matches!(op, "+" | "-" | "*" | "/" | "//") {

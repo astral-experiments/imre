@@ -462,6 +462,10 @@ fn directory_fd(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
     Ok(native::directory_fd_number(&fd)?)
 }
 
+fn audit_fd(ctx: &mut Context, fd: i32) -> Id {
+    ctx.int(i64::from(if fd == libc::AT_FDCWD { -1 } else { fd }))
+}
+
 /// Bind the path and keyword-only directory descriptor in Argument Clinic order.
 fn path_and_dir_fd(
     ctx: &mut Context,
@@ -664,6 +668,10 @@ fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     } else {
         libc::AT_FDCWD
     };
+    if !ctx.audit_hooks.is_empty() {
+        let audit_flags = ctx.int(i64::from(flags | libc::O_CLOEXEC));
+        super::audit::event(ctx, "open", &[path, NONE, audit_flags])?;
+    }
     match native::open_at(&pathname, flags, mode, dir_fd) {
         Ok(fd) => Ok(ctx.int(i64::from(fd))),
         Err(error) => {

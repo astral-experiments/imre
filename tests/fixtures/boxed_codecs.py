@@ -6,6 +6,25 @@ class EchoDecoder(codecs.IncrementalDecoder):
         return self.errors, input, final
 
 
+def check_text_encoding_flag():
+    entry = codecs.lookup("utf-8")
+    assert entry._is_text_encoding is True
+    marker = []
+    entry._is_text_encoding = marker
+    assert codecs.lookup("UTF-8")._is_text_encoding is marker
+    assert codecs.lookup("u8")._is_text_encoding is True
+    entry._is_text_encoding = None
+    assert entry._is_text_encoding is None
+    del entry._is_text_encoding
+    assert entry._is_text_encoding is True
+    try:
+        del entry._is_text_encoding
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("deleted the inherited flag")
+
+
 def check_raw_unicode_escape():
     for alias in ("raw-unicode-escape", "raw_unicode_escape", "RAW Unicode ESCAPE"):
         assert str(b"A\xff\x00", alias) == "A\xff\x00"
@@ -84,10 +103,11 @@ def check_escape_decode():
             raise AssertionError("expected invalid escape to raise")
 
 
-def check_endian_boms():
-    from codecs import BOM_UTF16_BE, BOM_UTF16_LE, BOM_UTF32_BE, BOM_UTF32_LE
+def check_boms():
+    from codecs import BOM_UTF8, BOM_UTF16_BE, BOM_UTF16_LE, BOM_UTF32_BE, BOM_UTF32_LE
 
     for name, mark, expected in (
+        ("BOM_UTF8", BOM_UTF8, b"\xef\xbb\xbf"),
         ("BOM_UTF16_BE", BOM_UTF16_BE, b"\xfe\xff"),
         ("BOM_UTF16_LE", BOM_UTF16_LE, b"\xff\xfe"),
         ("BOM_UTF32_BE", BOM_UTF32_BE, b"\x00\x00\xfe\xff"),
@@ -98,10 +118,12 @@ def check_endian_boms():
 
 
 def current():
+    check_text_encoding_flag()
     check_escape_decode()
-    utf16_encoders()
+    fixed_endian_encoders()
+    utf16_extended_decoder()
     check_raw_unicode_escape()
-    check_endian_boms()
+    check_boms()
     decoder = codecs.IncrementalDecoder(errors="replace")
     assert decoder.errors == "replace"
     assert decoder.getstate() == (b"", 0)
@@ -268,8 +290,11 @@ def current():
         print(e is seen[0], str(e))
 
 
-def utf16_encoders():
-    for name, canonical in (('unicodelittleunmarked', 'utf-16-le'), ('utf_16be', 'utf-16-be')):
+def fixed_endian_encoders():
+    for name, canonical in (
+        ('unicodelittleunmarked', 'utf-16-le'), ('utf_16be', 'utf-16-be'),
+        ('utf_32le', 'utf-32-le'), ('utf-32be', 'utf-32-be'),
+    ):
         text = '🙂\ud800\udcffZ'
         try:
             text.encode(name)
@@ -286,3 +311,39 @@ def utf16_encoders():
     assert '\ud800\udcff'.encode('utf-16-le', 'surrogatepass') == b'\x00\xd8\xff\xdc'
     assert '\ud800\udcff'.encode('utf-16-be', 'surrogatepass') == b'\xd8\x00\xdc\xff'
     assert 'ü'.encode('utf-16-le', 'unused handler') == b'\xfc\x00'
+
+    assert '\ud800\udcff'.encode('utf-32-le', 'surrogatepass') == b'\x00\xd8\x00\x00\xff\xdc\x00\x00'
+    assert '\ud800\udcff'.encode('utf-32-be', 'surrogatepass') == b'\x00\x00\xd8\x00\x00\x00\xdc\xff'
+
+
+def utf16_extended_decoder():
+    from _codecs import utf_16_ex_decode
+
+    assert utf_16_ex_decode is codecs.utf_16_ex_decode
+    assert utf_16_ex_decode(b"\xfe\xff\xd8\x3d") == ("", 2, 1)
+    assert utf_16_ex_decode(b"\xd8\x3d\xde\x00", None, 1) == ("😀", 4, 1)
+    assert utf_16_ex_decode(b"\xff\xfe", None, -3) == ("\ufeff", 2, -3)
+    assert utf_16_ex_decode(b"\x00\xdc", "surrogatepass", -1) == ("\udc00", 2, -1)
+    class Exporter(bytes):
+        def __buffer__(self, flags):
+            return memoryview(b"B\x00")
+
+    try:
+        result = utf_16_ex_decode(Exporter(b"A\x00"), None, -1)
+    except NotImplementedError as exc:
+        assert "buffer hooks" in str(exc)
+    else:
+        assert result == ("B", 2, -1)
+
+    error = UnicodeDecodeError("utf-16-le\x00suffix", b"\x00\xd8", 0, 2, "bad")
+    assert codecs.lookup_error("surrogatepass")(error) == ("\ud800", 2)
+
+    def change_input(error):
+        assert (error.encoding, error.start, error.end) == ("utf-16-le", 0, 2)
+        error.object = b"B\x00C\x00"
+        return "?", 0
+
+    codecs.register_error("test.utf16_change_input", change_input)
+    wire = b"\x00\xdc"
+    assert utf_16_ex_decode(wire, "test.utf16_change_input", -1) == ("?BC", 4, -1)
+    assert utf_16_ex_decode(wire, "test.utf16_change_input", -1, True) == ("?BC", 2, -1)

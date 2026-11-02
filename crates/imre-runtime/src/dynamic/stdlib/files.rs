@@ -324,6 +324,19 @@ pub(super) fn readinto_bytes(ctx: &mut Context, object: Id) -> Result<&mut [u8]>
     }
 }
 
+/// A buffered read encountering EAGAIN returns its copied prefix count, or None if still empty.
+pub(super) fn readinto_error(ctx: &mut Context, error: std::io::Error, count: usize) -> Result<Id> {
+    if error.kind() == std::io::ErrorKind::WouldBlock {
+        Ok(if count == 0 {
+            NONE
+        } else {
+            ctx.int(count as i64)
+        })
+    } else {
+        Err(os_error(error))
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -561,7 +574,7 @@ pub(super) fn call(
                     Ok(0) => break,
                     Ok(n) => count += n,
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(os_error(e)),
+                    Err(e) => return readinto_error(ctx, e, count),
                 }
             }
             Ok(ctx.int(count as i64))
