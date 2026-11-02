@@ -13,7 +13,7 @@ use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEnc
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
-    entries: HashMap<*const Object, Id>,
+    entries: HashMap<*const Object, (CodecInfo, Id)>,
     initialized: bool,
     search_path: Vec<Id>,
     // None denotes an existing stateless native transform with no boxed CodecInfo.
@@ -25,9 +25,14 @@ pub(in crate::dynamic) struct Registry {
 
 impl Registry {
     pub(in crate::dynamic) fn roots(&self) -> impl Iterator<Item = &Id> {
-        // Each decoder is also reachable from its registry entry.
         self.entries
             .values()
+            .map(|(_, entry)| entry)
+            .chain(
+                self.functions
+                    .values()
+                    .flat_map(|(encode, decode)| [encode, decode]),
+            )
             .chain(self.handlers.values())
             .chain(&self.search_path)
             .chain(self.search_cache.values().filter_map(Option::as_ref))
@@ -455,10 +460,9 @@ pub(super) fn lookup_transform(
         if entry == NONE {
             continue;
         }
-        if !matches!(ctx.heap.get(entry), Value::CodecInfo { .. })
-            && !ctx
-                .tuple_items(entry)?
-                .is_some_and(|items| items.len() == 4)
+        if !ctx
+            .tuple_items(entry)?
+            .is_some_and(|items| items.len() == 4)
         {
             return Err(type_error("codec search functions must return 4-tuples"));
         }
@@ -486,16 +490,39 @@ fn cache_lookup(ctx: &mut Context, key: String, entry: Option<Id>) -> Result<Opt
     Ok(entry)
 }
 
-fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
-    let key = entry.as_ptr();
-    if let Some(&id) = ctx.codec_entries.entries.get(&key) {
-        return Ok(id);
+/// Fetch the stateless native transforms without searching the Python registry during import.
+pub(super) fn entry_functions(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let name = unary_arg("_imre_codec_functions", args, kwargs)?;
+    let codec = Codec::lookup(ctx.str_value(name)?)?;
+    let (encode, decode) = native_functions(ctx, codec)?;
+    Ok(ctx.alloc(Value::Tuple(vec![encode, decode])))
+}
+
+fn native_functions(ctx: &mut Context, codec: Codec) -> Result<(Id, Id)> {
+    if let Some(&functions) = ctx.codec_entries.functions.get(codec.name()) {
+        return Ok(functions);
     }
     ctx.codec_entries
-        .entries
+        .functions
         .try_reserve(1)
         .map_err(|_| crate::Error::allocation())?;
-    // _codecs.lookup also works before application code imports the public module.
+    let functions = (
+        ctx.alloc(Value::CodecEncoder(codec)),
+        ctx.alloc(Value::CodecDecoder(codec)),
+    );
+    ctx.codec_entries.functions.insert(codec.name(), functions);
+    Ok(functions)
+}
+
+fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
+    let key = entry.as_ptr();
+    if let Some((_, id)) = ctx.codec_entries.entries.get(&key) {
+        return Ok(*id);
+    }
     if !ctx.classes.contains_key("codecs.CodecInfo") {
         ctx.module("codecs")?;
     }
@@ -505,32 +532,43 @@ fn box_native_entry(ctx: &mut Context, entry: CodecInfo) -> Result<Id> {
         .copied()
         .ok_or_else(|| Error::new("ImportError", "codecs.CodecInfo is unavailable"))?;
     let codec = entry.codec();
-    let (encode, decode) = if let Some(&functions) = ctx.codec_entries.functions.get(codec.name()) {
-        functions
-    } else {
-        let functions = (
-            ctx.alloc(Value::CodecEncoder(codec)),
-            ctx.alloc(Value::CodecDecoder(codec)),
-        );
-        // Charmap methods belong to a per-entry Codec instance; built-ins and
-        // module-level functions are shared by all spellings of a codec.
-        if !matches!(codec, Codec::CodePage(_)) {
-            ctx.codec_entries
-                .functions
-                .try_reserve(1)
-                .map_err(|_| crate::Error::allocation())?;
-            ctx.codec_entries.functions.insert(codec.name(), functions);
-        }
-        functions
+    let suffix = match codec {
+        Codec::Ascii => "ascii",
+        Codec::Latin1 => "latin_1",
+        Codec::Utf8 { signature: false } => "utf_8",
+        Codec::Utf8 { signature: true } => "utf_8_sig",
+        Codec::CodePage(_) => codec.name(),
     };
-    let id = ctx.alloc(Value::CodecInfo {
+    let module = ctx.module(&format!("encodings.{suffix}"))?;
+    let writer = ctx.lookup_attr(module, "StreamWriter")?;
+    let (encode, decode) = match codec {
+        Codec::CodePage(_) => {
+            // getregentry creates fresh bound Codec methods for each alias entry.
+            let class = ctx.lookup_attr(module, "Codec")?;
+            let encoder = ctx.call(class, Vec::new(), Vec::new())?;
+            let decoder = ctx.call(class, Vec::new(), Vec::new())?;
+            (
+                ctx.lookup_attr(encoder, "encode")?,
+                ctx.lookup_attr(decoder, "decode")?,
+            )
+        }
+        Codec::Utf8 { signature: true } => {
+            let (_, decode) = native_functions(ctx, codec)?;
+            (ctx.lookup_attr(module, "encode")?, decode)
+        }
+        _ => native_functions(ctx, codec)?,
+    };
+    let name = ctx.text(codec.name());
+    let id = ctx.call(
         class,
-        entry,
-        encode,
-        decode,
-        text_encoding_override: None,
-    });
-    ctx.codec_entries.entries.insert(key, id);
+        vec![encode, decode, NONE, writer],
+        vec![("name".into(), name)],
+    )?;
+    ctx.codec_entries
+        .entries
+        .try_reserve(1)
+        .map_err(|_| crate::Error::allocation())?;
+    ctx.codec_entries.entries.insert(key, (entry, id));
     Ok(id)
 }
 

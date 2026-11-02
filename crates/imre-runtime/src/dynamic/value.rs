@@ -473,7 +473,6 @@ impl Context {
             Value::Poll(_) => "select.poll",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
-            Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(..) => "_io.BufferedRandom",
@@ -803,13 +802,6 @@ pub(super) enum Value {
         hash: Option<i64>,
     },
     ByteArray(Vec<u8>),
-    CodecInfo {
-        class: Id,
-        encode: Id,
-        entry: crate::objects::CodecInfo,
-        decode: Id,
-        text_encoding_override: Option<Id>,
-    },
     CodecEncoder(crate::objects::Codec),
     CodecDecoder(crate::objects::Codec),
     Hash(super::stdlib::hashlib::digest::SharedHash),
@@ -1274,7 +1266,7 @@ impl Value {
 
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
-            Self::Instance { class, .. } | Self::CodecInfo { class, .. } => Some(*class),
+            Self::Instance { class, .. } => Some(*class),
             Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
@@ -1686,16 +1678,6 @@ impl Value {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),
             Self::HashMethod { owner, .. } => visit.push(*owner),
-            Self::CodecInfo {
-                class,
-                encode,
-                decode,
-                text_encoding_override,
-                ..
-            } => {
-                visit.extend([*class, *encode, *decode]);
-                visit.extend(*text_encoding_override);
-            }
             Self::RegexScanner {
                 pattern, subject, ..
             } => visit.extend([*pattern, *subject]),

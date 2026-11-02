@@ -82,12 +82,8 @@ fn apply(
             _ => {}
         }
     }
-    let callable = if matches!(ctx.heap.get(entry), Value::CodecInfo { .. }) {
-        ctx.lookup_attr(entry, operation)?
-    } else {
-        let items = ctx.tuple_items(entry)?.expect("verified codec tuple");
-        items[usize::from(operation == "decode")]
-    };
+    let items = ctx.tuple_items(entry)?.expect("verified codec tuple");
+    let callable = items[usize::from(operation == "decode")];
     let mut args = vec![input];
     if let Some(errors) = errors {
         let policy = spelling(ctx, Some(errors), "strict")?;
