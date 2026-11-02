@@ -850,8 +850,14 @@ def check_pickle_reductions(imre, root, run):
                     assert data.startswith(bytes([0x80, protocol])), data
                 value = pickle.loads(data)
                 shared = ("\0\n\r\\\x1aéĀ🍏", 1 << 2048, -2147483649, True, None)
-                assert value == (shared, shared, ("rebuilt", protocol), ("rebuilt", protocol), "37", ())
+                assert value[:6] == (shared, shared, ("rebuilt", protocol), ("rebuilt", protocol), "37", ())
                 assert value[0] is value[1] and value[2] is value[3]
+                graph, small, wide, replaced, recursive = value[6]
+                assert graph["self"] is graph and graph["left"] is graph["right"]
+                assert graph["distinct"] == graph["left"] == {} and graph["distinct"] is not graph["left"]
+                assert small[0]["back"] is small and wide[0]["back"] is wide
+                assert recursive[0]["back"] is recursive
+                assert list(replaced.items()) == [("first", 5), ("later", 37)]
     finally:
         sys.path.pop(0)
 
