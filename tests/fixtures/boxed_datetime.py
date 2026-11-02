@@ -2,6 +2,29 @@ import json
 from datetime import UTC, date, datetime as dt, time, timedelta, timezone
 
 
+def test_class_constants():
+    for cls, smallest, largest, step in (
+        (date, date(1, 1, 1), date(9999, 12, 31), timedelta(days=1)),
+        (dt, dt(1, 1, 1), dt(9999, 12, 31, 23, 59, 59, 999999), timedelta(microseconds=1)),
+        (time, time(), time(23, 59, 59, 999999), timedelta(microseconds=1)),
+        (timedelta, timedelta(days=-999999999), timedelta(days=999999999, seconds=86399, microseconds=999999), timedelta(microseconds=1)),
+    ):
+        assert type(cls.min) is cls and type(cls.max) is cls
+        assert (cls.min, cls.max, cls.resolution) == (smallest, largest, step)
+        assert smallest.min is cls.min and largest.max is cls.max
+        assert smallest.resolution is cls.resolution
+    assert dt.resolution is not time.resolution
+    assert time.resolution is not timedelta.resolution
+
+    class Child(time):
+        min = "override"
+    obj = Child()
+    assert obj.min == Child.min == "override"
+    assert obj.max is Child.max is time.max
+    obj.resolution = "instance override"
+    assert obj.resolution != Child.resolution and Child.resolution is time.resolution
+
+
 def test_http_date():
     assert UTC is timezone.utc
     assert timezone(timedelta(0)) is UTC
@@ -110,6 +133,7 @@ def current():
     test_now()
     test_time_of_day()
     test_http_date()
+    test_class_constants()
     test_cookie_timestamp()
     for timestamp in (None, "0", 1 << 100):
         try:
@@ -124,6 +148,28 @@ def current():
         print(str(exc))
     else:
         raise AssertionError("invalid timezone accepted")
+    test_calendar_ordering()
+
+
+def test_calendar_ordering():
+    leap = date(2000, 2, 29)
+    assert date(2000, 2, 28) < leap <= date(2000, 2, 29)
+    assert timedelta(microseconds=-1) < timedelta() < timedelta(days=1)
+    naive = dt(2000, 2, 29, 23)
+    assert naive < dt(2000, 3, 1) and naive >= dt(2000, 2, 29, 23, fold=1)
+    offset = timezone(timedelta(hours=2, microseconds=1))
+    local = dt(2000, 3, 1, 1, 0, 0, 1, offset, fold=1)
+    instant = dt(2000, 2, 29, 23, tzinfo=UTC)
+    assert instant <= local <= instant
+    assert dt(2000, 2, 29, 23, 0, 0, 1, UTC) > local
+    for left, right in ((naive, instant), (instant, naive), (leap, naive), (naive, leap),
+                        (offset, UTC), (leap, timedelta())):
+        try:
+            left < right
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("ordered incompatible calendar operands")
 
 
 if __name__ == "__main__":

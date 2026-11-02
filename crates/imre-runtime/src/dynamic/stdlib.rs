@@ -51,7 +51,7 @@ mod select;
 pub(super) mod signal;
 mod socket;
 mod structure;
-mod traceback;
+pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
 mod zipimport;
@@ -419,9 +419,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "warn_debug_override",
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
-        | ("_imre_dataclasses", "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata" | "slotted_type" | "retarget_class_cell") => {
-            ctx.builtin(&format!("{module}.{name}"))
-        }
+        | (
+            "_imre_dataclasses",
+            "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata" | "slotted_type" | "retarget_class_cell",
+        ) => ctx.builtin(&format!("{module}.{name}")),
         ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
@@ -604,6 +605,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("posixpath", "normpath") | ("posix", "_path_normpath") => {
             ctx.builtin("posix._path_normpath")
+        }
+        ("posixpath", "splitroot") | ("posix", "_path_splitroot_ex") => {
+            ctx.builtin("posix._path_splitroot_ex")
         }
         ("posix", "environ") => os::environment(ctx),
         ("posix", "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
@@ -1063,6 +1067,9 @@ pub(super) fn call(
         audit::event(ctx, name, &[argument])?;
         return Ok(ctx.heap.caller_module_at(depth.max(0) as usize).unwrap_or(NONE));
     }
+    if name == "sys.unraisablehook" {
+        return super::unraisable::default_hook(ctx, args, kwargs);
+    }
     if name == "sys._getframe" {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -1333,8 +1340,10 @@ pub(super) fn call(
     if let Some(op) = name.strip_prefix("_imre_zipimport.") {
         return zipimport::call(ctx, op, args, kwargs);
     }
-    if matches!(name, "posix.fspath" | "posix._path_normpath")
-        || name.starts_with("_imre_posixpath.")
+    if matches!(
+        name,
+        "posix.fspath" | "posix._path_normpath" | "posix._path_splitroot_ex"
+    ) || name.starts_with("_imre_posixpath.")
     {
         return posixpath::call(ctx, name, args, kwargs);
     }
@@ -1596,7 +1605,11 @@ pub(super) fn call(
         match (method, args, kwargs) {
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
-                return Ok(if ctx.defaultdict_factory(*obj).is_some() { TRUE } else { FALSE });
+                return Ok(if ctx.defaultdict_factory(*obj).is_some() {
+                    TRUE
+                } else {
+                    FALSE
+                });
             }
             ("load_global", [module, name], []) => {
                 let scope = match ctx.heap.get(*module) {
@@ -1890,6 +1903,7 @@ pub(super) fn call(
     const JSON_DUMP_KEYWORDS: &[&str] = &[
         "fp",
         "obj",
+        "skipkeys",
         "default",
         "ensure_ascii",
         "allow_nan",

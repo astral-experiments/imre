@@ -15,6 +15,14 @@ class EchoSpec:
 def current():
     low = "\udcff"
     high = "\U0000d800"
+    path = "dir/" + low
+    assert path.split("/")[::-1] == [low, "dir"]
+    assert (low * 5).rsplit(low * 2, 1) == [low * 3, ""]
+    assert (high + "\x1c" + low).split(None, 1) == [high, low]
+    assert str.split(Text(path), low) == ["dir/", ""]
+    field = Text("field" + low)
+    assert field.split("/")[0] is not field.split("/")[0]
+    assert field.rsplit("separator longer than field")[0] is field
     replacement = "\ufffd"
     assert type(low) is str and low.__class__ is str
     assert type(os.fsdecode(b"\xff")) is str

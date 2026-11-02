@@ -41,6 +41,7 @@ mod thread_rlock;
 mod thread_worker;
 mod typing;
 mod union;
+mod unraisable;
 mod value;
 mod weakref;
 mod wrapper_descriptor;
@@ -1353,7 +1354,7 @@ impl Context {
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
         if let Some(&cell) = scope.closure.cells.get(name)
-            && let Value::Cell(contents) = self.heap.get(cell)
+            && let Value::Cell(contents) | Value::ClassCell(contents) = self.heap.get(cell)
         {
             return *contents;
         }
@@ -1596,9 +1597,9 @@ impl Context {
             if name == "__class__"
                 && s.class_body.is_none()
                 && let Some(cell) = s.class_cell
-                && let Value::ClassCell(Some(class)) = self.heap.get(cell)
+                && let Value::ClassCell(value) = self.heap.get(cell)
             {
-                return Ok(*class);
+                return value.ok_or_else(|| Error::new("NameError", "cannot access free variable '__class__' where it is not associated with a value in enclosing scope"));
             }
             if let Some(parent) = s.parent {
                 scope = parent;
@@ -1640,6 +1641,12 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if let Some(constants) = crate::objects::Calendar::class_constants(name) {
+            for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
+                let id = stdlib::datetime::store(self, value, NONE);
+                self.builtins.insert(format!("{name}.{field}"), id);
+            }
+        }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
             self.builtin(builtins::exception_initializer(name));
@@ -2024,6 +2031,10 @@ impl Context {
             self.bind(scope, "RLock", rlock);
         }
         match name {
+            "abc" => {
+                let meta = self.abc_meta();
+                self.bind(scope, "ABCMeta", meta);
+            }
             #[cfg(target_os = "linux")]
             "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
             #[cfg(target_os = "linux")]
@@ -2105,7 +2116,13 @@ impl Context {
             }
             "sys" => {
                 self.bind(scope, "modules", self.modules);
-                for name in ["audit", "addaudithook", "_getframe", "_getframemodulename"] {
+                for name in [
+                    "audit",
+                    "addaudithook",
+                    "_getframe",
+                    "_getframemodulename",
+                    "unraisablehook",
+                ] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,
@@ -2113,6 +2130,12 @@ impl Context {
                         explicit: false,
                     });
                     self.bind(scope, name, function);
+                    if name == "unraisablehook" {
+                        self.bind(scope, "__unraisablehook__", function);
+                        if self.threads.system_module.is_none() {
+                            self.threads.default_unraisable_hook = Some(function);
+                        }
+                    }
                 }
                 for (name, original, stderr) in [
                     ("stdout", "__stdout__", false),

@@ -318,9 +318,9 @@ pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     Ok(NONE)
 }
 
-fn format_exception(
-    ctx: &mut Context,
-    value: Id,
+/// Append Python traceback frames without rendering the exception or its chain.
+pub(in crate::dynamic) fn format_frames(
+    ctx: &Context,
     mut tb: Id,
     limit: Option<i64>,
     lines: &mut Vec<String>,
@@ -385,6 +385,17 @@ fn format_exception(
             i += same;
         }
     }
+    Ok(())
+}
+
+fn format_exception(
+    ctx: &mut Context,
+    value: Id,
+    tb: Id,
+    limit: Option<i64>,
+    lines: &mut Vec<String>,
+) -> Result<()> {
+    format_frames(ctx, tb, limit, lines)?;
     let convert = ctx.builtin("str");
     let text = match ctx.call(convert, vec![value], Vec::new()) {
         Ok(result) => ctx.str_value(result)?.to_owned(),

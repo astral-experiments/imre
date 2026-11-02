@@ -161,7 +161,11 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (kind == "function" && name == "__call__")
+                ) || (matches!(
+                    kind.as_str(),
+                    "datetime.date" | "datetime.datetime" | "datetime.time" | "datetime.timedelta"
+                ) && matches!(name, "min" | "max" | "resolution"))
+                    || (kind == "function" && name == "__call__")
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
@@ -924,6 +928,7 @@ impl Context {
                 if HashState::is_provider_class(name)
                     || builtins::is_builtin_type(name)
                     || builtins::is_iterator_type(name)
+                    || name == stdlib::fixed_structseq::UNRAISABLE_ARGS
                     || matches!(
                         name.as_str(),
                         "NoneType"
@@ -1033,6 +1038,7 @@ impl Context {
                 class:
                     Some(
                         class @ ("time.struct_time"
+                        | stdlib::fixed_structseq::UNRAISABLE_ARGS
                         | stdlib::fixed_structseq::HASH_INFO
                         | stdlib::fixed_structseq::TERMINAL_SIZE
                         | stdlib::flags::TYPE
@@ -1202,6 +1208,7 @@ impl Context {
                     class:
                         Some(
                             class @ ("time.struct_time"
+                            | stdlib::fixed_structseq::UNRAISABLE_ARGS
                             | stdlib::fixed_structseq::HASH_INFO
                             | stdlib::fixed_structseq::TERMINAL_SIZE
                             | stdlib::flags::TYPE),
@@ -1493,6 +1500,16 @@ impl Context {
         {
             return self.bind_attribute(member, obj, meta);
         }
+        if matches!(name, "min" | "max" | "resolution") {
+            let owner = match self.heap.get(obj) {
+                Value::Calendar { .. } => Some(self.exact_type(obj)?),
+                Value::Native(_) => Some(obj),
+                _ => None,
+            };
+            if let Some(value) = owner.and_then(|class| self.own_class_attr(class, name)) {
+                return Ok(value);
+            }
+        }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
                 "__args__" => return Ok(union.args),
@@ -1724,6 +1741,13 @@ impl Context {
                         explicit: false,
                     }));
                 }
+            }
+            Value::ClassMethod(callable) if name == "__isabstractmethod__" => {
+                return Ok(if self.is_abstract_method(callable)? {
+                    TRUE
+                } else {
+                    FALSE
+                });
             }
             Value::ClassMethod(callable) if matches!(name, "__func__" | "__wrapped__") => {
                 return Ok(callable);
@@ -2891,7 +2915,8 @@ impl Context {
                     return self.bind_attribute(value, NONE, obj);
                 }
                 if name == "register"
-                    && (super::mapping_abc::is_abc_class(self, obj) || self.is_bundled_abc(obj))
+                    && self.heap.get(obj).instance_class().is_none()
+                    && (self.is_bundled_abc(obj) || super::mapping_abc::is_abc_class(self, obj))
                 {
                     let callable = self.builtin("abc.register");
                     return Ok(self.alloc(Value::Method {
@@ -2932,6 +2957,7 @@ impl Context {
                 }
                 if let Some(
                     owner @ ("time.struct_time"
+                    | stdlib::fixed_structseq::UNRAISABLE_ARGS
                     | stdlib::fixed_structseq::HASH_INFO
                     | stdlib::fixed_structseq::TERMINAL_SIZE
                     | stdlib::flags::TYPE),
@@ -3630,6 +3656,23 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if self.builtins.get("abc.ABCMeta") == Some(&obj)
+            && matches!(
+                name,
+                "__new__"
+                    | "__init__"
+                    | "__prepare__"
+                    | "mro"
+                    | "__bases__"
+                    | "__instancecheck__"
+                    | "__subclasscheck__"
+            )
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "custom ABCMeta construction and subclass checks are unsupported",
+            ));
+        }
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
@@ -4616,6 +4659,12 @@ impl Context {
                 ancestors,
                 ..
             } => {
+                if self.builtins.get("abc.ABCMeta") == Some(&callable) {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "direct ABCMeta construction is unsupported",
+                    ));
+                }
                 if let Some(call) = self.bound_slot(callable, "__call__")? {
                     return self.call(call, args, kwargs);
                 }
@@ -5069,10 +5118,21 @@ impl Context {
         &mut self,
         bases: Id,
         body: Id,
+        explicit_metaclass: Option<Id>,
         total: Option<Id>,
         parameterized: bool,
     ) -> Result<Id> {
         let (original, mut bases) = super::typing::resolve_bases(self, bases)?;
+        if self
+            .builtins
+            .get("abc.ABCMeta")
+            .is_some_and(|meta| bases.contains(meta))
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "subclassing ABCMeta is unsupported",
+            ));
+        }
         let typed_dict_meta = self
             .module_value("typing", "_TypedDictMeta")
             .filter(|meta| {
@@ -5080,6 +5140,54 @@ impl Context {
                     .iter()
                     .any(|&base| self.heap.get(base).instance_class() == Some(*meta))
             });
+        let enum_namespace = if typed_dict_meta.is_some() {
+            None
+        } else {
+            self.enum_namespace(&bases)
+        };
+        let abc_meta = if explicit_metaclass.is_some()
+            || bases.iter().any(|&base| self.is_bundled_abc(base))
+        {
+            let meta = self.abc_meta();
+            if explicit_metaclass.is_some_and(|candidate| candidate != meta) {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "only the ABCMeta metaclass is supported",
+                ));
+            }
+            let type_class = self.builtin("type");
+            for &base in &bases {
+                let parent_meta = self.exact_type(base)?;
+                if enum_namespace.is_some() || (parent_meta != type_class && parent_meta != meta) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases",
+                    ));
+                }
+            }
+            if self
+                .classes
+                .get("typing.Protocol")
+                .is_some_and(|&protocol| {
+                    bases
+                        .iter()
+                        .any(|&base| self.direct_subclass(base, protocol))
+                })
+            {
+                if explicit_metaclass.is_some() {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "the Protocol metaclass is unsupported with ABCMeta",
+                    ));
+                }
+                // Keep the existing Protocol layout when it wins over an inherited ABCMeta.
+                None
+            } else {
+                Some(meta)
+            }
+        } else {
+            None
+        };
         let Value::Function {
             scope: parent,
             code,
@@ -5099,11 +5207,6 @@ impl Context {
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
-        let enum_namespace = if typed_dict_meta.is_some() {
-            None
-        } else {
-            self.enum_namespace(&bases)
-        };
         let enum_kind = enum_namespace.as_ref().map(|state| state.kind);
         let cell = self.alloc(Value::ClassCell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
@@ -5194,7 +5297,7 @@ impl Context {
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
             unreachable!()
         };
-        *metaclass = typed_dict_meta;
+        *metaclass = abc_meta.or(typed_dict_meta);
         self.install_weakref_descriptor(class, scope);
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
@@ -5236,7 +5339,7 @@ impl Context {
             self.classes
                 .insert(format!("collections.abc.{name}"), class);
         }
-        self.init_abstract_class(class, &name, scope)?;
+        self.init_abstract_class(class, scope)?;
         if let Some((parents, fields, thunks)) = typed_dict_fields {
             let configure = self
                 .module_value("typing", "_configure_typeddict")

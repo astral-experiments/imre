@@ -119,11 +119,15 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
         "warnings" => Some((
             "warnings.py",
-            include_str!("../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"),
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"
+            ),
         )),
         "_py_warnings" => Some((
             "_py_warnings.py",
-            include_str!("../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"),
+            include_str!(
+                "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"
+            ),
         )),
         "re" => Some(("re.py", include_str!("../stdlib/re.py"))),
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
@@ -1733,6 +1737,9 @@ impl IntrinsicModule {
             (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
             (Self::Subprocess, "CalledProcessError") => Intrinsic::CalledProcessError,
             (Self::Subprocess, "TimeoutExpired") => Intrinsic::TimeoutExpired,
+            (Self::Posix, "_path_splitroot_ex") | (Self::PosixPath, "splitroot") => {
+                Intrinsic::ObjectRuntimeExport("posix._path_splitroot_ex")
+            }
             (Self::Posix, name) => os::symbol(name)?,
             (Self::Os, "makedirs") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.makedirs"),
             (Self::Os, "F_OK") => Intrinsic::AccessMode(0),

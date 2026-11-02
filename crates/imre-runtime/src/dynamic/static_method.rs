@@ -32,11 +32,7 @@ pub(super) fn attribute(
         "__func__" | "__wrapped__" => return Ok(Some(callable)),
         "__dict__" => return Ok(Some(dictionary)),
         "__isabstractmethod__" => {
-            let required = match ctx.lookup_attr(callable, name) {
-                Ok(value) => ctx.truth(value)?,
-                Err(error) if error.kind == "AttributeError" => false,
-                Err(error) => return Err(error),
-            };
+            let required = ctx.is_abstract_method(callable)?;
             return Ok(Some(if required { TRUE } else { FALSE }));
         }
         _ => {}

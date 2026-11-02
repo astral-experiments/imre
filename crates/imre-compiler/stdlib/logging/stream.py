@@ -80,6 +80,20 @@ class Handler:
         _rename_handler(self, self._name, None)
 
 
+class NullHandler(Handler):
+    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
+        pass
+
+    def emit(self, record: LogRecord | None) -> None:
+        pass
+
+    def createLock(self) -> None:
+        self.lock = None
+
+    def _at_fork_reinit(self) -> None:
+        pass
+
+
 class StreamHandler(Handler):
     stream: _TextOutput | None
     terminator: str

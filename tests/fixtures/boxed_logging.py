@@ -46,3 +46,9 @@ def current():
     assert stream.writes == ["GET /health 200\n", "GET /missing 404\n"]
     assert stream.flushes == 2
     print(stream.writes, stream.flushes)
+
+    silent = logging.NullHandler()
+    assert isinstance(silent, logging.Handler) and silent.lock is None
+    assert silent.handle(None) is None
+    assert silent.emit(None) is None
+    silent.close()
