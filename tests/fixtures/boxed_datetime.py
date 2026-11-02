@@ -123,6 +123,36 @@ def test_module_exports():
     assert MixinFirst() == "mixin"
 
 
+def test_tzinfo_instance_layout():
+    base = tzinfo()
+    for name in ("abc", "__dict__", "tzname", "__repr__"):
+        if name in ("tzname", "__repr__"):
+            message = f"'datetime.tzinfo' object attribute '{name}' is read-only"
+        else:
+            message = f"'datetime.tzinfo' object has no attribute '{name}' and no __dict__ for setting new attributes"
+        for operation, args in ((setattr, (7,)), (delattr, ())):
+            try:
+                operation(base, name, *args)
+            except AttributeError as exc:
+                assert str(exc) == message
+            else:
+                raise AssertionError(name)
+    assert not hasattr(base, "__dict__")
+
+    class Zone(tzinfo):
+        pass
+
+    class Slotted(tzinfo):
+        __slots__ = ("offset",)
+
+    zone = Zone()
+    zone.abc = 7
+    assert vars(zone) == {"abc": 7}
+    slot = Slotted()
+    slot.offset = 3
+    assert slot.offset == 3 and not hasattr(slot, "__dict__")
+
+
 def test_class_constants():
     for cls, smallest, largest, step in (
         (date, date(1, 1, 1), date(9999, 12, 31), timedelta(days=1)),
@@ -1097,6 +1127,7 @@ def current():
     test_time_of_day()
     test_http_date()
     test_module_exports()
+    test_tzinfo_instance_layout()
     test_class_constants()
     test_cookie_timestamp()
     for timestamp in (None, "0", 1 << 100):

@@ -4599,6 +4599,9 @@ impl Context {
                 Err(error)
             }
             Value::Instance { class, .. } if self.builtins.get("object") != Some(&class) => {
+                if self.builtins.get(stdlib::datetime::TZINFO) == Some(&class) {
+                    self.check_instance_field(obj, name)?;
+                }
                 let layout = self.instance_layout(class, name);
                 if name == "__dict__" && member.is_none() {
                     if !layout.dictionary {
@@ -4900,7 +4903,8 @@ impl Context {
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return Ok(());
         };
-        if !matches!(self.heap.get(class), Value::Class { .. }) {
+        let exact_tzinfo = self.builtins.get(stdlib::datetime::TZINFO) == Some(&class);
+        if !exact_tzinfo && !matches!(self.heap.get(class), Value::Class { .. }) {
             return Ok(());
         }
         let layout = self.instance_layout(class, name);
@@ -4910,7 +4914,10 @@ impl Context {
         let attribute = self.text(name);
         let quoted = self.repr(attribute);
         let kind = self.type_name(obj);
-        let message = if self.class_attr(class, name).is_some() {
+        // Exact native tzinfo has no stored MRO for object methods.
+        let inherited =
+            exact_tzinfo && (name == "__doc__" || crate::objects::OBJECT_METHODS.contains(&name));
+        let message = if self.class_attr(class, name).is_some() || inherited {
             format!("'{kind}' object attribute {quoted} is read-only")
         } else {
             format!(
