@@ -5,7 +5,6 @@ use crate::dynamic::builtins::bind;
 use crate::objects::{UrlInput, urlquote, urlsplit};
 
 mod join;
-mod quote;
 mod urlencode;
 
 /// Bind the mutable scheme registry once, in this module's Python namespace.
@@ -25,17 +24,19 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
         let registry = ctx.alloc(Value::List(items));
         ctx.bind(scope, name, registry);
     }
-    for name in ["urlsplit", "urlparse"] {
+    for name in [
+        "urlsplit",
+        "urlparse",
+        "urljoin",
+        "urlunsplit",
+        "urlunparse",
+        "unquote",
+        "urlencode",
+    ] {
         let operation = ctx.builtin(&format!("urllib.parse.{name}"));
         ctx.bind(scope, &format!("_imre_{name}"), operation);
     }
-    for name in [
-        "_check_netloc",
-        "_netloc_property",
-        "urljoin",
-        "urlunparse",
-        "urlunsplit",
-    ] {
+    for name in ["_check_netloc", "_netloc_property"] {
         let operation = ctx.builtin(&format!("urllib.parse.{name}"));
         ctx.bind(scope, name, operation);
     }
@@ -68,7 +69,6 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match name {
-        "quote" | "quote_plus" | "quote_from_bytes" => quote::call(ctx, name, args, kwargs),
         "urlencode" => urlencode::call(ctx, args, kwargs),
         "urljoin" => {
             let [base, url, fragments] =

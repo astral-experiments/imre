@@ -16,6 +16,23 @@ def current():
     urlsplit.cache_clear()
     assert urlsplit("https://example.org/a") is not result
 
+    parse.clear_cache()
+    parse.quote_from_bytes(b'!/:', safe=b'/')
+    getter = parse._byte_quoter_factory(b'/')
+    assert getter(ord('!')) == '%21' and getter(ord('/')) == '/'
+    assert getter.__self__[ord(':')] == '%3A'
+    assert parse._byte_quoter_factory.cache_info().hits == 1
+    assert parse.urlencode.__defaults__[-1] is parse.quote_plus
+    assert set(parse.__all__) <= set(dir(parse))
+    original_quote = parse.quote
+    del parse.quote
+    try:
+        assert 'quote' not in dir(parse) and not hasattr(parse, 'quote')
+    finally:
+        parse.quote = original_quote
+    parse.clear_cache()
+    assert parse._byte_quoter_factory.cache_info().currsize == 0
+
     values = ["first", "old"]
     def change_next(value, safe, encoding=None, errors=None):
         if value == "first":
