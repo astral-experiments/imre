@@ -11,6 +11,13 @@ def current():
             assert pattern.fullmatch(letter + "K") is None
         assert re.fullmatch(r"(?a:.[^a-z])", "éK", flags)
         assert re.fullmatch(r"(?a:\w(?u:\w)\w)\w", "AéZé", flags)
+    assert re.fullmatch(r"(?a:(?=\b)\w)", "A")
+    assert re.search(r"(?u:\b)", "\u0301") is None
+    assert re.fullmatch(r"(?-i:I)\b", "İ", re.I) is None
+    assert re.fullmatch("(?x:a # (?a: ignored\n)(?ui:b)", "aB")
+    assert re.fullmatch(r"(?ui:a)", "A")
+    assert re.fullmatch(r"(?u-m:a)", "a")
+    assert re.fullmatch(r"(?u:(?P<état>é))", "é")["état"] == "é"
     assert Template("$User ${Count} $$").substitute(User="Ann", Count=2) == "Ann 2 $"
     assert not Template("$K").is_valid()
 

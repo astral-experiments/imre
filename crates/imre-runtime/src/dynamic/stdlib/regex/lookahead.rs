@@ -14,15 +14,11 @@ pub(super) fn compile(
     flags: i64,
     original: String,
 ) -> Result<(String, Matcher), String> {
-    if !(pattern.contains("(?=")
-        || pattern.contains("(?!")
-        || pattern.contains(r"\b")
-        || pattern.contains(r"\B"))
-    {
+    if !(pattern.contains("(?") || pattern.contains(r"\b") || pattern.contains(r"\B")) {
         return Err(original);
     }
     let ascii = flags & ASCII != 0;
-    let (mut source, groups) = imre_regex::lookahead_source(
+    let (mut source, groups) = imre_regex::lookahead_or_scoped_source(
         pattern,
         flags & VERBOSE != 0,
         alphabet(false, ascii, flags),

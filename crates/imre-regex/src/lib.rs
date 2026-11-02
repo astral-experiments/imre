@@ -177,7 +177,14 @@ pub fn translate_pattern(
     dotall: bool,
     literal_guards: bool,
 ) -> Result<FixedPattern, String> {
-    let (output, groups) = tokenize(pattern, verbose, alphabet, dotall, literal_guards, false)?;
+    let (output, groups) = tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        literal_guards,
+        Grammar::Standard,
+    )?;
     analyze(output, groups)
 }
 
@@ -188,7 +195,39 @@ pub fn lookahead_source(
     alphabet: Alphabet,
     dotall: bool,
 ) -> Result<(String, Vec<Option<String>>), String> {
-    tokenize(pattern, verbose, alphabet, dotall, false, true)
+    tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        false,
+        Grammar::Lookahead,
+    )
+}
+
+/// Normalize text for the boxed matcher when a lookahead, Python word boundary,
+/// or scoped case/alphabet rule needs its extended group and capture support.
+pub fn lookahead_or_scoped_source(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+) -> Result<(String, Vec<Option<String>>), String> {
+    tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        false,
+        Grammar::LookaheadOrScoped,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Grammar {
+    Standard,
+    Lookahead,
+    LookaheadOrScoped,
 }
 
 enum Scope {
@@ -246,8 +285,9 @@ fn tokenize(
     alphabet: Alphabet,
     mut dotall: bool,
     literal_guards: bool,
-    lookahead: bool,
+    grammar: Grammar,
 ) -> Result<(String, Vec<Option<String>>), String> {
+    let lookahead = grammar != Grammar::Standard;
     let mut escapes = Escapes {
         alphabet,
         bracketed_word: false,
@@ -255,6 +295,7 @@ fn tokenize(
     let mut modes = vec![(0, alphabet)];
     let mut scoped_mode = false;
     let mut has_lookahead = false;
+    let mut has_boundary = false;
     let mut highest_condition = 0;
     let mut literal_brace = false;
     let mut input = pattern.chars().peekable();
@@ -458,14 +499,13 @@ fn tokenize(
                 class(&mut input, &mut output, &mut escapes)?;
                 can_repeat = true;
             }
-            '\\' if lookahead
-                && !escapes.alphabet.ascii()
-                && matches!(input.peek(), Some('b' | 'B')) =>
-            {
-                // Python words contain Unicode letters, numbers and underscore.
-                // Test both sides without consuming either adjacent character.
-                has_lookahead = true;
-                let word = if escapes.alphabet.ignores_case() {
+            '\\' if lookahead && matches!(input.peek(), Some('b' | 'B')) => {
+                // Compare the Python word status on either side without consuming a scalar.
+                // The lookahead engine cannot switch its Unicode mode even for ASCII boundaries.
+                has_boundary = true;
+                let word = if escapes.alphabet.ascii() {
+                    r"[A-Za-z0-9_]"
+                } else if escapes.alphabet.ignores_case() {
                     r"(?-i:[\p{L}\p{N}_])"
                 } else {
                     r"[\p{L}\p{N}_]"
@@ -552,7 +592,10 @@ fn tokenize(
     if highest_condition >= groups.len() {
         return Err("invalid conditional group reference".into());
     }
-    if lookahead && !has_lookahead {
+    if lookahead
+        && !has_lookahead
+        && !(grammar == Grammar::LookaheadOrScoped && (scoped_mode || has_boundary))
+    {
         return Err("expected a Python lookahead assertion".into());
     }
     if modes.iter().any(|(_, mode)| mode.ignores_case()) {
@@ -1023,13 +1066,26 @@ mod tests {
             assert!(regex.is_match(yes), "{pattern} on {yes}");
             assert!(!regex.is_match(no), "{pattern} on {no}");
         }
-        for pattern in [r"(?-a:a)", r"(?au:a)", r"(?i:(?=\w)(a)\1)"] {
+        for pattern in [r"(?-a:a)", r"(?au:a)"] {
             assert!(
-                super::lookahead_source(pattern, false, Unicode, false).is_err(),
+                translate_pattern(pattern, false, Unicode, false, false).is_err(),
                 "{pattern}"
             );
         }
+        assert!(super::lookahead_source(r"(?i:(?=\w)(a)\1)", false, Unicode, false).is_err());
         assert!(translate_pattern(r"(?u:.)", false, Bytes, false, false).is_err());
+        let named = "(?P<é>.)(?-i:I)";
+        assert!(super::lookahead_source(named, false, UnicodeIgnoreCase, false).is_err());
+        assert!(super::lookahead_source(r"(?u:\b)", false, Unicode, false).is_err());
+        let (source, groups) =
+            super::lookahead_or_scoped_source(named, false, UnicodeIgnoreCase, false).unwrap();
+        assert_eq!(groups, [None, Some("é".to_owned())]);
+        let compiled = regex::RegexBuilder::new(&source)
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+        assert!(compiled.is_match("aI"));
+        assert!(!compiled.is_match("aİ"));
     }
 
     #[test]

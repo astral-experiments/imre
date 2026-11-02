@@ -252,21 +252,22 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
             if c == '(' && !in_class && chars.peek() == Some(&'?') {
                 let mut group = chars.clone();
                 group.next();
-                let mut alphabet = false;
-                let mut case = false;
+                let mut disabling = false;
+                let mut needs_python_alphabet = false;
+                let mut prefer_python_flags = false;
                 while let Some(flag) = group.next_if(|c| "aiLmsux-".contains(*c)) {
-                    alphabet |= matches!(flag, 'a' | 'u');
-                    case |= flag == 'i';
+                    disabling |= flag == '-';
+                    needs_python_alphabet |= flag == 'u' && (ascii || disabling);
+                    prefer_python_flags |= matches!(flag, 'a' | 'u' | 'i' | 'x');
                 }
-                // The raw engine's Unicode flag also controls UTF-8 decoding. Python
-                // changes only character classes and case folding within these groups.
                 if group.peek() == Some(&':') {
-                    if alphabet {
+                    // The raw engine's u flag also controls UTF-8 decoding. Only a
+                    // redundant positive Unicode scope can use its parser as a fallback.
+                    if needs_python_alphabet {
                         return None;
                     }
-                    prefer_translation |= case;
+                    prefer_translation |= prefer_python_flags;
                 }
-                prefer_translation |= chars.clone().take(3).eq(['?', 'x', ':']);
             }
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
@@ -527,6 +528,13 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         let matcher = build_regex(&source, bytes, flags, &[])?;
         Ok((source, matcher))
     };
+    let backtrack = |error| {
+        if bytes {
+            Err(error)
+        } else {
+            lookahead::compile(&source, flags, error)
+        }
+    };
     let global_verbose = source.starts_with("(?x)");
     let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
         let original = || {
@@ -540,7 +548,10 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         if prefer_translation || global_verbose {
             // Python has its own verbose layout and literal-brace rules. Keep the
             // direct parser for features outside the subset translator.
-            translate(&source).and_then(build).or_else(|_| original())
+            translate(&source)
+                .and_then(build)
+                .or_else(backtrack)
+                .or_else(|_| original())
         } else {
             original()
         }
@@ -598,13 +609,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             assertions = guards;
             Ok((source, matcher))
         })
-        .or_else(|original| {
-            if bytes {
-                Err(original)
-            } else {
-                lookahead::compile(&source, flags, original)
-            }
-        })
+        .or_else(backtrack)
         .map_err(|message| pattern_error(ctx, id, flags, message))?;
     // GroupInfo contains the synthetic final-newline capture as well as user names.
     let names = regex.group_info().pattern_names(PatternID::ZERO).flatten();
