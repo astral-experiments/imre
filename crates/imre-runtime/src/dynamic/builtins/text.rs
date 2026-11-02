@@ -1519,7 +1519,8 @@ pub(super) fn method(
         "isupper" => Some(crate::objects::python_isupper),
         _ => None,
     };
-    if let Some(predicate) = predicate {
+    let mapping = matches!(name, "title" | "swapcase");
+    if predicate.is_some() || mapping {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "str.{name}() takes no keyword arguments"
@@ -1531,6 +1532,21 @@ pub(super) fn method(
                 args.len()
             )));
         }
+    }
+    if mapping {
+        let title = name == "title";
+        let storage = ctx.string_storage(receiver).unwrap();
+        let mapped = match ctx.heap.get(storage) {
+            Value::Str(text) if text.is_empty() => return ctx.heap.string_literal(""),
+            Value::Str(text) => Value::Str(crate::objects::case_map(text, title)?),
+            Value::SurrogateStr(points) => {
+                Value::SurrogateStr(crate::objects::case_map_points(points, title)?)
+            }
+            _ => unreachable!(),
+        };
+        return ctx.heap.fresh_string(mapped);
+    }
+    if let Some(predicate) = predicate {
         if matches!(name, "isascii" | "isalpha" | "isdigit")
             && matches!(
                 ctx.heap.get(ctx.scalar_value(receiver)),
