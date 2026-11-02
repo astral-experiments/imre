@@ -366,7 +366,10 @@ class Popen:
         poll()
         if self.returncode is None:
             refresh = type(poll) is _MethodType and poll.__func__ is _popen_poll and poll.__self__ is self
-            _process.signal(self._handle, sig, refresh)
+            try:
+                _process.signal(self._handle, sig, refresh)
+            except ProcessLookupError:
+                pass
 
     def terminate(self):
         self.send_signal(15)

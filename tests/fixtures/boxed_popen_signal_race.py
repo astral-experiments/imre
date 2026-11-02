@@ -1,6 +1,5 @@
 import gc
 import os
-import signal
 import subprocess
 
 
@@ -28,6 +27,23 @@ def current():
         p.poll = lambda: 123
         p.send_signal(0)
 
+        class Missing:
+            def __index__(self):
+                raise ProcessLookupError("from signal conversion")
+
+        p.send_signal(Missing())
+
+        class Invalid:
+            def __index__(self):
+                raise ValueError("from signal conversion")
+
+        try:
+            p.send_signal(Invalid())
+        except ValueError as exc:
+            assert exc.args == ("from signal conversion",)
+        else:
+            raise AssertionError("invalid signal was suppressed")
+
         def failed_poll():
             raise ProcessLookupError("from poll")
 
@@ -39,15 +55,21 @@ def current():
         else:
             raise AssertionError("poll error suppressed")
     finally:
-        if "poll" in p.__dict__:
-            del p.poll
-        p.returncode = None
         p.stdin.close()
-        assert p.wait(timeout=10) == 7
+        try:
+            if "poll" in p.__dict__:
+                del p.poll
+            p.returncode = None
+            assert p.wait(timeout=10) == 7
+        finally:
+            try:
+                os.waitpid(p.pid, 0)
+            except ChildProcessError:
+                pass
 
     p.poll = lambda: None
     p.returncode = None
-    p.send_signal(signal.SIGTERM)
+    p.send_signal(0)
     del p.poll
     assert p.poll() == 0
     p.send_signal(object())
