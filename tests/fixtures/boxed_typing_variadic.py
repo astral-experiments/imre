@@ -101,6 +101,25 @@ def current():
     u = TypeVar("U")
     class Mixed(Generic[t, *ts, u]): pass
     class Fixed(Generic[t, u]): pass
+    class Signature(Generic[p, t]): pass
+    class Parameters(Generic[p]): pass
+
+    spelling = [int, u]
+    signature = Signature[spelling, Callable[[u], t]]
+    spelling[0] = bytes
+    assert signature.__args__[0] == (int, u)
+    assert signature.__parameters__ == (u, t)
+    assert signature[str, bool] == Signature[[int, str], Callable[[str], bool]]
+    assert Parameters[int, str] == Parameters[[int, str]]
+    assert Parameters[(int, str),] is Parameters[(int, str),]
+    assert Parameters[[int, str]] is not Parameters[[int, str]]
+    try:
+        Signature[[int]]
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("missing return parameter accepted")
+
     defaulted = TypeVarTuple("Defaulted", default=Unpack[tuple[str, int]])
     class Defaulted(Generic[*defaulted]): pass
     other = TypeVarTuple("Other")
