@@ -13,7 +13,7 @@ pub(super) fn fd(ctx: &mut Context, object: Id) -> Result<i32> {
         n
     } else {
         let method = ctx.lookup_attr(object, "fileno").map_err(|e| {
-            if e.kind == "AttributeError" {
+            if ctx.is_attribute_error(&e) {
                 Error::new(
                     "TypeError",
                     "argument must be an int, or have a fileno() method.",

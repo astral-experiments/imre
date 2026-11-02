@@ -2703,6 +2703,10 @@ impl Context {
         source_globals: Id,
         source: Option<(PathBuf, importlib::SourceBody, Option<Id>)>,
     ) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        if source.is_none() && matches!(name, "os" | "posix") {
+            stdlib::os::eventfd::initialize(self, scope);
+        }
         if name == "_thread" && source.is_none() {
             let rlock = self.builtin(thread_rlock::CLASS);
             self.bind(scope, "RLock", rlock);
