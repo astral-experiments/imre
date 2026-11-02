@@ -11,6 +11,7 @@ pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,
 };
 mod bytes_io;
+mod bytes_writer;
 mod docstrings;
 mod file_io;
 pub(super) use file_io::check_text_options;
@@ -22,6 +23,7 @@ pub(super) use text_wrapper::text_options;
 pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
     BufferedFile(Id),
+    BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
