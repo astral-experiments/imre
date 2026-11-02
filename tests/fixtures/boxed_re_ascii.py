@@ -172,6 +172,8 @@ def current():
         assert doubled.fullmatch(wrong) is None
         assert doubled.match(wrong).span(1) == (0, 0)
     assert re.fullmatch(r"^(a+).\1$", "aaaa") is None
+    at_end = re.search(r"(?=(a*)*)\1", "aaa")
+    assert at_end.span() == (0, 0) and at_end.span(1) == (3, 3)
     for spelling, subject, expected in (
         (r"((a)?)+\2", "aa", ((1, 1), (0, 1))),
         (rb"(?:(a?)|(b)){0,2}\2\1", b"bb", ((1, 1), (0, 1))),

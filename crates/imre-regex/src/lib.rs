@@ -757,23 +757,26 @@ fn tokenize(
     if highest_condition >= groups.len() {
         return Err("invalid conditional group reference".into());
     }
-    if grammar == Grammar::Backtracking && has_reference && nullable_repeat {
-        return Err("a repeated empty match could change the referenced capture".into());
-    }
+    let casefold = modes.iter().any(|(_, mode)| mode.ignores_case());
+    let text_assertions =
+        alphabet != Alphabet::Bytes && (has_lookaround || scoped_mode || has_boundary);
     match grammar {
         Grammar::Lookahead if !has_lookaround => {
             return Err("expected a Python lookahead assertion".into());
         }
-        Grammar::Backtracking
-            if !has_reference
-                && (alphabet == Alphabet::Bytes
-                    || !(has_lookaround || scoped_mode || has_boundary)) =>
-        {
+        Grammar::Backtracking if !has_reference && !text_assertions => {
             return Err("pattern does not require backtracking".into());
+        }
+        // Keep previously supported case-sensitive text assertions on their existing matcher.
+        // For newly admitted references, a stalled repeat could leave the wrong capture.
+        Grammar::Backtracking
+            if nullable_repeat && has_reference && (!text_assertions || casefold) =>
+        {
+            return Err("a repeated empty match could change the referenced capture".into());
         }
         _ => {}
     }
-    if modes.iter().any(|(_, mode)| mode.ignores_case()) {
+    if casefold {
         output = if grammar == Grammar::Backtracking && has_reference {
             casefold::backrefs(&output, &modes)?
         } else {
