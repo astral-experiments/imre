@@ -3697,7 +3697,78 @@ impl Context {
         result
     }
 
+    /// Dispatch one mapping proxy slot at a time. Left operands inspect the original
+    /// right operand before a reflected proxy slot unwraps it.
+    fn mapping_proxy_union(&mut self, mut left: Id, mut right: Id) -> Result<Id> {
+        loop {
+            if let Value::MappingProxy(mapping) = *self.heap.get(left) {
+                left = mapping;
+                if let Value::MappingProxy(mapping) = *self.heap.get(right) {
+                    right = mapping;
+                }
+                continue;
+            }
+            if matches!(self.heap.get(left), Value::Weak(wr) if wr.kind != weakref::Kind::Reference) {
+                return self.binary("|", left, right);
+            }
+            let next_right = match self.heap.get(right) {
+                Value::MappingProxy(mapping) => Some(*mapping),
+                Value::Weak(wr) if wr.kind != weakref::Kind::Reference => None,
+                _ => return self.binary("|", left, right),
+            };
+            match self.heap.get(left) {
+                Value::Union(_) | Value::TypeVar(_) => {
+                    return super::union::make(self, &[left, right]);
+                }
+                Value::GenericAlias(alias)
+                    if alias.kind.is_typing_alias()
+                        || matches!(alias.kind, super::typing::AliasKind::Literal(_)) =>
+                {
+                    return super::union::make(self, &[left, right]);
+                }
+                Value::DictView {
+                    kind: value::DictViewKind::Keys | value::DictViewKind::Items,
+                    ..
+                } => {
+                    return self.dict_view_union(left, right);
+                }
+                _ => {}
+            }
+            if let Some(result) = self.operator_slot(left, "__or__", right)? {
+                return Ok(result);
+            }
+            // Upgrade weak references only when their reflected slot actually wins.
+            right = match next_right {
+                Some(mapping) => mapping,
+                None => {
+                    let target = self.weak_proxy_target(right)?;
+                    self.heap.keep(target);
+                    target
+                }
+            };
+        }
+    }
+
+    /// Dictionary keys and items accept any iterable on either side of a binary union.
+    fn dict_view_union(&mut self, left: Id, right: Id) -> Result<Id> {
+        let result = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        builtins::update_set(self, result, left)?;
+        builtins::update_set(self, result, right)?;
+        Ok(result)
+    }
+
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        if !inplace
+            && op == "|"
+            && (matches!(self.heap.get(a), Value::MappingProxy(_))
+                || matches!(self.heap.get(b), Value::MappingProxy(_))
+                    && !matches!(self.heap.get(a), Value::Weak(wr) if wr.kind != weakref::Kind::Reference))
+        {
+            return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
+        }
         if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
             let left = self.weak_proxy_target(a)?;
             let right = self.weak_proxy_target(b)?;
@@ -3751,14 +3822,7 @@ impl Context {
                 if op != "|" {
                     return self.set_algebra(op, a, b, false);
                 }
-                // Dictionary keys and items implement reflected union, returning a fresh set.
-                let result = self.alloc(Value::Set {
-                    entries: Default::default(),
-                    frozen: false,
-                });
-                builtins::update_set(self, result, a)?;
-                builtins::update_set(self, result, b)?;
-                return Ok(result);
+                return self.dict_view_union(a, b);
             }
             "|" | "&" | "-"
                 if matches!(self.heap.get(a), Value::Set { .. })
