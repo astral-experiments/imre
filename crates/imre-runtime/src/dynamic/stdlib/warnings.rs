@@ -3,7 +3,7 @@ use super::{Context, NONE, Result};
 impl Context {
     pub(in crate::dynamic) fn encoding_warning(&mut self, level: i32) -> Result<()> {
         let (filename, line, module) = if let Some((loc, scope)) = self.heap.warning_frame(level) {
-            let globals = self.module_globals(scope);
+            let globals = self.module_globals(scope)?;
             let module = self
                 .dict_named_item(globals, "__name__")
                 .and_then(|id| self.str_value(id).ok())
