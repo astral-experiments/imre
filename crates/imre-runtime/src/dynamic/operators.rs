@@ -4862,7 +4862,11 @@ impl Context {
             })
         };
         let (mut ac, mut bc) = (class(a), class(b));
-        if op == "^" {
+        let set_xor = op == "^"
+            && [a, b].into_iter().any(|id| {
+                matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. })
+            });
+        if set_xor {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
                 if matches!(self.heap.get(value), Value::Set { .. }) {
                     *class = Some(self.exact_type(value)?);
@@ -4916,8 +4920,12 @@ impl Context {
             ));
         }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
-            ac != bc
-                && self.subclass(bc, ac)
+            let strict_subclass = ac != bc && if set_xor {
+                self.direct_subclass(bc, ac)
+            } else {
+                self.subclass(bc, ac)
+            };
+            strict_subclass
                 && (inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right))
         } else {
             false
