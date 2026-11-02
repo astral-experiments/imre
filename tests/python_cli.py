@@ -1541,6 +1541,20 @@ def main():
         )
         compare("-IB", years, native_args=("run", years, "--quiet"))
 
+        arithmetic = root / "date_arithmetic.py"
+        for expression in (
+            "(day - date(2000, 2, 28)).days",
+            "day.__add__(timedelta(days=1))",
+            "date.__rsub__(day, date(2000, 3, 1))",
+            "getattr(day, '__radd__')(timedelta(days=1))",
+        ):
+            arithmetic.write_text(
+                "from datetime import date, timedelta\n"
+                "day = date(2000, 2, 29)\n"
+                f"print({expression})\n"
+            )
+            compare("-IB", arithmetic, native_args=("run", arithmetic, "--quiet"))
+
         names = root / "calendar_type_names.py"
         names.write_text(
             "from datetime import date, datetime, timedelta\n"

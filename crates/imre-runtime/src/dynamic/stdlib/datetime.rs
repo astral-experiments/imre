@@ -97,6 +97,10 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__reduce__",
                 "__repr__",
                 "__str__",
+                "__add__",
+                "__radd__",
+                "__sub__",
+                "__rsub__",
                 "ctime",
                 "isoweekday",
                 "toordinal",
@@ -550,21 +554,24 @@ fn nearest_quotient(ctx: &Context, numerator: Id, denominator: Id) -> Result<cra
     )))
 }
 
-fn datetime_arithmetic(
+fn date_arithmetic(
     ctx: &mut Context,
-    name: &str,
+    method: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let (owner, name) = method.split_once('.').unwrap();
     let Some((&receiver, args)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            format!("descriptor '{name}' of 'datetime.datetime' object needs an argument"),
+            format!("descriptor '{name}' of 'datetime.{owner}' object needs an argument"),
         ));
     };
     let scalar = ctx.scalar_value(receiver);
     let (value, tzinfo) = match ctx.heap.get(scalar) {
-        Value::Calendar { value, tzinfo, .. } if value.class() == "datetime" => {
+        Value::Calendar { value, tzinfo, .. }
+            if value.class() == owner || (owner == "date" && value.class() == "datetime") =>
+        {
             (value.clone(), *tzinfo)
         }
         _ => {
@@ -575,7 +582,7 @@ fn datetime_arithmetic(
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "descriptor '{name}' requires a 'datetime.datetime' object but received a '{kind}'"
+                    "descriptor '{name}' requires a 'datetime.{owner}' object but received a '{kind}'"
                 ),
             ));
         }
@@ -592,24 +599,28 @@ fn datetime_arithmetic(
             format!("expected 1 argument, got {}", args.len()),
         ));
     };
+    // A datetime is a valid receiver for an explicit date descriptor, but date arithmetic
+    // declines it so that the datetime operand can handle its own semantics.
+    if value.class() != owner {
+        return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+    }
     if matches!(name, "__sub__" | "__rsub__")
-        && let Some(other_value) = calendar(ctx, other, "datetime")
+        && let Some(other_value) = calendar(ctx, other, owner)
+        && other_value.class() == owner
     {
-        let (a, b) = if name == "__sub__" {
-            (receiver, other)
+        let (left, right, a, b) = if name == "__sub__" {
+            (&value, &other_value, receiver, other)
         } else {
-            (other, receiver)
+            (&other_value, &value, other, receiver)
         };
-        if let Some(delta) = comparison::subtract(ctx, a, b)? {
-            return Ok(store(ctx, delta, NONE));
-        }
-        let other = other_value;
-        let result = if name == "__sub__" {
-            value.datetime_difference(&other)?
+        let delta = if owner == "date" {
+            left.date_difference(right)?
+        } else if let Some(delta) = comparison::subtract(ctx, a, b)? {
+            delta
         } else {
-            other.datetime_difference(&value)?
+            left.datetime_difference(right)?
         };
-        return Ok(store(ctx, result, NONE));
+        return Ok(store(ctx, delta, NONE));
     }
     let Some(delta) = calendar(ctx, other, "timedelta") else {
         return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
@@ -621,14 +632,16 @@ fn datetime_arithmetic(
     if receiver == scalar {
         return Ok(store(ctx, shifted, tzinfo));
     }
-    // CPython calls the subclass's constructor with all seven fields and the original tzinfo.
     let class = ctx.exact_type(receiver)?;
     let fields = shifted.fields();
-    let mut args: Vec<_> = fields[..7]
+    let count = if owner == "date" { 3 } else { 7 };
+    let mut args: Vec<_> = fields[..count]
         .iter()
         .map(|&part| ctx.int(part as i64))
         .collect();
-    args.push(tzinfo);
+    if owner == "datetime" {
+        args.push(tzinfo);
+    }
     ctx.call(class, args, Vec::new())
 }
 
@@ -892,8 +905,9 @@ pub(super) fn call(
                 format!("a tzinfo subclass must implement {name}()"),
             ))
         }
-        "datetime.__add__" | "datetime.__radd__" | "datetime.__sub__" | "datetime.__rsub__" => {
-            datetime_arithmetic(ctx, &method["datetime.".len()..], args, kwargs)
+        "date.__add__" | "date.__radd__" | "date.__sub__" | "date.__rsub__"
+        | "datetime.__add__" | "datetime.__radd__" | "datetime.__sub__" | "datetime.__rsub__" => {
+            date_arithmetic(ctx, method, args, kwargs)
         }
         "date.today" | "date.fromtimestamp" => fromutc::date_constructor(ctx, method, args, kwargs),
         "date.fromordinal" => date_fromordinal(ctx, args, kwargs),
@@ -1536,7 +1550,8 @@ fn clock_method(
                     value
                 } else {
                     // Subtract through the native slot, including Python subtype construction.
-                    let shifted = datetime_arithmetic(ctx, "__sub__", &[receiver, offset], &[])?;
+                    let shifted =
+                        date_arithmetic(ctx, "datetime.__sub__", &[receiver, offset], &[])?;
                     ctx.finish_call_operands(mark, shifted);
                     calendar(ctx, shifted, "datetime").ok_or_else(|| {
                         Error::new(

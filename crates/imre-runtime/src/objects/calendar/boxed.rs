@@ -126,6 +126,12 @@ impl Calendar {
         shift(&self.0, duration.delta_microseconds(), subtract).map(Self)
     }
 
+    /// Subtract two dates by their stored ordinals, independently of Python field overrides.
+    pub(crate) fn date_difference(&self, other: &Self) -> Result<Self, Error> {
+        let days = self.ordinal() - other.ordinal();
+        try_owner(Value::Delta(i128::from(days) * DAY)).map(Self)
+    }
+
     /// Subtract two datetimes backed by naive or fixed-offset wall times.
     pub(crate) fn datetime_difference(&self, other: &Self) -> Result<Self, Error> {
         let parts = |dt: &Self| {

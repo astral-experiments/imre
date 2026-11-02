@@ -98,6 +98,11 @@ pub(super) fn boxed_comparison(receiver: Type, name: &str) -> bool {
         )
 }
 
+pub(super) fn boxed_date_arithmetic(receiver: Type, name: &str) -> bool {
+    receiver == Type::Calendar(C::Date)
+        && matches!(name, "__add__" | "__radd__" | "__sub__" | "__rsub__")
+}
+
 pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
     match name {
         "utctimetuple" => receiver == Type::Calendar(C::DateTime),
@@ -121,7 +126,7 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
         "ctime" | "fromordinal" | "isoweekday" | "today" => {
             matches!(receiver, Type::Calendar(C::Date | C::DateTime))
         }
-        _ => boxed_comparison(receiver, name),
+        _ => boxed_comparison(receiver, name) || boxed_date_arithmetic(receiver, name),
     }
 }
 
