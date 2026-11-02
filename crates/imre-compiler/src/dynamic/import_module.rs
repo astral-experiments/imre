@@ -4,6 +4,24 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Python sources used only by the boxed importer.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "warnings" => Some((
+            "warnings.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"
+            ),
+        )),
+        "_py_warnings" => Some((
+            "_py_warnings.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"
+            ),
+        )),
+        "linecache" => Some((
+            "linecache.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/linecache.py"
+            ),
+        )),
         "inspect" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some((
