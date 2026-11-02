@@ -57,7 +57,7 @@ impl Property {
         };
         let owner = if let Some(class) = class
             && let Value::Class { scope, .. } = ctx.heap.get(class)
-            && let Some(&name) = ctx.scope_data(*scope).names.get("__qualname__")
+            && let Some(name) = ctx.scope_name(*scope, "__qualname__")
             && let Value::Str(name) = ctx.heap.get(name)
         {
             name

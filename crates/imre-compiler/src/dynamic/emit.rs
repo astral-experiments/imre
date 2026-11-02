@@ -123,7 +123,10 @@ enum Body<'a> {
     Statements(&'a [ast::Stmt]),
     GeneratorFunction(&'a [ast::Stmt]),
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
-    Annotations(Vec<(&'a str, &'a ast::Expr)>),
+    Annotations(
+        Vec<(&'a str, &'a ast::Expr)>,
+        Option<statements::ClassBindings>,
+    ),
     AnnotationValue(&'a ast::Expr),
     AnnotationThunk(String, ruff_text_size::TextRange),
     Expression(&'a ast::Expr),
@@ -231,6 +234,7 @@ impl Output {
             output: self,
             source,
             class_sites: None,
+            annotation_lookup: false,
             class_locals: match &body {
                 Body::Namespace(stmts) if !prefix.is_empty() => {
                     Some(statements::class_locals(stmts))
@@ -272,7 +276,7 @@ impl Output {
             }
             Body::GeneratorFunction(_) => {}
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
-            Body::Annotations(entries) => f.annotations(&entries),
+            Body::Annotations(entries, class) => f.annotations(&entries, class),
             Body::Unsupported(stmt, reason) => {
                 f.checkpoint(stmt);
                 f.unsupported(reason);
@@ -326,7 +330,8 @@ struct Function<'a, 'p> {
     source: &'p SourceMap<'p>,
     prefix: String,
     class_sites: Option<statements::class_annotations::ClassSites>,
-    class_locals: Option<BTreeSet<String>>,
+    class_locals: Option<statements::ClassBindings>,
+    annotation_lookup: bool,
     ir: String,
     block: String,
     error: String,
@@ -459,14 +464,16 @@ impl Function<'_, '_> {
     }
 
     fn lookup(&mut self, name: &str) -> String {
-        let op = if self
-            .class_locals
-            .as_ref()
-            .is_some_and(|locals| locals.contains(name))
-        {
-            "lookup_class_local"
-        } else {
-            "lookup"
+        let op = match &self.class_locals {
+            Some(class) if self.annotation_lookup && class.globals.contains(name) => {
+                "lookup_annotation_global"
+            }
+            Some(class) if self.annotation_lookup && class.locals.contains(name) => {
+                "lookup_class_annotation_global"
+            }
+            Some(_) if self.annotation_lookup => "lookup_class_annotation",
+            Some(class) if class.locals.contains(name) => "lookup_class_local",
+            _ => "lookup",
         };
         let name = self.code_name(name);
         self.op(op, &[&self.scope.clone(), &name])

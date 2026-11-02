@@ -127,7 +127,9 @@ impl Context {
             return Ok(value);
         }
         if state.members.contains(name) {
-            let old = self.scope_data(scope).names[name];
+            let old = self
+                .scope_name(scope, name)
+                .ok_or_else(|| Error::new("KeyError", name))?;
             return Err(Error::new(
                 "TypeError",
                 format!("'{name}' already defined as {}", self.repr(old)),

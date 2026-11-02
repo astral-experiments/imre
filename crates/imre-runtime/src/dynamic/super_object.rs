@@ -155,9 +155,18 @@ impl Context {
                 let cell = frame.class_cell.ok_or_else(|| {
                     Error::new("RuntimeError", "super(): __class__ cell not found")
                 })?;
-                let Value::ClassCell(Some(class)) = self.heap.get(cell) else {
+                let Value::Cell(Some(class)) = self.heap.get(cell) else {
                     return Err(Error::new("RuntimeError", "super(): empty __class__ cell"));
                 };
+                if self.builtin_type_name(*class) != Some("type") {
+                    return Err(Error::new(
+                        "RuntimeError",
+                        format!(
+                            "super(): __class__ is not a type ({})",
+                            self.type_name(*class)
+                        ),
+                    ));
+                }
                 (*class, receiver)
             }
             [start] => (*start, NONE),
