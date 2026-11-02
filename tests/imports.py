@@ -40,7 +40,7 @@ REJECTED = {
             "print(isdatadescriptor(property()))\n"
             "typed('wrong')\n"
         ),
-    }, "invalid-argument-type"),
+    }, "expected int, got str"),
     "optional_import_keeps_typed_call_check": ({
         "main.py": (
             "import http.client\n"
