@@ -928,6 +928,17 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // Exit callbacks run before Python enters its finalization phase.
     ctx.finalizing
         .store(true, std::sync::atomic::Ordering::Release);
+    ctx.heap.discarded_shutdown_write = Some(false);
+    ctx.heap.release_temporaries_since(mark);
+    if let Err(error) = ctx.release_main_at_shutdown() {
+        super::unraisable::report(
+            &mut ctx,
+            error,
+            false,
+            None,
+            "Exception ignored during main module cleanup",
+        );
+    }
     if let Err(error) = ctx.finalize_shutdown_resources() {
         super::unraisable::report(
             &mut ctx,
@@ -939,7 +950,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     }
     stdlib::io::prepare_writer_shutdown(&ctx);
     crate::fault_handler::disable();
-    if status == 0 && stdlib::io::has_pending_callback_write(&ctx) {
+    if status == 0 && ctx.heap.has_pending_callback_write() {
         use std::io::Write;
 
         let _ = writeln!(

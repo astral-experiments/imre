@@ -233,13 +233,8 @@ impl Context {
     fn int(&mut self, value: i64) -> Id {
         self.alloc(Value::Int(crate::Int::from(value)))
     }
-    /// The builtin mapping payload is independent of a subclass instance's attributes.
     fn dict_storage(&self, value: Id) -> Option<Id> {
-        match self.heap.get(value) {
-            Value::Dict(_) | Value::DefaultDict { .. } => Some(value),
-            Value::Instance { dictionary, .. } => *dictionary,
-            _ => None,
-        }
+        self.heap.dict_storage(value)
     }
 
     /// The native elements inherited by a Python-defined list or tuple subclass.
@@ -298,10 +293,7 @@ impl Context {
     }
 
     fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
-        match self.heap.get(self.dict_storage(value)?) {
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
-            _ => unreachable!("dictionary payload"),
-        }
+        self.heap.dict_entries(value)
     }
 
     fn dict(&mut self, entries: Vec<(Id, Id)>) -> Id {

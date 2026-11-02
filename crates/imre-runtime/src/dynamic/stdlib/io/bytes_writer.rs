@@ -4,6 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 use std::rc::Rc;
 
+use crate::dynamic::value::Heap;
 use crate::{BinaryOutput, BlockedWrite};
 
 use super::super::files;
@@ -32,30 +33,32 @@ pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<Writer>> {
     }
 }
 
-/// Detect bytes that would be discarded when the VM drops a live Python-backed
-/// writer. During shutdown, inspecting the raw or resolving close could run Python.
-pub(in crate::dynamic) fn has_pending_callback_write(ctx: &Context) -> bool {
-    ctx.heap.pending_finalizers().iter().copied().any(|owner| {
-        super::buffered_reader::pending_update(ctx, owner)
-            .is_some_and(|raw| native_writer(ctx, raw).is_none())
-            || state(ctx, owner).is_some_and(|w| {
-                w.unflushed.get() != 0
-                    && w.raw
-                        .get()
-                        .is_some_and(|raw| native_writer(ctx, raw).is_none())
-            })
-    })
+/// Inspect pending output without resolving Python attributes during shutdown.
+pub(in crate::dynamic) fn pending_callback_write(heap: &Heap, value: &Value) -> bool {
+    let Value::Instance {
+        memory_stream: Some(stream),
+        ..
+    } = value
+    else {
+        return false;
+    };
+    let raw = match stream {
+        MemoryStream::Reader(reader) => reader.pending_update(),
+        MemoryStream::BufferedBytes(writer) if writer.unflushed.get() != 0 => writer.raw.get(),
+        _ => None,
+    };
+    raw.is_some_and(|raw| native_writer(heap, raw).is_none())
 }
 
 /// Bypass Python only on an exact BytesIO whose write method is still native.
-fn native_writer(ctx: &Context, raw: Id) -> Option<Rc<BytesIo>> {
+fn native_writer(heap: &Heap, raw: Id) -> Option<Rc<BytesIo>> {
     if let Value::Instance {
         class,
         memory_stream: Some(MemoryStream::Bytes(stream)),
         ..
-    } = ctx.heap.get(raw)
-        && ctx.heap.get(*class).io_kind() == Some("BytesIO")
-        && ctx.raw_instance_field(raw, "write").is_none()
+    } = heap.get(raw)
+        && heap.get(*class).io_kind() == Some("BytesIO")
+        && heap.raw_instance_field(raw, "write").is_none()
     {
         return Some(stream.clone());
     }
@@ -115,7 +118,7 @@ pub(super) fn raw_write(ctx: &mut Context, raw: Id, data: &[u8]) -> Result<Optio
 
 impl RawWriter<'_> {
     fn call_raw(ctx: &mut Context, raw: Id, data: &[u8]) -> Result<Option<usize>> {
-        if let Some(stream) = native_writer(ctx, raw) {
+        if let Some(stream) = native_writer(&ctx.heap, raw) {
             stream.write(ctx, data)?;
             return Ok(Some(data.len()));
         }
@@ -401,7 +404,7 @@ impl Writer {
                     | Value::BytesIoStorage(_)
                     | Value::RawReadWindow(_)
             )
-            && native_writer(ctx, raw).is_none()
+            && native_writer(&ctx.heap, raw).is_none()
         {
             // A direct raw.write view must observe in-place mutations to the input.
             // Retaining a Rust borrow across a Python callback cannot implement it.
@@ -448,7 +451,7 @@ impl Writer {
                 let _guard = self.lock()?;
                 // invoke retains the exception roots across raw.close().
                 let raw = self.raw()?;
-                let python_raw = native_writer(ctx, raw).is_none();
+                let python_raw = native_writer(&ctx.heap, raw).is_none();
                 let closed = invoke(ctx, raw, "close", vec![]);
                 if python_raw && closed.is_ok() {
                     // CPython retires its buffer after calling raw.close, even if
