@@ -189,12 +189,7 @@ pub(super) fn forwards_to_origin(name: &str) -> bool {
 }
 
 /// Resolve ordinary attributes of parameterized typing generics on their origin.
-pub(super) fn generic_attr_target(
-    ctx: &Context,
-    mut obj: Id,
-    name: &str,
-    writing: bool,
-) -> Result<Id> {
+pub(super) fn generic_attr_target(ctx: &Context, mut obj: Id, name: &str, writing: bool) -> Result<Id> {
     let mut depth = 0;
     while let Value::GenericAlias(alias) = ctx.heap.get(obj)
         && alias.kind == AliasKind::Generic
@@ -935,8 +930,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?
         }
         Value::GenericAlias(alias) if alias.kind == AliasKind::Generic && name == "copy_with" => {
-            let callable =
-                ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?;
+            let callable = ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name)?;
             ctx.alloc(Value::Method {
                 callable,
                 receiver: value,
@@ -1173,8 +1167,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
                 if a.instantiable { TRUE } else { FALSE }
             }
             attr if let Some((_, value)) = a.metadata().find(|(name, _)| *name == attr) => value,
-            attr if (a.kind == AliasKind::Concatenate
-                || (a.kind != AliasKind::Generic && a.name.is_some()))
+            attr if (a.kind == AliasKind::Concatenate || (a.kind != AliasKind::Generic && a.name.is_some()))
                 && forwards_to_origin(attr) =>
             {
                 return Some(ctx.lookup_attr(a.origin, attr));
