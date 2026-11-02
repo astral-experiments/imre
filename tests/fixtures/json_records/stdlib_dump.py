@@ -37,5 +37,10 @@ with open("dump.json", "w", encoding="utf-8") as out:
         json.dump((1, b"x"), out)
     except TypeError as error:
         print(str(error))
+    # A failed first key still leaves the opening brace in the stream.
+    try:
+        json.dump({10**4300: 1}, out)
+    except ValueError as error:
+        print(str(error))
 with open("dump.json", encoding="utf-8") as saved:
     print(saved.read())
