@@ -25,6 +25,9 @@ def current():
             return ('changed?', 'override')
     assert parse.urldefrag(CustomSplit('path#frag')).geturl() == 'changed?#override'
 
+    assert parse.unwrap(' < URL:https://example.test/a?b#c > ') == 'https://example.test/a?b#c'
+    assert parse.unwrap('url:path') == 'url:path'
+
     class Redirect(str):
         def lstrip(self, chars):
             return 'ALT:path?#changed'
