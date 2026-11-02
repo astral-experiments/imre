@@ -249,11 +249,11 @@ impl Context {
                     a
                 };
                 let name = copy_label(self.str_value(b)?)?;
-                let replaced = self.store_source_name(scope, &name, c)?;
+                let replaced = self.store_source_name(scope, &name, c, op == "assign_target")?;
                 if matches!(op, "assign_target" | "assign_named_target") {
-                    Ok(flag(replaced))
+                    Ok(replaced)
                 } else {
-                    if replaced {
+                    if replaced == TRUE {
                         self.heap.release_unbound_finalizers();
                     }
                     Ok(c)
@@ -1546,7 +1546,7 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
 ) {
     // SAFETY: the caller owns the context and its live handle array.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    if ctx.heap.assignment_target(live, replaced == TRUE) {
+    if ctx.heap.assignment_target(live, replaced) {
         ctx.collect_unreachable();
     }
 }
@@ -1591,14 +1591,9 @@ impl Context {
         data.exec_locals.is_some()
             || data.exec_globals.is_some()
             || data.class_body_mapping().is_some()
-            || self.scope_name(scope, name).is_some_and(|old| {
-                old != value
-                    && self.heap.could_own_finalizer(old, false)
-                    && (data.namespace.is_some()
-                        || data.class_namespace.is_some()
-                        || data.class_body.is_some()
-                        || !self.heap.retains_replaced_operands(data, value, old))
-            })
+            || self
+                .scope_name(scope, name)
+                .is_some_and(|old| old != value && self.heap.could_own_finalizer(old, false))
     }
 
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {

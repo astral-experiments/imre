@@ -3833,19 +3833,44 @@ impl Context {
 
     /// Release the old binding before the next generator target or instruction can observe it.
     pub(super) fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
-        if self.store_source_name(scope, name, value)? && self.heap.has_unbound_finalizer(NONE) {
+        if self.store_source_name(scope, name, value, false)? == TRUE
+            && self.heap.has_unbound_finalizer(NONE)
+        {
             self.collect_unreachable();
             self.heap.release_unbound_finalizers();
         }
         Ok(())
     }
 
-    /// Publish a binding and report whether its previous value could own a buffered writer.
-    pub(super) fn store_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<bool> {
+    /// Publish a binding and report whether releasing its old operands needs a prompt sweep.
+    /// An unpack target can return NONE to trim its temporaries without sweeping.
+    pub(super) fn store_source_name(
+        &mut self,
+        scope: Id,
+        name: &str,
+        value: Id,
+        unpack: bool,
+    ) -> Result<Id> {
         let value = self.enum_assignment(scope, name, value)?;
         let replaced = self.replacing_finalizer(scope, name, value);
         let scope = self.binding_scope(scope, name);
         let frame = self.scope_data(scope);
+        let release = if !replaced {
+            FALSE
+        } else if unpack
+            && frame.exec_locals.is_none()
+            && frame.exec_globals.is_none()
+            && frame.class_body.is_none()
+            && frame.class_namespace.is_none()
+            && frame.namespace.is_none()
+            && self
+                .scope_name(scope, name)
+                .is_some_and(|old| self.heap.retains_replaced_operands(frame, value, old))
+        {
+            NONE
+        } else {
+            TRUE
+        };
         if let Some(locals) = frame.exec_locals.or(frame.class_body_mapping()) {
             if matches!(self.heap.get(locals), Value::List(_)) {
                 return Err(Error::new(
@@ -3864,7 +3889,7 @@ impl Context {
         } else {
             self.bind(scope, name, value);
         }
-        Ok(replaced)
+        Ok(release)
     }
 
     pub(super) fn load_exec_name(&mut self, locals: Id, name: &str) -> Result<Id> {
@@ -5057,7 +5082,9 @@ impl Context {
                     self.named_expression_scope(scope),
                     name.id.as_str(),
                     value,
-                )? && self.heap.named_assignment(mark, value)
+                    false,
+                )? == TRUE
+                    && self.heap.named_assignment(mark, value)
                 {
                     self.collect_unreachable();
                     self.heap.release_unbound_finalizers();

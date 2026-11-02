@@ -3489,15 +3489,17 @@ impl Heap {
     }
 
     /// Keep the operands needed by later targets after a source assignment releases its old value.
-    pub(super) fn assignment_target(&mut self, live: &[Id], replaced: bool) -> bool {
+    pub(super) fn assignment_target(&mut self, live: &[Id], replaced: Id) -> bool {
         // The private unpack list still owns all items waiting for a target.
-        if !replaced || !self.has_unbound_finalizer(NONE) {
+        if replaced == FALSE || !self.has_unbound_finalizer(NONE) {
             return false;
         }
         let temporaries = &mut self.frames.last_mut().unwrap().live;
         temporaries.clear();
         temporaries.extend_from_slice(live);
-        true
+        // Later targets can mutate a local that currently keeps an operand alive.
+        // Their callbacks must see only the explicitly live roots, even if no sweep was needed.
+        replaced == TRUE || self.collect_next_statement
     }
 
     /// A named expression retains earlier operands and its result after replacing the binding.

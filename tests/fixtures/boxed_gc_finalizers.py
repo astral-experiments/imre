@@ -121,8 +121,25 @@ def check_unraisable():
         sys.unraisablehook = before
 
 
+def clear_and_count(owners):
+    owners.clear()
+    return len(events)
+
+
+def check_unpack_operands():
+    owners = [Owner()]
+    nested = [[]]
+    seen = {}
+    # The second target drops the most recent strong path to the RHS lookup.
+    nested, seen[clear_and_count(owners)] = [nested], owners[0] is None
+    assert seen == {1: False}
+    saved.clear()
+    events.clear()
+
+
 def current():
     check_unraisable()
+    check_unpack_operands()
     # Keep another pending finalizer reachable while cyclic and acyclic owners die.
     held = [Owner()]
     witness = ref(held[0])
