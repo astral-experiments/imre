@@ -1893,7 +1893,7 @@ impl IntrinsicModule {
             (Self::Collections | Self::CollectionsNative, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections | Self::CollectionsNative, "deque") => Intrinsic::Deque,
             (Self::Collections, "ChainMap") => Intrinsic::ChainMap,
-            (Self::Collections, "OrderedDict") => Intrinsic::OrderedDict,
+            (Self::Collections | Self::CollectionsNative, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
             (Self::Collections, "Counter") => Intrinsic::Counter,
             (Self::Collections, "UserDict") => {
