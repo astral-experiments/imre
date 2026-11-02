@@ -437,7 +437,6 @@ pub(in crate::dynamic) fn open(
             "text files require UTF-8 encoding",
         ));
     }
-    let writing = mode.contains(['w', 'a', 'x']);
     let file = match mode {
         "r" | "rt" | "tr" => crate::objects::TextFile::open(path, 0)
             .map(|file| {
@@ -448,8 +447,7 @@ pub(in crate::dynamic) fn open(
             .and_then(files::BinaryFile::into_value),
     };
     match file {
-        Ok(file) if writing => ctx.heap.alloc_file_writer(file),
-        Ok(file) => Ok(ctx.alloc(file)),
+        Ok(file) => ctx.heap.alloc_file_writer(file),
         Err(error) => Err(ctx.with_open_filename(error, raw_arg)?),
     }
 }
