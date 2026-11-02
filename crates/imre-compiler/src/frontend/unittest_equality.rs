@@ -22,7 +22,12 @@ impl Checker<'_> {
         class: usize,
         receiver: &Expr,
     ) -> Result<Option<Expr>, String> {
-        if self.classes.methods[class].contains_key("assertIsInstance") {
+        let name = "assertIsInstance";
+        let record = &self.classes.declarations.definitions[class];
+        if self.classes.methods[class].contains_key(name)
+            || record.static_bindings.contains_key(name)
+            || record.fields.iter().any(|field| field.name == name)
+        {
             return Ok(None);
         }
         let method = "_assertTextBytesInstance";
