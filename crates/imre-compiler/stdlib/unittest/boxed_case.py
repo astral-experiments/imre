@@ -36,6 +36,58 @@ def expectedFailure(test_item):
     return test_item
 
 
+class _BaseTestCaseContext:
+
+    def __init__(self, test_case):
+        self.test_case = test_case
+
+    def _raiseFailure(self, standardMsg):
+        msg = self.test_case._formatMessage(self.msg, standardMsg)
+        raise self.test_case.failureException(msg)
+
+
+def assertLogs(self, logger=None, level=None):
+    """Fail unless a log message of level *level* or higher is emitted
+    on *logger_name* or its children.  If omitted, *level* defaults to
+    INFO and *logger* defaults to the root logger.
+
+    This method must be used as a context manager, and will yield
+    a recording object with two attributes: `output` and `records`.
+    At the end of the context manager, the `output` attribute will
+    be a list of the matching formatted log messages and the
+    `records` attribute will be a list of the corresponding LogRecord
+    objects.
+
+    Example::
+
+        with self.assertLogs('foo', level='INFO') as cm:
+            logging.getLogger('foo').info('first message')
+            logging.getLogger('foo.bar').error('second message')
+        self.assertEqual(cm.output, ['INFO:foo:first message',
+                                     'ERROR:foo.bar:second message'])
+    """
+    # Lazy import to avoid importing logging if it is not needed.
+    from ._log import _AssertLogsContext
+    return _AssertLogsContext(self, logger, level, no_logs=False)
+
+
+def assertNoLogs(self, logger=None, level=None):
+    """ Fail unless no log messages of level *level* or higher are emitted
+    on *logger_name* or its children.
+
+    This method must be used as a context manager.
+    """
+    from ._log import _AssertLogsContext
+    return _AssertLogsContext(self, logger, level, no_logs=True)
+
+
+assertLogs.__qualname__ = "TestCase.assertLogs"
+assertNoLogs.__qualname__ = "TestCase.assertNoLogs"
+TestCase.assertLogs = assertLogs
+TestCase.assertNoLogs = assertNoLogs
+del assertLogs, assertNoLogs
+
+
 class _UnexpectedSuccess(Exception):
     pass
 

@@ -883,7 +883,7 @@ pub(super) fn call(
         return Ok(ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?));
     }
     let max = match method {
-        "bind" | "connect" | "listen" | "setblocking" | "shutdown" => 1,
+        "bind" | "connect" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
         "recv" | "send" | "sendall" => 2,
         "setsockopt" | "__exit__" | "recv_into" => 3,
         _ => 0,
@@ -923,6 +923,30 @@ pub(super) fn call(
             };
         }
         "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,
+        "gettimeout" => {
+            return Ok(native::get_timeout(&s).map_or(NONE, |duration| {
+                ctx.alloc(Value::Float(duration.as_secs_f64()))
+            }));
+        }
+        "settimeout" => {
+            let value = argument(args, 0)?;
+            let timeout = super::select::timeout(ctx, Some(&value), false).map_err(|error| {
+                if error.kind == "ValueError" && error.message == "timeout must be non-negative" {
+                    Error::new("ValueError", "Timeout value out of range")
+                } else if error.kind == "TypeError" {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "'{}' object cannot be interpreted as an integer or float",
+                            ctx.type_name(value)
+                        ),
+                    )
+                } else {
+                    error
+                }
+            })?;
+            native::set_timeout(&s, timeout)?;
+        }
         "getblocking" => {
             return Ok(if native::imre_socket_getblocking(&s) {
                 super::TRUE
@@ -973,7 +997,7 @@ pub(super) fn call(
             };
             let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
             if method == "send" {
-                return Ok(ctx.int(native::send(native::fd(&s), bytes, flags)? as i64));
+                return Ok(ctx.int(native::send(&s, bytes, flags)? as i64));
             }
             native::send_all(&s, bytes, flags)?;
         }

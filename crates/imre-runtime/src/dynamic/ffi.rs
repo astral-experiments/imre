@@ -810,6 +810,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     };
     ctx.workers.join_before_exit_callbacks();
     atexit::run(&mut ctx);
+    stdlib::io::prepare_writer_shutdown(&ctx);
     status
 }
 
@@ -1586,7 +1587,19 @@ impl Context {
     fn run_weak_callbacks(&mut self, callbacks: impl IntoIterator<Item = (Id, Id)>) {
         for (callback, reference) in callbacks {
             if let Err(error) = self.call(callback, vec![reference], Vec::new()) {
-                eprintln!("Exception ignored while calling weakref callback: {error}");
+                // clear_weak_targets retains __callback__ for cyclic GC, but clears it
+                // on ordinary release. CPython uses a distinct diagnostic for each.
+                let cyclic = self
+                    .heap
+                    .get(reference)
+                    .weak_reference()
+                    .is_some_and(|wr| wr.callback != NONE);
+                let message = if cyclic {
+                    "Exception ignored on calling weakref callback"
+                } else {
+                    "Exception ignored while calling weakref callback"
+                };
+                super::unraisable::report(self, error, true, Some(callback), message);
             }
         }
     }

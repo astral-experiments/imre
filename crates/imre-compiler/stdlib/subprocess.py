@@ -1,5 +1,6 @@
 """POSIX process handles for runtime-loaded Imre modules."""
 import _imre_subprocess as _process
+import io
 import selectors
 
 __all__ = ["Popen", "PIPE", "STDOUT", "call", "check_call", "getstatusoutput",
@@ -22,10 +23,10 @@ def _cleanup():
     _process.cleanup()
 
 
-def _decode(data, encoding, errors):
+def _decode(data, stream):
     if data is None:
         return None
-    return data.decode(encoding, errors).replace("\r\n", "\n").replace("\r", "\n")
+    return data.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n")
 
 
 class Popen:
@@ -33,7 +34,7 @@ class Popen:
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
                  stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True,
-                 pipesize=-1):
+                 universal_newlines=None, encoding=None, errors=None, text=None, pipesize=-1):
         if executable is not None:
             raise NotImplementedError("an alternate subprocess executable is unsupported")
         if bufsize is None:
@@ -47,16 +48,42 @@ class Popen:
             pipesize = -1
         if not isinstance(pipesize, int):
             raise TypeError("pipesize must be an integer")
+        if (text is not None and universal_newlines is not None
+                and bool(text) != bool(universal_newlines)):
+            raise SubprocessError("Cannot disambiguate when both text and universal_newlines "
+                                  "are supplied but different. Pass one or the other.")
+        self.encoding = encoding
+        self.errors = errors
+        self.text_mode = encoding or errors or text or universal_newlines
+        if self.text_mode and encoding is None:
+            self.encoding = io.text_encoding(None, 2)
+            if self.encoding == "locale":
+                from _locale import getencoding
+                self.encoding = getencoding()
+        line_buffering = self.text_mode and bufsize == 1
+        if line_buffering:
+            bufsize = -1
+        self._communication_started = False
         _cleanup()
         self.args = args
         self.pipesize = pipesize
         self._sigint_wait_secs = 0.25
         self._handle = _process.launch(args, stdin, stdout, stderr, close_fds,
-                                       restore_signals, cwd, env, bufsize, pipesize, shell)
+                                       restore_signals, cwd, env, bufsize, pipesize,
+                                       encoding if self.text_mode else None,
+                                       errors if self.text_mode else None, shell)
         try:
             self.stdin = _process.pipe(self._handle, 0)
             self.stdout = _process.pipe(self._handle, 1)
             self.stderr = _process.pipe(self._handle, 2)
+            if self.text_mode:
+                if self.stdin is not None:
+                    self.stdin = io.TextIOWrapper(self.stdin, encoding=self.encoding, errors=errors,
+                                                 write_through=True, line_buffering=line_buffering)
+                if self.stdout is not None:
+                    self.stdout = io.TextIOWrapper(self.stdout, encoding=self.encoding, errors=errors)
+                if self.stderr is not None:
+                    self.stderr = io.TextIOWrapper(self.stderr, encoding=self.encoding, errors=errors)
         except BaseException:
             self.kill()
             _process.close_wait(self._handle)
@@ -65,6 +92,14 @@ class Popen:
     def __del__(self):
         if self._handle is not None and _process.finalize(self._handle) and _active is not None:
             _active.append(self)
+
+    @property
+    def universal_newlines(self):
+        return self.text_mode
+
+    @universal_newlines.setter
+    def universal_newlines(self, value):
+        self.text_mode = bool(value)
 
     @property
     def pid(self):
@@ -87,12 +122,41 @@ class Popen:
         use_select = _PopenSelector is not selectors.PollSelector
         if use_select and _PopenSelector is not getattr(selectors, "SelectSelector", None):
             raise NotImplementedError("unsupported subprocess selector")
+        if self.text_mode:
+            if self._communication_started and input:
+                raise ValueError("Cannot send input after starting communication")
+            if self.stdin is None or self._communication_started:
+                input = None
+        single_pipe = (timeout is None and not self._communication_started
+                       and (self.stdin is None) + (self.stdout is None) + (self.stderr is None) >= 2)
+        if single_pipe:
+            reader = self.stdout or self.stderr
+            if isinstance(reader, io.TextIOWrapper):
+                # A direct read may already have decoded characters in this wrapper.
+                data = reader.read()
+                reader.close()
+                self.wait()
+                return (data, None) if reader is self.stdout else (None, data)
+            if isinstance(self.stdin, io.TextIOWrapper):
+                if input:
+                    try:
+                        self.stdin.write(input)
+                    except BrokenPipeError:
+                        pass
+                # The native single-pipe path flushes and closes the shared binary pipe.
+                input = None
+        else:
+            self._communication_started = True
+            if self.text_mode and input is not None:
+                input = input.encode(self.stdin.encoding, self.stdin.errors)
         out, err, expired, remaining = _process.communicate(self._handle, input, timeout, use_select)
         if expired:
             error = TimeoutExpired(self.args, timeout if remaining is None else remaining,
                                    output=out, stderr=err)
             error.timeout = timeout
             raise error
+        if self.text_mode and not single_pipe:
+            out, err = _decode(out, self.stdout), _decode(err, self.stderr)
         return out, err
 
     def send_signal(self, sig):
@@ -246,26 +310,12 @@ def run(*popenargs, input=None, capture_output=False, timeout=None, check=False,
             raise ValueError("stdout and stderr arguments may not be used with capture_output.")
         kwargs["stdout"] = PIPE
         kwargs["stderr"] = PIPE
-    text = kwargs.pop("text", None)
-    newlines = kwargs.pop("universal_newlines", None)
-    if text is not None and newlines is not None and bool(text) != bool(newlines):
-        raise SubprocessError("Cannot disambiguate when both text and universal_newlines are supplied but different. Pass one or the other.")
-    encoding = kwargs.pop("encoding", None)
-    errors = kwargs.pop("errors", None)
-    text_mode = text or newlines or encoding or errors
-    encoding = encoding or "utf-8"
-    errors = errors or "strict"
     # run owns its streams. Only the resulting data is exposed to the caller.
     if len(popenargs) < 2:
         kwargs.setdefault("bufsize", 0)
     with Popen(*popenargs, **kwargs) as process:
         try:
-            if text_mode and input is not None:
-                input = input.encode(encoding, errors)
             stdout, stderr = process.communicate(input, timeout=timeout)
-            if text_mode:
-                stdout = _decode(stdout, encoding, errors)
-                stderr = _decode(stderr, encoding, errors)
         except BaseException:
             process.kill()
             raise

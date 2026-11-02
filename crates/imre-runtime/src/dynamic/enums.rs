@@ -3,6 +3,8 @@
 use super::*;
 
 pub(super) mod auto;
+mod display;
+mod float;
 
 impl Context {
     pub(super) fn scalar_value(&self, id: Id) -> Id {
@@ -75,9 +77,7 @@ impl Context {
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        let Value::Class { name, .. } = self.heap.get(class) else {
-            unreachable!()
-        };
+        let name = self.class_name(class);
         let [value] = args else {
             return Err(Error::new("TypeError", format!("{name} requires a value")));
         };
@@ -91,7 +91,11 @@ impl Context {
         {
             return Ok(*value);
         }
-        if let Some(member) = self.member_for_value(values, *value) {
+        if self.float_enum_names(class).is_some() {
+            if let Some(member) = self.float_enum_lookup(class, values, *value)? {
+                return Ok(member);
+            }
+        } else if let Some(member) = self.member_for_value(values, *value) {
             return Ok(member);
         }
         if self.has_base(class, "enum.IntFlag")
@@ -99,10 +103,12 @@ impl Context {
         {
             return self.flag_combination(class, values, bits);
         }
-        Err(Error::new(
-            "ValueError",
-            format!("{} is not a valid {name}", self.repr(*value)),
-        ))
+        let name = if self.float_enum_names(class).is_some() {
+            self.class_qualname(class)
+        } else {
+            self.class_name(class)
+        };
+        Err(Error::new("ValueError", format!("{} is not a valid {name}", self.repr(*value))))
     }
 
     /// Intern a combination without adding a new declaration to __members__.
@@ -259,6 +265,9 @@ impl Context {
         self.bind(scope, "_value2member_map_", values);
         let proxy = self.alloc(Value::MappingProxy(names));
         self.bind(scope, "__members__", proxy);
+        if let Some(data_type) = base.filter(|&base| self.has_base(base, "float")) {
+            return self.populate_float_enum(class, scope, data_type, names, values, declarations);
+        }
         let new = self.class_attr(class, "__new__");
         for (name, raw) in declarations {
             if !classified && (name.starts_with('_') || self.is_enum_descriptor(raw)?) {

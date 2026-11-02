@@ -959,6 +959,31 @@ def check_pickle_reductions(imre, root, run):
         sys.path.pop(0)
 
 
+def check_unittest_main_names(imre, root, run):
+    source = root / "selected_tests.py"
+    source.write_text(
+        "import unittest\n"
+        "class Cases(unittest.TestCase):\n"
+        "    def test_a(self): print('a')\n"
+        "    def test_b(self): print('b')\n"
+        "unittest.main()\n"
+    )
+    executable = root / "selected_tests"
+    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable)
+    assert built.returncode == 0, built
+    for args, output in [((), "a\nb\n"), (("Cases.test_b", "Cases.test_a"), "b\na\n"),
+                         (("-vk", "test_b", "Cases"), "b\n")]:
+        result = run(executable, *args)
+        assert result.returncode == 0 and result.stdout == output, result
+    extra = run(executable, "Cases", "-v", "Cases.test_b")
+    assert extra.returncode == 2 and not extra.stdout and "unrecognized arguments" in extra.stderr, extra
+    for flags in [("-k", "-1"), ("-k=two words",)]:
+        filtered = run(executable, *flags, "Cases")
+        assert filtered.returncode == 5 and not filtered.stdout, filtered
+    missing = run(executable, "-v", "Cases.test_missing")
+    assert missing.returncode == 1 and "_FailedTest" in missing.stderr, missing
+
+
 def check_unittest_file_discovery(imre, root, run):
     entry = root / "discover_after_build.py"
     entry.write_text(
@@ -1262,6 +1287,15 @@ def main():
         ):
             subset_method.write_text(statement + "\n")
             compare("-B", subset_method, native_args=("run", subset_method, "--quiet"))
+
+        set_operator = root / "set_operator.py"
+        for statement in (
+            "print(set.__sub__({1, 2}, {2}) == {1})",
+            "intersection = frozenset.__rand__\nprint(intersection(frozenset(['a']), {'a'}))",
+            "items = {1}\nmerge = items.__ior__\nprint(merge({2}) is items)",
+        ):
+            set_operator.write_text(statement + "\n")
+            compare("-B", set_operator, native_args=("run", set_operator, "--quiet"))
 
         set_method = root / "set_difference_update.py"
         for statement in (
@@ -1819,6 +1853,8 @@ def report(text):
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        writer_fixture = fixtures / "io_buffered_writer_type.py"
+        compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
@@ -2012,6 +2048,7 @@ def report(text):
             "boxed_locale_error.py",
             "boxed_io_protocols.py",
             "boxed_io_abc_registration.py",
+            "boxed_importlib_abc.py",
             "boxed_logging_handlers.py",
             "boxed_logging_handler_list.py",
             "boxed_logging_handler_filters.py",
@@ -2022,6 +2059,7 @@ def report(text):
             "boxed_os_environb.py",
             "boxed_os_file_descriptors.py",
             "boxed_os_fdopen.py",
+            "boxed_binary_bytes_paths.py",
             "boxed_buffered_readlines.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_waitpid.py",
@@ -2035,8 +2073,10 @@ def report(text):
             "boxed_urllib_file.py",
             "boxed_urllib_cleanup.py",
             "boxed_urllib_retrieve.py",
+            "boxed_socket_timeout.py",
             "boxed_urllib_data.py",
             "boxed_urllib_http_status.py",
+            "boxed_http_transport.py",
             "boxed_message_parameters.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
@@ -2085,6 +2125,7 @@ def report(text):
             "boxed_unittest_ordering.py",
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_assert_warns.py",
+            "boxed_unittest_assert_logs.py",
             "boxed_unittest_assert_regex.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
@@ -2096,10 +2137,12 @@ def report(text):
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
             "boxed_set_issubset.py",
+            "boxed_set_operator_descriptors.py",
             "boxed_set_union.py",
             "boxed_set_difference_update.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
+            "boxed_weakref_unraisable.py",
             "boxed_gc_collect.py",
             "boxed_gc_controls.py",
             "boxed_gc_finalizers.py",
@@ -2126,6 +2169,7 @@ def report(text):
             "boxed_itertools_count.py",
             "boxed_enum_descriptors.py",
             "boxed_enum_auto.py",
+            "boxed_float_enum.py",
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",
             "boxed_with_lookup.py",
@@ -2233,12 +2277,15 @@ def report(text):
                         extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
                     )
         if os.name == "posix":
+            check_unittest_main_names(imre, root, run)
             check_unittest_file_discovery(imre, root, run)
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_exports.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_text.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_chdir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

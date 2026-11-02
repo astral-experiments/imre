@@ -113,9 +113,11 @@ impl Imports {
                     | "opcode"
                     | "_opcode_metadata"
                     | "sysconfig"
+                    | "pathlib.types"
                     | "platform"
                     | "keyword"
                     | "site"
+                    | "importlib.abc"
                     | "importlib.machinery"
                     | "traceback"
                     | "unittest.case"
@@ -270,7 +272,8 @@ impl<'a> Visitor<'a> for Imports {
                         && ((name == "operator" && boxed_operator(suffix))
                             || (name == "_opcode" && (boxed_opcode(suffix) || suffix == "*"))
                             || (name == "sys" && boxed_sys_export(suffix))
-                            || (name == "string" && suffix == "templatelib"))
+                            || (name == "string" && suffix == "templatelib")
+                            || (name == "pathlib" && suffix == "types"))
                     {
                         self.runtime_imports = true;
                     }
@@ -449,6 +452,7 @@ pub(crate) fn compile(
             "_imp",
             "atexit",
             "weakref",
+            "pathlib",
             "sys",
             "platform",
             "keyword",
@@ -556,15 +560,21 @@ pub(crate) fn compile(
     loop {
         let (owner, package, imports) = if let Some(next) = work.pop_front() {
             next
-        } else if late_pprint && !seen.contains("pprint") {
-            // A computed import may request pprint. Collect its bundled dependencies
-            // after the file graph, without parsing unrelated local modules.
-            bundled_only = true;
-            let mut imports = Imports::default();
-            imports.names.push((0, "pprint".to_owned()));
-            (String::new(), false, imports)
         } else {
-            break;
+            // Collect late imports and their bundled dependencies after the explicit
+            // file graph, without parsing unrelated modules in project directories.
+            let mut imports = Imports::default();
+            if late_pprint && !seen.contains("pprint") {
+                imports.names.push((0, "pprint".to_owned()));
+            }
+            if seen.contains("pathlib") && !seen.contains("pathlib.types") {
+                imports.names.push((0, "pathlib.types".to_owned()));
+            }
+            if imports.names.is_empty() {
+                break;
+            }
+            bundled_only = true;
+            (String::new(), false, imports)
         };
         if !options.runtime_imports
             && !registered_imports.called
@@ -580,6 +590,11 @@ pub(crate) fn compile(
             return Ok(None);
         }
         let mut names = imports.names;
+        if owner == "importlib" {
+            // Filesystem modules can import the loader protocols through either public module.
+            names.push((0, "importlib.abc".to_owned()));
+            names.push((0, "importlib.util".to_owned()));
+        }
         // A late import of native pickle also needs its bundled reader and dependencies.
         if imports.uses_import_builtin {
             late_pprint = true;

@@ -3362,21 +3362,31 @@ impl Context {
         })
     }
 
-    /// Union of set operands preserves mutable left-hand storage for augmented assignment.
-    fn set_union(&mut self, a: Id, b: Id, inplace: bool) -> Result<Id> {
-        let Value::Set { entries, frozen } = self.heap.get(a) else {
+    /// Apply a native binary operator to two set payloads without invoking subclass overrides.
+    pub(super) fn set_binary(
+        &mut self,
+        op: &str,
+        left: Id,
+        right: Id,
+        inplace: bool,
+    ) -> Result<Id> {
+        // Both union and self-intersection start from the left set's native table.
+        if op != "|" && !(op == "&" && left == right) {
+            return self.set_algebra(op, left, right, inplace);
+        }
+        let Value::Set { entries, frozen } = self.heap.get(left) else {
             unreachable!()
         };
         let result = if inplace && !frozen {
-            a
+            left
         } else {
             self.alloc(Value::Set {
                 entries: entries.try_clone()?,
                 frozen: *frozen,
             })
         };
-        if a != b {
-            builtins::update_set(self, result, b)?;
+        if left != right {
+            builtins::update_set(self, result, right)?;
         }
         Ok(result)
     }
@@ -3466,6 +3476,22 @@ impl Context {
             })
         };
         if op == "-" {
+            // For comparable sizes CPython probes the right set with each left key.
+            // Copy-and-discard reverses the equality callback, and is only used
+            // for a much larger left operand or for mutable difference updates.
+            if sets
+                && !mutate
+                && self.stored_entries(left).len() >> 2 <= self.stored_entries(right).len()
+            {
+                self.visit_set_operand(left, |ctx, key, hash| {
+                    ctx.heap.keep(key);
+                    if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
+                        ctx.set_dictionary_key(result, key, NONE, hash, false)?;
+                    }
+                    Ok(())
+                })?;
+                return Ok(result);
+            }
             if let Value::DictView {
                 dict,
                 kind: value::DictViewKind::Keys,
@@ -3671,7 +3697,78 @@ impl Context {
         result
     }
 
+    /// Dispatch one mapping proxy slot at a time. Left operands inspect the original
+    /// right operand before a reflected proxy slot unwraps it.
+    fn mapping_proxy_union(&mut self, mut left: Id, mut right: Id) -> Result<Id> {
+        loop {
+            if let Value::MappingProxy(mapping) = *self.heap.get(left) {
+                left = mapping;
+                if let Value::MappingProxy(mapping) = *self.heap.get(right) {
+                    right = mapping;
+                }
+                continue;
+            }
+            if matches!(self.heap.get(left), Value::Weak(wr) if wr.kind != weakref::Kind::Reference) {
+                return self.binary("|", left, right);
+            }
+            let next_right = match self.heap.get(right) {
+                Value::MappingProxy(mapping) => Some(*mapping),
+                Value::Weak(wr) if wr.kind != weakref::Kind::Reference => None,
+                _ => return self.binary("|", left, right),
+            };
+            match self.heap.get(left) {
+                Value::Union(_) | Value::TypeVar(_) => {
+                    return super::union::make(self, &[left, right]);
+                }
+                Value::GenericAlias(alias)
+                    if alias.kind.is_typing_alias()
+                        || matches!(alias.kind, super::typing::AliasKind::Literal(_)) =>
+                {
+                    return super::union::make(self, &[left, right]);
+                }
+                Value::DictView {
+                    kind: value::DictViewKind::Keys | value::DictViewKind::Items,
+                    ..
+                } => {
+                    return self.dict_view_union(left, right);
+                }
+                _ => {}
+            }
+            if let Some(result) = self.operator_slot(left, "__or__", right)? {
+                return Ok(result);
+            }
+            // Upgrade weak references only when their reflected slot actually wins.
+            right = match next_right {
+                Some(mapping) => mapping,
+                None => {
+                    let target = self.weak_proxy_target(right)?;
+                    self.heap.keep(target);
+                    target
+                }
+            };
+        }
+    }
+
+    /// Dictionary keys and items accept any iterable on either side of a binary union.
+    fn dict_view_union(&mut self, left: Id, right: Id) -> Result<Id> {
+        let result = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        builtins::update_set(self, result, left)?;
+        builtins::update_set(self, result, right)?;
+        Ok(result)
+    }
+
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        if !inplace
+            && op == "|"
+            && (matches!(self.heap.get(a), Value::MappingProxy(_))
+                || matches!(self.heap.get(b), Value::MappingProxy(_))
+                    && !matches!(self.heap.get(a), Value::Weak(wr) if wr.kind != weakref::Kind::Reference))
+        {
+            return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
+        }
         if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
             let left = self.weak_proxy_target(a)?;
             let right = self.weak_proxy_target(b)?;
@@ -3725,14 +3822,7 @@ impl Context {
                 if op != "|" {
                     return self.set_algebra(op, a, b, false);
                 }
-                // Dictionary keys and items implement reflected union, returning a fresh set.
-                let result = self.alloc(Value::Set {
-                    entries: Default::default(),
-                    frozen: false,
-                });
-                builtins::update_set(self, result, a)?;
-                builtins::update_set(self, result, b)?;
-                return Ok(result);
+                return self.dict_view_union(a, b);
             }
             "|" | "&" | "-"
                 if matches!(self.heap.get(a), Value::Set { .. })
@@ -3742,11 +3832,7 @@ impl Context {
                     (self.heap.get(a), self.heap.get(b)),
                     (Value::Set { .. }, Value::Set { .. })
                 ) {
-                    return if op == "|" {
-                        self.set_union(a, b, inplace)
-                    } else {
-                        self.set_algebra(op, a, b, inplace)
-                    };
+                    return self.set_binary(op, a, b, inplace);
                 }
                 return Err(Error::new(
                     "TypeError",
@@ -4157,6 +4243,21 @@ impl Context {
                     .map(Some);
             }
 
+            // A float subtype inherits float's comparison slots independently. In particular,
+            // float.__ne__ need not call an overridden __eq__, and NaN is unequal to itself.
+            if matches!(name, "__eq__" | "__ne__")
+                && let Value::Instance { scalar: Some(scalar), .. } = self.heap.get(obj)
+                && let Value::Float(number) = self.heap.get(*scalar)
+            {
+                let other = self.scalar_value(other);
+                let equal = match self.heap.get(other) {
+                    Value::Float(right) => number == right,
+                    Value::Int(_) | Value::Bool(_) => crate::floats::compare(&self.as_int(other)?, *number) == 0,
+                    _ => return Ok(None),
+                };
+                return Ok(Some(builtins::boolean(equal == (name == "__eq__"))));
+            }
+
             if name == "__ne__"
                 && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
             {
@@ -4464,6 +4565,14 @@ impl Context {
         {
             return Ok(result);
         }
+        // A mutable set's in-place slot runs before the right operand's reflected slot.
+        if matches!(op, "|" | "-" | "&")
+            && matches!(self.heap.get(a), Value::Set { frozen: false, .. })
+            && let right = self.scalar_value(b)
+            && matches!(self.heap.get(right), Value::Set { .. })
+        {
+            return self.set_binary(op, a, right, true);
+        }
         if op == "+"
             && let Value::ByteArray(left) = self.heap.get(a)
             && let Value::Bytes(right) | Value::ByteArray(right) = self.heap.get(b)
@@ -4481,6 +4590,10 @@ impl Context {
                 unreachable!()
             };
             *left = bytes;
+            return Ok(a);
+        }
+        if op == "|" && matches!(self.heap.get(a), Value::Dict(_) | Value::DefaultDict { .. }) {
+            builtins::update_dict(self, a, Some(b), &[])?;
             return Ok(a);
         }
         self.binary_operation(op, a, b, true)

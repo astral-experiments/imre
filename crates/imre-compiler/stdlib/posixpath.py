@@ -2,6 +2,8 @@
 # os reads these constants while the two modules import each other.
 curdir = "."
 extsep = "."
+sep = "/"
+altsep = None
 
 import os
 from _imre_posixpath import (

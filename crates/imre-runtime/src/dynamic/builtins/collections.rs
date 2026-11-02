@@ -801,6 +801,7 @@ pub(super) fn method(
     let slot = matches!(
         name,
         "dict.__init__"
+            | "dict.__ior__"
             | "dict.__eq__"
             | "dict.__repr__"
             | "dict.__len__"
@@ -870,6 +871,16 @@ pub(super) fn method(
         }
         let representation = ctx.checked_container_slot_repr(object, receiver)?;
         return Ok(ctx.text(representation));
+    }
+    if name == "dict.__ior__" {
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __ior__() takes no keyword arguments"));
+        }
+        let [other] = args else {
+            return Err(type_error(format!("expected 1 argument, got {}", args.len())));
+        };
+        update(ctx, receiver, Some(*other), &[])?;
+        return Ok(object);
     }
     if name == "dict.__eq__" {
         if !kwargs.is_empty() {
@@ -1255,7 +1266,8 @@ pub(super) fn builtin_slot(
         )));
     }
     let storage = ctx.scalar_value(object);
-    if matches!(method, "__add__" | "__iadd__") {
+    let set_op = set_operator(method);
+    if matches!(method, "__add__" | "__iadd__") || set_op.is_some() {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
@@ -1272,6 +1284,20 @@ pub(super) fn builtin_slot(
         }
         if method == "__add__" {
             return ctx.concat_list(storage, *value);
+        }
+        if let Some(op) = set_op {
+            let other = ctx.scalar_value(*value);
+            if !matches!(ctx.heap.get(other), Value::Set { .. }) {
+                return Ok(NOT_IMPLEMENTED);
+            }
+            let (left, right) = if method.starts_with("__r") {
+                (other, storage)
+            } else {
+                (storage, other)
+            };
+            let inplace = method.starts_with("__i");
+            let result = ctx.set_binary(op, left, right, inplace)?;
+            return Ok(if inplace { object } else { result });
         }
         list_extend(ctx, storage, *value)?;
         return Ok(object);

@@ -15,6 +15,9 @@ class Message:
     def __init__(self) -> None:
         self._headers = []
 
+    def set_raw(self, name: str, value: str) -> None:
+        self._headers.append((name, value))
+
     def items(self) -> list[tuple[str, str]]:
         return self._headers[:]
 

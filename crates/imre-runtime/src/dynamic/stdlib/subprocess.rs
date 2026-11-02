@@ -103,6 +103,8 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         env,
         bufsize,
         pipesize,
+        encoding,
+        errors,
         shell,
     ] = values
     else {
@@ -113,6 +115,10 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         redirect(ctx, stdout, 1)?,
         redirect(ctx, stderr, 2)?,
     ];
+    if (encoding != NONE || errors != NONE) && streams.iter().any(|(mode, _)| *mode == 1) {
+        // CPython opens text wrappers before the child can execute.
+        io::text_options(ctx, encoding, errors, NONE)?;
+    }
     let shell = ctx.truth(shell)?;
     let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(args)),

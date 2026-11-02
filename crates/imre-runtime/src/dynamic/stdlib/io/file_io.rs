@@ -39,6 +39,15 @@ fn file_block_size(size: impl TryInto<i64>) -> i64 {
     }
 }
 
+/// Truncate a live raw or buffered disk descriptor without changing its position.
+pub(super) fn truncate_fd(fd: RawFd, size: i64) -> Result<()> {
+    // SAFETY: ftruncate accepts an integer descriptor and size.
+    if unsafe { libc::ftruncate(fd, size) } < 0 {
+        return Err(os_error(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
 fn closed() -> Error {
     Error::new("ValueError", "I/O operation on closed file")
 }
@@ -180,6 +189,25 @@ fn check_open_string(ctx: &mut Context, value: Id, name: &str, expected: &str) -
     Ok(())
 }
 
+/// Convert open()'s optional text arguments before any path or descriptor is acquired.
+pub(in crate::dynamic::stdlib) fn check_text_options(
+    ctx: &mut Context,
+    encoding: Option<Id>,
+    errors: Option<Id>,
+    newline: Option<Id>,
+) -> Result<()> {
+    for (name, id) in [
+        ("encoding", encoding),
+        ("errors", errors),
+        ("newline", newline),
+    ] {
+        if let Some(id) = id.filter(|&id| id != NONE) {
+            check_open_string(ctx, id, name, "str or None")?;
+        }
+    }
+    Ok(())
+}
+
 enum DescriptorLookup {
     FromArgument,
     Resolved(Option<RawFd>),
@@ -227,15 +255,7 @@ pub(in crate::dynamic) fn open(
     let encoding = encoding.filter(|&v| v != NONE);
     let errors = errors.filter(|&v| v != NONE);
     let newline = newline.filter(|&v| v != NONE);
-    for (name, id) in [
-        ("encoding", encoding),
-        ("errors", errors),
-        ("newline", newline),
-    ] {
-        if let Some(id) = id {
-            check_open_string(ctx, id, name, "str or None")?;
-        }
-    }
+    check_text_options(ctx, encoding, errors, newline)?;
     let owns = closefd.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
     // Numeric inputs reach FileIO before Python attempts their index or filesystem protocol.
     let numeric = matches!(
@@ -273,8 +293,13 @@ pub(in crate::dynamic) fn open(
     let text_output = !binary && !mode_text.contains('+') && mode_text.contains(['w', 'a', 'x']);
     let text_input_with_newline =
         buffering < 0 && newline.is_some() && matches!(mode_text, "r" | "rt" | "tr");
+    let binary_bytes_path = binary
+        && buffering < 0
+        && !mode_text.contains('+')
+        && !numeric
+        && matches!(ctx.heap.get(ctx.scalar_value(raw_arg)), Value::Bytes(_));
     let fd = descriptor_from_argument(ctx, raw_arg);
-    if fd.is_some() || text_output || text_input_with_newline {
+    if fd.is_some() || text_output || text_input_with_newline || binary_bytes_path {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
@@ -879,10 +904,7 @@ pub(super) fn call(
                 Some(n) => n,
                 None => os::seek(fd, 0, libc::SEEK_CUR)?,
             };
-            // SAFETY: ftruncate accepts an integer descriptor and size.
-            if unsafe { libc::ftruncate(fd, size) } < 0 {
-                return Err(os_error(std::io::Error::last_os_error()));
-            }
+            truncate_fd(fd, size)?;
             raw.blksize.set(super::DEFAULT_BUFFER_SIZE);
             Ok(ctx.int(size))
         });

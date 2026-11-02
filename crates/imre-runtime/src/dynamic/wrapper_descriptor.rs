@@ -33,6 +33,12 @@ impl BuiltinDescriptor {
                 attr,
                 stdlib::os::scandir::ITER_METHODS,
             )),
+            Some(("set", attr)) if builtins::set_operators("set").contains(&attr) => {
+                Some(("set", attr, builtins::set_operators("set")))
+            }
+            Some(("frozenset", attr)) if builtins::set_operators("frozenset").contains(&attr) => {
+                Some(("frozenset", attr, builtins::set_operators("frozenset")))
+            }
             Some(("functools.KeyWrapper", attr)) => Some((
                 "functools.KeyWrapper",
                 attr,
@@ -114,6 +120,7 @@ impl BuiltinDescriptor {
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
+            "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
@@ -255,6 +262,20 @@ impl BuiltinDescriptor {
         receiver: Option<Id>,
     ) -> Option<Id> {
         Some(match name {
+            "__doc__" | "__text_signature__"
+                if matches!(self.owner, "set" | "frozenset")
+                    && let Some(op) = builtins::set_operator(self.name) =>
+            {
+                if name == "__text_signature__" {
+                    ctx.text("($self, value, /)")
+                } else if self.name.starts_with("__r") {
+                    ctx.text(format!("Return value{op}self."))
+                } else if self.name.starts_with("__i") {
+                    ctx.text(format!("Return self{op}=value."))
+                } else {
+                    ctx.text(format!("Return self{op}value."))
+                }
+            }
             "__name__" => ctx.text(self.name),
             "__qualname__" => {
                 let owner = if self.method
@@ -306,6 +327,8 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__rtruediv__" => ctx.text("Return value/self."),
             "__doc__" if self.name == "__floordiv__" => ctx.text("Return self//value."),
             "__doc__" if self.name == "__rfloordiv__" => ctx.text("Return value//self."),
+            "__doc__" if self.name == "__ior__" => ctx.text("Return self|=value."),
+            "__text_signature__" if self.name == "__ior__" => ctx.text("($self, value, /)"),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
             "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__floordiv__" | "__rfloordiv__") => {
                 ctx.text("($self, value, /)")
