@@ -183,6 +183,7 @@ impl BuiltinDescriptor {
             "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
+            "wrapper_descriptor.__get__" => ("wrapper_descriptor", "__get__"),
             "str.__str__" => ("str", "__str__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
@@ -299,7 +300,9 @@ impl BuiltinDescriptor {
             "memoryview" => matches!(ctx.heap.get(receiver), Value::MemoryView { .. }),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "member_descriptor" => ctx.exact_type(receiver)? == ctx.builtin("member_descriptor"),
-            "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
+            "method_descriptor" | "wrapper_descriptor" => {
+                ctx.builtin_type_name(receiver) == Some(self.owner)
+            }
             "dict" => ctx.dict_storage(receiver).is_some(),
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
             deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
