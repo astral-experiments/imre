@@ -60,3 +60,48 @@ else:
 sentinel = object()
 data.__spec__.loader = Loader()
 assert resources.files(data) is sentinel
+
+
+class LegacyReader:
+    def get_resource_reader(self, name):
+        assert name == 'data'
+        return self
+
+    def contents(self):
+        return ('message.txt', 'dir')
+
+    def is_resource(self, name):
+        return name == 'message.txt'
+
+    def open_resource(self, name):
+        from io import BytesIO
+        if name != 'message.txt':
+            raise FileNotFoundError(name)
+        return BytesIO(b'caf\xc3\xa9\n')
+
+
+data.__spec__.loader = LegacyReader()
+root = resources.files(data)
+assert root.name == 'data'
+assert [p.name for p in root.iterdir()] == ['message.txt', 'dir']
+assert (root / 'dir').is_dir()
+message = root / 'message.txt'
+assert message.is_file() and not list(message.iterdir())
+assert message.read_bytes() == b'caf\xc3\xa9\n'
+assert message.read_text(encoding='utf-8') == 'café\n'
+try:
+    (root / 'absent').read_bytes()
+except FileNotFoundError:
+    pass
+else:
+    raise AssertionError('suppressed a reader error')
+
+data.__spec__.loader = None
+orphan = resources.files(data) / 'missing' / 'child'
+assert orphan.name == 'child' and not orphan.is_file() and not orphan.is_dir()
+try:
+    orphan.read_bytes()
+except FileNotFoundError:
+    pass
+else:
+    raise AssertionError('opened an orphan resource')
