@@ -44,7 +44,7 @@ impl BuiltinDescriptor {
                 Some((members.owner, attr, members.methods))
             }
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
-            Some(("bytes", attr)) => Some(("bytes", attr, &["endswith"][..])),
+            Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("memoryview", attr)) => Some(("memoryview", attr, builtins::MEMORYVIEW_METHODS)),
             Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),

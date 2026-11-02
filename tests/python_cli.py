@@ -11,6 +11,58 @@ import tempfile
 from pathlib import Path
 
 
+def check_command_stdin(imre, run):
+    source = (
+        "import os, sys\n"
+        "from io import BytesIO, StringIO\n"
+        "s = sys.stdin\n"
+        "assert s is sys.__stdin__ and s.fileno() == 0 and not s.buffer.raw.closefd\n"
+        "print(s.name, repr(input()), repr(s.readline()), repr(s.read(1)), repr(s.read()), repr(s.read()))\n"
+        "s.close()\n"
+        "print(os.read(0, 1))\n"
+        "sys.stdin = StringIO('redirected\\n')\n"
+        "print(input())\n"
+        "sys.stdin = BytesIO(b'binary\\n')\n"
+        "modules = sys.modules\n"
+        "original_sys = modules['sys']\n"
+        "modules['sys'] = None\n"
+        "result = input()\n"
+        "modules['sys'] = original_sys\n"
+        "print(result)\n"
+    )
+    # Hold the write end open until each read returns. The alarm also bounds the
+    # compiled child if a regression makes it wait for another write or EOF.
+    live_pipe = (
+        "import os, signal, sys\n"
+        "read_fd, write_fd = os.pipe()\n"
+        "os.dup2(read_fd, 0)\n"
+        "os.close(read_fd)\n"
+        "signal.alarm(5)\n"
+        "os.write(write_fd, b'line\\n')\n"
+        "assert input() == 'line'\n"
+        "buffer = sys.stdin.buffer\n"
+        "os.write(write_fd, b'ab')\n"
+        "assert buffer.read1(0) == b'' and buffer.read1(1) == b'a'\n"
+        "assert os.read(0, 1) == b'b'\n"
+        "os.write(write_fd, b'xyz')\n"
+        "assert buffer.read(1) == b'x' and buffer.read1(-1) == b'yz'\n"
+        "os.close(write_fd)\n"
+        "assert buffer.read1() == b''\n"
+        "signal.alarm(0)\n"
+    )
+    cases = [
+        ("import sys; print(repr(sys.stdin.read()))", b""),
+        (source, "one\r\ntwo\nλtail".encode()),
+    ]
+    if os.name == "posix":
+        cases.append((live_pipe, b""))
+    for command, data in cases:
+        reference = run(sys.executable, "-B", "-c", command, stdin=data)
+        actual = run(imre, "-B", "-c", command, stdin=data)
+        assert reference.returncode == actual.returncode == 0, (reference.stderr, actual.stderr)
+        assert actual.stdout == reference.stdout and actual.stderr == reference.stderr == b""
+
+
 def check_io_compaction_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "refuse_io_compaction.c"
     wrapper = root / "refuse_io_compaction.o"
@@ -981,6 +1033,8 @@ def main():
             assert actual.returncode == 0 and not actual.stderr, actual.stderr
             assert actual.stdout == "'one\\r'\n''\n'λ'\nEOF\n".encode()
 
+        check_command_stdin(imre, run)
+
         streams = root / "streams.py"
         streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
         expected = run(sys.executable, "-B", streams)
@@ -1591,6 +1645,8 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
+        io_fixture = fixtures / "boxed_io_indirect_import.py"
+        compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
         for name in (
@@ -1715,6 +1771,7 @@ def report(text):
             "boxed_codecs.py",
             "boxed_io_exports.py",
             "boxed_io_text_encoding.py",
+            "boxed_io_protocols.py",
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
@@ -1742,6 +1799,7 @@ def report(text):
             "boxed_logging.py",
             "boxed_logging_file.py",
             "boxed_class_attribute.py",
+            "boxed_missing_attribute_owners.py",
             "boxed_request_strings.py",
             "boxed_str_maketrans.py",
             "boxed_map_capwords.py",
@@ -1913,6 +1971,12 @@ def report(text):
                 assert (fault.returncode, fault.stdout, fault.stderr) == (0, oracle.stdout, b""), fault
                 retry = run(binary, extra=injected | {"IMRE_SECRETS_TEST_SOURCE": "reject"})
                 assert (retry.returncode, retry.stdout, retry.stderr) == (0, b"c\n", b"draw\ndraw\n"), retry
+        # A nested declaration is invalid even if the surrounding function is never called.
+        source = root / "generic-nonlocal.py"
+        source.write_text("def factory():\n    class Box[T]:\n        def f(self):\n            nonlocal T\n")
+        invalid = run(imre, "build", source, "--runtime-imports", "-o", root / "invalid-nonlocal")
+        assert invalid.returncode and b"SyntaxError: nonlocal binding not allowed for type parameter 'T'" in invalid.stderr, invalid
+
         for fixture in ("boxed_typing_generics.py", "boxed_typing_list.py"):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             compare("-IB", "-c", imports)

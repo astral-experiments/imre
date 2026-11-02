@@ -43,11 +43,11 @@ pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
 mod posixpath;
+mod random;
 pub(super) mod readiness;
 pub(super) mod regex;
 #[cfg(target_os = "linux")]
 mod resource;
-mod secrets;
 mod select;
 #[cfg(target_os = "linux")]
 pub(super) mod signal;
@@ -689,7 +689,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
-        | ("random", "random")
+        | ("random", "random" | "choice")
         | ("codecs", "encode" | "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
@@ -1218,8 +1218,8 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
     }
-    if name == "secrets.choice" {
-        return secrets::choice(ctx, args, kwargs);
+    if matches!(name, "random.choice" | "secrets.choice") {
+        return random::choice(ctx, args, kwargs, name == "secrets.choice");
     }
     if name == "_collections_abc._check_methods" {
         if let Some((key, _)) = kwargs.iter().find(|(key, _)| key != "C") {
@@ -1966,8 +1966,8 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "pattern.findall" | "file.read" | "file.readline" | "file.readinto"
-        | "file.write" | "warnings.warn" => (2, &[]),
+        "struct.unpack" | "pattern.findall" | "file.read" | "file.read1" | "file.readline"
+        | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" | "match.groupdict" => (2, &["default"]),

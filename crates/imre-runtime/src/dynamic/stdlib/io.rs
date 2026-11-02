@@ -49,6 +49,35 @@ const PUBLIC_NAMES: &[&str] = &[
     "Writer",
 ];
 
+/// Build the interpreter's shared text reader without taking ownership of fd 0.
+pub(in crate::dynamic) fn standard_input(ctx: &mut Context) -> Result<Id> {
+    let fd = ctx.int(0);
+    let mode = ctx.text("r");
+    let buffering = ctx.int(-1);
+    let encoding = ctx.text(crate::sys::standard_field(0, false).as_str());
+    let errors = ctx.text(crate::sys::standard_field(0, true).as_str());
+    let newline = ctx.text("\n");
+    let stream = match open(
+        ctx,
+        &[fd, mode, buffering, encoding, errors, newline, FALSE],
+        &[],
+    ) {
+        Err(error)
+            if matches!(error.os_args.as_deref(),
+                Some(super::super::os_error::Args::Native { source, .. }) if source.errno == i64::from(libc::EBADF)
+            ) =>
+        {
+            return Ok(NONE);
+        }
+        result => result?,
+    };
+    let buffer = ctx.lookup_attr(stream, "buffer")?;
+    let raw = ctx.lookup_attr(buffer, "raw")?;
+    let name = ctx.text("<stdin>");
+    ctx.set_attr(raw, "name", name)?;
+    Ok(stream)
+}
+
 /// Select the default text encoding from the interpreter's startup configuration.
 pub(super) fn text_encoding(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
@@ -192,7 +221,9 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         module,
         "TextIOBase",
         io,
-        &["encoding", "errors", "newlines", "detach"],
+        &[
+            "encoding", "errors", "newlines", "detach", "read", "readline", "write",
+        ],
     );
     ctx.builtins.insert("_io._TextIOBase".into(), text);
     let wrapper = class(ctx, module, "TextIOWrapper", text, text_wrapper::METHODS);
@@ -271,6 +302,66 @@ fn class(ctx: &mut Context, module: Id, name: &str, base: Id, methods: &[&'stati
     }
     ctx.bind(module, name, owner);
     owner
+}
+
+/// Text and buffered bases validate their C signatures before rejecting a transfer.
+fn unsupported_transfer(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    text: bool,
+) -> Result<Id> {
+    let count = args.len() + kwargs.len();
+    if count > 1 {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes at most 1 argument ({count} given)"),
+        ));
+    }
+    if name == "write" {
+        let Some(&value) = args.first() else {
+            return Err(Error::new(
+                "TypeError",
+                "write() takes exactly 1 positional argument (0 given)",
+            ));
+        };
+        if text {
+            let nul = match ctx.heap.get(ctx.scalar_value(value)) {
+                Value::Str(s) => s.contains('\0'),
+                Value::SurrogateStr(_) => ctx
+                    .encode_utf8_codepoints(value, false, "strict")?
+                    .contains(&0),
+                _ => {
+                    let kind = if value == NONE {
+                        "None"
+                    } else {
+                        ctx.type_name(value)
+                    };
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("write() argument 1 must be str, not {kind}"),
+                    ));
+                }
+            };
+            if nul {
+                return Err(Error::new("ValueError", "embedded null character"));
+            }
+        }
+    } else if let Some((key, _)) = kwargs.first() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() got an unexpected keyword argument '{key}'"),
+        ));
+    } else if let Some(&size) = args.first() {
+        ctx.index_integer(size)?
+            .to_i64()
+            .and_then(|n| i32::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new("OverflowError", "Python int too large to convert to C int")
+            })?;
+    }
+    Err(Error::new("UnsupportedOperation", name))
 }
 
 fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
@@ -370,10 +461,13 @@ pub(in super::super) fn call(
     let bytes_io = ctx.builtins.get("_io.BytesIO").copied();
     let raw = ctx.builtins.get("_io._RawIOBase") == Some(&owner);
     let buffered = ctx.builtins.get("_io._BufferedIOBase") == Some(&owner);
+    let text = ctx.builtins.get("_io._TextIOBase") == Some(&owner);
     let descriptor = if raw {
         Some("_RawIOBase")
     } else if buffered {
         Some("_BufferedIOBase")
+    } else if text {
+        Some("_TextIOBase")
     } else if bytes_io == Some(owner) {
         Some("BytesIO")
     } else {
@@ -438,16 +532,19 @@ pub(in super::super) fn call(
         }
         return Ok(NONE);
     }
-    if name == "detach" && (ctx.builtins.get("_io._TextIOBase") == Some(&owner) || buffered) {
+    if name == "detach" && (text || buffered) {
         if !rest.is_empty() || !kwargs.is_empty() {
             return Err(Error::new("TypeError", "detach() takes no arguments"));
         }
         return Err(Error::new("UnsupportedOperation", "detach"));
     }
+    if (text || buffered) && matches!(name, "write" | "read" | "read1" | "readline") {
+        return unsupported_transfer(ctx, name, rest, kwargs, text);
+    }
     if buffered {
         return buffered_io::call(ctx, receiver, name, rest, kwargs);
     }
-    if ctx.builtins.get("_io._TextIOBase") == Some(&owner) {
+    if text {
         // The base class getters return None even on a closed or uninitialized subclass.
         return Ok(NONE);
     }

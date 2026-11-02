@@ -1671,6 +1671,12 @@ impl IntrinsicModule {
             (Self::Binascii, "Incomplete") => Intrinsic::BinasciiIncomplete,
             (Self::Hashlib, "file_digest") => Intrinsic::HashFileDigest,
             (Self::Hashlib, "new") => Intrinsic::HashNew,
+            (Self::Hashlib, "__get_builtin_constructor") => {
+                Intrinsic::ObjectRuntimeExport("hashlib.__get_builtin_constructor")
+            }
+            (Self::Hashlib, "__builtin_constructor_cache") => {
+                Intrinsic::ObjectRuntimeExport("hashlib.__builtin_constructor_cache")
+            }
             (Self::Hashlib, "algorithms_available") => {
                 Intrinsic::HashAlgorithms { guaranteed: false }
             }
@@ -1683,6 +1689,8 @@ impl IntrinsicModule {
             (Self::Io | Self::IoNative, "BlockingIOError") => {
                 Intrinsic::ObjectRuntimeExport("io.BlockingIOError")
             }
+            (Self::Io, "Reader") => Intrinsic::ObjectRuntimeExport("io.Reader"),
+            (Self::Io, "Writer") => Intrinsic::ObjectRuntimeExport("io.Writer"),
             (Self::Io, "SEEK_SET") => Intrinsic::IntConstant(0),
             (Self::Io, "SEEK_CUR") => Intrinsic::IntConstant(1),
             (Self::Io, "SEEK_END") => Intrinsic::IntConstant(2),
@@ -1925,6 +1933,12 @@ impl IntrinsicModule {
             (Self::UrllibParse, "quote_plus") => Intrinsic::QuotePlus,
             (Self::UrllibParse, "urlencode") => Intrinsic::UrlEncode,
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
+            (Self::UrllibParse, "parse_qs") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.parse_qs")
+            }
+            (Self::UrllibParse, "unquote_to_bytes") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.unquote_to_bytes")
+            }
             (Self::UrllibParse, "unquote_plus") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.unquote_plus")
             }
@@ -1992,6 +2006,12 @@ impl IntrinsicModule {
             }
             (Self::UrllibParse, "_splitvalue") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse._splitvalue")
+            }
+            (Self::UrllibParse, "to_bytes") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.to_bytes")
+            }
+            (Self::UrllibParse, "_to_bytes") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._to_bytes")
             }
             (Self::UrllibParse, "unwrap") => Intrinsic::ObjectRuntimeExport("urllib.parse.unwrap"),
             (Self::UrllibParse, "urldefrag") => {

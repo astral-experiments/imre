@@ -1257,7 +1257,7 @@ pub(super) fn method(
         return ctx.new_string(owner, receiver, args, kwargs);
     }
     let receiver = if owner == "bytes"
-        || (owner == "bytearray" && matches!(name, "endswith" | "startswith"))
+        || (owner == "bytearray" && matches!(name, "endswith" | "split" | "startswith"))
     {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
@@ -1490,21 +1490,31 @@ pub(super) fn method(
             None => receiver,
         });
     }
-    if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
-        let [sep, max] =
-            super::bind_method_arguments("rsplit", args, kwargs, ["sep", "maxsplit"], 2)?;
+    if matches!(owner, "bytes" | "bytearray") && matches!(name, "split" | "rsplit") {
+        let [sep, max] = super::bind_method_arguments(name, args, kwargs, ["sep", "maxsplit"], 2)?;
         let limit = split_limit(ctx, max)?;
         let separator = sep
             .filter(|&id| id != NONE)
-            .map(|id| ctx.bytes_like(id))
+            .map(|id| match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::Array(array) => Ok(array.as_bytes()),
+                _ => ctx.bytes_like(id),
+            })
             .transpose()?;
-        let Value::Bytes(data) = ctx.heap.get(receiver) else {
-            unreachable!()
-        };
-        let parts = crate::objects::rsplit_bytes(data, separator, limit)?;
+        let immutable = owner == "bytes";
+        let parts = crate::objects::split_bytes(
+            ctx.bytes_like(receiver)?,
+            separator,
+            limit,
+            name == "rsplit",
+            immutable,
+        )?;
         let fields = parts
             .into_iter()
-            .map(|part| part.map_or(receiver, |bytes| ctx.alloc(Value::Bytes(bytes))))
+            .map(|part| match part {
+                None => receiver,
+                Some(bytes) if immutable => ctx.alloc(Value::Bytes(bytes)),
+                Some(bytes) => ctx.alloc(Value::ByteArray(bytes)),
+            })
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
     }

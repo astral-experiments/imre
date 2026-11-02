@@ -4101,11 +4101,18 @@ impl Context {
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
         if matches!(op, "==" | "!=")
             && let Value::MemoryView { owner, .. } = self.heap.get(a)
-            && (owner.is_none()
-                || matches!(self.heap.get(self.scalar_value(b)),
-                    Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. } | Value::Array(_)))
         {
-            return Ok(Some(builtins::boolean(self.equal(a, b) == (op == "=="))));
+            if owner.is_some() {
+                self.check_buffer_exporter(b)?;
+            }
+            if owner.is_none()
+                || matches!(
+                    self.heap.get(self.scalar_value(b)),
+                    Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. } | Value::Array(_)
+                )
+            {
+                return Ok(Some(builtins::boolean(self.equal(a, b) == (op == "=="))));
+            }
         }
         if matches!(op, "==" | "!=")
             && matches!(self.heap.get(a), Value::Deque(_))
@@ -4219,6 +4226,11 @@ impl Context {
         }
         if let Some(result) = self.operator_slot(a, left, b)? {
             return Ok(Some(result));
+        }
+        if matches!(op, "==" | "!=")
+            && matches!(self.heap.get(b), Value::MemoryView { owner: Some(_), .. })
+        {
+            self.check_buffer_exporter(a)?;
         }
         if !reflected_first && (ac != bc || inplace.is_empty()) {
             return self.operator_slot(b, right, a);

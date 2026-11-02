@@ -2,20 +2,32 @@ use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
 
 /// Select the original element through Python's length and subscription protocols.
-pub(super) fn choice(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+pub(super) fn choice(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    secure: bool,
+) -> Result<Id> {
     let mut seq = args.first().copied();
     for (key, value) in kwargs {
-        if key != "seq" {
-            return Err(Error::new(
-                "TypeError",
-                format!("Random.choice() got an unexpected keyword argument '{key}'"),
-            ));
-        }
-        if seq.replace(*value).is_some() {
-            return Err(Error::new(
-                "TypeError",
-                "Random.choice() got multiple values for argument 'seq'",
-            ));
+        match key.as_str() {
+            "seq" if seq.is_none() => seq = Some(*value),
+            "self" | "seq" => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("Random.choice() got multiple values for argument '{key}'"),
+                ));
+            }
+            _ => {
+                let mut message =
+                    format!("Random.choice() got an unexpected keyword argument '{key}'");
+                if let Some(hint) =
+                    crate::objects::exceptions::keyword_suggestion(key, &["self", "seq"])
+                {
+                    message.push_str(&format!(". Did you mean '{hint}'?"));
+                }
+                return Err(Error::new("TypeError", message));
+            }
         }
     }
     if args.len() > 1 {
@@ -40,7 +52,7 @@ pub(super) fn choice(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
     } else {
         first
     };
-    let index = crate::objects::secrets_choice_index(&ctx.as_int(bound)?)?;
+    let index = crate::objects::choice_index(&ctx.as_int(bound)?, secure)?;
     let key = ctx.alloc(Value::Int(crate::Int::new(index)));
     ctx.get_item(seq, key)
 }

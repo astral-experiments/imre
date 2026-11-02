@@ -155,14 +155,13 @@ class TestCase(_SuiteMember):
     _subtest_params: dict[str, object]
     failureException: typing.ClassVar[type[Exception]] = AssertionError
     _testMethodName: str
-    longMessage: bool
+    longMessage = True
     maxDiff: int | None
     _diffThreshold: int
 
     def __init__(self, methodName: str = "runTest") -> None:
         self._subtest_params = {}
         self._testMethodName = methodName
-        self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
         _validateCaseMethod(self, methodName)

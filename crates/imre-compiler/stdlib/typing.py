@@ -179,6 +179,8 @@ def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
     def __annotate__(format):
         result = {}
         for base in bases:
+            if base is Generic:
+                continue
             annotate = base.__annotate__
             if annotate is not None:
                 result.update(_typeddict_base_annotations(annotate, format))

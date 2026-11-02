@@ -82,6 +82,7 @@ pub fn direct_method<'a>(
 #[derive(Default)]
 pub struct Names {
     pub string_annotations: bool,
+    pub duplicate_type_parameter: Option<Identifier>,
     original: HashMap<TextSize, Name>,
     owners: HashMap<TextSize, Name>,
     import_roots: HashSet<TextSize>,
@@ -125,6 +126,7 @@ pub fn lower_in(body: &mut [ast::Stmt], owner: &str, string_annotations: bool) -
         owner,
         names: &names,
         string_annotations,
+        only_parameters: None,
     }
     .visit_body(body);
     names.into_inner()
@@ -134,10 +136,17 @@ struct Mangler<'a> {
     owner: &'a str,
     names: &'a RefCell<Names>,
     string_annotations: bool,
+    only_parameters: Option<&'a HashSet<Name>>,
 }
 
 impl Mangler<'_> {
     fn replacement(&self, name: &str) -> Option<Name> {
+        if self
+            .only_parameters
+            .is_some_and(|params| !params.contains(name))
+        {
+            return None;
+        }
         let owner = self.owner.trim_start_matches('_');
         (is_mangled_private(name) && !name.contains('.') && !owner.is_empty())
             .then(|| Name::new(format!("_{owner}{name}")))
@@ -171,17 +180,42 @@ impl Transformer for Mangler<'_> {
                 for decorator in &mut class.decorator_list {
                     self.visit_decorator(decorator);
                 }
+                let body = Mangler {
+                    owner: owner.as_str(),
+                    only_parameters: None,
+                    ..*self
+                };
                 if let Some(params) = &mut class.type_params {
-                    self.visit_type_params(params);
-                }
-                if let Some(arguments) = &mut class.arguments {
+                    // Only its declared private type parameters are mangled in a
+                    // generic class's header. The body uses normal class mangling.
+                    let names = params.iter().map(|param| param.name().id.clone()).collect();
+                    let header = Mangler {
+                        only_parameters: Some(&names),
+                        ..body
+                    };
+                    let mut bindings = HashSet::new();
+                    for param in &mut params.type_params {
+                        let name = match param {
+                            ast::TypeParam::TypeVar(p) => &mut p.name,
+                            ast::TypeParam::TypeVarTuple(p) => &mut p.name,
+                            ast::TypeParam::ParamSpec(p) => &mut p.name,
+                        };
+                        header.definition(name);
+                        if !bindings.insert(name.id.clone()) {
+                            self.names
+                                .borrow_mut()
+                                .duplicate_type_parameter
+                                .get_or_insert_with(|| name.clone());
+                        }
+                    }
+                    header.visit_type_params(params);
+                    if let Some(arguments) = &mut class.arguments {
+                        header.visit_arguments(arguments);
+                    }
+                } else if let Some(arguments) = &mut class.arguments {
                     self.visit_arguments(arguments);
                 }
-                Mangler {
-                    owner: owner.as_str(),
-                    ..*self
-                }
-                .visit_body(&mut class.body);
+                body.visit_body(&mut class.body);
                 return;
             }
             ast::Stmt::FunctionDef(function) => {
