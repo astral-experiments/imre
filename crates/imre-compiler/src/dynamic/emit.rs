@@ -118,13 +118,16 @@ pub(crate) fn emit(
     ))
 }
 
+/// A source-backed function whose call returns a suspended frame.
+struct SuspendedSuite<'a> {
+    statements: &'a [ast::Stmt],
+    is_async: bool,
+}
+
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
-    SuspendedFunction {
-        suite: &'a [ast::Stmt],
-        is_async: bool,
-    },
+    GeneratorFunction(SuspendedSuite<'a>),
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
         Vec<(&'a str, &'a ast::Expr)>,
@@ -277,7 +280,7 @@ impl Output {
                 f.declare_globals(stmts);
                 f.statements(stmts);
             }
-            Body::SuspendedFunction { .. } => {}
+            Body::GeneratorFunction(_) => {}
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class),
             Body::Unsupported(stmt, reason) => {

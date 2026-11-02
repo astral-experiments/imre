@@ -8,7 +8,7 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_text_size::{Ranged, TextSize};
 use serde_json::json;
 
-use super::{Body, Cleanup, Function, LoopTarget};
+use super::{Body, Cleanup, Function, LoopTarget, SuspendedSuite};
 
 #[derive(Default)]
 struct ClosureNames {
@@ -319,10 +319,10 @@ impl Function<'_, '_> {
                     let body = if v.is_async && generator {
                         Body::Unsupported(stmt, "async function")
                     } else if v.is_async || generator {
-                        Body::SuspendedFunction {
-                            suite: &v.body,
+                        Body::GeneratorFunction(SuspendedSuite {
+                            statements: &v.body,
                             is_async: v.is_async,
-                        }
+                        })
                     } else {
                         Body::Statements(&v.body)
                     };
@@ -589,11 +589,10 @@ impl Function<'_, '_> {
             format!("{qualname}.<locals>.")
         };
         let doc = match &body {
-            Body::Statements(stmts) | Body::SuspendedFunction { suite: stmts, .. }
-                if self.output.keep_docstrings =>
-            {
-                crate::frontend::docstring(stmts)
-            }
+            Body::Statements(stmts)
+            | Body::GeneratorFunction(SuspendedSuite {
+                statements: stmts, ..
+            }) if self.output.keep_docstrings => crate::frontend::docstring(stmts),
             Body::Unsupported(ast::Stmt::FunctionDef(f), _) if self.output.keep_docstrings => {
                 crate::frontend::docstring(&f.body)
             }
@@ -626,10 +625,10 @@ impl Function<'_, '_> {
                     flags |= HAS_DOCSTRING;
                 }
                 let kind = match &body {
-                    Body::SuspendedFunction { is_async: true, .. } => COROUTINE,
-                    Body::SuspendedFunction {
+                    Body::GeneratorFunction(SuspendedSuite { is_async: true, .. }) => COROUTINE,
+                    Body::GeneratorFunction(SuspendedSuite {
                         is_async: false, ..
-                    }
+                    })
                     | Body::Generator(..) => GENERATOR,
                     Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
                     Body::Unsupported(ast::Stmt::FunctionDef(f), _) if f.is_async => {
@@ -703,10 +702,10 @@ impl Function<'_, '_> {
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
-        let generator = if let Body::SuspendedFunction {
-            suite: stmts,
+        let generator = if let Body::GeneratorFunction(SuspendedSuite {
+            statements: stmts,
             is_async,
-        } = &body
+        }) = &body
         {
             if !self.source.method_imports.is_empty() {
                 signature["method_imports"] = json!(self.source.method_imports);
@@ -732,9 +731,10 @@ impl Function<'_, '_> {
         };
         let mut closure_names = ClosureNames::default();
         match &body {
-            Body::Statements(stmts) | Body::SuspendedFunction { suite: stmts, .. } => {
-                closure_names.visit_body(stmts)
-            }
+            Body::Statements(stmts)
+            | Body::GeneratorFunction(SuspendedSuite {
+                statements: stmts, ..
+            }) => closure_names.visit_body(stmts),
             Body::Namespace(stmts) => {
                 let mut bindings = ClosureNames::default();
                 bindings.visit_body(stmts);
@@ -1277,9 +1277,10 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     }
     let mut captures = ClassCell(false);
     match body {
-        Body::Statements(stmts) | Body::SuspendedFunction { suite: stmts, .. } => {
-            captures.visit_body(stmts)
-        }
+        Body::Statements(stmts)
+        | Body::GeneratorFunction(SuspendedSuite {
+            statements: stmts, ..
+        }) => captures.visit_body(stmts),
         Body::Expression(expr) => captures.visit_expr(expr),
         Body::Generator(generators, element) => {
             for (index, generator) in generators.iter().enumerate() {
