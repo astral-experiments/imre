@@ -112,7 +112,9 @@ impl Checker<'_> {
             Some(Binding::Intrinsic(Intrinsic::ClockTime)) => Type::ClockTime,
             _ => return Ok(None),
         };
-        if boxed_member(kind, a.attr.as_str()) {
+        if matches!(a.attr.as_str(), "__module__" | "__name__" | "__qualname__")
+            || boxed_member(kind, a.attr.as_str())
+        {
             return Err(self.object_runtime_export("datetime class member", a));
         }
         if base != Some(Binding::Intrinsic(Intrinsic::Calendar(C::Zone))) {

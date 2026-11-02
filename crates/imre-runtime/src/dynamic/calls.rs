@@ -2711,11 +2711,17 @@ impl Context {
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
             },
-            Value::Native(ref class) if class == "datetime.time" => match name {
-                "__name__" | "__qualname__" => return Ok(self.text("time")),
-                "__module__" => return Ok(self.text("datetime")),
-                _ => {}
-            },
+            Value::Native(ref class)
+                if matches!(name, "__module__" | "__name__" | "__qualname__")
+                    && let Some(short) = class.strip_prefix("datetime.")
+                    && self.builtin_type_name(obj) == Some("type") =>
+            {
+                return Ok(self.text(if name == "__module__" {
+                    "datetime".to_owned()
+                } else {
+                    short.to_owned()
+                }));
+            }
             Value::Template { strings, .. } if name == "strings" => return Ok(strings),
             Value::Template { interpolations, .. } if name == "interpolations" => {
                 return Ok(interpolations);
@@ -2817,10 +2823,6 @@ impl Context {
             {
                 let base = class == stdlib::datetime::TZINFO;
                 match name {
-                    "__module__" => return Ok(self.text("datetime")),
-                    "__name__" | "__qualname__" => {
-                        return Ok(self.text(if base { "tzinfo" } else { "timezone" }));
-                    }
                     "__base__" => {
                         let parent = if base {
                             "object"
