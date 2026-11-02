@@ -2153,6 +2153,8 @@ impl Context {
                 self.bind(scope, "_jit", jit);
             }
             "re" => {
+                let matched = self.builtin(value::REGEX_MATCH_TYPE);
+                self.bind(scope, "Match", matched);
                 let pattern = self.builtin(value::REGEX_PATTERN_TYPE);
                 self.bind(scope, "Pattern", pattern);
             }

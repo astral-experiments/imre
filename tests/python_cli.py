@@ -1649,6 +1649,7 @@ def report(text):
             "boxed_formatter.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
+            "boxed_re_match_type.py",
             "boxed_re_verbose.py",
             "boxed_re_split.py",
             "boxed_re_findall_empty.py",
