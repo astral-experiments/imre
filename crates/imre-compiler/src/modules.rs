@@ -171,6 +171,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
+        "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
         "collections" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("collections/__init__.py", SOURCE.get_or_init(|| {

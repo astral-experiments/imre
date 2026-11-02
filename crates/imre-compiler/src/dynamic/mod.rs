@@ -108,6 +108,7 @@ impl Imports {
                     | "sysconfig"
                     | "platform"
                     | "keyword"
+                    | "token"
                     | "site"
                     | "importlib.machinery"
                     | "traceback"
@@ -405,6 +406,7 @@ pub(crate) fn compile(
             "sys",
             "platform",
             "keyword",
+            "token",
             "site",
             "importlib",
             "operator",

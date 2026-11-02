@@ -1,0 +1,11 @@
+import token
+from token import *
+from token import EXACT_TOKEN_TYPES
+
+assert EXACT_TOKEN_TYPES is token.EXACT_TOKEN_TYPES
+assert EXACT_TOKEN_TYPES[':='] == COLONEQUAL
+assert EXACT_TOKEN_TYPES['...'] == ELLIPSIS
+assert tok_name[TSTRING_START] == 'TSTRING_START'
+assert ISTERMINAL(NAME) and not ISTERMINAL(NT_OFFSET)
+assert ISNONTERMINAL(NT_OFFSET) and not ISNONTERMINAL(NAME)
+assert ISEOF(ENDMARKER) and not ISEOF(NAME)
