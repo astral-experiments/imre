@@ -37,3 +37,25 @@ def current():
             newline.search(*args, **kwargs)
         except TypeError as error:
             print(str(error))
+
+    # pos indexes the original string; endpos supplies its logical end.
+    text = "xαβz"
+    pattern = re.compile("(α|αβ)")
+    assert pattern.match(string=text, pos=1, endpos=3).group(1) == "α"
+    assert pattern.fullmatch(text, endpos=3, pos=1).group(1) == "αβ"
+    assert re.compile("^α").match(text, 1, 3) is None
+    assert re.compile("β$").fullmatch(text, 2, 3).group() == "β"
+    assert re.compile(b"(.)").match(b"x\xff!z", 1, 2).group(1) == b"\xff"
+    assert pattern.match(text, 3, 1) is None and pattern.fullmatch(text, 3, 1) is None
+    assert re.compile("x").match(text, -10, 20).group() == "x"
+
+    # CPython can match an empty alternative past endpos. The boxed matcher
+    # currently rejects this case rather than losing the original position.
+    empty = re.compile("")
+    try:
+        empty_match = empty.match("aa", 1, 0)
+    except NotImplementedError as error:
+        assert str(error) == "zero-width matching with pos past endpos is unsupported"
+    else:
+        assert empty_match is not None and empty_match.span() == (1, 1)
+    assert empty.fullmatch("aa", 1, 0) is None

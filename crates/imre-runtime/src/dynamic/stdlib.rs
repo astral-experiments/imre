@@ -1649,8 +1649,8 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if name == "pattern.search" {
-        return regex::search(ctx, args, kwargs);
+    if let Some(method @ ("match" | "fullmatch" | "search")) = name.strip_prefix("pattern.") {
+        return regex::search(ctx, method, args, kwargs);
     }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);
@@ -1698,10 +1698,8 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
-        | "file.read" | "file.readline" | "file.readinto" | "file.write" | "warnings.warn" => {
-            (2, &[])
-        }
+        "struct.unpack" | "pattern.findall" | "file.read" | "file.readline" | "file.readinto"
+        | "file.write" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" => (2, &["default"]),
