@@ -333,6 +333,8 @@ fn tokenize(
     };
     let mut modes = vec![(0, alphabet)];
     let mut scoped_mode = false;
+    // Earlier captures can provide the width of a later lookbehind backreference.
+    let needs_lookbehind_width = lookahead && pattern.contains("(?<");
     let mut has_lookaround = false;
     let mut width = BranchWidth::default();
     let mut group_widths = Vec::new(); // Indexed by capture number minus one.
@@ -518,7 +520,25 @@ fn tokenize(
                         may_backtrack = false; // A conditional cannot take an extra unreachable branch.
                     }
                 }
-                output.push_str(if may_backtrack { r"|[^\s\S]|" } else { "|" });
+                output.push('|');
+                if may_backtrack {
+                    // A synthetic branch must preserve the backend's fixed-width
+                    // analysis inside lookbehinds and the captures they reference.
+                    let size = if needs_lookbehind_width {
+                        width.width()
+                    } else {
+                        1
+                    };
+                    if size == 0 {
+                        output.push_str("(?!)");
+                    } else {
+                        output.push_str(r"[^\s\S]");
+                        if (2..u64::from(u32::MAX)).contains(&size) {
+                            write!(output, "{{{size}}}").unwrap();
+                        }
+                    }
+                    output.push('|');
+                }
                 may_backtrack = false;
                 can_repeat = false;
                 width.finish_branch();

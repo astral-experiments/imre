@@ -72,6 +72,10 @@ def current():
     assert re.search(r"(?<!x{2})z", "z").span() == (0, 1)
     assert re.search(r"(ab)\1(?<=\1)c", "ababc").groups() == ("ab",)
     assert re.match(r"(?:(a)|(x))b(?<=(?(2)x|b))c", "abc").groups() == ("a", None)
+    assert re.search(r"(?<=(?:a{2}|bb))c", "aac").span() == (2, 3)
+    assert re.search(r"(?<!(?:a{2}|bb))c", "bbc") is None
+    assert re.search(r"(?<!(?:a{2}|bb))c", "abc").span() == (2, 3)
+    assert re.match(r"(a{2}|bb)c(?<=\1c)", "aac").groups() == ("aa",)
     for invalid in (r"(?<=x*)z", r"(?<!é|ab)z", r"(?<=a{1,2})", r"(a+)(?<=\1)",
                     r"(?<=(a)\1)", r"(?<=(?(1)x|y))(a)"):
         try:
