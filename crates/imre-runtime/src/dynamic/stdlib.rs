@@ -1811,9 +1811,6 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("collections._tuplegetter.") {
         return super::namedtuple::getter_method(ctx, method, args, kwargs);
     }
-    if name == "_collections._make" {
-        return super::namedtuple::make(ctx, args, kwargs);
-    }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
