@@ -1745,11 +1745,16 @@ impl Context {
     }
 
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
-    pub(super) fn allocate_class(
+    pub(super) fn allocate_class(&mut self, name: String, scope: Id, bases: Vec<Id>) -> Result<Id> {
+        self.allocate_class_with_slots(name, scope, bases, false)
+    }
+
+    pub(super) fn allocate_class_with_slots(
         &mut self,
         name: String,
         scope: Id,
         mut bases: Vec<Id>,
+        ordinary_slots: bool,
     ) -> Result<Id> {
         for &base in &bases {
             if matches!(self.heap.get(base), Value::Native(name) if name == super::thread_local::CLASS)
@@ -1814,17 +1819,29 @@ impl Context {
             mro.extend_from_slice(&ancestors);
         }
         let slot_names = self.declared_slot_names(scope)?;
-        let members = if self
-            .scope_data(scope)
-            .class_namespace
-            .as_ref()
-            .is_some_and(|ns| ns.member_slots)
-        {
+        // Other dunder names can replace special methods or class metadata. Keep
+        // their existing layout until their type slots can be updated as well.
+        let ordinary_slots = ordinary_slots
+            && slot_names.as_deref().is_some_and(|names| {
+                names.iter().all(|name| {
+                    !name.starts_with("__")
+                        || !name.ends_with("__")
+                        || matches!(name.as_str(), "__dict__" | "__weakref__")
+                })
+            });
+        let member_slots = ordinary_slots
+            || self
+                .scope_data(scope)
+                .class_namespace
+                .as_ref()
+                .is_some_and(|ns| ns.member_slots);
+        let members = if member_slots {
             self.prepare_slot_members(
                 &name,
                 scope,
                 &bases,
                 slot_names.as_deref().unwrap_or_default(),
+                ordinary_slots,
             )?
         } else {
             Vec::new()
@@ -1858,6 +1875,7 @@ impl Context {
             fields.names.insert("__hash__".to_owned(), NONE);
         }
         let namespace = fields.class_namespace.get_or_insert_with(Default::default);
+        namespace.member_slots = member_slots;
         namespace.slot_names = slot_names;
         namespace.bases = bases;
         namespace.mro = mro;
