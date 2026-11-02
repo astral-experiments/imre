@@ -549,7 +549,21 @@ pub(crate) fn compile(
     let mut seen = HashSet::new();
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
-    while let Some((owner, package, imports)) = work.pop_front() {
+    let mut late_pprint = false;
+    let mut bundled_only = false;
+    loop {
+        let (owner, package, imports) = if let Some(next) = work.pop_front() {
+            next
+        } else if late_pprint && !seen.contains("pprint") {
+            // A computed import may request pprint. Collect its bundled dependencies
+            // after the file graph, without parsing unrelated local modules.
+            bundled_only = true;
+            let mut imports = Imports::default();
+            imports.names.push((0, "pprint".to_owned()));
+            (String::new(), false, imports)
+        } else {
+            break;
+        };
         if !options.runtime_imports
             && !registered_imports.called
             && imports.needs_typed_machinery()
@@ -566,6 +580,7 @@ pub(crate) fn compile(
         let mut names = imports.names;
         // A late import of native pickle also needs its bundled reader and dependencies.
         if imports.uses_import_builtin {
+            late_pprint = true;
             names.push((0, "pickle".to_owned()));
         }
         // Importing array registers its type with MutableSequence. A runtime
@@ -630,6 +645,9 @@ pub(crate) fn compile(
                     let imports = imports_for_module(&path, source)?;
                     sources.push((prefix.clone(), path, source.to_owned()));
                     work.push_back((prefix.clone(), package, imports));
+                }
+                if bundled_only {
+                    continue;
                 }
                 for root in &roots {
                     let stem = root.join(prefix.replace('.', "/"));
