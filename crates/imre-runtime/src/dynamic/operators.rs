@@ -4669,6 +4669,7 @@ impl Context {
         };
         let class = match value.class() {
             "timedelta" => "datetime.timedelta",
+            "date" if add_or_subtract => "datetime.date",
             "datetime" if add_or_subtract => "datetime.datetime",
             _ => return None,
         };

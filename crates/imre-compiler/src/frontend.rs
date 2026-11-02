@@ -6010,6 +6010,12 @@ impl<'a> Checker<'a> {
             return Err(self.object_runtime_export("timedelta remainder", binary));
         }
         if let (Type::Calendar(first), Type::Calendar(second)) = (left.ty, right.ty) {
+            if binary.op == ast::Operator::Sub
+                && first == ir::CalendarType::Date
+                && second == ir::CalendarType::Date
+            {
+                return Err(self.object_runtime_export("date difference", binary));
+            }
             return calendar::binary(first, second, left, right, binary, self.source);
         }
         if binary.op == ast::Operator::Mod
@@ -11039,9 +11045,10 @@ impl<'a> Checker<'a> {
             return Ok(self.implementation_hasattr(receiver.clone(), key));
         }
         if self.unshadowed_builtin(&call.func, "getattr")
-            && let [receiver, attribute] = args.as_slice()
+            && let [receiver, attribute] | [receiver, attribute, _] = args.as_slice()
             && let ExprKind::Str(member) = &attribute.kind
-            && calendar::boxed_comparison(receiver.ty, member)
+            && (calendar::boxed_date_arithmetic(receiver.ty, member)
+                || (args.len() == 2 && calendar::boxed_comparison(receiver.ty, member)))
         {
             return Err(self.object_runtime_export("datetime instance member", call));
         }
