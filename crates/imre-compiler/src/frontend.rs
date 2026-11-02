@@ -4847,6 +4847,7 @@ impl<'a> Checker<'a> {
                     && self.resolve(&call.func)
                         == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
                     && call.arguments.find_keyword("stdout").is_some()
+                    && !processes::boxed_launch_keywords(call)
                 {
                     Some(Statement::Expr(self.process_run(call, true)?))
                 } else if let ast::Expr::Call(call) = &*expression.value
@@ -8730,6 +8731,20 @@ impl<'a> Checker<'a> {
         }
         if let Some(expanded) = self.expand_closed_call(call) {
             return self.call_on(&expanded, receiver);
+        }
+        if processes::boxed_launch_keywords(call)
+            && matches!(
+                self.resolve(&call.func),
+                Some(Binding::Intrinsic(
+                    Intrinsic::Popen
+                        | Intrinsic::SubprocessCall
+                        | Intrinsic::SubprocessCheckCall
+                        | Intrinsic::SubprocessRun
+                        | Intrinsic::CheckOutput
+                ))
+            )
+        {
+            return Err(self.scoped_builtin_error("subprocess launch keywords", call));
         }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) {
             return self.ordered_dict_constructor(call, None);
