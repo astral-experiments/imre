@@ -748,7 +748,7 @@ pub(super) enum Value {
         decode: Id,
     },
     CodecDecoder(crate::objects::Codec),
-    Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
+    Hash(crate::objects::SharedHash),
     Hmac(Hmac),
     Struct {
         format: String,
@@ -1066,7 +1066,7 @@ impl Value {
             Self::Str(_) | Self::SurrogateStr(_) => "str",
             Self::Map { .. } => "map",
             Self::Filter { .. } => "filter",
-            Self::Hash(state) => state.borrow().class_name(),
+            Self::Hash(state) => state.lock().class_name(),
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",

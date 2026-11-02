@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use super::builtins::boolean;
 use super::{Context, Error, Id, NONE, Result, Value};
+use crate::objects::SharedHash;
 use crate::objects::locks::{PrimitiveLock, thread_ident, timeout_float, timeout_int};
 
 type WorkerStatus = std::result::Result<(), String>;
@@ -270,6 +271,10 @@ impl Drop for Registry {
 pub(super) enum Operation {
     Python(Box<Callback>),
     Empty,
+    UpdateHash {
+        hash: SharedHash,
+        data: Vec<u8>,
+    },
     Acquire {
         lock: Arc<PrimitiveLock>,
         release: Option<Arc<PrimitiveLock>>,
@@ -293,6 +298,7 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
         .spawn(move || {
             // A failed bootstrap publishes no identity and contributes nothing to the live count.
             let mut prefix = None;
+            let mut update = None;
             let (python, acquire) = match operation {
                 Operation::Python(callback) => match callback.load() {
                     Ok((mut worker, function, arguments)) => {
@@ -306,6 +312,10 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
                     }
                 },
                 Operation::Empty => (None, None),
+                Operation::UpdateHash { hash, data } => {
+                    update = Some((hash, data));
+                    (None, None)
+                }
                 Operation::Acquire { lock, release } => {
                     prefix = release;
                     (None, Some(lock))
@@ -340,6 +350,8 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
                     }
                 } else if let Some(lock) = acquire {
                     lock.acquire(true, None);
+                } else if let Some((hash, data)) = update {
+                    hash.lock().update(&data);
                 }
             }
             Ok(())
@@ -390,18 +402,33 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
         callable, receiver, ..
     } = *ctx.heap.get(target)
         && let Value::Native(symbol) = ctx.heap.get(callable)
-        && matches!(ctx.heap.get(args), Value::Tuple(items) | Value::List(items) if items.is_empty())
+        && let Value::Tuple(pos) | Value::List(pos) = ctx.heap.get(args)
         && matches!(ctx.heap.get(kwargs), Value::Dict(entries) if entries.is_empty())
-        && symbol == "_thread.lock.acquire"
-        && let Value::PrimitiveLock(lock) = ctx.heap.get(receiver)
     {
-        return Ok((
-            Operation::Acquire {
-                lock: Arc::clone(lock),
-                release: None,
-            },
-            vec![target, args, kwargs],
-        ));
+        let operation = match (ctx.heap.get(receiver), pos.as_slice()) {
+            (Value::PrimitiveLock(lock), []) if symbol == "_thread.lock.acquire" => {
+                Some(Operation::Acquire {
+                    lock: Arc::clone(lock),
+                    release: None,
+                })
+            }
+            (value @ Value::Hash(hash), [id])
+                if super::builtins::method_name(value, "update").as_ref() == Some(symbol) =>
+            {
+                if let Value::Bytes(data) = ctx.heap.get(*id) {
+                    Some(Operation::UpdateHash {
+                        hash: hash.clone(),
+                        data: super::copy_ids(data)?,
+                    })
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        if let Some(operation) = operation {
+            return Ok((operation, vec![target, args, kwargs]));
+        }
     }
     Err(Error::new(
         "NotImplementedError",

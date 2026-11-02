@@ -481,10 +481,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         } if attr == "geturl" => "urllib.parse.ParseResult",
         Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
         Value::Hash(state)
-            if crate::objects::HashState::is_provider_class(state.borrow().class_name())
+            if crate::objects::HashState::is_provider_class(state.lock().class_name())
                 && matches!(attr, "update" | "copy" | "digest" | "hexdigest") =>
         {
-            state.borrow().class_name()
+            state.lock().class_name()
         }
         Value::Hash(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hash",
         Value::Hmac(_) if matches!(attr, "update" | "copy" | "digest" | "hexdigest") => "hmac.HMAC",
