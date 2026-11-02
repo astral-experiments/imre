@@ -40,6 +40,9 @@ def current():
     else:
         raise AssertionError("invalid pipe codec was accepted")
 
+    with subprocess.Popen(["/bin/true"], text=True) as child:
+        assert child.communicate("unused") == (None, None)
+
     # Conflict validation takes precedence over launching the nonexistent executable.
     try:
         subprocess.Popen(["/no/such/child"], text=False, universal_newlines=1)

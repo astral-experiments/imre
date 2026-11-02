@@ -118,6 +118,11 @@ class Popen:
         use_select = _PopenSelector is not selectors.PollSelector
         if use_select and _PopenSelector is not getattr(selectors, "SelectSelector", None):
             raise NotImplementedError("unsupported subprocess selector")
+        if self.text_mode:
+            if self._communication_started and input:
+                raise ValueError("Cannot send input after starting communication")
+            if self.stdin is None or self._communication_started:
+                input = None
         single_pipe = (timeout is None and not self._communication_started
                        and (self.stdin, self.stdout, self.stderr).count(None) >= 2)
         if single_pipe:
@@ -137,13 +142,9 @@ class Popen:
                 # The native single-pipe path flushes and closes the shared binary pipe.
                 input = None
         else:
-            if self.text_mode and self._communication_started:
-                if input:
-                    raise ValueError("Cannot send input after starting communication")
-                input = None
             self._communication_started = True
             if self.text_mode and input is not None:
-                input = None if self.stdin is None else input.encode(self.stdin.encoding, self.stdin.errors)
+                input = input.encode(self.stdin.encoding, self.stdin.errors)
         out, err, expired, remaining = _process.communicate(self._handle, input, timeout, use_select)
         if expired:
             error = TimeoutExpired(self.args, timeout if remaining is None else remaining,
