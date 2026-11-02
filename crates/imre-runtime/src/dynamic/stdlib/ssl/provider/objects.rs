@@ -8,6 +8,16 @@ use crate::dynamic::{
     value::{Error, Id, NONE, Result, Value},
 };
 
+#[repr(C)]
+struct OptionEntry {
+    name: *const c_char,
+    value: u64,
+}
+
+unsafe extern "C" {
+    fn imre_ssl_options(version: std::ffi::c_ulong, count: *mut usize) -> *const OptionEntry;
+}
+
 fn api() -> Result<&'static Api> {
     super::api().ok_or_else(|| Error::new("ImportError", "system TLS provider unavailable"))
 }
@@ -36,6 +46,20 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
     .map(|n| ctx.int(n));
     let info = ctx.alloc(Value::Tuple(parts.into()));
     ctx.bind(scope, "OPENSSL_VERSION_INFO", info);
+    // CPython protocol method selectors, distinct from TLS wire versions.
+    for (name, code) in [
+        ("PROTOCOL_SSLv23", 2),
+        ("PROTOCOL_TLS", 2),
+        ("PROTOCOL_TLSv1", 3),
+        ("PROTOCOL_TLSv1_1", 4),
+        ("PROTOCOL_TLSv1_2", 5),
+        ("PROTOCOL_TLS_CLIENT", 16),
+        ("PROTOCOL_TLS_SERVER", 17),
+    ] {
+        let value = ctx.int(code);
+        ctx.bind(scope, name, value);
+    }
+
     // These are library build capabilities, independent of runtime cipher policy.
     for (name, available) in [
         ("HAS_SNI", true),
@@ -54,6 +78,16 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         let function = ctx.builtin(&format!("_ssl.{name}"));
         ctx.bind(scope, name, function);
     }
+    let mut count = 0;
+    // SAFETY: the header shim returns a nonempty static table with count entries.
+    let options = unsafe { imre_ssl_options(number as std::ffi::c_ulong, &mut count) };
+    for option in unsafe { std::slice::from_raw_parts(options, count) } {
+        // SAFETY: each name is an ASCII string literal owned by the static table.
+        let name = unsafe { CStr::from_ptr(option.name) }.to_str().unwrap();
+        let value = ctx.alloc(Value::Int(crate::Int::new(option.value.into())));
+        ctx.bind(scope, name, value);
+    }
+    super::versions::install(ctx, scope, number as u64);
     Ok(())
 }
 

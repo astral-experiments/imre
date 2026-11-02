@@ -21,15 +21,20 @@ def main():
     client = sys.argv[1:] or [sys.executable, "-B", str(Path(__file__).with_name("loopback_client.py"))]
     hostname = fixture.SIGNED_CERTFILE_HOSTNAME
     cases = (
-        (False, False, fixture.SIGNING_CA, hostname, 0),
-        (False, False, fixture.SIGNING_CA, "wrong.example", 62),
-        (False, False, fixture.CAFILE_NEURONIO, hostname, 20),
-        (False, True, fixture.CAFILE_NEURONIO, hostname, 19),
-        (False, False, fixture.SIGNING_CA, "127.0.0.1", 64),
-        (True, False, fixture.SIGNING_CA, hostname, 0),
+        (False, False, fixture.SIGNING_CA, hostname, 0, None),
+        (False, False, fixture.SIGNING_CA, "wrong.example", 62, None),
+        (False, False, fixture.CAFILE_NEURONIO, hostname, 20, None),
+        (False, True, fixture.CAFILE_NEURONIO, hostname, 19, None),
+        (False, False, fixture.SIGNING_CA, "127.0.0.1", 64, None),
+        (True, False, fixture.SIGNING_CA, hostname, 0, None),
+        (False, False, fixture.SIGNING_CA, hostname, 0, fixture.TLSVersion.TLSv1_2),
+        (False, False, fixture.SIGNING_CA, hostname, 0, fixture.TLSVersion.TLSv1_3),
     )
-    for https_defaults, chain, cafile, name, expected in cases:
+    for https_defaults, chain, cafile, name, expected, version in cases:
         _, server_context, _ = fixture.testing_context(server_chain=chain)
+        if version is not None:
+            server_context.minimum_version = version
+            server_context.maximum_version = version
         if https_defaults:
             server_context.set_alpn_protocols(["http/1.1"])
         server = fixture.ThreadedEchoServer(context=server_context, chatty=False)
@@ -37,8 +42,11 @@ def main():
             argv = [*client, "127.0.0.1", str(server.port), cafile, name, str(expected)]
             if https_defaults:
                 argv.append("https")
+            if version is not None:
+                argv.append(version.name)
             child = subprocess.run(argv, capture_output=True, text=True, timeout=30)
-        print(json.dumps(dict(server_chain=chain, alpn=server.selected_alpn_protocols, argv=argv, exit=child.returncode, stdout=child.stdout,
+        print(json.dumps(dict(server_chain=chain, pinned_version=version.name if version is not None else None,
+                              alpn=server.selected_alpn_protocols, argv=argv, exit=child.returncode, stdout=child.stdout,
                               stderr=child.stderr, server_errors=server.conn_errors)), flush=True)
         if https_defaults and server.selected_alpn_protocols != ["http/1.1"]:
             return 1
