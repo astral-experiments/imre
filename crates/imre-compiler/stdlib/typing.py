@@ -2582,54 +2582,97 @@ def evaluate_forward_ref(
                                   is_class=forward_ref.__forward_is_class__)
     if owner is None:
         owner = forward_ref.__owner__
-    return _resolve_forward_type(
-        value, globals, locals, type_params, owner, format,
-        _recursive_guard | {forward_ref.__forward_arg__}, forward_ref,
+    return _eval_type(
+        value, globals, locals, type_params,
+        recursive_guard=_recursive_guard | {forward_ref.__forward_arg__},
+        format=format, owner=owner, parent_fwdref=forward_ref,
     )
 
 
-def _resolve_forward_type(value, globals, locals, type_params, owner, format, guard, parent=None):
+def _deprecation_warning_for_no_type_params_passed(funcname: str) -> None:
+    import warnings
+
+    depr_message = (
+        f"Failing to pass a value to the 'type_params' parameter "
+        f"of {funcname!r} is deprecated, as it leads to incorrect behaviour "
+        f"when calling {funcname} on a stringified annotation "
+        f"that references a PEP 695 type parameter. "
+        f"It will be disallowed in Python 3.15."
+    )
+    warnings.warn(depr_message, category=DeprecationWarning, stacklevel=3)
+
+
+def _forward_ref_module_globals(ref, owner):
+    # Let annotationlib infer the defining module unless we must restore owner parameters.
+    params = getattr(owner, "__type_params__", None)
+    if not params:
+        return None
+    namespace = getattr(_sys.modules.get(ref.__forward_module__), "__dict__", None)
+    if namespace is None:
+        return None
+    globalns = dict(namespace)
+    for param in params:
+        globalns[param.__name__] = param
+    return globalns
+
+
+def _eval_type(t, globalns, localns, type_params=_sentinel, *, recursive_guard=frozenset(),
+               format=None, owner=None, parent_fwdref=None, prefer_fwd_module=False):
+    """Evaluate all forward references in the given type t.
+
+    For use of globalns and localns see the docstring for get_type_hints().
+    recursive_guard is used to prevent infinite recursion with a recursive
+    ForwardRef.
+    """
     from types import GenericAlias
 
-    if isinstance(value, ForwardRef):
-        return evaluate_forward_ref(value, globals=globals, locals=locals, type_params=type_params,
-                                    owner=owner, format=format, _recursive_guard=guard)
-
+    if type_params is _sentinel:
+        _deprecation_warning_for_no_type_params_passed("typing._eval_type")
+        type_params = ()
+    if isinstance(t, ForwardRef):
+        if prefer_fwd_module and t.__forward_module__ is not None:
+            globalns = _forward_ref_module_globals(t, owner)
+        return evaluate_forward_ref(t, globals=globalns, locals=localns,
+                                    type_params=type_params, owner=owner,
+                                    _recursive_guard=recursive_guard, format=format)
     # Query the native alias representation without publishing private classes in typing.
-    kind = _typing_runtime._get_alias_kind(value)
-    if kind is None and not isinstance(value, (_AnnotatedAlias, Union)):
-        return value
+    kind = _typing_runtime._get_alias_kind(t)
+    if kind is None and not isinstance(t, (_AnnotatedAlias, Union)):
+        return t
     if kind == "builtin":
         args = tuple(
-            _make_forward_ref(arg, module=getattr(parent, "__forward_module__", None),
-                              owner=getattr(parent, "__owner__", None))
-            if isinstance(arg, str) else arg for arg in value.__args__
+            _make_forward_ref(arg, module=getattr(parent_fwdref, "__forward_module__", None),
+                              owner=getattr(parent_fwdref, "__owner__", None))
+            if isinstance(arg, str) else arg for arg in t.__args__
         )
-        unpacked = value.__unpacked__
-        if _should_unflatten_callable_args(value, args):
-            value = value.__origin__[(args[:-1], args[-1])]
+        unpacked = t.__unpacked__
+        if _should_unflatten_callable_args(t, args):
+            t = t.__origin__[(args[:-1], args[-1])]
         else:
-            value = value.__origin__[args]
+            t = t.__origin__[args]
         if unpacked:
-            value = Unpack[value]
-        kind = _typing_runtime._get_alias_kind(value)
+            t = Unpack[t]
+        kind = _typing_runtime._get_alias_kind(t)
 
-    resolved = tuple(_resolve_forward_type(arg, globals, locals, type_params, owner, format,
-                                           guard) for arg in value.__args__)
-    if resolved == value.__args__:
-        return value
+    resolved = tuple(
+        _eval_type(arg, globalns, localns, type_params, recursive_guard=recursive_guard,
+                   format=format, owner=owner, prefer_fwd_module=prefer_fwd_module)
+        for arg in t.__args__
+    )
+    if resolved == t.__args__:
+        return t
     if kind == "builtin":
-        return GenericAlias(value.__origin__, resolved)
-    if isinstance(value, _typing.Union):
+        return GenericAlias(t.__origin__, resolved)
+    if isinstance(t, _typing.Union):
         union = resolved[0]
         for arg in resolved[1:]:
             union = union | arg
         return union
-    copy_with = getattr(value, "copy_with", None)
+    copy_with = getattr(t, "copy_with", None)
     if copy_with is not None:
         return copy_with(resolved)
     # The native literal alias lacks an instance copy_with.
-    return type(value)(value.__origin__, resolved)
+    return type(t)(t.__origin__, resolved)
 
 
 # VALUE-format annotation resolution from CPython 3.14.5 Lib/typing.py.
@@ -2655,16 +2698,7 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         if expr in seen:
             return value
         if prefer_fwd_module and value.__forward_module__ is not None:
-            globalns = None
-            # A reference with its own module replaces the globals built by _hint_scope.
-            # Restore the owner's parameters without modifying the real module dictionary.
-            if params := getattr(owner, "__type_params__", None):
-                import sys
-                namespace = getattr(sys.modules.get(value.__forward_module__), "__dict__", None)
-                if namespace is not None:
-                    globalns = dict(namespace)
-                    for param in params:
-                        globalns[param.__name__] = param
+            globalns = _forward_ref_module_globals(value, owner)
         result = value.evaluate(globals=globalns, locals=localns, type_params=(), owner=owner, format=format)
         if format == Format.FORWARDREF and isinstance(result, ForwardRef):
             return result
