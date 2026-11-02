@@ -84,6 +84,17 @@ def current():
     assert re.fullmatch(r"\B(?=$)", "").span() == (0, 0)
     assert [m.start() for m in re.finditer(r"\B(?=.)", "a_\u200d!")] == [1, 3]
 
+    choice = re.compile(r"(?P<flag>x)?(?(flag)y|z)")
+    assert choice.fullmatch("xy").group("flag") == "x"
+    assert choice.fullmatch("z").group("flag") is None
+    assert choice.fullmatch("xz") is None and choice.fullmatch("y") is None
+    assert re.fullmatch(r"(?P<empty>)(?(empty)y|n)", "y").span("empty") == (0, 0)
+    assert re.fullmatch(br"(?(1)x|y)(a)", b"ya").group(1) == b"a"
+    branches = "|".join("(" + str(i) + ")" for i in range(1, 201))
+    many = re.compile("(?:" + branches + ")(?(200)y|n)")
+    assert many.fullmatch("200y").group(200) == "200"
+    assert many.fullmatch("199n").group(200) is None and many.fullmatch("200n") is None
+
     # Lookbehind can read and capture before pos. The assertion consumes no input.
     p = re.compile(r"(?<=\A(?P<prefix>é|𐀀))(b)")
     m = p.fullmatch("𐀀b!", 1, 2)
