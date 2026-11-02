@@ -138,6 +138,9 @@ pub(super) fn resolve(
                         if graph
                             .session
                             .is_builtin_sequence_class(definition.module, origin)
+                            || graph
+                                .session
+                                .is_collections_storage_base(definition.module, argument)
                             || graph.session.is_known_class(
                                 definition.module,
                                 argument,
