@@ -6,6 +6,22 @@ from array import array
 def current():
     pattern = re.compile("(?P<word>x*)|é")
     assert re.sub(pattern, "_", "éx", count=1) == "_éx"
+    assert re.subn(pattern, "_", "éx") == ("____", 4)
+    assert pattern.subn("_", "éx", 1) == ("_éx", 1)
+    assert re.compile(b"x").subn(b"x", bytearray(b"x-x")) == (b"x-x", 2)
+    pairs = re.compile(r"(a)?b")
+    assert pairs.subn(r"<\1>", "ab-b") == ("<a>-<>", 2)
+    assert pairs.subn(r"<\1>", "no match") == ("no match", 0)
+    for kwargs, args, message in (
+        ({"unknown": 0}, (), "subn() missing required argument 'repl' (pos 1)"),
+        ({"countt": 1}, ("_", "ab"), "subn() got an unexpected keyword argument 'countt'. Did you mean 'count'?"),
+    ):
+        try:
+            pairs.subn(*args, **kwargs)
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("invalid subn arguments accepted")
     compile_pattern = re.compile
     try:
         re.compile = None
@@ -24,6 +40,11 @@ def current():
     sub = pattern.sub
     assert sub(repl=replace, string=subject) == r"\1\1\1"
     assert seen == [((0, 0), ""), ((0, 1), None), ((1, 2), "x"), ((2, 2), "")]
+    seen.clear()
+    assert pattern.subn(repl=replace, string=subject) == (r"\1\1\1", 4)
+    assert seen == [((0, 0), ""), ((0, 1), None), ((1, 2), "x"), ((2, 2), "")]
+    untouched, count = pattern.subn(replace, subject, count=-1)
+    assert untouched is subject and count == 0 and len(seen) == 4
     seen.clear()
     assert sub(replace, subject, count=1) == r"\1éx"
     assert sub(replace, subject, count=-1) is subject and len(seen) == 1

@@ -4,29 +4,37 @@ use imre_regex::{ReplacementError, ReplacementPart};
 /// Substitute matches in order, retaining the allocation-free match path for literal replacements.
 pub(in crate::dynamic::stdlib) fn pattern_sub(
     ctx: &mut Context,
+    method: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let (value, substitutions) = substitute(ctx, method, args, kwargs)?;
+    if method == "subn" {
+        let count = ctx.int(substitutions as i64);
+        Ok(ctx.alloc(Value::Tuple(vec![value, count])))
+    } else {
+        Ok(value)
+    }
+}
+
+/// Both entry points count completed substitutions in the same matcher loop.
+fn substitute(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Id, isize)> {
     let receiver = argument(args, 0)?;
-    let [repl, string, count] = crate::dynamic::builtins::bind_method_arguments(
-        "sub",
+    let [Some(repl), Some(string), count] = crate::dynamic::builtins::bind_builtin_arguments(
+        method,
         &args[1..],
         kwargs,
         ["repl", "string", "count"],
-        3,
-    )?;
-    let repl = repl.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            "sub() missing required argument 'repl' (pos 1)",
-        )
-    })?;
-    let string = string.ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            "sub() missing required argument 'string' (pos 2)",
-        )
-    })?;
+        2,
+    )?
+    else {
+        unreachable!("the replacement and input were bound above")
+    };
     let limit = split::match_limit(ctx, count)?;
     let Value::RegexPattern(pattern) = ctx.heap.get(receiver) else {
         return Err(Error::new(
@@ -117,18 +125,19 @@ pub(in crate::dynamic::stdlib) fn pattern_sub(
             && span.range() == (0..text.len())
             && matches!(ctx.heap.get(repl), Value::Str(_) | Value::Bytes(_))
         {
-            return Ok(repl);
+            return Ok((repl, substitutions));
         }
         append(&mut output, replacement)?;
     } else if matches!(ctx.heap.get(string), Value::Str(_) | Value::Bytes(_)) {
-        return Ok(string);
+        return Ok((string, 0));
     }
     append(&mut output, &text[cursor..])?;
-    Ok(if pattern.bytes {
+    let value = if pattern.bytes {
         ctx.alloc(Value::Bytes(output))
     } else {
         ctx.text(String::from_utf8(output).expect("text regex spans end on UTF-8 boundaries"))
-    })
+    };
+    Ok((value, substitutions))
 }
 
 /// Parse the template before searching; unmatched captures contribute no text to the expansion.
@@ -140,7 +149,7 @@ fn template_sub(
     string: Id,
     limit: isize,
     replacement_is_bytes: bool,
-) -> Result<Id> {
+) -> Result<(Id, isize)> {
     // CPython's template cache retries unhashable buffers, but propagates invalid memoryview hashes.
     if matches!(ctx.heap.get(repl), Value::MemoryView { .. })
         && let Err(error) = ctx.dictionary_hash(repl)
@@ -258,7 +267,7 @@ fn expanded_sub(
     string: Id,
     limit: isize,
     mut expand: impl FnMut(&mut Context, Match) -> Result<Id>,
-) -> Result<Id> {
+) -> Result<(Id, isize)> {
     let length = subject_bytes(ctx, string, pattern.bytes)?.len();
     let mut pieces = Vec::new();
     let mut add = |item| -> Result<()> {
@@ -300,7 +309,7 @@ fn expanded_sub(
         count += 1;
     }
     if previous.is_none() && matches!(ctx.heap.get(string), Value::Str(_) | Value::Bytes(_)) {
-        return Ok(string);
+        return Ok((string, 0));
     }
     if cursor < length {
         let tail = group_value(
@@ -328,7 +337,7 @@ fn expanded_sub(
         if let [item] = pieces.as_slice()
             && matches!(ctx.heap.get(*item), Value::Bytes(_))
         {
-            return Ok(*item);
+            return Ok((*item, count));
         }
         let mut output = Vec::new();
         for (i, item) in pieces.into_iter().enumerate() {
@@ -339,7 +348,7 @@ fn expanded_sub(
             };
             append(&mut output, data)?;
         }
-        return Ok(ctx.alloc(Value::Bytes(output)));
+        return Ok((ctx.alloc(Value::Bytes(output)), count));
     }
     for (i, &item) in pieces.iter().enumerate() {
         if ctx.string_storage(item).is_none() {
@@ -349,7 +358,8 @@ fn expanded_sub(
     let parts = ctx.alloc(Value::List(pieces));
     let empty = ctx.text("");
     let join = ctx.lookup_attr(empty, "join")?;
-    ctx.call(join, vec![parts], Vec::new())
+    let value = ctx.call(join, vec![parts], Vec::new())?;
+    Ok((value, count))
 }
 
 fn append(output: &mut Vec<u8>, piece: &[u8]) -> Result<()> {
