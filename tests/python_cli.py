@@ -2794,6 +2794,7 @@ for name in ("md4", "ripemd160"):
             "boxed_formatter.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
+            "boxed_re_numeric_escapes.py",
             "boxed_re_verbose.py",
             "boxed_re_multiline_dollar.py",
             "boxed_re_positive_lookahead.py",

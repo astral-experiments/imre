@@ -1,28 +1,25 @@
 //! Unicode 16 single-character names used by Python regex escapes.
 
-pub enum NamedEscapeError {
-    Syntax(&'static str, usize),
-    Undefined(String),
-}
+use super::EscapeError;
 
 /// Consume the operand of a Python regex named escape, committing the iterator only on success.
 /// Error offsets count characters from the backslash, including tokenizer lookahead.
 pub(super) fn named_scalar(
     input: &mut (impl Iterator<Item = char> + Clone),
     bytes: bool,
-) -> Result<char, NamedEscapeError> {
-    use NamedEscapeError::{Syntax, Undefined};
+) -> Result<char, EscapeError> {
+    let syntax = |message: &str, at| EscapeError::Syntax(message.to_owned(), at);
 
-    let eof = |at| Syntax("bad escape (end of pattern)", at);
+    let eof = |at| syntax("bad escape (end of pattern)", at);
     let mut end = input.clone();
     if end.clone().eq(['\\']) {
         return Err(eof(2));
     }
     if bytes {
-        return Err(Syntax(r"bad escape \N", 0));
+        return Err(syntax(r"bad escape \N", 0));
     }
     if end.next() != Some('{') {
-        return Err(Syntax("missing {", 2));
+        return Err(syntax("missing {", 2));
     }
     let mut name = String::new();
     let mut at = 3;
@@ -33,14 +30,14 @@ pub(super) fn named_scalar(
                 return Err(eof(at + 1));
             }
             if name.is_empty() {
-                return Err(Syntax("missing character name", 3));
+                return Err(syntax("missing character name", 3));
             }
             let scalar = if name.is_ascii() && name.len() <= 256 {
                 lookup(&name)
             } else {
                 None
             };
-            let scalar = scalar.ok_or(Undefined(name))?;
+            let scalar = scalar.ok_or(EscapeError::Undefined(name))?;
             *input = end;
             return Ok(scalar);
         }
@@ -51,7 +48,7 @@ pub(super) fn named_scalar(
         }
         at += 1;
     }
-    Err(Syntax(
+    Err(syntax(
         if name.is_empty() {
             "missing character name"
         } else {
