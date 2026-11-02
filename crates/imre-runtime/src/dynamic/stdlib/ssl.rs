@@ -37,6 +37,9 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "set_ciphers",
         "load_verify_locations",
         "wrap",
+        "channel_binding",
+        "hostname_checks_common_name",
+        "set_hostname_checks_common_name",
         "sendall",
         "recv",
         "close",
@@ -57,6 +60,7 @@ fn context(ctx: &Context, id: Id) -> Result<&RefCell<provider::Context>> {
 fn session(ctx: &Context, id: Id) -> Result<&RefCell<Option<provider::Session>>> {
     match ctx.heap.get(id) {
         Value::TlsSession(handle) => Ok(handle),
+        Value::None => Err(closed()),
         _ => Err(Error::new("TypeError", "expected a TLS session")),
     }
 }
@@ -183,6 +187,51 @@ pub(super) fn call(
                 }
                 Err(e) => Err(provider_error(ctx, e)),
             }
+        }
+        ("hostname_checks_common_name", &[handle]) => Ok(super::builtins::boolean(
+            context(ctx, handle)?.borrow().hostname_checks_common_name(),
+        )),
+        ("set_hostname_checks_common_name", &[handle, enabled]) => {
+            let enabled = ctx.truth(enabled)?;
+            context(ctx, handle)?
+                .borrow_mut()
+                .set_hostname_checks_common_name(enabled);
+            Ok(NONE)
+        }
+        ("channel_binding", &[handle, kind]) => {
+            let storage = ctx.string_storage(kind).ok_or_else(|| {
+                let ty = if kind == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(kind)
+                };
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "get_channel_binding() argument 'cb_type' must be str, not {}",
+                        &ty[..ty.floor_char_boundary(ty.len().min(50))]
+                    ),
+                )
+            })?;
+            // Argument Clinic uses the underlying Unicode data for str subclasses.
+            let kind = ctx.encode_utf8_codepoints(storage, false, "strict")?;
+            if kind.contains(&0) {
+                return Err(Error::new("ValueError", "embedded null character"));
+            }
+            if kind != b"tls-unique" {
+                return Err(Error::new(
+                    "ValueError",
+                    format!(
+                        "'{}' channel binding type not implemented",
+                        String::from_utf8_lossy(&kind)
+                    ),
+                ));
+            }
+            let data = session(ctx, handle)?
+                .borrow()
+                .as_ref()
+                .and_then(|ssl| ssl.channel_binding());
+            Ok(data.map_or(NONE, |bytes| ctx.alloc(Value::Bytes(bytes))))
         }
         ("sendall", &[handle, data]) => {
             let data = ctx.native_buffer_bytes(data)?;

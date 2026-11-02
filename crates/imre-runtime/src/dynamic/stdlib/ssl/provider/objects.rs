@@ -36,6 +36,20 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
     .map(|n| ctx.int(n));
     let info = ctx.alloc(Value::Tuple(parts.into()));
     ctx.bind(scope, "OPENSSL_VERSION_INFO", info);
+    // These are library build capabilities, independent of runtime cipher policy.
+    for (name, available) in [
+        ("HAS_SNI", true),
+        ("HAS_TLS_UNIQUE", true),
+        ("HAS_ECDH", true),
+        ("HAS_NPN", false),
+        ("HAS_ALPN", true),
+        ("HAS_PSK", api.has_psk),
+        ("HAS_PHA", true),
+    ] {
+        ctx.bind(scope, name, builtins::boolean(available));
+    }
+    let flag = ctx.int(i64::from(super::HOSTFLAG_NEVER_CHECK_SUBJECT));
+    ctx.bind(scope, "HOSTFLAG_NEVER_CHECK_SUBJECT", flag);
     for name in ["txt2obj", "nid2obj"] {
         let function = ctx.builtin(&format!("_ssl.{name}"));
         ctx.bind(scope, name, function);

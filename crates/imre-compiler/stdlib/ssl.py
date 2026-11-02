@@ -7,6 +7,10 @@ from _ssl import nid2obj as _nid2obj, txt2obj as _txt2obj
 from collections import namedtuple
 from enum import Enum as _Enum, IntEnum as _IntEnum, IntFlag as _IntFlag
 
+from _ssl import HAS_SNI, HAS_ECDH, HAS_NPN, HAS_ALPN, HAS_PSK, HAS_PHA
+
+CHANNEL_BINDING_TYPES = ["tls-unique"]
+HAS_NEVER_CHECK_COMMON_NAME = hasattr(_ssl, "HOSTFLAG_NEVER_CHECK_SUBJECT")
 SSL_ERROR_SSL = 1
 
 
@@ -157,6 +161,14 @@ class SSLContext:
             raise NotImplementedError("only CERT_REQUIRED is supported")
 
     @property
+    def hostname_checks_common_name(self):
+        return _call(_imre_ssl.hostname_checks_common_name, self._ctx)
+
+    @hostname_checks_common_name.setter
+    def hostname_checks_common_name(self, enabled):
+        _call(_imre_ssl.set_hostname_checks_common_name, self._ctx, enabled)
+
+    @property
     def security_level(self):
         return _call(_imre_ssl.security_level, self._ctx)
 
@@ -260,8 +272,17 @@ class SSLSocket:
             raise ValueError("non-zero flags not allowed in calls to recv() on SSLSocket")
         return _call(_imre_ssl.recv, self._session, buflen)
 
+    def get_channel_binding(self, cb_type="tls-unique"):
+        if self._session is None:
+            if cb_type not in CHANNEL_BINDING_TYPES:
+                raise ValueError("{0} channel binding type not implemented".format(cb_type))
+            return None
+        return _call(_imre_ssl.channel_binding, self._session, cb_type)
+
     def close(self):
-        _call(_imre_ssl.close, self._session)
+        if self._session is not None:
+            _call(_imre_ssl.close, self._session)
+            self._session = None
 
     def __enter__(self):
         return self

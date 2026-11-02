@@ -40,9 +40,20 @@ def main():
                 data += chunk
             assert data == b"local tls\n"
             assert peer.recv(0) == b""
+            binding = peer.get_channel_binding()
+            assert isinstance(binding, bytes) and binding
+            assert peer.get_channel_binding(cb_type="tls-unique") == binding
+            peer.sendall(b"CB tls-unique\n")
+            response = b""
+            while not response.endswith(b"\n"):
+                chunk = peer.recv(1024)
+                assert chunk
+                response += chunk
+            assert response.strip() == repr(binding).encode("ascii")
             peer.sendall(b"over\n")
             print("VERIFIED_ECHO", hostname)
         peer.close()
+        assert peer.get_channel_binding() is None
 
 
 main()
