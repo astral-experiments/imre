@@ -487,15 +487,18 @@ pub(super) fn call(
                 };
             }
             let fd = reg_fd(ctx, &handle, obj)?;
-            let Some(key) = registration(ctx, keys, fd)? else {
+            let entry = builtins::call(ctx, "dict.pop", &[keys, fd, NONE], &[])?;
+            if entry == NONE {
                 return missing(ctx, obj);
-            };
-            ctx.heap.keep(key.key);
-            ctx.delete_item(keys, fd)?;
-            if let Some(poll) = &mut handle.borrow_mut().poll {
-                poll.remove(native_fd(ctx, fd)?);
             }
-            Ok(key.key)
+            let key = Registration::unpack(ctx, entry).key;
+            ctx.heap.keep(key);
+            if handle.borrow().poll.is_some() {
+                let number = ctx.lookup_attr(key, "fd")?;
+                let native = native_fd(ctx, number)?;
+                handle.borrow_mut().poll.as_mut().unwrap().remove(native);
+            }
+            Ok(key)
         }
         "select" => {
             let [seconds] = builtins::bind(name, args, kwargs, ["timeout"])?;
