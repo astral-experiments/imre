@@ -64,7 +64,7 @@ impl Function<'_, '_> {
         let body = Body::ClassAnnotations(sites.into_values().collect(), bindings.globals);
         let code = self
             .output
-            .definition(self.source, String::new(), body, start, false);
+            .definition(self.source, String::new(), body, start, false, None);
         let environment = self.op(
             "class_annotation_environment",
             &[&self.scope.clone(), &offsets],
@@ -72,7 +72,7 @@ impl Function<'_, '_> {
         let name = self.text("__annotate__");
         let qualname = self.text(&format!("{}__annotate__", self.prefix));
         let defaults = self.op("dict", &[]);
-        let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
+        let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
         self.bind("__annotate_func__", &function);
     }
 
