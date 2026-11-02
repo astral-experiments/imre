@@ -17,11 +17,10 @@ def files(anchor=_missing, *, package=_missing):
         raise NotImplementedError("inferring the resource anchor from the calling frame is unsupported")
     if isinstance(anchor, str):
         anchor = import_module(anchor)
-    spec = anchor.__spec__
-    get_reader = getattr(spec.loader, 'get_resource_reader', None)
-    reader = get_reader(spec.name) if get_reader is not None else None
-    if not hasattr(reader, 'files'):
-        raise NotImplementedError("resource loaders without a traversable reader are unsupported")
+    from ._adapters import wrap_spec
+
+    spec = wrap_spec(anchor)
+    reader = spec.loader.get_resource_reader(spec.name)
     return reader.files()
 
 
@@ -34,3 +33,9 @@ def read_text(anchor, *path_names, encoding=_missing, errors='strict'):
     if anchor is None:
         raise TypeError("anchor must be module or string, got None")
     return files(anchor).joinpath(*path_names).read_text(encoding=encoding, errors=errors)
+
+
+def as_file(path):
+    """Provide a pathlib.Path for the duration of a context manager."""
+    from importlib.resources._as_file import as_file as materialize
+    return materialize(path)

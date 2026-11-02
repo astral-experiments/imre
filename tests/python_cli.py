@@ -68,7 +68,7 @@ def check_context_protocol_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_context_protocol.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     for opcode in ("lookup_enter", "lookup_exit"):
         for target in [0, 1]:
@@ -303,7 +303,7 @@ def check_weak_proxy_root_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_weak_proxy_root.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     source = root / "weak_proxy_subscripts.py"
     # A single expression keeps the reads' temporary handles in the same frame.
@@ -326,7 +326,7 @@ def call_allocation_flags(root):
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
     return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_op_at,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
     ])
 
 
@@ -676,7 +676,7 @@ def check_ffi_result_roots(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "ffi_result_roots_refuse.c", "-o", wrapper], check=True)
     result_flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
     source = import_path + "import boxed_ffi_result_roots as fixture; fixture.allocation()"
@@ -777,6 +777,35 @@ def check_class_metadata_allocation(imre, run, flags):
 
 
 
+def check_pending_signals(imre, root, env):
+    import signal
+
+    fixture = Path(__file__).resolve().with_name("fixtures") / "boxed_signal_pending.py"
+    native = root / "signal-pending"
+    subprocess.run([imre, "build", fixture, "--runtime-imports", "-o", native], check=True, env=env)
+    for delivered, expected in (
+        (0, 0),
+        (signal.SIGUSR1, signal.SIGUSR1),
+        (signal.SIGUSR2, signal.SIGUSR2),
+        (signal.SIGRTMIN + 1, signal.SIGRTMIN + 1),
+        (signal.SIGUSR2, signal.SIGUSR1),
+    ):
+        def queue_before_exec():
+            if delivered:
+                signal.pthread_sigmask(signal.SIG_BLOCK, {delivered})
+                os.kill(os.getpid(), delivered)
+
+        result = subprocess.run(
+            [native, str(int(expected))], env=env, capture_output=True,
+            preexec_fn=queue_before_exec, timeout=30,
+        )
+        if delivered == expected:
+            assert result.returncode == 0 and result.stderr == b"", result
+            assert result.stdout == f"verified pending signals {int(expected)}\n".encode(), result
+        else:
+            assert result.returncode == 1 and b"unexpected pending signals" in result.stderr, result
+
+
 def check_marshal_allocation(exe):
     import resource
     import select
@@ -821,8 +850,14 @@ def check_pickle_reductions(imre, root, run):
                     assert data.startswith(bytes([0x80, protocol])), data
                 value = pickle.loads(data)
                 shared = ("\0\n\r\\\x1aéĀ🍏", 1 << 2048, -2147483649, True, None)
-                assert value == (shared, shared, ("rebuilt", protocol), ("rebuilt", protocol), "37", ())
+                assert value[:6] == (shared, shared, ("rebuilt", protocol), ("rebuilt", protocol), "37", ())
                 assert value[0] is value[1] and value[2] is value[3]
+                graph, small, wide, replaced, recursive = value[6]
+                assert graph["self"] is graph and graph["left"] is graph["right"]
+                assert graph["distinct"] == graph["left"] == {} and graph["distinct"] is not graph["left"]
+                assert small[0]["back"] is small and wide[0]["back"] is wide
+                assert recursive[0]["back"] is recursive
+                assert list(replaced.items()) == [("first", 5), ("later", 37)]
     finally:
         sys.path.pop(0)
 
@@ -889,6 +924,7 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
             check_ffi_result_roots(imre, root, run)
@@ -1294,6 +1330,19 @@ print(found.value)
 """,
         )
 
+        compare(
+            "-B", "-c",
+            """import sys
+from importlib import import_module
+import_members = import_module("import_members")
+import_members.__all__ = ["found"]
+assert "import_members.found" not in sys.modules
+namespace = {"__package__": "import_members"}
+exec("from . import *", namespace)
+assert namespace["found"] is import_members.found is sys.modules["import_members.found"]
+""",
+        )
+
         opcode = run(imre, "-B", "-c", 'op = __import__("".join(("_", "opcode")))\n'
                      'print(op.ENABLE_SPECIALIZATION, op.ENABLE_SPECIALIZATION_FT)')
         assert (opcode.returncode, opcode.stdout, opcode.stderr) == (0, b"0 0\n", b""), opcode
@@ -1374,6 +1423,34 @@ print(found.value)
             extra={"IMRE_PYTHON": "/wrong"},
         )
         assert executable.stdout.decode().strip() == str(imre), executable.stderr
+
+        source = root / "boxed_executable.py"
+        source.write_text(
+            "import subprocess, sys\n"
+            "sys.path.append('unused')\n"
+            "assert sys._base_executable == sys.executable\n"
+            "print(sys.executable)\n"
+            "print(sys.prefix)\n"
+            "if sys.argv[1:] == ['spawn']:\n"
+            "    child = subprocess.run([sys.executable, '-c', "
+            "\"import sys; print('child'); sys.exit(47)\"], capture_output=True)\n"
+            "    assert (child.stdout, child.stderr, child.returncode) == (b'child\\n', b'', 47)\n"
+        )
+        image = root / "boxed-executable"
+        built = run(imre, "build", "--runtime-imports", source, "-o", image)
+        assert built.returncode == 0, built.stderr
+        helper_dir = root / "python-helpers"
+        helper_dir.mkdir()
+        helper = helper_dir / "python3"
+        helper.symlink_to(imre)
+        for args, extra, expected in (
+            ((), {"PATH": ""}, ""),
+            ((), {"PATH": str(helper_dir)}, str(helper)),
+            (("spawn",), {"IMRE_PYTHON": str(helper.relative_to(root))}, str(helper_dir.resolve() / "python3")),
+        ):
+            result = run(image, *args, extra=extra)
+            assert result.returncode == 0, result.stderr
+            assert result.stdout.decode().splitlines() == [expected, str(root.resolve())]
 
         # An isolated command can add a package search root itself. Exercise its
         # normal Python code, including live dictionary views and descriptor errors.
@@ -1561,6 +1638,7 @@ def report(text):
             "boxed_slice_deep_repr.py",
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
+            "boxed_relative_package_imports.py",
             "boxed_sys_getframe.py",
             "boxed_sys_audit.py",
             "boxed_sys_audit_recursion.py",
@@ -1587,7 +1665,10 @@ def report(text):
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
             "boxed_temporary_file.py",
+            "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
+            "boxed_tempfile_default_directory.py",
+            "boxed_tempfile_mktemp.py",
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
@@ -1603,6 +1684,7 @@ def report(text):
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
             "boxed_typing_no_type_check.py",
+            "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
             "boxed_typing_typeddict.py",
             "boxed_typing_dataclass_transform.py",
@@ -1620,18 +1702,23 @@ def report(text):
             "boxed_re_split.py",
             "boxed_re_findall_empty.py",
             "boxed_re_scanner.py",
+            "boxed_re_escape.py",
             "boxed_datetime.py",
             "boxed_dataclasses.py",
+            "boxed_make_dataclass.py",
+            "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
             "boxed_time.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_io_exports.py",
             "boxed_io_text_encoding.py",
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
+            "boxed_os_descriptor_io.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
             "boxed_os_makedirs.py",
@@ -1641,6 +1728,7 @@ def report(text):
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
             "boxed_warning_categories.py",
+            "boxed_warnings.py",
             "boxed_oserror.py",
             "boxed_type_identity.py",
             "boxed_singleton_types.py",
@@ -1652,6 +1740,7 @@ def report(text):
             "boxed_any_generator.py",
             "boxed_global.py",
             "boxed_logging.py",
+            "boxed_logging_file.py",
             "boxed_class_attribute.py",
             "boxed_request_strings.py",
             "boxed_str_maketrans.py",
@@ -1666,9 +1755,12 @@ def report(text):
             "boxed_unittest_subclass.py",
             "boxed_unittest_not_has_attr.py",
             "boxed_unittest_not_equal.py",
+            "boxed_unittest_less_equal.py",
             "boxed_unittest_assert_raises.py",
+            "boxed_unittest_assert_warns.py",
             "boxed_unittest_assert_regex.py",
             "boxed_unittest_patch.py",
+            "boxed_unittest_named_loader.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
             "boxed_frozenset.py",
@@ -1696,7 +1788,9 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_registry.py",
+            "boxed_unittest_runner_warnings.py",
             "boxed_unittest_class_cleanup.py",
+            "boxed_pathlib.py",
             "boxed_posixpath.py",
             "boxed_linecache.py",
             "boxed_stat.py",
@@ -1709,6 +1803,7 @@ def report(text):
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",
             "boxed_itertools_chain.py",
+            "boxed_itertools_cycle.py",
             "boxed_itertools_combinations.py",
             "boxed_itertools_permutations.py",
             "boxed_itertools_product.py",
@@ -1719,6 +1814,7 @@ def report(text):
             "boxed_threading_lock.py",
             "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
+            "boxed_abc_metaclass.py",
             "boxed_mapping_abc.py",
             "boxed_user_containers.py",
             "boxed_dict_pop.py",
@@ -1795,6 +1891,8 @@ def report(text):
             os.symlink(b"unresolved-\xff", root / "readlink-source")
             plugin.write_bytes((fixtures / "boxed_os_readlink.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_os_symlink.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
@@ -1867,6 +1965,11 @@ except ImportError:
         (root / "chunks.bin").write_bytes(b"0a\r\n\xffx!\n")
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_io.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.exercise('chunks.bin')")
+        compare(
+            "-IB", "-c",
+            "with open('chunks.bin', 'rb') as stream:\n    print(stream.name, stream.mode)\n"
+            "print(stream.name, stream.mode)",
+        )
         compare(
             "-IB", "-c",
             "import sys, hashlib\nsys.path\n"

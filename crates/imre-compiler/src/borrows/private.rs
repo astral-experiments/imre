@@ -2,7 +2,7 @@
 //! projections from incoming parameters. A fresh constructor must also keep its
 //! receiver private throughout initialization.
 
-use super::{statements, written, written_except};
+use super::{written, written_except};
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, Module, Statement, Type};
 
 pub(super) fn analyze(module: &Module) -> Vec<Vec<bool>> {
@@ -54,7 +54,7 @@ fn confined_locals(function: &Function) -> Vec<bool> {
         }
     }
     let mut uses = vec![0; function.locals.len()];
-    statements(&function.body, &mut |statement| match statement {
+    ir::walk_statements(&function.body, &mut |statement| match statement {
         Statement::SetField(receiver, _, _) | Statement::AugmentField(receiver, _, _, _) => {
             account(&mut uses, receiver, -1);
         }

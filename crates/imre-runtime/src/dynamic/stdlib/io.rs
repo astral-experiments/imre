@@ -21,6 +21,34 @@ pub(in crate::dynamic) enum MemoryStream {
 
 const DEFAULT_BUFFER_SIZE: i64 = 128 * 1024;
 
+// CPython 3.14.5 Lib/io.py, in wildcard import order.
+const PUBLIC_NAMES: &[&str] = &[
+    "BlockingIOError",
+    "open",
+    "open_code",
+    "IOBase",
+    "RawIOBase",
+    "FileIO",
+    "BytesIO",
+    "StringIO",
+    "BufferedIOBase",
+    "BufferedReader",
+    "BufferedWriter",
+    "BufferedRWPair",
+    "BufferedRandom",
+    "TextIOBase",
+    "TextIOWrapper",
+    "UnsupportedOperation",
+    "SEEK_SET",
+    "SEEK_CUR",
+    "SEEK_END",
+    "DEFAULT_BUFFER_SIZE",
+    "text_encoding",
+    "IncrementalNewlineDecoder",
+    "Reader",
+    "Writer",
+];
+
 /// Select the default text encoding from the interpreter's startup configuration.
 pub(super) fn text_encoding(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
@@ -108,6 +136,9 @@ pub(super) fn open_code(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
 
 /// Install canonical class objects so subclasses inherit the same methods across imports.
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
+    let names = PUBLIC_NAMES.iter().map(|&name| ctx.text(name)).collect();
+    let exports = ctx.alloc(Value::List(names));
+    ctx.bind(module, "__all__", exports);
     let open = ctx.builtin("open");
     ctx.bind(module, "open", open);
     let text_encoding = ctx.builtin("_io.text_encoding");
@@ -147,8 +178,9 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         module,
         "RawIOBase",
         io,
-        &["read", "readall", "readinto"],
+        &["read", "readall", "readinto", "write"],
     );
+    ctx.builtins.insert("_io._RawIOBase".into(), raw);
     let file = class(ctx, module, "FileIO", raw, file_io::METHODS);
     ctx.builtins.insert("_io.FileIO".into(), file);
     let buffered = class(ctx, module, "BufferedIOBase", io, buffered_io::METHODS);
@@ -336,34 +368,48 @@ pub(in super::super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let bytes_io = ctx.builtins.get("_io.BytesIO").copied();
+    let raw = ctx.builtins.get("_io._RawIOBase") == Some(&owner);
+    let buffered = ctx.builtins.get("_io._BufferedIOBase") == Some(&owner);
+    let descriptor = if raw {
+        Some("_RawIOBase")
+    } else if buffered {
+        Some("_BufferedIOBase")
+    } else if bytes_io == Some(owner) {
+        Some("BytesIO")
+    } else {
+        None
+    };
     let Some((&receiver, rest)) = args.split_first() else {
-        let message = if bytes_io == Some(owner) {
-            if name == "__init__" {
+        let message = match (descriptor, name) {
+            (Some("BytesIO"), "__init__") => {
                 "descriptor '__init__' of '_io.BytesIO' object needs an argument".into()
-            } else {
-                format!("unbound method BytesIO.{name}() needs an argument")
             }
-        } else {
-            format!("unbound I/O method {name} needs a receiver")
+            (Some(class), _) => format!("unbound method {class}.{name}() needs an argument"),
+            _ => format!("unbound I/O method {name} needs a receiver"),
         };
         return Err(Error::new("TypeError", message));
     };
     if !ctx.instance_of(receiver, owner) {
-        let message = if bytes_io == Some(owner) {
-            let actual = ctx.type_name(receiver);
-            if name == "__init__" {
-                format!(
-                    "descriptor '__init__' requires a '_io.BytesIO' object but received a '{actual}'"
-                )
-            } else {
-                format!(
-                    "descriptor '{name}' for '_io.BytesIO' objects doesn't apply to a '{actual}' object"
-                )
-            }
-        } else {
-            format!("invalid receiver for {name}")
+        let actual = ctx.type_name(receiver);
+        let message = match (descriptor, name) {
+            (Some("BytesIO"), "__init__") => format!(
+                "descriptor '__init__' requires a '_io.BytesIO' object but received a '{actual}'"
+            ),
+            (Some(class), _) => format!(
+                "descriptor '{name}' for '_io.{class}' objects doesn't apply to a '{actual}' object"
+            ),
+            _ => format!("invalid receiver for {name}"),
         };
         return Err(Error::new("TypeError", message));
+    }
+    if raw && matches!(name, "write" | "readinto") {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("_RawIOBase.{name}() takes no keyword arguments"),
+            ));
+        }
+        return Err(Error::new("NotImplementedError", ""));
     }
     if bytes_io != Some(owner)
         && matches!(name, "__iter__" | "__next__" | "readlines" | "writelines")
@@ -392,14 +438,14 @@ pub(in super::super) fn call(
         }
         return Ok(NONE);
     }
-    if name == "detach"
-        && (ctx.builtins.get("_io._TextIOBase") == Some(&owner)
-            || ctx.builtins.get("_io._BufferedIOBase") == Some(&owner))
-    {
+    if name == "detach" && (ctx.builtins.get("_io._TextIOBase") == Some(&owner) || buffered) {
         if !rest.is_empty() || !kwargs.is_empty() {
             return Err(Error::new("TypeError", "detach() takes no arguments"));
         }
         return Err(Error::new("UnsupportedOperation", "detach"));
+    }
+    if buffered {
+        return buffered_io::call(ctx, receiver, name, rest, kwargs);
     }
     if ctx.builtins.get("_io._TextIOBase") == Some(&owner) {
         // The base class getters return None even on a closed or uninitialized subclass.
@@ -422,9 +468,6 @@ pub(in super::super) fn call(
     {
         return file_io::call(ctx, receiver, name, rest, kwargs);
     }
-    if ctx.builtins.get("_io._BufferedIOBase") == Some(&owner) {
-        return buffered_io::call(ctx, receiver, name, rest, kwargs);
-    }
     if bytes_io == Some(owner)
         || matches!(name, "__enter__" | "__exit__")
             && bytes_io.is_some_and(|class| ctx.instance_of(receiver, class))
@@ -443,7 +486,6 @@ pub(in super::super) fn call(
     }
     let arity = match name {
         "read" => 1..=2,
-        "readinto" => 2..=2,
         "__exit__" => 4..=4,
         _ => 1..=1,
     };
@@ -531,7 +573,6 @@ pub(in super::super) fn call(
             }
             Ok(ctx.alloc(Value::Bytes(out)))
         }
-        "readinto" => Err(Error::new("NotImplementedError", "")),
         _ => unreachable!("registered IOBase method"),
     }
 }

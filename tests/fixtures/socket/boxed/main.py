@@ -5,3 +5,5 @@ import stream
 import ipv6_stream
 import dualstack
 import datagram
+import nameinfo
+import resolver

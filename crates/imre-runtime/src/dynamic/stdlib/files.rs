@@ -12,22 +12,29 @@ pub(in crate::dynamic) enum BinaryFile {
     Descriptor(super::io::BufferedFd),
     Reader {
         slot: RefCell<Option<ReadSource>>,
-        socket: bool,
+        path: Option<Id>,
     },
-    Writer(RefCell<crate::objects::FileState>),
+    Writer {
+        file: RefCell<crate::objects::FileState>,
+        path: Id,
+        mode: &'static str,
+    },
 }
 
 impl BinaryFile {
     /// Opens the documented read, truncate, append, or exclusive-create mode.
-    pub(in crate::dynamic) fn open(path: &str, mode: &str) -> Result<Self> {
-        let mode = match mode {
+    pub(in crate::dynamic) fn open(path: &str, name: Id, mode: &str) -> Result<Self> {
+        let (flags, mode) = match mode {
             "rb" => {
                 let (file, _) = crate::objects::open_file(path, 0)?;
-                return Ok(Self::reader(ReadSource::File(BufReader::new(file))));
+                return Ok(Self::reader(
+                    ReadSource::File(BufReader::new(file)),
+                    Some(name),
+                ));
             }
-            "wb" => 1,
-            "ab" => 2,
-            "xb" => 3,
+            "wb" => (1, "wb"),
+            "ab" => (2, "ab"),
+            "xb" => (3, "xb"),
             _ => {
                 return Err(Error::new(
                     "ValueError",
@@ -35,16 +42,29 @@ impl BinaryFile {
                 ));
             }
         };
-        Ok(Self::Writer(RefCell::new(
-            crate::objects::FileState::binary_writer(path, mode)?,
-        )))
+        Ok(Self::Writer {
+            file: RefCell::new(crate::objects::FileState::binary_writer(path, flags)?),
+            path: name,
+            mode,
+        })
     }
 
     /// Files and sockets share the same buffered reader methods.
-    pub(in crate::dynamic) fn reader(reader: ReadSource) -> Self {
+    pub(in crate::dynamic) fn reader(reader: ReadSource, path: Option<Id>) -> Self {
         Self::Reader {
-            socket: matches!(reader, ReadSource::Socket(_)),
+            path,
             slot: RefCell::new(Some(reader)),
+        }
+    }
+
+    /// Filename objects and binary access modes remain observable after close.
+    pub(in crate::dynamic) fn path_metadata(&self) -> Option<(Id, &'static str)> {
+        match self {
+            Self::Reader {
+                path: Some(path), ..
+            } => Some((*path, "rb")),
+            Self::Writer { path, mode, .. } => Some((*path, mode)),
+            _ => None,
         }
     }
 
@@ -58,7 +78,7 @@ impl BinaryFile {
     /// SocketIO reports its live descriptor, or -1 once this reader has closed.
     pub(in crate::dynamic) fn socket_reader_name(&self) -> Option<RawFd> {
         match self {
-            Self::Reader { slot, socket: true } => {
+            Self::Reader { slot, path: None } => {
                 Some(slot.borrow().as_ref().map_or(-1, AsRawFd::as_raw_fd))
             }
             _ => None,
@@ -70,7 +90,7 @@ impl BinaryFile {
         match self {
             Self::Descriptor(fd) => fd.closed(),
             Self::Reader { slot, .. } => slot.borrow().is_none(),
-            Self::Writer(file) => file.borrow().closed(),
+            Self::Writer { file, .. } => file.borrow().closed(),
         }
     }
 }
@@ -151,35 +171,6 @@ fn dirname(path: &str) -> &str {
     } else {
         head.trim_end_matches('/')
     }
-}
-
-fn abspath(path: &str) -> std::io::Result<String> {
-    let path = if path.starts_with('/') {
-        path.to_owned()
-    } else {
-        let cwd = std::env::current_dir()?;
-        join(
-            cwd.to_str()
-                .ok_or_else(|| std::io::Error::other("non-UTF-8 working directory"))?,
-            path,
-        )
-    };
-    let prefix = if path.starts_with("//") && !path.starts_with("///") {
-        "//"
-    } else {
-        "/"
-    };
-    let mut parts = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(part),
-        }
-    }
-    Ok(format!("{prefix}{}", parts.join("/")))
 }
 
 fn run_process(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -304,7 +295,6 @@ pub(super) fn call(
             }
             return Ok(ctx.text(path));
         }
-        "os.path.abspath" => return Ok(ctx.text(abspath(ctx.str_value(first)?).map_err(os_error)?)),
         "os.path.dirname" => return Ok(ctx.text(dirname(ctx.str_value(first)?).to_owned())),
         "subprocess.run" => return run_process(ctx, args, kwargs),
         _ => {}
@@ -315,8 +305,8 @@ pub(super) fn call(
     let handle = handle.clone();
     let (slot, socket) = match handle.as_ref() {
         BinaryFile::Descriptor(file) => return file.call(ctx, first, name, &args[1..], kwargs),
-        BinaryFile::Reader { slot, socket } => (slot, *socket),
-        BinaryFile::Writer(file) => {
+        BinaryFile::Reader { slot, path } => (slot, path.is_none()),
+        BinaryFile::Writer { file, .. } => {
             if name == "file.seek" {
                 let value = option(args, 2, kwargs, "whence")?;
                 let whence = value

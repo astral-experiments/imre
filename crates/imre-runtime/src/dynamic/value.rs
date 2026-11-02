@@ -53,6 +53,8 @@ pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 const EMPTY_TUPLE: Id = 5;
 
+pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
+pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
 pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
@@ -456,7 +458,7 @@ impl Context {
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
-            Value::BufferedRandom(_) => "_io.BufferedRandom",
+            Value::BufferedRandom(..) => "_io.BufferedRandom",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
@@ -638,8 +640,12 @@ pub(super) struct ClassNamespace {
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
+    /// TypedDict installs a class-wide annotation function in place of its field thunks.
+    pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
+    /// Dynamic classes install real descriptors instead of using inline fields by spelling.
+    pub member_slots: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -722,6 +728,11 @@ pub(super) enum Value {
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
+    /// A contiguous read-only view keeps its original bytes exporter alive until release.
+    MemoryView {
+        owner: Option<Id>,
+        hash: Option<i64>,
+    },
     ByteArray(Vec<u8>),
     CodecInfo {
         entry: crate::objects::CodecInfo,
@@ -834,12 +845,15 @@ pub(super) enum Value {
     Instance {
         class: Id,
         fields: indexmap::IndexMap<String, Id>,
+        /// Storage addressed by the declaring member, independent of the instance dictionary.
+        member_values: Option<Box<HashMap<Id, Id>>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
         weak_reference: Option<Box<super::weakref::Reference>>,
+        cycle: Option<Box<super::stdlib::itertools::Cycle>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -852,6 +866,7 @@ pub(super) enum Value {
     /// The writable document member of the native tuple descriptor type.
     TupleGetterDoc,
     ReadOnlyMember(&'static str, &'static str),
+    SlotMember { owner: Id, name: Id },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
@@ -980,7 +995,10 @@ pub(super) enum Value {
     },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     NamedFileCloser(crate::Shared<std::cell::RefCell<super::stdlib::tempfile::NamedCloser>>),
-    BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
+    BufferedRandom(
+        crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
+        Id,
+    ),
     RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
     Context(std::rc::Rc<HashMap<Id, Id>>),
     ContextVar {
@@ -1033,12 +1051,13 @@ impl Value {
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
+            Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
             Self::File(file) => match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
@@ -1048,6 +1067,8 @@ impl Value {
             Self::DequeIterator { .. } => super::deque::ITERATOR,
             Self::List(_) => "list",
             Self::CallableIterator(_) => "callable_iterator",
+            Self::RegexPattern(_) => REGEX_PATTERN_TYPE,
+            Self::RegexMatch(_) => REGEX_MATCH_TYPE,
             Self::RegexScanner { .. } => "_sre.SRE_Scanner",
             Self::Tuple(_) => "tuple",
             Self::Slice(_) => "slice",
@@ -1074,7 +1095,7 @@ impl Value {
             Self::Dict(_) => "dict",
             Self::MappingProxy(_) => "mappingproxy",
             Self::Function { .. } => "function",
-            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) => "member_descriptor",
+            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => "member_descriptor",
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
@@ -1226,6 +1247,7 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::MemoryView { owner, .. } => visit.extend(owner),
             Self::Template {
                 strings,
                 interpolations,
@@ -1368,13 +1390,16 @@ impl Value {
                 visit.extend([union.args, union.members, union.parameters]);
                 visit.extend(union.unhashable);
             }
+            Self::SlotMember { owner, name } => visit.extend([*owner, *name]),
             Self::Instance {
                 class,
                 fields,
+                member_values,
                 namespace,
                 dictionary,
                 scalar,
                 weak_reference,
+                cycle,
                 memory_stream,
                 property,
             } => {
@@ -1383,6 +1408,9 @@ impl Value {
                 }
                 if let Some(reference) = weak_reference {
                     visit.push(reference.callback);
+                }
+                if let Some(cycle) = cycle {
+                    cycle.children(visit);
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
@@ -1395,6 +1423,11 @@ impl Value {
                 }
                 visit.push(*class);
                 visit.extend(dictionary);
+                if let Some(values) = member_values {
+                    for (&member, &value) in values.iter() {
+                        visit.extend([member, value]);
+                    }
+                }
                 visit.extend(fields.values());
                 visit.extend(namespace);
                 visit.extend(scalar);
@@ -1458,6 +1491,8 @@ impl Value {
             Self::File(file) => {
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
+                } else if let Some((path, _)) = file.path_metadata() {
+                    visit.push(path);
                 }
             }
             Self::None
@@ -1489,8 +1524,8 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::TextFile(_)
-            | Self::NamedFileCloser(_)
-            | Self::BufferedRandom(_) => {}
+            | Self::NamedFileCloser(_) => {}
+            Self::BufferedRandom(_, name) => visit.push(*name),
         }
     }
 }
@@ -2059,7 +2094,7 @@ impl Heap {
     }
 
     pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
-        let Value::Cell(contents) = self.get_mut(cell) else {
+        let (Value::Cell(contents) | Value::ClassCell(contents)) = self.get_mut(cell) else {
             unreachable!("compiled closure cell")
         };
         let previous = std::mem::replace(contents, value);
@@ -2127,6 +2162,23 @@ impl Heap {
         let id = self.alloc_slot(Value::Tuple(items));
         self.slots[id as usize].untracked_tuple.set(untracked);
         id
+    }
+
+    /// Allocate a distinct string result even when its value is a cached Latin-1 character.
+    pub(super) fn fresh_string(&mut self, value: Value) -> Result<Id> {
+        debug_assert!(matches!(value, Value::Str(_) | Value::SurrogateStr(_)));
+        if self.free_head == END {
+            self.slots
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
+        self.frames
+            .last_mut()
+            .unwrap()
+            .live
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        Ok(self.alloc_slot(value))
     }
 
     fn alloc_slot(&mut self, value: Value) -> Id {
@@ -2516,6 +2568,10 @@ impl Heap {
         })
     }
 
+    pub fn current_code(&self) -> Id {
+        self.frames.last().unwrap().code
+    }
+
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
     }
@@ -2803,14 +2859,26 @@ impl Heap {
         let active = self.caught_exception(caught);
         let frame = self.frames.last_mut().unwrap();
         frame.active = active;
-        if let Some(id) = frame.object
-            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
-        {
-            *lineno = location.line;
-        }
+        let line = location.line;
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
+        self.set_statement_line(line);
+    }
+
+    /// A match statement can execute separate pattern and guard expressions in one step.
+    pub(super) fn set_statement_line(&mut self, line: u32) {
+        let frame = self.frames.last_mut().unwrap();
+        frame
+            .location
+            .as_mut()
+            .expect("active source location")
+            .line = line;
+        if let Some(id) = frame.object
+            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
+        {
+            *lineno = line;
+        }
     }
 
     /// A discarded owner or the allocation threshold has requested a sweep.

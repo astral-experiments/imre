@@ -7,9 +7,10 @@ mod normalization;
 pub(crate) mod translate;
 pub(crate) mod urlquote;
 pub(crate) mod urlsplit;
+pub(crate) mod zfill;
 
 pub(crate) use expandtabs::expand_tabs;
-pub(crate) use lowercase::{capitalize, python_islower};
+pub(crate) use lowercase::{capitalize, case_map, case_map_points, python_islower, python_istitle};
 pub(super) use lowercase::{lowercase, lowercase_chars};
 pub(crate) use normalization::normalize_unicode;
 
@@ -235,11 +236,50 @@ pub(crate) fn python_alnum(text: &str) -> bool {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric());
     }
     const RANGES: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alnum.rs"));
+    all_in_ranges(text, RANGES)
+}
+
+fn all_in_ranges(text: &str, ranges: &[(u32, u32)]) -> bool {
     text.chars().all(|ch| {
         let cp = u32::from(ch);
-        let index = RANGES.partition_point(|&(_, end)| end < cp);
-        RANGES.get(index).is_some_and(|&(start, _)| start <= cp)
+        let index = ranges.partition_point(|&(_, end)| end < cp);
+        ranges.get(index).is_some_and(|&(start, _)| start <= cp)
     })
+}
+
+pub(crate) fn python_isalpha(text: &str) -> bool {
+    if text.is_ascii() {
+        return !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphabetic());
+    }
+    const LETTERS: &[(u32, u32)] = include!(concat!(env!("OUT_DIR"), "/unicode_alpha.rs"));
+    all_in_ranges(text, LETTERS)
+}
+
+pub(crate) fn python_isdigit(text: &str) -> bool {
+    if text.is_ascii() {
+        return !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    }
+    text.chars().all(crate::integer_text::is_digit)
+}
+
+/// Tests for a nonempty string of Unicode 16 letters.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isalpha(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_isalpha(unsafe { &*value }))
+}
+
+/// Tests for a nonempty string of Unicode 16 Decimal or Digit characters.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isdigit(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_isdigit(unsafe { &*value }))
 }
 
 /// Tests a native string with Python's alphanumeric predicate.
@@ -286,6 +326,16 @@ pub unsafe extern "C" fn imre_str_is_ascii(value: *const Str) -> u32 {
 pub unsafe extern "C" fn imre_str_is_lower(value: *const Str) -> u32 {
     // SAFETY: the caller supplies a rooted, exact UTF-8 string.
     u32::from(python_islower(unsafe { &*value }.chars()))
+}
+
+/// Tests a native string with Python's titlecase predicate.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_title(value: *const Str) -> u32 {
+    // SAFETY: the caller supplies a rooted, exact UTF-8 string.
+    u32::from(python_istitle(unsafe { &*value }.chars()))
 }
 
 /// Returns whether the string has a cased character and every cased character is uppercase.

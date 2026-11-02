@@ -18,19 +18,25 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "unlink",
+                "access", "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat",
+                "symlink", "unlink", "utime",
             ][..],
         ),
-        ("supports_fd", &["chmod", "listdir", "scandir", "stat"][..]),
+        (
+            "supports_fd",
+            &["chmod", "listdir", "scandir", "stat", "utime"][..],
+        ),
         (
             "supports_follow_symlinks",
             &[
+                "access",
                 #[cfg(target_os = "macos")]
                 "chmod",
                 "stat",
+                "utime",
             ][..],
         ),
-        ("supports_effective_ids", &[][..]),
+        ("supports_effective_ids", &["access"][..]),
     ] {
         let set = ctx.alloc(Value::Set {
             entries: Default::default(),
@@ -316,13 +322,16 @@ pub(super) fn change_environment(
 }
 
 mod chmod;
+mod symlink;
 mod unlink;
+mod utime;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
     matches!(
         name,
-        "open"
+        "access"
+            | "open"
             | "readlink"
             | "scandir"
             | "remove"
@@ -330,16 +339,20 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "rmdir"
             | "mkdir"
             | "chmod"
+            | "utime"
             | "dup"
             | "dup2"
             | "isatty"
             | "lseek"
             | "pipe"
+            | "read"
+            | "write"
             | "close"
             | "get_blocking"
             | "set_blocking"
             | "get_inheritable"
             | "set_inheritable"
+            | "symlink"
     )
 }
 
@@ -458,6 +471,49 @@ fn readlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
     Ok(ctx.text_codepoints(codec.decode_filesystem(&target)?))
 }
 
+/// Test filesystem access using the credentials and link policy requested by the caller.
+fn access(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let names = ["path", "mode", "dir_fd", "effective_ids", "follow_symlinks"];
+    if args.len() > 2 && args.len() + kwargs.len() <= names.len() {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "access() takes exactly 2 positional arguments ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    let [Some(path), Some(mode), dir_fd, effective, follow] =
+        builtins::bind_builtin_arguments("access", args, kwargs, names, 2)?
+    else {
+        unreachable!("access requires path and mode")
+    };
+    let path = posixpath::path_arg(
+        ctx,
+        path,
+        "access: path should be string, bytes or os.PathLike",
+    )?;
+    let path = c_path(ctx, path, "access: embedded null character in path")?;
+    let mode = c_int(ctx, mode)?;
+    let dir_fd = directory_fd(ctx, dir_fd)?;
+    let effective = effective
+        .map(|v| ctx.truth(v))
+        .transpose()?
+        .unwrap_or(false);
+    let follow = follow.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
+    let flags = (if effective { libc::AT_EACCESS } else { 0 })
+        | (if follow { 0 } else { libc::AT_SYMLINK_NOFOLLOW });
+    // SAFETY: path is NUL-terminated and remains live through the synchronous check.
+    let status = unsafe {
+        if dir_fd == libc::AT_FDCWD && flags == 0 {
+            libc::access(path.as_ptr(), mode)
+        } else {
+            libc::faccessat(dir_fd, path.as_ptr(), mode, flags)
+        }
+    };
+    Ok(builtins::boolean(status == 0))
+}
+
 /// Create a directory relative to dir_fd using the caller's mode and process umask.
 fn mkdir(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let names = ["path", "mode", "dir_fd"];
@@ -537,11 +593,20 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "access" {
+        return access(ctx, args, kwargs);
+    }
+    if name == "symlink" {
+        return symlink::call(ctx, args, kwargs);
+    }
     if name == "scandir" {
         return scandir::open(ctx, args, kwargs);
     }
     if matches!(name, "remove" | "unlink" | "rmdir") {
         return unlink::call(ctx, name, args, kwargs);
+    }
+    if name == "utime" {
+        return utime::call(ctx, args, kwargs);
     }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
@@ -604,6 +669,33 @@ pub(super) fn descriptor(
             result.push(ctx.int(i64::from(fd)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
+    }
+    if matches!(name, "read" | "write") {
+        let [fd, data] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        return if name == "read" {
+            let length = crate::signed_index(&ctx.index_integer(*data)?).ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+            Ok(ctx.alloc(Value::Bytes(native::read(fd, length)?)))
+        } else {
+            // The synchronous syscall borrows the buffer after fd conversion.
+            // It cannot reenter Python, so mutable storage cannot resize underneath it.
+            let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
+                Value::Array(array) => array.as_bytes(),
+                _ => ctx.bytes_like(*data)?,
+            };
+            let count = native::write(fd, bytes)?;
+            Ok(ctx.int(count as i64))
+        };
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

@@ -71,7 +71,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — | — |
 | `py_compile` | Yes | No API example recorded. | — | — | — |
 | `random` | Yes | Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences. [Evidence](../benchmarks/cpython_stdlib/full/shutil/random.md) | — | — | — |
-| `re` | Yes | Fixed regular expressions, captures and replacement escapes in `sub`. [Evidence](../benchmarks/cpython_stdlib/README.md) | — | — | — |
+| `re` | Yes | Fixed regular expressions, captures and replacement escapes in `sub`. [`escape`](../tests/fixtures/boxed_re_escape.py) quotes literal text and byte strings for use in patterns. [Evidence](../benchmarks/cpython_stdlib/README.md) | — | — | — |
 | `secrets` | Yes | Draw an unpredictable item from native strings, bytes, lists, homogeneous tuples, or integer ranges with OS randomness. [Evidence](../tests/fixtures/iterables/secrets_choice.py) | — | — | — |
 | `select` | Yes | Wait for readable or writable POSIX file descriptors with `poll` or `select`. [Evidence](../benchmarks/cpython_stdlib/full/select/operations.py) | [0 / 134](../benchmarks/cpython_stdlib/full/select/) | 7 | 6 |
 | `selectors` | Yes | Use `SelectSelector` and `PollSelector` with `subprocess._PopenSelector` to choose how `Popen.communicate` waits for pipes. [Evidence](../tests/fixtures/processes/select_backend.py) | — | — | — |

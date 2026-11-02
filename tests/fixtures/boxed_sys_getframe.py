@@ -37,10 +37,22 @@ def current():
     else:
         raise AssertionError('depth did not fit in a C int')
 
+    def origin():
+        return sys._getframemodulename(), sys._getframemodulename(depth=1)
+
+    marker = object()
+    origin.__module__ = marker
+    assert origin() == (marker, __name__)
+    assert sys._getframemodulename(-1) == __name__
+    assert sys._getframemodulename(10_000) is None
+    assert sys._getframemodulename.__text_signature__ == '($module, /, depth=0)'
+
     observed = []
     def hook(event, arguments):
         if event == 'object.__getattr__' and arguments == (frame, 'f_code'):
             raise PermissionError('blocked frame code')
+        if event == 'sys._getframemodulename' and arguments == (-3,):
+            raise PermissionError('blocked module lookup')
         if event == 'sys._getframe':
             observed.extend(arguments)
             raise PermissionError('blocked frame')
@@ -58,3 +70,9 @@ def current():
         assert str(exc) == 'blocked frame code'
     else:
         raise AssertionError('frame code audit hook veto ignored')
+    try:
+        sys._getframemodulename(-3)
+    except PermissionError as exc:
+        assert str(exc) == 'blocked module lookup'
+    else:
+        raise AssertionError('module lookup ignored audit veto')

@@ -2,6 +2,29 @@ import json
 from datetime import UTC, date, datetime as dt, time, timedelta, timezone
 
 
+def test_class_constants():
+    for cls, smallest, largest, step in (
+        (date, date(1, 1, 1), date(9999, 12, 31), timedelta(days=1)),
+        (dt, dt(1, 1, 1), dt(9999, 12, 31, 23, 59, 59, 999999), timedelta(microseconds=1)),
+        (time, time(), time(23, 59, 59, 999999), timedelta(microseconds=1)),
+        (timedelta, timedelta(days=-999999999), timedelta(days=999999999, seconds=86399, microseconds=999999), timedelta(microseconds=1)),
+    ):
+        assert type(cls.min) is cls and type(cls.max) is cls
+        assert (cls.min, cls.max, cls.resolution) == (smallest, largest, step)
+        assert smallest.min is cls.min and largest.max is cls.max
+        assert smallest.resolution is cls.resolution
+    assert dt.resolution is not time.resolution
+    assert time.resolution is not timedelta.resolution
+
+    class Child(time):
+        min = "override"
+    obj = Child()
+    assert obj.min == Child.min == "override"
+    assert obj.max is Child.max is time.max
+    obj.resolution = "instance override"
+    assert obj.resolution != Child.resolution and Child.resolution is time.resolution
+
+
 def test_http_date():
     assert UTC is timezone.utc
     assert timezone(timedelta(0)) is UTC
@@ -83,9 +106,146 @@ def test_time_of_day():
     print(str(midnight), repr(clock), str(clock), str(combined))
 
 
+def test_now():
+    from time import time as timestamp
+
+    now = dt.now
+    east = timezone(timedelta(hours=5, minutes=30))
+    for args, kwargs, zone in (((), {}, None), ((None,), {}, None),
+                               ((UTC,), {}, UTC), ((), {"tz": east}, east)):
+        before = int(timestamp())
+        stamp = now(*args, **kwargs)
+        after = int(timestamp())
+        assert type(stamp) is dt and stamp.tzinfo is zone
+        assert 0 <= stamp.microsecond < 1000000
+        assert any(stamp.timetuple() == dt.fromtimestamp(sec, zone).timetuple()
+                   for sec in range(before, after + 1))
+    for args, kwargs in (((1,), {}), ((None, None), {}), ((), {"foo": 1}), ((None,), {"tz": None})):
+        try:
+            now(*args, **kwargs)
+        except TypeError as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("invalid now() arguments accepted")
+
+
+def test_subclass_construction():
+    class Date(date):
+        pass
+
+    class Clock(time):
+        pass
+
+    class Delta(timedelta):
+        pass
+
+    class Moment(dt):
+        def __new__(cls, year, label):
+            return super().__new__(cls, year, 2, 1, minute=42, fold=1)
+
+        def __init__(self, year, label):
+            self.label = label
+
+    class Grandchild(Moment):
+        pass
+
+    value = Grandchild(2000, label="leap")
+    assert type(value) is Grandchild and isinstance(value, dt) and isinstance(value, date)
+    assert (value.year, value.minute, value.fold, value.label) == (2000, 42, 1, "leap")
+    assert value.toordinal() == date(2000, 2, 1).toordinal()
+    assert type(dt.__new__(Moment, 2000, 1, 1)) is Moment
+    assert repr(value) == "Grandchild(2000, 2, 1, 0, 42, fold=1)"
+    assert date.__repr__(value) == "Grandchild(2000, 2, 1)"
+    assert str(value) == "2000-02-01 00:42:00"
+
+    class BadFormat(Grandchild):
+        @property
+        def isoformat(self):
+            raise AttributeError("blocked format")
+
+    try:
+        str(BadFormat(2000, "leap"))
+    except AttributeError as error:
+        assert str(error) == "blocked format"
+    else:
+        raise AssertionError("calendar formatting ignored a descriptor error")
+
+    assert repr(Clock(7, 8)) == "Clock(7, 8)"
+    assert repr(Delta(0)) == "Delta(0)"
+    assert not Delta() and Delta(seconds=1)
+
+    class Custom(Delta):
+        def __repr__(self):
+            return "custom " + super().__repr__()
+        def __bool__(self):
+            return True
+
+    custom = Custom()
+    assert repr(custom) == "custom Custom(0)" and bool(custom)
+    assert str(custom) == "0:00:00"
+
+    class HasLength(Delta):
+        def __len__(self):
+            return 5
+
+    assert not HasLength()
+
+    assert Date(2024, 2, 29).day == 29
+    assert Clock(microsecond=321).microsecond == 321
+    assert Delta(days=1, seconds=2).total_seconds() == 86402
+
+    class Shadow(Date):
+        year = "overridden"
+        @property
+        def day(self):
+            return self.month
+
+    shadow = Shadow(2024, 2, 29)
+    assert shadow.year == "overridden" and shadow.day == 2
+    try:
+        shadow.month = 7
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("calendar field was writable")
+
+    class Other(Date):
+        def __new__(cls):
+            return "foreign result"
+        def __init__(self):
+            raise AssertionError("initializer called for a foreign result")
+
+
+    class Mixin:
+        __slots__ = ()
+
+    class Mixed(Mixin, dt, date):
+        pass
+
+    assert Mixed(2001, 2, 3).year == 2001
+    try:
+        class Bad(date, time):
+            pass
+    except TypeError as error:
+        assert str(error) == "multiple bases have instance lay-out conflict"
+    else:
+        raise AssertionError("incompatible native layouts accepted")
+
+    assert Other() == "foreign result"
+    try:
+        date.__new__(Moment, 2000, 1, 1)
+    except TypeError as error:
+        assert "is not safe" in str(error)
+    else:
+        raise AssertionError("date allocated an incompatible datetime layout")
+
+
 def current():
+    test_subclass_construction()
+    test_now()
     test_time_of_day()
     test_http_date()
+    test_class_constants()
     test_cookie_timestamp()
     for timestamp in (None, "0", 1 << 100):
         try:
@@ -100,6 +260,50 @@ def current():
         print(str(exc))
     else:
         raise AssertionError("invalid timezone accepted")
+    test_calendar_ordering()
+
+
+def test_calendar_ordering():
+    leap = date(2000, 2, 29)
+    assert date(2000, 2, 28) < leap <= date(2000, 2, 29)
+    assert timedelta(microseconds=-1) < timedelta() < timedelta(days=1)
+    naive = dt(2000, 2, 29, 23)
+    assert naive < dt(2000, 3, 1) and naive >= dt(2000, 2, 29, 23, fold=1)
+    offset = timezone(timedelta(hours=2, microseconds=1))
+    local = dt(2000, 3, 1, 1, 0, 0, 1, offset, fold=1)
+    instant = dt(2000, 2, 29, 23, tzinfo=UTC)
+    assert instant <= local <= instant
+    assert dt(2000, 2, 29, 23, 0, 0, 1, UTC) > local
+    for left, right in ((naive, instant), (instant, naive), (leap, naive), (naive, leap),
+                        (offset, UTC), (leap, timedelta())):
+        try:
+            left < right
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("ordered incompatible calendar operands")
+
+
+    class Declines(date):
+        def __lt__(self, other):
+            return NotImplemented
+
+        def __gt__(self, other):
+            return NotImplemented
+
+    class Reflected(Declines):
+        def __gt__(self, other):
+            return "reflected"
+
+    first = Declines(2000, 2, 28)
+    try:
+        first < Declines(2000, 2, 29)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("both calendar ordering hooks declined")
+    assert first < leap
+    assert (first < Reflected(2000, 2, 29)) == "reflected"
 
 
 if __name__ == "__main__":

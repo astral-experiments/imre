@@ -34,4 +34,71 @@ def current():
         pass
     else:
         raise AssertionError("circular reference")
+    class MixedKeys(dict):
+        def items(self):
+            return [(b"omit", object()), ("kept", [{b"omit": 0}]), ((), object())]
+
+    from io import StringIO
+    mixed = MixedKeys(placeholder=True)
+    expected = '{\n  "kept": [\n    {}\n  ]\n}'
+    assert json.dumps(mixed, skipkeys=True, indent=2, default=reject) == expected
+    stream = StringIO()
+    json.dump(mixed, stream, skipkeys=True, indent=2, default=reject)
+    assert stream.getvalue() == expected
+
+    # Sorting observes the original keys, including ones that would be skipped.
+    try:
+        json.dumps({"a": 1, b"b": 2}, sort_keys=True, skipkeys=True)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("incomparable keys")
+
+    # A Python string can contain both raw surrogate halves and scalar values.
+    key = "é\ud800\udfff"
+    value = '\ufffd"\n\udc0d'
+    doc = {key: [value]}
+    escaped = '{"\\u00e9\\ud800\\udfff": ["\\ufffd\\"\\n\\udc0d"]}'
+    raw = '{"é\ud800\udfff": ["\ufffd\\"\\n\udc0d"]}'
+    for ascii, want in ((True, escaped), (False, raw)):
+        assert json.dumps(doc, ensure_ascii=ascii, skipkeys=True) == want
+        stream = StringIO()
+        json.dump(doc, stream, ensure_ascii=ascii)
+        assert stream.getvalue() == want
+
+    chunks = []
+    class Writer:
+        def write(self, chunk):
+            chunks.append(chunk)
+            if chunk == '"\udfff"':
+                raise ValueError("writer stopped")
+
+    try:
+        json.dump({key: '\udfff', 'other': object()}, Writer(), ensure_ascii=False, default=reject)
+    except ValueError as error:
+        assert str(error) == "writer stopped"
+    else:
+        raise AssertionError("writer exception")
+    assert chunks == ['{', '"' + key + '"', ': ', '"\udfff"']
+
+    class Key:
+        @property
+        def __class__(self):
+            return Record
+
+    for streaming, expected_name in [(False, "Key"), (True, "Record")]:
+        output = StringIO()
+        try:
+            data = {"first": 1, Key(): 2}
+            if streaming:
+                json.dump(data, output)
+            else:
+                json.dumps(data)
+        except TypeError as exc:
+            assert exc.args == ("keys must be str, int, float, bool or None, not " + expected_name,)
+        else:
+            raise AssertionError("invalid key")
+        if streaming:
+            assert output.getvalue() == '{"first": 1'
+
     print("encoded container subclasses")

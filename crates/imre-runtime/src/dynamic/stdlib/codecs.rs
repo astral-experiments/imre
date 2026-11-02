@@ -369,13 +369,7 @@ pub(in crate::dynamic) fn decode_bytes(
         && uses_python_handler(ctx, name)
     {
         let name = name.to_owned();
-        if matches!(ctx.heap.get(input), Value::ByteArray(_)) {
-            ctx.bytearray_exports.push(input);
-            let result = registered_utf8(ctx, input, &name, signature);
-            ctx.bytearray_exports.pop();
-            return result;
-        }
-        return registered_utf8(ctx, input, &name, signature);
+        return ctx.with_buffer_export(input, |ctx| registered_utf8(ctx, input, &name, signature));
     }
     let result = codec
         .decode(ctx.bytes_like(input)?, Some(name))

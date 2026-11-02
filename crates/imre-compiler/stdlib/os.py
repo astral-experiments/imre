@@ -3,7 +3,7 @@ import abc
 import posixpath as path
 from _collections_abc import _check_methods
 from _collections_abc import MutableMapping as _MutableMapping
-from posix import environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, terminal_size, unsetenv
+from posix import access, environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, read, terminal_size, unsetenv, write
 from types import GenericAlias
 
 
@@ -116,6 +116,9 @@ class _Environ(_MutableMapping):
 
     def __len__(self):
         return len(self._data)
+
+    def copy(self):
+        return dict(self)
 
 
 environ = _Environ(_environ)

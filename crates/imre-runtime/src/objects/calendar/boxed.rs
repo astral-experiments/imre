@@ -49,6 +49,36 @@ impl Calendar {
         })
     }
 
+    /// Build each type's own min, max and resolution, in CPython's class-dictionary order.
+    pub(crate) fn class_constants(class: &str) -> Option<[Self; 3]> {
+        let (min, max, resolution) = match class {
+            "datetime.date" => (Value::DateOnly(1), Value::DateOnly(MAX_ORD), DAY),
+            "datetime.datetime" => {
+                let datetime = |local| Value::Date {
+                    local,
+                    zone: None,
+                    fold: 0,
+                };
+                (datetime(0), datetime(MAX_ORD * DAY - 1), 1)
+            }
+            "datetime.time" => {
+                let time = |local| Value::Time {
+                    local,
+                    zone: None,
+                    fold: 0,
+                };
+                (time(0), time(DAY - 1), 1)
+            }
+            "datetime.timedelta" => (
+                Value::Delta(-999_999_999 * DAY),
+                Value::Delta(1_000_000_000 * DAY - 1),
+                1,
+            ),
+            _ => return None,
+        };
+        Some([min, max, Value::Delta(resolution)].map(|value| Self(owner(value))))
+    }
+
     pub(crate) fn utc() -> Self {
         Self(utc())
     }
@@ -120,13 +150,9 @@ impl Calendar {
         clock_parts(&self.0)
     }
 
-    pub(crate) fn clock_order(&self, other: &Self) -> Result<std::cmp::Ordering, Error> {
-        with(&self.0, |a| with(&other.0, |b| clock::order(a, b))).ok_or_else(|| {
-            Error::new(
-                Kind::TypeError,
-                "can't compare offset-naive and offset-aware times",
-            )
-        })
+    /// Compare two values of the same orderable calendar class.
+    pub(crate) fn order(&self, other: &Self, operator: &str) -> Result<std::cmp::Ordering, Error> {
+        compare_rooted(&self.0, &other.0, false, operator)
     }
 
     pub(crate) fn combine(&self, time: &Self, zone: Option<&Self>) -> Result<Self, Error> {
@@ -142,6 +168,19 @@ impl Calendar {
         zone: Option<&Self>,
     ) -> Result<Self, Error> {
         let (seconds, micros) = timestamp.timeval()?;
+        Self::from_timeval(seconds, micros, zone)
+    }
+
+    pub(crate) fn now(zone: Option<&Self>) -> Result<Self, Error> {
+        let micros = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(delta) => delta.as_micros() as i128,
+            Err(e) => (-(e.duration().as_nanos() as i128)).div_euclid(1000),
+        };
+        let seconds = i64::try_from(micros.div_euclid(1_000_000)).map_err(|_| timed::overflow())?;
+        Self::from_timeval(seconds, micros.rem_euclid(1_000_000) as i32, zone)
+    }
+
+    fn from_timeval(seconds: i64, micros: i32, zone: Option<&Self>) -> Result<Self, Error> {
         let tm = timed::civil(seconds, zone.is_some())?;
         let year = tm.tm_year.checked_add(1900).ok_or_else(timed::overflow)?;
         let fields = [
@@ -231,6 +270,28 @@ impl Calendar {
         with(&self.0, |v| calendar_text(v, false))
     }
 
+    /// date.__str__ calls isoformat, which uses a T separator for a datetime receiver.
+    pub(crate) fn iso_text(&self) -> String {
+        with(&self.0, |v| calendar_text(v, true))
+    }
+
+    /// Use the receiver's class name but the descriptor owner's field layout.
+    pub(crate) fn subtype_repr(&self, class: &str, as_date: bool) -> String {
+        let mut text = String::new();
+        let mut out = super::super::values::ReprWriter(&mut text);
+        if as_date {
+            write_named_repr(
+                &Value::DateOnly(i128::from(self.ordinal())),
+                Some(class),
+                &mut out,
+            )
+        } else {
+            with(&self.0, |v| write_named_repr(v, Some(class), &mut out))
+        }
+        .expect("writing to a string succeeds");
+        text
+    }
+
     pub(crate) fn repr(&self) -> String {
         let mut s = String::new();
         with(&self.0, |v| {
@@ -239,4 +300,13 @@ impl Calendar {
         .expect("writing to a string succeeds");
         s
     }
+}
+
+/// # Safety
+/// A nonzero word holds a rooted fixed timezone for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_calendar_now(z: usize) -> *const Object {
+    // SAFETY: a present zone stays rooted until the calendar owns it.
+    let zone = (z != 0).then(|| Calendar(unsafe { retain(z as *const Object) }));
+    rc_result(Calendar::now(zone.as_ref()).map(|datetime| datetime.0))
 }

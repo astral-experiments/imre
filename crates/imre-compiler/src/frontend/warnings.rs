@@ -2,24 +2,13 @@
 mod display;
 use super::*;
 
-const CATEGORIES: &[&str] = &[
-    "Warning",
-    "ResourceWarning",
-    "RuntimeWarning",
-    "UserWarning",
-    "DeprecationWarning",
-    "PendingDeprecationWarning",
-    "SyntaxWarning",
-    "FutureWarning",
-    "ImportWarning",
-    "UnicodeWarning",
-    "BytesWarning",
-    "EncodingWarning",
-];
+use imre_ast::exceptions::WARNING_CATEGORIES;
 
 /// Warning categories have the ordinary, immutable identity of builtin classes.
 pub(super) fn is_warning_class(name: &str) -> bool {
-    CATEGORIES.contains(&name)
+    WARNING_CATEGORIES
+        .iter()
+        .any(|category| category.name() == name)
 }
 
 impl Checker<'_> {
@@ -112,9 +101,9 @@ impl Checker<'_> {
                 "message" => checker.warning_pattern(arg, true, &mut message_re)?,
                 "module" => checker.warning_pattern(arg, false, &mut module_re)?,
                 "category" => {
-                    if let Some(id) = CATEGORIES
+                    if let Some(id) = WARNING_CATEGORIES
                         .iter()
-                        .position(|name| checker.unshadowed_builtin(arg, name))
+                        .position(|kind| checker.unshadowed_builtin(arg, kind.name()))
                     {
                         category = id as u32;
                         Expr::integer(0)

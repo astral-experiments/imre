@@ -150,9 +150,11 @@ impl Builtin {
                 match operation {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
+                    | TextOperation::ZFill { .. }
                     | TextOperation::Normalize
                     | TextOperation::Lower
                     | TextOperation::Upper
+                    | TextOperation::CaseMap { .. }
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
@@ -467,6 +469,7 @@ impl Builtin {
             | Self::JsonLoads
             | Self::JsonEmptyObject
             | Self::JsonDecoderDecode
+            | Self::JsonEncoderEncode(_)
             | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
@@ -515,6 +518,7 @@ impl Builtin {
             | Self::NewPlainObject
             | Self::InspectSentinel
             | Self::JsonDecoderNew
+            | Self::JsonEncoderNew
             | Self::JsonDecoderMemo
             | Self::HashUpdate
             | Self::HashDigestSize
@@ -1323,6 +1327,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice_sum"
                 | "imre_str_get"
                 | "imre_str_expandtabs"
+                | "imre_str_zfill"
+                | "imre_str_case_map"
                 | "imre_str_lower"
                 | "imre_str_upper"
                 | "imre_str_capitalize"

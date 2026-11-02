@@ -1,13 +1,7 @@
 """Logging for Python modules executed by the native object runtime."""
 import sys
+import weakref
 import _imre_logging as _native
-
-CRITICAL = 50
-ERROR = 40
-WARNING = 30
-INFO = 20
-DEBUG = 10
-NOTSET = 0
 
 
 class _Lock:
@@ -27,39 +21,72 @@ class _Lock:
         self.release()
 
 
-_handler_level = _native.check_level
+_lock = _Lock()
+_handlers = weakref.WeakValueDictionary()
 
 
-class _MessageRecord:
-    def __init__(self, name, level, msg, args):
-        self.name = name
-        self.levelno = level
-        self.levelname = _native.level_name(level)
-        self.msg = msg
-        self.args = args
-        if len(args) == 1 and isinstance(args[0], dict) and args[0]:
-            self.args = args[0]
-
-    def getMessage(self):
-        message = str(self.msg)
-        if self.args:
-            message = message % self.args
-        return message
+def _handler_level(level):
+    return _checkLevel(level)
 
 
 class _MessageFormatter:
     def format(self, record):
         record.message = record.getMessage()
-        return record.message
+        message = "%(message)s" % record.__dict__
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self.formatException(record.exc_info)
+        for detail in (record.exc_text, record.stack_info):
+            if detail:
+                if not message.endswith("\n"):
+                    message += "\n"
+                message += detail
+        return message
+
+    def formatException(self, ei):
+        """
+        Format and return the specified exception information as a string.
+
+        This default implementation just uses
+        traceback.print_exception()
+        """
+        sio = io.StringIO()
+        tb = ei[2]
+        # See issues #9427, #1553375. Commented out for now.
+        #if getattr(self, 'fullstack', False):
+        #    traceback.print_stack(tb.tb_frame.f_back, file=sio)
+        traceback.print_exception(ei[0], ei[1], tb, limit=None, file=sio)
+        s = sio.getvalue()
+        sio.close()
+        if s[-1:] == "\n":
+            s = s[:-1]
+        return s
 
 
 _default_formatter = _MessageFormatter()
-raiseExceptions = True
 
 
-def _rename_handler(handler, old, new):
-    if old is not None or new is not None:
-        raise NotImplementedError("named handlers in runtime-loaded logging")
+def _set_handler_name(handler, name):
+    with _lock:
+        if handler._name in _handlers:
+            del _handlers[handler._name]
+        handler._name = name
+        if name:
+            _handlers[name] = handler
+
+
+def _close_handler(handler):
+    with _lock:
+        handler._closed = True
+        if handler._name and handler._name in _handlers:
+            del _handlers[handler._name]
+
+
+def getHandlerByName(name):
+    return _handlers.get(name)
+
+
+def getHandlerNames():
+    return frozenset(_handlers)
 
 
 def _handle_error(record):
@@ -67,14 +94,120 @@ def _handle_error(record):
         raise NotImplementedError("handler error diagnostics in runtime-loaded logging")
 
 
-def _fallback(logger, level, record, found):
-    if not found and level >= WARNING:
-        sys.stderr.write(record.getMessage() + "\n")
-        sys.stderr.flush()
+class FileHandler(StreamHandler):
+    terminator = "\n"
+
+    def __init__(self, filename, mode="a", encoding=None, delay=False, errors=None):
+        self.baseFilename = os.path.abspath(os.fspath(filename))
+        self.mode = mode
+        self.encoding = encoding if "b" in mode else io.text_encoding(encoding)
+        self.errors = errors
+        self.delay = delay
+        self._builtin_open = open
+
+        # Subclasses can override _open, including during eager construction.
+        stream = None
+        if not delay:
+            stream = self._open()
+            if stream is None:
+                stream = sys.stderr
+        Handler.__init__(self)
+        self.stream = stream
+
+    def _open(self):
+        return self._builtin_open(self.baseFilename, self.mode,
+                                  encoding=self.encoding, errors=self.errors)
+
+    def emit(self, record):
+        if self.stream is None and (self.mode != "w" or not self._closed):
+            self.stream = self._open()
+        if self.stream:
+            StreamHandler.emit(self, record)
+
+    def close(self):
+        with self.lock:
+            try:
+                if self.stream:
+                    try:
+                        self.flush()
+                    finally:
+                        stream = self.stream
+                        self.stream = None
+                        if hasattr(stream, "close"):
+                            stream.close()
+            finally:
+                StreamHandler.close(self)
+
+    def __repr__(self):
+        return "<%s %s (%s)>" % (type(self).__name__, self.baseFilename,
+                                  getLevelName(self.level))
 
 
-class Logger:
+class Filterer(object):
+    """
+    A base class for loggers and handlers which allows them to share
+    common code.
+    """
+    def __init__(self):
+        """
+        Initialize the list of filters to be an empty list.
+        """
+        self.filters = []
+
+    def addFilter(self, filter):
+        """
+        Add the specified filter to this handler.
+        """
+        if not (filter in self.filters):
+            self.filters.append(filter)
+
+    def removeFilter(self, filter):
+        """
+        Remove the specified filter from this handler.
+        """
+        if filter in self.filters:
+            self.filters.remove(filter)
+
+    def filter(self, record):
+        """
+        Determine if a record is loggable by consulting all the filters.
+
+        The default is to allow the record to be logged; any filter can veto
+        this by returning a false value.
+        If a filter attached to a handler returns a log record instance,
+        then that instance is used in place of the original log record in
+        any further processing of the event by that handler.
+        If a filter returns any other true value, the original log record
+        is used in any further processing of the event by that handler.
+
+        If none of the filters return false values, this method returns
+        a log record.
+        If any of the filters return a false value, this method returns
+        a false value.
+
+        .. versionchanged:: 3.2
+
+           Allow filters to be just callables.
+
+        .. versionchanged:: 3.12
+           Allow filters to return a LogRecord instead of
+           modifying it in place.
+        """
+        for f in self.filters:
+            if hasattr(f, 'filter'):
+                result = f.filter(record)
+            else:
+                result = f(record) # assume callable - will raise if not
+            if not result:
+                return False
+            if isinstance(result, LogRecord):
+                record = result
+        return record
+
+
+class Logger(Filterer):
     def __init__(self, name, level=NOTSET):
+        Filterer.__init__(self)
         self._native = _native.new(name, _handler_level(level))
         self.handlers = []
 
@@ -125,25 +258,195 @@ class Logger:
         if hdlr in self.handlers:
             self.handlers.remove(hdlr)
 
-    def log(self, level, msg, *args):
+    def findCaller(self, stack_info=False, stacklevel=1):
+        """
+        Find the stack frame of the caller so that we can note the source
+        file name, line number and function name.
+        """
+        f = currentframe()
+        #On some versions of IronPython, currentframe() returns None if
+        #IronPython isn't run with -X:Frames.
+        if f is None:
+            return "(unknown file)", 0, "(unknown function)", None
+        while stacklevel > 0:
+            next_f = f.f_back
+            if next_f is None:
+                ## We've got options here.
+                ## If we want to use the last (deepest) frame:
+                break
+                ## If we want to mimic the warnings module:
+                #return ("sys", 1, "(unknown function)", None)
+                ## If we want to be pedantic:
+                #raise ValueError("call stack is not deep enough")
+            f = next_f
+            if not _is_internal_frame(f):
+                stacklevel -= 1
+        co = f.f_code
+        sinfo = None
+        if stack_info:
+            with io.StringIO() as sio:
+                sio.write("Stack (most recent call last):\n")
+                traceback.print_stack(f, file=sio)
+                sinfo = sio.getvalue()
+                if sinfo[-1] == '\n':
+                    sinfo = sinfo[:-1]
+        return co.co_filename, f.f_lineno, co.co_name, sinfo
+
+    def makeRecord(self, name, level, fn, lno, msg, args, exc_info,
+                   func=None, extra=None, sinfo=None):
+        """
+        A factory method which can be overridden in subclasses to create
+        specialized LogRecords.
+        """
+        rv = _logRecordFactory(name, level, fn, lno, msg, args, exc_info, func,
+                             sinfo)
+        if extra is not None:
+            for key in extra:
+                if (key in ["message", "asctime"]) or (key in rv.__dict__):
+                    raise KeyError("Attempt to overwrite %r in LogRecord" % key)
+                rv.__dict__[key] = extra[key]
+        return rv
+
+    def log(self, level, msg, *args, **kwargs):
+        """
+        Log 'msg % args' with the integer severity 'level'.
+
+        To pass exception information, use the keyword argument exc_info with
+        a true value, e.g.
+
+        logger.log(level, "We have a %s", "mysterious problem", exc_info=True)
+        """
+        if not isinstance(level, int):
+            if raiseExceptions:
+                raise TypeError("level must be an integer")
+            else:
+                return
         if self.isEnabledFor(level):
-            record = _MessageRecord(self.name, level, msg, args)
-            _deliver(self, level, record)
+            self._log(level, msg, args, **kwargs)
 
-    def info(self, msg, *args):
-        self.log(INFO, msg, *args)
+    def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False,
+             stacklevel=1):
+        """
+        Low-level logging routine which creates a LogRecord and then calls
+        all the handlers of this logger to handle the record.
+        """
+        sinfo = None
+        if _srcfile:
+            #IronPython doesn't track Python frames, so findCaller raises an
+            #exception on some versions of IronPython. We trap it here so that
+            #IronPython can use logging.
+            try:
+                fn, lno, func, sinfo = self.findCaller(stack_info, stacklevel)
+            except ValueError: # pragma: no cover
+                fn, lno, func = "(unknown file)", 0, "(unknown function)"
+        else: # pragma: no cover
+            fn, lno, func = "(unknown file)", 0, "(unknown function)"
+        if exc_info:
+            if isinstance(exc_info, BaseException):
+                exc_info = (type(exc_info), exc_info, exc_info.__traceback__)
+            elif not isinstance(exc_info, tuple):
+                exc_info = sys.exc_info()
+        record = self.makeRecord(self.name, level, fn, lno, msg, args,
+                                 exc_info, func, extra, sinfo)
+        self.handle(record)
 
-    def debug(self, msg, *args):
-        self.log(DEBUG, msg, *args)
+    def handle(self, record):
+        """
+        Call the handlers for the specified record.
 
-    def warning(self, msg, *args):
-        self.log(WARNING, msg, *args)
+        This method is used for unpickled records received from a socket, as
+        well as those created locally. Logger-level filtering is applied.
+        """
+        if self.disabled:
+            return
+        maybe_record = self.filter(record)
+        if not maybe_record:
+            return
+        if isinstance(maybe_record, LogRecord):
+            record = maybe_record
+        self.callHandlers(record)
 
-    def error(self, msg, *args):
-        self.log(ERROR, msg, *args)
+    def callHandlers(self, record):
+        current = self
+        found = False
+        while current is not None:
+            for handler in current.handlers:
+                found = True
+                if record.levelno >= handler.level:
+                    handler.handle(record)
+            if not current.propagate:
+                break
+            current = current.parent
+        if not found and record.levelno >= WARNING:
+            sys.stderr.write(_default_formatter.format(record) + "\n")
+            sys.stderr.flush()
 
-    def critical(self, msg, *args):
-        self.log(CRITICAL, msg, *args)
+    def info(self, msg, *args, **kwargs):
+        """
+        Log 'msg % args' with severity 'INFO'.
+
+        To pass exception information, use the keyword argument exc_info with
+        a true value, e.g.
+
+        logger.info("Houston, we have a %s", "notable problem", exc_info=True)
+        """
+        if self.isEnabledFor(INFO):
+            self._log(INFO, msg, args, **kwargs)
+
+    def debug(self, msg, *args, **kwargs):
+        """
+        Log 'msg % args' with severity 'DEBUG'.
+
+        To pass exception information, use the keyword argument exc_info with
+        a true value, e.g.
+
+        logger.debug("Houston, we have a %s", "thorny problem", exc_info=True)
+        """
+        if self.isEnabledFor(DEBUG):
+            self._log(DEBUG, msg, args, **kwargs)
+
+    def warning(self, msg, *args, **kwargs):
+        """
+        Log 'msg % args' with severity 'WARNING'.
+
+        To pass exception information, use the keyword argument exc_info with
+        a true value, e.g.
+
+        logger.warning("Houston, we have a %s", "bit of a problem", exc_info=True)
+        """
+        if self.isEnabledFor(WARNING):
+            self._log(WARNING, msg, args, **kwargs)
+
+    def error(self, msg, *args, **kwargs):
+        """
+        Log 'msg % args' with severity 'ERROR'.
+
+        To pass exception information, use the keyword argument exc_info with
+        a true value, e.g.
+
+        logger.error("Houston, we have a %s", "major problem", exc_info=True)
+        """
+        if self.isEnabledFor(ERROR):
+            self._log(ERROR, msg, args, **kwargs)
+
+    def exception(self, msg, *args, exc_info=True, **kwargs):
+        """
+        Convenience method for logging an ERROR with exception information.
+        """
+        self.error(msg, *args, exc_info=exc_info, **kwargs)
+
+
+    def critical(self, msg, *args, **kwargs):
+        """
+        Log 'msg % args' with severity 'CRITICAL'.
+
+        To pass exception information, use the keyword argument exc_info with
+        a true value, e.g.
+
+        logger.critical("Houston, we have a %s", "major disaster", exc_info=True)
+        """
+        if self.isEnabledFor(CRITICAL):
+            self._log(CRITICAL, msg, args, **kwargs)
 
 
 def getLogger(name=None):

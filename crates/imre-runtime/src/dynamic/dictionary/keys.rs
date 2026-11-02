@@ -491,6 +491,20 @@ impl Context {
         if let Value::Union(union) = *self.heap.get(key) {
             return union.hash(self).map(ControlFlow::Break);
         }
+        if let Value::MemoryView { owner, hash } = *self.heap.get(key) {
+            if let Some(hash) = hash {
+                return Ok(ControlFlow::Break(hash));
+            }
+            let owner = Self::memoryview_owner(owner)?;
+            let hash = self.with_buffer_export(key, |ctx| {
+                ctx.dictionary_hash(owner)?;
+                Ok(crate::python_hash::bytes(ctx.bytes_like(key)?))
+            })?;
+            if let Value::MemoryView { hash: cached, .. } = self.heap.get_mut(key) {
+                *cached = Some(hash);
+            }
+            return Ok(ControlFlow::Break(hash));
+        }
         if let Value::Weak(wr) = *self.heap.get(key) {
             if wr.kind != super::super::weakref::Kind::Reference {
                 return Err(self.unhashable(key));
@@ -678,13 +692,14 @@ impl Context {
     pub(in super::super) fn lookup_builtin_type_name(
         &mut self,
         key: Id,
-        names: &[&'static str],
+        groups: &[&[&'static str]],
     ) -> Option<&'static str> {
+        let mut names = groups.iter().flat_map(|group| group.iter().copied());
         if let Value::Str(text) = self.heap.get(key) {
-            return names.iter().copied().find(|&name| name == text);
+            return names.find(|&name| name == text);
         }
         let hash = self.dictionary_hash(key).ok()?;
-        for &name in names {
+        for name in names {
             if normalized(crate::python_hash::text(name)) == hash {
                 let stored = self.text(name);
                 if self.dictionary_equal(stored, key).ok()? {

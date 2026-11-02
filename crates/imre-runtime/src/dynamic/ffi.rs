@@ -151,10 +151,6 @@ impl Context {
                 };
                 self.template_interpolation(a, b, conversion, spec)
             }
-            "template_literal" => {
-                let parts = self.items(a)?;
-                self.template_literal(&parts)
-            }
             "build_template" => {
                 let interpolations = self.items(b)?;
                 Ok(self.template_from_literal(a, interpolations))
@@ -234,7 +230,7 @@ impl Context {
                 self.module(&name)
             }
             "from" => self.import_from(a, b),
-            "import_star" => self.import_star(a, b),
+            "import_star" => self.import_star(a, b, false),
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {
@@ -348,8 +344,9 @@ impl Context {
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "class" | "parameterized_class" => {
+                let metaclass = self.dict_named_item(a, "metaclass");
                 let total = self.dict_named_item(a, "total");
-                self.class(b, c, total, op == "parameterized_class")
+                self.class(b, c, metaclass, total, op == "parameterized_class")
             }
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
@@ -629,8 +626,10 @@ pub(super) fn new_context<S: Into<String>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
 ) -> Context {
-    let executable = config["executable"]
-        .as_str()
+    let launcher = config["executable"].as_str();
+    let helper_executable =
+        launcher.map_or_else(crate::objects::python_executable_text, str::to_owned);
+    let executable = launcher
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
@@ -640,12 +639,13 @@ pub(super) fn new_context<S: Into<String>>(
         workers: Default::default(),
         config,
         executable,
+        helper_executable,
         argv: NONE,
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
         contexts: Vec::new(),
-        bytearray_exports: Vec::new(),
+        buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
         token_missing: NONE,
@@ -864,18 +864,6 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
     };
     let value = value.map(|v| ctx.alloc(v));
     finish(ctx, value)
-}
-
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_op(
-    ctx: *mut Context,
-    opcode: *const c_char,
-    a: Id,
-    b: Id,
-    c: Id,
-) -> Id {
-    // SAFETY: legacy call sites pass the same handles, without an instruction position.
-    unsafe { imre_dyn_op_at(ctx, opcode, a, b, c, std::ptr::null()) }
 }
 
 #[unsafe(no_mangle)]
@@ -1332,7 +1320,7 @@ impl Context {
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
                 .chain(self.contexts.iter().copied())
-                .chain(self.bytearray_exports.iter().copied())
+                .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
                 .chain(self.source_builtins)
                 .chain([

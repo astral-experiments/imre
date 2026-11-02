@@ -208,26 +208,10 @@ fn insert_rule(rule: Rule, append: bool) {
     filters.displayed.clear();
 }
 
-// Numeric identities are shared with the compiler's typed warning filters.
-const CATEGORIES: &[&str] = &[
-    "Warning",
-    "ResourceWarning",
-    "RuntimeWarning",
-    "UserWarning",
-    "DeprecationWarning",
-    "PendingDeprecationWarning",
-    "SyntaxWarning",
-    "FutureWarning",
-    "ImportWarning",
-    "UnicodeWarning",
-    "BytesWarning",
-    "EncodingWarning",
-];
-
 pub(crate) fn category_number(name: &str) -> Option<u32> {
-    CATEGORIES
+    imre_ast::exceptions::WARNING_CATEGORIES
         .iter()
-        .position(|&kind| kind == name)
+        .position(|kind| kind.name() == name)
         .map(|n| n as u32)
 }
 

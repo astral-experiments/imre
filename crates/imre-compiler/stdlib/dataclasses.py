@@ -1,7 +1,12 @@
-from _imre_dataclasses import is_defaultdict as _is_defaultdict, load_global as _load_global, loaded_module as _loaded_module, members as _members, metadata as _metadata
-from types import FunctionType, GenericAlias
+from _imre_dataclasses import (
+    field_identifier as _field_identifier, is_defaultdict as _is_defaultdict,
+    load_global as _load_global, loaded_module as _loaded_module,
+    make_type as _make_type, members as _members, metadata as _metadata,
+    retarget_class_cell as _retarget_class_cell, slotted_type as _slotted_type,
+)
+from types import FunctionType, GenericAlias, MemberDescriptorType
 
-__all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "asdict", "astuple", "replace",
+__all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "make_dataclass", "asdict", "astuple", "replace",
            "MISSING", "KW_ONLY", "InitVar", "FrozenInstanceError"]
 
 _FIELDS = "__dataclass_fields__"
@@ -235,13 +240,14 @@ def _missing(names, qualname, kind):
     raise TypeError(f'{qualname}() missing {len(names)} required {kind} argument{plural}: {joined}')
 
 
-def _initializer(cls, data, positional, qualname, frozen):
+def _initializer(owner_class, data, positional, qualname, frozen, slots):
     required = [f for f in positional if f.default is MISSING and f.default_factory is MISSING]
-    has_post_init = hasattr(cls, '__post_init__')
-    receiver = '__dataclass_self__' if 'self' in cls.__dataclass_fields__ else 'self'
+    has_post_init = hasattr(owner_class(), '__post_init__')
+    receiver = '__dataclass_self__' if 'self' in owner_class().__dataclass_fields__ else 'self'
     initvars = [f for f in data.values() if f._field_type is _FIELD_INITVAR]
     # An init=False InitVar has no parameter; CPython loads its name in the generated initializer's globals.
-    module = _loaded_module(cls.__module__) if any(not f.init for f in initvars) else None
+    module_name = owner_class().__module__
+    module = _loaded_module(module_name) if any(not f.init for f in initvars) else None
     def __init__(self, /, *args, **kwargs):
         values = {}
         for f, value in zip(positional, args):
@@ -273,7 +279,7 @@ def _initializer(cls, data, positional, qualname, frozen):
                 value = values[f.name]
             elif f.default_factory is not MISSING:
                 value = f.default_factory()
-            elif f.init:
+            elif f.init or (slots and f.default is not MISSING):
                 value = f.default
             else:
                 continue
@@ -296,7 +302,7 @@ def _initializer(cls, data, positional, qualname, frozen):
         def forward(__dataclass_self__, /, *args, **kwargs):
             return __init__(__dataclass_self__, *args, **kwargs)
 
-    owner = _loaded_module(cls.__module__)
+    owner = _loaded_module(module_name)
     namespace = owner.__dict__ if owner is not None else {}
     init = FunctionType(forward.__code__, namespace, "__init__", closure=forward.__closure__)
     names = tuple(f.name for f in data.values() if f.init)
@@ -304,11 +310,13 @@ def _initializer(cls, data, positional, qualname, frozen):
         if format != 1:
             raise NotImplementedError(format)
         annotations = {}
-        for base in reversed(cls.__mro__):
+        for base in reversed(owner_class().__mro__):
             annotations.update(getattr(base, "__annotations__", {}))
         result = {name: annotations[name] for name in names if name in annotations}
         result["return"] = None
         return result
+    annotate.__generated_by_dataclasses__ = True
+    annotate.__qualname__ = qualname + ".__annotate__"
     init.__annotate__ = annotate
     return init
 
@@ -345,6 +353,11 @@ def _annotation_marker(cls, annotation):
 
 def _decorate(cls, params):
     own = _members(cls)
+    if params.slots:
+        if '__slots__' in own:
+            raise TypeError(f'{cls.__name__} already specifies __slots__')
+        if type(cls) is not type or cls.__bases__ != (object,):
+            raise NotImplementedError('boxed slotted dataclasses require an ordinary object-based class')
     data = {}
     frozen_bases = []
     for base in cls.__mro__[-1:0:-1]:
@@ -367,6 +380,8 @@ def _decorate(cls, params):
             seen_kw_only = kw_only = True
             continue
         default = getattr(cls, name, MISSING)
+        if isinstance(default, MemberDescriptorType):
+            default = MISSING
         f = default if isinstance(default, Field) else field(default=default)
         if marker in ('ClassVar', 'InitVar'):
             if f.default_factory is not MISSING:
@@ -410,7 +425,7 @@ def _decorate(cls, params):
                 last_default = f.name
             elif last_default is not None:
                 raise TypeError(f'non-default argument {f.name!r} follows default argument {last_default!r}')
-        install('__init__', _initializer(cls, init_fields, positional, cls.__qualname__ + '.__init__', params.frozen))
+        install('__init__', _initializer(lambda: cls, init_fields, positional, cls.__qualname__ + '.__init__', params.frozen, params.slots))
     if '__replace__' not in own:
         cls.__replace__ = _replace
     if params.match_args and '__match_args__' not in own:
@@ -467,22 +482,77 @@ def _decorate(cls, params):
             cls.__hash__ = __hash__
         elif params.eq:
             cls.__hash__ = None
+    frozen_owner = cls
     if params.frozen:
         field_names = tuple(f.name for f in real_fields)
         for name in ('__setattr__', '__delattr__'):
             if name in own:
                 raise TypeError(f'Cannot overwrite attribute {name} in class {cls.__name__}')
         def __setattr__(self, name, value):
-            if type(self) is cls or name in field_names:
+            if type(self) is frozen_owner or name in field_names:
                 raise FrozenInstanceError(f'cannot assign to field {name!r}')
-            super(cls, self).__setattr__(name, value)
+            super(frozen_owner, self).__setattr__(name, value)
         def __delattr__(self, name):
-            if type(self) is cls or name in field_names:
+            if type(self) is frozen_owner or name in field_names:
                 raise FrozenInstanceError(f'cannot delete field {name!r}')
-            super(cls, self).__delattr__(name)
+            super(frozen_owner, self).__delattr__(name)
         install('__setattr__', __setattr__)
         install('__delattr__', __delattr__)
+    if params.slots:
+        # Generated methods may retain this frame. The original descriptor snapshot owns the old class.
+        own.clear()
+        cls, repaired_user_cell = _add_slots(cls, real_fields, params)
+        # CPython stops after repairing the first __class__ cell. A user method
+        # can have a separate cell from the one shared by generated methods.
+        if not repaired_user_cell:
+            frozen_owner = cls
     return cls
+
+
+def _dataclass_getstate(self):
+    return [getattr(self, f.name) for f in fields(self)]
+
+
+def _dataclass_setstate(self, state):
+    for f, value in zip(fields(self), state):
+        object.__setattr__(self, f.name, value)
+
+
+def _add_slots(cls, real_fields, params):
+    namespace = _members(cls)
+    slots = {f.name: f.doc for f in real_fields}
+    if params.weakref_slot:
+        slots['__weakref__'] = None
+    namespace['__slots__'] = slots if any(doc is not None for doc in slots.values()) else tuple(slots)
+    for f in real_fields:
+        namespace.pop(f.name, None)
+    namespace.pop('__dict__', None)
+    namespace.pop('__weakref__', None)
+    namespace['__qualname__'] = cls.__qualname__
+    newcls = _slotted_type(cls, namespace)
+
+    if params.frozen:
+        if '__getstate__' not in namespace:
+            newcls.__getstate__ = _dataclass_getstate
+        if '__setstate__' not in namespace:
+            newcls.__setstate__ = _dataclass_setstate
+
+    for original in namespace.values():
+        member = original
+        seen = {id(member): member}
+        while not isinstance(member, type) and hasattr(member, '__wrapped__'):
+            member = member.__wrapped__
+            key = id(member)
+            # Like inspect.unwrap, keep the objects alive and bound the chain.
+            if key in seen or len(seen) >= 1000:
+                raise ValueError(f'wrapper loop when unwrapping {original!r}')
+            seen[key] = member
+        if isinstance(member, property):
+            if any(_retarget_class_cell(f, cls, newcls) for f in (member.fget, member.fset, member.fdel)):
+                return newcls, True
+        elif _retarget_class_cell(member, cls, newcls):
+            return newcls, True
+    return newcls, False
 
 
 def dataclass(cls=None, /, *, init=True, repr=True, eq=True, order=False,
@@ -492,12 +562,83 @@ def dataclass(cls=None, /, *, init=True, repr=True, eq=True, order=False,
         raise ValueError('eq must be true if order is true')
     if weakref_slot and not slots:
         raise TypeError('weakref_slot is True but slots is False')
-    if slots:
-        raise NotImplementedError('boxed dataclass slots')
     params = _DataclassParams(init, repr, eq, order, unsafe_hash, frozen, match_args, kw_only, slots, weakref_slot)
     def wrap(cls):
         return _decorate(cls, params)
     return wrap if cls is None else wrap(cls)
+
+
+def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
+                   repr=True, eq=True, order=False, unsafe_hash=False, frozen=False,
+                   match_args=True, kw_only=False, slots=False, weakref_slot=False,
+                   module=None, decorator=dataclass):
+    """Create a class from field declarations and apply the requested decorator."""
+    from keyword import iskeyword
+    import sys
+
+    annotations = {}
+    defaults = {}
+    implicit = False
+    for item in fields:
+        if isinstance(item, str):
+            name = item
+            annotation = None
+            implicit = True
+        elif len(item) == 2:
+            name, annotation = item
+        elif len(item) == 3:
+            name, annotation, default = item
+            defaults[name] = default
+        else:
+            raise TypeError(f'Invalid field: {item!r}')
+
+        if not isinstance(name, str) or not _field_identifier(name):
+            raise TypeError(f'Field names must be valid identifiers: {name!r}')
+        if iskeyword(name):
+            raise TypeError(f'Field names must not be keywords: {name!r}')
+        if name in annotations:
+            raise TypeError(f'Field name duplicated: {name!r}')
+        annotations[name] = annotation
+
+    if implicit:
+        raise NotImplementedError('implicit Any fields require deferred typing.Any resolution')
+    if not isinstance(bases, tuple):
+        raise TypeError('type.__new__() argument 2 must be tuple, not ' + type(bases).__name__)
+
+    members = {}
+    if namespace is not None:
+        members.update(namespace)
+    members.update(defaults)
+    if '__slots__' in members or '__classcell__' in members:
+        raise NotImplementedError('boxed make_dataclass requires an ordinary class namespace')
+    if any(not isinstance(key, str) for key in members):
+        raise NotImplementedError('boxed class namespaces require string keys')
+    members.setdefault('__module__', 'types')
+    members.setdefault('__doc__', None)
+    members.setdefault('__qualname__', cls_name)
+    if not isinstance(members['__qualname__'], str):
+        raise TypeError('type __qualname__ must be a str')
+    for key in ('__init_subclass__', '__class_getitem__'):
+        value = members.get(key)
+        if isinstance(value, FunctionType):
+            members[key] = classmethod(value)
+    if isinstance(members.get('__new__'), FunctionType):
+        members['__new__'] = staticmethod(members['__new__'])
+    cls = _make_type(cls_name, bases, members)
+
+    def annotate(format):
+        # The field types are already values. Rendering strings requires annotationlib.
+        if format == 4:
+            raise NotImplementedError(format)
+        return annotations.copy()
+
+    cls.__annotate__ = annotate
+    if module is None:
+        module = sys._getframemodulename(1) or '__main__'
+    cls.__module__ = module
+    return decorator(cls, init=init, repr=repr, eq=eq, order=order,
+                     unsafe_hash=unsafe_hash, frozen=frozen, match_args=match_args,
+                     kw_only=kw_only, slots=slots, weakref_slot=weakref_slot)
 
 
 def _convert(obj, factory, named):

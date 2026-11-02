@@ -156,6 +156,7 @@ impl Type {
             | Self::TextOutput
             | Self::Hash
             | Self::JsonDecoder
+            | Self::JsonEncoder
             | Self::ZipFile
             | Self::ZipInfo
             | Self::Context
@@ -3640,6 +3641,7 @@ impl Emitter<'_, '_> {
                 | Type::TextOutput
                 | Type::Hash
                 | Type::JsonDecoder
+                | Type::JsonEncoder
                 | Type::ZipFile
                 | Type::ZipInfo
                 | Type::Context
@@ -4843,6 +4845,30 @@ impl Emitter<'_, '_> {
                     ty: returns,
                     operand: self.checked_instruction(format!(
                         "call ptr @{function}(ptr {})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::JsonEncoderNew => {
+                let [ascii, nan, sort] = std::array::from_fn(|index| {
+                    self.instruction(format!("zext i1 {} to i32", args[index].value.operand))
+                });
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @imre_json_encoder_new(i32 {ascii}, i32 {nan}, i32 {sort})"
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::JsonEncoderEncode(schema) => {
+                let schema = self.output.global_ref(json::schema_name(*schema));
+                let word = self.word(&args[1].value);
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_json_encoder_encode(ptr {}, i64 {word}, ptr @{schema})",
                         args[0].value.operand
                     )),
                     small_integer: false,
@@ -8662,6 +8688,9 @@ declare ptr @imre_async_process_communicate(ptr, ptr)
 declare ptr @imre_environ_copy()
 declare ptr @imre_environ_get(ptr, ptr)
 declare ptr @imre_getcwd()
+declare i64 @imre_os_transfer_fd(i64)
+declare ptr @imre_os_read(i64, i64)
+declare i64 @imre_os_write(i64, ptr)
 declare void @imre_os_close(i64)
 declare i64 @imre_os_open(ptr, i32, i64, i64, i64)
 declare i64 @imre_os_error_field(ptr, i32)
@@ -9075,6 +9104,8 @@ declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
 declare ptr @imre_json_decoder_new()
+declare ptr @imre_json_encoder_new(i32, i32, i32)
+declare ptr @imre_json_encoder_encode(ptr, i64, ptr)
 declare ptr @imre_json_decoder_memo(ptr)
 declare ptr @imre_json_decoder_decode(ptr, ptr)
 declare ptr @imre_json_loads_bytes(ptr)
@@ -9201,16 +9232,9 @@ define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline 
   ret i64 %selected
 }
 
-; Reassociation is exact only if the integral term, count and every partial
-; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
-define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
-entry:
-  %single = icmp eq i64 %count, 1
-  br i1 %single, label %one, label %bounds
-one:
-  %single_sum = fadd double %sum, %term
-  ret double %single_sum
-bounds:
+; Bound the absolute value of every partial sum for an integral projection.
+; The strict comparison also rejects a rounded-up or rounded-down boundary.
+define internal i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count) alwaysinline nounwind {
   %n = uitofp i64 %count to double
   %ni = icmp ule i64 %count, 9007199254740992
   %t = call double @llvm.trunc.f64(double %term)
@@ -9225,8 +9249,23 @@ bounds:
   %integral = and i1 %ti, %si
   %fits = and i1 %ni, %bounded
   %exact = and i1 %integral, %fits
+  ret i1 %exact
+}
+
+; Reassociation is exact only if the integral term, count and every partial
+; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
+define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
+entry:
+  %single = icmp eq i64 %count, 1
+  br i1 %single, label %one, label %bounds
+one:
+  %single_sum = fadd double %sum, %term
+  ret double %single_sum
+bounds:
+  %exact = call i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count)
   br i1 %exact, label %bulk, label %ordered
 bulk:
+  %n = uitofp i64 %count to double
   %product = fmul double %term, %n
   %result = fadd double %sum, %product
   ret double %result
@@ -9372,7 +9411,9 @@ declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_expandtabs(ptr, i64)
+declare ptr @imre_str_zfill(ptr, i64, i32)
 declare ptr @imre_unicode_normalize(ptr, ptr)
+declare ptr @imre_str_case_map(ptr, i32)
 declare ptr @imre_str_lower(ptr)
 declare ptr @imre_str_upper(ptr)
 declare ptr @imre_str_capitalize(ptr)
@@ -9394,6 +9435,8 @@ declare ptr @imre_str_splitlines(ptr)
 declare ptr @imre_str_splitlines_options(ptr, i32)
 declare i32 @imre_str_isspace(ptr)
 declare i32 @imre_str_isalnum(ptr)
+declare i32 @imre_str_isalpha(ptr)
+declare i32 @imre_str_isdigit(ptr)
 declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
@@ -9477,6 +9520,7 @@ declare ptr @imre_frozenset_strings(ptr)
 declare ptr @imre_sys_stdlib_module_names()
 declare i32 @imre_str_is_ascii(ptr)
 declare i32 @imre_str_is_lower(ptr)
+declare i32 @imre_str_is_title(ptr)
 declare i32 @imre_str_is_upper(ptr)
 declare ptr @imre_errno_module()
 declare ptr @imre_errno_namespace(ptr)
@@ -9547,7 +9591,7 @@ declare i1 @imre_calendar_is_datetime(ptr)
 declare ptr @imre_calendar_zone(ptr, i64)
 declare ptr @imre_calendar_utc()
 declare ptr @imre_calendar_zone_limit(i1)
-declare ptr @imre_calendar_now(ptr)
+declare ptr @imre_calendar_now(i64)
 declare ptr @imre_email_parsedate(ptr)
 declare ptr @imre_email_format_datetime(ptr, i1)
 declare ptr @imre_email_formatdate(i32, i64, i1, i1)

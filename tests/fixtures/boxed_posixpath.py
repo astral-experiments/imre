@@ -5,7 +5,7 @@ import posix
 import posixpath
 from os import altsep, fspath, linesep, pathsep, sep
 from os.path import altsep as path_altsep, pathsep as path_list_sep, sep as path_sep
-from posixpath import normpath
+from posixpath import abspath, normpath
 
 
 class Path:
@@ -53,6 +53,15 @@ def current():
     ):
         result = normpath(path=Path(value))
         assert result == expected and type(result) is type(expected)
+    assert os.path.splitroot is posixpath.splitroot is posix._path_splitroot_ex
+    for path, expected in (
+        (Text("relative"), ("", "", "relative")),
+        (Text("///a"), ("", "/", "//a")),
+        (Raw(b"//\xff"), (b"", b"//", b"\xff")),
+        ("/\udcff\x00", ("", "/", "\udcff\x00")),
+    ):
+        parts = os.path.splitroot(p=Path(path))
+        assert parts == expected and all(type(item) is type(expected[0]) for item in parts)
     assert os.path.commonprefix is posixpath.commonprefix is genericpath.commonprefix
     for paths, expected in (
         ([], ""), (["café", "cafés"], "café"), ([Path(b"/a"), Path(b"/b")], b"/"),
@@ -103,6 +112,17 @@ def current():
     assert os.path.join(Path("root"), "dirA") == "root/dirA"
     assert os.path.join("root", Path("/other"), Path("child")) == "/other/child"
     assert os.path.isabs(Path(b"/test"))
+    assert abspath is os.path.abspath is posixpath.abspath
+    assert abspath(path=Path(b"sub/../\xff")) == os.getcwdb().rstrip(b"/") + b"/\xff"
+    assert abspath(Path(os.fsdecode(b"//host/\xff/./name/.."))) == os.fsdecode(b"//host/\xff")
+    assert abspath(Raw(b"///host/../../dir")) == b"/dir"
+
+    class Rooted(Text):
+        def startswith(self, sep):
+            assert sep == "/"
+            return True
+
+    assert abspath(Rooted("a/../relative")) == "relative"
     assert os.path.relpath(Path("/a/./b"), start="/a/c") == "../b"
     assert os.path.relpath(Path(b"/a/\xff"), start=b"/a") == b"\xff"
     try:
@@ -126,6 +146,11 @@ def current():
         os.putenv(key, "native only")
         assert os.getenv(key, missing) == ""
         assert posix.environ[key.encode()] == b""
+        snapshot = os.environ.copy()
+        assert type(snapshot) is dict
+        assert snapshot[key] == ""
+        snapshot[key] = "copy only"
+        assert os.environ[key] == ""
         try:
             os.getenv(key.encode())
         except TypeError as error:

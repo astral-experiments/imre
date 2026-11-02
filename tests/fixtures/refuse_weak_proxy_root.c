@@ -9,7 +9,6 @@ void *__real_malloc(size_t);
 void *__real_realloc(void *, size_t);
 void *__real_calloc(size_t, size_t);
 uint64_t __real_imre_dyn_lit(void *, int, const unsigned char *, size_t);
-uint64_t __real_imre_dyn_op(void *, const char *, uint64_t, uint64_t, uint64_t);
 uint64_t __real_imre_dyn_op_at(void *, const char *, uint64_t, uint64_t, uint64_t, const uint32_t (*)[4]);
 static _Thread_local unsigned armed, active, calls, allocations, nth;
 static int deny(size_t size) {
@@ -40,12 +39,6 @@ uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, siz
 static int enter(const char *op) {
     if (armed && !strcmp(op, "get")) { ++calls; active = 1; return 1; }
     return 0;
-}
-uint64_t __wrap_imre_dyn_op(void *ctx, const char *op, uint64_t a, uint64_t b, uint64_t c) {
-    int probe = enter(op);
-    uint64_t result = __real_imre_dyn_op(ctx, op, a, b, c);
-    if (probe) active = 0;
-    return result;
 }
 uint64_t __wrap_imre_dyn_op_at(void *ctx, const char *op, uint64_t a, uint64_t b, uint64_t c, const uint32_t (*span)[4]) {
     int probe = enter(op);

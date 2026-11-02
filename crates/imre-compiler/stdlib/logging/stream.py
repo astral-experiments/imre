@@ -39,8 +39,7 @@ class Handler:
         return self._name
 
     def set_name(self, name: str | None) -> None:
-        _rename_handler(self, self._name, name)
-        self._name = name
+        _set_handler_name(self, name)
 
     name = property(get_name, set_name)
 
@@ -76,8 +75,21 @@ class Handler:
         pass
 
     def close(self) -> None:
-        self._closed = True
-        _rename_handler(self, self._name, None)
+        _close_handler(self)
+
+
+class NullHandler(Handler):
+    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
+        pass
+
+    def emit(self, record: LogRecord | None) -> None:
+        pass
+
+    def createLock(self) -> None:
+        self.lock = None
+
+    def _at_fork_reinit(self) -> None:
+        pass
 
 
 class StreamHandler(Handler):
@@ -118,17 +130,3 @@ class StreamHandler(Handler):
             old = self.stream
             self.stream = stream
         return old
-
-
-def _deliver(logger: Logger, level: int, record: LogRecord) -> None:
-    current: Logger | None = logger
-    found = False
-    while current is not None:
-        for handler in current.handlers:
-            found = True
-            if level >= handler.level:
-                handler.handle(record)
-        if not current.propagate:
-            break
-        current = current.parent
-    _fallback(logger, level, record, found)

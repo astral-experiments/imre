@@ -10,6 +10,8 @@ def current():
             events.append(("exit", kind, exc, tb))
 
     case = unittest.TestCase()
+    other = unittest.TestCase()
+    assert case._cleanups == [] and case._cleanups is not other._cleanups
     manager = Manager()
     manager.__enter__ = lambda: -1
     case.addCleanup(events.append, "oldest")

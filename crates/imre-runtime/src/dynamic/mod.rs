@@ -5,6 +5,7 @@ mod abstract_class;
 mod array;
 mod builtins;
 mod calls;
+mod class_annotations;
 mod complex;
 mod deque;
 mod dictionary;
@@ -19,6 +20,7 @@ mod lowlevel_threads;
 mod mapping_abc;
 mod module_type;
 mod namedtuple;
+mod slot_member;
 mod namespace;
 mod namespace_init;
 mod namespace_repr;
@@ -39,6 +41,7 @@ mod thread_rlock;
 mod thread_worker;
 mod typing;
 mod union;
+mod unraisable;
 mod value;
 mod weakref;
 mod wrapper_descriptor;
@@ -97,6 +100,7 @@ pub(crate) struct Context {
     heap: Heap,
     config: serde_json::Value,
     executable: PathBuf,
+    helper_executable: String,
     argv: Id,
     sys_path: Id,
     default_encoding: Id,
@@ -104,7 +108,7 @@ pub(crate) struct Context {
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
-    bytearray_exports: Vec<Id>,
+    buffer_exports: Vec<Id>,
     // Active sorts temporarily detach their list storage while Python callbacks run.
     sorting_lists: Vec<Id>,
     // Container ancestors visible to a reentrant Python __repr__.
@@ -288,8 +292,21 @@ impl Context {
         }
     }
 
+    fn memoryview_owner(owner: Option<Id>) -> Result<Id> {
+        owner.ok_or_else(|| {
+            Error::new(
+                "ValueError",
+                "operation forbidden on released memoryview object",
+            )
+        })
+    }
+
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
-        match self.heap.get(self.scalar_value(id)) {
+        let owner = match self.heap.get(id) {
+            Value::MemoryView { owner, .. } => Self::memoryview_owner(*owner)?,
+            _ => id,
+        };
+        match self.heap.get(self.scalar_value(owner)) {
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
             _ => Err(Error::new(
                 "TypeError",
@@ -301,19 +318,22 @@ impl Context {
         }
     }
 
-    /// Keep the underlying bytearray exported while an argument conversion runs Python.
+    /// Keep the buffer exported while an argument conversion runs Python.
     fn with_buffer_export<T>(
         &mut self,
         input: Id,
         convert: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
         let input = self.scalar_value(input);
-        if !matches!(self.heap.get(input), Value::ByteArray(_)) {
+        if !matches!(
+            self.heap.get(input),
+            Value::ByteArray(_) | Value::MemoryView { .. }
+        ) {
             return convert(self);
         }
-        self.bytearray_exports.push(input);
+        self.buffer_exports.push(input);
         let result = convert(self);
-        self.bytearray_exports.pop();
+        self.buffer_exports.pop();
         result
     }
 
@@ -330,7 +350,7 @@ impl Context {
     }
 
     fn check_bytearray_resize(&self, id: Id) -> Result<()> {
-        if self.bytearray_exports.contains(&id) {
+        if self.buffer_exports.contains(&id) {
             Err(Self::exported_bytearray_error())
         } else {
             Ok(())
@@ -1351,7 +1371,7 @@ impl Context {
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
         if let Some(&cell) = scope.closure.cells.get(name)
-            && let Value::Cell(contents) = self.heap.get(cell)
+            && let Value::Cell(contents) | Value::ClassCell(contents) = self.heap.get(cell)
         {
             return *contents;
         }
@@ -1594,9 +1614,9 @@ impl Context {
             if name == "__class__"
                 && s.class_body.is_none()
                 && let Some(cell) = s.class_cell
-                && let Value::ClassCell(Some(class)) = self.heap.get(cell)
+                && let Value::ClassCell(value) = self.heap.get(cell)
             {
-                return Ok(*class);
+                return value.ok_or_else(|| Error::new("NameError", "cannot access free variable '__class__' where it is not associated with a value in enclosing scope"));
             }
             if let Some(parent) = s.parent {
                 scope = parent;
@@ -1638,6 +1658,13 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if let Some(constants) = crate::objects::Calendar::class_constants(name) {
+            stdlib::datetime::install_members(self, name);
+            for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
+                let id = stdlib::datetime::store(self, value, NONE);
+                self.builtins.insert(format!("{name}.{field}"), id);
+            }
+        }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
             self.builtin(builtins::exception_initializer(name));
@@ -1667,6 +1694,7 @@ impl Context {
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
+            "memoryview" => builtins::MEMORYVIEW_METHODS,
             "int" => &["bit_length", "to_bytes", "__format__"],
             "float" => &["__format__", "__getformat__", "as_integer_ratio"],
             "bytes" => {
@@ -2021,7 +2049,28 @@ impl Context {
             let rlock = self.builtin(thread_rlock::CLASS);
             self.bind(scope, "RLock", rlock);
         }
+        if matches!(name, "io" | "_io") {
+            let error = self.builtin("BlockingIOError");
+            self.bind(scope, "BlockingIOError", error);
+        }
         match name {
+            "inspect" => {
+                for &(name, flag) in imre_ast::code_flags::INSPECT_FLAGS {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, name, value);
+                }
+            }
+            "abc" => {
+                let meta = self.abc_meta();
+                self.bind(scope, "ABCMeta", meta);
+            }
+            #[cfg(target_os = "linux")]
+            "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
+            #[cfg(target_os = "linux")]
+            "_imre_signal" if source.is_none() => {
+                let factory = self.builtin("_imre_signal.make_signals");
+                self.bind(scope, "make_signals", factory);
+            }
             "_thread" => {
                 for name in ["allocate_lock", "allocate"] {
                     let factory = self.builtin(&format!("_thread.{name}"));
@@ -2063,8 +2112,22 @@ impl Context {
                 let devnull = self.text("/dev/null");
                 self.bind(scope, "devnull", devnull);
             }
+            "math" if source.is_none() => {
+                let pi = self.alloc(Value::Float(std::f64::consts::PI));
+                self.bind(scope, "pi", pi);
+            }
             "errno" => stdlib::install_errno(self, scope)?,
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
+            "socket"
+                if source.is_none()
+                    || source.as_ref().is_some_and(|(path, _)| {
+                        self.config["bundled_root"].as_str().is_some_and(|root| {
+                            path == &std::path::Path::new(root).join("socket.py")
+                        })
+                    }) =>
+            {
+                stdlib::import_socket_constants(self, scope)?
+            }
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
@@ -2095,7 +2158,13 @@ impl Context {
             }
             "sys" => {
                 self.bind(scope, "modules", self.modules);
-                for name in ["audit", "addaudithook", "_getframe"] {
+                for name in [
+                    "audit",
+                    "addaudithook",
+                    "_getframe",
+                    "_getframemodulename",
+                    "unraisablehook",
+                ] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,
@@ -2103,6 +2172,12 @@ impl Context {
                         explicit: false,
                     });
                     self.bind(scope, name, function);
+                    if name == "unraisablehook" {
+                        self.bind(scope, "__unraisablehook__", function);
+                        if self.threads.system_module.is_none() {
+                            self.threads.default_unraisable_hook = Some(function);
+                        }
+                    }
                 }
                 for (name, original, stderr) in [
                     ("stdout", "__stdout__", false),
@@ -2119,6 +2194,12 @@ impl Context {
                 }
                 let jit = stdlib::jit_module(self)?;
                 self.bind(scope, "_jit", jit);
+            }
+            "re" => {
+                let pattern = self.builtin(value::REGEX_PATTERN_TYPE);
+                self.bind(scope, "Pattern", pattern);
+                let match_type = self.builtin(value::REGEX_MATCH_TYPE);
+                self.bind(scope, "Match", match_type);
             }
             "array" => {
                 let array = self.builtin("array.array");

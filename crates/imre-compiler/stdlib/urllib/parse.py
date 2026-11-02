@@ -1,6 +1,8 @@
 # URL helpers from CPython 3.14.5 Lib/urllib/parse.py (PSF-2.0).
 
 from collections import namedtuple
+import re
+import warnings
 from urllib.parse import unquote
 
 
@@ -64,6 +66,179 @@ DefragResultBytes._decoded_counterpart = DefragResult
 
 
 _WHATWG_C0_CONTROL_OR_SPACE = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f '
+
+
+def splittype(url):
+    warnings.warn("urllib.parse.splittype() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splittype(url)
+
+
+_typeprog = None
+def _splittype(url):
+    """splittype('type:opaquestring') --> 'type', 'opaquestring'."""
+    global _typeprog
+    if _typeprog is None:
+        _typeprog = re.compile('([^/:]+):(.*)', re.DOTALL)
+
+    match = _typeprog.match(url)
+    if match:
+        scheme, data = match.groups()
+        return scheme.lower(), data
+    return None, url
+
+
+def splithost(url):
+    warnings.warn("urllib.parse.splithost() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splithost(url)
+
+
+_hostprog = None
+def _splithost(url):
+    """splithost('//host[:port]/path') --> 'host[:port]', '/path'."""
+    global _hostprog
+    if _hostprog is None:
+        _hostprog = re.compile('//([^/#?]*)(.*)', re.DOTALL)
+
+    match = _hostprog.match(url)
+    if match:
+        host_port, path = match.groups()
+        if path and path[0] != '/':
+            path = '/' + path
+        return host_port, path
+    return None, url
+
+
+def splituser(host):
+    warnings.warn("urllib.parse.splituser() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splituser(host)
+
+
+def _splituser(host):
+    """splituser('user[:passwd]@host[:port]') --> 'user[:passwd]', 'host[:port]'."""
+    user, delim, host = host.rpartition('@')
+    return (user if delim else None), host
+
+
+def splitpasswd(user):
+    warnings.warn("urllib.parse.splitpasswd() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitpasswd(user)
+
+
+def _splitpasswd(user):
+    """splitpasswd('user:passwd') -> 'user', 'passwd'."""
+    user, delim, passwd = user.partition(':')
+    return user, (passwd if delim else None)
+
+
+def splitport(host):
+    warnings.warn("urllib.parse.splitport() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitport(host)
+
+
+_portprog = None
+def _splitport(host):
+    """splitport('host:port') --> 'host', 'port'."""
+    global _portprog
+    if _portprog is None:
+        _portprog = re.compile('(.*):([0-9]*)', re.DOTALL)
+
+    match = _portprog.fullmatch(host)
+    if match:
+        host, port = match.groups()
+        if port:
+            return host, port
+    return host, None
+
+
+def splitnport(host, defport=-1):
+    warnings.warn("urllib.parse.splitnport() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitnport(host, defport)
+
+
+def _splitnport(host, defport=-1):
+    """Split host and port, returning numeric port.
+    Return given default port if no ':' found; defaults to -1.
+    Return numerical port if a valid number is found after ':'.
+    Return None if ':' but not a valid number."""
+    host, delim, port = host.rpartition(':')
+    if not delim:
+        host = port
+    elif port:
+        if port.isdigit() and port.isascii():
+            nport = int(port)
+        else:
+            nport = None
+        return host, nport
+    return host, defport
+
+
+def splitquery(url):
+    warnings.warn("urllib.parse.splitquery() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitquery(url)
+
+
+def _splitquery(url):
+    """splitquery('/path?query') --> '/path', 'query'."""
+    path, delim, query = url.rpartition('?')
+    if delim:
+        return path, query
+    return url, None
+
+
+def splittag(url):
+    warnings.warn("urllib.parse.splittag() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splittag(url)
+
+
+def _splittag(url):
+    """splittag('/path#tag') --> '/path', 'tag'."""
+    path, delim, tag = url.rpartition('#')
+    if delim:
+        return path, tag
+    return url, None
+
+
+def splitattr(url):
+    warnings.warn("urllib.parse.splitattr() is deprecated as of 3.8, "
+                  "use urllib.parse.urlparse() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitattr(url)
+
+
+def _splitattr(url):
+    """splitattr('/path;attr1=value1;attr2=value2;...') ->
+        '/path', ['attr1=value1', 'attr2=value2', ...]."""
+    words = url.split(';')
+    return words[0], words[1:]
+
+
+def splitvalue(attr):
+    warnings.warn("urllib.parse.splitvalue() is deprecated as of 3.8, "
+                  "use urllib.parse.parse_qsl() instead",
+                  DeprecationWarning, stacklevel=2)
+    return _splitvalue(attr)
+
+
+def _splitvalue(attr):
+    """splitvalue('attr=value') --> 'attr', 'value'."""
+    attr, delim, value = attr.partition('=')
+    return attr, (value if delim else None)
 
 
 def unwrap(url):

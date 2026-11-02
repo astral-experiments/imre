@@ -316,7 +316,16 @@ impl Checker<'_> {
         instance: &impl Ranged,
         tail: &[ast::Expr],
     ) -> Result<Expr, String> {
-        if !matches!(receiver.ty, Type::Str | Type::StrLiteral(_)) {
+        let string_enum = matches!(receiver.ty, Type::StrEnum(_));
+        let copy = string_enum && method == ir::StrDescriptor::ZFill;
+        let mapping = matches!(
+            method,
+            ir::StrDescriptor::Title | ir::StrDescriptor::SwapCase
+        );
+        if !(matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            || copy
+            || (string_enum && (method.is_predicate() || mapping)))
+        {
             let name = self.exact_argument_type_name(receiver.ty).ok_or_else(|| {
                 error(
                     self.source,
@@ -340,13 +349,12 @@ impl Checker<'_> {
         let mut bound = call.clone();
         bound.arguments.args = tail.iter().cloned().collect();
         let receiver = Self::string_value(receiver);
-        let result = match method {
-            ir::StrDescriptor::IsAlnum
-            | ir::StrDescriptor::IsAscii
-            | ir::StrDescriptor::IsLower => {
-                self.splitlines_or_predicate(receiver, method.name(), &bound)?
-            }
-            _ => self.text_method(receiver, method.name(), &bound)?,
+        let result = if method.is_predicate() || mapping {
+            self.splitlines_or_unary_text(receiver, method.name(), &bound)?
+        } else if method == ir::StrDescriptor::ZFill {
+            self.zfill(receiver, &bound, copy)?
+        } else {
+            self.text_method(receiver, method.name(), &bound)?
         };
         Ok(evaluated(callable, result))
     }
@@ -375,10 +383,7 @@ impl Checker<'_> {
             self.module,
             call.arguments.keywords.iter().map(Ranged::range),
         );
-        let ty = if matches!(
-            method,
-            ir::StrDescriptor::IsAlnum | ir::StrDescriptor::IsAscii | ir::StrDescriptor::IsLower
-        ) {
+        let ty = if method.is_predicate() {
             Type::Bool
         } else {
             Type::Str
