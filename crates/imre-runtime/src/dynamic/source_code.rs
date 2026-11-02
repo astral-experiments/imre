@@ -19,6 +19,7 @@ pub(super) struct Program {
     class_attributes: Option<BTreeSet<String>>,
     class_cell: bool,
     class_nonlocal: bool,
+    has_named_bindings: bool,
     doc: Option<ruff_text_size::TextRange>,
     literals: HashMap<ruff_text_size::TextRange, Id>,
     pub(super) string_roots: Id,
@@ -184,6 +185,82 @@ fn synchronous_genexpr(genexpr: &ast::ExprGenerator) -> bool {
         }
     }
     true
+}
+
+/// Assignment expressions bind in the containing code unit, including unexecuted branches.
+#[derive(Default)]
+struct NamedBindings {
+    targets: Vec<(String, ruff_text_size::TextSize)>,
+    in_iterable: bool,
+    invalid_iterable: bool,
+}
+
+impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
+    // Compound statements lower their nested suites in their own source order.
+    fn visit_body(&mut self, _body: &'a [ast::Stmt]) {}
+
+    fn visit_annotation(&mut self, _expr: &'a ast::Expr) {}
+
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Named(named) = expr
+            && let ast::Expr::Name(name) = named.target.as_ref()
+        {
+            if self.in_iterable {
+                self.invalid_iterable = true;
+            } else {
+                self.targets.push((name.id.to_string(), name.start()));
+            }
+        }
+        if !self.in_iterable
+            && let ast::Expr::Lambda(lambda) = expr
+        {
+            if let Some(params) = &lambda.parameters {
+                self.visit_parameters(params);
+            }
+            return;
+        }
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            ast::visitor::walk_expr(self, expr)
+        });
+    }
+
+    fn visit_comprehension(&mut self, clause: &'a ast::Comprehension) {
+        let previous = std::mem::replace(&mut self.in_iterable, true);
+        self.visit_expr(&clause.iter);
+        self.in_iterable = previous;
+        for test in &clause.ifs {
+            self.visit_expr(test);
+        }
+    }
+}
+
+impl NamedBindings {
+    fn declare(self, program: &mut Program) -> Result<()> {
+        if self.invalid_iterable {
+            return Err(Error::new(
+                "SyntaxError",
+                "assignment expression cannot be used in a comprehension iterable expression",
+            ));
+        }
+        for (name, offset) in self.targets {
+            if let Some((kind, directive)) = program.directives.get(&name) {
+                if offset < *directive {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        format!(
+                            "name '{name}' is assigned to before {} declaration",
+                            kind.keyword()
+                        ),
+                    ));
+                }
+            }
+            if name == "__debug__" {
+                return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
+            }
+            program.locals.insert(name);
+        }
+        Ok(())
+    }
 }
 
 /// CPython records self.X stores from code units immediately enclosed by a class.
@@ -903,7 +980,7 @@ impl Program {
             } else {
                 "<genexpr>"
             };
-            let mut child = Self::new(self.filename.clone(), name);
+            let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
             child.qualname =
                 Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
             child.method_imports = self.method_imports.clone();
@@ -912,6 +989,11 @@ impl Program {
             child.first_line = line_at(expr.start().to_usize());
             let params = match expr {
                 ast::Expr::Lambda(lambda) => {
+                    if self.has_named_bindings {
+                        let mut named = NamedBindings::default();
+                        named.visit_expr(&lambda.body);
+                        named.declare(&mut child)?;
+                    }
                     let params = lambda.parameters.clone().unwrap_or_default();
                     let line = child.first_line;
                     let end = match child.lower_suspension(*lambda.body.clone(), line, true)? {
@@ -1121,7 +1203,7 @@ impl Program {
         Ok(())
     }
 
-    fn new(filename: Rc<str>, name: &str) -> Self {
+    fn new(filename: Rc<str>, name: &str, has_named_bindings: bool) -> Self {
         Self {
             filename,
             name: name.to_owned(),
@@ -1129,6 +1211,7 @@ impl Program {
             class_attributes: None,
             class_cell: false,
             class_nonlocal: false,
+            has_named_bindings,
             doc: None,
             literals: HashMap::new(),
             string_roots: NONE,
@@ -1194,7 +1277,7 @@ impl Program {
             .private_names
             .as_ref()
             .map_or(name.as_str(), |p| p.definition(name));
-        let mut child = Self::new(self.filename.clone(), original);
+        let mut child = Self::new(self.filename.clone(), original, self.has_named_bindings);
         child.qualname =
             Self::qualified_name(&self.qualname, self.class_attributes.is_some(), original);
         child.method_imports = self.method_imports.clone();
@@ -1214,7 +1297,15 @@ impl Program {
         active: Option<&mut LoopJumps>,
     ) -> Result<()> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-            self.lower_suite(body, lines, function, active)
+            use ast::visitor::Visitor;
+            let mut named = NamedBindings::default();
+            if self.has_named_bindings {
+                for stmt in &body {
+                    named.visit_stmt(stmt);
+                }
+            }
+            self.lower_suite(body, lines, function, active)?;
+            named.declare(self)
         })
     }
 
@@ -1859,7 +1950,7 @@ impl Context {
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
         let spellings = check_runtime_strings(&source, parsed.tokens())?;
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        let mut code = Program::new(Rc::from(filename), "<module>");
+        let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
         code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
             &source,
@@ -2226,7 +2317,7 @@ impl Context {
             return Err(Self::undefined_source_name(self.str_value(text)?, text));
         }
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        let mut program = Program::new(Rc::from("<string>"), "<module>");
+        let mut program = Program::new(Rc::from("<string>"), "<module>", source.contains(":="));
         program.template_expressions = Rc::new(imre_ast::strings::template_expressions(
             source,
             parsed.tokens(),
@@ -2440,6 +2531,7 @@ impl Context {
         let mut program = Program::new(
             self.str_value(code.filename)?.into(),
             self.str_value(code.name)?,
+            source.contains(":="),
         );
         program.method_imports = Rc::new(signature.method_imports);
         program.template_expressions = Rc::new(template_expressions);
@@ -3753,6 +3845,20 @@ impl Context {
                 }
                 self.check_source_local(code, scope, name)?;
                 self.lookup(scope, name)
+            }
+            Expr::Named(named) => {
+                let Expr::Name(name) = named.target.as_ref() else {
+                    return Err(unsupported("assignment expression target"));
+                };
+                let mark = self.heap.temporary_mark();
+                let value = eval(self, &named.value)?;
+                if self.store_source_name(scope, name.id.as_str(), value)?
+                    && self.heap.named_assignment(mark, value)
+                {
+                    self.collect_unreachable();
+                    self.heap.release_unbound_finalizers();
+                }
+                Ok(value)
             }
             Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
             Expr::TString(template) => {
