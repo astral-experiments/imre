@@ -268,17 +268,10 @@ fn checked(ret: libc::c_int) -> Result<libc::c_int> {
 pub extern "C" fn imre_os_strerror(code: usize) -> *const Str {
     finish(
         c_int(code).and_then(|code| {
-            // SAFETY: copy libc's terminated string before any further calls.
-            let message = unsafe { libc::strerror(code) };
-            if message.is_null() {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    "strerror() argument out of range",
-                ));
-            }
-            // SAFETY: the non-null pointer returned above remains live during this copy.
-            let text = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
-            Ok(StrOwner::into_raw(StrOwner::new(Str::from(text.as_ref()))))
+            crate::sys::with_errno_message(code, |message| {
+                let text = message.to_string_lossy();
+                Ok(StrOwner::into_raw(StrOwner::new(Str::from(text.as_ref()))))
+            })
         }),
         std::ptr::null(),
     )
