@@ -81,6 +81,7 @@ enum Instruction {
     },
     From(String, u32, Vec<(String, String)>),
     Define(Definition),
+    CheckAnnotationFormat,
     Annotations {
         entries: Vec<(String, ast::Expr)>,
         class: bool,
@@ -160,6 +161,7 @@ struct Definition {
 }
 
 enum DefinitionKind {
+    TypeAlias,
     Function(Box<ast::Parameters>),
     Class(Option<Box<ast::Arguments>>),
 }
@@ -1123,10 +1125,12 @@ impl Program {
                             strings.visit_parameters(parameters)
                         }
                         DefinitionKind::Class(Some(args)) => strings.visit_arguments(args),
-                        DefinitionKind::Class(None) => {}
+                        DefinitionKind::Class(None) | DefinitionKind::TypeAlias => {}
                     }
                 }
-                Instruction::ClassStart | Instruction::ClassEnd => {}
+                Instruction::ClassStart
+                | Instruction::ClassEnd
+                | Instruction::CheckAnnotationFormat => {}
                 Instruction::Yield(e) | Instruction::Return(e) | Instruction::Next(e, _) => {
                     if let Some(e) = e {
                         strings.visit_expr(e);
@@ -1718,6 +1722,32 @@ impl Program {
                         names.push((alias.name.to_string(), local));
                     }
                     Instruction::From(module.to_owned(), s.level, names)
+                }
+                Stmt::TypeAlias(s)
+                    if !function && self.class_attributes.is_none() && s.type_params.is_none() =>
+                {
+                    let ast::Expr::Name(name) = *s.name else {
+                        return Err(unsupported("type alias target"));
+                    };
+                    let name = ast::Identifier::new(name.id, name.range);
+                    let mut child = self.definition_body(&name, &[], line, lines);
+                    child.locals.insert(".format".to_owned());
+                    child
+                        .instructions
+                        .push((line, Instruction::CheckAnnotationFormat));
+                    let rhs_line =
+                        lines.partition_point(|n| *n <= s.value.start().to_usize()) as u32;
+                    child
+                        .instructions
+                        .push((rhs_line, Instruction::Return(Some(*s.value))));
+                    self.locals.insert(name.to_string());
+                    Instruction::Define(Definition {
+                        binding: name.to_string(),
+                        decorators: Vec::new(),
+                        body: Rc::new(child),
+                        kind: DefinitionKind::TypeAlias,
+                        annotate: None,
+                    })
                 }
                 Stmt::FunctionDef(mut s) if s.type_params.is_none() => {
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
@@ -2341,6 +2371,29 @@ impl Context {
             let args = [msg, location];
             let mut error = self.exception("SyntaxError", &args);
             self.retain_syntax_fields(&mut error, self.syntax_fields(&args))?;
+            return Err(error);
+        }
+        if let ast::Mod::Module(module) = parsed.syntax()
+            && let Some((expr, message)) = imre_ast::type_alias_error(&module.body)
+        {
+            let position = |offset: ruff_text_size::TextSize| {
+                let offset = offset.to_usize();
+                let line = lines.partition_point(|start| *start <= offset);
+                (line as i64, (offset - lines[line - 1] + 1) as i64)
+            };
+            let (line, column) = position(expr.start());
+            let (end_line, end_column) = position(expr.end());
+            let msg = self.text(message);
+            let line = self.int(line);
+            let mut fields = self.syntax_fields(&[msg]);
+            fields[1] = filename_id;
+            fields[2] = line;
+            fields[3] = self.int(column);
+            fields[5] = self.int(end_line);
+            fields[6] = self.int(end_column);
+            let mut error = self.exception("SyntaxError", &[msg]);
+            error.message.push_str(&self.syntax_suffix(filename_id, line)?);
+            self.retain_syntax_fields(&mut error, fields)?;
             return Err(error);
         }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
@@ -4127,6 +4180,10 @@ impl Context {
                 let annotate = self.source_annotator(provider, owner, scope)?;
                 self.bind_source_name(scope, "__annotate_func__", annotate)?;
             }
+            Instruction::CheckAnnotationFormat => {
+                let format = self.lookup(scope, ".format")?;
+                self.op("annotation_format", format, NONE, NONE)?;
+            }
             Instruction::ClassStart => {
                 self.enable_class_annotation_provider(scope);
                 // Only postponed annotations need a visible mapping from the start of the suite.
@@ -4184,6 +4241,16 @@ impl Context {
         let defaults = self.dict(vec![]);
         let mut bases = None;
         let sig = match &definition.kind {
+            DefinitionKind::TypeAlias => {
+                let format = self.text(".format");
+                let value_format = self.int(1);
+                self.put_item(defaults, format, value_format)?;
+                serde_json::json!({
+                    "posonly": [".format"],
+                    "scope_locals": [".format"],
+                    "scope_locals_complete": true,
+                })
+            }
             DefinitionKind::Class(args) => {
                 let mut values = Vec::new();
                 let mut keywords = Vec::new();
@@ -4274,6 +4341,10 @@ impl Context {
             scope
         };
         let mut value = self.source_function(code, defining_scope, defaults);
+        if matches!(definition.kind, DefinitionKind::TypeAlias) {
+            let name = self.code_object(code).name;
+            return self.op("type_alias", name, value, NONE);
+        }
         if let Some(provider) = &definition.annotate {
             let annotate = self.source_annotator(provider, code, defining_scope)?;
             self.set_function_attr(value, "__annotate__", annotate)?;

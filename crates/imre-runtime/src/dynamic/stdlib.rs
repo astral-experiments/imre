@@ -575,6 +575,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "ParamSpecArgs"
             | "ParamSpecKwargs"
             | "TypeVarTuple"
+            | "TypeAliasType"
             | "_new_typeddict"
             | "_UnpackGenericAlias"
             | "_eval_type_expression"

@@ -143,6 +143,21 @@ impl Context {
 
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
+            "annotation_format" => {
+                let limit = self.int(2);
+                let unsupported = self.binary(">", a, limit)?;
+                if self.truth(unsupported)? {
+                    let error = self.builtin("NotImplementedError");
+                    self.op("raise", error, NONE, FALSE)
+                } else {
+                    Ok(NONE)
+                }
+            }
+            "type_alias" => Ok(self.alloc(Value::TypeAlias {
+                name: a,
+                evaluator: b,
+                cached: None,
+            })),
             "template_interpolation" => {
                 let (Value::List(meta) | Value::Tuple(meta)) = self.heap.get(c) else {
                     unreachable!("compiled interpolation metadata");
