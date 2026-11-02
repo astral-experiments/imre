@@ -2013,6 +2013,7 @@ impl Context {
                 builtins::STR_METHODS
             }
             thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
+            stdlib::fixed_structseq::SCHED_PARAM => &["__new__", "__reduce__", "__replace__"],
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };

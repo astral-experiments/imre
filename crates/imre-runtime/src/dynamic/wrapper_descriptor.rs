@@ -96,6 +96,11 @@ impl BuiltinDescriptor {
             )),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
+            Some((stdlib::fixed_structseq::SCHED_PARAM, attr)) => Some((
+                stdlib::fixed_structseq::SCHED_PARAM,
+                attr,
+                &["__reduce__", "__replace__"][..],
+            )),
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 Some((layout.class, attr, &["__reduce__"][..]))
             }
@@ -116,6 +121,7 @@ impl BuiltinDescriptor {
                             | "__getinitargs__"
                             | "__reduce__"
                             | "__reduce_ex__"
+                            | "__replace__"
                             | "__fspath__"
                             | "__format__"
                             | "__enter__"
@@ -250,7 +256,9 @@ impl BuiltinDescriptor {
             }
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
             "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
-            class @ (stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS) => matches!(
+            class @ (stdlib::fixed_structseq::SCHED_PARAM
+            | stdlib::os::stat::CLASS
+            | stdlib::os::stat::VFS_CLASS) => matches!(
                 ctx.heap.get(receiver),
                 Value::NamedTuple {
                     class: Some(owner),
