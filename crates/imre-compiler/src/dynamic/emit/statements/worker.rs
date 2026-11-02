@@ -142,3 +142,38 @@ pub(super) fn captured_locks<'a>(
         _ => None,
     }
 }
+
+/// The only heap lookup in this method precedes the blocking native acquire.
+pub(super) fn bound_lock_field<'a>(
+    stmts: &'a [ast::Stmt],
+    params: &ast::Parameters,
+) -> Option<&'a str> {
+    if params.vararg.is_some() || params.kwarg.is_some() || !params.kwonlyargs.is_empty() {
+        return None;
+    }
+    let mut positional = params.posonlyargs.iter().chain(&params.args);
+    let receiver = positional.next()?.name();
+    if positional.next().is_some() || receiver.starts_with("__") {
+        return None;
+    }
+    let [ast::Stmt::Expr(statement)] = stmts else {
+        return None;
+    };
+    let ast::Expr::Call(call) = &*statement.value else {
+        return None;
+    };
+    let ast::Expr::Attribute(method) = &*call.func else {
+        return None;
+    };
+    let ast::Expr::Attribute(field) = &*method.value else {
+        return None;
+    };
+    let ast::Expr::Name(owner) = &*field.value else {
+        return None;
+    };
+    (call.arguments.is_empty()
+        && method.attr.as_str() == "acquire"
+        && owner.id.as_str() == receiver.as_str()
+        && !field.attr.starts_with("__"))
+    .then(|| field.attr.as_str())
+}

@@ -701,6 +701,8 @@ impl Function<'_, '_> {
                 }
             } else if let Some(names) = worker::captured_locks(stmts, params) {
                 signature["thread_captured_locks"] = json!(names);
+            } else if let Some(field) = worker::bound_lock_field(stmts, params) {
+                signature["thread_bound_lock_field"] = json!(field);
             }
         }
         let code = self.output.definition(self.source, prefix, body, start);
