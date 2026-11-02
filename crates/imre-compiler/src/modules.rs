@@ -1022,7 +1022,11 @@ impl IntrinsicModule {
     pub(crate) fn lacks_builtin_stub(self) -> bool {
         matches!(
             self,
-            Self::Opcode | Self::StringFormatting | Self::CollectionsNative | Self::DatetimeNative
+            Self::Opcode
+                | Self::StringFormatting
+                | Self::CollectionsNative
+                | Self::DatetimeNative
+                | Self::SignalNative
         )
     }
 
