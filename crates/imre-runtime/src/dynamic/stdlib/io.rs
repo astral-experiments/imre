@@ -260,11 +260,50 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     }
 }
 
+/// Qualify a native I/O failure at its originating call, before a Python override can forward it.
+pub(in super::super) fn qualify_error(
+    ctx: &mut Context,
+    mut error: Error,
+    class: Option<Id>,
+) -> Error {
+    if error.kind == "UnsupportedOperation" && error.class().is_none() {
+        error.class = class.unwrap_or_else(|| ctx.builtin("UnsupportedOperation"));
+    }
+    error
+}
+
+/// Each low-level I/O module owns a mutable exception type with CPython's two bases.
+pub(in super::super) fn unsupported_operation(ctx: &mut Context) -> Id {
+    let scope = ctx.scope("io", None);
+    let module = ctx.text("io");
+    let name = ctx.text("UnsupportedOperation");
+    ctx.bind(scope, "__module__", module);
+    ctx.bind(scope, "__qualname__", name);
+    ctx.bind(scope, "__doc__", NONE);
+    let os_error = ctx.builtin("OSError");
+    let value_error = ctx.builtin("ValueError");
+    let class = ctx
+        .allocate_class(
+            "UnsupportedOperation".into(),
+            scope,
+            vec![os_error, value_error],
+        )
+        .expect("the standard I/O exception bases have a linearization");
+    ctx.install_weakref_descriptor(class, scope);
+    class
+}
+
 /// Construct a low-level module's native I/O classes before io.py declares its ABCs.
 pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_object: Id) {
     let text_encoding = ctx.builtin("_io.text_encoding");
     ctx.bind(module, "text_encoding", text_encoding);
-    let unsupported = ctx.builtin("UnsupportedOperation");
+    // Intrinsic file objects retain the initial module's exception and stream classes.
+    let initial = !ctx.builtins.contains_key("_io._IOBase");
+    let unsupported = if initial {
+        ctx.builtin("UnsupportedOperation")
+    } else {
+        unsupported_operation(ctx)
+    };
     ctx.bind(module, "UnsupportedOperation", unsupported);
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
     ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
@@ -357,14 +396,17 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
             "line_buffering",
         ],
     );
-    // Native open and intrinsic file objects retain their initial _io classes.
-    let initial = !ctx.builtins.contains_key("_io._IOBase");
     let opener = if initial {
         ctx.builtins
             .insert("_io.open.__self__".into(), module_object);
         ctx.builtin("open")
     } else {
-        let callable = ctx.alloc(Value::IoOpen { reader, writer, random });
+        let callable = ctx.alloc(Value::IoOpen {
+            reader,
+            writer,
+            random,
+            unsupported,
+        });
         ctx.alloc(Value::Method {
             callable,
             receiver: module_object,
@@ -444,8 +486,13 @@ fn class(
         NEWLINE_DECODER => newline_decoder::CLASS,
         _ => "_io._IOBase",
     };
+    let unsupported = ctx.scope_name(module, "UnsupportedOperation").unwrap();
     for &name in methods {
-        let method = ctx.alloc(Value::IoMethod { owner, name });
+        let method = ctx.alloc(Value::IoMethod {
+            owner,
+            name,
+            unsupported,
+        });
         let attr = if matches!(
             name,
             "closed" | "encoding" | "errors" | "line_buffering" | "newlines"
@@ -461,6 +508,7 @@ fn class(
                 ctx.alloc(Value::IoMethod {
                     owner,
                     name: "set_chunk_size",
+                    unsupported,
                 })
             });
             ctx.alloc(Value::GetSetDescriptor {
