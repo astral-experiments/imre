@@ -68,7 +68,7 @@ impl Drop for NamedCloser {
     }
 }
 
-fn open_named(ctx: &mut Context, name: Id, on_close: Id) -> Result<Id> {
+fn open_named(ctx: &mut Context, name: Id, on_close: Id, write_only: bool) -> Result<Id> {
     let bytes = match ctx.heap.get(ctx.scalar_value(name)) {
         Value::Bytes(bytes) => bytes.clone(),
         _ => ctx.encode_filesystem_string(name)?,
@@ -77,7 +77,7 @@ fn open_named(ctx: &mut Context, name: Id, on_close: Id) -> Result<Id> {
         return Err(Error::new("ValueError", "embedded null byte"));
     }
     let path = PathBuf::from(OsString::from_vec(bytes));
-    let on_close = ctx.truth(on_close)?;
+    let on_close = !write_only && ctx.truth(on_close)?;
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -88,6 +88,13 @@ fn open_named(ctx: &mut Context, name: Id, on_close: Id) -> Result<Id> {
         Ok(file) => file,
         Err(error) => return Err(ctx.with_errno_filename(errno_error(error).into(), name)?),
     };
+    if write_only {
+        let writer = ctx.named_temporary_writer(file, name);
+        if writer.is_err() {
+            let _ = std::fs::remove_file(path);
+        }
+        return writer;
+    }
     let owners = (|| -> Result<_> {
         let file = FileState::buffered_random(file)?;
         let owner =
@@ -138,7 +145,11 @@ pub(super) fn path_operation(
         ));
     }
     match (name, args) {
-        ("open_named", &[name, on_close]) => open_named(ctx, name, on_close),
+        ("open_named", &[name, on_close]) => open_named(ctx, name, on_close, false),
+        ("open_named", &[name, on_close, writer]) => {
+            let write_only = ctx.truth(writer)?;
+            open_named(ctx, name, on_close, write_only)
+        }
         ("keep_named", &[guard]) => {
             let Value::NamedFileCloser(closer) = ctx.heap.get(guard) else {
                 return Err(Error::new(
