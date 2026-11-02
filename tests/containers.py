@@ -23,6 +23,17 @@ class Item:
 # Projection-only tuple locals may be scalarized. These cases protect snapshot
 # ownership, evaluation order, control-flow rebinding, and boxed escape paths.
 ACCEPTED = {
+    "deque_ordering": (
+        "from collections import deque\n"
+        "a, b = deque([2]), deque([2, 3])\n"
+        "print(a < b, a <= b, b > a, b >= a)\n"
+    ),
+    "saved_deque_comparison": (
+        "from collections import deque\n"
+        "less = deque.__lt__\n"
+        "a, b = deque([1]), deque([2])\n"
+        "print(less(a, b), a.__ge__(b))\n"
+    ),
     "dict_copy_constructor": 'original = {"one": 1}\nvalues: dict[str, int] = dict(original)\n',
     "set_empty_without_context": "values = set()\nprint(type(values) is set, len(values))\n",
     "set_iterable_constructor": "values: set[int] = set([1, 2])\nprint(type(values) is set, sorted(values))\n",

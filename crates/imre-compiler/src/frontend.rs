@@ -6156,6 +6156,9 @@ impl<'a> Checker<'a> {
                 return Ok((Binary::Repeat, right));
             }
         }
+        if op == ast::Operator::Add && matches!(left, Type::Deque(_)) {
+            return Err(self.object_builtin_error("collections.deque concatenation", node));
+        }
         if op == ast::Operator::Add && matches!(left, Type::Str | Type::Bytes) && right == left {
             return Ok((Binary::Concat, left));
         }
@@ -7315,6 +7318,15 @@ impl<'a> Checker<'a> {
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
+                    if matches!(
+                        op,
+                        ast::CmpOp::Lt | ast::CmpOp::LtE | ast::CmpOp::Gt | ast::CmpOp::GtE
+                    ) && (matches!(ty, Type::Deque(_)) || matches!(right, Type::Deque(_)))
+                    {
+                        return Err(
+                            self.scoped_builtin_error("collections.deque ordering", expression)
+                        );
+                    }
                     if ty == Type::Context || right == Type::Context {
                         return Err(error(
                             self.source,

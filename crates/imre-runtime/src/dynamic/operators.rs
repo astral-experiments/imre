@@ -4377,6 +4377,20 @@ impl Context {
             {
                 return self.complex_sum(op == "+", a, b);
             }
+            "+" if matches!(self.heap.get(self.scalar_value(a)), Value::Deque(_)) => {
+                if self.overrides_add(a, "collections.deque.__add__") {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for +{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
+                return deque::concat(self, a, b);
+            }
             "+" if let Some(storage) = self.list_storage(a) => {
                 if inplace && storage == a {
                     builtins::call(self, "list.extend", &[storage, b], &[])?;
@@ -4715,17 +4729,23 @@ impl Context {
         {
             return Ok(None);
         }
-        // Without a Python addition hook, list concatenation waits for the reflected operand.
-        if name == "__add__"
-            && self.list_storage(obj).is_some()
-            && !self.overrides_add(obj, "list.__add__")
-            && self.slot(obj, "__radd__").is_none()
-        {
-            return Ok(None);
+        // Sequence concatenation runs after the right operand's reflected numeric slot.
+        if name == "__add__" {
+            let native = match self.heap.get(self.scalar_value(obj)) {
+                Value::List(_) => Some("list.__add__"),
+                Value::Deque(_) => Some("collections.deque.__add__"),
+                _ => None,
+            };
+            if native.is_some_and(|slot| !self.overrides_add(obj, slot))
+                && self.slot(obj, "__radd__").is_none()
+            {
+                return Ok(None);
+            }
         }
         let method = if matches!(
             (name, self.heap.get(obj)),
-            ("__xor__" | "__rxor__", Value::Set { .. })
+            ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
+                | ("__xor__" | "__rxor__", Value::Set { .. })
                 | (
                     "__or__" | "__ror__",
                     Value::Dict(_) | Value::DefaultDict { .. }
@@ -5065,7 +5085,11 @@ impl Context {
         }
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
+                if matches!(op, "<" | "<=" | ">" | ">=")
+                    && matches!(self.heap.get(id), Value::Deque(_))
+                {
+                    self.builtins.get(deque::CLASS).copied()
+                } else if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
                     self.calendar_slot_class(id, matches!(op, "+" | "-"))
                 } else {
                     None
@@ -5101,7 +5125,7 @@ impl Context {
             && [a, b]
                 .into_iter()
                 .any(|id| match self.heap.get(self.scalar_value(id)) {
-                    Value::Set { .. } => true,
+                    Value::Set { .. } | Value::Deque(_) => true,
                     Value::Calendar { value, .. } => value.class() != "timezone",
                     _ => false,
                 });
