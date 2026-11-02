@@ -373,7 +373,7 @@ impl Builtin {
                 | ProcessOperation::EnvironClear
                 | ProcessOperation::EnvironUpdate { .. }
                 | ProcessOperation::EnvironGet
-                | ProcessOperation::GetCwd
+                | ProcessOperation::GetCwd { .. }
                 | ProcessOperation::Fd(_)
                 | ProcessOperation::Credential(_)
                 | ProcessOperation::CredentialId { .. }
@@ -1109,6 +1109,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_environb_index"
                 | "imre_environ_index"
                 | "imre_getcwd"
+                | "imre_getcwdb"
                 | "imre_os_linesep"
                 | "imre_os_pathsep"
                 | "imre_shutil_which"

@@ -545,6 +545,19 @@ pub extern "C" fn imre_getcwd() -> *const Str {
     finish(result, std::ptr::null())
 }
 
+/// Returns the raw POSIX working directory without applying a text codec.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_getcwdb() -> *const Bytes {
+    let cwd = std::env::current_dir()
+        .map_err(files::errno_error)
+        .map(|cwd| {
+            crate::BytesOwner::into_raw(crate::BytesOwner::new(
+                cwd.into_os_string().into_encoded_bytes(),
+            ))
+        });
+    finish(cwd, std::ptr::null())
+}
+
 fn suffix_start(name: &str) -> Option<usize> {
     let index = name.rfind('.')?;
     name[..index]

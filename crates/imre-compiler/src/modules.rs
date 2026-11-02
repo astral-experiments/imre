@@ -956,7 +956,9 @@ pub(crate) enum Intrinsic {
     EnvironBytes,
     BoolConstant(bool),
     GetEnv,
-    GetCwd,
+    GetCwd {
+        bytes: bool,
+    },
     Chdir,
     Strerror,
     StatResult,
@@ -2689,7 +2691,9 @@ impl IntrinsicModule {
             (Self::Os, "environb") if cfg!(unix) => Intrinsic::EnvironBytes,
             (Self::Os, "supports_bytes_environ") => Intrinsic::BoolConstant(cfg!(unix)),
             (Self::Os, "getenv") => Intrinsic::GetEnv,
-            (Self::Os, "getcwd") => Intrinsic::GetCwd,
+            (Self::Os, "getcwd" | "getcwdb") => Intrinsic::GetCwd {
+                bytes: name == "getcwdb",
+            },
             (Self::Os, "fspath") => Intrinsic::FsPath,
             (Self::Os, "_fspath") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os._fspath"),
             (Self::Os, "fsdecode") => Intrinsic::FsDecode,
