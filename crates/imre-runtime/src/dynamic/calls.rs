@@ -287,6 +287,9 @@ impl Context {
             Value::Native(kind) if kind == "type" && name == "mro" => {
                 self.builtins.get("type.mro").copied()
             }
+            Value::Native(kind) if kind == "builtin_function_or_method" && name == "__reduce__" => {
+                self.builtins.get("builtin_function_or_method.__reduce__").copied()
+            }
             Value::Native(kind) if kind == "object" => match name {
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
                 "__ne__" => self.builtins.get("object.__ne__").copied(),
@@ -1888,6 +1891,14 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if matches!(name, "__reduce__" | "__reduce_ex__") {
+            let owner = self.builtin("builtin_function_or_method");
+            if obj == owner || self.builtin_type_name(obj) == Some("builtin_function_or_method") {
+                let descriptor = self.class_attr(owner, name).unwrap();
+                let receiver = if obj == owner { NONE } else { obj };
+                return self.bind_attribute(descriptor, receiver, owner);
+            }
+        }
         if name == "__dict__"
             && let Some(&dictionary) = self.native_type_dicts.get(&obj)
         {
@@ -5711,6 +5722,9 @@ impl Context {
             }
             Value::Native(name) if name == "object.__getstate__" => {
                 self.object_getstate(&args, &kwargs)
+            }
+            Value::Native(name) if name == "builtin_function_or_method.__reduce__" => {
+                stdlib::pickle::builtin_reduce(self, &args, &kwargs)
             }
             Value::Native(name)
                 if matches!(name.as_str(), "object.__reduce__" | "object.__reduce_ex__") =>

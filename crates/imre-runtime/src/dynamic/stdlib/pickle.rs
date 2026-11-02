@@ -148,6 +148,56 @@ fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
     Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
 }
 
+/// CPython's PyCFunction reducer looks the method up again on the restored receiver.
+pub(in crate::dynamic) fn builtin_reduce(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&method, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "unbound method builtin_function_or_method.__reduce__() needs an argument",
+        ));
+    };
+    if ctx.builtin_type_name(method) != Some("builtin_function_or_method") {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '__reduce__' for 'builtin_function_or_method' objects doesn't apply to a '{}' object",
+                ctx.builtin_type_name(method)
+                    .unwrap_or_else(|| ctx.type_name(method)),
+            ),
+        ));
+    }
+    if !kwargs.is_empty() || !rest.is_empty() {
+        let detail = if kwargs.is_empty() {
+            format!("no arguments ({} given)", rest.len())
+        } else {
+            "no keyword arguments".to_owned()
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!("builtin_function_or_method.__reduce__() takes {detail}"),
+        ));
+    }
+    let receiver = match *ctx.heap.get(method) {
+        Value::Method { receiver, .. } => receiver,
+        _ => match ctx.lookup_attr(method, "__self__") {
+            Ok(value) => value,
+            Err(e) if ctx.is_attribute_error(&e) => NONE,
+            Err(e) => return Err(e),
+        },
+    };
+    let name = ctx.lookup_attr(method, "__name__")?;
+    if receiver == NONE || matches!(ctx.heap.get(receiver), Value::Module { .. }) {
+        return Ok(name);
+    }
+    let args = ctx.alloc(Value::Tuple(vec![receiver, name]));
+    let getattr = ctx.builtin("getattr");
+    Ok(ctx.alloc(Value::Tuple(vec![getattr, args])))
+}
+
 /// Delegate to the instance hook only when its class overrides object's reducer.
 pub(in crate::dynamic) fn object_reduce(
     ctx: &mut Context,
@@ -534,6 +584,13 @@ impl Pickler {
             ctx.call(reducer, vec![obj], Vec::new())?
         } else {
             match ctx.heap.get(obj) {
+                // Native __new__ functions are bound to their defining type.
+                Value::Native(symbol)
+                    if super::super::builtins::constructor_owner(symbol).is_some()
+                        && ctx.builtin_type_name(obj) == Some("builtin_function_or_method") =>
+                {
+                    Self::call_reduce_hook(ctx, obj, self.protocol)?
+                }
                 Value::Class { .. } | Value::Native(_) => return self.save_global(ctx, obj, None),
                 Value::Ellipsis => return self.save_global(ctx, obj, Some("Ellipsis".into())),
                 Value::NotImplemented => {

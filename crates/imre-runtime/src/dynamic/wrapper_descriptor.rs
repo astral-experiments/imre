@@ -203,6 +203,7 @@ impl BuiltinDescriptor {
             "frozenset.__sizeof__" => ("frozenset", "__sizeof__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
+            "builtin_function_or_method.__reduce__" => ("builtin_function_or_method", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__add__" => ("int", "__add__"),
             "int.__index__" => ("int", "__index__"),
@@ -366,7 +367,7 @@ impl BuiltinDescriptor {
             "memoryview" => matches!(ctx.heap.get(receiver), Value::MemoryView { .. }),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "member_descriptor" => ctx.exact_type(receiver)? == ctx.builtin("member_descriptor"),
-            "method_descriptor" | "wrapper_descriptor" => {
+            "builtin_function_or_method" | "method_descriptor" | "wrapper_descriptor" => {
                 ctx.builtin_type_name(receiver) == Some(self.owner)
             }
             "dict" => ctx.dict_storage(receiver).is_some(),
