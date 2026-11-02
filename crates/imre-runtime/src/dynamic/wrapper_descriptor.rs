@@ -231,9 +231,7 @@ impl BuiltinDescriptor {
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
             deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
-            "bool" | "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"
-            | "frozenset" => ctx.builtin_slot_accepts(receiver, self.owner),
-            _ => matches!(ctx.heap.get(receiver), Value::ThreadLocal(_)),
+            _ => ctx.builtin_slot_accepts(receiver, self.owner),
         };
         if !accepts {
             return Err(Error::new(

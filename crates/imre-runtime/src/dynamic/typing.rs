@@ -1757,13 +1757,6 @@ impl Context {
         ordinary_slots: bool,
     ) -> Result<Id> {
         for &base in &bases {
-            if matches!(self.heap.get(base), Value::Native(name) if name == super::thread_local::CLASS)
-            {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "thread-local subclasses require per-thread initialization",
-                ));
-            }
             if matches!(self.heap.get(base), Value::Native(name) if name == "typing._UnpackGenericAlias")
             {
                 return Err(Error::new(
@@ -1807,6 +1800,17 @@ impl Context {
         }
         let ancestors = self.linearized_bases(&bases, false)?;
         self.check_member_slot_bases(&bases, &ancestors)?;
+        // A mixed layout needs CPython's solid-base check before choosing a native allocator.
+        if bases.len() > 1
+            && bases
+                .iter()
+                .any(|&base| self.has_base(base, super::thread_local::CLASS))
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "multiple bases for a thread-local subclass are unsupported",
+            ));
+        }
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
         // Keep allocation and special-slot dispatch on their existing native layout.

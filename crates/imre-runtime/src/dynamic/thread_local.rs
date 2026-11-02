@@ -66,6 +66,38 @@ impl<'a> Name<'a> {
     }
 }
 
+/// Allocate a local with its real subclass and a distinct dictionary for the creating thread.
+pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&class, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "_thread._local.__new__(): not enough arguments",
+        ));
+    };
+    let base = ctx.builtin(CLASS);
+    if !ctx.subclass(class, base) {
+        return Err(ctx.invalid_new_subtype(CLASS, class));
+    }
+    ctx.check_local_initializer(class)?;
+    if !args.is_empty() || !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "Initialization arguments are not supported",
+        ));
+    }
+    let storage = ctx.alloc(Value::ThreadLocal(Default::default()));
+    if class == base {
+        return Ok(storage);
+    }
+    let object = ctx.instance(class, None);
+    let Value::Instance { scalar, .. } = ctx.heap.get_mut(object) else {
+        unreachable!()
+    };
+    *scalar = Some(storage);
+    ctx.local_dict(object)?;
+    Ok(object)
+}
+
 /// Apply one of the type's attribute wrappers after validating its receiver and arguments.
 pub(super) fn method(
     ctx: &mut Context,
@@ -79,7 +111,7 @@ pub(super) fn method(
             format!("descriptor '{slot}' of '{CLASS}' object needs an argument"),
         ));
     };
-    if !matches!(ctx.heap.get(obj), Value::ThreadLocal(_)) {
+    if !ctx.builtin_slot_accepts(obj, CLASS) {
         return Err(Error::new(
             "TypeError",
             format!(
@@ -148,19 +180,36 @@ impl Dictionaries {
 }
 
 impl Context {
-    fn local_dict(&mut self, obj: Id) -> Id {
-        let Value::ThreadLocal(local) = self.heap.get(obj) else {
+    fn check_local_initializer(&self, class: Id) -> Result<()> {
+        if self.class_attr(class, "__init__").is_some_and(
+            |init| !matches!(self.heap.get(init), Value::Native(name) if name == "object.__init__"),
+        ) {
+            return Err(Error::new(
+                "NotImplementedError",
+                "thread-local subclasses with custom initialization require per-thread initialization",
+            ));
+        }
+        Ok(())
+    }
+
+    fn local_dict(&mut self, obj: Id) -> Result<Id> {
+        let storage = self.scalar_value(obj);
+        let Value::ThreadLocal(local) = self.heap.get(storage) else {
             unreachable!()
         };
         if let Some(dict) = local.current() {
-            return dict;
+            return Ok(dict);
+        }
+        // A subclass can gain an initializer after its first instance was created.
+        if let Some(class) = self.heap.get(obj).instance_class() {
+            self.check_local_initializer(class)?;
         }
         let dict = self.dict(Vec::new());
-        let Value::ThreadLocal(local) = self.heap.get_mut(obj) else {
+        let Value::ThreadLocal(local) = self.heap.get_mut(storage) else {
             unreachable!()
         };
         local.insert(dict);
-        dict
+        Ok(dict)
     }
 
     /// Preserve an exception from the lookup separately from an absent key.
@@ -172,9 +221,18 @@ impl Context {
     }
 
     pub(super) fn local_attribute(&mut self, obj: Id, name: Name<'_>) -> Result<Id> {
-        let dict = self.local_dict(obj);
+        let dict = self.local_dict(obj)?;
         if name.is_dict(self)? {
             return Ok(dict);
+        }
+        if let Some(class) = self.heap.get(obj).instance_class() {
+            let text = name.text(self)?;
+            if self.local_data_attribute(class, &text, false) {
+                return self.default_get_attr(obj, &text);
+            }
+            let key = name.key(self);
+            let field = self.local_dict_value(dict, key)?;
+            return self.instance_attribute(obj, class, field, &text);
         }
         let key = name.key(self);
         if let Some(value) = self.local_dict_value(dict, key)? {
@@ -227,7 +285,7 @@ impl Context {
         name: Name<'_>,
         value: Option<Id>,
     ) -> Result<()> {
-        let dict = self.local_dict(obj);
+        let dict = self.local_dict(obj)?;
         if name.is_dict(self)? {
             let key = name.key(self);
             let repr = if let Some(hook) = self.bound_slot(key, "__repr__")? {
@@ -248,12 +306,34 @@ impl Context {
             };
             return Err(Error::new(
                 "AttributeError",
-                format!("'_thread._local' object attribute {repr} is read-only"),
+                format!(
+                    "'{}' object attribute {repr} is read-only",
+                    self.type_name(obj)
+                ),
             ));
         }
         let text = name.text(self)?;
         let key = name.key(self);
-        if self.lookup_builtin_type_name(key, TYPE_NAMES) == Some("__class__") {
+        if let Some(class) = self.heap.get(obj).instance_class() {
+            if self.local_data_attribute(class, &text, true) {
+                return match value {
+                    Some(value) => self.default_set_attr(obj, &text, value),
+                    None => self.default_delete_attr(obj, &text),
+                };
+            }
+            if text == "__class__" && self.class_attr(class, &text).is_none() {
+                if value == Some(class) {
+                    return Ok(());
+                }
+                if value.is_none_or(|value| self.builtin_type_name(value) != Some("type")) {
+                    return self.update_base_local_attribute(obj, "__class__", value);
+                }
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "reassigning a thread-local subclass is unsupported",
+                ));
+            }
+        } else if self.lookup_builtin_type_name(key, TYPE_NAMES) == Some("__class__") {
             return self.update_base_local_attribute(obj, "__class__", value);
         }
         let result = match value {
