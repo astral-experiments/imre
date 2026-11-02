@@ -59,3 +59,25 @@ def current():
         if os.path.exists(path):
             os.unlink(path)
         os.rmdir(folder)
+
+
+    # Frame code, the module spec and the line cache refer to the same provider.
+    import __hello__
+    import contextlib
+    import reprlib
+    import zlib
+    for module, function in ((contextlib, contextlib.ExitStack.callback),
+                             (reprlib, reprlib.recursive_repr)):
+        spec = module.__spec__
+        source = spec.loader.get_source(spec.name)
+        code = function.__code__
+        definition = source.splitlines()[code.co_firstlineno - 1]
+        assert definition.lstrip().startswith("def " + code.co_name + "(")
+        assert spec.origin == code.co_filename
+        assert linecache.lazycache(code.co_filename, module.__dict__)
+        assert linecache.getline(code.co_filename, code.co_firstlineno) == definition + "\n"
+        assert linecache.getlines(code.co_filename) is linecache.getlines(code.co_filename)
+    assert zlib.__spec__.loader.get_source("zlib") is None
+    if __hello__.__spec__.origin == "frozen":
+        assert __hello__.__spec__.loader.get_source("__hello__") is None
+    linecache.clearcache()

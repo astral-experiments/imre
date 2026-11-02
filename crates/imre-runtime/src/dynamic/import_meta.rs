@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::objects::exceptions::string_repr;
 
 use super::{
-    Context,
+    Context, SourceModule,
     importlib::SourceBody,
     stdlib,
     value::{Error, Id, NONE, Result, Value},
@@ -65,14 +65,35 @@ impl Context {
         })
     }
 
-    fn bundled_source(&self, name: &str) -> Option<(PathBuf, SourceBody)> {
+    fn bundled_registration(&self, name: &str) -> Option<&SourceModule> {
         let root = Path::new(self.config["bundled_root"].as_str()?);
-        let source = self
-            .sources
+        self.sources
             .get(name)?
             .iter()
-            .find(|s| s.path.starts_with(root))?;
+            .find(|s| s.path.starts_with(root))
+    }
+
+    fn bundled_source(&self, name: &str) -> Option<(PathBuf, SourceBody)> {
+        let source = self.bundled_registration(name)?;
         Some((source.path.clone(), SourceBody::Compiled(source.code)))
+    }
+
+    /// Return the source of this loader's registered initializer when it has a Python body.
+    pub(super) fn native_source(&mut self, name: &str, bundled: bool) -> Result<Id> {
+        let frozen = self.is_frozen(name);
+        let sealed = frozen || stdlib::is_module(name);
+        let registration = self.bundled_registration(name);
+        if sealed == bundled || (!sealed && registration.is_none()) {
+            return Err(Self::missing_module(name));
+        }
+        let text = registration.and_then(|source| source.bundled_text);
+        Ok(if frozen {
+            NONE
+        } else {
+            text.map_or(NONE, |bytes| {
+                self.text(std::str::from_utf8(bytes).expect("compiler-emitted Python is UTF-8"))
+            })
+        })
     }
 
     fn native_locations(&self, name: &str, source: Option<&Path>) -> Result<Vec<PathBuf>> {
