@@ -12,6 +12,7 @@ struct Field {
 #[derive(Debug, PartialEq)]
 pub(crate) enum UnpackedField {
     Integer(u64),
+    Signed(i64),
     Bytes(Vec<u8>),
 }
 
@@ -65,7 +66,11 @@ impl StructFormat {
                     size_of::<std::ffi::c_ulong>(),
                     align_of::<std::ffi::c_ulong>(),
                 ),
-                b'L' => (4, 1),
+                b'l' if prefix == b'@' => (
+                    size_of::<std::ffi::c_long>(),
+                    align_of::<std::ffi::c_long>(),
+                ),
+                b'L' | b'l' => (4, 1),
                 b'B' => (1, 1),
                 b'H' => (2, align_of::<u16>()),
                 b'I' => (4, align_of::<u32>()),
@@ -145,7 +150,13 @@ impl StructFormat {
                 word[8 - field.len()..].copy_from_slice(field);
                 u64::from_be_bytes(word)
             };
-            result.push(UnpackedField::Integer(value));
+            result.push(if code == b'l' {
+                // Move the field's sign bit into bit 63 before the arithmetic shift.
+                let shift = (8 - field.len()) * 8;
+                UnpackedField::Signed(((value << shift) as i64) >> shift)
+            } else {
+                UnpackedField::Integer(value)
+            });
         }
         Ok(result)
     }
