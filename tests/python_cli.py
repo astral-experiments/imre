@@ -1601,6 +1601,11 @@ def main():
             )
             compare("-IB", arithmetic, native_args=("run", arithmetic, "--quiet"))
 
+        accessors = Path(__file__).resolve().parent / "fixtures" / "tempfile_accessors.py"
+        compare("-IB", accessors, native_args=("run", accessors, "--quiet"))
+        if sys.platform == "linux":
+            compare("-B", accessors, extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
+
         if sys.platform == "linux" and sys.version_info >= (3, 13):
             count = Path(__file__).resolve().parent / "fixtures" / "os_cpu_count.py"
             compare("-IB", count)
