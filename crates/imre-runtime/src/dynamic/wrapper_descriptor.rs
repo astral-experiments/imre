@@ -68,12 +68,19 @@ impl BuiltinDescriptor {
                 method: !name.starts_with("__")
                     || matches!(
                         name,
-                        "__reversed__" | "__reduce__" | "__fspath__" | "__format__" | "__enter__" | "__exit__"
+                        "__reversed__"
+                            | "__reduce__"
+                            | "__reduce_ex__"
+                            | "__fspath__"
+                            | "__format__"
+                            | "__enter__"
+                            | "__exit__"
                     ),
             });
         }
         let (owner, name) = match symbol {
             "object.__format__" => ("object", "__format__"),
+            "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
             "str.isascii" => ("str", "isascii"),
@@ -114,6 +121,7 @@ impl BuiltinDescriptor {
             method: matches!(
                 name,
                 "__format__"
+                    | "__reduce_ex__"
                     | "isascii"
                     | "isalpha"
                     | "isdigit"

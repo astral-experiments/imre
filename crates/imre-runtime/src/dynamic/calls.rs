@@ -146,7 +146,15 @@ impl Context {
                 })
                 .flatten();
         }
-        self.find_in_mro(class, |base| self.own_class_attr(base, name))
+        let attr = self.find_in_mro(class, |base| self.own_class_attr(base, name));
+        if attr.is_none()
+            && name == "__reduce_ex__"
+            && (self.has_base(class, "datetime.date") || self.has_base(class, "datetime.timedelta"))
+        {
+            // These classes override __reduce__, and inherit the delegating object method.
+            return self.builtins.get("object.__reduce_ex__").copied();
+        }
+        attr
     }
 
     /// Visit the class and its bases in Python's method resolution order.
@@ -2850,6 +2858,9 @@ impl Context {
             {
                 return Ok(TRUE);
             }
+            Value::Native(ref class) if class == "object" && name == "__reduce_ex__" => {
+                return Ok(self.builtin("object.__reduce_ex__"));
+            }
             Value::Native(ref class)
                 if name == "__format__" && self.builtin_type_name(obj) == Some("type") =>
             {
@@ -4520,6 +4531,38 @@ impl Context {
                     return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
                 }
                 super::namedtuple::allocate(self, &args, &kwargs)
+            }
+            Value::Native(name) if name == "object.__reduce_ex__" => {
+                let Some((&receiver, rest)) = args.split_first() else {
+                    return Err(Error::new(
+                        "TypeError",
+                        "unbound method object.__reduce_ex__() needs an argument",
+                    ));
+                };
+                let class = self.type_name(receiver);
+                if !kwargs.is_empty() {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("{class}.__reduce_ex__() takes no keyword arguments"),
+                    ));
+                }
+                let [protocol] = rest else {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "{class}.__reduce_ex__() takes exactly one argument ({} given)",
+                            rest.len()
+                        ),
+                    ));
+                };
+                self.index_integer(*protocol)?
+                    .to_i64()
+                    .and_then(|n| i32::try_from(n).ok())
+                    .ok_or_else(|| {
+                        Error::new("OverflowError", "Python int too large to convert to C int")
+                    })?;
+                let reducer = self.lookup_attr(receiver, "__reduce__")?;
+                self.call(reducer, Vec::new(), Vec::new())
             }
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
