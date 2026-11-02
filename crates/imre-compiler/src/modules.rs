@@ -2140,6 +2140,9 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Types, "DynamicClassAttribute") => {
+                Intrinsic::ObjectRuntimeExport("types.DynamicClassAttribute")
+            }
             (Self::Types, "get_original_bases") => {
                 Intrinsic::ObjectRuntimeExport("types.get_original_bases")
             }
