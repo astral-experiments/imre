@@ -406,8 +406,14 @@ impl Context {
     }
 
     fn file_spec(&mut self, name: Id, origin: Id, locations: Id, loader: Id) -> Result<Id> {
-        let importlib = self.module("importlib")?;
-        let make = self.lookup_attr(importlib, "_file_spec")?;
+        let make = if self.bootstrap_file_spec != NONE
+            && matches!(self.str_value(name)?, "importlib" | "importlib._bootstrap" | "importlib._bootstrap_external")
+        {
+            self.bootstrap_file_spec
+        } else {
+            let importlib = self.module("importlib")?;
+            self.lookup_attr(importlib, "_file_spec")?
+        };
         self.call(make, vec![name, origin, locations, loader], vec![])
     }
 

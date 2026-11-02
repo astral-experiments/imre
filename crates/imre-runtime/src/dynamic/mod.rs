@@ -135,6 +135,7 @@ pub(crate) struct Context {
     import_missing: Id,
     // The running frozen bootstrap keeps its globals even if its registry entry is replaced.
     bootstrap_globals: Id,
+    bootstrap_file_spec: Id,
     classes: HashMap<String, Id>,
     // The Python enum bases use native layouts but have writable class dictionaries.
     enum_scopes: HashMap<Id, Id>,
@@ -2521,7 +2522,12 @@ impl Context {
                 if self.bootstrap_globals == NONE {
                     self.bootstrap_globals = self.module_globals(scope)?;
                 }
-                let external = self.module("_frozen_importlib_external")?;
+                let key = self.text("_frozen_importlib_external");
+                let external = if self.registered_module(key)? == Some(NONE) {
+                    NONE
+                } else {
+                    self.module("_frozen_importlib_external")?
+                };
                 self.bind(scope, "_bootstrap_external", external);
             }
             "io" => stdlib::io::install(self, scope),
@@ -2661,10 +2667,12 @@ impl Context {
                 ),
                 importlib::SourceBody::Compiled(_)
                     if let Some(origin) = origin
-                        && name != "__main__"
-                        && !stdlib::is_module(name)
-                        && self.sources.contains_key("importlib")
-                        && path.is_absolute() =>
+                        && ((matches!(name, "importlib" | "importlib._bootstrap" | "importlib._bootstrap_external")
+                            && self.bootstrap_file_spec != NONE)
+                            || (name != "__main__"
+                                && !stdlib::is_module(name)
+                                && self.sources.contains_key("importlib")
+                                && path.is_absolute())) =>
                 {
                     self.initialize_source(module, scope, name_id, origin, NONE)
                 }
@@ -2684,9 +2692,11 @@ impl Context {
             *initializing = false;
             result?;
             if name == "importlib"
-                && let Some(external) = self.scope_name(scope, "_bootstrap_external")
+                && self.bootstrap_file_spec == NONE
+                && let Some(make_spec) = self.scope_name(scope, "_file_spec")
             {
-                self.publish_module("importlib._bootstrap_external", external)?;
+                // Fresh bootstrap imports run while the replacement package is still initializing.
+                self.bootstrap_file_spec = make_spec;
             }
             if name == "itertools"
                 && let Some(owner) = self.scope_name(scope, "batched")
