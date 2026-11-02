@@ -5,9 +5,15 @@ from random import shuffle
 random.seed(1729)
 values = list(range(12))
 alias = values
-print(shuffle(x=values), alias, random.getrandbits(32))
+assert shuffle(x=values) is None
+print(alias)
+print(random.getrandbits(32))
 words = ["red", "blue", "green", "white", "black"]
-print(shuffle(words), words, random.randrange(1000))
+assert shuffle(words) is None
+print(words)
+print(random.randrange(1000))
 empty: list[int] = []
 single = [5]
-print(shuffle(empty), shuffle(single), random.getrandbits(32))
+assert shuffle(empty) is None
+assert shuffle(single) is None
+print(random.getrandbits(32))
