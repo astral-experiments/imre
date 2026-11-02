@@ -30,6 +30,22 @@ def current():
             assert str(error) == "failed index"
         else:
             raise AssertionError("index exception was lost")
+    match = re.match(r"(?P<word>ab)(?P<tail>x)?", "ab")
+    assert "{word}:{tail}".format_map(match) == "ab:None"
+    try:
+        "{missing}".format_map(match)
+    except IndexError as error:
+        assert str(error) == "no such group"
+    else:
+        raise AssertionError("mapping lookup error was lost")
+    assert "{v:>{width}}".format_map({"v": "x", "width": 3}) == "  x"
+    for template in ("{}", "{0}", "{v:{0}}"):
+        try:
+            template.format_map({"v": "x"})
+        except ValueError as error:
+            assert str(error) == "Format string contains positional fields"
+        else:
+            raise AssertionError("positional field accepted")
     subject = chr(0x1f40d) + chr(0xd800) + chr(0xe000) + "Z"
     pattern = re.compile(r"(?P<value>.)(.)(a)?")
     match = pattern.fullmatch(subject, pos=1, endpos=3)
