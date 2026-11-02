@@ -2098,7 +2098,7 @@ impl Context {
         self.builtins.insert(name.to_owned(), value);
         if name == "super" {
             let mut entries = Vec::new();
-            for name in ["__new__", "__repr__", "__getattribute__", "__init__"] {
+            for name in ["__new__", "__repr__", "__getattribute__", "__init__", "__get__"] {
                 let method = self.builtin(&format!("super.{name}"));
                 entries.push((self.heap.code_name(name), method));
             }

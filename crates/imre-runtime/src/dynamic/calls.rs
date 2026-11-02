@@ -857,6 +857,14 @@ impl Context {
                 explicit: true,
             }));
         }
+        if let Value::Super {
+            start,
+            receiver: bound,
+            ..
+        } = *self.heap.get(value)
+        {
+            return self.bind_super(value, receiver, start, bound);
+        }
         if let Some(get) = self.slot(value, "__get__") {
             return self.call(get, vec![value, receiver, owner], Vec::new());
         }
@@ -5748,6 +5756,9 @@ impl Context {
                     ));
                 }
                 self.call(function, arguments.collect(), kwargs)
+            }
+            Value::Native(name) if name == "super.__get__" => {
+                wrapper_descriptor::descriptor_get(self, "super", &args, &kwargs)
             }
             Value::Native(name) if name == "classmethod.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "classmethod", &args, &kwargs)

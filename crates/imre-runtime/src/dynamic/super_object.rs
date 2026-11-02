@@ -431,6 +431,23 @@ impl Context {
         self.default_get_attr(proxy, name)
     }
 
+    /// Bind an unbound super descriptor using the descriptor's own type.
+    pub(super) fn bind_super(
+        &mut self,
+        descriptor: Id,
+        instance: Id,
+        start: Id,
+        bound_receiver: Id,
+    ) -> Result<Id> {
+        if instance == NONE || bound_receiver != NONE {
+            return Ok(descriptor);
+        }
+        if let Some(class) = self.heap.get(descriptor).instance_class() {
+            return self.call(class, vec![start, instance], Vec::new());
+        }
+        self.make_super(&[start, instance])
+    }
+
     pub(super) fn super_attribute(
         &mut self,
         start: Id,
