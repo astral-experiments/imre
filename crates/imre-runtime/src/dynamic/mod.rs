@@ -3052,6 +3052,8 @@ impl Context {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
             }
+            #[cfg(unix)]
+            "_imre_ssl" if source.is_none() => stdlib::ssl::install(self, scope)?,
             "_hashlib" if source.is_none() => {
                 stdlib::hashlib::install_openssl(self, module, scope)?
             }

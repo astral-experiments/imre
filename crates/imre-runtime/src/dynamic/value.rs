@@ -849,6 +849,10 @@ pub(super) enum Value {
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
+    #[cfg(unix)]
+    TlsContext(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::Context>>),
+    #[cfg(unix)]
+    TlsSession(std::rc::Rc<std::cell::RefCell<Option<super::stdlib::ssl::provider::Session>>>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
     GenericAliasIterator(Option<Id>),
@@ -1192,6 +1196,10 @@ impl Value {
     pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
         Some(match self {
             Self::Selector(handle) => handle.borrow().class_name(),
+            #[cfg(unix)]
+            Self::TlsContext(_) => "_imre_ssl.Context",
+            #[cfg(unix)]
+            Self::TlsSession(_) => "_imre_ssl.Session",
             Self::Context(_) => "_contextvars.Context",
             Self::ContextVar { .. } => "_contextvars.ContextVar",
             Self::ContextToken { .. } => "_contextvars.Token",
@@ -1792,6 +1800,8 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::ProcessHandle { .. } => {}
+            #[cfg(unix)]
+            Self::TlsContext(_) | Self::TlsSession(_) => {}
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }

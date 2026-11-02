@@ -213,6 +213,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
         "shutil" => Some(("shutil.py", include_str!("../../stdlib/shutil.py"))),
         "socket" => Some(("socket.py", include_str!("../../stdlib/socket.py"))),
+        "ssl" => Some(("ssl.py", include_str!("../../stdlib/ssl.py"))),
         "tempfile" => Some((
             "tempfile.py",
             concat!(
