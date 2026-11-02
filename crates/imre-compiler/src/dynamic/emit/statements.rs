@@ -221,7 +221,12 @@ impl Function<'_, '_> {
     pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
         for stmt in suite {
             if self.terminated {
-                break;
+                if self.module_annotation_sites.is_none() {
+                    break;
+                }
+                // Unreachable statements still contribute to a module provider's site order.
+                let dead = self.name("b");
+                self.label(&dead);
             }
             self.checkpoint(stmt);
             self.simple_call = match stmt {
@@ -351,12 +356,14 @@ impl Function<'_, '_> {
                             let thunk = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
                             let offset = v.start().to_u32();
                             self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
+                        } else if let Some(sites) = &mut self.module_annotation_sites {
+                            let index = sites.len();
+                            sites.push((name.id.to_string(), (*v.annotation).clone()));
+                            let index = self.integer(index);
+                            self.op("mark_module_annotation", &[&self.scope.clone(), &index]);
                         } else {
-                            let value = if self.source.string_annotations {
-                                self.text(&crate::frontend::annotation_spelling(&v.annotation))
-                            } else {
-                                "0".into()
-                            };
+                            let value =
+                                self.text(&crate::frontend::annotation_spelling(&v.annotation));
                             self.op("annotate", &[&self.scope.clone(), &key, &value]);
                         }
                     }
@@ -678,7 +685,13 @@ impl Function<'_, '_> {
             _ => None,
         };
         let flags = match (&body, params) {
-            (Body::Namespace(_) | Body::Annotations(..) | Body::ClassAnnotations(..), _) => None,
+            (
+                Body::Namespace(_)
+                | Body::Annotations(..)
+                | Body::ModuleAnnotations(..)
+                | Body::ClassAnnotations(..),
+                _,
+            ) => None,
             _ => {
                 use imre_ast::code_flags::*;
                 let mut flags = OPTIMIZED | NEWLOCALS;
@@ -973,10 +986,41 @@ impl Function<'_, '_> {
         self.label(&good);
     }
 
+    /// Publish a module's provider before its first statement. Every simple
+    /// annotation, including an unconditional one, becomes visible only after
+    /// execution reaches its assignment.
+    pub(super) fn setup_deferred_module_annotations(&mut self, sites: &[(String, ast::Expr)]) {
+        if !sites.is_empty() {
+            let entries = sites
+                .iter()
+                .map(|(name, expr)| (name.as_str(), expr))
+                .collect();
+            let signature = self.text(
+                &json!({
+                    "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
+                })
+                .to_string(),
+            );
+            let code = self.output.definition(
+                self.source,
+                String::new(),
+                Body::ModuleAnnotations(entries),
+                self.source.module_start,
+                false,
+            );
+            let name = self.text("__annotate__");
+            let defaults = self.op("dict", &[]);
+            let provider = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
+            self.bind("__annotate__", &provider);
+        }
+        self.op("setup_module_annotations", &[&self.scope.clone()]);
+    }
+
     pub(super) fn annotations(
         &mut self,
         entries: &[(&str, &ast::Expr)],
         class: Option<ClassBindings>,
+        module: bool,
     ) {
         self.check_annotation_format();
         let values = self.op("dict", &[]);
@@ -984,7 +1028,18 @@ impl Function<'_, '_> {
         self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
         self.annotation_lookup = true;
         self.class_locals = class;
-        for &(name, expression) in entries {
+        for (index, &(name, expression)) in entries.iter().enumerate() {
+            let after = module.then(|| {
+                let active = self.lookup("__conditional_annotations__");
+                let index = self.integer(index);
+                let present = self.op("in", &[&index, &active]);
+                let condition = self.truth(&present);
+                let yes = self.name("b");
+                let after = self.name("b");
+                self.branch(&condition, &yes, &after);
+                self.label(&yes);
+                after
+            });
             let key = self.code_name(name);
             let value = if self.source.string_annotations {
                 self.text(&crate::frontend::annotation_spelling(expression))
@@ -992,6 +1047,10 @@ impl Function<'_, '_> {
                 self.expr(expression)
             };
             self.op("put", &[&values, &key, &value]);
+            if let Some(after) = after {
+                self.jump(&after);
+                self.label(&after);
+            }
         }
         self.end(&format!("ret i64 {values}"));
     }
@@ -1254,7 +1313,7 @@ impl Function<'_, '_> {
         }
         self.exits.pop();
         self.error = outer;
-        if !self.terminated {
+        if !self.terminated || self.module_annotation_sites.is_some() {
             self.statements(&stmt.finalbody);
             self.jump(&done);
         }
@@ -1443,6 +1502,7 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
         }
         Body::Namespace(_)
         | Body::Annotations(..)
+        | Body::ModuleAnnotations(..)
         | Body::ClassAnnotations(..)
         | Body::AnnotationThunk(..)
         | Body::AnnotationValue(_)

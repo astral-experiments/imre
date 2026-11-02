@@ -4424,13 +4424,8 @@ impl Context {
                 self.start_module_annotations(code, owner, scope, provider.as_ref())?;
             }
             Instruction::MarkModuleAnnotation(index) => {
-                let active = self.module_annotation_name(scope, "__conditional_annotations__")?;
-                let set = self.scalar_value(active);
-                if !matches!(self.heap.get(set), Value::Set { frozen: false, .. }) {
-                    return Err(Error::new("TypeError", "expected a set"));
-                }
                 let index = self.int(*index as i64);
-                builtins::set_add(self, set, index)?;
+                self.mark_module_annotation(scope, index)?;
             }
             Instruction::ClassAnnotator(provider) => {
                 let annotate = self.source_annotator(provider, owner, scope)?;
