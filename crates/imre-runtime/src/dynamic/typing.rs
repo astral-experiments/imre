@@ -2002,6 +2002,18 @@ pub(super) fn call(
             validate_forward_ref(ctx.str_value(*text)?)?;
             Ok(NONE)
         }
+        // Read the base type descriptor directly, bypassing a custom metaclass's
+        // __annotations__ or __dict__. Static types have no annotation storage.
+        ("_get_type_annotations", [class]) => match ctx.heap.get(*class) {
+            Value::Class { scope, .. } => {
+                ctx.class_annotation_attr(*class, *scope, "__annotations__")
+            }
+            Value::Native(name) if ctx.is_type_object(*class) => Err(Error::new(
+                "AttributeError",
+                format!("type object '{name}' has no attribute '__annotations__'"),
+            )),
+            _ => Err(Error::new("TypeError", "expected a type")),
+        },
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
         }
