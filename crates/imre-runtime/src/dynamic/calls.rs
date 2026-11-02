@@ -4154,6 +4154,27 @@ impl Context {
         Ok(())
     }
 
+    /// Subclasses keep their writable namespaces when the defining type is immutable.
+    fn check_immutable_type_write(&self, obj: Id, attr: &str) -> Result<()> {
+        if let Value::Class { name, scope, .. } = self.heap.get(obj) {
+            let frame = self.scope_data(*scope);
+            if frame
+                .class_namespace
+                .as_ref()
+                .is_some_and(|ns| ns.immutable_type)
+            {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "cannot set '{attr}' attribute of immutable type '{}.{name}'",
+                        frame.module
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         if let Value::Native(class) = self.heap.get(obj)
             && HashState::is_provider_class(class)
@@ -4213,12 +4234,7 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
-        if let Some(owner) = self.itertools_layout(obj) {
-            return Err(Error::new(
-                "TypeError",
-                format!("cannot delete '{name}' attribute of immutable type '{owner}'"),
-            ));
-        }
+        self.check_immutable_type_write(obj, name)?;
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
         }
@@ -4845,12 +4861,7 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
-        if let Some(owner) = self.itertools_layout(obj) {
-            return Err(Error::new(
-                "TypeError",
-                format!("cannot set '{name}' attribute of immutable type '{owner}'"),
-            ));
-        }
+        self.check_immutable_type_write(obj, name)?;
         if let Some(result) = super::paramspec::update(self, obj, name, Some(value)) {
             return result;
         }

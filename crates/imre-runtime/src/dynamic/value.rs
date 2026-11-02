@@ -670,6 +670,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 pub(super) struct ClassNamespace {
     /// Qualified name of an iterator type whose instances require private native cursor state.
     pub itertools_layout: Option<&'static str>,
+    /// Attribute writes to the type object itself are forbidden, independently of its instance layout.
+    pub immutable_type: bool,
     pub bases: Id,
     pub mro: Id,
     /// The defining extension module of a heap type created with module state.

@@ -3295,6 +3295,7 @@ impl Context {
                     .as_str()
                     .is_some_and(|root| path == std::path::Path::new(root).join("itertools.py"))
             {
+                self.freeze_itertools_types(scope);
                 for (name, owner) in [
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),
