@@ -9,87 +9,63 @@ use std::collections::HashMap;
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use crate::objects::{
-    DecodedJson, JsonNumber, decode_json_bytes, decode_json_tokens, owned_bytes_input,
-    write_json_codepoints, write_json_fragment, write_json_string,
+    DecodedJson, JsonNumber, JsonTokenError, decode_json_tokens_at, write_json_codepoints,
+    write_json_fragment, write_json_string,
 };
 use crate::{Str, StrOwner};
 
-pub(super) fn loads(ctx: &mut Context, input: Id, raise_error: Id) -> Result<Id> {
-    let result = match ctx.heap.get(input) {
-        Value::Str(text) => {
-            let text = Str::try_new(text).map_err(|_| crate::Error::allocation())?;
-            if text.starts_with('\u{feff}') {
-                let document = StrOwner::try_new(text).map_err(|_| crate::Error::allocation())?;
-                let error = crate::objects::json_bom_error(document);
-                return Err(decode_error(ctx, input, raise_error, true, error));
-            }
-            parse(ctx, &text, None)
-        }
+/// Scan one value at a Python character offset and return its value and end offset.
+pub(super) fn scan_once(ctx: &mut Context, constant: Id, input: Id, idx: Id) -> Result<Id> {
+    let index = ctx.index_integer(idx)?.to_i64().ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })?;
+    let start =
+        usize::try_from(index).map_err(|_| Error::new("ValueError", "idx cannot be negative"))?;
+    let (text, wide) = match ctx.heap.get(input) {
+        Value::Str(text) => (
+            Str::try_new(text).map_err(|_| crate::Error::allocation())?,
+            None,
+        ),
         Value::SurrogateStr(points) => {
-            // JSON punctuation, escapes, whitespace and numbers are ASCII. One byte per original
-            // code point retains character offsets; string bodies always come from the real input.
+            // JSON syntax is ASCII. One byte per Python character preserves offsets,
+            // while the string builder reads token contents from the original input.
             let mut syntax = String::new();
             syntax
                 .try_reserve_exact(points.len())
                 .map_err(|_| crate::Error::allocation())?;
-            for &point in points {
-                syntax.push(if point < 128 {
-                    char::from(point as u8)
-                } else {
-                    '?'
-                });
+            syntax.extend(
+                points
+                    .iter()
+                    .map(|&p| if p < 128 { char::from(p as u8) } else { '?' }),
+            );
+            (Str::from(syntax), Some(input))
+        }
+        _ => return Err(Error::new("TypeError", "scanner input must be a string")),
+    };
+    let Some(byte) = text.char_indices().nth(start).map(|(offset, _)| offset) else {
+        return Err(ctx.exception("StopIteration", &[idx]));
+    };
+    match parse(ctx, &text, wide, byte, constant) {
+        Ok((value, end)) => {
+            let end = ctx.int(index + text[byte..end].chars().count() as i64);
+            Ok(ctx.alloc(Value::Tuple(vec![value, end])))
+        }
+        Err(JsonTokenError::Build(error)) => Err(error),
+        Err(JsonTokenError::Parse(error)) => {
+            let Some((message, _, pos)) = error.json_decode_fields() else {
+                return Err(error.into());
+            };
+            if message == "Expecting value" {
+                let pos = ctx.int(pos as i64);
+                Err(ctx.exception("StopIteration", &[pos]))
+            } else {
+                Err(scanstring::scan_error(ctx, input, pos as i64, message))
             }
-            if points.first() == Some(&0xfeff) {
-                let owner =
-                    StrOwner::try_new(Str::from(syntax)).map_err(|_| crate::Error::allocation())?;
-                let error = crate::objects::json_bom_error(owner);
-                return Err(decode_error(ctx, input, raise_error, true, error));
-            }
-            parse(ctx, &syntax, Some(input))
         }
-        Value::Bytes(bytes) => {
-            let owner = owned_bytes_input(bytes)?;
-            parse(ctx, &decode_json_bytes(&owner)?, None)
-        }
-        _ => {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "the JSON object must be str, bytes or bytearray, not {}",
-                    ctx.type_name(input)
-                ),
-            ));
-        }
-    };
-    result.map_err(|error| decode_error(ctx, input, raise_error, false, error))
-}
-
-/// Raise the class owned by the calling package, retaining the Python document's identity.
-fn decode_error(
-    ctx: &mut Context,
-    input: Id,
-    raise_error: Id,
-    bom: bool,
-    error: crate::Error,
-) -> Error {
-    let Some((message, document, position)) = error.json_decode_fields() else {
-        return error.into();
-    };
-    let message = ctx.text(message);
-    let document = if matches!(ctx.heap.get(input), Value::Str(_) | Value::SurrogateStr(_)) {
-        input
-    } else {
-        ctx.text(document)
-    };
-    let position = ctx.int(position as i64);
-    let bom = if bom { TRUE } else { FALSE };
-    ctx.call(
-        raise_error,
-        vec![message, document, position, bom],
-        Vec::new(),
-    )
-    .err()
-    .unwrap_or_else(|| Error::new("SystemError", "JSON error callback returned"))
+    }
 }
 
 /// The key memo compares decoded contents, including literal and escaped spellings of a key.
@@ -161,10 +137,17 @@ impl ParsedString {
     }
 }
 
-fn parse(ctx: &mut Context, text: &str, wide: Option<Id>) -> std::result::Result<Id, crate::Error> {
+fn parse(
+    ctx: &mut Context,
+    text: &str,
+    wide: Option<Id>,
+    start: usize,
+    constant: Id,
+) -> std::result::Result<(Id, usize), JsonTokenError<Error>> {
     let mut keys = HashMap::new();
-    decode_json_tokens(
+    decode_json_tokens_at(
         text,
+        start,
         || Str::try_new(text).ok().map(StrOwner::new),
         |value| {
             Ok(match value {
@@ -173,6 +156,12 @@ fn parse(ctx: &mut Context, text: &str, wide: Option<Id>) -> std::result::Result
                 DecodedJson::Bool(false) => FALSE,
                 DecodedJson::Number(JsonNumber::Integer(n)) => ctx.alloc(Value::Int(n)),
                 DecodedJson::Number(JsonNumber::Float(n)) => ctx.alloc(Value::Float(n)),
+                DecodedJson::Constant(name) => {
+                    let name = ctx.text(name);
+                    let value = ctx.call(constant, vec![name], Vec::new())?;
+                    ctx.heap.keep(value);
+                    value
+                }
                 DecodedJson::String(body) => ParsedString::read(ctx, text, wide, body)?.boxed(ctx),
                 DecodedJson::Array(items) => ctx.alloc(Value::List(items)),
                 DecodedJson::Object(fields) => {

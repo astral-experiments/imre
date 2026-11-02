@@ -62,6 +62,27 @@ def surrogate_documents():
         raise AssertionError('invalid value was accepted')
 
 
+def cached_decoder(package):
+    cache = package._default_decoder
+    calls = []
+    marker = object()
+
+    def decode(doc):
+        assert type(doc) is str
+        calls.append(doc)
+        return marker
+
+    cache.decode = decode
+    try:
+        text = '"é"'
+        assert package.loads(text) is marker
+        assert package.loads(text.encode()) is marker
+        assert package.loads(bytearray(b'\xfe\xff\x00"\x00\xe9\x00"')) is marker
+        assert calls == [text, text, text] and calls[0] is text
+    finally:
+        del cache.decode
+
+
 def current():
     import importlib
     import json
@@ -85,6 +106,7 @@ def current():
     assert fresh.scanner.make_scanner.__module__ == 'json.scanner'
     assert fresh.decoder.scanstring.__module__ == 'json.decoder'
     for package in (json, fresh):
+        cached_decoder(package)
         assert package.JSONDecoder is package.decoder.JSONDecoder
         assert package.JSONDecodeError is package.decoder.JSONDecodeError
         assert package.JSONDecoder().decode('["é", 2]') == ['é', 2]
