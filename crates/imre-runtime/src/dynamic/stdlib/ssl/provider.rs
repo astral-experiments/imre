@@ -13,6 +13,9 @@ const CIPHERS: &CStr =
 const SSL_CTRL_SET_MIN_PROTO_VERSION: c_int = 123;
 const SSL_CTRL_SET_TLSEXT_HOSTNAME: c_int = 55;
 const TLS1_2_VERSION: c_long = 0x0303;
+const X509_V_FLAG_TRUSTED_FIRST: c_ulong = 0x8000;
+const X509_V_FLAG_X509_STRICT: c_ulong = 0x20;
+const X509_V_FLAG_PARTIAL_CHAIN: c_ulong = 0x80000;
 const X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS: c_uint = 4;
 const SSL_ERROR_SSL: c_int = 1;
 const SSL_ERROR_WANT_READ: c_int = 2;
@@ -54,6 +57,12 @@ functions! {
     SSL_CTX_set_verify(Handle, c_int, VerifyCallback) -> ();
     SSL_CTX_set_cipher_list(Handle, *const c_char) -> c_int;
     SSL_CTX_get_security_level(Handle) -> c_int;
+    SSL_CTX_set_default_verify_paths(Handle) -> c_int;
+    SSL_CTX_get0_param(Handle) -> Handle;
+    X509_VERIFY_PARAM_set_flags(Handle, c_ulong) -> c_int;
+    X509_VERIFY_PARAM_get_flags(Handle) -> c_ulong;
+    SSL_CTX_set_alpn_protos(Handle, *const u8, c_uint) -> c_int;
+    SSL_CTX_set_post_handshake_auth(Handle, c_int) -> ();
     SSL_CTX_load_verify_locations(Handle, *const c_char, *const c_char) -> c_int;
     SSL_new(Handle) -> Handle;
     SSL_free(Handle) -> ();
@@ -172,8 +181,70 @@ impl Context {
         {
             return Err(api.error("SSL_CTX_set_min_proto_version"));
         }
+        ctx.add_verify_flags(X509_V_FLAG_TRUSTED_FIRST)?;
         ctx.set_ciphers(CIPHERS)?;
         Ok(ctx)
+    }
+
+    fn add_verify_flags(&mut self, flags: c_ulong) -> Result<(), Failure> {
+        self.api.clear();
+        // SAFETY: the parameters are borrowed from this live SSL_CTX; set_flags
+        // adds verification requirements without clearing the other flags.
+        if unsafe {
+            (self.api.X509_VERIFY_PARAM_set_flags)(
+                (self.api.SSL_CTX_get0_param)(self.handle.as_ptr()),
+                flags,
+            )
+        } != 1
+        {
+            return Err(self.api.error("X509_VERIFY_PARAM_set_flags"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn apply_default_verify_flags(&mut self) -> Result<(), Failure> {
+        self.add_verify_flags(X509_V_FLAG_PARTIAL_CHAIN | X509_V_FLAG_X509_STRICT)
+    }
+
+    pub(crate) fn verify_flags(&self) -> u64 {
+        // SAFETY: the borrowed parameters remain valid throughout the query.
+        unsafe {
+            (self.api.X509_VERIFY_PARAM_get_flags)((self.api.SSL_CTX_get0_param)(
+                self.handle.as_ptr(),
+            )) as u64
+        }
+    }
+
+    pub(crate) fn set_default_verify_paths(&mut self) -> Result<(), Failure> {
+        self.api.clear();
+        // SAFETY: OpenSSL populates its owned trust store from its configured
+        // locations, including the provider's SSL_CERT_FILE and SSL_CERT_DIR.
+        if unsafe { (self.api.SSL_CTX_set_default_verify_paths)(self.handle.as_ptr()) } != 1 {
+            return Err(self.api.error("SSL_CTX_set_default_verify_paths"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn set_alpn_protocols(&mut self, protocols: &[u8]) -> Result<(), Failure> {
+        let len = c_uint::try_from(protocols.len())
+            .map_err(|_| Failure::Other("ALPN protocol list is too long".into()))?;
+        self.api.clear();
+        // SAFETY: OpenSSL validates and copies the length-prefixed protocol
+        // list, and this API returns zero on success (including an empty list).
+        if unsafe {
+            (self.api.SSL_CTX_set_alpn_protos)(self.handle.as_ptr(), protocols.as_ptr(), len)
+        } != 0
+        {
+            return Err(self.api.error("SSL_CTX_set_alpn_protos"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn set_post_handshake_auth(&mut self, enabled: bool) {
+        // SAFETY: configure the PHA ClientHello extension on future SSL objects.
+        unsafe {
+            (self.api.SSL_CTX_set_post_handshake_auth)(self.handle.as_ptr(), i32::from(enabled))
+        };
     }
 
     pub(crate) fn load_verify_locations(&mut self, cafile: &CStr) -> Result<(), Failure> {

@@ -29,6 +29,11 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
     for name in [
         "context",
         "security_level",
+        "verify_flags",
+        "default_verify_paths",
+        "default_verify_flags",
+        "set_alpn_protocols",
+        "set_post_handshake_auth",
         "set_ciphers",
         "load_verify_locations",
         "wrap",
@@ -90,6 +95,46 @@ pub(super) fn call(
         ("security_level", &[handle]) => {
             let level = context(ctx, handle)?.borrow().security_level();
             Ok(ctx.int(i64::from(level)))
+        }
+        ("verify_flags", &[handle]) => {
+            let flags = context(ctx, handle)?.borrow().verify_flags();
+            Ok(ctx.alloc(Value::Int(crate::Int::new(flags.into()))))
+        }
+        ("default_verify_paths", &[handle]) => {
+            context(ctx, handle)?
+                .borrow_mut()
+                .set_default_verify_paths()
+                .map_err(|e| provider_error(ctx, e))?;
+            Ok(NONE)
+        }
+        ("default_verify_flags", &[handle]) => {
+            context(ctx, handle)?
+                .borrow_mut()
+                .apply_default_verify_flags()
+                .map_err(|e| provider_error(ctx, e))?;
+            Ok(NONE)
+        }
+        ("set_alpn_protocols", &[handle, wire]) => {
+            let Value::Bytes(protocols) = ctx.heap.get(ctx.scalar_value(wire)) else {
+                return Err(Error::new("TypeError", "expected ALPN wire bytes"));
+            };
+            context(ctx, handle)?
+                .borrow_mut()
+                .set_alpn_protocols(protocols)
+                .map_err(|e| provider_error(ctx, e))?;
+            Ok(NONE)
+        }
+        ("set_post_handshake_auth", &[handle, enabled]) => {
+            let Value::Bool(enabled) = *ctx.heap.get(enabled) else {
+                return Err(Error::new(
+                    "TypeError",
+                    "expected bool for post_handshake_auth",
+                ));
+            };
+            context(ctx, handle)?
+                .borrow_mut()
+                .set_post_handshake_auth(enabled);
+            Ok(NONE)
         }
         ("load_verify_locations", &[handle, cafile]) => {
             let path = super::posixpath::fspath(ctx, cafile)?;

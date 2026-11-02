@@ -1,7 +1,7 @@
 """TLS client contexts and blocking, connected sockets using system OpenSSL."""
 
 import _imre_ssl
-from enum import IntEnum as _IntEnum
+from enum import IntEnum as _IntEnum, IntFlag as _IntFlag
 
 OPENSSL_VERSION = _imre_ssl.OPENSSL_VERSION
 SSL_ERROR_SSL = 1
@@ -17,6 +17,24 @@ class VerifyMode(_IntEnum):
     CERT_REQUIRED = 2
 
 
+# X509_V_FLAG_* values in the OpenSSL 3 public ABI used by the provider.
+class VerifyFlags(_IntFlag):
+    VERIFY_DEFAULT = 0
+    VERIFY_CRL_CHECK_LEAF = 4
+    VERIFY_CRL_CHECK_CHAIN = 12
+    VERIFY_X509_STRICT = 32
+    VERIFY_ALLOW_PROXY_CERTS = 64
+    VERIFY_X509_TRUSTED_FIRST = 32768
+    VERIFY_X509_PARTIAL_CHAIN = 524288
+
+
+VERIFY_DEFAULT = VerifyFlags.VERIFY_DEFAULT
+VERIFY_CRL_CHECK_LEAF = VerifyFlags.VERIFY_CRL_CHECK_LEAF
+VERIFY_CRL_CHECK_CHAIN = VerifyFlags.VERIFY_CRL_CHECK_CHAIN
+VERIFY_X509_STRICT = VerifyFlags.VERIFY_X509_STRICT
+VERIFY_ALLOW_PROXY_CERTS = VerifyFlags.VERIFY_ALLOW_PROXY_CERTS
+VERIFY_X509_TRUSTED_FIRST = VerifyFlags.VERIFY_X509_TRUSTED_FIRST
+VERIFY_X509_PARTIAL_CHAIN = VerifyFlags.VERIFY_X509_PARTIAL_CHAIN
 PROTOCOL_TLS_CLIENT = _SSLMethod.PROTOCOL_TLS_CLIENT
 CERT_NONE = VerifyMode.CERT_NONE
 CERT_OPTIONAL = VerifyMode.CERT_OPTIONAL
@@ -69,12 +87,13 @@ def _call(function, *args):
 class SSLContext:
     """TLS settings and trusted certificates for client connections."""
 
-    __slots__ = ("_ctx",)
+    __slots__ = ("_ctx", "_post_handshake_auth")
 
     def __init__(self, protocol):
         if protocol != PROTOCOL_TLS_CLIENT:
             raise NotImplementedError("only PROTOCOL_TLS_CLIENT is supported")
         self._ctx = _call(_imre_ssl.context)
+        self._post_handshake_auth = False
 
     @property
     def protocol(self):
@@ -103,6 +122,33 @@ class SSLContext:
     @property
     def security_level(self):
         return _call(_imre_ssl.security_level, self._ctx)
+
+    @property
+    def verify_flags(self):
+        return VerifyFlags(_call(_imre_ssl.verify_flags, self._ctx))
+
+    @property
+    def post_handshake_auth(self):
+        return self._post_handshake_auth
+
+    @post_handshake_auth.setter
+    def post_handshake_auth(self, enabled):
+        enabled = bool(enabled)
+        _call(_imre_ssl.set_post_handshake_auth, self._ctx, enabled)
+        self._post_handshake_auth = enabled
+
+    def set_default_verify_paths(self):
+        _call(_imre_ssl.default_verify_paths, self._ctx)
+
+    def set_alpn_protocols(self, alpn_protocols):
+        wire = bytearray()
+        for protocol in alpn_protocols:
+            encoded = bytes(protocol, "ascii")
+            if not 1 <= len(encoded) <= 255:
+                raise SSLError("ALPN protocols must be 1 to 255 in length")
+            wire.append(len(encoded))
+            wire.extend(encoded)
+        _call(_imre_ssl.set_alpn_protocols, self._ctx, bytes(wire))
 
     def set_ciphers(self, cipherlist, /):
         _call(_imre_ssl.set_ciphers, self._ctx, cipherlist)
@@ -185,3 +231,17 @@ class SSLSocket:
 
     def __exit__(self, exc_type, exc, traceback):
         self.close()
+
+
+def create_default_context(*, cafile=None, capath=None, cadata=None):
+    """Create a verifying client context for server authentication."""
+    context = SSLContext(PROTOCOL_TLS_CLIENT)
+    _call(_imre_ssl.default_verify_flags, context._ctx)
+    if cafile or capath or cadata:
+        context.load_verify_locations(cafile, capath, cadata)
+    else:
+        context.set_default_verify_paths()
+    return context
+
+
+_create_default_https_context = create_default_context

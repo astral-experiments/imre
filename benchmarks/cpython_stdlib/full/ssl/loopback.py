@@ -21,20 +21,27 @@ def main():
     client = sys.argv[1:] or [sys.executable, "-B", str(Path(__file__).with_name("loopback_client.py"))]
     hostname = fixture.SIGNED_CERTFILE_HOSTNAME
     cases = (
-        (False, fixture.SIGNING_CA, hostname, 0),
-        (False, fixture.SIGNING_CA, "wrong.example", 62),
-        (False, fixture.CAFILE_NEURONIO, hostname, 20),
-        (True, fixture.CAFILE_NEURONIO, hostname, 19),
-        (False, fixture.SIGNING_CA, "127.0.0.1", 64),
+        (False, False, fixture.SIGNING_CA, hostname, 0),
+        (False, False, fixture.SIGNING_CA, "wrong.example", 62),
+        (False, False, fixture.CAFILE_NEURONIO, hostname, 20),
+        (False, True, fixture.CAFILE_NEURONIO, hostname, 19),
+        (False, False, fixture.SIGNING_CA, "127.0.0.1", 64),
+        (True, False, fixture.SIGNING_CA, hostname, 0),
     )
-    for chain, cafile, name, expected in cases:
+    for https_defaults, chain, cafile, name, expected in cases:
         _, server_context, _ = fixture.testing_context(server_chain=chain)
+        if https_defaults:
+            server_context.set_alpn_protocols(["http/1.1"])
         server = fixture.ThreadedEchoServer(context=server_context, chatty=False)
         with server:
             argv = [*client, "127.0.0.1", str(server.port), cafile, name, str(expected)]
+            if https_defaults:
+                argv.append("https")
             child = subprocess.run(argv, capture_output=True, text=True, timeout=30)
-        print(json.dumps(dict(server_chain=chain, argv=argv, exit=child.returncode, stdout=child.stdout,
+        print(json.dumps(dict(server_chain=chain, alpn=server.selected_alpn_protocols, argv=argv, exit=child.returncode, stdout=child.stdout,
                               stderr=child.stderr, server_errors=server.conn_errors)), flush=True)
+        if https_defaults and server.selected_alpn_protocols != ["http/1.1"]:
+            return 1
         marker = f"VERIFY_ERROR {expected} " if expected else f"VERIFIED_ECHO {hostname}"
         if child.returncode or marker not in child.stdout or bool(server.conn_errors) != bool(expected):
             return 1

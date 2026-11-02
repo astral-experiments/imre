@@ -5,8 +5,18 @@ import sys
 
 
 def main():
-    host, port, cafile, hostname, expected = sys.argv[1:]
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    host, port, cafile, hostname, expected = sys.argv[1:6]
+    if sys.argv[6:]:
+        import http.client
+        import urllib.request
+        with urllib.request.urlopen("data:,local") as response:
+            assert response.read() == b"local"
+        ctx = http.client._create_https_context(11)
+        assert ctx.post_handshake_auth
+        required = ssl.VERIFY_X509_STRICT | ssl.VERIFY_X509_PARTIAL_CHAIN
+        assert ctx.verify_flags & required == required
+    else:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     assert ctx.check_hostname and ctx.verify_mode == ssl.CERT_REQUIRED
     ctx.load_verify_locations(cafile=cafile)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as raw:
