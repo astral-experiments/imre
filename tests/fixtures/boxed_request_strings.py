@@ -115,6 +115,9 @@ def current():
             call()
         except TypeError as error:
             print(error)
+    for value in ("", "7_東", "ʕ_東", "aǅ", "ⅷ", Text("𐐨"), "\ud800a"):
+        saved = value.islower
+        print(value.islower(), saved(), str.islower(value))
     for value in ("", "7_東", "É_7東", "Éa", "Aǅ", "Ⅰ", "Aʕ", Text("𐐀"), CustomUpper("a")):
         print(value.isupper(), str.isupper(value))
     for call in (lambda: str.isupper(), lambda: str.isupper(1), lambda: "A".isupper(1),

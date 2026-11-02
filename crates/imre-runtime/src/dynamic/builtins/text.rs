@@ -1341,6 +1341,7 @@ pub(super) fn method(
     }
     let predicate: Option<fn(&str) -> bool> = match name {
         "isalnum" => Some(crate::objects::python_alnum),
+        "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
         "isupper" => Some(crate::objects::python_isupper),
         _ => None,
@@ -1355,6 +1356,14 @@ pub(super) fn method(
             return Err(type_error(format!(
                 "str.{name}() takes no arguments ({} given)",
                 args.len()
+            )));
+        }
+        if name == "islower"
+            && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))
+        {
+            // Unpaired surrogates are uncased, so only scalar values contribute.
+            return Ok(boolean(crate::objects::python_islower(
+                points.iter().copied().filter_map(char::from_u32),
             )));
         }
         return Ok(boolean(predicate(ctx.str_value(receiver)?)));

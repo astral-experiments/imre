@@ -51,6 +51,7 @@ impl Emitter<'_, '_> {
                 let symbol = match predicate {
                     TextPredicate::Alnum => "imre_str_isalnum",
                     TextPredicate::Space => "imre_str_isspace",
+                    TextPredicate::Lower => "imre_str_is_lower",
                     TextPredicate::Upper => "imre_str_is_upper",
                 };
                 let bit = self.instruction(format!("call i32 @{symbol}(ptr {source})"));

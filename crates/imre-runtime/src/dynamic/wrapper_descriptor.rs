@@ -55,6 +55,7 @@ impl BuiltinDescriptor {
             "object.__format__" => ("object", "__format__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
+            "str.islower" => ("str", "islower"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
@@ -78,7 +79,7 @@ impl BuiltinDescriptor {
         Some(Self {
             owner,
             name,
-            method: name == "__format__",
+            method: matches!(name, "__format__" | "islower"),
         })
     }
 
@@ -174,6 +175,10 @@ impl BuiltinDescriptor {
             }
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("islower", "__doc__") => {
+                        "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
+                    }
+                    ("islower", _) => "($self, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

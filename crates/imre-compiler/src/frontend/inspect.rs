@@ -328,7 +328,7 @@ impl Checker<'_> {
         bound.arguments.args = tail.iter().cloned().collect();
         let receiver = Self::string_value(receiver);
         let result = match method {
-            ir::StrDescriptor::IsAlnum => {
+            ir::StrDescriptor::IsAlnum | ir::StrDescriptor::IsLower => {
                 self.splitlines_or_predicate(receiver, method.name(), &bound)?
             }
             _ => self.text_method(receiver, method.name(), &bound)?,
@@ -360,7 +360,10 @@ impl Checker<'_> {
             self.module,
             call.arguments.keywords.iter().map(Ranged::range),
         );
-        let ty = if method == ir::StrDescriptor::IsAlnum {
+        let ty = if matches!(
+            method,
+            ir::StrDescriptor::IsAlnum | ir::StrDescriptor::IsLower
+        ) {
             Type::Bool
         } else {
             Type::Str

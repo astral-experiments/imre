@@ -7765,6 +7765,11 @@ impl<'a> Checker<'a> {
                     }
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
+                if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+                    && attribute.attr.as_str() == "islower"
+                {
+                    return Err(self.object_builtin_error("bound str.islower", attribute));
+                }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
                     return Ok(self.string_join_value(Some(receiver), attribute));
                 }
@@ -9694,7 +9699,7 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 attribute.attr.as_str(),
-                "splitlines" | "isalnum" | "isspace" | "isupper"
+                "splitlines" | "isalnum" | "isspace" | "islower" | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.splitlines_or_predicate(
