@@ -1572,6 +1572,28 @@ def main():
             )
             compare("-IB", arithmetic, native_args=("run", arithmetic, "--quiet"))
 
+        if sys.platform == "linux" and sys.version_info >= (3, 13):
+            count = Path(__file__).resolve().parent / "fixtures" / "os_cpu_count.py"
+            compare("-IB", count)
+            compare("-B", count, extra={"PYTHON_CPU_COUNT": "7"})
+            compare("-B", "-X", "cpu_count=2", "-X", "cpu_count=3", count,
+                    extra={"PYTHON_CPU_COUNT": "7"})
+            compare("-E", "-B", "-X", "cpu_count=default", count,
+                    extra={"PYTHON_CPU_COUNT": "invalid"})
+            for options, extra in (
+                (("-B", "-X", "cpu_count=2"), {"PYTHON_CPU_COUNT": "invalid"}),
+                (("-IB", "-X", "cpu_count"), {}),
+                (("-B",), {"PYTHON_CPU_COUNT": "bad", "PYTHONHASHSEED": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "bad", "PYTHONINTMAXSTRDIGITS": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "bad", "PYTHON_CONTEXT_AWARE_WARNINGS": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "2", "PYTHONHASHSEED": "bad", "PYTHON_CONTEXT_AWARE_WARNINGS": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "2", "PYTHONINTMAXSTRDIGITS": "bad", "PYTHON_CONTEXT_AWARE_WARNINGS": "bad"}),
+            ):
+                expected = run(sys.executable, *options, "-c", "pass", extra=extra)
+                actual = run(imre, *options, "-c", "pass", extra=extra)
+                assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", expected.stderr)
+                assert expected.returncode == 1
+
         names = root / "calendar_type_names.py"
         names.write_text(
             "from datetime import date, datetime, timedelta\n"

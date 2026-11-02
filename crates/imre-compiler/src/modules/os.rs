@@ -111,6 +111,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
         "getgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getgroups"),
+        "cpu_count" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.cpu_count")
+        }
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
         "scandir" if cfg!(any(target_os = "linux", target_os = "macos")) => {
             Intrinsic::ObjectRuntimeExport("posix.scandir")

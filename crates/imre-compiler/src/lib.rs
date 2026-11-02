@@ -55,6 +55,8 @@ pub struct CommandFlags {
     pub isolated: bool,
     pub ignore_environment: bool,
     pub context_aware_warnings: bool,
+    /// A positive CPU-count override; zero selects the operating system.
+    pub cpu_count: i32,
     /// Python's language optimization level; independent of LLVM optimization.
     pub optimize: i32,
     pub safe_path: bool,

@@ -1403,6 +1403,7 @@ pub(super) fn call(
             | "posix.getuid"
             | "posix.getgid"
             | "posix.getgroups"
+            | "posix.cpu_count"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
             | "sys._jit.is_active"
@@ -1452,6 +1453,10 @@ pub(super) fn call(
                     .map(|group| ctx.alloc(Value::Int(group)))
                     .collect();
                 ctx.alloc(Value::List(groups))
+            }
+            #[cfg(target_os = "linux")]
+            "posix.cpu_count" => {
+                crate::sys::cpu_count::online().map_or(NONE, |n| ctx.int(i64::from(n)))
             }
             "sys.getdefaultencoding" => ctx.default_encoding,
             "sys.get_int_max_str_digits" => {

@@ -1913,11 +1913,9 @@ impl Emitter<'_, '_> {
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
             ));
             self.line(format!(
-                "call void @imre_integer_digits_init(i32 {})",
-                u32::from(ignore_env)
-            ));
-            self.line(format!(
-                "call void @imre_context_warnings_init(i32 {})",
+                "call void @imre_process_config_init(i32 {}, i32 {}, i32 {})",
+                u32::from(ignore_env),
+                command_flags.map_or(-1, |flags| flags.cpu_count),
                 command_flags.map_or(-1, |flags| i32::from(flags.context_aware_warnings))
             ));
             self.line("call void @imre_record_error_init()");
@@ -9187,8 +9185,7 @@ declare ptr @imre_exception_swap_active(ptr)
 declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
 declare i32 @imre_finish_stdio()
-declare void @imre_integer_digits_init(i32)
-declare void @imre_context_warnings_init(i32)
+declare void @imre_process_config_init(i32, i32, i32)
 declare i64 @imre_sys_context_aware_warnings()
 declare void @imre_record_error_init()
 declare void @imre_stdio_unbuffered_init()
