@@ -213,6 +213,7 @@ impl Context {
                 self.module(&name)
             }
             "from" => self.import_from(a, b),
+            "import_star" => self.import_star(a, b),
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {

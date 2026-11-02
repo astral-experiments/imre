@@ -1954,7 +1954,7 @@ impl Context {
     }
 
     /// Release the old binding before the next generator target or instruction can observe it.
-    fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
+    pub(super) fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
         if self.store_source_name(scope, name, value)? && self.heap.has_unbound_finalizer(NONE) {
             self.collect_unreachable();
             self.heap.release_unbound_finalizers();

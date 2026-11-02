@@ -437,7 +437,7 @@ impl Function<'_, '_> {
                     let module = self.import(&name);
                     for alias in &v.names {
                         if alias.name.as_str() == "*" {
-                            self.unsupported("star import");
+                            self.op("import_star", &[&self.scope.clone(), &module]);
                             continue;
                         }
                         let attr = self.code_name(alias.name.as_str());

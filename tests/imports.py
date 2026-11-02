@@ -16,6 +16,19 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "function_wildcard": ({
+        "main.py": "def invalid():\n    from helper import *\n", "helper.py": HELPER,
+    }, "SyntaxError: import * only allowed at module level"),
+    "class_wildcard": ({
+        "main.py": "class Invalid:\n    from helper import *\n", "helper.py": HELPER,
+    }, "SyntaxError: import * only allowed at module level"),
+    "wildcard_keeps_return_check": ({
+        "main.py": "from helper import *\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
+        "helper.py": HELPER,
+    }, "int"),
+    "wildcard_keeps_missing_import": ({
+        "main.py": "from helper import *\nimport absent\n", "helper.py": HELPER,
+    }, "cannot resolve first-party"),
     "type_checking_only_export": ({
         "main.py": "from helper import token\n",
         "helper.py": "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    token = 3\n",
@@ -67,7 +80,6 @@ REJECTED = {
     "private_textwrap_helper": ({"main.py": "from textwrap import _chunk_text\n"}, "unsupported sealed standard-library export textwrap._chunk_text"),
     "unsupported_stdlib": ({"main.py": "import turtle\n"}, 'standard-library imports and shadowing are unsupported: "turtle"'),
     "missing": ({"main.py": "import missing_dependency\n"}, "cannot resolve first-party"),
-    "wildcard": ({"main.py": "from helper import *\n", "helper.py": HELPER}, "wildcard"),
     "dynamic": ({"main.py": '__import__("helper")\n', "helper.py": HELPER}, "unsupported"),
     "nested": ({"main.py": "def f() -> None:\n    import math\nf()\n"}, "unsupported"),
     "conditional": ({"main.py": "if False:\n    import math\n"}, "unsupported"),
@@ -139,6 +151,61 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "wildcard_native_namespaces": {
+        "main.py": "import paths\nimport prepare\nimport codes\nimport computed\n",
+        "paths.py": (
+            "import genericpath as _path\nfrom genericpath import *\n"
+            "assert [n for n in globals() if not n.startswith('_')] == _path.__all__\n"
+            "assert ALLOW_MISSING is _path.ALLOW_MISSING and samefile is _path.samefile\n"
+        ),
+        "prepare.py": (
+            "import errno\n"
+            "def resolve(name):\n    if name == '_computed': return 19\n    raise AttributeError(name)\n"
+            "errno.custom = 37\nerrno._private = 42\n"
+        ),
+        "codes.py": (
+            "import errno as _errno\nimport prepare as _prepare\nfrom errno import *\n"
+            "assert [n for n in globals() if not n.startswith('_')] == "
+            "[n for n in _errno.__dict__ if not n.startswith('_')]\n"
+            "assert '_private' not in globals() and custom == 37\n"
+            "assert ENOENT == _errno.ENOENT and errorcode is _errno.errorcode\n"
+            "assert dir(_errno) == sorted(_errno.__dict__)\n"
+            "del _errno.EINVAL\n_errno.ENOENT = 'rebound'\n"
+            "_errno.__all__ = ['_private', 'ENOENT', 'EINVAL']\n"
+            "try:\n    from errno import *\n"
+            "except AttributeError:\n    assert _private == 42 and ENOENT == 'rebound'\n"
+            "else:\n    raise AssertionError('deleted errno constant was resurrected')\n"
+            "_errno.__getattr__ = _prepare.resolve\n_errno.__all__ = ['_computed']\n"
+        ),
+        "computed.py": "from errno import *\nassert _computed == 19\n",
+    },
+    "wildcard_dict_subclass_all": {
+        "main.py": (
+            "from custom_names import *\nprint(custom)\n"
+            "try:\n    from dict_names import *\n"
+            "except KeyError as error:\n    print(error.args, globals()['partial'])\n"
+            "else:\n    raise AssertionError('missing KeyError from __all__')\n"
+        ),
+        "custom_names.py": (
+            "class Names(dict):\n    def __getitem__(self, index):\n"
+            "        if index == 0: return 'custom'\n        raise IndexError(index)\n"
+            "custom = 47\n__all__ = Names()\n"
+        ),
+        "dict_names.py": "class Names(dict): pass\npartial = 48\n__all__ = Names({0: 'partial'})\n",
+    },
+    "wildcard": {
+        "main.py": "import consumer\n",
+        "consumer.py": (
+            "from public import *\nfrom explicit import *\n"
+            "print(token, _private, 'ignored' in globals(), '_hidden' in globals())\n"
+            "try:\n    from broken import *\nexcept AttributeError:\n    print(earlier)\n"
+            "try:\n    from invalid import *\nexcept TypeError as error:\n    print(str(error))\n"
+        ),
+        "public.py": "token = 42\n_hidden = False\n",
+        "explicit.py": "_private = 7\nignored = True\n__all__ = ['_' + 'private']\n",
+        "broken.py": "earlier = 1\n__all__ = ['earlier', 'absent']\n",
+        "invalid.py": "__all__ = [3]\n",
+    },
     "type_checking_runtime_export": {
         "main.py": (
             "import helper\nfrom helper import token as selected\n"

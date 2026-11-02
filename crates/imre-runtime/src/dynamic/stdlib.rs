@@ -70,13 +70,18 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
+    matches!(name, "builtins" | "errno" | "genericpath") || has_lazy_attributes(name)
+}
+
+/// These providers synthesize attributes on lookup. Their module dictionaries
+/// alone do not enumerate their exports.
+pub(super) fn has_lazy_attributes(name: &str) -> bool {
     if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport") {
         return true;
     }
     matches!(
         name,
         "sys"
-            | "builtins"
             | "_imp"
             | "threading"
             | "_thread"
@@ -96,7 +101,6 @@ pub(super) fn is_module(name: &str) -> bool {
             | "ast"
             | "os"
             | "posix"
-            | "genericpath"
             | "posixpath"
             | "_imre_posixpath"
             | "_imre_metadata"
@@ -145,7 +149,6 @@ pub(super) fn is_module(name: &str) -> bool {
             | "collections"
             | "_collections_abc"
             | "enum"
-            | "errno"
             | "typing"
             | "contextlib"
             | "contextvars"
@@ -155,6 +158,22 @@ pub(super) fn is_module(name: &str) -> bool {
             | "urllib"
             | "urllib.parse"
     )
+}
+
+/// Populate errno in platform registration order so aliases and the reverse
+/// mapping share the same definitions as the ordinary compiler.
+pub(super) fn install_errno(ctx: &mut Context, scope: Id) -> Result<()> {
+    let doc = ctx.text(crate::objects::ERRNO_DOC);
+    ctx.bind(scope, "__doc__", doc);
+    let errorcode = ctx.dict(Vec::new());
+    ctx.bind(scope, "errorcode", errorcode);
+    for (symbol, value) in crate::objects::errno_entries() {
+        let code = ctx.int(i64::from(value));
+        ctx.bind(scope, symbol, code);
+        let name = ctx.text(symbol);
+        ctx.put_item(errorcode, code, name)?;
+    }
+    Ok(())
 }
 
 fn os_error(err: std::io::Error) -> Error {
@@ -452,27 +471,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("datetime.{name}"))
         }
         ("socket", name) => return socket::attribute(ctx, name),
-        ("errno", "__doc__") => ctx.text(crate::objects::ERRNO_DOC),
-        ("errno", "errorcode") => {
-            let dict = ctx.dict(Vec::new());
-            for (symbol, value) in crate::objects::errno_entries() {
-                let key = ctx.int(i64::from(value));
-                let symbol = ctx.text(symbol);
-                ctx.put_item(dict, key, symbol)?;
-            }
-            dict
-        }
-        ("errno", name) => {
-            let value = crate::objects::errno_entries()
-                .find_map(|(symbol, value)| (symbol == name).then_some(value))
-                .ok_or_else(|| {
-                    Error::new(
-                        "AttributeError",
-                        format!("module 'errno' has no attribute '{name}'"),
-                    )
-                })?;
-            ctx.int(i64::from(value))
-        }
         ("hashlib", name) if crate::objects::HashState::algorithms().any(|alg| alg == name) => {
             ctx.alloc(Value::Native(format!("hashlib.{name}")))
         }
