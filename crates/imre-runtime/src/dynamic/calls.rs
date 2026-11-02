@@ -375,7 +375,7 @@ impl Context {
                     || (kind == "function" && name == "__call__")
                     || (kind == "builtin_function_or_method" && name == "__reduce__")
                     || (kind == "set" && matches!(name, "intersection_update" | "update"))
-                    || (matches!(name, "__repr__" | "__reduce__" | "difference" | "intersection" | "issubset" | "symmetric_difference" | "union")
+                    || (matches!(name, "__repr__" | "__reduce__" | "difference" | "intersection" | "isdisjoint" | "issubset" | "symmetric_difference" | "union")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
@@ -3923,7 +3923,7 @@ impl Context {
                     || builtins::is_enum_base(class)
                     || (matches!(
                         name,
-                        "__repr__" | "difference" | "intersection" | "issubset" | "symmetric_difference" | "union"
+                        "__repr__" | "difference" | "intersection" | "isdisjoint" | "issubset" | "symmetric_difference" | "union"
                     ) && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
                         && matches!(

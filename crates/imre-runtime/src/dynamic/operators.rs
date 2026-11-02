@@ -1100,9 +1100,14 @@ impl Context {
         if subset_len > superset_len || (subset_len == superset_len && matches!(op, "<" | ">")) {
             return Ok(FALSE);
         }
+        self.set_members_match(subset, superset, true)
+    }
+
+    /// Test stored keys with their insertion hashes, stopping at the first mismatch.
+    pub(super) fn set_members_match(&mut self, source: Id, other: Id, present: bool) -> Result<Id> {
         let mut position = 0;
-        while let Some((at, key, _, hash)) = self.dictionary_pair(subset, position) {
-            let member = self.find_dictionary_key(superset, key, hash);
+        while let Some((at, key, _, hash)) = self.dictionary_pair(source, position) {
+            let member = self.find_dictionary_key(other, key, hash);
             if let Err(error) = &member {
                 for id in error.roots() {
                     self.heap.keep(id);
@@ -1113,7 +1118,7 @@ impl Context {
             let mark = self.heap.temporary_mark();
             self.heap.keep(key);
             self.discard_truth(mark);
-            if member?.1.is_none() {
+            if member?.1.is_some() != present {
                 return Ok(FALSE);
             }
             position = at + 1;

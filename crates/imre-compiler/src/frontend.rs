@@ -2636,6 +2636,7 @@ impl<'a> Checker<'a> {
             "pop" => "set.pop",
             "remove" => "set.remove",
             "update" => "set.update",
+            "isdisjoint" => "set.isdisjoint",
             "issubset" => "set.issubset",
             _ => return None,
         };
@@ -2644,11 +2645,12 @@ impl<'a> Checker<'a> {
         {
             return Some(name);
         }
-        if (operation || matches!(attribute.attr.as_str(), "issubset" | "symmetric_difference" | "union"))
+        if (operation || matches!(attribute.attr.as_str(), "isdisjoint" | "issubset" | "symmetric_difference" | "union"))
             && (receiver == Some(Type::FrozenStrings)
                 || self.unshadowed_builtin(&attribute.value, "frozenset"))
         {
             return Some(match attribute.attr.as_str() {
+                "isdisjoint" => "frozenset.isdisjoint",
                 "issubset" => "frozenset.issubset",
                 "union" => "frozenset.union",
                 "symmetric_difference" => "frozenset.symmetric_difference",

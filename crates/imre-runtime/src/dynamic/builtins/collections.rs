@@ -900,7 +900,8 @@ pub(super) fn method(
                     | "set.intersection_update"
                     | "set.symmetric_difference_update"
                     | "set.update"
-            ) || name.ends_with(".issubset")
+            ) || name.ends_with(".isdisjoint")
+                || name.ends_with(".issubset")
                 || name.ends_with(".symmetric_difference")
                 || name.ends_with(".intersection")
                 || name.ends_with(".difference")
@@ -912,7 +913,7 @@ pub(super) fn method(
         })?;
     let receiver = if let Some((
         kind,
-        method @ ("difference" | "intersection" | "issubset" | "symmetric_difference" | "union"),
+        method @ ("difference" | "intersection" | "isdisjoint" | "issubset" | "symmetric_difference" | "union"),
     )) = name.split_once('.')
     {
         let storage = ctx.scalar_value(object);
@@ -1046,6 +1047,8 @@ pub(super) fn method(
             | "frozenset.intersection"
             | "set.union"
             | "frozenset.union"
+            | "set.isdisjoint"
+            | "frozenset.isdisjoint"
             | "set.issubset"
             | "frozenset.issubset"
             | "set.issuperset"
@@ -1204,6 +1207,35 @@ pub(super) fn method(
                 entries,
                 frozen: false,
             }))
+        }
+        "set.isdisjoint" | "frozenset.isdisjoint" => {
+            let other = super::one_positional_arg(name, args, kwargs)?;
+            if object == other {
+                return Ok(boolean(ctx.stored_entries(receiver).is_empty()));
+            }
+            if matches!(ctx.heap.get(other), Value::Set { .. }) {
+                let (source, probe) = if ctx.stored_entries(other).len() > ctx.stored_entries(receiver).len() {
+                    (receiver, other)
+                } else {
+                    (other, receiver)
+                };
+                return ctx.set_members_match(source, probe, false);
+            }
+            let iterator = ctx.iterator(other)?;
+            ctx.heap.keep(iterator);
+            let mark = ctx.heap.temporary_mark();
+            let mut limit = ctx.heap.streaming_collection_limit();
+            loop {
+                ctx.collect_streaming_garbage(&mut limit);
+                let Some(item) = ctx.next_item(iterator)? else {
+                    return Ok(TRUE);
+                };
+                let member = set_member(ctx, receiver, item, false)?;
+                ctx.discard_truth(mark);
+                if member {
+                    return Ok(FALSE);
+                }
+            }
         }
         "set.issuperset" | "frozenset.issuperset" | "set.issubset" | "frozenset.issubset" => {
             let [source] = args else {
