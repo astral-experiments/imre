@@ -66,8 +66,8 @@ impl BuiltinDescriptor {
             Some(("frozenset", attr)) => Some(("frozenset", attr, &["__reduce__", "issubset"][..])),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
-            Some((stdlib::os::stat::CLASS, attr)) => {
-                Some((stdlib::os::stat::CLASS, attr, &["__reduce__"][..]))
+            Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
+                Some((layout.class, attr, &["__reduce__"][..]))
             }
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
             _ => None,
@@ -217,12 +217,12 @@ impl BuiltinDescriptor {
             }
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
             "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
-            stdlib::os::stat::CLASS => matches!(
+            class @ (stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS) => matches!(
                 ctx.heap.get(receiver),
                 Value::NamedTuple {
-                    class: Some(stdlib::os::stat::CLASS),
+                    class: Some(owner),
                     ..
-                }
+                } if *owner == class
             ),
             stdlib::os::scandir::ENTRY => matches!(ctx.heap.get(receiver), Value::DirEntry(_)),
             stdlib::os::scandir::ITER => matches!(ctx.heap.get(receiver), Value::Scandir(_)),
@@ -283,7 +283,7 @@ impl BuiltinDescriptor {
                 {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" => ctx.class_qualname(receiver),
-                        Value::NamedTuple { class: Some(stdlib::os::stat::CLASS), .. } => "stat_result",
+                        Value::NamedTuple { class: Some(owner), .. } if let Some(layout) = stdlib::os::stat::layout(owner) => layout.name(),
                         value if let Some(class) = value.instance_class() => ctx
                             .class_attr(class, "__qualname__")
                             .and_then(|name| ctx.str_value(name).ok())
@@ -349,8 +349,8 @@ impl BuiltinDescriptor {
                     ("__getstate__" | "__reduce__" | "__reduce_ex__", "__doc__") if self.owner == "object" => "Helper for pickle.",
                     ("__getstate__" | "__reduce__", _) if self.owner == "object" => "($self, /)",
                     ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
-                    ("__reduce__", "__doc__") if self.owner == stdlib::os::stat::CLASS => return Some(NONE),
-                    ("__reduce__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /)",
+                    ("__reduce__", "__doc__") if stdlib::os::stat::layout(self.owner).is_some() => return Some(NONE),
+                    ("__reduce__", _) if stdlib::os::stat::layout(self.owner).is_some() => "($self, /)",
                     ("count", "__doc__") if self.owner == "bytes" => {
                         "Return the number of non-overlapping occurrences of subsection 'sub' in bytes B[start:end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes."
                     }
