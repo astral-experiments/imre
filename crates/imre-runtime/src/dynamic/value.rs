@@ -641,7 +641,7 @@ pub(super) struct ClassNamespace {
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
-    /// Closure cell shared by runtime-source method annotation providers.
+    /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
     /// Scratch field dictionary used while a class body is executing.
     pub annotation_scratch: Option<Id>,
@@ -680,6 +680,15 @@ pub(super) struct Scope {
     pub module: String,
 }
 
+impl Scope {
+    /// type.__qualname__ lives outside the finished class dictionary.
+    pub(super) fn binding_namespace(&self, name: &str) -> Option<Id> {
+        self.namespace.filter(|_| {
+            name != "__qualname__" || self.class_namespace.is_none() || self.class_body.is_some()
+        })
+    }
+}
+
 #[derive(Clone, Default)]
 pub(super) struct ClosureScope {
     pub declared: HashSet<String>,
@@ -692,6 +701,20 @@ pub(super) struct ClosureScope {
 pub(super) struct ExecGlobals {
     pub dict: Id,
     pub builtins: Id,
+}
+
+#[derive(Clone)]
+pub(super) struct BoxedTextFile {
+    pub(super) file: crate::objects::TextFile,
+    pub(super) buffer: Option<Id>,
+}
+
+impl std::ops::Deref for BoxedTextFile {
+    type Target = crate::objects::TextFile;
+
+    fn deref(&self) -> &Self::Target {
+        &self.file
+    }
 }
 
 #[derive(Clone)]
@@ -737,7 +760,7 @@ pub(super) enum Value {
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
-    /// A contiguous read-only view keeps its original bytes exporter alive until release.
+    /// A contiguous view retains its original exporter until release.
     MemoryView {
         owner: Option<Id>,
         hash: Option<i64>,
@@ -799,7 +822,6 @@ pub(super) enum Value {
     },
     Scope(Scope),
     Cell(Option<Id>),
-    ClassCell(Option<Id>),
     Super {
         start: Id,
         receiver: Id,
@@ -1003,7 +1025,7 @@ pub(super) enum Value {
     },
     ProcessHandle(crate::objects::BoxedPopen),
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
-    TextFile(crate::objects::TextFile),
+    TextFile(BoxedTextFile),
     RegexScanner {
         pattern: Id,
         subject: Id,
@@ -1087,7 +1109,8 @@ impl Value {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Writer { .. }
+                | super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
             },
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
@@ -1124,7 +1147,7 @@ impl Value {
             }
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
-            Self::Cell(_) | Self::ClassCell(_) => "cell",
+            Self::Cell(_) => "cell",
             Self::Generator { .. } => "generator",
             Self::Coroutine(_) => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
@@ -1201,7 +1224,6 @@ impl Value {
             | Self::Code(_)
             | Self::Native(_)
             | Self::Scope(_)
-            | Self::ClassCell(_)
             | Self::LoopIterator { .. }
             | Self::ProcessHandle(_)
             | Self::Yielded(_) => false,
@@ -1340,7 +1362,6 @@ impl Value {
                 }
                 visit.extend(scope.names.values());
             }
-            Self::ClassCell(class) => visit.extend(class),
             Self::Super {
                 start,
                 receiver,
@@ -1569,9 +1590,9 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
-            | Self::TextFile(_)
             | Self::ProcessHandle(_)
             | Self::NamedFileCloser(_) => {}
+            Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
     }
@@ -2184,7 +2205,7 @@ impl Heap {
     }
 
     pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
-        let (Value::Cell(contents) | Value::ClassCell(contents)) = self.get_mut(cell) else {
+        let Value::Cell(contents) = self.get_mut(cell) else {
             unreachable!("compiled closure cell")
         };
         let previous = std::mem::replace(contents, value);
@@ -2206,7 +2227,7 @@ impl Heap {
             && (self.weak_edge(value)
                 || matches!(
                     self.get(value),
-                    Value::Function { .. } | Value::Cell(Some(_)) | Value::ClassCell(Some(_))
+                    Value::Function { .. } | Value::Cell(Some(_))
                 ))
             && !self.bound_in_active_frame(value)
         {
@@ -2735,6 +2756,27 @@ impl Heap {
         reachable
     }
 
+    /// A view can be unreachable before the next sweep. Check its actual lifetime
+    /// before resizing a previously exported array, without running Python callbacks.
+    pub(super) fn has_live_array_view(
+        &self,
+        array: Id,
+        roots: impl Iterator<Item = Id>,
+    ) -> Result<bool> {
+        let mut cycles = CycleSet::new(self.slots.len())?;
+        self.mark_reference_survivors(roots, &mut cycles);
+        let live = self.slots.iter().any(|slot| {
+            slot.marked()
+                && matches!(slot.value, Some(Value::MemoryView { owner: Some(owner), .. })
+                    if owner == array || matches!(self.get(owner),
+                        Value::Instance { scalar: Some(storage), .. } if *storage == array))
+        });
+        for slot in &self.slots {
+            slot.trace.set(UNMARKED);
+        }
+        Ok(live)
+    }
+
     pub(super) fn slot_count(&self) -> usize {
         self.slots.len()
     }
@@ -3051,16 +3093,20 @@ impl Heap {
             self.collect_next_statement = true;
             return None;
         };
-        self.mark(globals);
-        self.identify_cycles(&mut cycles);
-        // A weakref callback can drop an unrelated owner. Leave its graph intact
-        // for Python dispatch if this sweep only releases temporary callback roots.
-        self.mark(
-            cycles
-                .members()
-                .chain(self.ordinary_finalizers.iter().copied()),
-        );
+        self.mark_reference_survivors(globals, &mut cycles);
         self.sweep()
+    }
+
+    fn mark_reference_survivors(&self, globals: impl Iterator<Item = Id>, cycles: &mut CycleSet) {
+        // A weakref callback can drop an unrelated owner. Keep its graph intact
+        // for Python dispatch when this sweep releases temporary callback roots.
+        self.mark(globals.chain(self.ordinary_finalizers.iter().copied()));
+        self.identify_cycles(cycles);
+        // Peeling leaves both cycles and their unreachable descendants. Every
+        // strong child of a member is therefore already live or itself a member.
+        for id in cycles.members() {
+            self.slots[id as usize].trace.set(END);
+        }
     }
 
     pub(super) fn full_collection_active(&self) -> bool {
@@ -3388,6 +3434,34 @@ mod tests {
         heap.collect([child].into_iter());
         assert!(matches!(heap.get(parent), Value::Tuple(items) if items == &[keep]));
         assert_eq!(heap.free_count, 0);
+    }
+
+    #[test]
+    fn prompt_sweep_preserves_cycle_descendants_and_pending_owners() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let leaf = heap.alloc(Value::List(Vec::new()));
+        let cycle = heap.alloc(Value::List(vec![leaf, leaf]));
+        let Value::List(items) = heap.get_mut(cycle) else {
+            unreachable!()
+        };
+        items.push(cycle);
+        let child = heap.alloc(Value::List(Vec::new()));
+        let owner = heap.alloc(Value::List(vec![child]));
+        heap.register_finalizer(owner);
+        let discarded = heap.alloc(Value::List(Vec::new()));
+        heap.release_temporaries_since(mark);
+
+        heap.collect(std::iter::empty());
+        for id in [leaf, cycle, child, owner] {
+            assert!(heap.slots[id as usize].value.is_some());
+        }
+        assert!(heap.slots[discarded as usize].value.is_none());
+
+        heap.take_finalizer(owner, true);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[owner as usize].value.is_none());
+        assert!(heap.slots[child as usize].value.is_none());
     }
 
     #[test]

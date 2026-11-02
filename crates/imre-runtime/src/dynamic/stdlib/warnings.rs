@@ -3,6 +3,7 @@ use super::{Context, Error, Id, NONE, Result, Value};
 enum Origin {
     Caller(i32),
     FrozenImport(u32),
+    FrozenExternal { globals: Id, line: u32 },
 }
 
 impl Context {
@@ -12,6 +13,20 @@ impl Context {
             crate::objects::exceptions::Kind::ImportWarning,
             message,
             Origin::FrozenImport(1353),
+            NONE,
+        )
+    }
+
+    pub(in crate::dynamic) fn warn_external_loader(
+        &mut self,
+        globals: Id,
+        line: u32,
+        message: &str,
+    ) -> Result<()> {
+        self.emit_warning(
+            crate::objects::exceptions::Kind::DeprecationWarning,
+            message,
+            Origin::FrozenExternal { globals, line },
             NONE,
         )
     }
@@ -58,6 +73,17 @@ impl Context {
                 line,
                 "importlib._bootstrap".to_owned(),
             ),
+            Origin::FrozenExternal { globals, line } => {
+                let module = self.dict_named_item(globals, "__name__");
+                if module == Some(NONE) {
+                    return Ok(());
+                }
+                let module = module
+                    .and_then(|id| self.str_value(id).ok())
+                    .unwrap_or("<string>")
+                    .to_owned();
+                ("<frozen importlib._bootstrap_external>".into(), line, module)
+            }
             Origin::Caller(level) => {
                 if let Some((loc, scope)) = self.heap.warning_frame(level) {
                     let globals = self.module_globals(scope)?;
@@ -90,7 +116,7 @@ impl Context {
                     globals,
                     match origin {
                         Origin::Caller(_) => "warn",
-                        Origin::FrozenImport(_) => "warn_explicit",
+                        Origin::FrozenImport(_) | Origin::FrozenExternal { .. } => "warn_explicit",
                     },
                 )
             {
@@ -105,12 +131,16 @@ impl Context {
                         }
                         args
                     }
-                    Origin::FrozenImport(_) => {
-                        // Some closed graphs run the native bootstrap without importing its module.
-                        if self.bootstrap_globals == NONE {
-                            self.bootstrap_globals = self.dict(Vec::new());
-                        }
-                        let globals = self.bootstrap_globals;
+                    Origin::FrozenImport(_) | Origin::FrozenExternal { .. } => {
+                        let globals = if let Origin::FrozenExternal { globals, .. } = origin {
+                            globals
+                        } else {
+                            // Some closed graphs run the native bootstrap without importing its module.
+                            if self.bootstrap_globals == NONE {
+                                self.bootstrap_globals = self.dict(Vec::new());
+                            }
+                            self.bootstrap_globals
+                        };
                         let registry = match self.dict_named_item(globals, "__warningregistry__") {
                             Some(registry) => registry,
                             None => {

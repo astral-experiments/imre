@@ -1,22 +1,26 @@
 # URL request, local path and environment proxy helpers from CPython 3.14.5
 # Lib/urllib/request.py. See ../docstrings/LICENSE.
+import base64
 import bisect
+import io
 import os
 import re
 import socket
 import sys
+import tempfile
 
 from email.message import Message
-from urllib.error import URLError
+from urllib.error import ContentTooShortError, URLError
 from urllib.response import addinfourl
 from urllib.parse import (
-    _splithost, _splitport, _splittag, _splittype, quote, unquote, unwrap, urlparse, urlsplit,
+    _splithost, _splitport, _splittag, _splittype, quote, unquote, unquote_to_bytes, unwrap, urlparse, urlsplit,
 )
 
 
 __all__ = [
-    "Request", "OpenerDirector", "BaseHandler", "FileHandler", "UnknownHandler",
-    "urlopen", "install_opener", "build_opener", "pathname2url", "url2pathname",
+    "Request", "OpenerDirector", "BaseHandler", "DataHandler", "FileHandler", "UnknownHandler",
+    "urlopen", "install_opener", "build_opener", "urlretrieve", "urlcleanup",
+    "pathname2url", "url2pathname",
 ]
 
 
@@ -40,6 +44,84 @@ def install_opener(opener):
     global _opener
     _opener = opener
 
+
+_url_tempfiles = []
+
+def urlretrieve(url, filename=None, reporthook=None, data=None):
+    """
+    Retrieve a URL into a temporary location on disk.
+
+    Requires a URL argument. If a filename is passed, it is used as
+    the temporary file location. The reporthook argument should be
+    a callable that accepts a block number, a read size, and the
+    total file size of the URL target. The data argument should be
+    valid URL encoded data.
+
+    If a filename is passed and the URL points to a local resource,
+    the result is a copy from local file to new file.
+
+    Returns a tuple containing the path to the newly created
+    data file as well as the resulting HTTPMessage object.
+    """
+    url_type, path = _splittype(url)
+
+    fp = urlopen(url, data)
+    try:
+        headers = fp.info()
+
+        # Just return the local path and the "headers" for file://
+        # URLs. No sense in performing a copy unless requested.
+        if url_type == "file" and not filename:
+            return os.path.normpath(path), headers
+
+        # Handle temporary file setup.
+        if filename:
+            tfp = open(filename, 'wb')
+        else:
+            tfp = tempfile.NamedTemporaryFile(delete=False)
+            filename = tfp.name
+            _url_tempfiles.append(filename)
+
+        with tfp:
+            result = filename, headers
+            bs = 1024*8
+            size = -1
+            read = 0
+            blocknum = 0
+            if "content-length" in headers:
+                size = int(headers["Content-Length"])
+
+            if reporthook:
+                reporthook(blocknum, bs, size)
+
+            while block := fp.read(bs):
+                read += len(block)
+                tfp.write(block)
+                blocknum += 1
+                if reporthook:
+                    reporthook(blocknum, bs, size)
+    finally:
+        fp.close()
+
+    if size >= 0 and read < size:
+        raise ContentTooShortError(
+            "retrieval incomplete: got only %i out of %i bytes"
+            % (read, size), result)
+
+    return result
+
+def urlcleanup():
+    """Clean up temporary files from urlretrieve calls."""
+    for temp_file in _url_tempfiles:
+        try:
+            os.unlink(temp_file)
+        except OSError:
+            pass
+
+    del _url_tempfiles[:]
+    global _opener
+    if _opener:
+        _opener = None
 
 _cut_port_re = re.compile(r":\d+$", re.ASCII)
 def request_host(request):
@@ -318,7 +400,7 @@ def build_opener(*handlers):
     default handlers, the default handlers will not be used.
     """
     opener = OpenerDirector()
-    default_classes = [UnknownHandler, FileHandler]
+    default_classes = [UnknownHandler, FileHandler, DataHandler]
     skip = set()
     for klass in default_classes:
         for check in handlers:
@@ -367,9 +449,51 @@ class UnknownHandler(BaseHandler):
 
 class _DefaultUnknownHandler(UnknownHandler):
     def unknown_open(self, req):
-        if req.type in ("http", "https", "ftp", "data"):
+        if req.type in ("http", "https", "ftp"):
             raise NotImplementedError("urllib.request has no default %s handler" % req.type)
         return super().unknown_open(req)
+
+
+class DataHandler(BaseHandler):
+    def data_open(self, req):
+        # data URLs as specified in RFC 2397.
+        #
+        # ignores POSTed data
+        #
+        # syntax:
+        # dataurl   := "data:" [ mediatype ] [ ";base64" ] "," data
+        # mediatype := [ type "/" subtype ] *( ";" parameter )
+        # data      := *urlchar
+        # parameter := attribute "=" value
+        url = req.full_url
+
+        scheme, data = url.split(":",1)
+        mediatype, data = data.split(",",1)
+
+        # Disallow control characters within mediatype.
+        if re.search(r"[\x00-\x1F\x7F]", mediatype):
+            raise ValueError(
+                "Control characters not allowed in data: mediatype")
+
+        # even base64 encoded data URLs might be quoted so unquote in any case:
+        data = unquote_to_bytes(data)
+        if mediatype.endswith(";base64"):
+            try:
+                decode = base64.decodebytes
+            except AttributeError:
+                # decodebytes passes this already-decoded bytes object to binascii.
+                decode = base64.binascii.a2b_base64
+            data = decode(data)
+            mediatype = mediatype[:-7]
+
+        if not mediatype:
+            mediatype = "text/plain;charset=US-ASCII"
+
+        headers = Message()
+        # Parsing the generated header consumes spaces after the colon.
+        headers["Content-type"] = mediatype.lstrip(" ")
+        headers["Content-length"] = str(len(data))
+        return addinfourl(io.BytesIO(data), headers, url)
 
 
 class FileHandler(BaseHandler):

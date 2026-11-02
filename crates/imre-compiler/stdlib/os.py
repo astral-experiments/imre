@@ -14,6 +14,16 @@ extsep = path.extsep
 
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+def fdopen(fd, mode="r", buffering=-1, encoding=None, *args, **kwargs):
+    if not isinstance(fd, int):
+        raise TypeError("invalid fd type (%s, expected integer)" % type(fd))
+    import io
+    if "b" not in mode:
+        encoding = io.text_encoding(encoding)
+    return io.open(fd, mode, buffering, encoding, *args, **kwargs)
+
+
+
 _walk_symlinks_as_files = object()
 
 

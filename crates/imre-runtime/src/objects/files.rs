@@ -66,7 +66,7 @@ impl Stream {
     /// Closes exactly once even when flushing fails. A close error takes precedence.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
-            Self::Standard(stderr) => return crate::sys::flush_standard(stderr),
+            Self::Standard(stderr) => return crate::sys::close_standard_output(stderr, true),
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Random(file) => return file.close(),
             Self::UnreadGzip { file, .. } => (file, Ok(())),
@@ -170,6 +170,12 @@ impl FileState {
 
     pub(crate) fn close(&mut self) -> io::Result<()> {
         self.stream.take().map_or(Ok(()), Stream::close)
+    }
+
+    pub(super) fn close_standard_buffer(&mut self) -> Result<()> {
+        let stderr = self.standard_writer()?;
+        self.stream.take();
+        crate::sys::close_standard_output(stderr, false).map_err(errno_error)
     }
 
     pub(super) fn communicate_stdin(&mut self, input: &[u8], close: bool) -> Result<()> {

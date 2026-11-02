@@ -259,7 +259,21 @@ def assertSequenceEqual(self, seq1, seq2, msg=None, seq_type=None):
     self.fail(msg)
 
 
+def assertListEqual(self, list1, list2, msg=None):
+    """A list-specific equality assertion.
+
+    Args:
+        list1: The first list to compare.
+        list2: The second list to compare.
+        msg: Optional message to use on failure instead of a list of
+                differences.
+
+    """
+    self.assertSequenceEqual(list1, list2, msg, seq_type=list)
+
+
 TestCase.assertSequenceEqual = assertSequenceEqual
+TestCase.assertListEqual = assertListEqual
 
 
 # Multiset comparison and diagnostics follow CPython 3.14.5 unittest.util and unittest.case.

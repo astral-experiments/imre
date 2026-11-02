@@ -787,15 +787,21 @@ impl Context {
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
             }
-            (Value::MemoryView { .. }, Value::Array(array)) => self
-                .bytes_like(a)
-                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
-            (Value::Array(array), Value::MemoryView { .. }) => self
-                .bytes_like(b)
-                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
             (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
-                match (self.bytes_like(a), self.bytes_like(b)) {
-                    (Ok(left), Ok(right)) => left == right,
+                match (self.buffer_storage(a), self.buffer_storage(b)) {
+                    (Ok(Value::Array(a)), Ok(Value::Array(b))) => a.equals_numeric_array(b),
+                    (
+                        Ok(Value::Array(array)),
+                        Ok(Value::Bytes(bytes) | Value::ByteArray(bytes)),
+                    )
+                    | (
+                        Ok(Value::Bytes(bytes) | Value::ByteArray(bytes)),
+                        Ok(Value::Array(array)),
+                    ) => array.equals_unsigned_bytes(bytes),
+                    (
+                        Ok(Value::Bytes(a) | Value::ByteArray(a)),
+                        Ok(Value::Bytes(b) | Value::ByteArray(b)),
+                    ) => a == b,
                     _ => false,
                 }
             }
@@ -2307,19 +2313,17 @@ impl Context {
     }
 
     fn qualified_class_name(&self, class: Id, scope: Id) -> String {
-        let scope = self.scope_data(scope);
-        let module = match scope.names.get("__module__") {
-            Some(&value) => self.str_value(value).ok(),
-            None => Some(scope.module.as_str()),
+        let module = match self.namespace_binding(self.scope_data(scope), "__module__") {
+            Some(value) => self.str_value(value).ok(),
+            None => Some(self.scope_data(scope).module.as_str()),
         };
         let name = self.class_name(class);
         match module {
             None | Some("builtins") => name.to_owned(),
             Some(module) => {
-                let qualname = scope
-                    .names
-                    .get("__qualname__")
-                    .and_then(|&value| self.str_value(value).ok())
+                let qualname = self
+                    .namespace_binding(self.scope_data(scope), "__qualname__")
+                    .and_then(|value| self.str_value(value).ok())
                     .unwrap_or(name);
                 format!("{module}.{qualname}")
             }
@@ -2590,7 +2594,8 @@ impl Context {
                 format!("{variance}{}", self.display(var.name))
             }
             Value::GetSetDescriptor { owner, name, .. }
-                if crate::objects::HashState::is_provider_class(owner)
+                if *owner == "int"
+                    || crate::objects::HashState::is_provider_class(owner)
                     || *owner == super::value::TEMPLATE_TYPE
                     || stdlib::datetime::members(owner).is_some() =>
             {
@@ -4100,6 +4105,12 @@ impl Context {
         }
     }
 
+    /// An inherited object.__ne__ leaves ordinary comparison to the equality fallback.
+    fn has_custom_ne(&self, value: Id) -> bool {
+        self.slot(value, "__ne__")
+            .is_some_and(|slot| Some(&slot) != self.builtins.get("object.__ne__"))
+    }
+
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         if let Value::KeyWrapper { comparator, object } = *self.heap.get(obj) {
             return stdlib::functools::key_comparison(self, name, comparator, object, other);
@@ -4112,7 +4123,9 @@ impl Context {
         {
             return Ok(None);
         }
-        let method = if matches!(
+        let method = if name == "__ne__" && !self.has_custom_ne(obj) {
+            None
+        } else if matches!(
             name,
             "__add__"
                 | "__radd__"
@@ -4298,7 +4311,16 @@ impl Context {
                         | Value::Array(_)
                 )
             {
-                return Ok(Some(builtins::boolean(self.equal(a, b) == (op == "=="))));
+                // A live floating-point view compares its elements even with itself:
+                // a NaN is unequal. Container identity shortcuts still apply separately.
+                let equal = if a == b
+                    && let Ok(Value::Array(array)) = self.buffer_storage(a)
+                {
+                    array.equals_numeric_array(array)
+                } else {
+                    self.equal(a, b)
+                };
+                return Ok(Some(builtins::boolean(equal == (op == "=="))));
             }
         }
         if matches!(op, "==" | "!=")
@@ -4340,8 +4362,8 @@ impl Context {
             self.heap.keep(left);
             self.heap.keep(right);
             if op == "!="
-                && self.slot(left, "__ne__").is_none()
-                && self.slot(right, "__ne__").is_none()
+                && !self.has_custom_ne(left)
+                && !self.has_custom_ne(right)
             {
                 let equal = self.binary("==", left, right)?;
                 return Ok(Some(if self.truth(equal)? { FALSE } else { TRUE }));

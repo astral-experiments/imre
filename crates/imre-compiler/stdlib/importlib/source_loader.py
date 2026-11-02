@@ -9,6 +9,7 @@ from _imre_importlib import (
     path_stats as _path_stats,
     source_name as _source_name,
     warn_debug_override as _warn_debug_override,
+    warn_loader_deprecation as _warn_loader_deprecation,
 )
 from os import fspath as _fspath, sep
 
@@ -25,6 +26,34 @@ def _invalidate_default_path_caches():
             del _zip_path_importers[path]
         elif hasattr(finder, "invalidate_caches"):
             finder.invalidate_caches()
+
+
+def _bless_my_loader(module_globals):
+    """Choose the loader for a module's globals, honoring the legacy __loader__."""
+    if not isinstance(module_globals, dict):
+        return None
+    missing = object()
+    loader = module_globals.get("__loader__", None)
+    spec = module_globals.get("__spec__", missing)
+    if loader is None:
+        if spec is missing:
+            return None
+        if spec is None:
+            raise ValueError("Module globals is missing a __spec__.loader")
+
+    spec_loader = getattr(spec, "loader", missing)
+    if spec_loader in (missing, None):
+        if loader is None:
+            if spec_loader is missing:
+                raise AttributeError("Module globals is missing a __spec__.loader")
+            raise ValueError("Module globals is missing a __spec__.loader")
+        _warn_loader_deprecation(globals(), False)
+        spec_loader = loader
+
+    if loader is not None and loader != spec_loader:
+        _warn_loader_deprecation(globals(), True)
+        return loader
+    return spec_loader
 
 
 def _cache_path(path):

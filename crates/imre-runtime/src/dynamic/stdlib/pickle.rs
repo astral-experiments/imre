@@ -248,7 +248,7 @@ impl Pickler {
             (ctx.builtin("codecs.encode"), vec![text, latin1])
         };
         let args = ctx.alloc(Value::Tuple(args));
-        self.save_reduce(ctx, obj, func, args, NONE)
+        self.save_reduce(ctx, obj, func, args, NONE, NONE)
     }
 
     fn save_list(&mut self, ctx: &mut Context, obj: Id, length: usize) -> Result<()> {
@@ -399,11 +399,23 @@ impl Pickler {
                 format!("object differs from {module}.{name}"),
             ));
         }
+        // Before STACK_GLOBAL, rebuild dotted names as getattr(getattr(outer, ...), ...).
+        let (global_name, suffix) = if self.protocol < 4 {
+            name.split_once('.').unwrap_or((&name, ""))
+        } else {
+            (name.as_str(), "")
+        };
+        let attributes = suffix.split_terminator('.');
+        for _ in attributes.clone() {
+            let getattr = ctx.builtin("getattr");
+            self.save(ctx, getattr)?;
+            encoding::tuple_start(&mut self.out, self.protocol, 2);
+        }
         encoding::global(
             &mut self.out,
             self.protocol,
             &module,
-            &name,
+            global_name,
             self.fix_imports,
         )
         .map_err(|e| {
@@ -413,6 +425,12 @@ impl Pickler {
                 e
             }
         })?;
+        for attribute in attributes {
+            let attribute = ctx.text(attribute);
+            self.save(ctx, attribute)?;
+            encoding::tuple_end(&mut self.out, self.protocol, 2);
+            self.out.push(b'R'); // REDUCE
+        }
         self.remember(ctx, obj)
     }
 
@@ -457,14 +475,74 @@ impl Pickler {
                 "second item of the tuple returned by __reduce__ must be a tuple",
             ));
         }
-        if fields.iter().skip(3).any(|&field| field != NONE) {
-            return Err(Error::new(
-                "NotImplementedError",
-                "native pickle does not yet support reduction items or state setters",
+        let optional = |index| fields.get(index).copied().unwrap_or(NONE);
+        let mapping_items = optional(4);
+        if mapping_items != NONE
+            && !ctx.is_native_iterator(mapping_items)
+            && ctx.slot(mapping_items, "__next__").is_none()
+        {
+            return Err(pickling_error(
+                ctx,
+                format!(
+                    "fifth item of the tuple returned by __reduce__ must be an iterator, not {}",
+                    ctx.type_name(mapping_items)
+                ),
             ));
         }
-        let state = fields.get(2).copied().unwrap_or(NONE);
-        self.save_reduce(ctx, obj, fields[0], fields[1], state)
+        if optional(3) != NONE || optional(5) != NONE {
+            return Err(Error::new(
+                "NotImplementedError",
+                "native pickle does not yet support reduction list items or state setters",
+            ));
+        }
+        self.save_reduce(ctx, obj, fields[0], fields[1], optional(2), mapping_items)
+    }
+
+    /// Binary protocols fetch a second pair before serializing the first to select SETITEMS.
+    fn save_mapping_items(&mut self, ctx: &mut Context, iterator: Id) -> Result<()> {
+        fn pair(ctx: &Context, item: Id) -> Result<(Id, Id)> {
+            match ctx.heap.get(ctx.scalar_value(item)) {
+                Value::Tuple(fields) if fields.len() == 2 => Ok((fields[0], fields[1])),
+                _ => Err(Error::new(
+                    "TypeError",
+                    "dict items iterator must return 2-tuples",
+                )),
+            }
+        }
+
+        while let Some(first) = ctx.next_item(iterator)? {
+            let (key, value) = pair(ctx, first)?;
+            if self.protocol == 0 {
+                self.save_pair(ctx, key, value)?;
+                self.out.push(b's'); // SETITEM
+                continue;
+            }
+            ctx.heap.keep(first);
+            let Some(mut next) = ctx.next_item(iterator)? else {
+                self.save_pair(ctx, key, value)?;
+                self.out.push(b's');
+                break;
+            };
+            ctx.heap.keep(next);
+            self.out.push(b'('); // MARK
+            self.save_pair(ctx, key, value)?;
+            let mut count = 1;
+            loop {
+                let (key, value) = pair(ctx, next)?;
+                self.save_pair(ctx, key, value)?;
+                count += 1;
+                if count == BATCH_SIZE {
+                    break;
+                }
+                let Some(item) = ctx.next_item(iterator)? else {
+                    self.out.push(b'u'); // SETITEMS
+                    return Ok(());
+                };
+                next = item;
+            }
+            self.out.push(b'u');
+        }
+        Ok(())
     }
 
     /// NEWOBJ applies the original class's allocator directly when a reduction names __newobj__.
@@ -520,6 +598,7 @@ impl Pickler {
         func: Id,
         args: Id,
         state: Id,
+        mapping_items: Id,
     ) -> Result<()> {
         let newobj = if self.protocol >= 2 {
             match ctx.lookup_attr(func, "__name__") {
@@ -544,6 +623,9 @@ impl Pickler {
             return Ok(());
         }
         self.remember(ctx, obj)?;
+        if mapping_items != NONE {
+            self.save_mapping_items(ctx, mapping_items)?;
+        }
         if state != NONE {
             self.save(ctx, state)?;
             self.out.push(b'b'); // BUILD

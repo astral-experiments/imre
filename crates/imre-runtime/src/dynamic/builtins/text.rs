@@ -1410,7 +1410,7 @@ pub(super) fn method(
     if matches!(
         (owner, name),
         ("str", "find" | "rfind" | "count" | "index")
-            | ("bytes", "rfind")
+            | ("bytes", "count" | "find" | "rfind")
             | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
         if !kwargs.is_empty() {
@@ -1429,12 +1429,7 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        let invalid_needle = match (owner, name) {
-            ("str", "count" | "index") => ctx.string_storage(needle).is_none(),
-            ("str", _) => ctx.str_value(needle).is_err(),
-            _ => false,
-        };
-        if invalid_needle {
+        if owner == "str" && ctx.string_storage(needle).is_none() {
             let kind = if needle == NONE {
                 "None"
             } else {
@@ -1466,7 +1461,7 @@ pub(super) fn method(
                     n
                 }
             };
-            let start = start.as_ref().map_or(0, index) as usize;
+            let start = usize::try_from(start.as_ref().map_or(0, index)).unwrap_or(usize::MAX);
             let end = end.as_ref().map_or(len, index).min(len) as usize;
             if matches!(name, "startswith" | "endswith") {
                 let tuple = ctx.tuple_items(needle)?;
@@ -1499,20 +1494,41 @@ pub(super) fn method(
                 }
                 return Ok(FALSE);
             }
-            let needle = if let Some(index) = ctx.index_value(needle)? {
-                vec![
-                    index
+            ctx.check_buffer_exporter(needle)?;
+            let byte;
+            let needle = match ctx.buffer_storage(needle)? {
+                Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
+                Value::Array(array) => array.as_bytes(),
+                _ => {
+                    let index = ctx.index_value(needle)?.ok_or_else(|| {
+                        type_error(format!(
+                            "argument should be integer or bytes-like object, not '{}'",
+                            ctx.type_name(needle)
+                        ))
+                    })?;
+                    byte = index
                         .to_i64()
                         .and_then(|n| u8::try_from(n).ok())
-                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?,
-                ]
-            } else {
-                ctx.bytes_like(needle)?.to_vec()
+                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?;
+                    std::slice::from_ref(&byte)
+                }
             };
-            let value = ctx.bytes_like(receiver)?;
-            let offset = value
-                .get(start..end)
-                .and_then(|v| memchr::memmem::rfind(v, &needle));
+            let window = ctx.bytes_like(receiver)?.get(start..end);
+            if name == "count" {
+                let count = window.map_or(0, |v| match needle {
+                    [] => v.len() + 1,
+                    [byte] => memchr::memchr_iter(*byte, v).count(),
+                    _ => memchr::memmem::find_iter(v, needle).count(),
+                });
+                return Ok(ctx.int(count as i64));
+            }
+            let offset = window.and_then(|v| {
+                if name == "find" {
+                    memchr::memmem::find(v, needle)
+                } else {
+                    memchr::memmem::rfind(v, needle)
+                }
+            });
             return Ok(ctx.int(offset.map_or(-1, |at| (start + at) as i64)));
         }
         if name == "count" {
@@ -1532,16 +1548,16 @@ pub(super) fn method(
             };
             return Ok(ctx.alloc(Value::Int(value)));
         }
-        let found = if name == "index"
-            && [receiver, needle]
-                .iter()
-                .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
+        let found = if [receiver, needle]
+            .iter()
+            .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
         {
             crate::objects::find_codepoints(
                 &ctx.string_codepoints(receiver)?,
                 &ctx.string_codepoints(needle)?,
                 start.as_ref(),
                 end.as_ref(),
+                name == "rfind",
             )
         } else {
             crate::objects::find_text(

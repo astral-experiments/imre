@@ -861,6 +861,47 @@ pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Resul
     Ok(starts)
 }
 
+/// Check explicit keyword names before lowering can mangle class-private names.
+fn repeated_keyword(module: &ast::Mod) -> Option<&ast::Keyword> {
+    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
+
+    struct Children<'a>(Vec<ast::AnyNodeRef<'a>>);
+    impl<'a> SourceOrderVisitor<'a> for Children<'a> {
+        fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
+            self.0.push(node);
+            TraversalSignal::Skip
+        }
+    }
+
+    let mut pending = Children(vec![module.into()]);
+    while let Some(node) = pending.0.pop() {
+        let args = match node {
+            // A call's own keyword list is validated before its callable is compiled.
+            ast::AnyNodeRef::ExprCall(call) => Some(&call.arguments),
+            ast::AnyNodeRef::StmtClassDef(class) => class.arguments.as_deref(),
+            _ => None,
+        };
+        if let Some(args) = args {
+            for (index, keyword) in args.keywords.iter().enumerate() {
+                if let Some(name) = &keyword.arg
+                    && let Some(repeated) = args.keywords[index + 1..].iter().find(|other| {
+                        other
+                            .arg
+                            .as_ref()
+                            .is_some_and(|id| id.as_str() == name.as_str())
+                    })
+                {
+                    return Some(repeated);
+                }
+            }
+        }
+        let start = pending.0.len();
+        node.visit_source_order(&mut pending);
+        pending.0[start..].reverse();
+    }
+    None
+}
+
 /// Interactive input accepts one compound statement or one logical line of simple statements.
 fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result<()> {
     use ast::token::TokenKind::{Dedent, Newline};
@@ -2173,6 +2214,7 @@ impl Context {
             }
             _ => Cow::Borrowed(self.str_value(source)?),
         };
+        let filename_id = filename;
         let filename = filename_text;
         let source = if strip_indent {
             source.trim_start_matches([' ', '\t'])
@@ -2186,6 +2228,39 @@ impl Context {
         }
         let spellings = string_replacements(source, parsed.tokens());
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
+        if let Some(keyword) = repeated_keyword(parsed.syntax()) {
+            let message = format!(
+                "keyword argument repeated: {}",
+                keyword.arg.as_ref().unwrap()
+            );
+            let position = |offset: usize| {
+                let mut line = 1;
+                let mut line_start = 0;
+                for (at, newline) in source[..offset].match_indices(['\r', '\n']) {
+                    if newline == "\n" || !source[at + 1..].starts_with('\n') {
+                        line += 1;
+                        line_start = at + 1;
+                    }
+                }
+                (line, offset - line_start + 1)
+            };
+            let (line, column) = position(keyword.start().to_usize());
+            let (end_line, end_column) = position(keyword.end().to_usize());
+            let msg = self.text(&message);
+            let details = vec![
+                filename_id,
+                self.int(line as i64),
+                self.int(column as i64),
+                NONE,
+                self.int(end_line as i64),
+                self.int(end_column as i64),
+            ];
+            let location = self.alloc(Value::Tuple(details));
+            let args = [msg, location];
+            let mut error = self.exception("SyntaxError", &args);
+            self.retain_syntax_fields(&mut error, self.syntax_fields(&args))?;
+            return Err(error);
+        }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
@@ -2462,7 +2537,7 @@ impl Context {
             ));
         }
         for &cell in cells {
-            if !matches!(self.heap.get(cell), Value::Cell(_) | Value::ClassCell(_)) {
+            if !matches!(self.heap.get(cell), Value::Cell(_)) {
                 return Err(Error::new(
                     "TypeError",
                     format!(
@@ -4297,6 +4372,84 @@ impl Context {
         Ok(())
     }
 
+    fn source_keyword_mapping(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        callable: Id,
+        keywords: &[ast::Keyword],
+    ) -> Result<Id> {
+        let merged = self.dict(Vec::new());
+        self.heap.keep(merged);
+        // Merge each ** mapping immediately, but evaluate adjacent named arguments as a group.
+        for group in keywords.chunk_by(|left, right| left.arg.is_some() && right.arg.is_some()) {
+            let mapping = if group[0].arg.is_none() {
+                self.source_expr(code, scope, &group[0].value)?
+            } else {
+                let named = self.dict(Vec::new());
+                self.heap.keep(named);
+                for item in group {
+                    let key = self
+                        .heap
+                        .code_name(item.arg.as_ref().expect("named keyword").as_str());
+                    let value = self.source_expr(code, scope, &item.value)?;
+                    self.put_item(named, key, value)?;
+                }
+                named
+            };
+            self.op("keywords", merged, mapping, callable)?;
+        }
+        Ok(merged)
+    }
+
+    fn extend_source_call_args(
+        &mut self,
+        args: &mut Vec<Id>,
+        iterable: Id,
+        sole_star_callable: Option<Id>,
+    ) -> Result<()> {
+        let iter = match self.iterator(iterable) {
+            Err(error)
+                if error.kind == "TypeError"
+                    && self.slot(iterable, "__iter__").is_none()
+                    && self.slot(iterable, "__getitem__").is_none() =>
+            {
+                let prefix = if let Some(callable) = sole_star_callable {
+                    format!("{} argument after *", self.keyword_callable(callable)?)
+                } else {
+                    "Value after *".into()
+                };
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{prefix} must be an iterable, not {}",
+                        self.type_name(iterable)
+                    ),
+                ));
+            }
+            other => other?,
+        };
+        self.heap.keep(iter);
+        if sole_star_callable.is_none() {
+            let default = self.int(8);
+            let hint = self.length_hint(iterable, Some(default))?;
+            let hint = self.as_integer(hint)? as usize;
+            if hint <= isize::MAX as usize - args.len() {
+                args.try_reserve(hint)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+            }
+        }
+        while let Some(item) = self.next_item(iter)? {
+            args.try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            // Further arguments may clear the iterable and invoke Python callbacks.
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(item);
+            args.push(item);
+        }
+        Ok(())
+    }
+
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
@@ -4522,19 +4675,37 @@ impl Context {
                 } else {
                     eval(self, &v.func)?
                 };
-                let args = v
-                    .arguments
-                    .args
-                    .iter()
-                    .map(|a| eval(self, a))
-                    .collect::<Result<Vec<_>>>()?;
+                let mut args = Vec::new();
+                let mut sole_star = None;
+                for arg in &v.arguments.args {
+                    if let Expr::Starred(star) = arg {
+                        let value = eval(self, &star.value)?;
+                        if v.arguments.args.len() == 1 {
+                            // CALL_FUNCTION_EX consumes a sole iterable after evaluating keywords.
+                            sole_star = Some(value);
+                        } else {
+                            self.extend_source_call_args(&mut args, value, None)?;
+                        }
+                    } else {
+                        args.push(eval(self, arg)?);
+                    }
+                }
+                let keywords = &v.arguments.keywords;
                 let mut kwargs = Vec::new();
-                for item in &v.arguments.keywords {
-                    let key = item
-                        .arg
-                        .as_ref()
-                        .ok_or_else(|| unsupported("keyword unpack"))?;
-                    kwargs.push((key.to_string(), eval(self, &item.value)?));
+                let mapping = if keywords.iter().any(|item| item.arg.is_none()) {
+                    Some(self.source_keyword_mapping(code, scope, f, keywords)?)
+                } else {
+                    for item in keywords {
+                        let key = item.arg.as_ref().expect("named keyword");
+                        kwargs.push((key.to_string(), eval(self, &item.value)?));
+                    }
+                    None
+                };
+                if let Some(value) = sole_star {
+                    self.extend_source_call_args(&mut args, value, Some(f))?;
+                }
+                if let Some(mapping) = mapping {
+                    kwargs = self.keyword_args(mapping)?;
                 }
                 let result = self.call_in_scope(scope, f, args, kwargs)?;
                 self.finish_call_operands(mark, result);

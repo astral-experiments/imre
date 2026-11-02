@@ -43,6 +43,7 @@ mod metadata;
 pub(super) mod monitoring;
 mod operator;
 mod ordered_dict;
+pub(super) mod opcode;
 pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
@@ -106,13 +107,13 @@ pub(super) fn is_module(name: &str) -> bool {
         name,
         "_datetime"
             | "_imre_ordered_dict"
+            | "_opcode"
             | "atexit"
             | "builtins"
             | "errno"
             | "genericpath"
             | "itertools"
-    )
-        || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
+    ) || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }
 
@@ -144,7 +145,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "locale"
             | "_locale"
             | "traceback"
-            | "_opcode"
             | "sysconfig"
             | "ast"
             | "os"
@@ -433,7 +433,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd") => {
+        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan") => {
             ctx.builtin(&format!("math.{name}"))
         }
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -475,7 +475,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "path_stats"
             | "cache_name"
             | "source_name"
-            | "warn_debug_override",
+            | "warn_debug_override"
+            | "warn_loader_deprecation",
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
@@ -598,6 +599,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("resource", "RLIM_INFINITY") => resource::limit(ctx, resource::INFINITY),
         ("random", "randrange") => ctx.builtin("random.randrange"),
         ("secrets", "choice") => ctx.builtin("secrets.choice"),
+        ("select", "PIPE_BUF") => ctx.int(libc::PIPE_BUF as i64),
         ("select", "select" | "poll") => ctx.builtin(&format!("select.{name}")),
         ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
             ctx.int(i64::from(flag))
@@ -611,7 +613,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let items = options.into_iter().map(|option| ctx.text(option)).collect();
             ctx.alloc(Value::List(items))
         }
-        ("zlib", "adler32" | "crc32") => ctx.builtin(&format!("zlib.{name}")),
+        ("zlib", "adler32" | "crc32" | "error") => ctx.builtin(&format!("zlib.{name}")),
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
@@ -792,7 +794,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_signature_mapping"
             | "_signature_layout",
         )
-        | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
+        | (
+            "email.utils",
+            "parsedate_to_datetime" | "format_datetime" | "formatdate" | "_has_surrogates",
+        )
         | ("warnings", "warn")
         | (
             "fnmatch",
@@ -1023,6 +1028,9 @@ pub(super) fn call(
     }
     if name == "io.open_code" {
         return io::open_code(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_opcode.") {
+        return opcode::call(ctx, method, &args[1..], kwargs);
     }
     if let Some(method) = name.strip_prefix("types.SimpleNamespace.") {
         return super::namespace::method(ctx, method, args, kwargs);
@@ -1665,6 +1673,15 @@ pub(super) fn call(
                 let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
                 return Ok(ctx.text(path.to_string()));
             }
+            ("warn_loader_deprecation", [globals, mismatch], []) => {
+                let (line, message) = if ctx.truth(*mismatch)? {
+                    (670, "Module globals; __loader__ != __spec__.loader")
+                } else {
+                    (663, "Module globals is missing a __spec__.loader")
+                };
+                ctx.warn_external_loader(*globals, line, message)?;
+                return Ok(NONE);
+            }
             ("warn_debug_override", [], []) => {
                 crate::objects::cache_paths::warn_debug_override()?;
                 return Ok(NONE);
@@ -1769,15 +1786,14 @@ pub(super) fn call(
                     code,
                     ..
                 } = *ctx.heap.get(*method)
-                    && matches!(ctx.heap.get(cell), Value::ClassCell(Some(owner)) if owner == old)
+                    && matches!(ctx.heap.get(cell), Value::Cell(Some(owner)) if owner == old)
                 {
                     let parameters = ctx.code_object(code).parameters;
                     let sig: serde_json::Value =
                         serde_json::from_str(ctx.str_value(parameters)?)
                             .map_err(|e| Error::new("SystemError", e.to_string()))?;
                     if sig["class_cell"] == true {
-                        *ctx.heap.get_mut(cell) = Value::ClassCell(Some(*new));
-                        ctx.heap.weak_edge_removed(*old);
+                        ctx.heap.replace_cell(cell, Some(*new));
                         return Ok(TRUE);
                     }
                 }
@@ -1792,12 +1808,9 @@ pub(super) fn call(
             }
             ("members", [class], []) => {
                 if let Value::Class { scope, .. } = *ctx.heap.get(*class) {
-                    let names = ctx.scope_data(scope).names.clone();
-                    let entries = names
-                        .into_iter()
-                        .map(|(name, value)| (ctx.text(name), value))
-                        .collect();
-                    return Ok(ctx.dict(entries));
+                    let dictionary = ctx.class_namespace_dict(scope, false);
+                    let members = ctx.dict_entries(dictionary).expect("class dictionary").to_vec();
+                    return Ok(ctx.dict(members));
                 }
             }
             ("metadata", [mapping], []) => return ctx.mapping_proxy(*mapping),

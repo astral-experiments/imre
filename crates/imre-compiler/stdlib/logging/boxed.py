@@ -37,23 +37,6 @@ def _addHandlerRef(handler):
         _handlerList.append(weakref.ref(handler, _removeHandlerRef))
 
 
-def _handler_init(self, level=NOTSET):
-    self.filters = []
-    self._name = None
-    self.level = _checkLevel(level)
-    self.formatter = None
-    self._closed = False
-    _addHandlerRef(self)
-    self.createLock()
-
-
-# Typed handlers register their fixed-layout record after construction.
-_handler_init.__name__ = Handler.__init__.__name__
-_handler_init.__qualname__ = Handler.__init__.__qualname__
-Handler.__init__ = _handler_init
-del _handler_init
-
-
 def shutdown(handlerList=_handlerList):
     """
     Perform any cleanup actions in the logging system (e.g. flushing
@@ -257,68 +240,6 @@ class Filter(object):
         elif record.name.find(self.name, 0, self.nlen) != 0:
             return False
         return (record.name[self.nlen] == ".")
-
-class Filterer(object):
-    """
-    A base class for loggers and handlers which allows them to share
-    common code.
-    """
-    def __init__(self):
-        """
-        Initialize the list of filters to be an empty list.
-        """
-        self.filters = []
-
-    def addFilter(self, filter):
-        """
-        Add the specified filter to this handler.
-        """
-        if not (filter in self.filters):
-            self.filters.append(filter)
-
-    def removeFilter(self, filter):
-        """
-        Remove the specified filter from this handler.
-        """
-        if filter in self.filters:
-            self.filters.remove(filter)
-
-    def filter(self, record):
-        """
-        Determine if a record is loggable by consulting all the filters.
-
-        The default is to allow the record to be logged; any filter can veto
-        this by returning a false value.
-        If a filter attached to a handler returns a log record instance,
-        then that instance is used in place of the original log record in
-        any further processing of the event by that handler.
-        If a filter returns any other true value, the original log record
-        is used in any further processing of the event by that handler.
-
-        If none of the filters return false values, this method returns
-        a log record.
-        If any of the filters return a false value, this method returns
-        a false value.
-
-        .. versionchanged:: 3.2
-
-           Allow filters to be just callables.
-
-        .. versionchanged:: 3.12
-           Allow filters to return a LogRecord instead of
-           modifying it in place.
-        """
-        for f in self.filters:
-            if hasattr(f, 'filter'):
-                result = f.filter(record)
-            else:
-                result = f(record) # assume callable - will raise if not
-            if not result:
-                return False
-            if isinstance(result, LogRecord):
-                record = result
-        return record
-
 
 # CPython 3.14.5 Lib/logging/__init__.py, logger hierarchy and enablement.
 class PlaceHolder(object):

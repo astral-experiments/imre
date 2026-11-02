@@ -76,6 +76,27 @@ REJECTED = {
             "move = chdir\nmove('.')\npath('wrong')\n"
         ),
     }, "invalid-argument-type"),
+    "captured_chdir_checks_nested_missing_argument": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int) -> str:\n    return '.'\n"
+            "move = chdir\nmove(path())\n"
+        ),
+    }, "missing-argument"),
+    "captured_chdir_checks_user_overload": ({
+        "main.py": (
+            "from os import chdir\nfrom typing import overload\n"
+            "@overload\ndef path(n: int) -> str: return '.'\n"
+            "@overload\ndef path(n: int, m: int) -> str: return '.'\n"
+            "def path(n: int, m: int = 0) -> str: return '.'\n"
+            "move = chdir\nmove(path())\n"
+        ),
+    }, "no-matching-overload"),
+    "captured_chdir_checks_user_keyword": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int = 0) -> int:\n    return n\n"
+            "move = chdir\nmove('.')\npath(typo=1)\n"
+        ),
+    }, "unknown-argument"),
     "captured_chdir_preserves_callable_parameter": ({
         "main.py": (
             "from os import chdir\nfrom typing import Callable\n"
@@ -222,8 +243,9 @@ REJECTED = {
     "normalized_reserved_alias": ({"main.py": "from helper import f as ℕone\n", "helper.py": HELPER}, "reserved"),
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
+    "token_shadow": ({"main.py": "import token\n", "token.py": HELPER}, 'shadowing is unsupported: "token"'),
     "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
-    "opcode_bytecode_operation": ({"main.py": "from _opcode import stack_effect\n"}, "stack_effect"),
+    "opcode_unknown_operation": ({"main.py": "from _opcode import not_an_opcode_operation\n"}, "not_an_opcode_operation"),
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
     "unstubbed_builtin_shadow": ({"main.py": "import _types\n", "_types.py": HELPER}, "standard-library"),
     "frozen_shadow": ({"main.py": "import __hello__\n", "__hello__.py": HELPER}, "standard-library"),
@@ -233,6 +255,14 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "token_named_helper": {
+        "main.py": "from helper import read\nprint(read())\n",
+        "helper.py": "from token import EXACT_TOKEN_TYPES, tok_name\ndef read():\n    return tok_name[EXACT_TOKEN_TYPES[':=']]\n",
+    },
+    "token_qualified_helper": {
+        "main.py": "from helper import read\nprint(read())\n",
+        "helper.py": "import token\ndef read():\n    return token.tok_name[token.EXACT_TOKEN_TYPES[':=']]\n",
+    },
     "codeop_module": {
         "main.py": (
             "import codeop\n"
@@ -242,6 +272,28 @@ ACCEPTED = {
             "assert type(compiler) is Compile\n"
             "assert compiler.flags == codeop.PyCF_DONT_IMPLY_DEDENT | codeop.PyCF_ALLOW_INCOMPLETE_INPUT\n"
         ),
+    },
+    "codeop_named_helper": {
+        "main.py": "from helper import flags\nprint(flags())\n",
+        "helper.py": (
+            "from codeop import Compile, CommandCompiler\n"
+            "def flags():\n"
+            "    compiler = CommandCompiler().compiler\n"
+            "    assert type(compiler) is Compile\n"
+            "    return compiler.flags\n"
+        ),
+    },
+    "opcode_named_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "from _opcode import stack_effect\ndef effect():\n    return stack_effect(31)\n",
+    },
+    "opcode_qualified_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "import _opcode\ndef effect():\n    return _opcode.stack_effect(31)\n",
+    },
+    "opcode_star_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "from _opcode import *\ndef effect():\n    return stack_effect(31)\n",
     },
     "atexit_in_dependency": {
         "main.py": "from cleanup import prepare\nprepare()\n",
@@ -861,19 +913,52 @@ def main() -> None:
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 checks += 1
 
-        # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
-        source = root / "opcode_flags.py"
+        late_import = temporary / "late_import.py"
+        late_import.write_text(
+            "import builtins, sys\n"
+            "module = builtins.__import__(sys.argv[1])\n"
+            "if sys.argv[2] == 'flags':\n"
+            "    print(module.CommandCompiler().compiler.flags)\n"
+            "else:\n"
+            "    print(module.opmap['POP_TOP'])\n"
+        )
         for level in args.opt_levels:
-            executable = temporary / f"opcode-flags-{level}"
-            command = [compiler, "build", str(source), "-o", str(executable), "--runtime", runtime,
-                       "--clang", args.clang, "--opt-level", str(level), *build_flags]
+            executable = temporary / f"late-import-{level}"
+            command = [compiler, "build", str(late_import), "-o", str(executable),
+                       "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                       *build_flags, "--runtime-imports", "--no-cache"]
             if args.sanitize:
                 command.append("--sanitize")
-            require_success(run(command, temporary))
-            result = run([str(executable)], temporary)
-            require_success(result)
-            assert result.stdout == "0\n0\nno bytecode specialization\n", result
-            checks += 1
+            require_success(run(command, temporary, timeout=build_timeout))
+            for module, operation, expected in [
+                ("opcode", "lookup", "31"), ("_opcode_metadata", "lookup", "31"),
+                ("code", "flags", "16896"), ("codeop", "flags", "16896"),
+            ]:
+                result = run([str(executable), module, operation], temporary)
+                require_success(result)
+                assert result.stdout == expected + "\n", (module, level, result.stdout)
+                checks += 1
+
+        # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
+        for level in args.opt_levels:
+            for fixture, route, output in [
+                ("opcode_flags", [], "0\n0\nno bytecode specialization\n"),
+                ("opcode_stack_effect", [], "-1\n"),
+                ("opcode_module", [], "opcode module OK\n"),
+                ("opcode_operations", [], "opcode operations OK\n"),
+                ("opcode_operations", ["--runtime-imports"], "opcode operations OK\n"),
+            ]:
+                executable = temporary / f"{fixture}-{level}"
+                command = [compiler, "build", str(root / f"{fixture}.py"), "-o", str(executable),
+                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                           *build_flags, *route]
+                if args.sanitize:
+                    command.append("--sanitize")
+                require_success(run(command, temporary))
+                result = run([str(executable)], temporary)
+                require_success(result)
+                assert result.stdout == output, result
+                checks += 1
 
         # A failing guard must run before the next import initializes its child.
         guarded = temporary / "wrong_name"

@@ -94,6 +94,35 @@ def list_cases():
     return singleton, live, [shared, shared], BadReturn((iter, (["c", "a"],)))
 
 
+class RestoredMapping(dict):
+    def __reduce__(self):
+        return type(self), (), self.state, None, iter(self.items())
+
+    def __setstate__(self, state):
+        assert list(self) == ["z", "a", "m"]
+        assert self["z"] is self and self["a"] is state
+        self.state = state
+
+
+def mapping_items_case(protocol):
+    for items, error in (([], pickle.PicklingError), (iter([["a", 1]]), TypeError),
+                         (iter([("a",)]), TypeError)):
+        try:
+            pickle.dumps(BadReturn((dict, (), None, None, items)), protocol)
+        except error:
+            pass
+        else:
+            raise AssertionError("accepted invalid mapping item iterator")
+    mapping = RestoredMapping()
+    mapping["z"] = mapping
+    mapping["a"] = {}
+    mapping["m"] = 42
+    mapping.state = mapping["a"]
+    restored = pickle.loads(pickle.dumps(mapping, protocol))
+    assert restored["z"] is restored and restored.state is restored["a"]
+    return mapping
+
+
 def check_floats(protocol):
     for value, text, bits in (
         (-0.0, b"-0.0", "8000000000000000"),
@@ -200,10 +229,26 @@ def check_object_reducer():
     assert clone.link is clone.slot is plain.slot
 
 
+class Outer:
+    class Middle:
+        class Inner:
+            pass
+
+
+def check_global_names(protocol):
+    from collections import OrderedDict, UserDict, UserList, UserString
+
+    for cls in (Outer.Middle, Outer.Middle.Inner, OrderedDict, UserDict, UserList, UserString):
+        for fix_imports in (True, False):
+            data = pickle.dumps(cls, protocol, fix_imports=fix_imports)
+            assert pickle.loads(data, fix_imports=fix_imports) is cls
+
+
 def produce():
     check_object_reducer()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        check_global_names(protocol)
         check_reduction_state(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
@@ -223,7 +268,7 @@ def produce():
         reduced = WithProtocol()
         payload = bytes(range(256))
         value = (shared, shared, reduced, reduced, WithoutProtocol(), (), dictionary_cases(protocol),
-                 (b"", payload[:-1], payload, payload, ReducedBytes(b"x")), list_cases())
+                 (b"", payload[:-1], payload, payload, ReducedBytes(b"x")), list_cases(), mapping_items_case(protocol))
         print(list(pickle.dumps(value, protocol)))
 
 

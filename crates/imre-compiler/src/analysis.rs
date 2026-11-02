@@ -632,8 +632,12 @@ impl Session {
         scoped_builtin: bool,
     ) -> Result<(), String> {
         let mut rules = RuleSelection::default();
-        let argument_rule = scoped_builtin.then_some("invalid-argument-type");
-        for name in std::iter::once("invalid-return-type").chain(argument_rule) {
+        let arguments = if scoped_builtin {
+            CALL_ARGUMENT_RULES
+        } else {
+            &[]
+        };
+        for &name in ["invalid-return-type"].iter().chain(arguments) {
             rules.enable(
                 default_lint_registry()
                     .get(name)
@@ -645,7 +649,7 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(Arc::new(rules));
-        self.errors(skipped, overloads)
+        self.errors(skipped, overloads, scoped_builtin)
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.
@@ -657,13 +661,14 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(skipped, overloads)
+        self.errors(skipped, overloads, false)
     }
 
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
+        scoped_builtin: bool,
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -675,6 +680,7 @@ impl Session {
                     file,
                     skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
                     overloads.get(index).map_or(&[][..], Vec::as_slice),
+                    scoped_builtin,
                 );
                 file_errors(&self.db, checked)
             })
@@ -695,7 +701,19 @@ struct CheckedFile<'db> {
     file: File,
     skipped: Vec<TextRange>,
     overloads: Vec<CheckedDiagnostic>,
+    #[returns(copy)]
+    scoped_builtin: bool,
 }
+
+const CALL_ARGUMENT_RULES: &[&str] = &[
+    "invalid-argument-type",
+    "missing-argument",
+    "no-matching-overload",
+    "too-many-positional-arguments",
+    "unknown-argument",
+    "positional-only-parameter-as-kwarg",
+    "parameter-already-assigned",
+];
 
 /// Only exclude the exact ty diagnostic already checked by native lowering.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -811,8 +829,9 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (diagnostic.id().as_str() == "invalid-argument-type"
-                                && vendored_argument(db, file, range))
+                            || (checked.scoped_builtin(db)
+                                && CALL_ARGUMENT_RULES.contains(&diagnostic.id().as_str())
+                                && vendored_argument(db, file, range, diagnostic.id().as_str()))
                             // ty also reports implicit None returns at the annotation span.
                             || (diagnostic.id().as_str() == "invalid-return-type"
                                 && diagnostic.headline_message()
@@ -839,7 +858,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
 }
 
 /// Leave argument conversion to Python only for calls proved to target vendored code.
-fn vendored_argument(db: &dyn Db, file: File, range: TextRange) -> bool {
+fn vendored_argument(db: &dyn Db, file: File, range: TextRange, rule: &str) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
     use ty_python_semantic::types::Type;
     let file = db.program_file(file);
@@ -849,9 +868,19 @@ fn vendored_argument(db: &dyn Db, file: File, range: TextRange) -> bool {
         return false;
     }
     let nodes = covering_node(root, range);
-    let Some(call) = nodes.ancestors().find_map(|node| match node {
-        AnyNodeRef::ExprCall(call) if call.arguments.range().contains_range(range) => Some(call),
-        _ => None,
+    // ty points to the entire call for missing arguments and overload mismatches.
+    // An excess argument can itself be a call, in which case its parent owns the error.
+    let whole_call = matches!(rule, "missing-argument" | "no-matching-overload");
+    let Some(call) = nodes.ancestors().find_map(|node| {
+        let AnyNodeRef::ExprCall(call) = node else {
+            return None;
+        };
+        let owns_range = if whole_call {
+            call.range() == range
+        } else {
+            call.arguments.range().contains_range(range)
+        };
+        owns_range.then_some(call)
     }) else {
         return false;
     };
@@ -1107,7 +1136,7 @@ impl AnalysisCache {
             && cached.same_files(fresh, inputs)
         {
             cached.update(fresh, inputs)?;
-            return cached.session.errors(skipped, overloads);
+            return cached.session.errors(skipped, overloads, false);
         }
         if self.hints.is_some() {
             // The quiet database must retain its inference with diagnostics disabled.
@@ -1536,7 +1565,7 @@ mod diagnostic_mode_tests {
         assert!(message.contains("not callable"), "{message}");
         // Entry profiles can skip a scope without changing its source or Salsa revision.
         let whole = TextRange::new(0.into(), 40.into());
-        assert!(session.errors(Some(&[vec![whole]]), &[]).is_ok());
-        assert_eq!(session.errors(None, &[]).unwrap_err(), message);
+        assert!(session.errors(Some(&[vec![whole]]), &[], false).is_ok());
+        assert_eq!(session.errors(None, &[], false).unwrap_err(), message);
     }
 }

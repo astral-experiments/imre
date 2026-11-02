@@ -14,8 +14,47 @@ from _collections import (
 _ordered_dict_missing = object()
 
 
+def _ordered_dict_receiver(receiver, method):
+    if not issubclass(type(receiver), OrderedDict):
+        raise TypeError(f"descriptor '{method}' requires a 'collections.OrderedDict' object "
+                        f"but received a '{type(receiver).__name__}'")
+
+
+def _ordered_dict_update(target, other):
+    if type(other) is dict:
+        pairs = list(other.items())
+    else:
+        keys = getattr(other, "keys", _ordered_dict_missing)
+        if keys is not _ordered_dict_missing:
+            for key in keys():
+                target[key] = other[key]
+            return
+        items = getattr(other, "items", _ordered_dict_missing)
+        pairs = other if items is _ordered_dict_missing else items()
+    for key, value in pairs:
+        target[key] = value
+
+
+def _ordered_dict_union(left, right):
+    if not issubclass(type(left), dict) or not issubclass(type(right), dict):
+        return NotImplemented
+    cls = type(left) if issubclass(type(left), OrderedDict) else type(right)
+    result = cls(left)
+    _ordered_dict_update(result, right)
+    return result
+
+
 class OrderedDict(dict):
     __module__ = "collections"
+
+    def __init__(self, /, *args, **kwargs):
+        _ordered_dict_receiver(self, "__init__")
+        if len(args) > 1:
+            raise TypeError(f"expected at most 1 argument, got {len(args)}")
+        if args:
+            _ordered_dict_update(self, args[0])
+        if kwargs:
+            _ordered_dict_update(self, kwargs)
 
     def __iter__(self):
         return iter(_ordered_dict_view(self, "keys"))
@@ -41,6 +80,19 @@ class OrderedDict(dict):
     def __ne__(self, other):
         equal = self.__eq__(other)
         return NotImplemented if equal is NotImplemented else not equal
+
+    def __or__(self, other, /):
+        _ordered_dict_receiver(self, "__or__")
+        return _ordered_dict_union(self, other)
+
+    def __ror__(self, other, /):
+        _ordered_dict_receiver(self, "__ror__")
+        return _ordered_dict_union(other, self)
+
+    def __ior__(self, other, /):
+        _ordered_dict_receiver(self, "__ior__")
+        _ordered_dict_update(self, other)
+        return self
 
     def move_to_end(self, /, key, last=True):
         return _ordered_dict_move_to_end(self, key, last)

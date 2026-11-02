@@ -941,6 +941,9 @@ def check_pickle_reductions(imre, root, run):
                 payload = bytes(range(256))
                 assert value[7] == (b"", payload[:-1], payload, payload, ("rebuilt", protocol))
                 assert value[7][2] is value[7][3]
+                mapping = value[9]
+                assert list(mapping) == ["z", "a", "m"] and mapping["m"] == 42
+                assert mapping["z"] is mapping and mapping.state is mapping["a"]
                 singleton, live, pair, iterator = value[8]
                 assert singleton == ([7] if protocol else [7, "added"])
                 assert live == [7, "second", "added"]
@@ -1088,8 +1091,12 @@ def main():
         expected = run(sys.executable, "-B", streams)
         actual = run(imre, "run", streams, "--runtime-imports", "--quiet")
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
-        assert actual.stdout == expected.stdout == "stdout π\n".encode()
-        assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\n".encode()
+        assert actual.stdout == expected.stdout == "stdout π\nraw:then:text\n".encode()
+        assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\nbinary stderr\n".encode()
+
+        text_close = run(imre, "-B", "-c", "import streams", "close-text")
+        assert text_close.returncode == 0, text_close.stderr
+        assert (text_close.stdout, text_close.stderr) == (expected.stdout, expected.stderr)
 
         string_io = root / "string_io.py"
         string_io.write_bytes((Path(__file__).with_name("fixtures") / "boxed_string_io.py").read_bytes())
@@ -1326,6 +1333,11 @@ def main():
                 "os", "posix",
             )
 
+        compare(
+            "-IB", "-c",
+            "import sys; m = __import__(sys.argv[1]); print(m.tok_name[m.EXACT_TOKEN_TYPES[':=']])",
+            "token",
+        )
         compare("-IB", "-c", "import sys; print(__import__(sys.argv[1]).SelectorKey('f', 7, 1, 'd'))", "selectors")
         compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
         compare(
@@ -1727,6 +1739,10 @@ def report(text):
         (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
         compare("-IB", "-c", uuid_import + "print(uuid.marker)")
 
+        (helpers / "pprint.py").write_text("def incomplete(:\n")
+        compare("-IB", "-c", f"import sys\nsys.path.insert(0, {str(helpers)!r})\nprint(__import__('sys').__name__)")
+        (helpers / "pprint.py").unlink()
+
         (root / "legacy.py").write_text(args_code)
         legacy = run(imre, "run", "legacy.py", "--quiet", "--", "--opt-level", "2")
         assert (
@@ -1856,7 +1872,7 @@ def report(text):
         compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
         boxed_call_args = fixtures / "boxed_unittest_call_args.py"
         compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
-        for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py"):
+        for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py", "boxed_unittest_mock_call.py"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
@@ -1892,6 +1908,7 @@ def report(text):
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
+            "boxed_int_rational_fields.py",
             "boxed_int_from_bytes.py",
             "boxed_divmod_slots.py",
             "boxed_complex.py",
@@ -1943,6 +1960,7 @@ def report(text):
             "boxed_typing_type.py",
             "boxed_typing_mapping.py",
             "boxed_typing_regex_aliases.py",
+            "boxed_pprint.py",
             "boxed_formatter.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
@@ -1967,10 +1985,12 @@ def report(text):
             "boxed_dataclass_init_annotations.py",
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
+            "boxed_email_addresses.py",
             "boxed_http_message.py",
             "boxed_time.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_buffered_partial_write.py",
             "boxed_io_exports.py",
             "boxed_io_reimport.py",
             "boxed_io_text_encoding.py",
@@ -1978,13 +1998,16 @@ def report(text):
             "boxed_locale_error.py",
             "boxed_io_protocols.py",
             "boxed_io_abc_registration.py",
+            "boxed_logging_handlers.py",
             "boxed_logging_handler_list.py",
+            "boxed_logging_handler_filters.py",
             "boxed_logging_rlock.py",
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
             "boxed_os_environb.py",
             "boxed_os_file_descriptors.py",
+            "boxed_os_fdopen.py",
             "boxed_buffered_readlines.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_waitpid.py",
@@ -1996,6 +2019,10 @@ def report(text):
             "boxed_urlsplit.py",
             "boxed_urllib_request.py",
             "boxed_urllib_file.py",
+            "boxed_urllib_cleanup.py",
+            "boxed_urllib_retrieve.py",
+            "boxed_urllib_data.py",
+            "boxed_message_parameters.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
@@ -2008,6 +2035,7 @@ def report(text):
             "boxed_singleton_subclass.py",
             "boxed_function_closure_cells.py",
             "boxed_function_closure_edges.py",
+            "boxed_function_annotation_closure.py",
             "boxed_functiontype.py",
             "boxed_function_call.py",
             "boxed_any_generator.py",
@@ -2104,6 +2132,7 @@ def report(text):
             "boxed_dict_subclasses.py",
             "boxed_dict_union.py",
             "boxed_abc_metaclass.py",
+            "boxed_bless_loader.py",
             "boxed_mapping_abc.py",
             "boxed_user_containers.py",
             "boxed_dict_pop.py",
@@ -2147,6 +2176,7 @@ def report(text):
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",
+            "boxed_bytes_count.py",
             "boxed_bytes_separators.py",
             "boxed_bytes_join.py",
             "boxed_bytes_fromhex.py",
@@ -2158,6 +2188,7 @@ def report(text):
             "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
+            "boxed_colorize.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
             "boxed_string_surrogates.py",
@@ -2204,6 +2235,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_os_readlink.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_symlink.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_os_rename.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

@@ -188,9 +188,13 @@ impl Context {
 
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
-            Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
+            Value::Native(kind) if kind == "type" && name == "mro" => {
+                self.builtins.get("type.mro").copied()
+            }
             Value::Native(kind) if kind == "object" => match name {
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
+                "__ne__" => self.builtins.get("object.__ne__").copied(),
                 "__format__" => self.builtins.get("object.__format__").copied(),
                 "__getstate__" => self.builtins.get("object.__getstate__").copied(),
                 "__reduce__" => self.builtins.get("object.__reduce__").copied(),
@@ -750,7 +754,9 @@ impl Context {
                             | "module.__repr__"
                             | "module.__getattribute__"
                             | "object.__str__"
+                            | "bytes.count"
                             | "bytes.decode"
+                            | "bytes.find"
                             | "bytes.rfind"
                             | "bytes.rsplit"
                             | "bytes.rstrip"
@@ -921,10 +927,7 @@ impl Context {
         if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            if (child == stdlib::flags::TYPE
-                || stdlib::fixed_structseq::fixed_type(child).is_some())
-                && parent == "tuple"
-            {
+            if Self::native_base(child) == Some(parent) {
                 return true;
             }
             if parent == "object" {
@@ -935,22 +938,30 @@ impl Context {
             }
             return matches!(
                 (child.as_str(), parent.as_str()),
-                ("bool", "int")
-                    | ("datetime.datetime", "datetime.date")
-                    | ("datetime.timezone", stdlib::datetime::TZINFO)
-                    | ("typing._UnpackGenericAlias", "typing._GenericAlias")
-                    | (HashState::XOF_CLASS, HashState::CLASS)
-                    | (stdlib::os::stat::CLASS, "tuple")
-                    | ("collections.defaultdict", "dict")
-                    | ("odict_keys", "dict_keys")
-                    | ("odict_items", "dict_items")
-                    | ("odict_values", "dict_values")
-                    | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
+                ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
             );
         }
         false
     }
+    /// Immediate native parent shared by subclass checks and the class lineage.
+    pub(super) fn native_base(class: &str) -> Option<&'static str> {
+        Some(match class {
+            "bool" => "int",
+            "datetime.datetime" => "datetime.date",
+            "datetime.timezone" => stdlib::datetime::TZINFO,
+            stdlib::flags::TYPE | stdlib::os::stat::CLASS => "tuple",
+            class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
+            "typing._UnpackGenericAlias" => "typing._GenericAlias",
+            HashState::XOF_CLASS => HashState::CLASS,
+            "collections.defaultdict" => "dict",
+            "odict_keys" => "dict_keys",
+            "odict_items" => "dict_items",
+            "odict_values" => "dict_values",
+            _ => return None,
+        })
+    }
+
     fn equal_class(&self, a: Id, b: Id) -> bool {
         a == b
             || matches!((self.heap.get(a),self.heap.get(b)),(Value::Native(x),Value::Native(y)) if x==y)
@@ -1003,6 +1014,14 @@ impl Context {
     /// Check whether an inline value is an immutable tuple position.
     fn has_namedtuple_field(&self, class: Id, name: &str) -> bool {
         matches!(self.heap.get(class), Value::Class { namedtuple_fields: Some(names), .. } if names.iter().any(|field| field == name))
+    }
+
+    pub(super) fn is_type_object(&self, obj: Id) -> bool {
+        match self.heap.get(obj) {
+            Value::Class { .. } => true,
+            Value::Native(_) => matches!(self.builtin_type_name(obj), Some("type" | "typing._AnyMeta")),
+            _ => false,
+        }
     }
 
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
@@ -1572,13 +1591,12 @@ impl Context {
         if let Some(class) = self.heap.get(obj).instance_class()
             && let Value::Class { scope, .. } = self.heap.get(class)
         {
-            let scope = self.scope_data(*scope);
-            if let Some(qualified) = scope.names.get("__qualname__") {
-                kind = self.str_value(*qualified).unwrap_or(kind);
+            if let Some(qualified) = self.namespace_binding(self.scope_data(*scope), "__qualname__") {
+                kind = self.str_value(qualified).unwrap_or(kind);
             }
-            module = match scope.names.get("__module__") {
-                Some(id) => self.str_value(*id).ok(),
-                None => Some(scope.module.as_str()),
+            module = match self.namespace_binding(self.scope_data(*scope), "__module__") {
+                Some(id) => self.str_value(id).ok(),
+                None => Some(self.scope_data(*scope).module.as_str()),
             }
             .filter(|name| !matches!(*name, "builtins" | "__main__"));
         }
@@ -1664,6 +1682,18 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if matches!(name, "numerator" | "denominator") {
+            let receiver = match self.heap.get(obj) {
+                Value::Int(_) | Value::Bool(_) => Some(obj),
+                Value::Native(kind) if matches!(kind.as_str(), "int" | "bool") => Some(NONE),
+                _ => None,
+            };
+            if let Some(receiver) = receiver {
+                let owner = self.builtin("int");
+                let descriptor = self.own_class_attr(owner, name).unwrap();
+                return self.bind_attribute(descriptor, receiver, owner);
+            }
+        }
         if self.heap.get(obj).native_io_class_name() == Some("_io.BufferedReader") {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name)
@@ -1948,12 +1978,30 @@ impl Context {
             Value::None if name == "__doc__" => {
                 return Ok(self.text("The type of the None singleton."));
             }
-            Value::MemoryView { owner, .. } if matches!(name, "obj" | "readonly" | "nbytes") => {
+            Value::MemoryView { owner, .. }
+                if matches!(
+                    name,
+                    "obj" | "readonly" | "nbytes" | "itemsize" | "format" | "shape"
+                ) =>
+            {
                 let owner = Self::memoryview_owner(owner)?;
+                let (format, width, len, readonly) = match self.heap.get(self.scalar_value(owner)) {
+                    Value::Array(array) => {
+                        let (format, width) = array.view_layout();
+                        (format, width, array.len(), false)
+                    }
+                    _ => ("B", 1, self.bytes_like(owner)?.len(), true),
+                };
                 return Ok(match name {
                     "obj" => owner,
-                    "readonly" => TRUE,
-                    _ => self.int(self.bytes_like(owner)?.len() as i64),
+                    "readonly" => builtins::boolean(readonly),
+                    "nbytes" => self.int((len * width) as i64),
+                    "itemsize" => self.int(width as i64),
+                    "format" => self.text(format),
+                    _ => {
+                        let length = self.int(len as i64);
+                        self.alloc(Value::Tuple(vec![length]))
+                    }
                 });
             }
             Value::Slice(parts) if matches!(name, "start" | "stop" | "step") => {
@@ -2204,7 +2252,7 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::Cell(contents) | Value::ClassCell(contents) if name == "cell_contents" => {
+            Value::Cell(contents) if name == "cell_contents" => {
                 return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
@@ -2315,6 +2363,14 @@ impl Context {
                             "__text_signature__" if method == "sys._getframemodulename" => {
                                 Some("($module, /, depth=0)")
                             }
+                            "__doc__" if let Some(name) = method.strip_prefix("_opcode.") => {
+                                stdlib::opcode::doc(name)
+                            }
+                            "__text_signature__"
+                                if let Some(name) = method.strip_prefix("_opcode.") =>
+                            {
+                                Some(stdlib::opcode::signature(name))
+                            }
                             "__text_signature__" if method == "sys.audit" => {
                                 Some("($module, event, /, *args)")
                             }
@@ -2407,20 +2463,25 @@ impl Context {
             }
             Value::GetSetDescriptor {
                 owner, name: field, ..
-            } if HashState::is_provider_class(owner)
+            } if owner == "int"
+                || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
             {
                 match name {
                     "__objclass__" => return Ok(self.builtin(owner)),
                     "__name__" => return Ok(self.text(field)),
+                    "__doc__" if owner == "int" => {
+                        return Ok(self.text(format!("the {field} of a rational number in lowest terms")));
+                    }
                     "__qualname__" => {
                         return Ok(
-                            self.text(format!("{}.{field}", owner.rsplit_once('.').unwrap().1))
+                            self.text(format!("{}.{field}", owner.rsplit('.').next().unwrap()))
                         );
                     }
-                    "__get__" => {
-                        let get = self.builtin("getset_descriptor.__get__");
+                    "__get__" | "__set__" | "__delete__" if name == "__get__" || owner == "int" => {
+                        let symbol = format!("getset_descriptor.{name}");
+                        let get = self.builtin(&symbol);
                         return Ok(self.alloc(Value::Method {
                             callable: get,
                             receiver: obj,
@@ -2774,6 +2835,12 @@ impl Context {
             Value::BufferedRandom(ref file, _) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
+            Value::TextFile(ref file)
+                if name == "buffer"
+                    && let Some(buffer) = file.buffer =>
+            {
+                return Ok(buffer);
+            }
             Value::TextFile(ref file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
             }
@@ -2997,7 +3064,11 @@ impl Context {
             Value::Native(ref builtin)
                 if matches!(
                     builtin.as_str(),
-                    "binascii.Error" | "binascii.Incomplete" | "socket.gaierror" | "socket.herror"
+                    "binascii.Error"
+                        | "binascii.Incomplete"
+                        | "socket.gaierror"
+                        | "socket.herror"
+                        | "zlib.error"
                 ) =>
             {
                 let (module, short) = builtin.split_once('.').unwrap();
@@ -3128,6 +3199,7 @@ impl Context {
                             | "__getattribute__"
                             | "__setattr__"
                             | "__delattr__"
+                            | "__ne__"
                             | "__init__"
                             | "__new__"
                     ) =>
@@ -3356,6 +3428,12 @@ impl Context {
     }
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if name == "mro" && self.is_type_object(obj) {
+            let owner = self.builtin("type");
+            let descriptor = self.builtin("type.mro");
+            let receiver = if obj == owner { NONE } else { obj };
+            return self.bind_attribute(descriptor, receiver, owner);
+        }
         if name == "__init_subclass__" {
             let class = if self.builtin_type_name(obj) == Some("type") {
                 obj
@@ -3511,7 +3589,7 @@ impl Context {
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
             self.heap.replace_cell(obj, None);
             return Ok(());
         }
@@ -3788,7 +3866,7 @@ impl Context {
                 continue;
             };
             let frame = self.scope_data(*scope);
-            shadowed |= frame.names.contains_key(name);
+            shadowed |= self.namespace_binding(frame, name).is_some();
             let Some(slots) = frame
                 .class_namespace
                 .as_deref()
@@ -3827,6 +3905,12 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        if matches!(name, "numerator" | "denominator")
+            && matches!(self.heap.get(obj), Value::Int(_) | Value::Bool(_))
+        {
+            let owner = self.builtin("int");
+            return self.own_class_attr(owner, name);
+        }
         if let Value::NamedTuple {
             class: Some(owner), ..
         } = *self.heap.get(obj)
@@ -4203,7 +4287,7 @@ impl Context {
                 Some(value),
             );
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
             self.heap.replace_cell(obj, Some(value));
             return Ok(());
         }
@@ -4557,6 +4641,41 @@ impl Context {
         Some(class)
     }
 
+    /// Invert only the receiver's equality result, preserving a declined comparison.
+    pub(super) fn object_ne(&mut self, object: Id, other: Id) -> Result<Id> {
+        let class = self.exact_type(object)?;
+        if let Some(slot) = self.class_attr(class, "__eq__") {
+            // Re-entering the same native descriptor cannot reach a Python equality hook.
+            if self.builtins.get("object.__ne__") == Some(&slot) {
+                return Err(Error::new(
+                    "RecursionError",
+                    "maximum recursion depth exceeded in comparison",
+                ));
+            }
+            let method = self.bind_attribute(slot, object, class)?;
+            let equal = self.call(method, vec![other], Vec::new())?;
+            return if equal == value::NOT_IMPLEMENTED {
+                Ok(equal)
+            } else {
+                Ok(builtins::boolean(!self.truth(equal)?))
+            };
+        }
+        if self.allocation_base(class) == self.builtins.get("object").copied() {
+            return Ok(if object == other {
+                FALSE
+            } else {
+                value::NOT_IMPLEMENTED
+            });
+        }
+        Err(Error::new(
+            "NotImplementedError",
+            format!(
+                "object.__ne__(): the equality slot of '{}' is unsupported",
+                self.type_name(object)
+            ),
+        ))
+    }
+
     /// Allocate a plain instance without invoking its constructor or initializer.
     fn new_object(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         let Some((&class, rest)) = args.split_first() else {
@@ -4888,6 +5007,7 @@ impl Context {
             {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
+            Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
@@ -4921,6 +5041,8 @@ impl Context {
                             | "bool.__repr__"
                             | "float.__repr__"
                             | "float.as_integer_ratio"
+                            | "getset_descriptor.__set__"
+                            | "getset_descriptor.__delete__"
                     )
                     || !name.contains('.')
                     || matches!(
@@ -4938,6 +5060,7 @@ impl Context {
                                 | "mappingproxy"
                                 | "set"
                                 | "int"
+                                | "_int_getset"
                                 | "frozenset"
                                 | "tuple"
                                 | "bytes"
@@ -5683,6 +5806,12 @@ impl Context {
             .into_iter()
             .map(|name| (class_scope.names[&name], name))
             .collect::<Vec<_>>();
+        if let Some(dict) = class_scope.class_namespace.as_ref().and_then(|namespace| {
+            namespace.annotation_dict_cell.and(namespace.dictionary)
+        }) {
+            class_scope.namespace = Some(dict);
+            class_scope.names.retain(|name, _| name == "__qualname__");
+        }
         // A hook may replace an attribute and execute code that triggers collection.
         for &(value, _) in &members {
             self.heap.keep(value);
@@ -5787,9 +5916,12 @@ impl Context {
         // inheriting type's normal namespace preparation, allocation, and MRO.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && (["__prepare__", "__new__", "__init__", "mro"]
+            && (["__prepare__", "__new__", "__init__"]
                 .iter()
                 .any(|name| self.class_attr(winner, name).is_some())
+                || self
+                    .class_attr(winner, "mro")
+                    .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
                 || ["__call__", "__getattr__", "__getattribute__"]
                     .iter()
                     .any(|name| self.slot(winner, name).is_some()))
@@ -5859,7 +5991,7 @@ impl Context {
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
         let enum_kind = enum_namespace.as_ref().map(|state| state.kind);
-        let cell = self.alloc(Value::ClassCell(None));
+        let cell = self.alloc(Value::Cell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -5895,6 +6027,7 @@ impl Context {
         self.execute(code, scope, FrameOwner::Function(body))?;
         let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
+        let annotation_body = self.finish_annotation_body(scope)?;
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
@@ -5968,13 +6101,19 @@ impl Context {
         if typed_dict_meta.is_none() {
             super::typing::class_parameters(self, scope, original, &bases)?;
         }
-        let class = self.allocate_class(name.clone(), scope, bases)?;
+        let object = self.builtin("object");
+        let ordinary_slots = typed_dict_meta.is_none()
+            && enum_kind.is_none()
+            && bases
+                .iter()
+                .all(|&base| base == object || self.allocation_base(base) == Some(object));
+        let class = self.allocate_class_with_slots(name.clone(), scope, bases, ordinary_slots)?;
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
             unreachable!()
         };
         *metaclass = class_meta;
         self.install_weakref_descriptor(class, scope);
-        *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
+        self.heap.replace_cell(cell, Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -5990,6 +6129,21 @@ impl Context {
                 .names
                 .entry("__doc__".to_owned())
                 .or_insert(NONE);
+        }
+        if let Some((cell, body)) = annotation_body {
+            // type.__new__ replaces the body namespace with the finished type's dictionary.
+            let dict = self.class_namespace_dict(scope, false);
+            let extras = self
+                .dict_entries(body)
+                .expect("class body dictionary")
+                .iter()
+                .copied()
+                .filter(|&(key, _)| self.string_storage(key).is_none())
+                .collect::<Vec<_>>();
+            for (key, value) in extras {
+                self.put_item(dict, key, value)?;
+            }
+            self.heap.replace_cell(cell, Some(dict));
         }
         self.initialize_class_members(class, scope)?;
         if let Some(kind) = enum_kind {
