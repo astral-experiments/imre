@@ -1579,6 +1579,7 @@ def report(text):
             "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
         )
+        compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",
@@ -1708,7 +1709,6 @@ def report(text):
             "boxed_unittest_assert_warns.py",
             "boxed_unittest_assert_regex.py",
             "boxed_unittest_patch.py",
-            "boxed_unittest_named_loader.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
             "boxed_frozenset.py",
