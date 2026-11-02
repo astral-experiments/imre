@@ -379,6 +379,7 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
 }
 
 pub(super) const MEMORYVIEW_METHODS: &[&str] = &[
+    "cast",
     "__enter__",
     "__exit__",
     "release",
@@ -1423,6 +1424,7 @@ pub(super) fn call(
             "memoryview" if matches!(method, "__getitem__" | "__setitem__" | "__delitem__") => {
                 ctx.memoryview_item_method(method, args, kwargs)
             }
+            "memoryview" if method == "cast" => ctx.cast_memoryview(args, kwargs),
             "memoryview" if MEMORYVIEW_METHODS.contains(&method) => {
                 if method == "tobytes" {
                     if args.is_empty() {

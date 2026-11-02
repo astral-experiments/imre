@@ -480,15 +480,7 @@ impl Context {
             Value::BytesIoBuffer { .. } => {
                 let len = self.view_element_count(object)?;
                 self.invalidate_stream_snapshot(object);
-                (
-                    object,
-                    false,
-                    Some(memoryview::ViewLayout {
-                        start: 0,
-                        len,
-                        stride: 1,
-                    }),
-                )
+                (object, false, Some(memoryview::ViewLayout::full(len)))
             }
             Value::Array(ref a) if a.view_layout().0 != "w" => (object, false, None),
             Value::Array(_) => {
