@@ -100,14 +100,15 @@ pub(super) fn setrlimit(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     let number = ctx.int(i64::from(resource));
     audit::event(ctx, "resource.setrlimit", &[number, limits])?;
 
-    let items = ctx.items(limits)?;
+    // Keep the full snapshot alive across iteration and both __index__ callbacks.
+    let iterator = ctx.iterator(limits)?;
+    let snapshot = ctx.collect_generator(iterator, true)?;
+    let Value::Tuple(items) = ctx.heap.get(snapshot) else {
+        unreachable!()
+    };
     let &[current, maximum] = items.as_slice() else {
         return Err(Error::new("ValueError", "expected a tuple of 2 integers"));
     };
-    // __index__ on the first item may mutate the source or trigger collection.
-    ctx.heap.reserve_temporaries(2)?;
-    ctx.heap.keep(current);
-    ctx.heap.keep(maximum);
     let limits = rlimit {
         rlim_cur: as_limit(ctx, current)?,
         rlim_max: as_limit(ctx, maximum)?,
