@@ -1342,6 +1342,8 @@ pub(super) fn method(
     let predicate: Option<fn(&str) -> bool> = match name {
         "isalnum" => Some(crate::objects::python_alnum),
         "isascii" => Some(str::is_ascii),
+        "isalpha" => Some(crate::objects::python_isalpha),
+        "isdigit" => Some(crate::objects::python_isdigit),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
         "isupper" => Some(crate::objects::python_isupper),
@@ -1359,7 +1361,7 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        if name == "isascii"
+        if matches!(name, "isascii" | "isalpha" | "isdigit")
             && matches!(
                 ctx.heap.get(ctx.scalar_value(receiver)),
                 Value::SurrogateStr(_)

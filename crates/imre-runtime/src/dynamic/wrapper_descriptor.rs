@@ -68,6 +68,8 @@ impl BuiltinDescriptor {
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
             "str.isascii" => ("str", "isascii"),
+            "str.isalpha" => ("str", "isalpha"),
+            "str.isdigit" => ("str", "isdigit"),
             "str.islower" => ("str", "islower"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
@@ -94,7 +96,10 @@ impl BuiltinDescriptor {
         Some(Self {
             owner,
             name,
-            method: matches!(name, "__format__" | "isascii" | "islower"),
+            method: matches!(
+                name,
+                "__format__" | "isascii" | "isalpha" | "isdigit" | "islower"
+            ),
         })
     }
 
@@ -200,10 +205,16 @@ impl BuiltinDescriptor {
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
                     }
+                    ("isalpha", "__doc__") => {
+                        "Return True if the string is an alphabetic string, False otherwise.\n\nA string is alphabetic if all characters in the string are alphabetic and there\nis at least one character in the string."
+                    }
+                    ("isdigit", "__doc__") => {
+                        "Return True if the string is a digit string, False otherwise.\n\nA string is a digit string if all characters in the string are digits and there\nis at least one character in the string."
+                    }
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
-                    ("isascii" | "islower", _) => "($self, /)",
+                    ("isascii" | "isalpha" | "isdigit" | "islower", _) => "($self, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

@@ -1737,6 +1737,8 @@ pub(crate) enum StrDescriptor {
     IsAlnum,
     IsLower,
     IsAscii,
+    IsAlpha,
+    IsDigit,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
@@ -1747,9 +1749,17 @@ impl StrDescriptor {
             "rstrip" => Self::RStrip,
             "isalnum" => Self::IsAlnum,
             "isascii" => Self::IsAscii,
+            "isalpha" => Self::IsAlpha,
+            "isdigit" => Self::IsDigit,
             "islower" => Self::IsLower,
             _ => return None,
         })
+    }
+    pub(crate) fn is_predicate(self) -> bool {
+        matches!(
+            self,
+            Self::IsAlnum | Self::IsAscii | Self::IsAlpha | Self::IsDigit | Self::IsLower
+        )
     }
     pub(crate) fn name(self) -> &'static str {
         match self {
@@ -1759,6 +1769,8 @@ impl StrDescriptor {
             Self::RStrip => "rstrip",
             Self::IsAlnum => "isalnum",
             Self::IsAscii => "isascii",
+            Self::IsAlpha => "isalpha",
+            Self::IsDigit => "isdigit",
             Self::IsLower => "islower",
         }
     }
@@ -1833,6 +1845,8 @@ pub(crate) enum UrlProperty {
 pub(crate) enum TextPredicate {
     Alnum,
     Ascii,
+    Alpha,
+    Digit,
     Space,
     Lower,
     Upper,

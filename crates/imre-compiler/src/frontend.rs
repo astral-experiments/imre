@@ -7764,7 +7764,10 @@ impl<'a> Checker<'a> {
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
                 if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
-                    && matches!(attribute.attr.as_str(), "isascii" | "islower")
+                    && matches!(
+                        attribute.attr.as_str(),
+                        "isascii" | "isalpha" | "isdigit" | "islower"
+                    )
                 {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),
@@ -9700,7 +9703,14 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 attribute.attr.as_str(),
-                "splitlines" | "isalnum" | "isascii" | "isspace" | "islower" | "isupper"
+                "splitlines"
+                    | "isalnum"
+                    | "isascii"
+                    | "isalpha"
+                    | "isdigit"
+                    | "isspace"
+                    | "islower"
+                    | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.splitlines_or_predicate(
