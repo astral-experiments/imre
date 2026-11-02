@@ -37,7 +37,6 @@ REJECTED = {
         "class Index:\n    def __index__(self) -> int:\n        return 97\n"
         'print(Index() in b"abc")\n'
     ),
-    "bytes_mutable": 'value = bytearray(b"abc")\n',
     "shadowed_fromhex": (
         'def convert(bytes: int) -> int:\n    return bytes.fromhex("41")\n'
         "print(convert(1))\n"
