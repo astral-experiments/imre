@@ -161,6 +161,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "pathlib/__init__.py",
             include_str!("../../stdlib/pathlib/__init__.py"),
         )),
+        "pathlib._local" => Some((
+            "pathlib/_local.py",
+            include_str!("../../stdlib/pathlib/_local.py"),
+        )),
         "pathlib._os" => Some((
             "pathlib/_os.py",
             include_str!("../../stdlib/pathlib/_os.py"),

@@ -115,6 +115,7 @@ impl Imports {
                     | "opcode"
                     | "_opcode_metadata"
                     | "sysconfig"
+                    | "pathlib._local"
                     | "pathlib.types"
                     | "platform"
                     | "keyword"
@@ -291,7 +292,7 @@ impl<'a> Visitor<'a> for Imports {
                             || (name == "_opcode" && (boxed_opcode(suffix) || suffix == "*"))
                             || (name == "sys" && boxed_sys_export(suffix))
                             || (name == "string" && suffix == "templatelib")
-                            || (name == "pathlib" && suffix == "types"))
+                            || (name == "pathlib" && matches!(suffix, "_local" | "types")))
                     {
                         self.runtime_imports = true;
                     }
@@ -615,6 +616,12 @@ pub(crate) fn compile(
             let mut imports = Imports::default();
             if late_pprint && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
+            }
+            // Python 3.13 path pickles name this module even when the reader never imports pathlib.
+            if (seen.contains("pickle") || seen.contains("pathlib"))
+                && !seen.contains("pathlib._local")
+            {
+                imports.names.push((0, "pathlib._local".to_owned()));
             }
             if seen.contains("pathlib") && !seen.contains("pathlib.types") {
                 imports.names.push((0, "pathlib.types".to_owned()));
