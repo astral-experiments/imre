@@ -83,6 +83,19 @@ with tempfile.TemporaryDirectory() as directory:
             portion = machinery.PathFinder.find_spec('keyword', [directory])
             assert portion.loader is None
             assert list(portion.submodule_search_locations) == [os.path.join(directory, 'keyword')]
+            finder = machinery.PathFinder
+            original_find_spec = finder.__dict__['find_spec']
+
+            def choose_namespace(cls, name, path=None, target=None):
+                assert name == 'keyword'
+                return portion
+
+            finder.find_spec = classmethod(choose_namespace)
+            try:
+                assert util.find_spec('keyword') is portion
+            finally:
+                finder.find_spec = original_find_spec
+
             actual = util.find_spec('keyword')
             assert actual.origin == regular.origin and type(actual.loader) is type(regular.loader)
             import keyword
