@@ -1420,8 +1420,7 @@ impl Context {
         sequence_words: Option<usize>,
     ) -> Result<Option<String>> {
         let calendar_repr = matches!(lookup, FormatLookup::Repr)
-            && matches!(self.heap.get(id), Value::Calendar { .. })
-            && super::stdlib::datetime::render::custom_zone(self, id).is_some();
+            && super::stdlib::datetime::render::python_repr(self, id);
         if !matches!(lookup, FormatLookup::MethodName)
             && !calendar_repr
             && self.format_slot(id, "__repr__").is_none()

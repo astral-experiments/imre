@@ -44,17 +44,35 @@ pub(super) fn repr(
     class: Id,
     kind: &str,
 ) -> Result<Id> {
+    let Value::Calendar {
+        tzinfo, tzoffset, tzname, ..
+    } = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+        unreachable!()
+    };
+    if kind == "timezone" {
+        if receiver == utc(ctx) {
+            return Ok(ctx.text("datetime.timezone.utc"));
+        }
+        let mut points: Vec<u32> = "datetime.timezone(".bytes().map(u32::from).collect();
+        let offset = crate::dynamic::builtins::call(ctx, "repr", &[tzoffset], &[])?;
+        points.extend(ctx.string_codepoints(offset)?.iter().copied());
+        if tzname != NONE {
+            points.extend(", ".bytes().map(u32::from));
+            let name = crate::dynamic::builtins::call(ctx, "repr", &[tzname], &[])?;
+            points.extend(ctx.string_codepoints(name)?.iter().copied());
+        }
+        points.push(u32::from(b')'));
+        return Ok(ctx.text_codepoints(points));
+    }
     let base = value.subtype_repr(ctx.class_name(class), kind == "date");
-    if kind != "date"
-        && let Some(zone) = custom_zone(ctx, receiver)
-    {
+    if kind != "date" && tzinfo != NONE {
         let at = if kind == "time" && value.clock_parts()[4] != 0 {
             base.len() - ", fold=1)".len()
         } else {
             base.len() - 1
         };
         let builtin = ctx.builtin("repr");
-        let supplied = ctx.call(builtin, vec![zone], vec![])?;
+        let supplied = ctx.call(builtin, vec![tzinfo], vec![])?;
         let mut points: Vec<u32> = base[..at].chars().map(u32::from).collect();
         points.extend(", tzinfo=".bytes().map(u32::from));
         points.extend(
@@ -192,14 +210,14 @@ pub(in crate::dynamic) fn exact(ctx: &mut Context, id: Id, quoted: bool) -> Resu
     let Value::Calendar { value, .. } = ctx.heap.get(id) else {
         return Ok(None);
     };
-    if custom_zone(ctx, id).is_none() {
-        return Ok(None);
-    }
     let value = value.clone();
     let kind = value.class();
-    if quoted {
+    if quoted && python_repr(ctx, id) {
         let class = ctx.exact_type(id)?;
         return repr(ctx, id, &value, class, kind).map(Some);
+    }
+    if quoted || custom_zone(ctx, id).is_none() {
+        return Ok(None);
     }
     if kind == "time" {
         isoformat(ctx, "time.isoformat", &[id], &[]).map(Some)
@@ -207,4 +225,9 @@ pub(in crate::dynamic) fn exact(ctx: &mut Context, id: Id, quoted: bool) -> Resu
         let sep = ctx.text(" ");
         isoformat(ctx, "datetime.isoformat", &[id, sep], &[]).map(Some)
     }
+}
+
+/// These exact values refer to Python objects with an observable repr.
+pub(in crate::dynamic) fn python_repr(ctx: &Context, id: Id) -> bool {
+    matches!(ctx.heap.get(id), Value::Calendar { tzinfo, tzoffset, .. } if *tzinfo != NONE || *tzoffset != NONE)
 }

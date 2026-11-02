@@ -107,6 +107,11 @@ pub(super) fn construct(
             if matches!(ctx.heap.get(value), Value::Str(_) | Value::SurrogateStr(_)) {
                 return Ok(value);
             }
+            if let Value::Calendar { tzname, .. } = *ctx.heap.get(value)
+                && tzname != NONE
+            {
+                return Ok(tzname);
+            }
             let string_hook = ctx.bound_slot(value, "__str__")?;
             if string_hook.is_none()
                 && let Value::Raised(error) = ctx.heap.get(value)
