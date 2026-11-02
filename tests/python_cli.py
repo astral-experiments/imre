@@ -1928,6 +1928,16 @@ def main():
             extra={"PYTHONDONTWRITEBYTECODE": "1", "IMREFLAGS": "--bogus"},
         )
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
+        compare(
+            "-B", "-c",
+            "import atexit, os\n"
+            "atexit.register(lambda: print('after shutdown', handler.stream is None))\n"
+            "import logging\n"
+            "handler = logging.FileHandler(os.devnull)\n"
+            "atexit.register(lambda: print('before shutdown', handler.stream is None))\n",
+            extra={"IMREFLAGS": "--opt-level 0"},
+            native_timeout=300,
+        )
         compare("-B", "-c", "print(list.__len__([1, 2]), tuple.__len__((3,)))")
         if os.name == "posix":
             for base in ("list", "tuple"):
