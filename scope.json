@@ -1,0 +1,166 @@
+{
+  "stage": "final",
+  "imre_baseline": "ff034f7b2538e67bc41efd6c9eedd59dec7a7e66",
+  "imre_current": "d7beefe0352e3cd83a6d4a1642357b499dcd4eee",
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "reference_registration": 43,
+  "stock_pass": 43,
+  "stock_provider_skips": 0,
+  "upstream_sha256": "6325b930f5fc9aa8537640423d410e2237811952ae41c097fbb03100cf26f0af",
+  "callback_controls": {
+    "reference": {
+      "rows": 6,
+      "matches": null
+    },
+    "base": {
+      "rows": 12,
+      "matches": 4
+    },
+    "tested": {
+      "rows": 12,
+      "matches": 10
+    },
+    "public": {
+      "rows": 12,
+      "matches": 10
+    },
+    "guarded": {
+      "rows": 12,
+      "matches": 10
+    },
+    "forwarding/reference": {
+      "rows": 2,
+      "matches": null
+    },
+    "forwarding/tested": {
+      "rows": 4,
+      "matches": 4
+    },
+    "forwarding/public": {
+      "rows": 4,
+      "matches": 4
+    },
+    "forwarding/guarded": {
+      "rows": 4,
+      "matches": 4
+    }
+  },
+  "supplemental_opt2_in_packet": false,
+  "guarded_head": "1a4d86c7658902e17ce14d3130ab0182db897b6c",
+  "intermediate": "6f29a0da89751520483cc5a25de18736416ad493",
+  "stock_regrtest_default": {
+    "PASS": 42,
+    "SKIP": 1
+  },
+  "prior_credit_reference": {
+    "repository": "astral-experiments/imre",
+    "commit": "81977ec61cfffc48e9742b022f42f07d733667e3",
+    "path": "README.md",
+    "sha256": "bf1a3109a344c8780628f6b20c9cc7d07d98be6d955df18ec0487cefb270c66a",
+    "line": 123,
+    "row": "| `io` | 112 | 1,038 | The public stateful-decoder original passed in ordinary and boxed O0/O3 and was already among the 112 credited cases. All four builds of the intact 667-case test_io module compiled. Discovery stops at io.BufferedReader. |",
+    "prior_credited_total": 112,
+    "original_io_denominator": 1038,
+    "distinct_key_overlap": "User stated these 43 IDs were absent from the 112-key union. No prior key list was available for an independent set intersection.",
+    "paired_before": 4,
+    "paired_after": 26,
+    "net_paired_public_vs_pinned_base": 22,
+    "conditional_total_if_all_disjoint": 138
+  },
+  "original_class_stages": {
+    "base": {
+      "O0": {
+        "registered": 43,
+        "outcomes": {
+          "PASS": 4,
+          "SKIP": 2,
+          "ERROR": 35,
+          "FAIL": 1,
+          "INTERRUPTED": 1
+        }
+      },
+      "O3": {
+        "registered": 43,
+        "outcomes": {
+          "PASS": 4,
+          "SKIP": 2,
+          "ERROR": 35,
+          "FAIL": 1,
+          "INTERRUPTED": 1
+        }
+      }
+    },
+    "tested": {
+      "O0": {
+        "registered": 43,
+        "outcomes": {
+          "PASS": 25,
+          "SKIP": 2,
+          "ERROR": 7,
+          "FAIL": 4,
+          "INTERRUPTED": 5
+        }
+      },
+      "O3": {
+        "registered": 43,
+        "outcomes": {
+          "PASS": 25,
+          "SKIP": 2,
+          "ERROR": 7,
+          "FAIL": 4,
+          "INTERRUPTED": 5
+        }
+      }
+    },
+    "public": {
+      "O0": {
+        "registered": 43,
+        "outcomes": {
+          "PASS": 26,
+          "SKIP": 2,
+          "ERROR": 6,
+          "FAIL": 4,
+          "INTERRUPTED": 5
+        }
+      },
+      "O3": {
+        "registered": 43,
+        "outcomes": {
+          "PASS": 26,
+          "SKIP": 2,
+          "ERROR": 6,
+          "FAIL": 4,
+          "INTERRUPTED": 5
+        }
+      }
+    }
+  },
+  "paired_keys_new_on_3912_branch": [
+    "test.test_io.CBufferedWriterTest.test_close_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_context_manager",
+    "test.test_io.CBufferedWriterTest.test_destructor",
+    "test.test_io.CBufferedWriterTest.test_detach",
+    "test.test_io.CBufferedWriterTest.test_detach_flush",
+    "test.test_io.CBufferedWriterTest.test_fileno",
+    "test.test_io.CBufferedWriterTest.test_flush",
+    "test.test_io.CBufferedWriterTest.test_flush_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_invalid_args",
+    "test.test_io.CBufferedWriterTest.test_misbehaved_io",
+    "test.test_io.CBufferedWriterTest.test_multi_close",
+    "test.test_io.CBufferedWriterTest.test_nonnormalized_close_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_override_destructor",
+    "test.test_io.CBufferedWriterTest.test_readonly_attributes",
+    "test.test_io.CBufferedWriterTest.test_unseekable",
+    "test.test_io.CBufferedWriterTest.test_write",
+    "test.test_io.CBufferedWriterTest.test_write_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_write_overflow",
+    "test.test_io.CBufferedWriterTest.test_writelines",
+    "test.test_io.CBufferedWriterTest.test_writelines_error",
+    "test.test_io.CBufferedWriterTest.test_writelines_userlist"
+  ],
+  "additional_paired_keys_only_on_public": [
+    "test.test_io.CBufferedWriterTest.test_truncate_after_write"
+  ],
+  "paired_keys_lost_public_vs_baseline": [],
+  "guard_scope": "one focused original test_write and control witnesses"
+}

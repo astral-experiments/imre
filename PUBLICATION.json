@@ -1,0 +1,48 @@
+{
+  "signer": "receipt-specific one-use Ed25519",
+  "spki_der_sha256": "196e7b8a7df217e481f6e74eba8dc0e88589309e77d4389d9da6077ca44cd71f",
+  "covered_manifest": "SHA256SUMS",
+  "detached_signature": "SHA256SUMS.sig",
+  "archive": "cbwc-receipts.tar.gz",
+  "fresh_extraction_verified_payloads": 2181,
+  "files_to_publish": [
+    "PUBLICATION.json",
+    "SHA256SUMS",
+    "SHA256SUMS.sig",
+    "SIGNING.md",
+    "cbwc-receipts.tar.gz",
+    "receipt-archive.sha256",
+    "signer-ed25519.pem",
+    "verify-cbwc.py"
+  ],
+  "publish_files": {
+    "SHA256SUMS": {
+      "bytes": 256916,
+      "sha256": "d160730350a673e2456721cc4803f5d80a642cc77cd5ded2a47e48552f5f5d49"
+    },
+    "SHA256SUMS.sig": {
+      "bytes": 64,
+      "sha256": "a3af11cc905c410de9882fb1df1ef4ff2d0c08b6fc0ab9608bf2547b1196e3f0"
+    },
+    "SIGNING.md": {
+      "bytes": 816,
+      "sha256": "6395e2d04b77f80d624947c0c23cd75e577d6bf518474c1a86d031b68e7c2c56"
+    },
+    "cbwc-receipts.tar.gz": {
+      "bytes": 321487,
+      "sha256": "c3594e8dd2354e83c6b84675b75b5616e46421c9bf22b2aa9b15e813f35059ae"
+    },
+    "receipt-archive.sha256": {
+      "bytes": 87,
+      "sha256": "65a3cfa6129cda6f88a8c83236190e456ad9a5f5671e0cf6fa23e79a31b7f393"
+    },
+    "signer-ed25519.pem": {
+      "bytes": 113,
+      "sha256": "1583f732152178c426973b6fe43f6886d884bbcab201995c07881a54f4186d94"
+    },
+    "verify-cbwc.py": {
+      "bytes": 5437,
+      "sha256": "a04a5cb04d2190b7018ee93aaca468a8ebfad528bc1d34f2c4d2bfcaf7e484c8"
+    }
+  }
+}
