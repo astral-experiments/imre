@@ -582,14 +582,20 @@ pub(super) fn reduce_builtin_alias(ctx: &mut Context, receiver: Id) -> Result<Id
             if alias.unpacked {
                 let plain = builtin_alias(ctx, origin, args);
                 let iterator = ctx.iterator(plain)?;
-                (ctx.builtin("next"), vec![iterator])
+                ctx.heap.keep(iterator);
+                (super::builtins::frame_builtin(ctx, "next")?, vec![iterator])
             } else {
                 (ctx.exact_type(receiver)?, vec![origin, args])
             }
         }
-        Value::GenericAliasIterator(source) => {
-            let source = (*source).unwrap_or_else(|| ctx.alloc(Value::Tuple(Vec::new())));
-            (ctx.builtin("iter"), vec![source])
+        Value::GenericAliasIterator(_) => {
+            // Looking up iter can advance the receiver through a custom builtins mapping.
+            let iter = super::builtins::frame_builtin(ctx, "iter")?;
+            let Value::GenericAliasIterator(source) = *ctx.heap.get(receiver) else {
+                unreachable!()
+            };
+            let source = source.unwrap_or_else(|| ctx.heap.packed_tuple(Vec::new(), false));
+            (iter, vec![source])
         }
         _ => unreachable!("validated generic alias or iterator"),
     };

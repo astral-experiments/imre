@@ -58,6 +58,20 @@ def current():
     assert iterator.__reduce__() == (iter, ((),))
     factory, (fresh,) = starred.__reduce__()
     assert factory is next and fresh.__reduce__() == (iter, (alias,))
+    ns = {"x": starred, "__builtins__": {"next": "replacement"}}
+    exec("result = x.__reduce__()", ns)
+    assert ns["result"][0] == "replacement"
+    iterator = iter(alias)
+
+    class Builtins(dict):
+        def __missing__(self, name):
+            assert name == "iter"
+            next(iterator)
+            return "replacement"
+
+    ns = {"x": iterator, "__builtins__": Builtins()}
+    exec("result = x.__reduce__()", ns)
+    assert ns["result"] == ("replacement", ((),))
     for original in (starred, alias | int):
         assert copy.copy(original) == copy.deepcopy(original) == original
         for protocol in range(pickle.HIGHEST_PROTOCOL + 1):

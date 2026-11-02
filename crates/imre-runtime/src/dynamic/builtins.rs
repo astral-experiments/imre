@@ -1140,12 +1140,32 @@ pub(super) fn noargs_method_receiver(
 ) -> Result<Id> {
     let (receiver, rest) = method_receiver_args(ctx, owner, method, args, kwargs)?;
     if !rest.is_empty() {
+        let short = owner.rsplit('.').next().unwrap_or(owner);
         return Err(type_error(format!(
-            "{owner}.{method}() takes no arguments ({} given)",
+            "{short}.{method}() takes no arguments ({} given)",
             rest.len()
         )));
     }
     Ok(receiver)
+}
+
+/// Look up a reconstruction callable in the current frame's builtins, as PyEval_GetBuiltin does.
+pub(super) fn frame_builtin(ctx: &mut Context, name: &str) -> Result<Id> {
+    let scope = ctx.heap.current_scope();
+    let builtins = if scope != NONE
+        && let Some(globals) = ctx.scope_data(ctx.root_scope(scope)).exec_globals
+    {
+        globals.builtins
+    } else {
+        ctx.default_source_builtins()?
+    };
+    ctx.load_exec_name(builtins, name).map_err(|error| {
+        if ctx.is_builtin_error(&error, "KeyError") {
+            Error::new("AttributeError", name)
+        } else {
+            error
+        }
+    })
 }
 
 /// Reduce a builtin using its stored receiver and name, without consulting receiver attributes.
@@ -1172,21 +1192,7 @@ fn reduce_builtin_method(ctx: &mut Context, method: Id) -> Result<Id> {
     else {
         return Ok(ctx.text(name));
     };
-    let scope = ctx.heap.current_scope();
-    let builtins = if scope != NONE
-        && let Some(globals) = ctx.scope_data(ctx.root_scope(scope)).exec_globals
-    {
-        globals.builtins
-    } else {
-        ctx.default_source_builtins()?
-    };
-    let getattr = ctx.load_exec_name(builtins, "getattr").map_err(|error| {
-        if ctx.is_builtin_error(&error, "KeyError") {
-            Error::new("AttributeError", "getattr")
-        } else {
-            error
-        }
-    })?;
+    let getattr = frame_builtin(ctx, "getattr")?;
     let name = ctx.text(name);
     let args = ctx.alloc(Value::Tuple(vec![receiver, name]));
     Ok(ctx.alloc(Value::Tuple(vec![getattr, args])))
