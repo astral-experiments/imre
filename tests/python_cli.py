@@ -2049,6 +2049,7 @@ def report(text):
             "boxed_binary_bytes_paths.py",
             "boxed_buffered_readlines.py",
             "boxed_os_descriptor_io.py",
+            "boxed_os_ftruncate.py",
             "boxed_os_waitpid.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
