@@ -1,4 +1,5 @@
 import gc
+from _thread import allocate_lock, start_new_thread
 from weakref import ref
 
 
@@ -10,6 +11,12 @@ def cycle(events):
     node = Node()
     node.link = node
     return ref(node, events.append)
+
+
+def enable_on_worker(isenabled, enable, done):
+    if not isenabled():
+        enable()
+        done.release()
 
 
 def current():
@@ -32,6 +39,12 @@ def current():
         more = [[] for _ in range(32000)]
         assert pending() is None and events == [immediate, delayed, pending]
         assert len(more) == 32000
+
+        done = allocate_lock()
+        done.acquire()
+        gc.disable()
+        start_new_thread(enable_on_worker, (gc.isenabled, gc.enable, done))
+        assert done.acquire(timeout=5) and gc.isenabled()
     finally:
         if was_enabled:
             gc.enable()

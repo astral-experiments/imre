@@ -141,11 +141,18 @@ impl Callback {
             let value = match ctx.heap.get(id) {
                 Value::PrimitiveLock(lock) => Argument::Lock(Arc::clone(lock)),
                 Value::HandlerLock(lock) => Argument::RLock(Arc::clone(lock)),
-                Value::Native(name) if !high_level && name == "_thread._count" => {
-                    Argument::Builtin("_thread._count")
-                }
-                Value::Native(name) if !high_level && name == "sys.exit" => {
-                    Argument::Builtin("sys.exit")
+                Value::Native(name) if !high_level => {
+                    let symbol = [
+                        "_thread._count",
+                        "sys.exit",
+                        "gc.enable",
+                        "gc.disable",
+                        "gc.isenabled",
+                    ]
+                    .into_iter()
+                    .find(|symbol| *symbol == name)
+                    .ok_or_else(unsupported)?;
+                    Argument::Builtin(symbol)
                 }
                 _ => return Err(unsupported()),
             };
