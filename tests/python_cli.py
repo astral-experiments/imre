@@ -2117,6 +2117,7 @@ def report(text):
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",
             "boxed_function_defaults.py",
+            "boxed_reprlib.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
             "boxed_set_issubset.py",
