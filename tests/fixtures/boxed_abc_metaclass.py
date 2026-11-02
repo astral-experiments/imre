@@ -50,7 +50,14 @@ def current():
     exec("class Virtual(metaclass=Meta): marker = 42", namespace)
     virtual = namespace["Virtual"]
     assert type(virtual) is Meta and virtual.marker == 42
+    token = abc.get_cache_token()
     assert Abstract.register(virtual) is virtual
+    changed = abc.get_cache_token()
+    assert changed != token
+    assert Abstract.register(virtual) is virtual
+    assert abc.get_cache_token() == changed
+    assert Abstract.register(Complete) is Complete
+    assert abc.get_cache_token() == changed
     assert issubclass(virtual, Abstract) and isinstance(virtual(), Abstract)
     assert Abstract not in virtual.__mro__
 

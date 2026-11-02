@@ -1872,6 +1872,8 @@ pub(super) struct Heap {
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
     pub(super) abc_registrations: Vec<[Id; 2]>,
+    // Collecting weak registration pairs must not roll back the invalidation counter.
+    pub(super) abc_cache_token: u64,
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
@@ -1958,6 +1960,7 @@ impl Heap {
             linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
+            abc_cache_token: 0,
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),

@@ -2063,6 +2063,8 @@ impl Context {
             "abc" => {
                 let meta = self.abc_meta();
                 self.bind(scope, "ABCMeta", meta);
+                let token = self.builtin("abc.get_cache_token");
+                self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
             "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
