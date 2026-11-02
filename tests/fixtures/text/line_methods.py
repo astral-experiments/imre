@@ -94,6 +94,14 @@ try:
     print("".isspace(wrong=argument(-1)))
 except TypeError as err:
     print(err)
+unbound_ascii = str.isascii
+for text in ("", "\0\x7f", "ascii\x80", "🦊"):
+    print(text.isascii())
+    print(unbound_ascii(text))
+try:
+    unbound_ascii(3)
+except TypeError as err:
+    print(err)
 unbound_lower = str.islower
 for text in ("", "7東", "ʕ東", "aǅ", "ⅷ", "𐐨", "𐐀"):
     print(text.islower())
