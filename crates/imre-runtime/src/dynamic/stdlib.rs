@@ -26,6 +26,7 @@ mod hashlib;
 mod hmac;
 mod inspect;
 pub(super) mod itertools;
+mod locale;
 pub(super) mod tempfile;
 mod time;
 mod tokenize;
@@ -407,7 +408,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "default_directory"
             | "open_named" | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
-        ("locale" | "_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
+        ("_locale", "getencoding" | "setlocale") => ctx.builtin(&format!("_locale.{name}")),
+        ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
+        ("_locale", "LC_COLLATE") => ctx.int(libc::LC_COLLATE.into()),
+        ("_locale", "LC_CTYPE") => ctx.int(libc::LC_CTYPE.into()),
+        ("_locale", "LC_MONETARY") => ctx.int(libc::LC_MONETARY.into()),
+        ("_locale", "LC_NUMERIC") => ctx.int(libc::LC_NUMERIC.into()),
+        ("_locale", "LC_TIME") => ctx.int(libc::LC_TIME.into()),
+        ("_locale", "LC_MESSAGES") => ctx.int(libc::LC_MESSAGES.into()),
         ("tempfile", "TemporaryFile") | ("_imre_tempfile", "open_file") => {
             ctx.builtin("tempfile.TemporaryFile")
         }
@@ -875,6 +883,9 @@ pub(super) fn call(
         return super::atexit::call(ctx, method, args, kwargs);
     }
 
+    if name == "_locale.setlocale" {
+        return locale::setlocale(ctx, args, kwargs);
+    }
     if name == "_imre_linecache.source_lines" {
         let ([data], []) = (args, kwargs) else {
             return Err(Error::new(
