@@ -10988,6 +10988,13 @@ impl<'a> Checker<'a> {
             let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
             return Ok(self.implementation_hasattr(receiver.clone(), key));
         }
+        if self.unshadowed_builtin(&call.func, "getattr")
+            && let [receiver, attribute] = args.as_slice()
+            && let ExprKind::Str(member) = &attribute.kind
+            && calendar::boxed_comparison(receiver.ty, member)
+        {
+            return Err(self.object_runtime_export("datetime instance member", call));
+        }
         if matches!(name.id.as_str(), "getattr" | "hasattr" | "vars")
             && args.first().is_some_and(|arg| arg.ty == Type::NativeModule)
             && self.resolve(&call.func).is_none()

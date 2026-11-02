@@ -85,6 +85,12 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             "datetime.date",
             &FIELDS[..3],
             &[
+                "__eq__",
+                "__ne__",
+                "__lt__",
+                "__le__",
+                "__gt__",
+                "__ge__",
                 "__format__",
                 "__reduce__",
                 "__repr__",
@@ -778,7 +784,7 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if let Some((
-        kind @ ("datetime" | "time"),
+        kind @ ("date" | "datetime" | "time"),
         operation @ ("__eq__" | "__ne__" | "__lt__" | "__le__" | "__gt__" | "__ge__"),
     )) = method.split_once('.')
     {

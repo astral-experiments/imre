@@ -90,6 +90,14 @@ fn fixed_zone_method(name: &str) -> bool {
     matches!(name, "utcoffset" | "tzname" | "dst")
 }
 
+pub(super) fn boxed_comparison(receiver: Type, name: &str) -> bool {
+    matches!(receiver, Type::Calendar(C::Date | C::DateTime))
+        && matches!(
+            name,
+            "__eq__" | "__ne__" | "__lt__" | "__le__" | "__gt__" | "__ge__"
+        )
+}
+
 pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
     match name {
         "utctimetuple" => receiver == Type::Calendar(C::DateTime),
@@ -112,7 +120,7 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
         "ctime" | "isoweekday" | "today" => {
             matches!(receiver, Type::Calendar(C::Date | C::DateTime))
         }
-        _ => false,
+        _ => boxed_comparison(receiver, name),
     }
 }
 

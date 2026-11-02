@@ -1514,6 +1514,19 @@ def main():
         )
         compare("-IB", names, native_args=("run", names, "--quiet"))
 
+        comparisons = root / "calendar_comparison.py"
+        for expression in (
+            "d.__eq__(dt)", "date.__le__(dt, d)", "dt.__ne__(d)",
+            "getattr(d, '__eq__')(dt)", "getattr(dt, '__ne__')(d)",
+        ):
+            comparisons.write_text(
+                "from datetime import date, datetime\n"
+                "d = date(2024, 2, 29)\n"
+                "dt = datetime(2024, 2, 29, 23)\n"
+                f"print({expression})\n"
+            )
+            compare("-IB", comparisons, native_args=("run", comparisons, "--quiet"))
+
         if os.name == "posix":
             compare(
                 "-IB", "-c",
@@ -2518,6 +2531,7 @@ def report(text):
             "boxed_re_scanner.py",
             "boxed_re_escape.py",
             "boxed_datetime.py",
+            "boxed_date_comparison.py",
             "boxed_timedelta_multiply.py",
             "boxed_timedelta_scale.py",
             "boxed_timedelta_floordiv.py",
