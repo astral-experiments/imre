@@ -236,7 +236,6 @@ enum Body<'a> {
         Vec<(&'a str, &'a ast::Expr)>,
         Option<statements::ClassBindings>,
     ),
-    AnnotationValue(&'a ast::Expr),
     Expression(&'a ast::Expr),
     YieldingLambda(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
@@ -440,10 +439,6 @@ impl Output {
                 f.unsupported("async function");
             }
             Body::Generator(generators, element) => f.generator_step(generators, element),
-            Body::AnnotationValue(expr) => {
-                let value = f.expr(expr);
-                f.end(&format!("ret i64 {value}"));
-            }
             Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
                 if matches!(body, Body::TypeAlias(_)) {

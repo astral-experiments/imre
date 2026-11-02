@@ -335,14 +335,7 @@ impl Function<'_, '_> {
                     {
                         let key = self.code_name(name.id.as_str());
                         if self.class_locals.is_some() && !self.source.string_annotations {
-                            // Class annotations may refer to a name bound after the class body.
-                            let value = self.output.code(
-                                self.source,
-                                String::new(),
-                                Body::AnnotationValue(&v.annotation),
-                                false,
-                            );
-                            self.remember_annotation(v, name.id.as_str(), &value);
+                            self.remember_annotation(v, name.id.as_str());
                             let offset = v.start().to_u32();
                             self.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
                         } else if let Some(sites) = &mut self.module_annotation_sites {
