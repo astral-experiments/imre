@@ -2393,8 +2393,18 @@ impl Context {
             }
             #[cfg(target_os = "linux")]
             "posix" if source.is_none() => stdlib::os::scheduler::initialize(self, scope),
-            #[cfg(target_os = "linux")]
-            "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
+            #[cfg(unix)]
+            "_signal" if source.is_none() => {
+                #[cfg(target_os = "linux")]
+                stdlib::signal::initialize(self, scope);
+                for (name, disposition) in [("SIG_DFL", libc::SIG_DFL), ("SIG_IGN", libc::SIG_IGN)]
+                {
+                    let value = self.int(disposition as i64);
+                    self.bind(scope, name, value);
+                }
+                let handler = self.builtin("_signal.default_int_handler");
+                self.bind(scope, "default_int_handler", handler);
+            }
             #[cfg(target_os = "linux")]
             "_imre_signal" if source.is_none() => {
                 let factory = self.builtin("_imre_signal.make_signals");
