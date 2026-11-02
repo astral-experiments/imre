@@ -63,10 +63,9 @@ fn fd(ctx: &mut Context, obj: Id) -> Result<Id> {
         {
             Ok(number) => number,
             Err(e)
-                if matches!(
-                    e.kind.as_ref(),
-                    "AttributeError" | "TypeError" | "ValueError"
-                ) =>
+                if ["AttributeError", "TypeError", "ValueError"]
+                    .iter()
+                    .any(|kind| ctx.is_builtin_error(&e, kind)) =>
             {
                 let name = ctx.checked_format(obj, true)?;
                 return Err(Error::new(
@@ -98,7 +97,7 @@ fn native_fd(ctx: &Context, fd: Id) -> Result<i32> {
 
 fn reg_fd(ctx: &mut Context, handle: &RefCell<Selector>, obj: Id) -> Result<Id> {
     match fd(ctx, obj) {
-        Err(e) if e.kind == "ValueError" => {
+        Err(e) if ctx.is_builtin_error(&e, "ValueError") => {
             // Lookup by identity still permits unregistering a socket that was closed.
             for &(fd, entry) in ctx.dict_entries(handle.borrow().keys).unwrap() {
                 if Registration::unpack(ctx, entry).fileobj == obj {
@@ -483,7 +482,7 @@ pub(super) fn call(
                     return Err(Error::new("RuntimeError", "Selector is closed"));
                 }
                 return match ctx.get_item(view, obj) {
-                    Err(e) if e.kind == "KeyError" => missing(ctx, obj),
+                    Err(e) if ctx.is_builtin_error(&e, "KeyError") => missing(ctx, obj),
                     result => result,
                 };
             }
