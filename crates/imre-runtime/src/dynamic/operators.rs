@@ -3540,19 +3540,36 @@ impl Context {
             (self.alloc(Value::Set { entries, frozen }), left)
         };
         self.visit_set_operand(source, |ctx, key, hash| {
+            let roots = ctx.heap.temporary_mark();
             ctx.heap.keep(key);
-            let (hash, position) = ctx.find_dictionary_key(result, key, hash)?;
-            if let Some(index) = position {
-                let Value::Set { entries, .. } = ctx.heap.get_mut(result) else {
-                    unreachable!()
-                };
-                let (resident, _) = entries.remove(index)?;
-                ctx.heap.weak_edge_removed(resident);
-            } else {
-                // Insertion probes again: a collision callback may change its answer.
-                ctx.set_dictionary_key(result, key, NONE, Some(hash), false)?;
+            let toggle = ctx.find_dictionary_key(result, key, hash).and_then(|(hash, found)| {
+                if let Some(index) = found {
+                    let Value::Set { entries, .. } = ctx.heap.get_mut(result) else {
+                        unreachable!()
+                    };
+                    let (resident, _) = entries.remove(index)?;
+                    let mark = ctx.heap.temporary_mark();
+                    ctx.heap.keep(resident);
+                    ctx.heap.weak_edge_removed(resident);
+                    ctx.discard_truth(mark);
+                } else {
+                    // Insertion probes again: a collision callback may change its answer.
+                    ctx.set_dictionary_key(result, key, NONE, Some(hash), false)?;
+                }
+                Ok(())
+            });
+            // Comparison can clear the source. Release our key before advancing
+            // the live cursor, and preserve any active exception during finalization.
+            ctx.heap.release_temporaries_since(roots);
+            if let Err(error) = &toggle {
+                for id in error.roots() {
+                    ctx.heap.keep(id);
+                }
             }
-            Ok(())
+            let mark = ctx.heap.temporary_mark();
+            ctx.heap.keep(key);
+            ctx.discard_truth(mark);
+            toggle
         })?;
         Ok(result)
     }
