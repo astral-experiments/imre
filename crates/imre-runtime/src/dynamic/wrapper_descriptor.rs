@@ -74,6 +74,9 @@ impl BuiltinDescriptor {
             Some(("BaseException", attr)) => {
                 Some(("BaseException", attr, &["add_note", "with_traceback"][..]))
             }
+            Some(("member_descriptor", attr)) => {
+                Some(("member_descriptor", attr, super::namedtuple::MEMBER_SLOTS))
+            }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
             Some(("set", attr)) => Some((
                 "set",
@@ -250,6 +253,7 @@ impl BuiltinDescriptor {
             "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
             "memoryview" => matches!(ctx.heap.get(receiver), Value::MemoryView { .. }),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
+            "member_descriptor" => ctx.exact_type(receiver)? == ctx.builtin("member_descriptor"),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
             "dict" => ctx.dict_storage(receiver).is_some(),
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),

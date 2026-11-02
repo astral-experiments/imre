@@ -793,7 +793,16 @@ pub(super) fn bind_generic_parameters(
     Ok(())
 }
 
+/// Members physically stored on a TypeVar and returned unbound by class lookup.
+pub(super) const VARIANCE_FIELDS: [&str; 3] =
+    ["__covariant__", "__contravariant__", "__infer_variance__"];
+
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
+    if matches!(ctx.heap.get(value), Value::Native(class) if class == "typing.TypeVar")
+        && let Some(member) = ctx.own_class_attr(value, name)
+    {
+        return Some(Ok(member));
+    }
     let attr = match ctx.heap.get(value) {
         Value::TypeVar(_)
         | Value::ParamSpec(_)
