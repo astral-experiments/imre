@@ -2119,11 +2119,19 @@ impl Context {
                 "__repr__",
                 "__reduce__",
                 "difference",
+                "intersection",
                 "issubset",
                 "union",
                 "update",
             ],
-            "frozenset" => &["__repr__", "__reduce__", "difference", "issubset", "union"],
+            "frozenset" => &[
+                "__repr__",
+                "__reduce__",
+                "difference",
+                "intersection",
+                "issubset",
+                "union",
+            ],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS
