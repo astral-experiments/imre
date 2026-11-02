@@ -270,10 +270,12 @@ fn object_fallback<T>(
     let check_returns = || {
         if checked_file && let Some(graph) = &graph {
             let (skipped, overloads) = graph.diagnostic_scopes();
-            graph
-                .session
-                .diagnostic_copy()?
-                .check_return_types(skipped.as_deref(), &overloads)?;
+            graph.session.diagnostic_copy()?.check_fallback_contracts(
+                skipped.as_deref(),
+                &overloads,
+                !graph.needs_object_runtime.get()
+                    && graph.object_builtin_errors.borrow().contains(&error),
+            )?;
         }
         Ok(())
     };
