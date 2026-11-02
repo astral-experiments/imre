@@ -2167,8 +2167,8 @@ pub(super) fn call(
     {
         return regex::search(ctx, method, args, kwargs);
     }
-    if name == "pattern.sub" {
-        return regex::pattern_sub(ctx, args, kwargs);
+    if let Some(method @ ("sub" | "subn")) = name.strip_prefix("pattern.") {
+        return regex::pattern_sub(ctx, method, args, kwargs);
     }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);

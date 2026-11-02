@@ -681,7 +681,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_)
             if matches!(
                 attr,
-                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "scanner"
+                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "subn" | "scanner"
             ) =>
         {
             "pattern"
