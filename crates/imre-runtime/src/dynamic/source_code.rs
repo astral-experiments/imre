@@ -4029,7 +4029,11 @@ impl Context {
             Instruction::StringAnnotation(name, expression) => {
                 let key = self.heap.code_name(name);
                 let spelling = self.source_expr(code, scope, expression)?;
-                let annotations = self.lookup(scope, "__annotations__")?;
+                // LOAD_NAME for this implicit store skips enclosing function locals.
+                let annotations = match self.scope_name(scope, "__annotations__") {
+                    Some(mapping) => mapping,
+                    None => self.lookup(self.root_scope(scope), "__annotations__")?,
+                };
                 self.put_item(annotations, key, spelling)?;
             }
             Instruction::ClassAnnotator(provider) => {
@@ -4037,8 +4041,16 @@ impl Context {
                 self.bind(scope, "__annotate_func__", annotate);
             }
             Instruction::ClassStart => {
-                if code.string_annotations() {
-                    self.enable_class_annotation_provider(scope);
+                self.enable_class_annotation_provider(scope);
+                // Only postponed annotations need a visible mapping from the start of the suite.
+                if !code.string_annotations()
+                    || !code
+                        .instructions
+                        .iter()
+                        .any(|(_, op)| matches!(op, Instruction::StringAnnotation(..)))
+                {
+                    let key = self.heap.code_name("__annotations__");
+                    self.remove_binding(scope, "__annotations__", key)?;
                 }
                 let first = self.int(i64::from(code.first_line));
                 self.bind(scope, "__firstlineno__", first);

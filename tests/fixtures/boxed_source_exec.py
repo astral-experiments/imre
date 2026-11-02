@@ -225,13 +225,20 @@ def source_annotations():
     assert future.__annotations__ == {"n": "Missing", "obj": "'A'", "return": "tuple[int]"}
     fallback = {"__annotations__": {}}
     exec("""from __future__ import annotations
-class Fields:
-    first: int
-    del __annotations__
-    second: Missing
+def fields():
+    __annotations__ = {}
+    class Fields:
+        first: int
+        del __annotations__
+        second: Missing
+    return Fields, __annotations__
 """, fallback)
-    assert fallback["__annotations__"] == {"second": "Missing"}
-    assert fallback["Fields"].__annotate__ is None
+    fields, outer = fallback["fields"]()
+    assert not outer and fallback["__annotations__"] == {"second": "Missing"}
+    assert fields.__annotate__ is None
+    exec("class Declared:\n    existed = '__annotations__' in locals()\n    field: int\nclass Empty(Declared): pass", ns)
+    assert not ns["Declared"].existed
+    assert ns["Empty"].__annotate__ is None and ns["Empty"].__annotations__ == {}
     for expr in ("(tmp := int)", "(yield int)", "(await T)"):
         for source in ("def f(arg: " + expr + "): pass",
                        "def f(obj): obj.field: " + expr + " = 1",
