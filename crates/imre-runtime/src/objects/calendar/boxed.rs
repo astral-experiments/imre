@@ -117,6 +117,15 @@ impl Calendar {
         make_delta(mask, words).map(Self)
     }
 
+    pub(crate) fn shift_duration(&self, other: &Self, subtract: bool) -> Result<Self, Error> {
+        shift_delta(
+            self.delta_microseconds(),
+            other.delta_microseconds(),
+            subtract,
+        )
+        .map(Self)
+    }
+
     pub(crate) fn negate_delta(&self) -> Result<Self, Error> {
         negate_delta(&self.0).map(Self)
     }
