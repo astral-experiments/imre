@@ -426,6 +426,11 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let fields = bind_field_metadata(ctx, scope, &names, &defaults);
     bind_fields(ctx, scope, &names);
     bind_repr(ctx, scope, name, fields)?;
+    let collections = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_replace")?;
+    let replace = ctx.call(factory, vec![name, fields], Vec::new())?;
+    ctx.bind(scope, "_replace", replace);
+    ctx.bind(scope, "__replace__", replace);
     let slots = ctx.alloc(Value::Tuple(Vec::new()));
     ctx.bind(scope, "__slots__", slots);
     let doc = ctx.text(format!("{typename}({})", names.join(", ")));
