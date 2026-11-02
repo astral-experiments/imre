@@ -10,12 +10,35 @@ if False:
 last: Later
 (nonsimple): Unset
 Alias = str
+calls = []
+
+
+def counted():
+    calls.append(1)
+    return len(calls)
+
+
+for fail in (False, True):
+    try:
+        try:
+            if fail:
+                raise ValueError
+        finally:
+            item: counted()
+    except ValueError:
+        pass
+try:
+    entered: int
+except ValueError:
+    failed: bool
+else:
+    completed: str
 
 
 def current():
     global Later
     module = sys.modules[__name__]
-    assert before == {} and __conditional_annotations__ == {0, 2}
+    assert before == {} and __conditional_annotations__ == {0, 2, 3, 4, 5, 6}
     try:
         __annotate__(1)
     except NameError:
@@ -27,8 +50,16 @@ def current():
     assert hints["last"].__forward_arg__ == "Later"
     assert hints["last"].__owner__ is module
     assert get_annotations(module, format=Format.STRING) == {
-        "first": "Alias", "skipped": "Unset", "last": "Later"
+        "first": "Alias", "skipped": "Unset", "last": "Later",
+        "item": "counted()", "entered": "int", "completed": "str", "failed": "bool",
     }
     Later = bytes
-    assert list(__annotate__(1).items()) == [("first", str), ("last", bytes)]
-    assert module.__annotations__ == {"first": str, "last": bytes}
+    calls.clear()
+    hints = __annotate__(1)
+    assert calls == [1, 1]
+    assert list(hints.items()) == [
+        ("first", str), ("last", bytes), ("item", 2), ("entered", int), ("completed", str)
+    ]
+    calls.clear()
+    assert module.__annotations__ == hints
+    assert module.__annotations__ is module.__annotations__ and calls == [1, 1]

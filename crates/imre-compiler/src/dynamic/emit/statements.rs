@@ -221,7 +221,12 @@ impl Function<'_, '_> {
     pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
         for stmt in suite {
             if self.terminated {
-                break;
+                if self.module_annotation_sites.is_none() {
+                    break;
+                }
+                // Unreachable statements still contribute to a module provider's site order.
+                let dead = self.name("b");
+                self.label(&dead);
             }
             self.checkpoint(stmt);
             self.simple_call = match stmt {
@@ -352,8 +357,10 @@ impl Function<'_, '_> {
                             let thunk = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
                             let offset = v.start().to_u32();
                             self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
-                        } else if self.module && !self.source.string_annotations {
-                            let index = self.integer(self.module_annotation_sites[&v.start()]);
+                        } else if let Some(sites) = &mut self.module_annotation_sites {
+                            let index = sites.len();
+                            sites.push((name.id.to_string(), (*v.annotation).clone()));
+                            let index = self.integer(index);
                             self.op("mark_module_annotation", &[&self.scope.clone(), &index]);
                         } else {
                             let value =
@@ -979,38 +986,11 @@ impl Function<'_, '_> {
     /// Publish a module's provider before its first statement. Every simple
     /// annotation, including an unconditional one, becomes visible only after
     /// execution reaches its assignment.
-    pub(super) fn setup_deferred_module_annotations(&mut self, body: &[ast::Stmt]) {
-        use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
-
-        #[derive(Default)]
-        struct Sites<'a>(Vec<(&'a ast::StmtAnnAssign, &'a str)>);
-        impl<'a> StatementVisitor<'a> for Sites<'a> {
-            fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-                match stmt {
-                    ast::Stmt::AnnAssign(assign) => {
-                        if let ast::Expr::Name(name) = &*assign.target
-                            && assign.simple
-                        {
-                            self.0.push((assign, name.id.as_str()));
-                        }
-                    }
-                    ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_) => {}
-                    _ => walk_stmt(self, stmt),
-                }
-            }
-        }
-        let mut sites = Sites::default();
-        sites.visit_body(body);
-        if let Some((first, _)) = sites.0.first() {
-            let start = first.start();
+    pub(super) fn setup_deferred_module_annotations(&mut self, sites: &[(String, ast::Expr)]) {
+        if !sites.is_empty() {
             let entries = sites
-                .0
-                .into_iter()
-                .enumerate()
-                .map(|(index, (assign, name))| {
-                    self.module_annotation_sites.insert(assign.start(), index);
-                    (name, &*assign.annotation)
-                })
+                .iter()
+                .map(|(name, expr)| (name.as_str(), expr))
                 .collect();
             let signature = self.text(
                 &json!({
@@ -1022,7 +1002,7 @@ impl Function<'_, '_> {
                 self.source,
                 String::new(),
                 Body::ModuleAnnotations(entries),
-                start,
+                0.into(),
                 false,
             );
             let name = self.text("__annotate__");
@@ -1330,7 +1310,7 @@ impl Function<'_, '_> {
         }
         self.exits.pop();
         self.error = outer;
-        if !self.terminated {
+        if !self.terminated || self.module_annotation_sites.is_some() {
             self.statements(&stmt.finalbody);
             self.jump(&done);
         }

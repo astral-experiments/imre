@@ -334,7 +334,7 @@ impl Output {
             output: self,
             source,
             class_sites: None,
-            module_annotation_sites: Default::default(),
+            module_annotation_sites: None,
             in_function,
             module,
             declared_globals: Default::default(),
@@ -365,7 +365,10 @@ impl Output {
                     if source.string_annotations {
                         f.op("setup_module_string_annotations", &[&f.scope.clone()]);
                     } else {
-                        f.setup_deferred_module_annotations(stmts);
+                        // Lower the provider after collecting the body, but run its setup first.
+                        f.module_annotation_sites = Some(Vec::new());
+                        f.jump("annotations_init");
+                        f.label("module_body");
                     }
                 }
                 if f.output.keep_docstrings
@@ -379,6 +382,12 @@ impl Output {
                     f.annotated_class_body(stmts);
                 } else {
                     f.statements(stmts);
+                }
+                if let Some(sites) = f.module_annotation_sites.take() {
+                    f.end("ret i64 0");
+                    f.label("annotations_init");
+                    f.setup_deferred_module_annotations(&sites);
+                    f.jump("module_body");
                 }
             }
             Body::Statements(stmts) => {
@@ -448,7 +457,7 @@ struct Function<'a, 'p> {
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
     module: bool,
-    module_annotation_sites: std::collections::BTreeMap<ruff_text_size::TextSize, usize>,
+    module_annotation_sites: Option<Vec<(String, ast::Expr)>>,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,
