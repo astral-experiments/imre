@@ -12,6 +12,7 @@ class PageSize:
 def current():
     names = posix.sysconf_names
     assert query is os.sysconf and names is os.sysconf_names
+    print(query.__doc__, query.__text_signature__)
     page_size = query("SC_PAGESIZE")
     assert page_size > 0 and page_size == query("SC_PAGE_SIZE") == query(PageSize())
     assert query("SC_OPEN_MAX") == query(names["SC_OPEN_MAX"]) > 0
