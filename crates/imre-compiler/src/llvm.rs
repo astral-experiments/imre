@@ -391,6 +391,7 @@ fn emit_program(
         borrowed_locals: Vec::new(),
         struct_locals: Vec::new(),
         rooted_locals: Vec::new(),
+        affine_literal_lengths: Vec::new(),
         length_roots: Vec::new(),
         length_snapshots: Vec::new(),
         expression_rebound: Vec::new(),
@@ -614,6 +615,7 @@ struct Emitter<'a, 'module> {
     borrowed_locals: Vec<bool>,
     struct_locals: Vec<bool>,
     rooted_locals: Vec<bool>,
+    affine_literal_lengths: Vec<(usize, i32)>,
     length_roots: Vec<Option<usize>>,
     length_snapshots: Vec<Option<LengthSnapshot>>,
     expression_rebound: Vec<bool>,
@@ -1772,11 +1774,15 @@ impl Emitter<'_, '_> {
         self.length_snapshots = vec![None; self.locals.len()];
         self.small_locals = self.ranges.small_locals(function);
         self.expression_rebound = function.expression_rebound();
-        let rebound = borrows::written(function);
+        let mut writes = vec![0u8; function.locals.len()];
+        crate::ir::walk_writes(&function.body, |slot, _| {
+            writes[slot] = writes[slot].saturating_add(1);
+        });
+        self.affine_literal_lengths = affine::literal_lengths(function, &writes);
         self.borrowed_params = vec![false; self.locals.len()];
         for &slot in &function.params {
             self.borrowed_params[slot] =
-                !rebound[slot] && !self.resource_types.contains(&function.locals[slot]);
+                writes[slot] == 0 && !self.resource_types.contains(&function.locals[slot]);
         }
         let mut cleanup_slots: Vec<_> = (0..self.locals.len())
             .filter(|&slot| {
@@ -9366,10 +9372,21 @@ define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline 
   ret i64 %selected
 }
 
-; Skip 1,023 additions, leaving the last iteration in the ordinary loop body.
+; Skip complete periods (at most 1,023 iterations) and publish locals in the ordinary body.
 ; Nonnegative i32 ordinals and coefficients keep each scalar expression small.
 ; The chunk subtotal is computed in i128 before narrowing to a tagged integer.
-define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i32 %scale, i32 %offset) noinline nounwind memory(none) {
+; Keep the usual fixed extent constant when this module also emits shorter periods.
+define internal {i64,i64} @imre_affine_fixed_prefix(i64 %at, i64 %end, i64 %total, i64 %scale, i64 %offset) noinline nounwind memory(none) {
+  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 1023, i64 %scale, i64 %offset)
+  ret {i64,i64} %result
+}
+
+define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset) noinline nounwind memory(none) {
+  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset)
+  ret {i64,i64} %result
+}
+
+define internal {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset) alwaysinline nounwind memory(none) {
   %tags0 = and i64 %at, %end
   %tags = and i64 %tags0, %total
   %small = trunc i64 %tags to i1
@@ -9377,26 +9394,24 @@ define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %tota
   %stop = ashr i64 %end, 1
   %sum = ashr i64 %total, 1
   %bounded = icmp ule i64 %i, 2147482624
-  %last = add i64 %i, 1023
+  %last = add i64 %i, %count
   %within = icmp slt i64 %last, %stop
   %valid = and i1 %small, %bounded
   %chunk = and i1 %valid, %within
   br i1 %chunk, label %check_sum, label %fallback
 check_sum:
-  %a = zext i32 %scale to i128
-  %b = zext i32 %offset to i128
+  %a = zext i64 %scale to i128
+  %b = zext i64 %offset to i128
   %x = zext i64 %i to i128
-  %base = mul i128 %x, 1023
-  %ordinals = add i128 %base, 522753
-  %linear = mul i128 %a, %ordinals
-  %constant = mul i128 %b, 1023
-  %delta = add i128 %linear, %constant
+  %linear = mul i128 %x, %a
+  %delta = add i128 %linear, %b
   %initial = sext i64 %sum to i128
   %partial = add i128 %initial, %delta
   %fits = icmp sle i128 %partial, 4611686018427387903
   br i1 %fits, label %success, label %fallback
 success:
-  %new_at = add i64 %at, 2046
+  %advance = shl i64 %count, 1
+  %new_at = add i64 %at, %advance
   %n = trunc i128 %partial to i64
   %shift = shl i64 %n, 1
   %new_total = or i64 %shift, 1
