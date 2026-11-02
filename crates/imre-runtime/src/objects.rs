@@ -116,7 +116,7 @@ pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
 pub(crate) mod warnings;
-pub(crate) use warnings::{runtime_warning, unclosed_scandir};
+pub(crate) use warnings::runtime_warning;
 mod words;
 mod zipfile;
 pub(crate) use zipfile::Archive as ZipArchive;
