@@ -26,3 +26,39 @@ def current():
         print(str(error))
     else:
         raise AssertionError("ForwardRef accepted a subclass")
+
+    from typing import Annotated, get_args
+
+    def annotated(value: Annotated[Later, "marker"]):
+        pass
+
+    annotations = module.get_annotations(annotated, format=module.Format.FORWARDREF)
+    ref, metadata = get_args(annotations["value"])
+    assert type(ref) is module.ForwardRef and ref.__owner__ is annotated
+    assert ref.__forward_arg__ == "Later" and metadata == "marker"
+    Later = str
+    assert ref.evaluate() is Later
+    resolved = module.get_annotations(annotated)
+    assert resolved == {"value": Annotated[Later, "marker"]}
+    resolved.clear()
+    assert module.get_annotations(annotated) == annotated.__annotations__ != {}
+
+    class Meta(type):
+        @property
+        def __annotations__(cls):
+            return {"masked": str}
+
+    class WithOwnAnnotations(metaclass=Meta):
+        field: int
+
+    assert module.get_annotations(WithOwnAnnotations) == {"field": int}
+
+    def sums(reflected: 1 + int, nested: Left + (Right + 1)):
+        pass
+
+    texts = {"reflected": "1 + int", "nested": "Left + (Right + 1)"}
+    assert module.get_annotations(sums, format=module.Format.STRING) == texts
+    refs = module.get_annotations(sums, format=module.Format.FORWARDREF)
+    for name, ref in refs.items():
+        assert type(ref) is module.ForwardRef and ref.__owner__ is sums
+        assert ref.__forward_arg__ == texts[name]
