@@ -52,6 +52,8 @@ pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
             | "datetime.datetime.utcnow"
             | "datetime.datetime.utcfromtimestamp"
             | "datetime.datetime.combine"
+            | "datetime.date.today"
+            | "datetime.date.fromtimestamp"
     )
 }
 
@@ -93,6 +95,8 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "weekday",
                 "timetuple",
                 "strftime",
+                "fromtimestamp",
+                "today",
             ],
         ),
         "datetime.datetime" => (
@@ -881,6 +885,7 @@ pub(super) fn call(
         "datetime.__add__" | "datetime.__radd__" | "datetime.__sub__" | "datetime.__rsub__" => {
             datetime_arithmetic(ctx, &method["datetime.".len()..], args, kwargs)
         }
+        "date.today" | "date.fromtimestamp" => fromutc::date_constructor(ctx, method, args, kwargs),
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),

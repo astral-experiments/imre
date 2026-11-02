@@ -91,9 +91,11 @@ fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<
     Ok(struct_time(ctx, values, zone, offset))
 }
 
-fn civil(ctx: &mut Context, stamp: Id, utc: bool) -> Result<ClockParts> {
+pub(super) fn civil(ctx: &mut Context, stamp: Option<Id>, utc: bool) -> Result<ClockParts> {
+    let Some(stamp) = stamp else {
+        return Ok(ClockParts::from_float(wall_time(), utc)?);
+    };
     match ctx.heap.get(ctx.scalar_value(stamp)) {
-        Value::None => Ok(ClockParts::from_float(wall_time(), utc)?),
         Value::Float(n) => Ok(ClockParts::from_float(*n, utc)?),
         _ => Ok(ClockParts::from_int(&ctx.index_integer(stamp)?, utc)?),
     }
@@ -311,7 +313,11 @@ pub(super) fn call(
                     ),
                 ));
             }
-            let parts = civil(ctx, args.first().copied().unwrap_or(NONE), name == "gmtime")?;
+            let parts = civil(
+                ctx,
+                args.first().copied().filter(|&stamp| stamp != NONE),
+                name == "gmtime",
+            )?;
             if name == "ctime" {
                 return Ok(ctx.text(ctime_text(parts.fields, 0)));
             }
