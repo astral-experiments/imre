@@ -361,6 +361,37 @@ pub(super) fn bytearray_method(
         return Ok(NONE);
     }
     let argument = one_positional_arg(name, args, kwargs)?;
+    if method == "resize" {
+        let size = ctx
+            .index_integer(argument)?
+            .big()
+            .to_isize()
+            .ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+        let size = usize::try_from(size).map_err(|_| {
+            Error::new(
+                "ValueError",
+                format!("Can only resize to positive sizes, got {size}"),
+            )
+        })?;
+        // __index__ may have changed the receiver or exported its buffer.
+        let storage = ctx.scalar_value(receiver);
+        let old_len = ctx.bytes_like(storage)?.len();
+        if size != old_len {
+            ctx.check_bytearray_resize(storage)?;
+            let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            data.try_reserve_exact(size.saturating_sub(old_len))
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            data.resize(size, 0);
+        }
+        return Ok(NONE);
+    }
     let byte;
     let extra = if method == "append" {
         byte = [ctx.byte_value(argument)?];

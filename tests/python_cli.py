@@ -2577,6 +2577,7 @@ def report(text):
             "boxed_binary_iterators.py",
             "boxed_array.py",
             "boxed_bytearray_memoryview.py",
+            "boxed_bytearray_resize.py",
             "boxed_bytes_io.py",
             "boxed_io_newline_decoder.py",
             "boxed_io_utf16.py",

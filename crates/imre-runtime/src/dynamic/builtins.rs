@@ -410,6 +410,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "endswith",
     "extend",
     "lstrip",
+    "resize",
     "reverse",
     "rstrip",
     "split",
