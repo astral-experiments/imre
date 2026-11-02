@@ -367,7 +367,6 @@ impl Context {
                     .is_some_and(|members| members.owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
-                    || (super::deque::iterator_class(kind).is_some() && super::deque::ITERATOR_METHODS.contains(&name))
                     || (kind == "function" && name == "__call__")
                     || (kind == "builtin_function_or_method" && name == "__reduce__")
                     || (kind == "set" && name == "update")
@@ -3066,6 +3065,11 @@ impl Context {
             {
                 let class = class.as_str().to_owned();
                 let (module, short) = class.rsplit_once('.').unwrap();
+                if super::deque::iterator_class(&class).is_some()
+                    && let Some(value) = self.own_class_attr(obj, name)
+                {
+                    return Ok(value);
+                }
                 if class == "array.array" && super::array::has_method(name) {
                     return Ok(self.builtin(&format!("array.array.{name}")));
                 }
@@ -3305,7 +3309,7 @@ impl Context {
             }
             Value::Native(ref symbol)
                 if let Some((owner, "__new__")) = symbol.rsplit_once('.')
-                    && stdlib::itertools::cursor_type(owner).is_some()
+                    && (stdlib::itertools::cursor_type(owner).is_some() || super::deque::iterator_class(owner).is_some())
                     && matches!(name, "__doc__" | "__text_signature__") =>
             {
                 return Ok(self.text(match name {
@@ -4130,6 +4134,14 @@ impl Context {
 
     /// Subclasses keep their writable namespaces when the defining type is immutable.
     fn check_immutable_type_write(&self, obj: Id, attr: &str) -> Result<()> {
+        if let Value::Native(class) = self.heap.get(obj)
+            && super::deque::iterator_class(class).is_some()
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot set '{attr}' attribute of immutable type '{class}'"),
+            ));
+        }
         if let Value::Class { name, scope, .. } = self.heap.get(obj) {
             let frame = self.scope_data(*scope);
             if frame
@@ -5495,7 +5507,7 @@ impl Context {
             Value::Class { name, .. } => {
                 format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
             }
-            Value::Native(name) if builtins::is_builtin_type(name) => {
+            Value::Native(name) if self.is_type_object(class) => {
                 format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
             }
             _ => format!(
@@ -5740,6 +5752,18 @@ impl Context {
                     && let Some(owner) = stdlib::itertools::cursor_type(owner) =>
             {
                 stdlib::itertools::allocate(self, owner, &args, &kwargs)
+            }
+            Value::Native(ref name)
+                if let Some((owner, "__new__")) = name.rsplit_once('.')
+                    && let Some(owner) = super::deque::iterator_class(owner) =>
+            {
+                let Some((&class, rest)) = args.split_first() else {
+                    return Err(Error::new("TypeError", format!("{owner}.__new__(): not enough arguments")));
+                };
+                if class != self.builtin(owner) {
+                    return Err(self.invalid_new_subtype(owner, class));
+                }
+                super::deque::construct_iterator(self, owner, rest)
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),

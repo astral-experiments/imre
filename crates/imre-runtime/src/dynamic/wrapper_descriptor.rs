@@ -412,6 +412,16 @@ impl BuiltinDescriptor {
                 let member = deque::member(self.name)?;
                 ctx.text(if name == "__doc__" { member.doc } else { member.signature })
             }
+            "__doc__" | "__text_signature__"
+                if deque::iterator_class(self.owner).is_some()
+                    && matches!(self.name, "__length_hint__" | "__reduce__") =>
+            {
+                ctx.text(match (self.name, name) {
+                    (_, "__text_signature__") => "($self, /)",
+                    ("__length_hint__", _) => "Private method returning an estimate of len(list(it)).",
+                    _ => "Return state information for pickling.",
+                })
+            }
             "__doc__" | "__text_signature__" if self.owner == defaultdict::CLASS => {
                 let (doc, signature) = defaultdict::metadata(self.name)?;
                 ctx.text(if name == "__doc__" { doc } else { signature })

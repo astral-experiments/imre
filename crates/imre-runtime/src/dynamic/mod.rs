@@ -2205,7 +2205,10 @@ impl Context {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
-            deque::ITERATOR | deque::REVERSE_ITERATOR => deque::ITERATOR_METHODS,
+            deque::ITERATOR | deque::REVERSE_ITERATOR => {
+                deque::install_iterator_namespace(self, value, name);
+                &[]
+            }
             thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             stdlib::fixed_structseq::SCHED_PARAM => &["__new__", "__reduce__", "__replace__"],
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
