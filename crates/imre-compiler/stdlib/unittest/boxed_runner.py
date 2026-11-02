@@ -12,13 +12,13 @@ def _boxedResultDetail(error):
 
 
 def _addError(self, test, error):
-    if self.failfast:
+    if getattr(self, "failfast", False):
         self.stop()
     self.errors.append((test, _boxedResultDetail(error)))
 
 
 def _addFailure(self, test, error):
-    if self.failfast:
+    if getattr(self, "failfast", False):
         self.stop()
     self.failures.append((test, _boxedResultDetail(error)))
 
@@ -29,7 +29,7 @@ def _resultExpectedFailure(self, test, error):
 
 def _resultSubTest(self, test, subtest, error):
     if error is not None:
-        if self.failfast:
+        if getattr(self, "failfast", False):
             self.stop()
         problems = self.failures if issubclass(error[0], test.failureException) else self.errors
         problems.append((subtest, _boxedResultDetail(error)))
