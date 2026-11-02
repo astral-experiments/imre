@@ -4356,6 +4356,7 @@ impl<'a> Loader<'a> {
                         };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
+                        // A Sequence annotation keeps its typed list contract; value uses request boxing.
                         self.needs_object_imports |= !matches!(
                             module,
                             IntrinsicModule::Marshal
@@ -4367,8 +4368,8 @@ impl<'a> Loader<'a> {
                         ) && matches!(
                             binding,
                             Binding::Intrinsic(
-                                Intrinsic::ObjectRuntimeExport(_) | Intrinsic::Awaitable
-                            )
+                                export @ (Intrinsic::ObjectRuntimeExport(_) | Intrinsic::Awaitable)
+                            ) if export != Intrinsic::TYPING_SEQUENCE
                         );
                         if module == IntrinsicModule::Collections
                             && binding == Binding::Intrinsic(Intrinsic::CountElements)
