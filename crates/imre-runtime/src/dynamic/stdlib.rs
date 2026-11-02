@@ -250,6 +250,17 @@ fn argument(args: &[Id], index: usize) -> Result<Id> {
         .ok_or_else(|| Error::new("TypeError", "missing required argument"))
 }
 
+/// PyArg formats at most 50 bytes of tp_name before decoding the entire diagnostic as UTF-8.
+fn string_argument_message(
+    function: &str,
+    position: usize,
+    kind: &str,
+) -> std::result::Result<String, crate::Error> {
+    let mut message = format!("{function}() argument {position} must be str, not ").into_bytes();
+    message.extend_from_slice(&kind.as_bytes()[..kind.len().min(50)]);
+    crate::objects::Codec::Utf8 { signature: false }.decode(&message, None)
+}
+
 /// Bind the one positional-or-keyword parameter of a Python function.
 pub(super) fn single_argument(
     name: &str,

@@ -105,6 +105,7 @@ pub(super) fn boxed_date_arithmetic(receiver: Type, name: &str) -> bool {
 
 pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
     match name {
+        "strptime" if receiver == Type::Calendar(C::Date) => true,
         "utctimetuple" => receiver == Type::Calendar(C::DateTime),
         "min" | "max" | "resolution" | "__reduce__" | "__reduce_ex__" => {
             matches!(
