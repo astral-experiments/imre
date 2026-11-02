@@ -292,7 +292,7 @@ pub(super) fn packed(ctx: &mut Context, stat: &libc::stat) -> Id {
     wrap(ctx, &FILE, values, extras)
 }
 
-pub(super) fn warn_bool_fd(ctx: &mut Context, value: Id) -> Result<()> {
+pub(in crate::dynamic::stdlib) fn warn_bool_fd(ctx: &mut Context, value: Id) -> Result<()> {
     if matches!(ctx.heap.get(value), Value::Bool(_)) {
         ctx.emit_builtin_warning(
             crate::objects::exceptions::Kind::RuntimeWarning,
