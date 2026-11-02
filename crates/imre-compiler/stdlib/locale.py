@@ -1,5 +1,7 @@
 """Locale categories and process locale selection."""
 
+import sys
+
 from _locale import (
     Error, LC_ALL, LC_COLLATE, LC_CTYPE, LC_MESSAGES, LC_MONETARY, LC_NUMERIC,
     LC_TIME, getencoding, setlocale as _setlocale,
@@ -74,3 +76,27 @@ def setlocale(category, locale=None):
                             "two strings -- language code, encoding.") from None
         locale = normalize(name)
     return _setlocale(category, locale)
+
+
+def getpreferredencoding(do_setlocale=True):
+    """Return the charset that the user is likely using."""
+    if sys.flags.warn_default_encoding:
+        import warnings
+        warnings.warn(
+            "UTF-8 Mode affects locale.getpreferredencoding(). Consider locale.getencoding() instead.",
+            EncodingWarning, 2)
+    if sys.flags.utf8_mode:
+        return "utf-8"
+
+    if not do_setlocale:
+        return getencoding()
+
+    old_loc = setlocale(LC_CTYPE)
+    try:
+        try:
+            setlocale(LC_CTYPE, "")
+        except Error:
+            pass
+        return getencoding()
+    finally:
+        setlocale(LC_CTYPE, old_loc)

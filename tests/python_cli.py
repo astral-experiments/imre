@@ -1543,9 +1543,11 @@ def main():
         locale_script = root / "get_locale.py"
         locale_script.write_text(
             "from _locale import LC_ALL, setlocale\n"
-            "from locale import getlocale\n"
+            "from locale import getlocale, getpreferredencoding\n"
             "setlocale(LC_ALL, 'C')\n"
             "print(getlocale(), getlocale(category=LC_ALL))\n"
+            "print(getpreferredencoding(False), getpreferredencoding(do_setlocale=True))\n"
+            "assert setlocale(LC_ALL) == 'C'\n"
         )
         compare("-B", locale_script)
 
