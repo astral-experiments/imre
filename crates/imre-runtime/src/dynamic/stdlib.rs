@@ -50,6 +50,7 @@ mod socket;
 mod structure;
 mod traceback;
 pub(super) mod urllib;
+mod warnings;
 mod zipimport;
 
 /// The JIT observer is a sys attribute with its own namespace, outside the import cache.
@@ -863,6 +864,9 @@ pub(super) fn call(
         // SAFETY: alarm takes a value only. POSIX interprets the C int as unsigned.
         let remaining = unsafe { libc::alarm(seconds as libc::c_uint) };
         return Ok(ctx.int(i64::from(remaining as libc::c_long)));
+    }
+    if name == "_io.text_encoding" {
+        return io::text_encoding(ctx, args, kwargs);
     }
     if name == "io.open_code" {
         return io::open_code(ctx, args, kwargs);

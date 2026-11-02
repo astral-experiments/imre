@@ -2389,6 +2389,20 @@ impl Heap {
         self.frames.last().unwrap().scope
     }
 
+    /// Python stack levels start at one and exclude the native root frame.
+    pub fn warning_frame(&self, level: i32) -> Option<(Location, Id)> {
+        self.frames
+            .iter()
+            .rev()
+            .filter_map(|frame| {
+                frame
+                    .location
+                    .clone()
+                    .map(|location| (location, frame.scope))
+            })
+            .nth((level.max(1) - 1) as usize)
+    }
+
     pub fn current_location(&self) -> Option<Location> {
         self.frames.last()?.location.clone()
     }

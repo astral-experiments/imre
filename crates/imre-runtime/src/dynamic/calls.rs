@@ -40,6 +40,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
+        "_io" if function == "text_encoding" => Some((module, function)),
         "zlib" if function == "adler32" => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -1802,6 +1803,24 @@ impl Context {
                     }
                     "__doc__" if symbol == "_thread.allocate_lock" => {
                         return Ok(self.text("Create a new lock object. See help(type(threading.Lock())) for\ninformation about locks."));
+                    }
+                    "__doc__" if symbol == "_io.text_encoding" => {
+                        return Ok(self.text(concat!(
+                            "A helper function to choose the text encoding.\n",
+                            "\n",
+                            "When encoding is not None, this function returns it.\n",
+                            "Otherwise, this function returns the default text encoding\n",
+                            "(i.e. \"locale\" or \"utf-8\" depends on UTF-8 mode).\n",
+                            "\n",
+                            "This function emits an EncodingWarning if encoding is None and\n",
+                            "sys.flags.warn_default_encoding is true.\n",
+                            "\n",
+                            "This can be used in APIs with an encoding=None parameter.\n",
+                            "However, please consider using encoding=\"utf-8\" for new APIs.",
+                        )));
+                    }
+                    "__text_signature__" if symbol == "_io.text_encoding" => {
+                        return Ok(self.text("($module, encoding, stacklevel=2, /)"));
                     }
                     "__doc__" if symbol == "posix.urandom" => {
                         return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));

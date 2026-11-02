@@ -1499,6 +1499,12 @@ impl IntrinsicModule {
             (Self::Io, "SEEK_SET") => Intrinsic::IntConstant(0),
             (Self::Io, "SEEK_CUR") => Intrinsic::IntConstant(1),
             (Self::Io, "SEEK_END") => Intrinsic::IntConstant(2),
+            (Self::Io | Self::IoNative, "text_encoding") => {
+                Intrinsic::ObjectRuntimeExport("_io.text_encoding")
+            }
+            (Self::Io | Self::IoNative, "TextIOWrapper") => {
+                Intrinsic::ObjectRuntimeExport("io.TextIOWrapper")
+            }
             (Self::Io | Self::IoNative, "open_code") => {
                 Intrinsic::ObjectRuntimeExport("io.open_code")
             }
