@@ -625,6 +625,12 @@ pub(crate) fn compile(
     let mut seen_roots = HashSet::new();
     roots.retain(|root| seen_roots.insert(root.clone()));
     let bundled_root = "<imre stdlib>";
+    let mut inputs = SourceInputs::default();
+    let mut archive = if options.path_entry && !entry.is_dir() {
+        Some(crate::zip_entry::ZipSources::open(&entry, &mut inputs)?)
+    } else {
+        None
+    };
     let mut sources = vec![(
         "__main__".to_owned(),
         if in_memory {
@@ -634,7 +640,6 @@ pub(crate) fn compile(
         },
         src.clone(),
     )];
-    let mut inputs = SourceInputs::default();
     if let Some(identity) = entry_identity {
         inputs.files.push((
             path.to_owned(),
@@ -783,6 +788,20 @@ pub(crate) fn compile(
                         && let Some(selected) = entry_sources.get(parent)
                         && selected.as_ref() != Some(root)
                     {
+                        continue;
+                    }
+                    if let Some(archive) = &mut archive
+                        && initial.first() == Some(root)
+                    {
+                        if let Some((member, source, package)) = archive.module(&prefix) {
+                            if let Ok(imports) =
+                                imports_for_module(&member, source.trim_start_matches('\u{feff}'))
+                            {
+                                work.push_back((prefix.clone(), package, imports));
+                            }
+                            entry_sources.insert(prefix.clone(), package.then(|| root.clone()));
+                            break;
+                        }
                         continue;
                     }
                     let stem = root.join(prefix.replace('.', "/"));
