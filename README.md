@@ -1,4 +1,4 @@
-# Imre
+# <img src="docs/assets/imre-mark.svg" width="24" height="24" alt=""> Imre
 
 An experimental ahead-of-time compiler for typed Python, written in Rust.
 
@@ -12,15 +12,16 @@ An experimental ahead-of-time compiler for typed Python, written in Rust.
 ## Benchmarks
 
 <p align="center">
-  <img src="benchmarks/results/runtime-suite.svg" width="100%" alt="Six panels comparing median elapsed time for Rust, Imre and CPython on inventory reconciliation, Base45 decoding, Luhn checksums, telemetry and offline conformance reporting.">
+  <img src="benchmarks/results/runtime-suite.svg" width="100%" alt="Rust has the lowest median time on all six workloads. CPython takes 1.7 to 12.2 times as long as Imre. Each workload has its own time scale.">
 </p>
 
 Imre and CPython 3.14.5 run the same Python programs. The Rust versions use
 the same inputs and produce the same outputs. Each bar shows the median time
-for 12 fresh processes pinned to one AMD EPYC Milan CPU.
+for 12 fresh processes pinned to one AMD EPYC Milan CPU. The speedup is the
+CPython median divided by the Imre median.
 
 <p align="center">
-  <img src="benchmarks/results/frozen-flask.svg" width="100%" alt="Mixed HTTP throughput for a frozen Flask app on Imre and equivalent Node.js, Bun and Rust/Hyper handlers, in requests per second.">
+  <img src="benchmarks/results/frozen-flask.svg" width="100%" alt="Median mixed HTTP throughput in requests per second. Frozen Flask on Imre handles 7,802, Node.js 2,266, Bun 7,733 and Rust/Hyper 8,138.">
 </p>
 
 The frozen Flask app compiles its routes and Jinja template ahead of time.

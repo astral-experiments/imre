@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="600pt" height="705pt" viewBox="0 0 600 705" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="690pt" height="569.25pt" viewBox="0 0 690 569.25" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <title>Median runtime by workload</title>
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -18,535 +18,598 @@
   </rdf:RDF>
  </metadata>
  <defs>
-  <style>
-    :root {--ink: #261230; --muted: #6f5d6f; --rule: #e2d5e8; --surface: #fbf2fc; --bar: #c9c1f4; --accent: #6340ac}
-    text {
-      font-variant-numeric: tabular-nums;
-    }
-    @media (prefers-color-scheme: dark) {:root {--ink: #f7eff8; --muted: #b8a5c3; --rule: #493554; --surface: #261230; --bar: #c9c1f4; --accent: #d7ff64}}
-  </style>
   <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
  </defs>
  <g id="figure_1">
   <g id="patch_1">
-   <path d="M 0 705
-L 600 705
-L 600 0
+   <path d="M 0 569.25
+L 690 569.25
+L 690 0
 L 0 0
-L 0 705
+L 0 569.25
 z
 " style="fill: none"/>
   </g>
   <g id="axes_1">
    <g id="patch_2">
-    <path d="M 9 0
-L 591 0
-Q 600 0 600 9
-L 600 696
-Q 600 705 591 705
-L 9 705
-Q 0 705 0 696
-L 0 9
-Q 0 0 9 0
+    <path d="M 21 11.25
+L 669 11.25
+Q 683.25 11.25 683.25 25.5
+L 683.25 545.25
+Q 683.25 559.5 669 559.5
+L 21 559.5
+Q 6.75 559.5 6.75 545.25
+L 6.75 25.5
+Q 6.75 11.25 21 11.25
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--surface)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #261230; stroke: #503d60; stroke-width: 1.2; stroke-linejoin: miter"/>
    </g>
    <g id="line2d_1">
-    <path d="M 24 91.5
-L 576 91.5
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 36 144
+L 336.75 144
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_2">
-    <path d="M 75 159.75
-L 75 249.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 101.25 195
+L 101.25 247.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_3">
-    <path d="M 159 159.75
-L 159 249.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 180.375 195
+L 180.375 247.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_4">
-    <path d="M 243 159.75
-L 243 249.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 259.5 195
+L 259.5 247.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_5">
-    <path d="M 24 280.5
-L 576 280.5
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 353.25 144
+L 654 144
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_6">
-    <path d="M 363 159.75
-L 363 249.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 418.5 195
+L 418.5 247.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_7">
-    <path d="M 419 159.75
-L 419 249.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 471.25 195
+L 471.25 247.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_8">
-    <path d="M 475 159.75
-L 475 249.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 524 195
+L 524 247.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_9">
-    <path d="M 531 159.75
-L 531 249.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 576.75 195
+L 576.75 247.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_10">
-    <path d="M 75 348.75
-L 75 438.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 36 279
+L 336.75 279
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_11">
-    <path d="M 131 348.75
-L 131 438.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 101.25 330
+L 101.25 382.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_12">
-    <path d="M 187 348.75
-L 187 438.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 154 330
+L 154 382.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_13">
-    <path d="M 243 348.75
-L 243 438.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 206.75 330
+L 206.75 382.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_14">
-    <path d="M 24 469.5
-L 576 469.5
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 259.5 330
+L 259.5 382.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_15">
-    <path d="M 363 348.75
-L 363 438.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 353.25 279
+L 654 279
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_16">
-    <path d="M 447 348.75
-L 447 438.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 418.5 330
+L 418.5 382.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_17">
-    <path d="M 531 348.75
-L 531 438.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 497.625 330
+L 497.625 382.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_18">
-    <path d="M 75 537.75
-L 75 627.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 576.75 330
+L 576.75 382.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_19">
-    <path d="M 131 537.75
-L 131 627.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 36 414
+L 336.75 414
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_20">
-    <path d="M 187 537.75
-L 187 627.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 101.25 465
+L 101.25 517.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_21">
-    <path d="M 243 537.75
-L 243 627.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 154 465
+L 154 517.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_22">
-    <path d="M 363 537.75
-L 363 627.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 206.75 465
+L 206.75 517.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_23">
-    <path d="M 419 537.75
-L 419 627.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 259.5 465
+L 259.5 517.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_24">
-    <path d="M 475 537.75
-L 475 627.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 353.25 414
+L 654 414
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="line2d_25">
-    <path d="M 531 537.75
-L 531 627.75
-" clip-path="url(#pf6cc378623)" style="fill: none; stroke: var(--rule); stroke-width: 0.6; stroke-linecap: square"/>
+    <path d="M 418.5 465
+L 418.5 517.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_26">
+    <path d="M 471.25 465
+L 471.25 517.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_27">
+    <path d="M 524 465
+L 524 517.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_28">
+    <path d="M 576.75 465
+L 576.75 517.5
+" clip-path="url(#p8d03a81021)" style="fill: none; stroke: #453250; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="patch_3">
-    <path d="M 75 169.5
-L 120.97091 169.5
-L 120.97091 180
-L 75 180
+    <path d="M 41.25 30.75
+L 54 30.75
+Q 59.25 30.75 59.25 36
+L 59.25 48.75
+Q 59.25 54 54 54
+L 41.25 54
+Q 36 54 36 48.75
+L 36 36
+Q 36 30.75 41.25 30.75
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="patch_4">
-    <path d="M 75 199.5
-L 145.246367 199.5
-L 145.246367 210
-L 75 210
+    <path d="M 41.25 36.75
+L 54 36.75
+L 54 39
+L 41.25 39
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--accent)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #261230"/>
    </g>
    <g id="patch_5">
-    <path d="M 75 229.5
-L 226.821716 229.5
-L 226.821716 240
-L 75 240
+    <path d="M 41.25 40.5
+L 50.25 40.5
+L 50.25 42.75
+L 41.25 42.75
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #261230"/>
    </g>
    <g id="patch_6">
-    <path d="M 363 169.5
-L 417.768236 169.5
-L 417.768236 180
-L 363 180
+    <path d="M 41.25 44.25
+L 46.5 44.25
+L 46.5 46.5
+L 41.25 46.5
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #261230"/>
    </g>
    <g id="patch_7">
-    <path d="M 363 199.5
-L 444.359134 199.5
-L 444.359134 210
-L 363 210
+    <path d="M 101.25 195.75
+L 144.552956 195.75
+L 144.552956 203.25
+L 101.25 203.25
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--accent)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="patch_8">
-    <path d="M 363 229.5
-L 498.698878 229.5
-L 498.698878 240
-L 363 240
+    <path d="M 101.25 217.5
+L 167.419569 217.5
+L 167.419569 225
+L 101.25 225
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #de5fe9"/>
    </g>
    <g id="patch_9">
-    <path d="M 75 358.5
-L 80.450024 358.5
-L 80.450024 369
-L 75 369
+    <path d="M 101.25 239.25
+L 244.260634 239.25
+L 244.260634 246.75
+L 101.25 246.75
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="patch_10">
-    <path d="M 75 388.5
-L 84.454083 388.5
-L 84.454083 399
-L 75 399
+    <path d="M 418.5 195.75
+L 470.089722 195.75
+L 470.089722 203.25
+L 418.5 203.25
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--accent)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="patch_11">
-    <path d="M 75 418.5
-L 190.511024 418.5
-L 190.511024 429
-L 75 429
+    <path d="M 418.5 217.5
+L 495.137399 217.5
+L 495.137399 225
+L 418.5 225
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #de5fe9"/>
    </g>
    <g id="patch_12">
-    <path d="M 363 358.5
-L 367.79958 358.5
-L 367.79958 369
-L 363 369
+    <path d="M 418.5 239.25
+L 546.323497 239.25
+L 546.323497 246.75
+L 418.5 246.75
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="patch_13">
-    <path d="M 363 388.5
-L 374.534145 388.5
-L 374.534145 399
-L 363 399
+    <path d="M 101.25 330.75
+L 106.383728 330.75
+L 106.383728 338.25
+L 101.25 338.25
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--accent)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="patch_14">
-    <path d="M 363 418.5
-L 495.403688 418.5
-L 495.403688 429
-L 363 429
+    <path d="M 101.25 352.5
+L 110.155408 352.5
+L 110.155408 360
+L 101.25 360
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #de5fe9"/>
    </g>
    <g id="patch_15">
-    <path d="M 75 547.5
-L 86.546702 547.5
-L 86.546702 558
-L 75 558
+    <path d="M 101.25 374.25
+L 210.057259 374.25
+L 210.057259 381.75
+L 101.25 381.75
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="patch_16">
-    <path d="M 75 577.5
-L 93.469895 577.5
-L 93.469895 588
-L 75 588
+    <path d="M 418.5 330.75
+L 423.021033 330.75
+L 423.021033 338.25
+L 418.5 338.25
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--accent)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="patch_17">
-    <path d="M 75 607.5
-L 218.390791 607.5
-L 218.390791 618
-L 75 618
+    <path d="M 418.5 352.5
+L 429.364753 352.5
+L 429.364753 360
+L 418.5 360
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #de5fe9"/>
    </g>
    <g id="patch_18">
-    <path d="M 363 547.5
-L 379.615836 547.5
-L 379.615836 558
-L 363 558
+    <path d="M 418.5 374.25
+L 543.219545 374.25
+L 543.219545 381.75
+L 418.5 381.75
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="patch_19">
-    <path d="M 363 577.5
-L 390.164889 577.5
-L 390.164889 588
-L 363 588
+    <path d="M 101.25 465.75
+L 112.126581 465.75
+L 112.126581 473.25
+L 101.25 473.25
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--accent)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="patch_20">
-    <path d="M 363 607.5
-L 525.585179 607.5
-L 525.585179 618
-L 363 618
+    <path d="M 101.25 487.5
+L 118.647982 487.5
+L 118.647982 495
+L 101.25 495
 z
-" clip-path="url(#pf6cc378623)" style="fill: var(--bar)"/>
+" clip-path="url(#p8d03a81021)" style="fill: #de5fe9"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 101.25 509.25
+L 236.319004 509.25
+L 236.319004 516.75
+L 101.25 516.75
+z
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
+   </g>
+   <g id="patch_22">
+    <path d="M 418.5 465.75
+L 434.151525 465.75
+L 434.151525 473.25
+L 418.5 473.25
+z
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
+   </g>
+   <g id="patch_23">
+    <path d="M 418.5 487.5
+L 444.088356 487.5
+L 444.088356 495
+L 418.5 495
+z
+" clip-path="url(#p8d03a81021)" style="fill: #de5fe9"/>
+   </g>
+   <g id="patch_24">
+    <path d="M 418.5 509.25
+L 571.649432 509.25
+L 571.649432 516.75
+L 418.5 516.75
+z
+" clip-path="url(#p8d03a81021)" style="fill: #cdcbfb"/>
    </g>
    <g id="text_1">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--muted)" x="24" y="24.798398" transform="rotate(-0 24 24.798398)">IMRE / RUNTIME BENCHMARKS</text>
+    <text style="font-size: 11.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: #c4b6d3" x="68.25" y="45.88418" transform="rotate(-0 68.25 45.88418)">IMRE / BENCHMARKS</text>
    </g>
    <g id="text_2">
-    <text style="font-size: 19.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="56.380781" transform="rotate(-0 24 56.380781)">RUNTIME BY WORKLOAD</text>
+    <text style="font-size: 11.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #c4b6d3" x="654" y="45.815625" transform="rotate(-0 654 45.815625)">12 runs per engine</text>
    </g>
    <g id="text_3">
-    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="76.397344" transform="rotate(-0 24 76.397344)">Rust, CPython and Imre on six workloads.</text>
+    <text style="font-weight: 500; font-size: 31.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="34.5" y="94.192031" transform="rotate(-0 34.5 94.192031)">Comparing Imre, Rust and CPython</text>
    </g>
    <g id="text_4">
-    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="122.639063" transform="rotate(-0 24 122.639063)">Inventory · repeated</text>
+    <text style="font-size: 14.25px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="36" y="122.432109" transform="rotate(-0 36 122.432109)">Median runtime. Scales vary by workload. Speedups compare Imre with CPython.</text>
    </g>
    <g id="text_5">
-    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="141.983438" transform="rotate(-0 24 141.983438)">16,384 requests, 64 SKUs</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="165.330469" transform="rotate(-0 39 165.330469)">Inventory · repeated</text>
    </g>
    <g id="text_6">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="75" y="264.048398" transform="rotate(-0 75 264.048398)">0</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="333.75" y="164.147344" transform="rotate(-0 333.75 164.147344)">2.2× speedup</text>
    </g>
    <g id="text_7">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="159" y="264.048398" transform="rotate(-0 159 264.048398)">50</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="182.147344" transform="rotate(-0 39 182.147344)">16,384 requests, 64 SKUs</text>
    </g>
    <g id="text_8">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="243" y="264.048398" transform="rotate(-0 243 264.048398)">100</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="101.25" y="263.507344" transform="rotate(-0 101.25 263.507344)">0</text>
    </g>
    <g id="text_9">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="177.440391" transform="rotate(-0 24 177.440391)">Rust</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="180.375" y="263.507344" transform="rotate(-0 180.375 263.507344)">50</text>
    </g>
    <g id="text_10">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="127.72091" y="177.466289" transform="rotate(-0 127.72091 177.466289)">27.36</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="259.5" y="263.507344" transform="rotate(-0 259.5 263.507344)">100</text>
    </g>
    <g id="text_11">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="24" y="207.440391" transform="rotate(-0 24 207.440391)">Imre</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="202.81125" transform="rotate(-0 39 202.81125)">Rust</text>
    </g>
    <g id="text_12">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="151.996367" y="207.466289" transform="rotate(-0 151.996367 207.466289)">41.81</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="333.75" y="203.05207" transform="rotate(-0 333.75 203.05207)">27.36 ms</text>
    </g>
    <g id="text_13">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="237.440391" transform="rotate(-0 24 237.440391)">CPython</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="224.56125" transform="rotate(-0 39 224.56125)">Imre</text>
    </g>
    <g id="text_14">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="233.571716" y="237.466289" transform="rotate(-0 233.571716 237.466289)">90.37</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #de5fe9" x="333.75" y="224.80207" transform="rotate(-0 333.75 224.80207)">41.81 ms</text>
    </g>
    <g id="text_15">
-    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="122.639063" transform="rotate(-0 312 122.639063)">Inventory · distinct</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="246.31125" transform="rotate(-0 39 246.31125)">CPython</text>
    </g>
    <g id="text_16">
-    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="312" y="141.983438" transform="rotate(-0 312 141.983438)">16,384 requests, 16,384 SKUs</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="333.75" y="246.55207" transform="rotate(-0 333.75 246.55207)">90.37 ms</text>
    </g>
    <g id="text_17">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="363" y="264.048398" transform="rotate(-0 363 264.048398)">0</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="356.25" y="165.330469" transform="rotate(-0 356.25 165.330469)">Inventory · distinct</text>
    </g>
    <g id="text_18">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="419" y="264.048398" transform="rotate(-0 419 264.048398)">50</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="651" y="164.147344" transform="rotate(-0 651 164.147344)">1.7× speedup</text>
    </g>
    <g id="text_19">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="475" y="264.048398" transform="rotate(-0 475 264.048398)">100</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="182.147344" transform="rotate(-0 356.25 182.147344)">16,384 requests, 16,384 SKUs</text>
    </g>
    <g id="text_20">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="531" y="264.048398" transform="rotate(-0 531 264.048398)">150</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="418.5" y="263.507344" transform="rotate(-0 418.5 263.507344)">0</text>
    </g>
    <g id="text_21">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="177.440391" transform="rotate(-0 312 177.440391)">Rust</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="471.25" y="263.507344" transform="rotate(-0 471.25 263.507344)">50</text>
    </g>
    <g id="text_22">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="424.518236" y="177.466289" transform="rotate(-0 424.518236 177.466289)">48.90</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="524" y="263.507344" transform="rotate(-0 524 263.507344)">100</text>
    </g>
    <g id="text_23">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="312" y="207.440391" transform="rotate(-0 312 207.440391)">Imre</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="576.75" y="263.507344" transform="rotate(-0 576.75 263.507344)">150</text>
    </g>
    <g id="text_24">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="451.109134" y="207.466289" transform="rotate(-0 451.109134 207.466289)">72.64</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="202.81125" transform="rotate(-0 356.25 202.81125)">Rust</text>
    </g>
    <g id="text_25">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="237.440391" transform="rotate(-0 312 237.440391)">CPython</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="651" y="203.05207" transform="rotate(-0 651 203.05207)">48.90 ms</text>
    </g>
    <g id="text_26">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="505.448878" y="237.466289" transform="rotate(-0 505.448878 237.466289)">121.16</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="224.56125" transform="rotate(-0 356.25 224.56125)">Imre</text>
    </g>
    <g id="text_27">
-    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="311.639063" transform="rotate(-0 24 311.639063)">Base45 decode</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #de5fe9" x="651" y="224.80207" transform="rotate(-0 651 224.80207)">72.64 ms</text>
    </g>
    <g id="text_28">
-    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="330.983437" transform="rotate(-0 24 330.983437)">64 × 16 KiB decoded</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="246.31125" transform="rotate(-0 356.25 246.31125)">CPython</text>
    </g>
    <g id="text_29">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="75" y="453.048398" transform="rotate(-0 75 453.048398)">0</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="651" y="246.55207" transform="rotate(-0 651 246.55207)">121.16 ms</text>
    </g>
    <g id="text_30">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="131" y="453.048398" transform="rotate(-0 131 453.048398)">100</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="300.389063" transform="rotate(-0 39 300.389063)">Base45 decode</text>
    </g>
    <g id="text_31">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="187" y="453.048398" transform="rotate(-0 187 453.048398)">200</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="333.75" y="299.147344" transform="rotate(-0 333.75 299.147344)">12.2× speedup</text>
    </g>
    <g id="text_32">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="243" y="453.048398" transform="rotate(-0 243 453.048398)">300</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="317.147344" transform="rotate(-0 39 317.147344)">64 × 16 KiB decoded</text>
    </g>
    <g id="text_33">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="366.440391" transform="rotate(-0 24 366.440391)">Rust</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="101.25" y="398.507344" transform="rotate(-0 101.25 398.507344)">0</text>
    </g>
    <g id="text_34">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="87.200024" y="366.466289" transform="rotate(-0 87.200024 366.466289)">9.73</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="154" y="398.507344" transform="rotate(-0 154 398.507344)">100</text>
    </g>
    <g id="text_35">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="24" y="396.440391" transform="rotate(-0 24 396.440391)">Imre</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="206.75" y="398.507344" transform="rotate(-0 206.75 398.507344)">200</text>
    </g>
    <g id="text_36">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="91.204083" y="396.466289" transform="rotate(-0 91.204083 396.466289)">16.88</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="259.5" y="398.507344" transform="rotate(-0 259.5 398.507344)">300</text>
    </g>
    <g id="text_37">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="426.440391" transform="rotate(-0 24 426.440391)">CPython</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="337.81125" transform="rotate(-0 39 337.81125)">Rust</text>
    </g>
    <g id="text_38">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="197.261024" y="426.466289" transform="rotate(-0 197.261024 426.466289)">206.27</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="333.75" y="338.05207" transform="rotate(-0 333.75 338.05207)">9.73 ms</text>
    </g>
    <g id="text_39">
-    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="311.639063" transform="rotate(-0 312 311.639063)">Luhn checksum</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="359.56125" transform="rotate(-0 39 359.56125)">Imre</text>
    </g>
    <g id="text_40">
-    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="312" y="330.983437" transform="rotate(-0 312 330.983437)">65,536 × 16 digits</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #de5fe9" x="333.75" y="359.80207" transform="rotate(-0 333.75 359.80207)">16.88 ms</text>
    </g>
    <g id="text_41">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="363" y="453.048398" transform="rotate(-0 363 453.048398)">0</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="381.31125" transform="rotate(-0 39 381.31125)">CPython</text>
    </g>
    <g id="text_42">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="447" y="453.048398" transform="rotate(-0 447 453.048398)">100</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="333.75" y="381.55207" transform="rotate(-0 333.75 381.55207)">206.27 ms</text>
    </g>
    <g id="text_43">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="531" y="453.048398" transform="rotate(-0 531 453.048398)">200</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="356.25" y="300.389063" transform="rotate(-0 356.25 300.389063)">Luhn checksum</text>
    </g>
    <g id="text_44">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="366.440391" transform="rotate(-0 312 366.440391)">Rust</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="651" y="299.147344" transform="rotate(-0 651 299.147344)">11.5× speedup</text>
    </g>
    <g id="text_45">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="374.54958" y="366.466289" transform="rotate(-0 374.54958 366.466289)">5.71</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="317.147344" transform="rotate(-0 356.25 317.147344)">65,536 × 16 digits</text>
    </g>
    <g id="text_46">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="312" y="396.440391" transform="rotate(-0 312 396.440391)">Imre</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="418.5" y="398.507344" transform="rotate(-0 418.5 398.507344)">0</text>
    </g>
    <g id="text_47">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="381.284145" y="396.466289" transform="rotate(-0 381.284145 396.466289)">13.73</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="497.625" y="398.507344" transform="rotate(-0 497.625 398.507344)">100</text>
    </g>
    <g id="text_48">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="426.440391" transform="rotate(-0 312 426.440391)">CPython</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="576.75" y="398.507344" transform="rotate(-0 576.75 398.507344)">200</text>
    </g>
    <g id="text_49">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="502.153688" y="426.466289" transform="rotate(-0 502.153688 426.466289)">157.62</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="337.81125" transform="rotate(-0 356.25 337.81125)">Rust</text>
    </g>
    <g id="text_50">
-    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="500.639063" transform="rotate(-0 24 500.639063)">Telemetry report</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="651" y="338.05207" transform="rotate(-0 651 338.05207)">5.71 ms</text>
    </g>
    <g id="text_51">
-    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="519.983438" transform="rotate(-0 24 519.983438)">81 × 4,096 aligned pairs</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="359.56125" transform="rotate(-0 356.25 359.56125)">Imre</text>
    </g>
    <g id="text_52">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="75" y="642.048398" transform="rotate(-0 75 642.048398)">0</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #de5fe9" x="651" y="359.80207" transform="rotate(-0 651 359.80207)">13.73 ms</text>
    </g>
    <g id="text_53">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="131" y="642.048398" transform="rotate(-0 131 642.048398)">50</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="381.31125" transform="rotate(-0 356.25 381.31125)">CPython</text>
    </g>
    <g id="text_54">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="187" y="642.048398" transform="rotate(-0 187 642.048398)">100</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="651" y="381.55207" transform="rotate(-0 651 381.55207)">157.62 ms</text>
    </g>
    <g id="text_55">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="243" y="642.048398" transform="rotate(-0 243 642.048398)">150</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="435.330469" transform="rotate(-0 39 435.330469)">Telemetry report</text>
    </g>
    <g id="text_56">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="555.440391" transform="rotate(-0 24 555.440391)">Rust</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="333.75" y="434.147344" transform="rotate(-0 333.75 434.147344)">7.8× speedup</text>
    </g>
    <g id="text_57">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="93.296702" y="555.466289" transform="rotate(-0 93.296702 555.466289)">10.31</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="452.147344" transform="rotate(-0 39 452.147344)">81 × 4,096 aligned pairs</text>
    </g>
    <g id="text_58">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="24" y="585.440391" transform="rotate(-0 24 585.440391)">Imre</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="101.25" y="533.507344" transform="rotate(-0 101.25 533.507344)">0</text>
    </g>
    <g id="text_59">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="100.219895" y="585.466289" transform="rotate(-0 100.219895 585.466289)">16.49</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="154" y="533.507344" transform="rotate(-0 154 533.507344)">50</text>
    </g>
    <g id="text_60">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="24" y="615.440391" transform="rotate(-0 24 615.440391)">CPython</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="206.75" y="533.507344" transform="rotate(-0 206.75 533.507344)">100</text>
    </g>
    <g id="text_61">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="225.140791" y="615.466289" transform="rotate(-0 225.140791 615.466289)">128.03</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="259.5" y="533.507344" transform="rotate(-0 259.5 533.507344)">150</text>
    </g>
    <g id="text_62">
-    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="500.639063" transform="rotate(-0 312 500.639063)">Offline conformance report</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="472.81125" transform="rotate(-0 39 472.81125)">Rust</text>
    </g>
    <g id="text_63">
-    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="312" y="519.983438" transform="rotate(-0 312 519.983438)">146 files, two captured ty runs</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="333.75" y="473.05207" transform="rotate(-0 333.75 473.05207)">10.31 ms</text>
    </g>
    <g id="text_64">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="363" y="642.048398" transform="rotate(-0 363 642.048398)">0</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="494.56125" transform="rotate(-0 39 494.56125)">Imre</text>
    </g>
    <g id="text_65">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="419" y="642.048398" transform="rotate(-0 419 642.048398)">100</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #de5fe9" x="333.75" y="494.80207" transform="rotate(-0 333.75 494.80207)">16.49 ms</text>
    </g>
    <g id="text_66">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="475" y="642.048398" transform="rotate(-0 475 642.048398)">200</text>
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="39" y="516.31125" transform="rotate(-0 39 516.31125)">CPython</text>
    </g>
    <g id="text_67">
-    <text style="font-size: 8.25px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: var(--muted)" x="531" y="642.048398" transform="rotate(-0 531 642.048398)">300</text>
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="333.75" y="516.55207" transform="rotate(-0 333.75 516.55207)">128.03 ms</text>
    </g>
    <g id="text_68">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="555.440391" transform="rotate(-0 312 555.440391)">Rust</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="356.25" y="435.389063" transform="rotate(-0 356.25 435.389063)">Offline conformance report</text>
    </g>
    <g id="text_69">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="386.365836" y="555.466289" transform="rotate(-0 386.365836 555.466289)">29.67</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="651" y="434.147344" transform="rotate(-0 651 434.147344)">6.0× speedup</text>
    </g>
    <g id="text_70">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--accent)" x="312" y="585.440391" transform="rotate(-0 312 585.440391)">Imre</text>
+    <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="452.147344" transform="rotate(-0 356.25 452.147344)">146 files, two captured ty runs</text>
    </g>
    <g id="text_71">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent)" x="396.914889" y="585.466289" transform="rotate(-0 396.914889 585.466289)">48.51</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="418.5" y="533.507344" transform="rotate(-0 418.5 533.507344)">0</text>
    </g>
    <g id="text_72">
-    <text style="font-size: 9.75px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--ink)" x="312" y="615.440391" transform="rotate(-0 312 615.440391)">CPython</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="471.25" y="533.507344" transform="rotate(-0 471.25 533.507344)">100</text>
    </g>
    <g id="text_73">
-    <text style="font-size: 9.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: start; fill: var(--ink)" x="532.335179" y="615.466289" transform="rotate(-0 532.335179 615.466289)">290.33</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="524" y="533.507344" transform="rotate(-0 524 533.507344)">200</text>
    </g>
    <g id="text_74">
-    <text style="font-size: 9px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: var(--muted)" x="24" y="687.983438" transform="rotate(-0 24 687.983438)">Median elapsed time (ms) · 12 runs · Lower is faster · Independent scales</text>
+    <text style="font-size: 9px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: middle; fill: #c4b6d3" x="576.75" y="533.507344" transform="rotate(-0 576.75 533.507344)">300</text>
+   </g>
+   <g id="text_75">
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="472.81125" transform="rotate(-0 356.25 472.81125)">Rust</text>
+   </g>
+   <g id="text_76">
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="651" y="473.05207" transform="rotate(-0 651 473.05207)">29.67 ms</text>
+   </g>
+   <g id="text_77">
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="494.56125" transform="rotate(-0 356.25 494.56125)">Imre</text>
+   </g>
+   <g id="text_78">
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #de5fe9" x="651" y="494.80207" transform="rotate(-0 651 494.80207)">48.51 ms</text>
+   </g>
+   <g id="text_79">
+    <text style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="356.25" y="516.31125" transform="rotate(-0 356.25 516.31125)">CPython</text>
+   </g>
+   <g id="text_80">
+    <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="651" y="516.55207" transform="rotate(-0 651 516.55207)">290.33 ms</text>
    </g>
   </g>
  </g>
  <defs>
-  <clipPath id="pf6cc378623">
-   <rect x="0" y="0" width="600" height="705"/>
+  <clipPath id="p8d03a81021">
+   <rect x="0" y="0" width="690" height="569.25"/>
   </clipPath>
  </defs>
 </svg>
