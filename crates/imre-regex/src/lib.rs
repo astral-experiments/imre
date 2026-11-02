@@ -217,9 +217,9 @@ pub fn lookahead_source(
     )
 }
 
-/// Normalize text for the boxed matcher when a lookaround, Python word boundary,
-/// or scoped case/alphabet rule needs its extended group and capture support.
-pub fn lookahead_or_scoped_source(
+/// Translate a pattern needing native backtracking, retaining Python capture slots.
+/// Bytes patterns enter this matcher only for validated capture references.
+pub fn backtracking_source(
     pattern: &str,
     verbose: bool,
     alphabet: Alphabet,
@@ -231,7 +231,7 @@ pub fn lookahead_or_scoped_source(
         alphabet,
         dotall,
         false,
-        Grammar::LookaheadOrScoped,
+        Grammar::Backtracking,
     )
 }
 
@@ -239,7 +239,7 @@ pub fn lookahead_or_scoped_source(
 enum Grammar {
     Standard { multiline: bool },
     Lookahead,
-    LookaheadOrScoped,
+    Backtracking,
 }
 
 enum Scope {
@@ -348,6 +348,7 @@ fn tokenize(
     // Earlier captures can provide the width of a later lookbehind backreference.
     let needs_lookbehind_width = lookahead && pattern.contains("(?<");
     let mut has_lookaround = false;
+    let mut has_reference = false;
     let mut width = BranchWidth::default();
     let mut group_widths = Vec::new(); // Indexed by capture number minus one.
     let mut has_boundary = false;
@@ -389,6 +390,7 @@ fn tokenize(
                     input.next();
                     let id = reference_id(&mut input, &groups, false)?;
                     check_reference(id, &outer_prefixes)?;
+                    has_reference = true;
                     write!(output, r"\k<{id}>").unwrap();
                     can_repeat = true;
                     width.push(group_widths[id - 1]);
@@ -650,6 +652,7 @@ fn tokenize(
                     return Err("invalid regex group reference".into());
                 }
                 check_reference(id, &outer_prefixes)?;
+                has_reference = true;
                 write!(output, r"\k<{id}>").unwrap();
                 can_repeat = true;
                 group_widths[id - 1]
@@ -718,14 +721,25 @@ fn tokenize(
     if highest_condition >= groups.len() {
         return Err("invalid conditional group reference".into());
     }
-    if lookahead
-        && !has_lookaround
-        && !(grammar == Grammar::LookaheadOrScoped && (scoped_mode || has_boundary))
-    {
-        return Err("expected a Python lookahead assertion".into());
+    match grammar {
+        Grammar::Lookahead if !has_lookaround => {
+            return Err("expected a Python lookahead assertion".into());
+        }
+        Grammar::Backtracking
+            if !has_reference
+                && (alphabet == Alphabet::Bytes
+                    || !(has_lookaround || scoped_mode || has_boundary)) =>
+        {
+            return Err("pattern does not require backtracking".into());
+        }
+        _ => {}
     }
     if modes.iter().any(|(_, mode)| mode.ignores_case()) {
-        output = casefold::scoped(&output, &modes, lookahead)?;
+        output = if grammar == Grammar::Backtracking && has_reference {
+            casefold::backrefs(&output, &modes)?
+        } else {
+            casefold::scoped(&output, &modes, lookahead)?
+        };
     }
     Ok((output, groups))
 }
@@ -1143,7 +1157,7 @@ mod tests {
         assert!(super::lookahead_source(named, false, UnicodeIgnoreCase, false).is_err());
         assert!(super::lookahead_source(r"(?u:\b)", false, Unicode, false).is_err());
         let (source, groups) =
-            super::lookahead_or_scoped_source(named, false, UnicodeIgnoreCase, false).unwrap();
+            super::backtracking_source(named, false, UnicodeIgnoreCase, false).unwrap();
         assert_eq!(groups, [None, Some("é".to_owned())]);
         let compiled = regex::RegexBuilder::new(&source)
             .case_insensitive(true)

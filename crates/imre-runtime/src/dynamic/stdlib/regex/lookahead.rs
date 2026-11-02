@@ -1,27 +1,31 @@
-//! Match translated text lookaheads with their ordinary numbered capture slots.
+//! Backtrack over Python assertions and capture references while preserving the public slots.
+use std::borrow::Cow;
 use std::cell::OnceCell;
 
-use fancy_regex::{CompileError, Error, Regex, RegexBuilder};
+use fancy_regex::{BytesMode, CompileError, Error, Regex, RegexBuilder};
 use regex_automata::util::captures::{Captures, GroupInfo};
 use regex_automata::util::primitives::NonMaxUsize;
 use regex_automata::{Anchored, Input, PatternID};
 
-use super::{ASCII, DOTALL, IGNORECASE, MULTILINE, Matcher, VERBOSE, alphabet, group_names};
+use super::{
+    ASCII, DOTALL, IGNORECASE, MULTILINE, Matcher, VERBOSE, alphabet, group_names, locale_dependent,
+};
 
 /// Compile only grammar accepted by the Python lexer. Flags apply to assertions and their suffix.
 pub(super) fn compile(
     pattern: &str,
     flags: i64,
+    bytes: bool,
     original: String,
 ) -> Result<(String, Matcher), String> {
-    if !(pattern.contains("(?") || pattern.contains(r"\b") || pattern.contains(r"\B")) {
+    let ascii = bytes || flags & ASCII != 0;
+    if locale_dependent(pattern, flags) {
         return Err(original);
     }
-    let ascii = flags & ASCII != 0;
-    let (mut source, groups) = imre_regex::lookahead_or_scoped_source(
+    let (mut source, groups) = imre_regex::backtracking_source(
         pattern,
         flags & VERBOSE != 0,
-        alphabet(false, ascii, flags),
+        alphabet(bytes, ascii, flags),
         flags & DOTALL != 0,
     )
     .map_err(|_| original)?;
@@ -32,7 +36,7 @@ pub(super) fn compile(
     };
     source = source.replace('$', dollar);
     let mut modes = String::new();
-    if flags & IGNORECASE != 0 && !ascii {
+    if flags & IGNORECASE != 0 && (bytes || !ascii) {
         modes.push('i');
     }
     if flags & MULTILINE != 0 {
@@ -47,30 +51,47 @@ pub(super) fn compile(
     if let Some(name) = groups
         .iter()
         .flatten()
-        .find(|name| !group_names::valid(name, false))
+        .find(|name| !group_names::valid(name, bytes))
     {
-        return Err(group_names::bad_name(name, false));
+        return Err(group_names::bad_name(name, bytes));
     }
     let groups = GroupInfo::new([groups]).map_err(|e| e.to_string())?;
-    let matcher = Lookahead::new(&source, groups)?;
+    let mode = if bytes {
+        BytesMode::Ascii
+    } else {
+        BytesMode::Unicode
+    };
+    let matcher = Lookahead::new(&source, groups, mode, bytes && flags & IGNORECASE != 0)?;
     Ok((source, Matcher::Lookahead(Box::new(matcher))))
 }
 
 pub(super) struct Lookahead {
     search: Regex,
+    mode: BytesMode,
+    fold_bytes: bool,
     anchored: OnceCell<Result<Regex, Error>>,
     nonempty: OnceCell<Result<Regex, Error>>,
     pub(super) groups: GroupInfo,
 }
 
 impl Lookahead {
-    pub(super) fn new(source: &str, groups: GroupInfo) -> Result<Self, String> {
-        let search = Regex::new(source).map_err(|e| e.to_string())?;
+    fn new(
+        source: &str,
+        groups: GroupInfo,
+        mode: BytesMode,
+        fold_bytes: bool,
+    ) -> Result<Self, String> {
+        let search = RegexBuilder::new(source)
+            .bytes_mode(mode)
+            .build()
+            .map_err(|e| e.to_string())?;
         if search.captures_len() != groups.group_len(PatternID::ZERO) {
-            return Err("lookahead would change the Python capture groups".into());
+            return Err("backtracking would change the Python capture groups".into());
         }
         Ok(Self {
             search,
+            mode,
+            fold_bytes,
             groups,
             anchored: OnceCell::new(),
             nonempty: OnceCell::new(),
@@ -78,6 +99,10 @@ impl Lookahead {
     }
 
     /// Preserve the prefix for anchors, and make endpos the assertion's end of input.
+    pub(super) fn with_source(&self, source: &str) -> Result<Self, String> {
+        Self::new(source, self.groups.clone(), self.mode, self.fold_bytes)
+    }
+
     pub(super) fn captures(
         &self,
         input: Input<'_>,
@@ -93,6 +118,7 @@ impl Lookahead {
             };
             match cache.get_or_init(|| {
                 RegexBuilder::new(&format!(r"\G(?:{})", self.search.as_str()))
+                    .bytes_mode(self.mode)
                     .find_not_empty(nonempty)
                     .build()
             }) {
@@ -107,10 +133,16 @@ impl Lookahead {
         } else {
             &self.search
         };
-        let text = std::str::from_utf8(&input.haystack()[..input.end()])
-            .expect("lookahead is only compiled for text patterns");
+        let haystack = &input.haystack()[..input.end()];
+        // Bytes IGNORECASE folds ASCII only. Folding the subject keeps backreferences
+        // exact for captures mixing ASCII and high bytes. Spans still index the original.
+        let haystack = if self.fold_bytes && haystack.iter().any(u8::is_ascii_uppercase) {
+            Cow::Owned(haystack.to_ascii_lowercase())
+        } else {
+            Cow::Borrowed(haystack)
+        };
         if let Some(found) = regex
-            .captures_from_pos(text, input.start())
+            .captures_from_pos(haystack.as_ref(), input.start())
             .map_err(|e| e.to_string())?
         {
             captures.set_pattern(Some(PatternID::ZERO));

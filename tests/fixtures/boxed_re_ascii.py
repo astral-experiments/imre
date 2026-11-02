@@ -161,14 +161,19 @@ def current():
         assert doubled.fullmatch(subject, pos, end - 1) is None
     assert re.fullmatch(r"(Python)\1", "PythonPythox") is None
 
-    # Repeating a variable expression can accept a different capture on the second copy.
-    try:
-        variable = re.compile(r"(a|b)\1")
-    except re.PatternError:
-        pass
-    else:
-        assert variable.fullmatch("bb").group(1) == "b"
-        assert variable.fullmatch("ab") is None
+    for spelling, subject, capture, wrong in (
+        (r"([a-c]*)\1", "xabcabc!", "abc", "abccba"),
+        (rb"([a-c]*)\1", b"xabcabc!", b"abc", b"abccba"),
+    ):
+        doubled = re.compile(spelling)
+        match = doubled.fullmatch(subject, 1, 7)
+        assert match.group(1) == capture and match.span(1) == (1, 4)
+        assert doubled.match(subject, 1, 7).span() == (1, 7)
+        assert doubled.fullmatch(wrong) is None
+        assert doubled.match(wrong).span(1) == (0, 0)
+    assert re.fullmatch(r"^(a+).\1$", "aaaa") is None
+    mixed = re.fullmatch(rb"(.+)\1", b"\xffA\xffa", re.I)
+    assert mixed.group(1) == b"\xffA" and mixed.span() == (0, 4)
 
     for spelling, name, word in (
         ("(?P<if>ab)(?P=if)", "if", "ab"),
