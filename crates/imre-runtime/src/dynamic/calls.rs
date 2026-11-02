@@ -2180,7 +2180,9 @@ impl Context {
             Value::Native(ref class) if class == "socket.socket" && name == "__name__" => {
                 return Ok(self.text("socket"));
             }
-            Value::Socket(_) if name == "family" => return Ok(self.int(i64::from(libc::AF_INET))),
+            Value::Socket(ref socket) if name == "family" => {
+                return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
+            }
             Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
             Value::BufferedRandom(ref file) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
