@@ -26,6 +26,7 @@ def current():
     del first
     print(observed() is None, equal in caches[0], caches[0][collision])
     equal_weak_value_keys(equal, Key("first"))
+    weak_key_constructor()
     generic_alias_weakref()
 
 
@@ -65,3 +66,16 @@ def generic_alias_weakref():
     del owner, alias
     collect()
     print(handle() is None, len(callbacks) == 1 and callbacks[0] is handle)
+
+
+def weak_key_constructor():
+    from gc import collect
+
+    key = Key("temporary")
+    key.cycle = key
+    observed = ref(key)
+    mapping = WeakKeyDictionary({key: 1})
+    assert mapping[key] == 1
+    del key
+    collect()
+    assert observed() is None and len(mapping) == 0
