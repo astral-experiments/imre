@@ -185,11 +185,18 @@ class Popen:
         else:
             self._communication_started = True
             if self.text_mode and input is not None:
-                # The selector registers stdin from the original input. Encoding
-                # an empty string can produce a BOM even though no bytes are sent.
-                write_input = bool(input)
-                encoded = input.encode(self.stdin.encoding, self.stdin.errors)
-                input = encoded if write_input else None
+                # A false input closes stdin before encoding. A BOM produced
+                # from an empty string is still validated, but the pipe is closed.
+                if not input:
+                    try:
+                        self.stdin.close()
+                    except BrokenPipeError:
+                        pass
+                input = input.encode(self.stdin.encoding, self.stdin.errors)
+                if not input:
+                    input = None
+                elif not isinstance(input, (bytes, bytearray)):
+                    input = memoryview(input)
         out, err, expired, remaining = _process.communicate(self._handle, input, timeout, use_select)
         if expired:
             error = TimeoutExpired(self.args, timeout if remaining is None else remaining,
