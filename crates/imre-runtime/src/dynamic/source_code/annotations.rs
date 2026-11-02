@@ -90,8 +90,7 @@ impl Program {
                 .into();
             }
         }
-        let mut provider =
-            Program::new(self.filename.clone(), "__annotate__", self.strip_docstrings);
+        let mut provider = self.nested_program("__annotate__");
         provider.qualname = format!("{}.__annotate__", body.qualname);
         provider.first_line = line;
         provider.method_imports = self.method_imports.clone();

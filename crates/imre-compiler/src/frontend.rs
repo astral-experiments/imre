@@ -161,6 +161,7 @@ struct ClassInfo {
     methods: Vec<HashMap<String, Signature>>,
     setters: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
+    raising_methods: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
     setup_fields: unittest_setup::Slots,
@@ -392,6 +393,7 @@ impl ClassInfo {
             methods: vec![HashMap::new(); fields.len()],
             setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
+            raising_methods: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
             setup_fields,
@@ -735,6 +737,15 @@ pub(crate) fn lower_with_caller_cache(
                 classes.keyword_copies.insert(signature.id);
             }
             if kind == crate::classes::MethodKind::Instance {
+                let after_doc = usize::from(docstring_literal(&method.body).is_some());
+                if module.archive.is_none()
+                    && class.methods[index].decorator_list.is_empty()
+                    && !signature.asynchronous
+                    && matches!(&method.body[after_doc..], [ast::Stmt::Raise(_)])
+                    && !imre_ast::code_flags::is_generator(&method.body)
+                {
+                    classes.raising_methods.insert(signature.id);
+                }
                 instance_signatures.insert(origin, signature.clone());
             }
             let table = if class.method_kinds[index] == crate::classes::MethodKind::PropertySetter {
@@ -4727,7 +4738,10 @@ impl<'a> Checker<'a> {
                 {
                     return Ok((vec![Statement::Expr(self.expr(&expression.value)?)], false));
                 } else {
-                    Some(Statement::Expr(self.expr(&expression.value)?))
+                    let value = self.expr(&expression.value)?;
+                    // Only a direct call selects one implementation; a dispatched override may return.
+                    let falls_through = !matches!(&value.kind, ExprKind::Call(id, _) if self.classes.raising_methods.contains(id));
+                    return Ok((vec![Statement::Expr(value)], falls_through));
                 }
             }
             ast::Stmt::Delete(delete) => {
@@ -5016,6 +5030,11 @@ impl<'a> Checker<'a> {
                 }
                 let value = value.map(|exception| self.exception_origin(exception, raise));
                 return Ok((vec![Statement::Raise(value)], false));
+            }
+            ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_)
+                if self.graph.command_startup.is_some() =>
+            {
+                return Err(self.object_runtime_export("a conditional or local import", statement));
             }
             ast::Stmt::Pass(_) => None,
             _ => {
@@ -9254,9 +9273,7 @@ impl<'a> Checker<'a> {
         {
             return self.environ_method(attribute, call);
         }
-        if let ast::Expr::Attribute(attr) = call.func.as_ref()
-            && matches!(attr.attr.as_str(), "__reduce__" | "__reduce_ex__")
-        {
+        if let ast::Expr::Attribute(attr) = call.func.as_ref() {
             self.calendar_class_attribute(attr)?;
         }
         if let ast::Expr::Attribute(attr) = call.func.as_ref()
@@ -9272,7 +9289,15 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some(class) = self.class_reference(&call.func) {
-            return self.construct(call, class);
+            let result = self.construct(call, class);
+            if result.is_err()
+                && self.native_mock(class)
+                && call.arguments.args.is_empty()
+                && self.boxed_mock_keywords(call)?
+            {
+                return Err(self.object_runtime_export("configured unittest.mock.Mock", call));
+            }
+            return result;
         }
         if let Some(Binding::Intrinsic(Intrinsic::PosixPath(operation))) = self.resolve(&call.func)
         {

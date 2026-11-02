@@ -645,9 +645,13 @@ impl Reachable {
                                     || matches!(&d.expression, ast::Expr::Attribute(a) if a.attr.as_str() == "setter"
                                         && matches!(&*a.value, ast::Expr::Name(n) if n.id.as_str() == name))
                                     || graph.resolve(id.module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::CachedProperty))));
-                            let assertion_exit = source.bundled
+                            let assertion_helper = source.bundled
                                 && source.name == "unittest"
                                 && match class.name.as_str() {
+                                    "TestCase" => {
+                                        name == "_assertBytesEqual"
+                                            && refs.found.attributes.contains("_bound_assertEqual")
+                                    }
                                     "_AssertRaisesContext" => {
                                         matches!(name, "_missing" | "_check_regex")
                                     }
@@ -693,7 +697,7 @@ impl Reachable {
                                 };
                             if (property
                                 || unittest_method
-                                || assertion_exit
+                                || assertion_helper
                                 || mock_dispatch
                                 || (source.closes_context(class.name.as_str())
                                     && matches!(name, "__enter__" | "close"))

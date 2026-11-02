@@ -593,6 +593,10 @@ impl Checker<'_> {
                     return Some(ty);
                 }
                 let receiver = Self::weak_target(probe.expr(&attribute.value).ok()?);
+                if self.mock_side_effect_target(receiver.ty, attribute) {
+                    // The assigned value selects exception storage or the boxed callback.
+                    return None;
+                }
                 if let Type::Class(class) = receiver.ty
                     && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
                 {

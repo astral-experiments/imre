@@ -2498,6 +2498,17 @@ impl Context {
             }
             Value::Method {
                 callable,
+                receiver,
+                explicit: false,
+            } if let Value::Native(symbol) = self.heap.get(*callable)
+                && let Some(slot) =
+                    super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol)
+                && !slot.method =>
+            {
+                slot.bound_repr(self, *receiver)
+            }
+            Value::Method {
+                callable,
                 explicit: false,
                 receiver,
             } if let Value::Native(symbol) = self.heap.get(*callable)
@@ -3996,7 +4007,16 @@ impl Context {
         }
         let method = if matches!(
             name,
-            "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__"
+            "__add__"
+                | "__radd__"
+                | "__sub__"
+                | "__rsub__"
+                | "__mul__"
+                | "__rmul__"
+                | "__truediv__"
+                | "__rtruediv__"
+                | "__floordiv__"
+                | "__rfloordiv__"
         ) && self.timedelta_slot_class(obj).is_some()
         {
             Some(self.lookup_attr(obj, name)?)
@@ -4217,7 +4237,7 @@ impl Context {
         };
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "*" | "/") {
+                if matches!(op, "+" | "-" | "*" | "/" | "//") {
                     self.timedelta_slot_class(id)
                 } else {
                     None

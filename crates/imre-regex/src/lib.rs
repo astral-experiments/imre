@@ -140,7 +140,7 @@ pub fn translate_for_runtime(
 /// Translate a boxed pattern with its byte and Unicode escape rules.
 pub fn translate_pattern(
     pattern: &str,
-    verbose: bool,
+    mut verbose: bool,
     alphabet: Alphabet,
     mut dotall: bool,
     literal_guards: bool,
@@ -166,11 +166,28 @@ pub fn translate_pattern(
                     can_repeat = false;
                     continue;
                 }
-                outer_prefixes.push((may_backtrack, dotall));
+                // A standalone (?x) may follow only earlier global flags and ignored layout.
+                if extension && input.clone().take(2).eq(['x', ')']) {
+                    if !output.is_empty() {
+                        return Err("global flags not at the start of the expression".into());
+                    }
+                    input.next();
+                    input.next();
+                    verbose = true;
+                    continue;
+                }
+                outer_prefixes.push((may_backtrack, dotall, verbose));
                 may_backtrack = false;
                 output.push('(');
                 if extension {
                     if input.next_if_eq(&':').is_some() {
+                        output.push_str("?:");
+                    } else if matches!(input.peek(), Some('x' | '-')) {
+                        let enable = input.next_if_eq(&'-').is_none();
+                        if input.next() != Some('x') || input.next() != Some(':') {
+                            return Err("expected scoped verbose group".into());
+                        }
+                        verbose = enable;
                         output.push_str("?:");
                     } else if input.next_if_eq(&'s').is_some() {
                         if input.next() != Some(':') {
@@ -180,7 +197,7 @@ pub fn translate_pattern(
                         dotall = true;
                     } else if input.next_if_eq(&'>').is_some() {
                         atomic_delimited(&mut input, &mut output, dotall, verbose, &mut escapes)?;
-                        (may_backtrack, dotall) = outer_prefixes.pop().unwrap();
+                        (may_backtrack, dotall, verbose) = outer_prefixes.pop().unwrap();
                         can_repeat = true;
                         continue;
                     } else if input.next_if_eq(&'P').is_some() && input.next_if_eq(&'<').is_some() {
@@ -214,16 +231,17 @@ pub fn translate_pattern(
                 // An empty character class is an unreachable branch that keeps
                 // these alternatives separate without adding a capture.
                 output.push_str(if may_backtrack { r"|[^\s\S]|" } else { "|" });
-                if let Some((outer, _)) = outer_prefixes.last_mut() {
+                if let Some((outer, _, _)) = outer_prefixes.last_mut() {
                     *outer = true; // The enclosing prefix now contains a choice.
                 }
                 may_backtrack = false;
                 can_repeat = false;
             }
             ')' => {
-                if let Some((backtrack, previous_dotall)) = outer_prefixes.pop() {
+                if let Some((backtrack, previous_dotall, previous_verbose)) = outer_prefixes.pop() {
                     may_backtrack |= backtrack;
                     dotall = previous_dotall;
+                    verbose = previous_verbose;
                 }
                 output.push(c);
                 can_repeat = true;

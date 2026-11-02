@@ -10,13 +10,14 @@ use crate::objects::{
 };
 use crate::{Str, StrOwner};
 
-pub(super) fn loads(ctx: &mut Context, input: Id) -> Result<Id> {
-    match ctx.heap.get(input) {
+pub(super) fn loads(ctx: &mut Context, input: Id, raise_error: Option<Id>) -> Result<Id> {
+    let result = match ctx.heap.get(input) {
         Value::Str(text) => {
             let text = Str::try_new(text).map_err(|_| crate::Error::allocation())?;
             if text.starts_with('\u{feff}') {
                 let document = StrOwner::try_new(text).map_err(|_| crate::Error::allocation())?;
-                return Err(crate::objects::json_bom_error(document).into());
+                let error = crate::objects::json_bom_error(document);
+                return Err(decode_error(ctx, input, raise_error, true, error));
             }
             parse(ctx, &text)
         }
@@ -24,19 +25,48 @@ pub(super) fn loads(ctx: &mut Context, input: Id) -> Result<Id> {
             let owner = owned_bytes_input(bytes)?;
             parse(ctx, &decode_json_bytes(&owner)?)
         }
-        _ => Err(Error::new(
-            "TypeError",
-            format!(
-                "the JSON object must be str, bytes or bytearray, not {}",
-                ctx.type_name(input)
-            ),
-        )),
-    }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "the JSON object must be str, bytes or bytearray, not {}",
+                    ctx.type_name(input)
+                ),
+            ));
+        }
+    };
+    result.map_err(|error| decode_error(ctx, input, raise_error, false, error))
 }
 
-fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
+/// Raise the class owned by the calling package, retaining the Python document's identity.
+fn decode_error(
+    ctx: &mut Context,
+    input: Id,
+    raise_error: Option<Id>,
+    bom: bool,
+    error: crate::Error,
+) -> Error {
+    let (Some(callback), Some((message, document, position))) =
+        (raise_error, error.json_decode_fields())
+    else {
+        return error.into();
+    };
+    let message = ctx.text(message);
+    let document = if matches!(ctx.heap.get(input), Value::Str(_)) {
+        input
+    } else {
+        ctx.text(document)
+    };
+    let position = ctx.int(position as i64);
+    let bom = if bom { TRUE } else { FALSE };
+    ctx.call(callback, vec![message, document, position, bom], Vec::new())
+        .err()
+        .unwrap_or_else(|| Error::new("SystemError", "JSON error callback returned"))
+}
+
+fn parse(ctx: &mut Context, text: &str) -> std::result::Result<Id, crate::Error> {
     let mut keys = HashMap::new();
-    Ok(decode_json(
+    decode_json(
         text,
         || Str::try_new(text).ok().map(StrOwner::new),
         |value| {
@@ -70,7 +100,7 @@ fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
                 }
             })
         },
-    )?)
+    )
 }
 
 #[derive(Default)]
@@ -81,6 +111,17 @@ struct Output {
 }
 
 impl Output {
+    fn quote(&mut self, value: &Value, ascii: bool) -> Result<()> {
+        match value {
+            Value::Str(text) => write_json_string(&mut self.text, text, ascii)?,
+            Value::SurrogateStr(points) => {
+                write_json_codepoints(&mut self.text, &mut self.surrogates, points, ascii)?;
+            }
+            _ => unreachable!("validated string storage"),
+        }
+        Ok(())
+    }
+
     fn finish(self, ctx: &mut Context) -> Result<Id> {
         if self.surrogates.is_empty() {
             return Ok(ctx.text(self.text));
@@ -103,6 +144,38 @@ impl Output {
         points.extend(self.text[previous..].chars().map(u32::from));
         Ok(ctx.alloc(Value::SurrogateStr(points)))
     }
+}
+
+/// Quote a Python string with the native JSON encoder's escaping rules.
+pub(super) fn encode_basestring(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes no keyword arguments"),
+        ));
+    }
+    let [input] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes exactly one argument ({} given)", args.len()),
+        ));
+    };
+    let storage = ctx.string_storage(*input).ok_or_else(|| {
+        let name = ctx.type_name(*input);
+        let name = &name[..name.floor_char_boundary(80)];
+        Error::new("TypeError", format!("first argument must be a string, not {name}"))
+    })?;
+    let mut output = Output::default();
+    output.quote(
+        ctx.heap.get(storage),
+        name == "_json.encode_basestring_ascii",
+    )?;
+    output.finish(ctx)
 }
 
 struct Encoder {
@@ -251,13 +324,9 @@ impl Encoder {
                 &mut self.output.text,
                 &float_text(ctx, id, *value, self.allow_nan)?,
             )?,
-            Value::Str(value) => write_json_string(&mut self.output.text, value, self.ascii)?,
-            Value::SurrogateStr(points) => write_json_codepoints(
-                &mut self.output.text,
-                &mut self.output.surrogates,
-                points,
-                self.ascii,
-            )?,
+            value @ (Value::Str(_) | Value::SurrogateStr(_)) => {
+                self.output.quote(value, self.ascii)?
+            }
             _ => {
                 if self.active.len() >= 512 {
                     return Err(Error::new(

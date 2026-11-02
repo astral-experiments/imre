@@ -1,4 +1,4 @@
-"""Find unpacked distributions and read their metadata headers."""
+"""Find installed distributions and read their metadata headers."""
 import re
 
 
@@ -27,27 +27,32 @@ def _first_header(text: str, name: str) -> str | None:
     return None
 
 
-def _matching_paths(root: str, name: str, legacy_name: str) -> list[str]:
-    directory = root or '.'
-    if _is_file(directory):
-        raise NotImplementedError('distribution lookup in archive import roots')
+def _archive_children(members: list[str]) -> list[str]:
+    directories: dict[str, bool] = {}
+    for member in members:
+        child = member.split('/', 1)[0]
+        if child == member:
+            directories[child] = False
+        elif child not in directories:
+            directories[child] = True
+    # zipfile.Path represents implicit directories with a trailing slash; exact files win.
+    return [child + '/' if is_dir else child for child, is_dir in directories.items()]
+
+
+def _matching_entries(directory: str, entries: list[str], name: str, legacy_name: str) -> list[str]:
     matches: list[str] = []
-    try:
-        entries = _filenames(directory)
-    except OSError:
-        return matches
     dirname = _basename(directory).lower()
     egg_info = ''
     for entry in entries:
-        filename = entry.lower()
+        filename = entry.rstrip('/').lower()
         if filename.endswith('.dist-info') or filename.endswith('.egg-info'):
             stem = filename.rsplit('.', 1)[0].split('-', 1)[0]
             if not name or _normalize(stem) == name:
-                matches.append(_join(directory, entry))
+                matches.append(entry)
         elif filename == 'egg-info' and dirname.endswith('.egg'):
             stem = dirname[:-4].split('-', 1)[0].replace('-', '_')
             if not legacy_name or stem == legacy_name:
-                egg_info = _join(directory, entry)
+                egg_info = entry
     if egg_info:
         matches.append(egg_info)
     return matches

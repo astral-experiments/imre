@@ -22,6 +22,11 @@ REJECTED = {
     "class_wildcard": ({
         "main.py": "class Invalid:\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
+    "configured_mock_checks_arguments": ({
+        "main.py": "from unittest.mock import Mock\n"
+                   "def identity(value: int) -> int: return value\n"
+                   "m = Mock(custom=identity('wrong'))\n",
+    }, "expected int, got str"),
     "wildcard_keeps_return_check": ({
         "main.py": "from helper import *\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
         "helper.py": HELPER,

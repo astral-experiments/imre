@@ -5,6 +5,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -82,6 +83,19 @@ REJECTED = {
 }
 
 
+def write_distribution_archive(directory: Path) -> None:
+    with ZipFile(directory / "unsupported.zip", "w") as archive:
+        member = ZipInfo("unsupported")
+        member.extract_version = 99
+        archive.writestr(member, b"")
+    with ZipFile(directory / "packages.whl", "w", ZIP_DEFLATED) as archive:
+        archive.writestr("demo_tools-7.dist-info/METADATA", "Name: Renamed-Tools\r\nVersion: 2.9\r\n")
+        archive.writestr("demo_tools-7.dist-info/entry_points.txt", "[cli]\nrun = demo:main\n")
+        archive.writestr("legacy.egg-info", "Name: Other\nVersion: 1\n")
+    with ZipFile(directory / "replacement.whl", "w", ZIP_DEFLATED) as archive:
+        archive.writestr("demo_tools-7.dist-info/METADATA", "Name: Renamed-Tools\nVersion: 3.1\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -118,6 +132,7 @@ def main() -> None:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
+        write_distribution_archive(project / "distribution_archive")
         for case in sorted(project.iterdir()):
             source = case / "main.py"
             error = ERRORS.get(case.name)

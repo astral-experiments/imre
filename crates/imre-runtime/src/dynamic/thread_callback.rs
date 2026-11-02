@@ -24,6 +24,7 @@ pub(super) struct Callback {
     signature: String,
     values: Vec<Argument>,
     config: serde_json::Value,
+    automatic_gc: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn unsupported() -> Error {
@@ -140,11 +141,18 @@ impl Callback {
             let value = match ctx.heap.get(id) {
                 Value::PrimitiveLock(lock) => Argument::Lock(Arc::clone(lock)),
                 Value::HandlerLock(lock) => Argument::RLock(Arc::clone(lock)),
-                Value::Native(name) if !high_level && name == "_thread._count" => {
-                    Argument::Builtin("_thread._count")
-                }
-                Value::Native(name) if !high_level && name == "sys.exit" => {
-                    Argument::Builtin("sys.exit")
+                Value::Native(name) if !high_level => {
+                    let symbol = [
+                        "_thread._count",
+                        "sys.exit",
+                        "gc.enable",
+                        "gc.disable",
+                        "gc.isenabled",
+                    ]
+                    .into_iter()
+                    .find(|symbol| *symbol == name)
+                    .ok_or_else(unsupported)?;
+                    Argument::Builtin(symbol)
                 }
                 _ => return Err(unsupported()),
             };
@@ -162,6 +170,7 @@ impl Callback {
                 signature: copy_label(signature)?,
                 values,
                 config: ctx.config.clone(),
+                automatic_gc: ctx.heap.automatic_gc.clone(),
             },
             roots,
         )))
@@ -169,6 +178,7 @@ impl Callback {
 
     pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
         let mut ctx = ffi::new_context(self.config, std::iter::empty::<String>());
+        ctx.heap.automatic_gc = self.automatic_gc;
         let globals = ctx.scope(&self.module, None);
         let name = ctx.text(self.name);
         let qualname = ctx.text(self.qualname);
