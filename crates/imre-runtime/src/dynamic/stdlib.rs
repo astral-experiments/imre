@@ -124,6 +124,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "urllib.parse"
             | "io"
             | "itertools"
+            | "subprocess"
             | "warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
@@ -216,7 +217,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "contextlib"
             | "contextvars"
             | "_contextvars"
-            | "subprocess"
             | "socket"
             | "_socket"
             | "urllib"
@@ -309,25 +309,6 @@ fn record(ctx: &mut Context, fields: &[(&str, Id)]) -> Id {
         extras: Vec::new(),
         names: fields.iter().map(|(name, _)| (*name).to_owned()).collect(),
         values: fields.iter().map(|&(_, value)| value).collect(),
-    })
-}
-
-fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
-    let class = ctx.alloc(Value::Native(type_name.to_owned()));
-    ctx.alloc(Value::Instance {
-        namespace: None,
-        class,
-        dictionary: None,
-        scalar: None,
-        property: None,
-        weak_reference: None,
-        cycle: None,
-        member_values: None,
-        memory_stream: None,
-        fields: fields
-            .iter()
-            .map(|&(key, value)| (key.to_owned(), value))
-            .collect(),
     })
 }
 
@@ -739,9 +720,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         {
             ctx.builtin(&format!("operator.{name}"))
         }
-        ("subprocess", "PIPE") => ctx.int(-1),
-        ("subprocess", "STDOUT") => ctx.int(-2),
-        ("subprocess", "DEVNULL") => ctx.int(-3),
         ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
             ctx.builtin(&format!("_contextvars.{name}"))
         }
@@ -826,8 +804,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "fnmatch",
             "fnmatch" | "fnmatchcase" | "filter" | "filterfalse" | "translate" | "_translate",
-        )
-        | ("subprocess", "run") => ctx.alloc(Value::Native(format!("{module}.{name}"))),
+        ) => ctx.alloc(Value::Native(format!("{module}.{name}"))),
         (
             "codecs",
             "strict_errors"
@@ -2345,7 +2322,6 @@ pub(super) fn call(
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
         "hash.update" => (2, &[]),
         "hash.copy" => (1, &[]),
-        "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.writelines" | "_IOBase.writelines" => {
             let receiver = argument(args, 0)?;
             return io::lines(
@@ -2702,10 +2678,7 @@ pub(super) fn call(
             }
             return Err(ctx.exception("SystemExit", args));
         }
-        name if name.starts_with("os.path.")
-            || name.starts_with("file.")
-            || name == "subprocess.run" =>
-        {
+        name if name.starts_with("os.path.") || name.starts_with("file.") => {
             return files::call(ctx, name, args, kwargs);
         }
         "match.groups" | "match.groupdict" => {
