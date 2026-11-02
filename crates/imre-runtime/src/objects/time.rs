@@ -9,8 +9,17 @@ use super::{
     words::WordKind,
 };
 use std::ffi::CStr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
+
+/// Signed nanoseconds since the Unix epoch, without rounding through floating point.
+pub(crate) fn wall_time_ns() -> i128 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_nanos() as i128,
+        Err(e) => -(e.duration().as_nanos() as i128),
+    }
+}
 
 /// Read the process-independent clock used by CPython's monotonic and performance counters.
 pub(crate) fn monotonic_time() -> std::io::Result<std::time::Duration> {

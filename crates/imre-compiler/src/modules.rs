@@ -1073,6 +1073,7 @@ impl IntrinsicModule {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
             (Self::Time, "ctime") => Intrinsic::ObjectRuntimeExport("time.ctime"),
+            (Self::Time, "time_ns") => Intrinsic::ObjectRuntimeExport("time.time_ns"),
             (Self::Time, "monotonic") => Intrinsic::ObjectRuntimeExport("time.monotonic"),
             (Self::Time, "perf_counter") => Intrinsic::ObjectRuntimeExport("time.perf_counter"),
             (Self::Time, "struct_time") => Intrinsic::StructTime,
