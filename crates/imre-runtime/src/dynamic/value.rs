@@ -2670,7 +2670,9 @@ impl Heap {
         let flat = |items: &[Id]| items.len() <= 8 && items.iter().copied().all(scalar);
         // Without a nested tuple the original discard need not truncate these temporaries.
         if !(2..=8).contains(&args.len())
-            || !args.iter().any(|&id| matches!(self.get(id), Value::Tuple(_)))
+            || !args
+                .iter()
+                .any(|&id| matches!(self.get(id), Value::Tuple(_)))
             || weak(arguments)
             || !args.iter().all(|&id| match self.get(id) {
                 Value::Tuple(items) => !weak(id) && flat(items),
@@ -2687,11 +2689,12 @@ impl Heap {
         }
         // Other operands may own resources or weak targets. Leave uncertain cases to the collector.
         if !dropped.iter().all(|&id| {
-            id == arguments || match self.get(id) {
-                Value::Tuple(items) | Value::List(items) => !weak(id) && flat(items),
-                Value::Dict(items) => !weak(id) && items.is_empty(),
-                _ => scalar(id),
-            }
+            id == arguments
+                || match self.get(id) {
+                    Value::Tuple(items) | Value::List(items) => !weak(id) && flat(items),
+                    Value::Dict(items) => !weak(id) && items.is_empty(),
+                    _ => scalar(id),
+                }
         }) {
             return false;
         }
