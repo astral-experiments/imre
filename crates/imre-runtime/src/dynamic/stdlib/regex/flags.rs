@@ -151,12 +151,21 @@ pub(super) fn parse(
                         if let Some((msg, offset)) =
                             imre_regex::repeat_diagnostic(&prefix, result.bits & VERBOSE != 0)
                         {
-                            return Err((
-                                msg,
-                                position(result.skip) + prefix[..offset].chars().count(),
-                            ));
+                            let start = prefix[..offset].chars().count();
+                            let end = if bytes { start } else { offset };
+                            let prior = &bad.prefix[..end];
+                            // A backend's counted repetitions have different limits. Leave them,
+                            // unsupported syntax and unclosed prefixes to ordinary compilation.
+                            if !prior.contains(&b'{')
+                                && valid_translated_prefix(prior, result.bits, bytes)
+                            {
+                                return Err((msg, position(result.skip) + start));
+                            }
+                        } else if bad.prefix.is_empty()
+                            || valid_translated_prefix(&bad.prefix, result.bits, bytes)
+                        {
+                            result.deferred = Some(bad);
                         }
-                        result.deferred = Some(bad);
                         break;
                     }
                 }
