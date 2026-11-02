@@ -1,6 +1,7 @@
 //! Move executable code and lock ownership into a fresh boxed context.
 //! Only the compiler can certify that the function needs no surrounding heap.
 
+use super::thread_worker::Operation;
 use super::value::{Body, Code, Location};
 use super::{Context, Error, Id, NONE, Result, Value, copy_label, ffi};
 use crate::objects::locks::PrimitiveLock;
@@ -40,7 +41,7 @@ impl Callback {
         args: Id,
         pos: &[Id],
         kwargs: Option<Id>,
-    ) -> Result<Option<(Self, Vec<Id>)>> {
+    ) -> Result<Option<(Operation, Vec<Id>)>> {
         Self::capture_checked(ctx, target, args, pos, kwargs, false)
     }
 
@@ -50,7 +51,7 @@ impl Callback {
         target: Id,
         args: Id,
         kwargs: Id,
-    ) -> Result<Option<(Self, Vec<Id>)>> {
+    ) -> Result<Option<(Operation, Vec<Id>)>> {
         let (Value::Tuple(pos) | Value::List(pos)) = ctx.heap.get(args) else {
             return Err(unsupported());
         };
@@ -67,7 +68,7 @@ impl Callback {
         pos: &[Id],
         kwargs: Option<Id>,
         high_level: bool,
-    ) -> Result<Option<(Self, Vec<Id>)>> {
+    ) -> Result<Option<(Operation, Vec<Id>)>> {
         let Value::Function {
             code,
             scope,
@@ -82,17 +83,69 @@ impl Callback {
         let Body::Native(entry) = code.body else {
             return Ok(None);
         };
-        if !code.freevars.is_empty()
-            || code.coroutine
-            || !code.closure_supported
-            || (closure != NONE
-                && !matches!(ctx.heap.get(closure), Value::Tuple(items) if items.is_empty()))
-        {
+        if code.coroutine || !code.closure_supported {
             return Ok(None);
         }
         let signature = ctx.str_value(code.parameters)?;
         let meta: serde_json::Value = serde_json::from_str(signature)
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
+        if !code.freevars.is_empty() {
+            if high_level
+                && pos.is_empty()
+                && let Some(kwargs) = kwargs
+                && matches!(ctx.heap.get(kwargs), Value::Dict(entries) if entries.is_empty())
+                && let Some(names) = meta["thread_captured_locks"].as_array()
+                && let Value::Tuple(cells) = ctx.heap.get(closure)
+                && cells.len() == code.freevars.len()
+                && cells.len() == names.len()
+            {
+                // Code freevars are in canonical name order; the proof is in execution order.
+                let operand = |name: &serde_json::Value| {
+                    let index = code
+                        .freevars
+                        .iter()
+                        .position(|n| Some(n.as_str()) == name.as_str())?;
+                    let Value::Cell(Some(id)) = *ctx.heap.get(cells[index]) else {
+                        return None;
+                    };
+                    let Value::PrimitiveLock(lock) = ctx.heap.get(id) else {
+                        return None;
+                    };
+                    Some((id, lock))
+                };
+                let (release, last) = match names.as_slice() {
+                    [last] => (None, last),
+                    [first, last] => {
+                        let (_, lock) = operand(first).ok_or_else(unsupported)?;
+                        // No other native owner can race this held release before startup completes.
+                        if Arc::strong_count(lock) != 1 || !lock.locked() {
+                            return Err(unsupported());
+                        }
+                        (Some(lock), last)
+                    }
+                    _ => return Err(unsupported()),
+                };
+                let (id, lock) = operand(last).ok_or_else(unsupported)?;
+                if release.is_some_and(|prefix| Arc::ptr_eq(prefix, lock)) {
+                    return Err(unsupported());
+                }
+                // The prefix has been consumed when the parent resumes. Only the final
+                // receiver must outlive a subsequent replacement of its closure cell.
+                return Ok(Some((
+                    Operation::Acquire {
+                        lock: Arc::clone(lock),
+                        release: release.cloned(),
+                    },
+                    vec![target, args, kwargs, id],
+                )));
+            }
+            return Ok(None);
+        }
+        if closure != NONE
+            && !matches!(ctx.heap.get(closure), Value::Tuple(items) if items.is_empty())
+        {
+            return Ok(None);
+        }
         let Some(names) = meta["thread_parameters"].as_array() else {
             return Ok(None);
         };
@@ -152,7 +205,7 @@ impl Callback {
             values.push(value);
         }
         Ok(Some((
-            Self {
+            Operation::Python(Box::new(Self {
                 entry,
                 module: copy_label(&ctx.scope_data(scope).module)?,
                 name: copy_label(ctx.str_value(code.name)?)?,
@@ -162,7 +215,7 @@ impl Callback {
                 signature: copy_label(signature)?,
                 values,
                 config: ctx.config.clone(),
-            },
+            })),
             roots,
         )))
     }
