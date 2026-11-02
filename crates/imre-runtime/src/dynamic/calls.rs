@@ -202,6 +202,9 @@ impl Context {
                 "__init_subclass__" => self.builtins.get("object.__init_subclass__").copied(),
                 _ => None,
             },
+            Value::Native(owner) if builtins::set_operators(owner).contains(&name) => {
+                self.builtins.get(&format!("{owner}.{name}")).copied()
+            }
             Value::Native(kind) if kind == "collections.defaultdict" => {
                 let owner = match name {
                     "__init__" | "__missing__" | "__repr__" | "copy" | "__copy__"
@@ -3162,6 +3165,9 @@ impl Context {
                 let owner = self.exact_type(obj)?;
                 let method = self.builtin("dict.fromkeys");
                 return Ok(self.bind_native_classmethod(method, owner));
+            }
+            Value::Native(ref owner) if builtins::set_operators(owner).contains(&name) => {
+                return Ok(self.builtin(&format!("{owner}.{name}")));
             }
             Value::Native(ref class) if class == "set" && name == "copy" => {
                 return Ok(self.builtin("set.copy"));

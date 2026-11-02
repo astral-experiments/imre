@@ -332,6 +332,29 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
+const FROZENSET_OPERATORS: &[&str] = &["__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__"];
+const SET_OPERATORS: &[&str] = &[
+    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__",
+    "__iand__", "__ior__", "__isub__",
+];
+
+pub(super) fn set_operators(owner: &str) -> &'static [&'static str] {
+    match owner {
+        "set" => SET_OPERATORS,
+        "frozenset" => FROZENSET_OPERATORS,
+        _ => &[],
+    }
+}
+
+pub(super) fn set_operator(method: &str) -> Option<&'static str> {
+    Some(match method {
+        "__and__" | "__rand__" | "__iand__" => "&",
+        "__or__" | "__ror__" | "__ior__" => "|",
+        "__sub__" | "__rsub__" | "__isub__" => "-",
+        _ => return None,
+    })
+}
+
 pub(super) const MEMORYVIEW_METHODS: &[&str] = &["release"];
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
@@ -542,6 +565,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
+        Value::Set { frozen: false, .. } if SET_OPERATORS.contains(&attr) => "set",
+        Value::Set { frozen: true, .. } if FROZENSET_OPERATORS.contains(&attr) => "frozenset",
         Value::Set { frozen: false, .. }
             if matches!(
                 attr,
@@ -1244,6 +1269,9 @@ pub(super) fn call(
                     )));
                 };
                 ctx.sequence_subscript(receiver, *key)
+            }
+            "set" | "frozenset" if set_operator(method).is_some() => {
+                collections::builtin_slot(ctx, name, args, kwargs)
             }
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)
