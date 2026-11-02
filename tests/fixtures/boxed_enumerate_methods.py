@@ -20,3 +20,29 @@ def current():
                 method(*args, **kwargs)
             except TypeError as error:
                 print(str(error))
+
+    data = {"first": 1, "last": 2}
+    for view in (data, data.keys(), data.values(), data.items()):
+        for start in (iter, reversed):
+            cursor = start(view)
+            step = cursor.__next__
+            assert cursor.__iter__() is cursor
+            for slot in (cursor.__iter__, type(cursor).__iter__, step, type(cursor).__next__):
+                assert slot.__text_signature__ == "($self, /)"
+                print(slot.__qualname__, slot.__doc__)
+            print(step(), type(cursor).__next__(cursor))
+            try:
+                step()
+            except StopIteration as error:
+                print(error.args)
+            else:
+                raise AssertionError("exhausted cursor produced another value")
+    cursor = iter(data)
+    step = cursor.__next__
+    data["new"] = 3
+    try:
+        step()
+    except RuntimeError as error:
+        print(error)
+    else:
+        raise AssertionError("saved cursor ignored a size change")
