@@ -517,7 +517,7 @@ impl Checker<'_> {
     }
 
     /// Keep both native layouts for a local that alternates between text and
-    /// a list of lines. The type hint selects storage; each assignment is still
+    /// bytes or a list of lines. The hint selects storage; each assignment is still
     /// checked and narrows subsequent uses to the member actually stored.
     pub(super) fn widen_reassigned_text(
         &mut self,
@@ -530,14 +530,21 @@ impl Checker<'_> {
             return Ok(());
         };
         let list = self.types.list(Type::Str);
-        if value.ty != list {
-            return Ok(());
-        }
+        let other = match (value.ty, rhs) {
+            (Type::Str, ast::Expr::StringLiteral(_)) => Type::Bytes,
+            (Type::Bytes, ast::Expr::BytesLiteral(_)) => Type::Str,
+            (ty, _) if ty == list => Type::Str,
+            _ => return Ok(()),
+        };
         // An annotation starts a new storage contract. A delete ends the
         // current binding, so neither can supply a layout for its predecessor.
-        let becomes_text = later.iter().find_map(|stmt| match stmt {
+        let changes_layout = later.iter().find_map(|stmt| match stmt {
             ast::Stmt::Assign(a) if matches!(a.targets.as_slice(), [ast::Expr::Name(n)] if n.id == name.id) => {
-                Some(self.graph.session.scalar_type(self.module, &a.value) == Some(Type::Str))
+                Some(if value.ty == list {
+                    self.graph.session.scalar_type(self.module, &a.value) == Some(other)
+                } else {
+                    matches!((other, a.value.as_ref()), (Type::Str, ast::Expr::StringLiteral(_)) | (Type::Bytes, ast::Expr::BytesLiteral(_)))
+                })
             }
             ast::Stmt::AnnAssign(a) if a.target.as_name_expr().is_some_and(|n| n.id == name.id) => Some(false),
             ast::Stmt::Delete(d) if d.targets.iter().any(|t| t.as_name_expr().is_some_and(|n| n.id == name.id)) => Some(false),
@@ -545,10 +552,10 @@ impl Checker<'_> {
         });
         // A walrus in the first RHS may already have emitted reads and writes
         // of this slot at its original type.
-        if becomes_text == Some(true)
+        if changes_layout == Some(true)
             && !narrowing::expression_assignments(rhs).contains(name.id.as_str())
         {
-            let union = self.types.union(&[Type::Str, list]).unwrap();
+            let union = self.types.union(&[value.ty, other]).unwrap();
             // Move the just-lowered RHS into the tagged value without cloning its IR.
             let original = std::mem::replace(value, self.local(*slot));
             *value = self.coerce(original, union, name)?;
