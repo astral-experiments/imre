@@ -1382,6 +1382,32 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "builtin_function_or_method" if method == "__reduce__" => {
+                let function = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                let name = ctx.lookup_attr(function, "__name__")?;
+                if let Value::Method { receiver, .. } = *ctx.heap.get(function)
+                    && !matches!(ctx.heap.get(receiver), Value::Module { .. })
+                {
+                    let scope = ctx.heap.current_scope();
+                    let builtins = if scope != NONE
+                        && let Some(globals) = ctx.scope_data(ctx.root_scope(scope)).exec_globals
+                    {
+                        globals.builtins
+                    } else {
+                        ctx.default_source_builtins()?
+                    };
+                    let getattr = ctx.load_exec_name(builtins, "getattr").map_err(|error| {
+                        if ctx.is_builtin_error(&error, "KeyError") {
+                            Error::new("AttributeError", "getattr")
+                        } else {
+                            error
+                        }
+                    })?;
+                    let args = ctx.alloc(Value::Tuple(vec![receiver, name]));
+                    return Ok(ctx.alloc(Value::Tuple(vec![getattr, args])));
+                }
+                Ok(name)
+            }
             "int" | "float" | "str" | "bytes" if method == "__new__" => {
                 let Some((&class, values)) = args.split_first() else {
                     return Err(type_error(format!("{name}(): not enough arguments")));
