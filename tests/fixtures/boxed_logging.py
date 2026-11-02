@@ -129,7 +129,10 @@ def check_root_records():
     logging.basicConfig(handlers=[handler], format="%(levelname)s %(message)s")
     try:
         logging.warning("less is %(less)s", {"less": "more"})
-        assert stream.writes == ["WARNING less is more\n"]
+        logging.info("below the default threshold")
+        logging.critical("disk %s", "full")
+        logging.log(logging.ERROR, "status %d", 7)
+        assert stream.writes == ["WARNING less is more\n", "CRITICAL disk full\n", "ERROR status 7\n"]
         try:
             raise ValueError("root failure")
         except ValueError:
