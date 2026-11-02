@@ -67,6 +67,7 @@ impl Pickler {
                     Value::None => self.out.push(b'N'),
                     Value::Bool(value) => encoding::boolean(&mut self.out, self.protocol, *value),
                     Value::Int(value) => encoding::int(&mut self.out, self.protocol, value)?,
+                    Value::Float(value) => encoding::float(&mut self.out, self.protocol, *value),
                     Value::Str(text) => {
                         encoding::string(&mut self.out, self.protocol, text)?;
                         self.remember(ctx, obj)?;
