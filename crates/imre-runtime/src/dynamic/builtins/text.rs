@@ -1512,6 +1512,7 @@ pub(super) fn method(
         "isdigit" => Some(crate::objects::python_isdigit),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
+        "istitle" => Some(|text| crate::objects::python_istitle(text.chars())),
         "isupper" => Some(crate::objects::python_isupper),
         _ => None,
     };
@@ -1543,6 +1544,14 @@ pub(super) fn method(
             return Ok(boolean(crate::objects::python_islower(
                 points.iter().copied().filter_map(char::from_u32),
             )));
+        }
+        if name == "istitle"
+            && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))
+        {
+            // A surrogate ends a cased run, just like the uncased replacement character.
+            return Ok(boolean(crate::objects::python_istitle(points.iter().map(
+                |&cp| char::from_u32(cp).unwrap_or(char::REPLACEMENT_CHARACTER),
+            ))));
         }
         return Ok(boolean(predicate(ctx.str_value(receiver)?)));
     }

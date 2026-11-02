@@ -9693,6 +9693,7 @@ impl<'a> Checker<'a> {
                     | "isdigit"
                     | "isspace"
                     | "islower"
+                    | "istitle"
                     | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {

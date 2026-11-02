@@ -320,6 +320,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "isdigit",
     "islower",
     "isspace",
+    "istitle",
     "isupper",
     "join",
     "lower",
