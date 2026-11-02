@@ -12,10 +12,10 @@ mod native_random;
 mod native_reader;
 mod native_writer;
 mod rwpair;
-pub(in crate::dynamic) use rwpair::deallocate_exact_pair;
 pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,
 };
+pub(in crate::dynamic) use rwpair::deallocate_exact_pair;
 mod bytes_io;
 mod bytes_writer;
 pub(in crate::dynamic) use bytes_writer::has_pending_callback_write;
@@ -261,11 +261,50 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
     }
 }
 
+/// Qualify a native I/O failure at its originating call, before a Python override can forward it.
+pub(in super::super) fn qualify_error(
+    ctx: &mut Context,
+    mut error: Error,
+    class: Option<Id>,
+) -> Error {
+    if error.kind == "UnsupportedOperation" && error.class().is_none() {
+        error.class = class.unwrap_or_else(|| ctx.builtin("UnsupportedOperation"));
+    }
+    error
+}
+
+/// Each low-level I/O module owns a mutable exception type with CPython's two bases.
+pub(in super::super) fn unsupported_operation(ctx: &mut Context) -> Id {
+    let scope = ctx.scope("io", None);
+    let module = ctx.text("io");
+    let name = ctx.text("UnsupportedOperation");
+    ctx.bind(scope, "__module__", module);
+    ctx.bind(scope, "__qualname__", name);
+    ctx.bind(scope, "__doc__", NONE);
+    let os_error = ctx.builtin("OSError");
+    let value_error = ctx.builtin("ValueError");
+    let class = ctx
+        .allocate_class(
+            "UnsupportedOperation".into(),
+            scope,
+            vec![os_error, value_error],
+        )
+        .expect("the standard I/O exception bases have a linearization");
+    ctx.install_weakref_descriptor(class, scope);
+    class
+}
+
 /// Construct a low-level module's native I/O classes before io.py declares its ABCs.
 pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_object: Id) {
     let text_encoding = ctx.builtin("_io.text_encoding");
     ctx.bind(module, "text_encoding", text_encoding);
-    let unsupported = ctx.builtin("UnsupportedOperation");
+    // Intrinsic file objects retain the initial module's exception and stream classes.
+    let initial = !ctx.builtins.contains_key("_io._IOBase");
+    let unsupported = if initial {
+        ctx.builtin("UnsupportedOperation")
+    } else {
+        unsupported_operation(ctx)
+    };
     ctx.bind(module, "UnsupportedOperation", unsupported);
     let size = ctx.int(DEFAULT_BUFFER_SIZE);
     ctx.bind(module, "DEFAULT_BUFFER_SIZE", size);
@@ -327,7 +366,13 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         unreachable!()
     };
     *io_kind = Some(NativeClass::Pair { reader, writer });
-    let random = class(ctx, module, "BufferedRandom", buffered, native_random::METHODS);
+    let random = class(
+        ctx,
+        module,
+        "BufferedRandom",
+        buffered,
+        native_random::METHODS,
+    );
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
     let text = class(
         ctx,
@@ -358,14 +403,17 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
             "line_buffering",
         ],
     );
-    // Native open and intrinsic file objects retain their initial _io classes.
-    let initial = !ctx.builtins.contains_key("_io._IOBase");
     let opener = if initial {
         ctx.builtins
             .insert("_io.open.__self__".into(), module_object);
         ctx.builtin("open")
     } else {
-        let callable = ctx.alloc(Value::IoOpen { reader, writer, random });
+        let callable = ctx.alloc(Value::IoOpen {
+            reader,
+            writer,
+            random,
+            unsupported,
+        });
         ctx.alloc(Value::Method {
             callable,
             receiver: module_object,
@@ -394,7 +442,12 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
 
 /// The native classes are immutable; Python I/O ABCs and user subclasses remain mutable.
 pub(in super::super) fn check_class_write(ctx: &Context, object: Id, attr: &str) -> Result<()> {
-    if let Value::Class { io_kind: Some(_), name, .. } = ctx.heap.get(object) {
+    if let Value::Class {
+        io_kind: Some(_),
+        name,
+        ..
+    } = ctx.heap.get(object)
+    {
         return Err(Error::new(
             "TypeError",
             format!("cannot set '{attr}' attribute of immutable type '_io.{name}'"),
@@ -445,8 +498,13 @@ fn class(
         NEWLINE_DECODER => newline_decoder::CLASS,
         _ => "_io._IOBase",
     };
+    let unsupported = ctx.scope_name(module, "UnsupportedOperation").unwrap();
     for &name in methods {
-        let method = ctx.alloc(Value::IoMethod { owner, name });
+        let method = ctx.alloc(Value::IoMethod {
+            owner,
+            name,
+            unsupported,
+        });
         let attr = if matches!(
             name,
             "closed" | "encoding" | "errors" | "line_buffering" | "newlines"
@@ -462,6 +520,7 @@ fn class(
                 ctx.alloc(Value::IoMethod {
                     owner,
                     name: "set_chunk_size",
+                    unsupported,
                 })
             });
             ctx.alloc(Value::GetSetDescriptor {
@@ -762,7 +821,10 @@ pub(in super::super) fn call(
     let Some((&receiver, rest)) = args.split_first() else {
         let message = match (descriptor, name) {
             (
-                Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")),
+                Some(
+                    class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair"
+                    | "BufferedRandom"),
+                ),
                 "__init__",
             ) => {
                 format!("descriptor '__init__' of '_io.{class}' object needs an argument")
@@ -786,7 +848,10 @@ pub(in super::super) fn call(
         let actual = ctx.type_name(receiver);
         let message = match (descriptor, name) {
             (
-                Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")),
+                Some(
+                    class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair"
+                    | "BufferedRandom"),
+                ),
                 "__init__",
             ) => {
                 format!(
@@ -815,8 +880,12 @@ pub(in super::super) fn call(
             return text_wrapper::next(ctx, receiver, receiver_class == owner, rest, kwargs);
         }
         Some("BufferedRandom") => return native_random::call(ctx, receiver, name, rest, kwargs),
-        Some("BufferedReader") => return native_reader::call(ctx, "BufferedReader", receiver, name, rest, kwargs),
-        Some("BufferedWriter") => return native_writer::call(ctx, "BufferedWriter", receiver, name, rest, kwargs),
+        Some("BufferedReader") => {
+            return native_reader::call(ctx, "BufferedReader", receiver, name, rest, kwargs);
+        }
+        Some("BufferedWriter") => {
+            return native_writer::call(ctx, "BufferedWriter", receiver, name, rest, kwargs);
+        }
         Some("BufferedRWPair") => return rwpair::call(ctx, owner, receiver, name, rest, kwargs),
         _ => {}
     }
@@ -849,7 +918,11 @@ pub(in super::super) fn call(
                 .and_then(|f| ctx.call(f, Vec::new(), Vec::new()))
             {
                 super::super::unraisable::report(
-                    ctx, error, true, Some(receiver), "Exception ignored while finalizing file",
+                    ctx,
+                    error,
+                    true,
+                    Some(receiver),
+                    "Exception ignored while finalizing file",
                 );
             }
         }

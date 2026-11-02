@@ -1225,7 +1225,10 @@ impl Types {
     }
 
     pub(crate) fn is_url_split_result(&self, ty: Type) -> bool {
-        matches!(self.tuple_origin(ty), Some(SPLIT_RESULT | SPLIT_RESULT_BYTES))
+        matches!(
+            self.tuple_origin(ty),
+            Some(SPLIT_RESULT | SPLIT_RESULT_BYTES)
+        )
     }
 
     pub(crate) fn tuple_origin(&self, ty: Type) -> Option<TupleOrigin> {

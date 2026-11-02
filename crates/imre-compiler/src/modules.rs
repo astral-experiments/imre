@@ -521,7 +521,10 @@ pub(crate) enum IntrinsicModule {
     PosixPath,
     Urllib,
     UrllibParse,
+    UrllibRequest,
+    UrllibError,
     Email,
+    EmailHeaderValueParser,
     EmailUtils,
     Collections,
     CollectionsNative,
@@ -573,7 +576,9 @@ pub(crate) enum Intrinsic {
     ContextToken,
     CopyContext,
     ModuleSpec,
-    CachePath { reverse: bool },
+    CachePath {
+        reverse: bool,
+    },
     NominalClass(&'static str),
     Number,
     GetAnnotations,
@@ -614,7 +619,9 @@ pub(crate) enum Intrinsic {
     HandlerLevelType,
     TextOutputType,
     HandlerFallback,
-    LevelMap { names: bool },
+    LevelMap {
+        names: bool,
+    },
     LogRecord,
     MakeLogRecord,
     LogFormatter,
@@ -642,7 +649,9 @@ pub(crate) enum Intrinsic {
     Linecache(crate::ir::LinecacheOperation),
     InspectGetattrStatic,
     InspectIsMethodDescriptor,
-    InspectCoroutine { mark: bool },
+    InspectCoroutine {
+        mark: bool,
+    },
     InspectSentinel,
     WrapperAttributes(WrapperAttributes),
     FunctionCache,
@@ -666,15 +675,21 @@ pub(crate) enum Intrinsic {
     Pipe,
     Devnull,
     CheckOutput,
-    ShellOutput { status: bool },
+    ShellOutput {
+        status: bool,
+    },
     NullContext,
     IntConstant(i64),
     WallTime,
     TimeSleep,
-    WarningFilter { simple: bool },
+    WarningFilter {
+        simple: bool,
+    },
     WarningReset,
     CatchWarnings,
-    WarningDisplay { show: bool },
+    WarningDisplay {
+        show: bool,
+    },
     PatchSet,
     PatchedFile,
     Hunk,
@@ -696,7 +711,9 @@ pub(crate) enum Intrinsic {
     SysVersion,
     SysHexversion,
     SysEncoding(SysEncoding),
-    SysIntern { query: bool },
+    SysIntern {
+        query: bool,
+    },
     SysException,
     SysGetFrameModuleName,
     SysGetRecursionLimit,
@@ -705,8 +722,13 @@ pub(crate) enum Intrinsic {
     Stdin,
     OsName,
     OsLinesep,
-    OsPathsep { posix: bool },
-    OsSeparator { alternate: bool, posix: bool },
+    OsPathsep {
+        posix: bool,
+    },
+    OsSeparator {
+        alternate: bool,
+        posix: bool,
+    },
     ErrnoAttribute,
     ErrnoFrom(usize),
     ModuleType,
@@ -722,7 +744,9 @@ pub(crate) enum Intrinsic {
     DocCaptureTake,
     DocDisplay,
     DocAscii,
-    MockCallList { mark: bool },
+    MockCallList {
+        mark: bool,
+    },
     DocExecute,
     Final,
     Argv,
@@ -764,10 +788,16 @@ pub(crate) enum Intrinsic {
     Sha256,
     NamedHash(&'static str),
     CodecInfoClass,
-    UnicodeNormalize { check: bool },
+    UnicodeNormalize {
+        check: bool,
+    },
     ObjectRuntimeExport(&'static str),
+    /// Bind the object provider when this export is used, after checking typed calls.
+    ScopedObjectExport(&'static str),
     WeakProxy,
-    WeakProxyClass { callable: bool },
+    WeakProxyClass {
+        callable: bool,
+    },
     CodecLookup,
     CodecGetWriter,
     CodecBom(&'static [u8]),
@@ -775,7 +805,9 @@ pub(crate) enum Intrinsic {
     HashFileDigest,
     HmacCompareDigest,
     SimpleNamespace,
-    HashAlgorithms { guaranteed: bool },
+    HashAlgorithms {
+        guaranteed: bool,
+    },
     ZipFile,
     ZipInfo,
     BytesIo,
@@ -851,7 +883,9 @@ pub(crate) enum Intrinsic {
     DestInSrc,
     IgnorePatterns,
     ShutilError,
-    RandomChoice { secure: bool },
+    RandomChoice {
+        secure: bool,
+    },
     Random(crate::ir::RandomOperation),
     SameFileError,
     SpecialFileError,
@@ -900,7 +934,9 @@ pub(crate) enum Intrinsic {
     EmailParseDate,
     EmailFormatDateTime,
     EmailFormatDate,
-    SplitResult { bytes: bool },
+    SplitResult {
+        bytes: bool,
+    },
 }
 
 impl Intrinsic {
@@ -1002,9 +1038,12 @@ impl IntrinsicModule {
             "genericpath" => Some(Self::GenericPath),
             "posixpath" => Some(Self::PosixPath),
             "email" => Some(Self::Email),
+            "email._header_value_parser" => Some(Self::EmailHeaderValueParser),
             "email.utils" => Some(Self::EmailUtils),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
+            "urllib.request" => Some(Self::UrllibRequest),
+            "urllib.error" => Some(Self::UrllibError),
             "importlib" => Some(Self::Importlib),
             "importlib.abc" => Some(Self::ImportlibAbc),
             "importlib._abc" => Some(Self::ImportlibLoaderAbc),
@@ -1118,11 +1157,20 @@ impl IntrinsicModule {
                 Self::JsonDecoder
             }));
         }
+        if self == Self::Email && name == "_header_value_parser" {
+            return Some(Binding::IntrinsicModule(Self::EmailHeaderValueParser));
+        }
         if self == Self::Email && name == "utils" {
             return Some(Binding::IntrinsicModule(Self::EmailUtils));
         }
-        if self == Self::Urllib && name == "parse" {
-            return Some(Binding::IntrinsicModule(Self::UrllibParse));
+        if self == Self::Urllib {
+            let child = match name {
+                "parse" => Self::UrllibParse,
+                "request" => Self::UrllibRequest,
+                "error" => Self::UrllibError,
+                _ => return None,
+            };
+            return Some(Binding::IntrinsicModule(child));
         }
         if self == Self::ImportlibAbc && name == "machinery" {
             return Some(Binding::IntrinsicModule(Self::ImportlibMachinery));
@@ -1518,6 +1566,7 @@ impl IntrinsicModule {
             }
             (Self::Contextlib, "suppress") => Intrinsic::ObjectRuntimeExport("contextlib.suppress"),
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
+            (Self::Warnings, "warn") => Intrinsic::ObjectRuntimeExport("warnings.warn"),
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
             (Self::Warnings, "catch_warnings") => Intrinsic::CatchWarnings,
@@ -1799,6 +1848,9 @@ impl IntrinsicModule {
             }
             (Self::Typing, "ParamSpecKwargs") => {
                 Intrinsic::ObjectRuntimeExport("typing.ParamSpecKwargs")
+            }
+            (Self::Typing, "TypeAliasType") => {
+                Intrinsic::ObjectRuntimeExport("typing.TypeAliasType")
             }
             (Self::Typing, "TypeVarTuple") => Intrinsic::ObjectRuntimeExport("typing.TypeVarTuple"),
             (Self::Typing, "Unpack") => Intrinsic::ObjectRuntimeExport("typing.Unpack"),
@@ -2214,7 +2266,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("io.open_code")
             }
             (Self::Io, "BufferedRandom") => Intrinsic::ObjectRuntimeExport("io.BufferedRandom"),
-            (Self::IoNative, "BufferedRandom") => Intrinsic::ObjectRuntimeExport("_io.BufferedRandom"),
+            (Self::IoNative, "BufferedRandom") => {
+                Intrinsic::ObjectRuntimeExport("_io.BufferedRandom")
+            }
             (Self::Io, "BufferedReader") => Intrinsic::ObjectRuntimeExport("io.BufferedReader"),
             (Self::IoNative, "BufferedReader") => {
                 Intrinsic::ObjectRuntimeExport("_io.BufferedReader")
@@ -2256,7 +2310,9 @@ impl IntrinsicModule {
             (Self::Re, "findall") => Intrinsic::ObjectRuntimeExport("re.findall"),
             (Self::Re, "finditer") => Intrinsic::ObjectRuntimeExport("re.finditer"),
             (Self::Re, "Scanner") => Intrinsic::ObjectRuntimeExport("re.Scanner"),
+            (Self::Re, "split") => Intrinsic::ObjectRuntimeExport("re.split"),
             (Self::Re, "sub") => Intrinsic::RegexSub,
+            (Self::Re, "subn") => Intrinsic::ObjectRuntimeExport("re.subn"),
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
             (Self::Re, "UNICODE") => Intrinsic::RegexUnicode,
             (Self::Re, "Pattern") => Intrinsic::RegexPattern,
@@ -2265,8 +2321,12 @@ impl IntrinsicModule {
             (Self::Enum, "IntEnum") => Intrinsic::IntEnum,
             (Self::Enum, "IntFlag") => Intrinsic::ObjectRuntimeExport("enum.IntFlag"),
             (Self::Enum, "global_enum") => Intrinsic::ObjectRuntimeExport("enum.global_enum"),
-            (Self::Enum, "global_enum_repr") => Intrinsic::ObjectRuntimeExport("enum.global_enum_repr"),
-            (Self::Enum, "global_flag_repr") => Intrinsic::ObjectRuntimeExport("enum.global_flag_repr"),
+            (Self::Enum, "global_enum_repr") => {
+                Intrinsic::ObjectRuntimeExport("enum.global_enum_repr")
+            }
+            (Self::Enum, "global_flag_repr") => {
+                Intrinsic::ObjectRuntimeExport("enum.global_flag_repr")
+            }
             (Self::Enum, "global_str") => Intrinsic::ObjectRuntimeExport("enum.global_str"),
             (Self::Enum, "_simple_enum") => Intrinsic::SimpleEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
@@ -2328,6 +2388,9 @@ impl IntrinsicModule {
             (Self::Zlib, "decompress") => Intrinsic::ObjectRuntimeExport("zlib.decompress"),
             (Self::Zlib, "crc32") => Intrinsic::ObjectRuntimeExport("zlib.crc32"),
             (Self::ImreJson, "decode") => Intrinsic::JsonDecode,
+            (Self::JsonNative, "make_scanner") => {
+                Intrinsic::ObjectRuntimeExport("_json.make_scanner")
+            }
             (Self::JsonNative, "scanstring") => Intrinsic::ObjectRuntimeExport("_json.scanstring"),
             (Self::JsonNative, "encode_basestring") => {
                 Intrinsic::ObjectRuntimeExport("_json.encode_basestring")
@@ -2370,7 +2433,9 @@ impl IntrinsicModule {
             (Self::Fcntl, "F_SETPIPE_SZ") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETPIPE_SZ"),
             (Self::Resource, "getrlimit") => Intrinsic::ObjectRuntimeExport("resource.getrlimit"),
             (Self::Resource, "setrlimit") => Intrinsic::ObjectRuntimeExport("resource.setrlimit"),
-            (Self::Resource, "RLIMIT_CORE") => Intrinsic::ObjectRuntimeExport("resource.RLIMIT_CORE"),
+            (Self::Resource, "RLIMIT_CORE") => {
+                Intrinsic::ObjectRuntimeExport("resource.RLIMIT_CORE")
+            }
             (Self::Resource, "RLIMIT_STACK") => {
                 Intrinsic::ObjectRuntimeExport("resource.RLIMIT_STACK")
             }
@@ -2489,6 +2554,33 @@ impl IntrinsicModule {
             (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
+            (Self::UrllibRequest, "Request") => {
+                Intrinsic::ScopedObjectExport("urllib.request.Request")
+            }
+            (Self::UrllibRequest, "urlopen") => {
+                Intrinsic::ScopedObjectExport("urllib.request.urlopen")
+            }
+            (Self::UrllibRequest, "urlretrieve") => {
+                Intrinsic::ScopedObjectExport("urllib.request.urlretrieve")
+            }
+            (Self::UrllibRequest, "urlcleanup") => {
+                Intrinsic::ScopedObjectExport("urllib.request.urlcleanup")
+            }
+            (Self::UrllibRequest, "build_opener") => {
+                Intrinsic::ScopedObjectExport("urllib.request.build_opener")
+            }
+            (Self::UrllibRequest, "install_opener") => {
+                Intrinsic::ScopedObjectExport("urllib.request.install_opener")
+            }
+            (Self::UrllibError, "URLError") => {
+                Intrinsic::ScopedObjectExport("urllib.error.URLError")
+            }
+            (Self::UrllibError, "HTTPError") => {
+                Intrinsic::ScopedObjectExport("urllib.error.HTTPError")
+            }
+            (Self::UrllibError, "ContentTooShortError") => {
+                Intrinsic::ScopedObjectExport("urllib.error.ContentTooShortError")
+            }
             (Self::UrllibParse, "uses_relative") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.uses_relative")
             }
@@ -2508,6 +2600,12 @@ impl IntrinsicModule {
             }
             (Self::UrllibParse, "unquote_plus") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.unquote_plus")
+            }
+            (Self::EmailHeaderValueParser, "get_addr_spec") => {
+                Intrinsic::ObjectRuntimeExport("email._header_value_parser.get_addr_spec")
+            }
+            (Self::EmailHeaderValueParser, "get_angle_addr") => {
+                Intrinsic::ObjectRuntimeExport("email._header_value_parser.get_angle_addr")
             }
             (Self::EmailUtils, "parsedate_to_datetime") => Intrinsic::EmailParseDate,
             (Self::EmailUtils, "format_datetime") => Intrinsic::EmailFormatDateTime,
@@ -2599,7 +2697,9 @@ impl IntrinsicModule {
             (Self::UrllibParse, "clear_cache") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.clear_cache")
             }
-            (Self::UrllibParse, "urlparse") => Intrinsic::ObjectRuntimeExport("urllib.parse.urlparse"),
+            (Self::UrllibParse, "urlparse") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.urlparse")
+            }
             (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
             (Self::UrllibParse, "urlunsplit") => Intrinsic::UrlUnsplit,
             (Self::UrllibParse, "SplitResult") => Intrinsic::SplitResult { bytes: false },
@@ -2771,6 +2871,32 @@ impl SourceGraph {
                         | Binding::IntrinsicModule(IntrinsicModule::Imre)
                 )
             })
+        })
+    }
+
+    pub(crate) fn boxed_pattern_method(
+        &self,
+        module: usize,
+        expr: &ast::Expr,
+    ) -> Option<&'static str> {
+        let attr = expr.as_attribute_expr()?;
+        let method = match attr.attr.as_str() {
+            "split" => "re.Pattern.split",
+            "subn" => "re.Pattern.subn",
+            _ => return None,
+        };
+        self.session
+            .is_regex_pattern(module, &attr.value)
+            .then_some(method)
+    }
+
+    /// A pattern created in an imported helper can reach a boxed method in another module.
+    pub(crate) fn uses_boxed_pattern_method(&self) -> bool {
+        self.modules.iter().enumerate().any(|(id, module)| {
+            !module.bundled
+                && ast::helpers::any_over_body(&module.parsed.syntax().body, |expr| {
+                    self.boxed_pattern_method(id, expr).is_some()
+                })
         })
     }
 
@@ -4491,6 +4617,7 @@ impl<'a> Loader<'a> {
                         })?;
                         if binding
                             == Binding::Intrinsic(Intrinsic::Fnmatch(FnmatchOperation::Parts))
+                            || module == IntrinsicModule::EmailHeaderValueParser
                         {
                             self.checked_builtin_imports.push((id, alias.range()));
                         }
@@ -4519,9 +4646,11 @@ impl<'a> Loader<'a> {
                         // A Sequence annotation keeps its typed list contract; value uses request boxing.
                         self.needs_object_imports |= !matches!(
                             module,
-                            IntrinsicModule::Marshal
+                            IntrinsicModule::EmailHeaderValueParser
+                                | IntrinsicModule::Marshal
                                 | IntrinsicModule::Pickle
                                 | IntrinsicModule::Struct
+                                | IntrinsicModule::Warnings
                                 | IntrinsicModule::ImportlibReaders
                                 | IntrinsicModule::ImportlibResourceReaders
                                 | IntrinsicModule::ImportlibResources

@@ -166,7 +166,11 @@ impl Calendar {
 
     /// Format the stored fixed UTC offset for %z or %:z.
     pub(crate) fn strftime_offset(&self, colon: bool) -> String {
-        let text = offset_text(offset(&self.0));
+        Self::format_utc_offset(offset(&self.0), colon)
+    }
+
+    pub(crate) fn format_utc_offset(micros: i128, colon: bool) -> String {
+        let text = offset_text(micros);
         if colon { text } else { text.replace(':', "") }
     }
 
@@ -199,6 +203,13 @@ impl Calendar {
         })
     }
 
+    pub(crate) fn wall_microseconds(&self) -> i128 {
+        with(&self.0, |value| match value {
+            Value::Date { local, .. } | Value::Time { local, .. } => *local,
+            _ => unreachable!(),
+        })
+    }
+
     pub(crate) fn clock_parts(&self) -> [i64; 5] {
         clock_parts(&self.0)
     }
@@ -214,6 +225,23 @@ impl Calendar {
 
     pub(crate) fn datetime(fields: [i32; 8], zone: Option<&Self>) -> Result<Self, Error> {
         datetime_from_fields(fields, zone.map(|z| z.0.clone())).map(Self)
+    }
+
+    /// Preserve the civil fields while replacing their native fixed timezone.
+    pub(crate) fn with_datetime_zone(&self, zone: Option<&Self>) -> Result<Self, Error> {
+        with(&self.0, |value| match value {
+            Value::Date { local, fold, .. } => try_owner(Value::Date {
+                local: *local,
+                fold: *fold,
+                zone: zone.map(|zone| zone.0.clone()),
+            })
+            .map(Self),
+            _ => unreachable!(),
+        })
+    }
+
+    pub(crate) fn timestamp_with_offset(&self, offset: i128) -> f64 {
+        total_seconds(self.wall_microseconds() - (EPOCH_ORD - 1) * DAY - offset)
     }
 
     pub(crate) fn timestamp(&self) -> Result<f64, Error> {
@@ -325,11 +353,22 @@ impl Calendar {
         parts(delta(&self.0))
     }
 
+    /// CPython hashes an aware clock as a duration, counting January 1 of year 1 as day one.
+    pub(crate) fn clock_hash_parts(&self, offset: i128) -> (i128, i128, i128) {
+        let origin = if self.class() == "datetime" { DAY } else { 0 };
+        parts(self.wall_microseconds() + origin - offset)
+    }
+
     /// Timedeltas, zones and aware datetimes hash as their normalized duration.
     pub(crate) fn hash_delta_parts(&self) -> Option<(i128, i128, i128)> {
         with(&self.0, |v| match v {
             Value::Delta(n) => Some(parts(*n)),
             Value::Zone { offset, .. } => Some(parts(delta(offset))),
+            Value::Time {
+                local,
+                zone: Some(zone),
+                ..
+            } => Some(parts(local - offset(zone))),
             Value::Date {
                 local,
                 zone: Some(zone),

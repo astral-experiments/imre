@@ -41,7 +41,12 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             ctx.builtin("object")
         }
         Value::Class { .. } | Value::Native(_) => object,
-        Value::Count { .. } | Value::Repeat(_) => ctx.exact_type(object)?,
+        Value::Count { .. }
+        | Value::Repeat(_)
+        | Value::Dict(_)
+        | Value::List(_)
+        | Value::Str(_)
+        | Value::SurrogateStr(_) => ctx.exact_type(object)?,
         Value::NamedTuple {
             class: Some(class), ..
         } if crate::dynamic::stdlib::os::stat::layout(class).is_some()
@@ -120,6 +125,55 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             );
             names.extend(["__class__".to_owned(), "__doc__".to_owned()]);
         }
+        Value::Native(name) if matches!(name.as_str(), "dict" | "list" | "str") => {
+            class_names(ctx, ctx.builtins["object"], names)?;
+            let (methods, slots): (&[&str], &[&str]) = match name.as_str() {
+                "dict" => (
+                    super::DICT_METHODS,
+                    &["__class_getitem__", "__or__", "__reversed__", "__ror__"],
+                ),
+                "list" => (
+                    super::LIST_METHODS,
+                    &[
+                        "__class_getitem__",
+                        "__contains__",
+                        "__delitem__",
+                        "__getitem__",
+                        "__imul__",
+                        "__iter__",
+                        "__len__",
+                        "__mul__",
+                        "__reversed__",
+                        "__rmul__",
+                        "__setitem__",
+                    ],
+                ),
+                _ => {
+                    // Passive attribute lookup in the compiler uses the same public str names.
+                    names.extend(
+                        include_str!("../../../native/str-method-names.txt")
+                            .split_ascii_whitespace()
+                            .map(str::to_owned),
+                    );
+                    (
+                        &[],
+                        &[
+                            "__add__",
+                            "__contains__",
+                            "__getitem__",
+                            "__getnewargs__",
+                            "__iter__",
+                            "__len__",
+                            "__mod__",
+                            "__mul__",
+                            "__rmod__",
+                            "__rmul__",
+                        ],
+                    )
+                }
+            };
+            names.extend(methods.iter().chain(slots).map(|&name| name.to_owned()));
+        }
         Value::Class {
             name: owner, scope, ..
         } => {
@@ -137,7 +191,8 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     ["__firstlineno__", "__static_attributes__", "__module__"].map(str::to_owned),
                 );
             }
-            if let Some(annotations) = ctx.namespace_binding(ctx.scope_data(scope_id), "__annotations__")
+            if let Some(annotations) =
+                ctx.namespace_binding(ctx.scope_data(scope_id), "__annotations__")
                 && ctx
                     .dict_entries(annotations)
                     .is_none_or(|entries| !entries.is_empty())
@@ -174,7 +229,10 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
         }
         Value::Native(_) if let Some(&dictionary) = ctx.native_type_dicts.get(&class) => {
             class_names(ctx, ctx.builtins["object"], names)?;
-            for &(key, _) in ctx.dict_entries(dictionary).expect("native class dictionary") {
+            for &(key, _) in ctx
+                .dict_entries(dictionary)
+                .expect("native class dictionary")
+            {
                 names.insert(ctx.str_value(key)?.to_owned());
             }
         }

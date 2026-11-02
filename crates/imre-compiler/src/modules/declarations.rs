@@ -31,7 +31,6 @@ pub(super) fn symbol(owner: IntrinsicModule, name: &str) -> Option<Binding> {
         (M::Declaration("email.message"), "Message") => "email.message.Message",
         (M::Declaration("email.parser"), "FeedParser") => "email.parser.FeedParser",
         (M::Declaration("email.policy"), "compat32") => "email.policy.compat32",
-        (M::Warnings, "warn") => "warnings.warn",
         _ => return None,
     };
     Some(Binding::Intrinsic(Intrinsic::Declaration(symbol)))

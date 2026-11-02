@@ -445,6 +445,14 @@ def make(events):
     assert events == ["outer", 1, 3]
 
 
+def source_listcomp():
+    item = []
+    local = {"groups": [[item, item], []], "item": "outside"}
+    result = eval("[item for group in groups for item in group if item is not None]", {}, local)
+    assert len(result) == 2 and result[0] is result[1] is item
+    assert local["item"] == "outside" and "group" not in local
+
+
 def source_setcomp():
     namespace = {}
     exec("""
@@ -787,6 +795,7 @@ def current():
     named_bindings()
     source_annotations()
     source_genexpr()
+    source_listcomp()
     source_setcomp()
     source_match()
     check_scope_directives()
