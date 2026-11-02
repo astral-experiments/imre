@@ -2600,11 +2600,18 @@ impl<'a> Checker<'a> {
     ) -> Option<&'static str> {
         let operation = matches!(
             attribute.attr.as_str(),
-            "__and__" | "__rand__" | "__or__" | "__ror__" | "__sub__" | "__rsub__"
+            "__and__"
+                | "__rand__"
+                | "__or__"
+                | "__ror__"
+                | "__sub__"
+                | "__rsub__"
+                | "__xor__"
+                | "__rxor__"
         );
         let name = match attribute.attr.as_str() {
             _ if operation => "set binary operator",
-            "__iand__" | "__ior__" | "__isub__" => "set in-place operator",
+            "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
             "union" => "set.union",
             "difference_update" => "set.difference_update",
             "remove" => "set.remove",
@@ -6035,6 +6042,13 @@ impl<'a> Checker<'a> {
         right: Type,
         node: &impl Ranged,
     ) -> Result<(Binary, Type), String> {
+        if op == ast::Operator::BitXor
+            && [left, right]
+                .into_iter()
+                .any(|ty| matches!(ty, Type::Set(_) | Type::FrozenStrings))
+        {
+            return Err(self.object_builtin_error("set binary operator", node));
+        }
         let bitwise = match op {
             ast::Operator::BitAnd => Some(Binary::BitAnd),
             ast::Operator::BitOr => Some(Binary::BitOr),

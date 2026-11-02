@@ -222,6 +222,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/code.py and Lib/codeop.py. See stdlib/docstrings/LICENSE.
         "code" => Some(("code.py", include_str!("../stdlib/code.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
+        "encodings" => Some((
+            "encodings/__init__.py",
+            include_str!("../stdlib/encodings/__init__.py"),
+        )),
         "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
         "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
@@ -787,7 +791,6 @@ pub(crate) enum Intrinsic {
     Sha1,
     Sha256,
     NamedHash(&'static str),
-    CodecInfoClass,
     UnicodeNormalize {
         check: bool,
     },
@@ -1234,6 +1237,16 @@ impl IntrinsicModule {
             }
             (Self::CodecsNative, "escape_decode") => {
                 Intrinsic::ObjectRuntimeExport("_codecs.escape_decode")
+            }
+            (Self::Codecs | Self::CodecsNative, "register") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.register")
+            }
+            (Self::Codecs | Self::CodecsNative, "unregister") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.unregister")
+            }
+            (Self::CodecsNative, "lookup") => Intrinsic::ObjectRuntimeExport("_codecs.lookup"),
+            (Self::CodecsNative, "_imre_native_search") => {
+                Intrinsic::ObjectRuntimeExport("_codecs._imre_native_search")
             }
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
             (Self::Pickle, "Pickler") => Intrinsic::PICKLER,
@@ -1934,7 +1947,7 @@ impl IntrinsicModule {
             (Self::Codecs, "IncrementalDecoder") => {
                 Intrinsic::ObjectRuntimeExport("codecs.IncrementalDecoder")
             }
-            (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Codecs, "CodecInfo") => Intrinsic::ObjectRuntimeExport("codecs.CodecInfo"),
             (Self::Threading, "_RLock") => Intrinsic::ObjectRuntimeExport("threading._RLock"),
             (Self::Threading, "_PyRLock") => Intrinsic::ObjectRuntimeExport("threading._PyRLock"),
             (Self::Threading, "_CRLock") => Intrinsic::ObjectRuntimeExport("threading._CRLock"),

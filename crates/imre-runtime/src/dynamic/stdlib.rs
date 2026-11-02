@@ -441,9 +441,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
-        ("codecs" | "_codecs", "encode" | "escape_decode" | "utf_16_ex_decode") => {
-            ctx.builtin(&format!("codecs.{name}"))
-        }
+        (
+            "codecs" | "_codecs",
+            "encode" | "decode" | "register" | "unregister" | "lookup" | "escape_decode"
+            | "utf_16_ex_decode",
+        ) => ctx.builtin(&format!("codecs.{name}")),
+        ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan" | "isqrt") => {
             ctx.builtin(&format!("math.{name}"))
@@ -788,7 +791,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
         | ("random", "random" | "choice" | "shuffle")
-        | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
+        | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
         | ("pickle", "dumps")
@@ -2091,12 +2094,16 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("time.") {
         return time::call(ctx, method, args, kwargs);
     }
+    if name == "encodings.search_function" {
+        return codecs::native_search(ctx, args, kwargs);
+    }
     if let Some(function) = name.strip_prefix("codecs.") {
         return match function {
             "encode" | "decode" => codecs::transform(ctx, function, args, kwargs),
             "escape_decode" => codecs::escape_decode(ctx, args, kwargs),
             "utf_16_ex_decode" => codecs::utf16_extended(ctx, args, kwargs),
             "lookup" => codecs::lookup(ctx, args, kwargs),
+            "register" | "unregister" => codecs::search_registry(ctx, function, args, kwargs),
             "register_error" | "lookup_error" => {
                 codecs::error_registry(ctx, function, args, kwargs)
             }

@@ -3129,6 +3129,11 @@ impl Context {
                 let member = self.alloc(Value::SlotMember { owner, name });
                 self.bind(scope, "_batched_state", member);
             }
+            if name == "codecs"
+                && let Some(class) = self.scope_name(scope, "CodecInfo")
+            {
+                self.classes.insert("codecs.CodecInfo".into(), class);
+            }
             if name == "re"
                 && let Some(class) = self.scope_name(scope, "PatternError")
             {

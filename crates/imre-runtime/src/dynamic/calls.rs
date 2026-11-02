@@ -27,6 +27,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     let (module, function) = symbol.split_once('.')?;
     match module {
         "_typing" if function == "_idfunc" => Some((module, function)),
+        "encodings" if function == "search_function" => Some((module, function)),
         "posix"
             if !function.contains('.')
                 && !matches!(
@@ -41,7 +42,18 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "functools" if matches!(function, "cmp_to_key" | "reduce") => {
             Some(("_functools", function))
         }
-        "codecs" if matches!(function, "encode" | "escape_decode" | "utf_16_ex_decode") => {
+        "codecs"
+            if matches!(
+                function,
+                "encode"
+                    | "decode"
+                    | "register"
+                    | "unregister"
+                    | "lookup"
+                    | "escape_decode"
+                    | "utf_16_ex_decode"
+            ) =>
+        {
             Some(("_codecs", function))
         }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
@@ -723,6 +735,7 @@ impl Context {
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
+                | Value::CodecEncoder(_)
                 | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
                 | Value::IoOpen { .. }
@@ -1315,6 +1328,7 @@ impl Context {
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
             Value::Instance { class, .. }
+            | Value::CodecInfo { class, .. }
             | Value::Class {
                 metaclass: Some(class),
                 ..
@@ -3303,9 +3317,12 @@ impl Context {
             }
             Value::CodecInfo {
                 ref entry,
+                encode,
                 decode,
                 text_encoding_override,
+                ..
             } => match name {
+                "encode" => return Ok(encode),
                 "_is_text_encoding" => return Ok(text_encoding_override.unwrap_or(TRUE)),
                 "name" => return Ok(self.text(entry.codec().name())),
                 "decode" => return Ok(decode),
@@ -5550,6 +5567,7 @@ impl Context {
                     object: Some(object),
                 }))
             }
+            Value::CodecEncoder(codec) => stdlib::codecs::entry_encode(self, codec, &args, &kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::IoOpen {
                 reader,
