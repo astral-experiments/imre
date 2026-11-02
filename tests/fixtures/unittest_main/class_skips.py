@@ -35,6 +35,8 @@ class OverriddenCase(PlatformCase):
 
 @unittest.skipUnless(True, reason("also unused"))
 class OrdinaryCase(unittest.TestCase):
+    @unittest.skipUnless(True, "enabled")
+    @unittest.skipIf(False, "available")
     def test_runs(self) -> None:
         print("ran ordinary case")
 
