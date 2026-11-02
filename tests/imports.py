@@ -370,6 +370,11 @@ REJECTED = {
         "_operator.py": HELPER,
     }, 'shadowing is unsupported: "_operator"'),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
+    "ntpath_shadow": ({
+        "main.py": "from helper import parts\nprint(parts())\n",
+        "helper.py": "import ntpath\ndef parts(): return ntpath.splitdrive('C:/a')\n",
+        "ntpath.py": HELPER,
+    }, 'shadowing is unsupported: "ntpath"'),
     "token_shadow": ({"main.py": "import token\n", "token.py": HELPER}, 'shadowing is unsupported: "token"'),
     "email_address_parser_unknown_name": ({
         "main.py": "from email._header_value_parser import missing_parser\n",
@@ -530,6 +535,15 @@ ACCEPTED = {
             "print(available is after.sys, missing is None)\n"
         ),
         "after.py": "import sys\nprint('after')\n",
+    },
+    "ntpath_indirect": {
+        "main.py": "from helper import paths\nprint(paths())\n",
+        "helper.py": (
+            "import ntpath\n"
+            "from ntpath import splitdrive\n"
+            "def paths():\n"
+            "    return ntpath.__name__, splitdrive('C:/base'), ntpath.join('C:', 'a', 'b')\n"
+        ),
     },
     "optional_import_in_dependency": {
         "helper.py": (
