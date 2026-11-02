@@ -655,6 +655,7 @@ impl BufferedFd {
             "peek" => {
                 let data = match buffer {
                     Buffer::Reader(reader) => crate::objects::peek_bytes(reader)?,
+                    Buffer::Random(reader) => crate::objects::peek_bytes(reader)?,
                     Buffer::Pipe(pipe) => pipe.peek()?,
                     Buffer::Writer(_) => unreachable!("peek requires a buffered reader"),
                 };
