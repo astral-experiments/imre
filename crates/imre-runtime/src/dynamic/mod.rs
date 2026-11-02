@@ -2785,7 +2785,8 @@ impl Context {
             #[cfg(target_os = "linux")]
             stdlib::posix_spawn::initialize(self, scope, posix)?;
             for attr in [
-                "chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups", "getpgrp",
+                "fchdir", "chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups",
+                "getpgrp",
             ] {
                 let value = match posix {
                     Some(posix) => match self.lookup_attr(posix, attr) {

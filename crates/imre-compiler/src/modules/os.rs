@@ -115,6 +115,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "umask" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.umask"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
         "chdir" if cfg!(unix) => Intrinsic::Chdir,
+        "fchdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fchdir"),
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
         "fchmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fchmod"),
         "chown" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chown"),
