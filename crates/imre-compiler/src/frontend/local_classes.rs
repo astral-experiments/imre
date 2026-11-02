@@ -123,6 +123,11 @@ impl Checker<'_> {
                     }
                     self.fixed_class_attributes(id)
                 } else {
+                    if let Some(crate::modules::Binding::Intrinsic(kind)) = self.resolve(base)
+                        && kind.is_subclassable_calendar()
+                    {
+                        return Err(self.object_runtime_export("calendar subclasses", base));
+                    }
                     return Err(error(
                         self.source,
                         base,
