@@ -775,6 +775,12 @@ ACCEPTED = {
             "    assert package is import_module(name) and package.__spec__ is spec\n"
             "    assert spec.loader is package.__loader__ and type(spec.loader) is zipimport.zipimporter\n"
             "    assert spec.submodule_search_locations is package.__path__\n"
+            "    from importlib.readers import ZipReader\n"
+            "    reader = spec.loader.get_resource_reader(name)\n"
+            "    assert isinstance(reader, ZipReader) and reader.prefix == name + '/'\n"
+            "    leaf = import_module(name + '.leaf')\n"
+            "    adjacent = leaf.__loader__.get_resource_reader(leaf.__name__)\n"
+            "    assert adjacent.archive == reader.archive and adjacent.prefix == reader.prefix\n"
             "    print(seen, spec.loader.get_data(package.__path__[0] + '/message.txt'))\n"
             "finder = spec.loader\n"
             "with open(finder.archive, \"rb\") as archive:\n"
@@ -1185,6 +1191,7 @@ def main() -> None:
                 for pkg, method in [("stored", ZIP_STORED), ("deflated", ZIP_DEFLATED)]:
                     with ZipFile(case / f"{pkg}.zip", "w", compression=method) as archive:
                         archive.writestr(f"{pkg}/__init__.py", "# coding: (ordinary comment)\nfrom witness import seen\nseen.append(__name__)\n")
+                        archive.writestr(f"{pkg}/leaf.py", "")
                         archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
