@@ -118,6 +118,14 @@ class _patch:
             self.is_started = False
 
     def __call__(self, func):
+        if isinstance(func, type):
+            for name in dir(func):
+                if name.startswith(patch.TEST_PREFIX):
+                    method = getattr(func, name)
+                    if hasattr(method, '__call__'):
+                        patcher = _patch(self.getter, self.attribute, self.new, self.create)
+                        setattr(func, name, patcher(method))
+            return func
         if hasattr(func, 'patchings'):
             func.patchings.append(self)
             return func

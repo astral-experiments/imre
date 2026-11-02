@@ -111,4 +111,37 @@ with patch.object(owner, "additional", create=True) as created:
     assert owner.additional is created
 assert not hasattr(owner, "additional")
 
+class PatchBase:
+    def test_inherited(self):
+        return sys.stdout
+
+
+class PatchTests(PatchBase):
+    test_data = 123
+
+    def test_nested(self):
+        return self.test_inherited()
+
+    def other(self):
+        return sys.stdout
+
+
+assert patch.object(sys, "stdout", original_stderr)(PatchTests) is PatchTests
+case = PatchTests()
+assert case.test_nested() is original_stderr and sys.stdout is original_stdout
+assert case.test_inherited() is original_stderr and case.other() is original_stdout
+assert case.test_data == 123 and PatchBase().test_inherited() is original_stdout
+assert patch.TEST_PREFIX == "test"
+patch.TEST_PREFIX = "check"
+try:
+    @patch("sys.stdout", original_stderr)
+    class CustomPrefix(PatchBase):
+        def check_output(self):
+            return sys.stdout
+
+    assert CustomPrefix().check_output() is original_stderr
+    assert CustomPrefix().test_inherited() is original_stdout
+finally:
+    patch.TEST_PREFIX = "test"
+
 print("patch restored")
