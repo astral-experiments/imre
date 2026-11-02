@@ -2,6 +2,7 @@ use std::cell::OnceCell;
 use std::fmt::Write;
 use std::rc::Rc;
 
+use num_traits::ToPrimitive;
 use regex_automata::{Anchored, Input, PatternID, Span, meta::Regex, util::captures::Captures};
 
 use super::{Context, Error, Id, NONE, Result, Value, argument};
@@ -31,7 +32,10 @@ const MULTILINE: i64 = 8;
 const DOTALL: i64 = 16;
 const UNICODE: i64 = 32;
 const VERBOSE: i64 = 64;
+const DEBUG: i64 = 128;
 const ASCII: i64 = 256;
+const KNOWN_FLAGS: i64 =
+    IGNORECASE | LOCALE | MULTILINE | DOTALL | UNICODE | VERBOSE | DEBUG | ASCII;
 
 // Declaration order is also the order used by the module-qualified flag repr.
 const FLAGS: &[(&str, &str, i64)] = &[
@@ -43,7 +47,7 @@ const FLAGS: &[(&str, &str, i64)] = &[
     ("MULTILINE", "M", MULTILINE),
     ("DOTALL", "S", DOTALL),
     ("VERBOSE", "X", VERBOSE),
-    ("DEBUG", "", 128),
+    ("DEBUG", "", DEBUG),
 ];
 
 pub(super) fn is_flag_attribute(name: &str) -> bool {
@@ -176,12 +180,15 @@ impl Pattern {
                 .filter(|(_, _, flag)| flags & flag != 0)
                 .collect();
             names.sort_unstable_by_key(|(_, _, flag)| flag);
-            let flags = names
+            let mut labels = names
                 .into_iter()
                 .map(|(name, _, _)| format!("re.{name}"))
-                .collect::<Vec<_>>()
-                .join("|");
-            format!("re.compile({source}, {flags})")
+                .collect::<Vec<_>>();
+            let remaining = (flags & !KNOWN_FLAGS) as u32;
+            if remaining != 0 {
+                labels.push(format!("0x{remaining:x}"));
+            }
+            format!("re.compile({source}, {})", labels.join("|"))
         }
     }
 
@@ -716,12 +723,13 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
 }
 
 fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
-    let flags = flags
-        .map(|value| ctx.as_integer(value))
+    let number = flags
+        .map(|value| ctx.as_int(value))
         .transpose()?
-        .unwrap_or(0);
+        .unwrap_or_else(|| 0.into());
+    let integer = number.to_i64();
     if matches!(ctx.heap.get(id), Value::RegexPattern(_)) {
-        if flags != 0 {
+        if integer != Some(0) {
             return Err(Error::new(
                 "ValueError",
                 "cannot process flags argument with a compiled pattern",
@@ -729,6 +737,14 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
         }
         return Ok(id);
     }
+    // Parse with the known switches even if the eventual C int conversion will fail.
+    let flags = integer.unwrap_or_else(|| {
+        (number.big().as_ref() & num_bigint::BigInt::from(KNOWN_FLAGS))
+            .to_i64()
+            .unwrap()
+    });
+    let unknown = flags & !KNOWN_FLAGS;
+    let flags = flags & KNOWN_FLAGS;
     let scalar = ctx.heap.get(ctx.scalar_value(id));
     let bytes = matches!(scalar, Value::Bytes(_));
     let projections = if let Value::SurrogateStr(points) = scalar {
@@ -793,7 +809,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
             Some(bad.error.1),
         ));
     }
-    let pattern = if let Some((plain, _)) = projections {
+    let mut pattern = if let Some((plain, _)) = projections {
         // A surrogate inside a leading comment has a different byte width in the
         // scalar-only program. Locate that program's own first significant byte.
         let plain_flags = match flags::parse(plain.as_bytes(), supplied_flags, false) {
@@ -813,6 +829,13 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
     } else {
         pattern
     };
+    if integer.is_none_or(|value| i32::try_from(value).is_err()) {
+        return Err(Error::new(
+            "OverflowError",
+            "Python int too large to convert to C int",
+        ));
+    }
+    pattern.flags |= unknown;
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))))
 }
 
@@ -841,7 +864,7 @@ fn check_flags(flags: i64, bytes: bool) -> Result<()> {
             "ASCII and UNICODE flags are incompatible",
         ));
     }
-    if flags & !(IGNORECASE | LOCALE | MULTILINE | DOTALL | ASCII | UNICODE | VERBOSE) != 0 {
+    if flags & DEBUG != 0 {
         return Err(Error::new(
             "NotImplementedError",
             "unsupported native regular expression flags",
