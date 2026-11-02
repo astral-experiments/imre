@@ -226,6 +226,11 @@ impl Context {
     }
 
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        if let Some(&dictionary) = self.native_type_dicts.get(&class) {
+            return self.dict_entries(dictionary)?.iter().find_map(|&(key, value)| {
+                (self.str_value(key).ok() == Some(name)).then_some(value)
+            });
+        }
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
             Value::Native(kind) if kind == "type" && name == "mro" => {
@@ -2837,6 +2842,12 @@ impl Context {
                 }
                 _ => {}
             },
+            Value::Count { .. } | Value::Repeat(_) => {
+                let class = self.exact_type(obj)?;
+                if let Some(value) = self.own_class_attr(class, name) {
+                    return self.bind_attribute(value, obj, class);
+                }
+            }
             Value::Native(ref class) if class == super::thread_local::CLASS => match name {
                 "__module__" => return Ok(self.text("_thread")),
                 "__name__" | "__qualname__" => return Ok(self.text("_local")),
@@ -2852,8 +2863,20 @@ impl Context {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(class.trim_start_matches("itertools.").to_owned()));
                     }
-                    "__module__" => return Ok(self.text("itertools")),
-                    _ => {}
+                    "__dict__" => {
+                        let dictionary = self.native_type_dicts[&obj];
+                        return Ok(self.alloc(Value::MappingProxy(dictionary)));
+                    }
+                    "__text_signature__" => return Ok(if class == "itertools.count" {
+                        self.text("(start=0, step=1)")
+                    } else {
+                        NONE
+                    }),
+                    _ => {
+                        if let Some(value) = self.own_class_attr(obj, name) {
+                            return Ok(value);
+                        }
+                    }
                 }
             }
             Value::Native(ref class)
@@ -2893,6 +2916,16 @@ impl Context {
                 return self.builtins.get("_io.open.__self__").copied().ok_or_else(|| {
                     Error::new("ImportError", "native _io module is unavailable")
                 });
+            }
+            Value::Native(ref symbol)
+                if let Some((owner, "__new__")) = symbol.rsplit_once('.')
+                    && stdlib::itertools::cursor_type(owner).is_some()
+                    && matches!(name, "__doc__" | "__text_signature__") =>
+            {
+                return Ok(self.text(match name {
+                    "__doc__" => "Create and return a new object.  See help(type) for accurate signature.",
+                    _ => "($type, *args, **kwargs)",
+                }));
             }
             Value::Native(ref symbol)
                 if matches!(
@@ -4426,6 +4459,7 @@ impl Context {
         stdlib::io::check_class_write(self, obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
             && (builtins::is_static_gc_type(class)
+                || stdlib::itertools::cursor_type(class).is_some()
                 || HashState::is_provider_class(class)
                 || matches!(
                     class.as_str(),
@@ -5286,6 +5320,12 @@ impl Context {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
             Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
+            Value::Native(ref name)
+                if let Some((owner, "__new__")) = name.rsplit_once('.')
+                    && let Some(owner) = stdlib::itertools::cursor_type(owner) =>
+            {
+                stdlib::itertools::allocate(self, owner, &args, &kwargs)
+            }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),

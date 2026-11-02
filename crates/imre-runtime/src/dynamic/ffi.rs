@@ -712,6 +712,7 @@ pub(super) fn new_context<S: Into<String>>(
         typing: super::typing::Registry::default(),
         logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
+        native_type_dicts: HashMap::new(),
         sources: HashMap::new(),
         call_depth: 0,
         deque_comparison_repeats: 0,
@@ -1467,6 +1468,7 @@ impl Context {
                 .chain(self.logger_wrappers.values())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
+                .chain(self.native_type_dicts.values())
                 .chain(self.native_code_objects.values())
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
