@@ -340,6 +340,7 @@ impl<'a> Visitor<'a> for References<'_> {
                 self.found.attributes.extend(
                     [
                         "_baseAssertEqual",
+                        "_assertClassEqual",
                         "_assertDateEqual",
                         "_assertDeltaEqual",
                         "assertMultiLineEqual",

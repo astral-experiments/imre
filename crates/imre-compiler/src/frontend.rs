@@ -10590,6 +10590,20 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let [operand] = args.as_slice()
+            && matches!(operand.ty, Type::Str | Type::StrLiteral(_) | Type::Bytes)
+            && self.unshadowed_builtin(&call.func, "type")
+        {
+            let class = if operand.ty == Type::Bytes {
+                "bytes"
+            } else {
+                "str"
+            };
+            return Ok(partials::after(
+                operand.clone(),
+                annotations::class_value(class),
+            ));
+        }
         if let [proxy] = args.as_slice()
             && matches!(proxy.ty, Type::WeakProxy(_))
             && let Some(value) = self.weak_proxy_builtin(name.id.as_str(), proxy.clone())
