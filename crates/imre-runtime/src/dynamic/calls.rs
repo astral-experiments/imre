@@ -5816,6 +5816,12 @@ impl Context {
                 .insert(format!("collections.abc.{name}"), class);
         }
         self.init_abstract_class(class, scope)?;
+        if self.is_protocol_declaration(class) {
+            let freeze = self
+                .module_value("typing", "_freeze_protocol_members")
+                .ok_or_else(|| Error::new("RuntimeError", "missing protocol initializer"))?;
+            self.call(freeze, vec![class, annotations], Vec::new())?;
+        }
         if let Some((parents, fields, annotate, generic)) = typed_dict_fields {
             if let Some(generic) = generic {
                 // Generic.__init_subclass__ reads the declared bases after __set_name__.
