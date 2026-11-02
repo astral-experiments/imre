@@ -257,6 +257,12 @@ class Popen:
             _process.close_wait(self._handle)
             raise
 
+    def __repr__(self):
+        result = f"<{self.__class__.__name__}: returncode: {self.returncode} args: {self.args!r}>"
+        if len(result) > 80:
+            return result[:76] + "...>"
+        return result
+
     def __del__(self, _warn=_warn):
         if self._handle is None:
             return
