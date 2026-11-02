@@ -103,6 +103,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         env,
         bufsize,
         pipesize,
+        shell,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -112,16 +113,31 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         redirect(ctx, stdout, 1)?,
         redirect(ctx, stderr, 2)?,
     ];
-    let scalar = matches!(
+    let shell = ctx.truth(shell)?;
+    let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(args)),
-        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::DirEntry(_)
-    ) || ctx
-        .slot(args, "__fspath__")
-        .is_some_and(|slot| slot != NONE);
-    let items = if scalar { vec![args] } else { ctx.items(args)? };
-    let Some(&program) = items.first() else {
-        return Err(Error::new("IndexError", "list index out of range"));
+        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+    );
+    let path_like = !spelling
+        && (matches!(ctx.heap.get(args), Value::DirEntry(_))
+            || ctx
+                .slot(args, "__fspath__")
+                .is_some_and(|slot| slot != NONE));
+    if shell && path_like {
+        return Err(Error::new(
+            "TypeError",
+            "path-like args is not allowed when shell is true",
+        ));
+    }
+    let items = if spelling || path_like {
+        vec![args]
+    } else {
+        ctx.items(args)?
     };
+    if items.is_empty() && !shell {
+        return Err(Error::new("IndexError", "list index out of range"));
+    }
+    let program = items.first().copied().unwrap_or(NONE);
     ctx.heap.reserve_temporaries(items.len())?;
     for &item in &items {
         ctx.heap.keep(item);
@@ -131,12 +147,15 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     argv.try_reserve_exact(items.len())
         .map_err(|_| Error::new("MemoryError", ""))?;
     // A direct launch reports the converted executable. Fork reports the original object.
-    let resolved_program = posixpath::fspath(ctx, program)?;
+    let mut resolved_program = NONE;
     ctx.heap.reserve_temporaries(1)?;
-    ctx.heap.keep(resolved_program);
-    argv.push(os::c_path(ctx, resolved_program, "embedded null byte")?.into_bytes());
-    for arg in &items[1..] {
-        argv.push(path(ctx, *arg)?);
+    for item in items {
+        let spelling = posixpath::fspath(ctx, item)?;
+        if argv.is_empty() {
+            resolved_program = spelling;
+            ctx.heap.keep(spelling);
+        }
+        argv.push(os::c_path(ctx, spelling, "embedded null byte")?.into_bytes());
     }
     let directory = (cwd != NONE).then(|| path(ctx, cwd)).transpose()?;
     let mut warning_error = None;
@@ -149,6 +168,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         env,
         ctx.as_int(bufsize)?,
         ctx.as_int(pipesize)?,
+        shell,
         &mut || {
             let result = (|| -> Result<()> {
                 let warnings = ctx.module("warnings")?;
@@ -177,7 +197,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
             let error = failure.error.into();
             match failure.directory {
                 Some(true) => Err(ctx.with_errno_filename(error, cwd)?),
-                Some(false) => {
+                Some(false) if !shell => {
                     let filename = if failure.direct {
                         resolved_program
                     } else {
@@ -185,7 +205,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
                     };
                     Err(ctx.with_errno_filename(error, filename)?)
                 }
-                None => Err(error),
+                _ => Err(error),
             }
         }
     }
