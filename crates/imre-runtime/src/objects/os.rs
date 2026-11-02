@@ -428,7 +428,7 @@ pub unsafe extern "C" fn imre_os_read(fd: usize, length: usize) -> *const crate:
                     "Python int too large to convert to C ssize_t",
                 )
             })?;
-            read(c_int(fd)?, length, super::stdlib::check_interrupt)
+            read(c_int(fd)?, length, None, super::stdlib::check_interrupt)
                 .map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes)))
         })(),
         std::ptr::null(),
@@ -496,15 +496,21 @@ pub(crate) fn sendfile(
     )
 }
 
+/// Read from the shared file position, or leave it untouched when given an offset.
 pub(crate) fn read<E: From<Error>>(
     fd: i32,
     length: isize,
+    offset: Option<libc::off_t>,
     dispatch: impl FnMut() -> std::result::Result<(), E>,
 ) -> std::result::Result<Vec<u8>, E> {
     let length = usize::try_from(length)
         .map_err(|_| errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?;
     #[cfg(target_os = "macos")]
-    let length = length.min(i32::MAX as usize);
+    let length = if offset.is_none() {
+        length.min(i32::MAX as usize)
+    } else {
+        length
+    };
     if length > crate::MAX_BYTES_LEN {
         return Err(Error::new(Kind::OverflowError, "byte string is too large").into());
     }
@@ -512,13 +518,22 @@ pub(crate) fn read<E: From<Error>>(
     bytes
         .try_reserve_exact(length)
         .map_err(|_| Error::memory_error())?;
-    // SAFETY: bytes has at least length writable bytes; read borrows the integer
-    // descriptor and initializes the returned prefix without retaining either.
     let count = transfer(
-        || transferred(unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), length) }),
+        || {
+            let buffer = bytes.as_mut_ptr().cast();
+            // SAFETY: both syscalls borrow fd and initialize at most length bytes
+            // in the reserved buffer, without retaining the pointer.
+            let count = unsafe {
+                match offset {
+                    Some(offset) => libc::pread(fd, buffer, length, offset),
+                    None => libc::read(fd, buffer, length),
+                }
+            };
+            transferred(count)
+        },
         dispatch,
     )?;
-    // SAFETY: read initialized exactly count bytes, including zero on EOF.
+    // SAFETY: the successful syscall initialized exactly count bytes, including zero at EOF.
     unsafe { bytes.set_len(count) };
     crate::compact_bytes(&mut bytes);
     Ok(bytes)
