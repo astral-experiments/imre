@@ -2127,6 +2127,7 @@ def report(text):
             "boxed_set_difference_update.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
+            "boxed_weakref_unraisable.py",
             "boxed_gc_collect.py",
             "boxed_gc_controls.py",
             "boxed_gc_finalizers.py",
