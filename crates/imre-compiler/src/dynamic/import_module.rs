@@ -321,7 +321,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
                 [
                     include_str!("../../stdlib/importlib/legacy_source_loader.py"),
-                    section("class ModuleSpec:", "def spec_from_loader("),
+                    section("class ModuleSpec:", "def _spec_from_module("),
                     section("def _init_module_attrs(", "def _module_repr_from_spec("),
                     section("def _call_with_frames_removed(", "def _requires_builtin("),
                     section("def _resolve_name(", "def _find_spec("),
@@ -352,6 +352,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     include_str!("../../stdlib/importlib/source_loader.py"),
                     section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _pack_uint32("),
                     section("if _MS_WINDOWS:\n    def _path_join(", "def _write_atomic("),
+                    section("def _get_cached(", "def _calc_mode("),
                     &spec,
                     &section("class _NamespacePath:", "class FileFinder:")
                         .replace("_warnings.warn('sys.path_hooks is empty', ImportWarning)",

@@ -226,6 +226,11 @@ impl Context {
     }
 
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        if let Some(&dictionary) = self.native_type_dicts.get(&class) {
+            return self.dict_entries(dictionary)?.iter().find_map(|&(key, value)| {
+                (self.str_value(key).ok() == Some(name)).then_some(value)
+            });
+        }
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
             Value::Native(kind) if kind == "type" && name == "mro" => {
@@ -267,6 +272,11 @@ impl Context {
                     ) =>
             {
                 Some(NONE)
+            }
+            Value::Native(kind)
+                if kind == "typing.TypeVar" && super::typing::VARIANCE_FIELDS.contains(&name) =>
+            {
+                self.builtins.get(&format!("{kind}.{name}")).copied()
             }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
                 name if kind == "BaseException"
@@ -1067,14 +1077,34 @@ impl Context {
         if ty == self.builtin(owner) {
             self.lookup_attr(receiver, field)
         } else {
-            Err(Error::new(
-                "TypeError",
-                format!(
-                    "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
-                    self.type_name(receiver)
-                ),
-            ))
+            Err(self.member_receiver_error(owner, field, ty))
         }
+    }
+
+    fn member_receiver_error(&self, owner: &str, field: &str, ty: Id) -> Error {
+        let name = self.class_name(ty);
+        let name = &name[..name.floor_char_boundary(100)];
+        Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{field}' for '{owner}' objects doesn't apply to a '{name}' object"
+            ),
+        )
+    }
+
+    /// A read-only member rejects an unrelated receiver before reporting a read-only write.
+    pub(super) fn reject_member_write(
+        &mut self,
+        owner: &str,
+        field: &str,
+        receiver: Id,
+    ) -> Result<()> {
+        let ty = self.exact_type(receiver)?;
+        let class = self.builtin(owner);
+        if !self.direct_subclass(ty, class) {
+            return Err(self.member_receiver_error(owner, field, ty));
+        }
+        Err(Error::new("AttributeError", "readonly attribute"))
     }
 
     /// Check whether an inline value is an immutable tuple position.
@@ -2121,6 +2151,7 @@ impl Context {
                 _ => {}
             },
             Value::ReadOnlyMember(owner, field) => match name {
+                "__doc__" if owner == "typing.TypeVar" => return Ok(NONE),
                 "__name__" => return Ok(self.text(field)),
                 "__qualname__" => {
                     return Ok(self.text(format!("{}.{field}", owner.rsplit('.').next().unwrap())));
@@ -2137,6 +2168,11 @@ impl Context {
             },
             Value::Native(ref class) if class == "member_descriptor" && name == "__module__" => {
                 return Ok(self.text("builtins"));
+            }
+            Value::Native(ref class)
+                if class == "member_descriptor" && super::namedtuple::MEMBER_SLOTS.contains(&name) =>
+            {
+                return Ok(self.builtin(&format!("member_descriptor.{name}")));
             }
             Value::TupleGetter { doc, .. } if name == "__doc__" => return Ok(doc.unwrap_or(NONE)),
             Value::WeakrefDescriptor(owner) => match name {
@@ -2806,6 +2842,12 @@ impl Context {
                 }
                 _ => {}
             },
+            Value::Count { .. } | Value::Repeat(_) => {
+                let class = self.exact_type(obj)?;
+                if let Some(value) = self.own_class_attr(class, name) {
+                    return self.bind_attribute(value, obj, class);
+                }
+            }
             Value::Native(ref class) if class == super::thread_local::CLASS => match name {
                 "__module__" => return Ok(self.text("_thread")),
                 "__name__" | "__qualname__" => return Ok(self.text("_local")),
@@ -2821,8 +2863,20 @@ impl Context {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(class.trim_start_matches("itertools.").to_owned()));
                     }
-                    "__module__" => return Ok(self.text("itertools")),
-                    _ => {}
+                    "__dict__" => {
+                        let dictionary = self.native_type_dicts[&obj];
+                        return Ok(self.alloc(Value::MappingProxy(dictionary)));
+                    }
+                    "__text_signature__" => return Ok(if class == "itertools.count" {
+                        self.text("(start=0, step=1)")
+                    } else {
+                        NONE
+                    }),
+                    _ => {
+                        if let Some(value) = self.own_class_attr(obj, name) {
+                            return Ok(value);
+                        }
+                    }
                 }
             }
             Value::Native(ref class)
@@ -2862,6 +2916,16 @@ impl Context {
                 return self.builtins.get("_io.open.__self__").copied().ok_or_else(|| {
                     Error::new("ImportError", "native _io module is unavailable")
                 });
+            }
+            Value::Native(ref symbol)
+                if let Some((owner, "__new__")) = symbol.rsplit_once('.')
+                    && stdlib::itertools::cursor_type(owner).is_some()
+                    && matches!(name, "__doc__" | "__text_signature__") =>
+            {
+                return Ok(self.text(match name {
+                    "__doc__" => "Create and return a new object.  See help(type) for accurate signature.",
+                    _ => "($type, *args, **kwargs)",
+                }));
             }
             Value::Native(ref symbol)
                 if matches!(
@@ -3796,8 +3860,8 @@ impl Context {
                 Value::TupleGetterDoc => {
                     return super::namedtuple::set_document(self, obj, None).map(|_| ());
                 }
-                Value::ReadOnlyMember(_, _) => {
-                    return Err(Error::new("AttributeError", "readonly attribute"));
+                Value::ReadOnlyMember(owner, field) => {
+                    return self.reject_member_write(owner, field, obj);
                 }
                 Value::TupleGetter { .. } => {
                     return Err(Error::new("AttributeError", "can't delete attribute"));
@@ -4130,6 +4194,10 @@ impl Context {
         {
             return Some(member);
         }
+        if matches!(self.heap.get(obj), Value::TypeVar(_)) {
+            let owner = self.builtin("typing.TypeVar");
+            return self.own_class_attr(owner, name);
+        }
         let member = self.slot(obj, name)?;
         if let Value::Instance { class, .. } = *self.heap.get(obj)
             && self.instance_layout(class, name).active_slot
@@ -4391,11 +4459,13 @@ impl Context {
         stdlib::io::check_class_write(self, obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
             && (builtins::is_static_gc_type(class)
+                || stdlib::itertools::cursor_type(class).is_some()
                 || HashState::is_provider_class(class)
                 || matches!(
                     class.as_str(),
                     HashState::CLASS
                         | HashState::XOF_CLASS
+                        | "typing.TypeVar"
                         | KEY_WRAPPER
                         | stdlib::flags::TYPE
                         | value::REGEX_PATTERN_TYPE
@@ -4520,8 +4590,8 @@ impl Context {
             if matches!(self.heap.get(descriptor), Value::SlotMember { .. }) {
                 return self.write_slot_member(descriptor, obj, Some(value));
             }
-            if matches!(self.heap.get(descriptor), Value::ReadOnlyMember(_, _)) {
-                return Err(Error::new("AttributeError", "readonly attribute"));
+            if let Value::ReadOnlyMember(owner, field) = *self.heap.get(descriptor) {
+                return self.reject_member_write(owner, field, obj);
             }
             if matches!(self.heap.get(descriptor), Value::TupleGetterDoc) {
                 return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
@@ -5250,6 +5320,12 @@ impl Context {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
             Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
+            Value::Native(ref name)
+                if let Some((owner, "__new__")) = name.rsplit_once('.')
+                    && let Some(owner) = stdlib::itertools::cursor_type(owner) =>
+            {
+                stdlib::itertools::allocate(self, owner, &args, &kwargs)
+            }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),

@@ -1408,6 +1408,15 @@ impl IntrinsicModule {
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
             }
+            (Self::ImportlibUtil, "module_from_spec") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.module_from_spec")
+            }
+            (Self::ImportlibUtil, "spec_from_file_location") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.spec_from_file_location")
+            }
+            (Self::ImportlibUtil, "spec_from_loader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.spec_from_loader")
+            }
             (Self::ImportlibUtil, "find_spec") => {
                 Intrinsic::RegisteredImport("importlib.util.find_spec")
             }
@@ -1826,6 +1835,7 @@ impl IntrinsicModule {
             (Self::Typing, "Required") => Intrinsic::ObjectRuntimeExport("typing.Required"),
             (Self::Typing, "NotRequired") => Intrinsic::ObjectRuntimeExport("typing.NotRequired"),
             (Self::Typing, "ReadOnly") => Intrinsic::ObjectRuntimeExport("typing.ReadOnly"),
+            (Self::Typing, "NamedTuple") => Intrinsic::ObjectRuntimeExport("typing.NamedTuple"),
             (Self::Typing, "TypedDict") => Intrinsic::ObjectRuntimeExport("typing.TypedDict"),
             (Self::Typing, "is_typeddict") => Intrinsic::ObjectRuntimeExport("typing.is_typeddict"),
             (Self::Typing, "Final") => Intrinsic::Final,

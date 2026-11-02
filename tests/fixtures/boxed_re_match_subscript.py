@@ -30,4 +30,12 @@ def current():
             assert str(error) == "failed index"
         else:
             raise AssertionError("index exception was lost")
+    subject = chr(0x1f40d) + chr(0xd800) + chr(0xe000) + "Z"
+    pattern = re.compile(r"(?P<value>.)(.)(a)?")
+    match = pattern.fullmatch(subject, pos=1, endpos=3)
+    assert match.string is subject and match.span("value") == (1, 2)
+    assert match.groups() == (chr(0xd800), chr(0xe000), None)
+    assert pattern.search(subject, 3, 1) is None
+    assert re.match(r"..", subject).span() == (0, 2)
+    assert re.fullmatch(pattern=r".+z", string=subject, flags=re.I)[0] == subject
     print("text and bytes match groups passed")

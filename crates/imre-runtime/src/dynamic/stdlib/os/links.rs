@@ -1,4 +1,6 @@
-use super::{Context, Id, NONE, Result, builtins, c_path, directory_fd, native, posixpath};
+use super::{
+    Context, Id, NONE, Result, audit_fd, builtins, c_path, directory_fd, native, posixpath,
+};
 use crate::dynamic::stdlib::audit;
 use std::ffi::CString;
 
@@ -19,10 +21,6 @@ fn path_argument(
         &format!("{name}: embedded null character in {argument}"),
     )?;
     Ok((path, spelling))
-}
-
-fn audit_fd(ctx: &mut Context, fd: i32) -> Id {
-    ctx.int(i64::from(if fd == libc::AT_FDCWD { -1 } else { fd }))
 }
 
 pub(super) fn symlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {

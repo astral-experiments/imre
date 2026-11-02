@@ -555,6 +555,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_typing", "_idfunc") => ctx.builtin("_typing._idfunc"),
         ("typing", "NoDefault") => super::typing::no_default(ctx),
         ("typing", "TYPE_CHECKING") => FALSE,
+        ("typing", "_NamedTuple") => ctx.builtin("typing.NamedTuple"),
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
         ("_collections_abc", abc) if super::mapping_abc::bootstrapped(abc) => {
@@ -788,7 +789,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
             | "finditer",
         )
-        | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator")
+        | ("typing", "IO" | "Generator" | "Iterator")
         | ("enum", "_simple_enum")
         | (
             "functools",
@@ -1713,11 +1714,10 @@ pub(super) fn call(
     if name == "itertools.repeat" {
         return itertools::repeat(ctx, args, kwargs);
     }
-    if let Some(method) = name
-        .strip_prefix("itertools.count.")
-        .or_else(|| name.strip_prefix("itertools.repeat."))
+    if let Some((owner, method)) = name.rsplit_once('.')
+        && let Some(owner) = itertools::cursor_type(owner)
     {
-        return itertools::method(ctx, method, args, kwargs);
+        return itertools::method(ctx, owner, method, args, kwargs);
     }
     if name == "types.coroutine" {
         let func = single_argument("coroutine", "func", args, kwargs)?;

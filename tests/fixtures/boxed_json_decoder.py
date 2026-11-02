@@ -67,6 +67,14 @@ def current():
                 assert error.args == ('Expecting value: line 2 column 6 (char 7)',)
             else:
                 raise AssertionError('accepted malformed JSON')
+    document = '"' + chr(0xd800) + '\\q"'
+    try:
+        fresh.loads(document)
+    except fresh.JSONDecodeError as error:
+        assert error.doc is document and error.pos == 3
+        assert error.msg == "Invalid \\escape: 'q'"
+    else:
+        raise AssertionError('accepted invalid escape after surrogate')
     # The decoder uses its own globals after the package attribute is rebound.
     fresh.decoder = None
     try:

@@ -10,6 +10,12 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
+        if let Some((owner, attr)) = symbol.rsplit_once('.')
+            && let Some(owner) = stdlib::itertools::cursor_type(owner)
+            && let Some(name) = stdlib::itertools::slots(owner).find(|&slot| slot == attr)
+        {
+            return Some(Self { owner, name, method: name == "__length_hint__" });
+        }
         if let Some((class, attr)) = symbol.rsplit_once('.')
             && let Some(owner) = crate::objects::HashState::provider_class(class)
             && let Some(&name) = ["copy", "update", "digest", "hexdigest"]
@@ -73,6 +79,9 @@ impl BuiltinDescriptor {
             Some(("memoryview", attr)) => Some(("memoryview", attr, builtins::MEMORYVIEW_METHODS)),
             Some(("BaseException", attr)) => {
                 Some(("BaseException", attr, &["add_note", "with_traceback"][..]))
+            }
+            Some(("member_descriptor", attr)) => {
+                Some(("member_descriptor", attr, super::namedtuple::MEMBER_SLOTS))
             }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
             Some(("set", attr)) => Some((
@@ -221,6 +230,9 @@ impl BuiltinDescriptor {
             class if crate::objects::HashState::is_provider_class(class) => {
                 ctx.type_name(receiver) == class
             }
+            owner if stdlib::itertools::cursor_type(owner).is_some() => {
+                ctx.instance_of(receiver, ctx.builtins[owner])
+            }
             owner if stdlib::datetime::members(owner).is_some() => {
                 ctx.instance_of(receiver, ctx.builtins[owner])
             }
@@ -250,6 +262,7 @@ impl BuiltinDescriptor {
             "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
             "memoryview" => matches!(ctx.heap.get(receiver), Value::MemoryView { .. }),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
+            "member_descriptor" => ctx.exact_type(receiver)? == ctx.builtin("member_descriptor"),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
             "dict" => ctx.dict_storage(receiver).is_some(),
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
@@ -328,6 +341,14 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
+            "__text_signature__" if self.name == "__getattribute__" => ctx.text("($self, name, /)"),
+            "__doc__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
+                ctx.text("Private method returning an estimate of len(list(it)).")
+            }
+            "__text_signature__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
+                ctx.text("($self, /)")
+            }
             "__doc__" if self.owner == "mappingproxy" && self.method => ctx.text(match self.name {
                 "keys" => "D.keys() -> a set-like object providing a view on D's keys",
                 "values" => "D.values() -> an object providing a view on D's values",
