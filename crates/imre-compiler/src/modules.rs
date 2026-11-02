@@ -51,6 +51,10 @@ fn stat_mode_source() -> Option<&'static str> {
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "unittest.runner" => Some((
+            "unittest/runner.py",
+            include_str!("../stdlib/unittest/runner.py"),
+        )),
         "unittest.signals" => Some((
             "unittest/signals.py",
             include_str!("../stdlib/unittest/signals.py"),
