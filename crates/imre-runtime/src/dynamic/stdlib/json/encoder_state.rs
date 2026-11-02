@@ -1,4 +1,4 @@
-use super::{Context, Error, Fragment, Id, NONE, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value, separator_storage};
 use crate::dynamic::{builtins::boolean, copy_ids};
 
 /// Parse the nine arguments of _json.make_encoder in CPython's conversion order.
@@ -24,7 +24,7 @@ pub(in crate::dynamic::stdlib) fn encoder_state(
         let value = argument(i)?;
         *slot = match i {
             4 | 5 => {
-                Fragment::separator(ctx, value, i + 1)?;
+                separator_storage(ctx, value, i + 1)?;
                 value
             }
             6..=8 => boolean(ctx.truth(value)?),

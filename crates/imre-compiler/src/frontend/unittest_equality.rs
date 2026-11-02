@@ -153,6 +153,12 @@ impl Checker<'_> {
         } else {
             Type::Int
         };
+        let optional_text = self.types.optional(Type::Str);
+        let right_can_be_optional_text = matches!(ty, Type::None | Type::Str | Type::StrLiteral(_))
+            && right
+                .map(|arg| self.expr(arg))
+                .transpose()?
+                .is_some_and(|arg| arg.ty == optional_text);
         let mut owner = class;
         let method =
             if matches!(ty, Type::List(_) | Type::ListInt) {
@@ -184,6 +190,11 @@ impl Checker<'_> {
                 "_assertTextOrListEqual"
             } else if self.types.mapping(ty) == Some((Type::Str, Type::Str)) {
                 "assertDictEqual"
+            } else if (ty == optional_text || right_can_be_optional_text)
+                && let Some(base) = self.bundled_case_method_owner(class, "_baseAssertEqual")
+            {
+                owner = base;
+                "_assertOptionalTextEqual"
             } else if matches!(ty, Type::Str | Type::StrLiteral(_)) {
                 "assertMultiLineEqual"
             } else if ty == Type::Bytes

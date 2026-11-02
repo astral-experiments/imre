@@ -65,6 +65,16 @@ def __hash_new(name, *args, **kwargs):
     """
     if name in __block_openssl_constructor or name in __sha3_provider_names:
         return __get_builtin_constructor(name)(*args, **kwargs)
+    if isinstance(name, str) and str.lower(name) in {'md5', 'ssl3-md5', '1.2.840.113549.2.5'}:
+        if _hashlib is not None:
+            try:
+                return _hashlib.new(name, *args, **kwargs)
+            except ValueError:
+                pass
+        elif name not in {'MD5', 'md5'}:
+            # Imre also supports OpenSSL's MD5 aliases with its portable backend.
+            name = 'md5'
+        return __get_builtin_constructor(name)(*args, **kwargs)
     return _native_new(name, *args, **kwargs)
 
 
@@ -81,6 +91,21 @@ for __func_name in __block_openssl_constructor | __sha3_provider_names:
         pass
 del __func_name
 
+
+try:
+    import _hashlib
+except ImportError:
+    _hashlib = None
+
+try:
+    _hashlib.openssl_md5(usedforsecurity=False)
+except (AttributeError, ValueError):
+    try:
+        md5 = __get_builtin_constructor('md5')
+    except ValueError:
+        pass
+else:
+    md5 = _hashlib.openssl_md5
 
 try:
     from _hashlib import pbkdf2_hmac

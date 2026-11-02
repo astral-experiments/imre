@@ -66,7 +66,7 @@ pub(in crate::dynamic) fn install_capabilities(
     Ok(())
 }
 
-/// The posix module caches this dictionary. os.environ wraps the same byte keys and values.
+/// Copy current POSIX environment bytes for the cached dictionary or an explicit reload.
 pub(super) fn environment(ctx: &mut Context) -> Id {
     let entries = crate::objects::initial_environment()
         .into_iter()
@@ -316,23 +316,12 @@ pub(super) fn change_environment(
     let posix = ctx.module("posix")?;
     ctx.lookup_attr(posix, "environ")?;
     let key = environment_argument(ctx, args[0])?;
-    let status = if set {
-        let value = environment_argument(ctx, args[1])?;
-        if key.as_bytes().contains(&b'=') {
-            return Err(Error::new(
-                "ValueError",
-                "illegal environment variable name",
-            ));
-        }
-        // SAFETY: the standalone interpreter runs Python on one thread. setenv copies its inputs.
-        unsafe { libc::setenv(key.as_ptr(), value.as_ptr(), 1) }
+    let value = if set {
+        Some(environment_argument(ctx, args[1])?)
     } else {
-        // SAFETY: key stays terminated and live through the synchronous unsetenv call.
-        unsafe { libc::unsetenv(key.as_ptr()) }
+        None
     };
-    if status != 0 {
-        return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
-    }
+    crate::objects::change_environment(&key, value.as_deref())?;
     Ok(NONE)
 }
 

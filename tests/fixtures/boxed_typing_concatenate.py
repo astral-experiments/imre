@@ -75,3 +75,13 @@ except TypeError as error:
     assert str(error) == f"Expected a list of types, an ellipsis, ParamSpec, or Concatenate. Got {float}"
 else:
     raise AssertionError("a scalar was accepted for the ParamSpec")
+
+
+# Prepare variadic parameters in declaration order, including a ParamSpec before a pack.
+Ts = typing.TypeVarTuple("Ts")
+pack_first = typing.Concatenate[typing.Unpack[Ts], P]
+assert pack_first.__parameters__ == (Ts, P)
+assert pack_first[int, str, [float, bool]] == (int, str, float, bool)
+param_first = typing.Callable[P, typing.Tuple[typing.Unpack[Ts]]]
+assert param_first.__parameters__ == (P, Ts)
+assert param_first[[str, float], int, bytes] == typing.Callable[[str, float], typing.Tuple[int, bytes]]

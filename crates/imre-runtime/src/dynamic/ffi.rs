@@ -22,7 +22,9 @@ impl Context {
         let args = self.items(arguments)?;
         let kwargs = self.keyword_args(keywords)?;
         let result = self.call_in_scope(scope, callable, args, kwargs)?;
-        self.finish_call_operands(mark, result);
+        if !self.heap.discard_scalar_call(mark, result, arguments) {
+            self.finish_call_operands(mark, result);
+        }
         Ok(result)
     }
 

@@ -262,6 +262,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             concat!(
                 include_str!("../stdlib/contextlib.py"),
                 "\n",
+                include_str!("../stdlib/contextlib_abstract_async.py"),
+                "\n",
                 include_str!("../stdlib/contextlib_nullcontext.py"),
                 "\n",
                 include_str!("../stdlib/contextlib_exitstack.py"),
@@ -555,6 +557,7 @@ pub(crate) enum IntrinsicModule {
     Hashlib,
     Blake2,
     Sha3,
+    Md5,
     Hmac,
     Types,
     Base64,
@@ -1088,6 +1091,7 @@ impl IntrinsicModule {
             "hashlib" => Some(Self::Hashlib),
             "_blake2" => Some(Self::Blake2),
             "_sha3" => Some(Self::Sha3),
+            "_md5" => Some(Self::Md5),
             "hmac" => Some(Self::Hmac),
             "base64" => Some(Self::Base64),
             "binascii" => Some(Self::Binascii),
@@ -1582,6 +1586,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("contextlib.redirect_stderr")
             }
             (Self::Contextlib, "suppress") => Intrinsic::ObjectRuntimeExport("contextlib.suppress"),
+            (Self::Contextlib, "AbstractAsyncContextManager") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.AbstractAsyncContextManager")
+            }
             (Self::Contextlib, "closing") => Intrinsic::ObjectRuntimeExport("contextlib.closing"),
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "warn") => Intrinsic::ObjectRuntimeExport("warnings.warn"),
@@ -1895,12 +1902,20 @@ impl IntrinsicModule {
             (Self::Typing, "Type") => Intrinsic::ObjectRuntimeExport("typing.Type"),
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
+            (Self::Typing, "Generator") => Intrinsic::ObjectRuntimeExport("typing.Generator"),
+            (Self::Typing, "ContextManager") => {
+                Intrinsic::ObjectRuntimeExport("typing.ContextManager")
+            }
+            (Self::Typing, "AsyncContextManager") => {
+                Intrinsic::ObjectRuntimeExport("typing.AsyncContextManager")
+            }
             (Self::Typing, "Awaitable") => Intrinsic::ObjectRuntimeExport("typing.Awaitable"),
             (Self::Typing, "AsyncIterator") => {
                 Intrinsic::ObjectRuntimeExport("typing.AsyncIterator")
             }
             (Self::Typing, "Pattern") => Intrinsic::ObjectRuntimeExport("typing.Pattern"),
             (Self::Typing, "Match") => Intrinsic::ObjectRuntimeExport("typing.Match"),
+            (Self::Typing, "Counter") => Intrinsic::ObjectRuntimeExport("typing.Counter"),
             (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
             (Self::Typing, "Mapping") => Intrinsic::TYPING_MAPPING,
             (Self::Typing, "MutableMapping") => {
@@ -2189,6 +2204,9 @@ impl IntrinsicModule {
                 _ => return None,
             }),
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
+            (Self::Md5, "md5") => Intrinsic::ObjectRuntimeExport("_md5.md5"),
+            (Self::Md5, "MD5Type") => Intrinsic::ObjectRuntimeExport("_md5.MD5Type"),
+            (Self::Md5, "_GIL_MINSIZE") => Intrinsic::ObjectRuntimeExport("_md5._GIL_MINSIZE"),
             (Self::Sha3, "sha3_224") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_224"),
             (Self::Sha3, "sha3_256") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_256"),
             (Self::Sha3, "sha3_384") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_384"),
@@ -2228,7 +2246,7 @@ impl IntrinsicModule {
             (Self::Blake2, "BLAKE2S_MAX_DIGEST_SIZE") => {
                 Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_MAX_DIGEST_SIZE")
             }
-            (Self::Hashlib, "md5") => Intrinsic::NamedHash("md5"),
+            (Self::Hashlib, "md5") => Intrinsic::ObjectRuntimeExport("hashlib.md5"),
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
             (Self::Hmac, "new") => Intrinsic::ObjectRuntimeExport("hmac.new"),
             (Self::Hmac, "HMAC") => Intrinsic::ObjectRuntimeExport("hmac.HMAC"),
@@ -4400,20 +4418,23 @@ impl<'a> Loader<'a> {
                             .last()
                             .is_some_and(|clause| clause.test.is_none())
                     {
-                        for function in guard
-                            .body
-                            .iter()
-                            .filter_map(ast::Stmt::as_function_def_stmt)
-                        {
-                            let name = function.name.as_str();
+                        for statement in &guard.body {
+                            let Some(name) = conditional_export_name(statement) else {
+                                continue;
+                            };
+                            // Assignments to existing globals retain their storage and write tracking.
+                            if module_value(statement).is_some()
+                                && self.modules[id].bindings.contains_key(name)
+                            {
+                                continue;
+                            }
                             if guard.elif_else_clauses.iter().all(|clause| {
                                 clause
                                     .body
                                     .iter()
-                                    .filter_map(ast::Stmt::as_function_def_stmt)
-                                    .any(|other| other.name.as_str() == name)
+                                    .any(|other| conditional_export_name(other) == Some(name))
                             }) {
-                                self.bind(id, name, Binding::ConditionalValue, function)?;
+                                self.bind(id, name, Binding::ConditionalValue, statement)?;
                                 self.needs_object_imports = true;
                             }
                         }
@@ -4814,6 +4835,7 @@ impl<'a> Loader<'a> {
                 IntrinsicModule::Ast
                     | IntrinsicModule::Blake2
                     | IntrinsicModule::Sha3
+                    | IntrinsicModule::Md5
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
@@ -5519,6 +5541,16 @@ fn module_value(statement: &ast::Stmt) -> Option<&ast::Expr> {
         ast::Stmt::Assign(assignment) => Some(&assignment.value),
         ast::Stmt::AnnAssign(assignment) => assignment.value.as_deref(),
         _ => None,
+    }
+}
+
+/// A runtime binding introduced directly in a module-level conditional branch.
+fn conditional_export_name(statement: &ast::Stmt) -> Option<&str> {
+    if let ast::Stmt::FunctionDef(function) = statement {
+        Some(function.name.as_str())
+    } else {
+        module_value(statement)?;
+        value_name(statement)
     }
 }
 

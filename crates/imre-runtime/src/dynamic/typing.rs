@@ -262,6 +262,17 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
                     _ => unreachable!(),
                 }
             }
+            Value::Instance { class, .. }
+                if ctx.module_value("typing", "_AnnotatedAlias") == Some(*class) =>
+            {
+                match ctx
+                    .raw_instance_field(arg, "__parameters__")
+                    .map(|id| ctx.heap.get(id))
+                {
+                    Some(Value::Tuple(members)) => members.as_slice(),
+                    _ => continue,
+                }
+            }
             _ => continue,
         };
         for &param in members {
@@ -505,9 +516,6 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         );
     }
     let kind = match ctx.heap.get(target) {
-        Value::Class { .. } if super::mapping_abc::is_generic_abc(ctx, target) => {
-            AliasKind::Builtin
-        }
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {
             AliasKind::Generic
         }
@@ -2210,6 +2218,12 @@ impl Context {
                     "Cannot subclass special typing classes",
                 ));
             }
+            if let Some(name) = self.heap.get(base).hash_type() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("type '{name}' is not an acceptable base type"),
+                ));
+            }
             if let Value::Native(name) = self.heap.get(base)
                 && (super::stdlib::fixed_structseq::fixed_type(name).is_some()
                     || crate::objects::HashState::is_provider_class(name)
@@ -2366,6 +2380,7 @@ impl Context {
         }
         let class = self.alloc(Value::Class {
             io_kind: None,
+            hash_type: None,
             metaclass: None,
             namedtuple_fields,
             name,

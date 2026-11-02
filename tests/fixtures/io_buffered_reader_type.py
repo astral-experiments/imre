@@ -15,6 +15,22 @@ class PrivateReader(NativeReader):
     pass
 
 
+assert NativeReader.__new__ is object.__new__
+for cls in (NativeReader, PublicReader):
+    reader = cls.__new__(cls)
+    assert type(reader) is cls and reader.raw is None
+    try:
+        reader.read(0)
+    except ValueError as error:
+        assert "uninitialized" in str(error)
+    else:
+        raise AssertionError("read from an uninitialized reader")
+    with io.FileIO(__file__, "r") as raw:
+        reader.__init__(raw)
+        assert reader.read(1) == b"i"
+        reader.close()
+        assert raw.closed
+
 assert ReaderCase.tp is NativeReader
 with io.open(__file__, "rb") as source:
     assert source.__iter__() is source
@@ -155,3 +171,37 @@ with io.FileIO(__file__, "r") as raw:
     events.clear()
     reader.__del__()
     assert raw.closed and events == [True]
+
+
+with io.open(__file__, "rb") as reader:
+    assert repr(reader) == "<_io.BufferedReader name=%r>" % reader.name
+
+raw = io.BytesIO(b"reader")
+reader = PublicReader(raw)
+assert repr(reader) == "<PublicReader>"
+raw.name = reader
+try:
+    repr(reader)
+except RuntimeError as exc:
+    assert str(exc) == "reentrant call inside PublicReader.__repr__"
+else:
+    raise AssertionError("recursive reader name did not raise")
+raw.name = b"rule"
+assert repr(reader) == "<PublicReader name=b'rule'>"
+assert reader.detach() is raw and repr(reader) == "<PublicReader>"
+raw.close()
+
+
+class NamedReader(io.BufferedReader):
+    @property
+    def name(self):
+        raise OSError("name unavailable")
+
+
+with NamedReader(io.BytesIO()) as reader:
+    try:
+        repr(reader)
+    except OSError as exc:
+        assert exc.args == ("name unavailable",)
+    else:
+        raise AssertionError("reader suppressed a name lookup error")

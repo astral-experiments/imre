@@ -13,6 +13,7 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
         start,
         end,
         retry,
+        ..
     } = *ctx.heap.get(scanner)
     else {
         return Err(Error::new(

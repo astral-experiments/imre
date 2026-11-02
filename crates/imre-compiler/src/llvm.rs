@@ -8772,7 +8772,11 @@ declare i64 @imre_async_process_status(ptr, i1 zeroext)
 declare ptr @imre_async_process_communicate(ptr, ptr)
 declare ptr @imre_environ_copy()
 declare ptr @imre_environb_copy()
+declare void @imre_environ_clear()
+declare void @imre_environ_update(ptr, i32)
 declare ptr @imre_environ_get(ptr, ptr)
+declare void @imre_environ_set(ptr, ptr)
+declare void @imre_environ_set_bytes(ptr, ptr)
 declare ptr @imre_getcwd()
 declare i64 @imre_os_transfer_fd(i64)
 declare ptr @imre_os_read(i64, i64)
@@ -9241,6 +9245,8 @@ declare ptr @imre_struct_list_new(ptr)
 declare i1 @imre_struct_try_fill_empty(ptr, ptr, ptr, i64)
 declare i64 @imre_struct_cycle_prefix(ptr, i64, i64)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
+declare i64 @imre_struct_binary_prefix(ptr, ptr) nounwind
+declare double @imre_struct_binary_ordered(ptr, i64, i64, double, double, double) nounwind
 declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare ptr @imre_struct_row(ptr, i64) nounwind
 declare ptr @imre_struct_row_checked(ptr, i64)

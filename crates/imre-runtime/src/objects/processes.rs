@@ -950,6 +950,10 @@ fn capture_guard(mut child: ChildGuard) -> io::Result<(ExitStatus, Vec<u8>, Vec<
     Ok((status, stdout, stderr))
 }
 
+// POSIX may move its environ array during setenv or unsetenv. Hold this lock
+// while walking the native array or changing it in either execution mode.
+static ENVIRONMENT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Borrows the POSIX environment while no native environment change is in progress.
 fn native_environ() -> *const *const libc::c_char {
     // SAFETY: the OS stores a live null-terminated environment for this process.
@@ -967,9 +971,9 @@ fn native_environ() -> *const *const libc::c_char {
 
 /// Copy the raw entries used by the POSIX module before its first environment mutation.
 pub(crate) fn initial_environment() -> Vec<(Vec<u8>, Vec<u8>)> {
+    let _guard = ENVIRONMENT.lock().unwrap();
     let mut seen = std::collections::HashSet::new();
-    // SAFETY: the standalone runtime does not run Python threads. Nothing in this
-    // iteration calls Python or changes the native environment before it is copied.
+    // SAFETY: the lock keeps the array stable until the copy completes.
     unsafe { environment_entries(native_environ()) }
         .filter(|(name, _)| seen.insert(*name))
         .map(|(name, value)| (name.to_vec(), value.to_vec()))
@@ -1002,11 +1006,103 @@ unsafe fn environment_entries<'a>(
 
 /// Inspect one POSIX environment value without allocating a temporary string.
 pub(super) fn with_environment_value<T>(key: &[u8], inspect: impl FnOnce(&[u8]) -> T) -> Option<T> {
-    // SAFETY: the language runtime keeps the environment immutable. The value
-    // is borrowed only for the duration of the callback.
+    let _guard = ENVIRONMENT.lock().unwrap();
+    // SAFETY: the lock keeps the environment stable through the callback.
     unsafe { environment_entries(native_environ()) }
         .find(|(name, _)| *name == key)
         .map(|(_, bytes)| inspect(bytes))
+}
+
+/// Update the same process environment inherited by newly spawned children.
+pub(crate) fn change_environment(key: &CStr, value: Option<&CStr>) -> Result<()> {
+    let _guard = ENVIRONMENT.lock().unwrap();
+    let status = if let Some(value) = value {
+        if key.to_bytes().contains(&b'=') {
+            return Err(Error::new(
+                Kind::ValueError,
+                "illegal environment variable name",
+            ));
+        }
+        // SAFETY: both inputs are live terminated strings; setenv copies them.
+        unsafe { libc::setenv(key.as_ptr(), value.as_ptr(), 1) }
+    } else {
+        // SAFETY: key stays terminated and live through the synchronous call.
+        unsafe { libc::unsetenv(key.as_ptr()) }
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(super::errno_error(io::Error::last_os_error()))
+    }
+}
+
+fn set_environment_bytes(key: &[u8], value: &[u8]) -> Result<()> {
+    change_environment(&cstring(key)?, Some(&cstring(value)?))
+}
+
+fn set_environment_text(key: &Str, value: &Str) -> Result<()> {
+    let encoding = crate::sys::filesystem_encoding()?;
+    let encode = |text: &Str| super::Codec::encode_str(text, &encoding, "surrogateescape");
+    set_environment_bytes(&encode(key)?, &encode(value)?)
+}
+
+/// Assign a typed bytes key and value to the process environment.
+///
+/// # Safety
+/// Both bytes objects are rooted until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_environ_set_bytes(key: *const Bytes, value: *const Bytes) {
+    // SAFETY: the caller supplies rooted bytes objects.
+    finish(unsafe { set_environment_bytes(&*key, &*value) }, ());
+}
+
+/// Assign a typed text key and value to the process environment.
+///
+/// # Safety
+/// Both strings are rooted by the caller until this function returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_environ_set(key: *const Str, value: *const Str) {
+    // SAFETY: the caller supplies rooted strings.
+    finish(unsafe { set_environment_text(&*key, &*value) }, ());
+}
+
+/// Remove POSIX names in mapping order. Entries remain raw bytes, including names
+/// inherited with an undecodable spelling.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_environ_clear() {
+    for (key, _) in initial_environment() {
+        if let Err(error) = cstring(&key).and_then(|key| change_environment(&key, None)) {
+            error.raise();
+            return;
+        }
+    }
+}
+
+/// # Safety
+/// The caller roots an exact dict[str, str] or dict[bytes, bytes] matching `bytes`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_environ_update(mapping: *const Object, bytes: u32) {
+    // SAFETY: the exact dictionary stays rooted. Its items iterator owns its cursor.
+    let items =
+        unsafe { crate::ObjectOwner::from_raw(super::mappings::imre_dict_iter(mapping, 1)) };
+    let update = || {
+        while let Some((key, item)) = super::mappings::pull(&items)? {
+            let value = item.expect("dictionary items have values");
+            // SAFETY: the item owns both words with the caller's exact homogeneous types.
+            unsafe {
+                if bytes != 0 {
+                    set_environment_bytes(
+                        &*(key.word as *const Bytes),
+                        &*(value.word as *const Bytes),
+                    )?;
+                } else {
+                    set_environment_text(&*(key.word as *const Str), &*(value.word as *const Str))?;
+                }
+            }
+        }
+        Ok(())
+    };
+    finish(update(), ());
 }
 
 /// Returns the first matching value, or the supplied nullable default.
@@ -1085,8 +1181,8 @@ unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<cr
 /// Diagnostics omit inherited values.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_environ_copy() -> *const Object {
-    // SAFETY: the single-threaded interpreter does not call Python while copying
-    // the OS's terminated environment. Raw POSIX entries preserve empty names.
+    let _guard = ENVIRONMENT.lock().unwrap();
+    // SAFETY: the lock keeps the terminated environment stable during the copy.
     let result = unsafe { environment_snapshot(native_environ()) };
     finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
 }

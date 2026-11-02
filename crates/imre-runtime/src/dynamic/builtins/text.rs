@@ -613,12 +613,13 @@ pub(in super::super) fn format_conversion(ctx: &mut Context, value: Id, conv: ch
     })
 }
 
-fn format_string(
-    ctx: &mut Context,
-    source: &str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
+#[derive(Clone, Copy)]
+enum FormatSource<'a> {
+    Arguments(&'a [Id], &'a [(String, Id)]),
+    Mapping(Id),
+}
+
+fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> Result<Id> {
     #[derive(Default)]
     struct Indices {
         next: usize,
@@ -627,8 +628,7 @@ fn format_string(
     fn render(
         ctx: &mut Context,
         s: &str,
-        args: &[Id],
-        kwargs: &[(String, Id)],
+        fields: FormatSource<'_>,
         indices: &mut Indices,
         nested: bool,
     ) -> Result<Id> {
@@ -651,6 +651,12 @@ fn format_string(
             let field = FieldName::parse(&field_name)
                 .map_err(|e| Error::new("ValueError", e.to_string()))?;
             let positional = |index| {
+                let FormatSource::Arguments(args, _) = fields else {
+                    return Err(Error::new(
+                        "ValueError",
+                        "Format string contains positional fields",
+                    ));
+                };
                 args.get(index).copied().ok_or_else(|| {
                     Error::new(
                         "IndexError",
@@ -680,14 +686,20 @@ fn format_string(
                     indices.manual = true;
                     positional(index)?
                 }
-                FieldType::Keyword(key) => kwargs
-                    .iter()
-                    .find(|(k, _)| k == &key)
-                    .map(|(_, id)| *id)
-                    .ok_or_else(|| {
+                FieldType::Keyword(key) => match fields {
+                    FormatSource::Arguments(_, kwargs) => kwargs
+                        .iter()
+                        .find(|(k, _)| k == &key)
+                        .map(|(_, id)| *id)
+                        .ok_or_else(|| {
+                            let key = ctx.text(key);
+                            ctx.lookup_error("KeyError", key)
+                        })?,
+                    FormatSource::Mapping(mapping) => {
                         let key = ctx.text(key);
-                        ctx.lookup_error("KeyError", key)
-                    })?,
+                        ctx.get_item(mapping, key)?
+                    }
+                },
             };
             for access in field.parts {
                 value = match access {
@@ -714,7 +726,7 @@ fn format_string(
                         "format specifier nested too deeply",
                     ));
                 }
-                Some(render(ctx, &format_spec, args, kwargs, indices, true)?)
+                Some(render(ctx, &format_spec, fields, indices, true)?)
             } else {
                 (!format_spec.is_empty()).then(|| ctx.text(format_spec))
             };
@@ -726,7 +738,7 @@ fn format_string(
         }
         Ok(ctx.text(output))
     }
-    render(ctx, source, args, kwargs, &mut Indices::default(), false)
+    render(ctx, source, fields, &mut Indices::default(), false)
 }
 
 fn ascii(s: &str) -> String {
@@ -2094,7 +2106,19 @@ pub(super) fn method(
     }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
-        "format" => format_string(ctx, &source, args, kwargs),
+        "format" => format_string(ctx, &source, FormatSource::Arguments(args, kwargs)),
+        "format_map" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("str.format_map() takes no keyword arguments"));
+            }
+            let [mapping] = args else {
+                return Err(type_error(format!(
+                    "str.format_map() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            format_string(ctx, &source, FormatSource::Mapping(*mapping))
+        }
         "partition" | "rpartition" => {
             if !kwargs.is_empty() {
                 return Err(type_error(format!(
