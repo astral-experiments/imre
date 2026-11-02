@@ -115,6 +115,8 @@ pub(in crate::dynamic) fn object_reduce(
     ctx.call(reducer, Vec::new(), Vec::new())
 }
 
+const BATCH_SIZE: usize = 1000;
+
 struct Pickler {
     protocol: u8,
     fix_imports: bool,
@@ -185,6 +187,10 @@ impl Pickler {
                         self.remember(ctx, obj)?;
                     }
                     Value::Bytes(_) => self.save_legacy_bytes(ctx, obj)?,
+                    Value::List(items) => {
+                        let length = items.len();
+                        self.save_list(ctx, obj, length)?;
+                    }
                     Value::Dict(_) => self.save_dict(ctx, obj)?,
                     Value::Function { .. } | Value::Class { .. } | Value::Native(_) => {
                         self.save_global(ctx, obj, None)?;
@@ -216,8 +222,41 @@ impl Pickler {
         self.save_reduce(ctx, obj, func, args, NONE)
     }
 
+    fn save_list(&mut self, ctx: &mut Context, obj: Id, length: usize) -> Result<()> {
+        self.out
+            .extend_from_slice(if self.protocol == 0 { b"(l" } else { b"]" });
+        self.remember(ctx, obj)?;
+        let iterator = ctx.iterator(obj)?;
+        let batched = self.protocol > 0 && length > 1;
+        let mut count = 0;
+        while let Some(item) = ctx.next_item(iterator)? {
+            if batched && count == 0 {
+                self.out.push(b'('); // MARK
+            }
+            // A reducer may remove its own list entry or replace a later one.
+            ctx.heap.keep(item);
+            self.save(ctx, item)?;
+            if batched {
+                count += 1;
+                if count == BATCH_SIZE {
+                    self.out.push(b'e'); // APPENDS
+                    count = 0;
+                }
+            } else {
+                self.out.push(b'a'); // APPEND
+                if self.protocol > 0 {
+                    // The binary singleton fast path writes only the original item.
+                    break;
+                }
+            }
+        }
+        if count > 0 {
+            self.out.push(b'e');
+        }
+        Ok(())
+    }
+
     fn save_dict(&mut self, ctx: &mut Context, obj: Id) -> Result<()> {
-        const BATCH_SIZE: usize = 1000;
         if self.protocol == 0 {
             self.out.extend_from_slice(b"(d"); // MARK, DICT
         } else {
