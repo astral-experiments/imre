@@ -322,6 +322,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
             if c == '(' && !in_class && chars.peek() == Some(&'?') {
                 let mut group = chars.clone();
                 group.next();
+                prefer_translation |= group.peek() == Some(&'#');
                 let mut prefer_python_flags = false;
                 while let Some(flag) = group.next_if(|c| "aiLmsux-".contains(*c)) {
                     prefer_python_flags |= matches!(flag, 'a' | 'u' | 'i' | 'x');
@@ -643,7 +644,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         Ok((source, matcher))
     };
     let backtrack = |error| lookahead::compile(&source, flags, bytes, error);
-    let global_verbose = source.starts_with("(?x)");
+    let global_verbose = imre_regex::leading_verbose(&source);
     let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
         let original = || {
             let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
