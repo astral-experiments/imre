@@ -2103,7 +2103,7 @@ impl Context {
             }
             "sys" => {
                 self.bind(scope, "modules", self.modules);
-                for name in ["audit", "addaudithook", "_getframe"] {
+                for name in ["audit", "addaudithook", "_getframe", "_getframemodulename"] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,
