@@ -265,6 +265,71 @@ class product:
         return result
 
 
+class batched:
+    """Batch data into tuples of length n. The last batch may be shorter than n.
+
+Loops over the input iterable and accumulates data into tuples
+up to size n.  The input is consumed lazily, just enough to
+fill a batch.  The result is yielded as soon as a batch is full
+or when the input iterable is exhausted.
+
+    >>> for batch in batched('ABCDEFG', 3):
+    ...     print(batch)
+    ...
+    ('A', 'B', 'C')
+    ('D', 'E', 'F')
+    ('G',)
+
+If "strict" is True, raises a ValueError if the final batch is shorter
+than n."""
+
+    __slots__ = ()
+
+    def __new__(cls, /, iterable, n, *, strict=False):
+        if not issubclass(cls, __class__):
+            raise TypeError("expected a batched subclass")
+        size = _ssize_index(n)
+        strict = bool(strict)
+        if size < 1:
+            raise ValueError("n must be at least one")
+        source = iter(iterable)
+        self = object.__new__(cls)
+        _batched_state.__set__(self, (source, size, strict))
+        return self
+
+    def __init__(self, *args, **kwargs):
+        # All state is set by __new__; calling the inherited initializer is inert.
+        if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+            object.__init__(self, *args, **kwargs)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        state = _batched_state.__get__(self)
+        if state is None:
+            raise StopIteration
+        source, size, strict = state
+        # Reserve the entire batch before advancing the input.
+        items = [None] * size
+        for i in range(size):
+            try:
+                items[i] = next(source)
+            except StopIteration:
+                break
+            except BaseException:
+                _batched_state.__set__(self, None)
+                raise
+        else:
+            return tuple(items)
+        if i and not strict:
+            return tuple(items[:i])
+        _batched_state.__set__(self, None)
+        if i:
+            raise ValueError("batched(): incomplete batch")
+        raise StopIteration
+
+
 class groupby:
     """Group consecutive values with equal keys, sharing one input iterator."""
 
