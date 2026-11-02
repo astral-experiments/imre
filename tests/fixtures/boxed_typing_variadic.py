@@ -1,4 +1,5 @@
 import sys
+from annotationlib import Format, get_annotations
 from collections.abc import Callable as ABCCallable
 from types import GenericAlias, ModuleType
 from typing import Annotated, Callable, ForwardRef, List, NoDefault, ParamSpec, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
@@ -34,6 +35,15 @@ def current():
         return variadic.__annotations__["args"]
 
     assert vararg_annotation(ts) is unpacked
+
+    def unresolved(*args: *Missing["field"]):
+        pass
+
+    assert get_annotations(unresolved, format=Format.STRING) == {"args": "*Missing['field']"}
+    forward = get_annotations(unresolved, format=Format.FORWARDREF)["args"]
+    assert type(forward) is ForwardRef and forward.__owner__ is unresolved
+    assert forward.__forward_arg__ == "*Missing['field']"
+
     try:
         vararg_annotation((int, str))
     except ValueError as exc:
