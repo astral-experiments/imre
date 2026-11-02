@@ -1,5 +1,6 @@
 import io
 import os
+import sys
 
 
 def current():
@@ -25,6 +26,16 @@ def current():
         assert not os.path.exists("unused-spelling")
         with io.FileIO("opener-target", "rb") as stream:
             assert stream.read() == b"abc"
+        spellings = []
+        def audit(event, args):
+            if event == "open" and args[0] is name:
+                spellings.append(args[1])
+        sys.addaudithook(audit)
+        for mode in ("".join(["b", "r"]), chr(114)):
+            with io.FileIO(name, mode, opener=opener):
+                pass
+            assert spellings[-1] == mode and type(spellings[-1]) is str
+            assert (spellings[-1] is mode) == (len(mode) == 1)
         with io.FileIO("opener-target", "rb") as stream:
             stream.__init__(name, "w", opener=opener)
             assert calls[-1] == os.O_CREAT | os.O_TRUNC | os.O_RDWR | os.O_CLOEXEC

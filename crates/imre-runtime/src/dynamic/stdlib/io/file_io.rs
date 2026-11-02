@@ -556,12 +556,6 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         String::from("r")
     };
     let owns = closefd.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
-    let opener = opener.filter(|&id| id != NONE).map(|callable| {
-        let spelling = mode_arg
-            .map(|id| ctx.scalar_value(id))
-            .unwrap_or_else(|| ctx.text("r"));
-        (callable, spelling)
-    });
     initialize_file(
         ctx,
         receiver,
@@ -569,7 +563,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         &selected_mode,
         owns,
         DescriptorLookup::FromArgument,
-        opener,
+        opener.filter(|&id| id != NONE),
         None,
     )
 }
@@ -713,7 +707,7 @@ fn initialize_file(
     mode_text: &str,
     owns: bool,
     descriptor: DescriptorLookup,
-    opener: Option<(Id, Id)>,
+    opener: Option<Id>,
     pipe: Option<BoxedPipe>,
 ) -> Result<Id> {
     // An opener, audit hook, or path protocol can reinitialize this same receiver.
@@ -770,7 +764,8 @@ fn initialize_file(
         raw.mode.set(access);
         let flags = parsed?;
         let update = access.readable && access.writable;
-        let opener = if let Some((callable, spelling)) = opener {
+        let opener = if let Some(callable) = opener {
+            let spelling = ctx.text(mode_text);
             let word = ctx.int(i64::from(opener_flags(flags, update)));
             super::super::audit::event(ctx, "open", &[path, spelling, word])?;
             Some((callable, word))
