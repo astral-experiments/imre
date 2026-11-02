@@ -227,6 +227,17 @@ def current():
         else:
             raise AssertionError("read from a detached buffer")
 
+    for args, expected in (
+        ((), "unbound method TextIOWrapper.truncate() needs an argument"),
+        ((1,), "descriptor 'truncate' for '_io.TextIOWrapper' objects doesn't apply to a 'int' object"),
+    ):
+        try:
+            io.TextIOWrapper.truncate(*args)
+        except TypeError as error:
+            assert str(error) == expected
+        else:
+            raise AssertionError("truncate accepted an invalid receiver")
+
     class TruncatingBuffer(io.BytesIO):
         def truncate(self, pos):
             return (self.getvalue(), pos)

@@ -864,7 +864,7 @@ pub(in super::super) fn call(
         Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
     ) {
         owner_kind
-    } else if owner_kind == Some("TextIOWrapper") && name == "__next__" {
+    } else if owner_kind == Some("TextIOWrapper") && matches!(name, "__next__" | "truncate") {
         Some("TextIOWrapper")
     } else if bytes_io {
         Some("BytesIO")
