@@ -1532,6 +1532,7 @@ def report(text):
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
+            "boxed_typing_assert_type.py",
             "boxed_typing_optional.py",
             "boxed_typing_literal.py",
             "boxed_typing_protocol.py",
