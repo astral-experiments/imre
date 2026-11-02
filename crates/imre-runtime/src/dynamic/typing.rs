@@ -21,6 +21,7 @@ pub(super) struct TypeVariable {
     pub covariant: bool,
     pub contravariant: bool,
     pub infer_variance: bool,
+    pub declared: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -948,6 +949,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             _ => return None,
         },
         Value::TypeVar(var) => match name {
+            "evaluate_bound" | "evaluate_constraints" | "evaluate_default" if var.declared => NONE,
             "__name__" => var.name,
             "__module__" => var.module,
             "__bound__" => var.bound,
@@ -1049,8 +1051,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
     Some(Ok(attr))
 }
 
-/// Create fresh compiler-declared type variables in a lexical scope shared by the class body and methods.
-pub(super) fn class_parameter_scope(ctx: &mut Context, outer: Id, names: Id) -> Result<Id> {
+/// Create the lexical scope for a type parameter list at a class or function definition.
+pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bool) -> Result<Id> {
     let enclosing = ctx.scope_data(outer);
     let parent = if enclosing.class_body.is_some() {
         enclosing.parent.unwrap_or(outer)
@@ -1063,10 +1065,16 @@ pub(super) fn class_parameter_scope(ctx: &mut Context, outer: Id, names: Id) -> 
     let mut params = Vec::new();
     for (binding, name) in ctx
         .dict_entries(names)
-        .expect("declared class type parameters")
+        .expect("declared type parameters")
         .to_vec()
     {
-        let param = typevar(ctx, &[name], &[("infer_variance".to_owned(), TRUE)], typing)?;
+        let param = typevar(
+            ctx,
+            &[name],
+            &[("infer_variance".to_owned(), TRUE)],
+            typing,
+            true,
+        )?;
         let binding = ctx.str_value(binding)?.to_owned();
         ctx.bind(scope, &binding, param);
         params.push(param);
@@ -1078,13 +1086,21 @@ pub(super) fn class_parameter_scope(ctx: &mut Context, outer: Id, names: Id) -> 
     frame.closure.declared_complete = true;
     let declared = ctx.alloc(Value::Tuple(params.clone()));
     ctx.bind(scope, ".type_params", declared);
-    let generic = named_class(ctx, "typing", "Generic");
-    let base = alias(ctx, AliasKind::Generic, generic, params)?;
-    ctx.bind(scope, ".generic_base", base);
+    if class {
+        let generic = named_class(ctx, "typing", "Generic");
+        let base = alias(ctx, AliasKind::Generic, generic, params)?;
+        ctx.bind(scope, ".generic_base", base);
+    }
     Ok(scope)
 }
 
-fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)], module: Id) -> Result<Id> {
+fn typevar(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    module: Id,
+    declared: bool,
+) -> Result<Id> {
     let mut name = args.first().copied();
     let mut bound = NONE;
     let mut covariant = false;
@@ -1154,6 +1170,7 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)], module: Id) 
         covariant,
         contravariant,
         infer_variance,
+        declared,
     })))
 }
 
@@ -1452,7 +1469,7 @@ pub(super) fn call(
     }
     if operation == "TypeVar" {
         let module = ctx.heap.caller_module();
-        return typevar(ctx, args, kwargs, module);
+        return typevar(ctx, args, kwargs, module, false);
     }
     if operation == "cast" {
         let [typ, value] = super::builtins::bind("cast()", args, kwargs, ["typ", "val"])?;

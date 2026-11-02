@@ -387,7 +387,9 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
-            "class_parameter_scope" => super::typing::class_parameter_scope(self, a, b),
+            "class_parameter_scope" | "function_parameter_scope" => {
+                super::typing::parameter_scope(self, a, b, op == "class_parameter_scope")
+            }
             "class_annotation_environment" => self.class_annotation_environment(a, b),
             "class_annotation_locals" => {
                 let parent = self.scope_data(a).parent.expect("annotation globals");

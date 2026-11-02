@@ -128,6 +128,7 @@ impl Function<'_, '_> {
                 "<lambda>",
                 v.parameters.as_deref(),
                 None,
+                None,
                 Body::Expression(&v.body),
             ),
             ast::Expr::TString(v) => self.template(&v.value),
@@ -156,6 +157,7 @@ impl Function<'_, '_> {
                 let step = self.define(
                     v.start(),
                     "<genexpr>",
+                    None,
                     None,
                     None,
                     Body::Generator(&v.generators, &v.elt),
