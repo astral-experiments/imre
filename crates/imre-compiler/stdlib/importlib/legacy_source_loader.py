@@ -1,6 +1,7 @@
 """Legacy direct loading with a SourceFileLoader, including replacement modules."""
 
 import sys
+from _thread import RLock
 from _imre_importlib import (
     _import_lock,
     create_native_module as _create_native_module,
@@ -13,6 +14,39 @@ from os import altsep, sep
 
 
 _NEEDS_LOADING = object()
+_module_locks = {}
+
+
+class _ModuleLockManager:
+    """Hold a reentrant lock for this name within the bootstrap's module registry."""
+
+    def __init__(self, name):
+        self._name = name
+
+    def __enter__(self):
+        # Keep the entry alive for waiters, but release the registry lock before
+        # acquiring the module lock or running any loader code.
+        with _import_lock:
+            lock, users = _module_locks.get(self._name, (None, 0))
+            self._lock = lock if lock is not None else RLock()
+            _module_locks[self._name] = (self._lock, users + 1)
+        try:
+            self._lock.acquire()
+        except BaseException:
+            self._drop_user()
+            raise
+
+    def _drop_user(self):
+        with _import_lock:
+            lock, users = _module_locks[self._name]
+            if users == 1:
+                del _module_locks[self._name]
+            else:
+                _module_locks[self._name] = (lock, users - 1)
+
+    def __exit__(self, *exc):
+        self._lock.release()
+        self._drop_user()
 
 
 def _warning_module():
@@ -26,7 +60,7 @@ if not _is_frozen:
 
 
 def _setup(sys_module, _imp_module):
-    # Importer state and module locking are owned by the native resolver.
+    # The native resolver owns the active finder registry.
     global sys, _imp
     sys = sys_module
     _imp = _imp_module
