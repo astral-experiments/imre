@@ -241,7 +241,8 @@ impl Context {
                 true
             }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
-            ("int", Value::Int(_) | Value::Bool(_))
+            ("bool", Value::Bool(_))
+            | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
@@ -1742,8 +1743,9 @@ impl Context {
             }
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
-            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__"],
-            "float" => &["__format__", "__getformat__", "as_integer_ratio"],
+            "bool" => &["__repr__"],
+            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"],
+            "float" => &["__format__", "__getformat__", "as_integer_ratio", "__repr__"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
