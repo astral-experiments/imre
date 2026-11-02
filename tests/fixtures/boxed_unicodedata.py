@@ -1,3 +1,4 @@
+import sys
 import unicodedata
 from unicodedata import normalize
 
@@ -7,6 +8,16 @@ class Text(str):
 
 
 def current():
+    assert sys.maxunicode == 0x10FFFF
+    for value in (Text("\u01FA"), "\u2100", "\uAC00", "\uAC01", "\ud800", chr(sys.maxunicode)):
+        print(unicodedata.decomposition(value))
+    for value in (None, b"x", "", "ab"):
+        try:
+            unicodedata.decomposition(value)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("invalid decomposition call succeeded")
     assert normalize is unicodedata.normalize
     for form in ("NFC", "NFD", "NFKC", "NFKD"):
         for value in ("", "plain", "é", "e\u0301", "①ﬂÅ", "각", "x\u0301", "a\u0315\u1acf\u0300", "\ua7f1"):
