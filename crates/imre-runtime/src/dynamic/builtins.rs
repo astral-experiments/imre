@@ -107,6 +107,7 @@ const FUNCTIONS: &[&str] = &[
     "format",
     "compile",
     "exec",
+    "eval",
     "iter",
     "next",
 ];
@@ -930,6 +931,10 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
+        if scope != NONE && matches!(self.heap.get(callable), Value::Native(name) if name == "eval")
+        {
+            return self.eval_source(scope, &args, &kwargs);
+        }
         if scope != NONE
             && args.is_empty()
             && kwargs.is_empty()
@@ -1288,8 +1293,9 @@ pub(super) fn call(
         "compile" => {
             positional(name, kwargs)?;
             arity(name, args, 3, 3)?;
-            ctx.compile_source(args[0], args[1], args[2])
+            ctx.compile_source(args[0], args[1], args[2], false)
         }
+        "eval" => ctx.eval_source(ctx.heap.current_scope(), args, kwargs),
         "exec" => {
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;
