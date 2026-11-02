@@ -2899,7 +2899,7 @@ impl Context {
                 return Ok(self.builtin("bytearray.maketrans"));
             }
             Value::Native(ref class)
-                if class == "bool" && matches!(name, "bit_length" | "to_bytes") =>
+                if class == "bool" && matches!(name, "__add__" | "bit_length" | "to_bytes") =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
@@ -2950,7 +2950,7 @@ impl Context {
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
-                    || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
+                    || (class == "int" && matches!(name, "__add__" | "bit_length" | "to_bytes"))
                     || (class == "float" && name == "as_integer_ratio")
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>

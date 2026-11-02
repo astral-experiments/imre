@@ -2498,6 +2498,17 @@ impl Context {
             }
             Value::Method {
                 callable,
+                receiver,
+                explicit: false,
+            } if let Value::Native(symbol) = self.heap.get(*callable)
+                && let Some(slot) =
+                    super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol)
+                && !slot.method =>
+            {
+                slot.bound_repr(self, *receiver)
+            }
+            Value::Method {
+                callable,
                 explicit: false,
                 receiver,
             } if let Value::Native(symbol) = self.heap.get(*callable)
