@@ -28,7 +28,9 @@ mapping = packages_distributions()
 assert mapping['shared_ns'] == ['Declared-Owner', 'Declared-Owner', 'Inferred-Owner']
 assert mapping['declared.name'] == ['Declared-Owner']
 assert mapping['single-module'] == ['Inferred-Owner']
-assert {'ignored.pth', 'lost_module', 'file_list-2.dist-info'}.isdisjoint(mapping)
+assert 'ignored.pth' not in mapping
+assert 'lost_module' not in mapping
+assert 'file_list-2.dist-info' not in mapping
 print(mapping['shared_ns'])
 
 (declared / 'METADATA').write_text('Name: Changed-Owner\n', encoding='utf-8')
