@@ -171,15 +171,21 @@ def source_annotations():
     from types import FunctionType
 
     ns = {"__name__": "annotations", "format": bytes, "Alias": bytes}
-    exec("""def factory(outer, Alias):
+    exec("""def factory(outer, Alias, Global):
     class C:
+        global Global
+        def uses_global(self, x: Global): ...
         def method(self, first: Late, /, normal: outer, *args: format,
                    named: Alias, **kw: int) -> None: ...
         Alias = str
         def sibling(self, arg: Alias): ...
     return C
 """, ns)
-    cls = ns["factory"](bool, int)
+    cls = ns["factory"](bool, int, int)
+    cls.Global = float
+    ns["Global"] = complex
+    assert cls.uses_global.__annotations__ == {"x": complex}
+    assert cls.uses_global.__annotate__.__code__.co_freevars == ("__classdict__",)
     provider = cls.method.__annotate__
     assert provider.__code__.co_freevars == ("__classdict__", "outer")
     assert provider.__closure__[0] is cls.sibling.__annotate__.__closure__[0]

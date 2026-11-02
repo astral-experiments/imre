@@ -799,6 +799,15 @@ impl Program {
                 Instruction::Define(definition) => {
                     if let Some(provider) = &mut definition.annotate {
                         let provider = Rc::get_mut(provider).expect("new annotation code");
+                        if self.class_attributes.is_some() {
+                            // A global declared by the class also bypasses its dictionary
+                            // when evaluated in an immediately enclosed annotation scope.
+                            for (name, (kind, _)) in &self.directives {
+                                if *kind == ScopeDirective::Global {
+                                    provider.directives.insert(name.clone(), (*kind, 0.into()));
+                                }
+                            }
+                        }
                         let (roots, reads) = provider.prepare_scope_strings(
                             strings.heap,
                             strings.shared,

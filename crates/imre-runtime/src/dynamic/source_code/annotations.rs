@@ -182,11 +182,13 @@ impl Context {
         let mut environment = self.scope_data(scope).parent.expect("annotation globals");
         if class {
             let dict = self.lookup(environment, "__classdict__")?;
+            let globals = self.scope_data(scope).globals.clone();
             let locals = self.scope("", Some(environment));
             let Value::Scope(frame) = self.heap.get_mut(locals) else {
                 unreachable!()
             };
             frame.exec_locals = Some(dict);
+            frame.globals = globals;
             environment = locals;
         }
         let annotations = self.dict(Vec::new());
