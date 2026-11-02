@@ -35,7 +35,7 @@ fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
     )
 }
 
-/// Produce the protocol 2+ default reduction for an ordinary Python instance with no new arguments.
+/// Reduce an ordinary Python instance using the state rules for its pickle protocol.
 fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Result<Id> {
     let Value::Instance { class, .. } = *ctx.heap.get(receiver) else {
         return Err(unsupported_reducer(ctx, receiver));
@@ -44,11 +44,23 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
     let Value::Class { ancestors, .. } = ctx.heap.get(class) else {
         return Err(unsupported_reducer(ctx, receiver));
     };
-    if protocol < 2
-        || ancestors
-            .iter()
-            .any(|&base| matches!(ctx.heap.get(base), Value::Native(kind) if kind != "object"))
-        || ctx.class_attr(class, "__getnewargs_ex__").is_some()
+    if ancestors
+        .iter()
+        .any(|&base| matches!(ctx.heap.get(base), Value::Native(kind) if kind != "object"))
+    {
+        return Err(unsupported_reducer(ctx, receiver));
+    }
+    if protocol < 2 {
+        if ctx.allocation_base(class) != ctx.builtins.get("object").copied() {
+            return Err(unsupported_reducer(ctx, receiver));
+        }
+        let copyreg = ctx.module("copyreg")?;
+        let reducer = ctx.lookup_attr(copyreg, "_reduce_ex")?;
+        ctx.heap.keep(reducer);
+        let protocol = ctx.int(i64::from(protocol));
+        return ctx.call(reducer, vec![receiver, protocol], Vec::new());
+    }
+    if ctx.class_attr(class, "__getnewargs_ex__").is_some()
         || ctx.class_attr(class, "__getnewargs__").is_some()
     {
         return Err(unsupported_reducer(ctx, receiver));

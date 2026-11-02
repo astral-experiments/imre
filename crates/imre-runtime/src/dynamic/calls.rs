@@ -4638,7 +4638,7 @@ impl Context {
 
     /// The first non-Python base owns the instance layout. Native classes
     /// represented with a class namespace (e.g. BytesIO) have no Python class cell.
-    fn allocation_base(&self, class: Id) -> Option<Id> {
+    pub(super) fn allocation_base(&self, class: Id) -> Option<Id> {
         self.find_in_mro(class, |base| self.owns_allocation(base).then_some(base))
     }
 
