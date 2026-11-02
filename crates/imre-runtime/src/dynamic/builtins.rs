@@ -367,7 +367,9 @@ pub(super) const BYTES_METHODS: &[&str] = &[
 
 pub(super) const STR_METHODS: &[&str] = &[
     "__format__",
+    "__mod__",
     "__repr__",
+    "__rmod__",
     "capitalize",
     "count",
     "encode",

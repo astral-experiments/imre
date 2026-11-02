@@ -96,6 +96,8 @@ impl BuiltinDescriptor {
             "float.__repr__" => ("float", "__repr__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
+            "str.__mod__" => ("str", "__mod__"),
+            "str.__rmod__" => ("str", "__rmod__"),
             "str.isascii" => ("str", "isascii"),
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
@@ -304,10 +306,12 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__rmul__" => ctx.text("Return value*self."),
             "__doc__" if self.name == "__truediv__" => ctx.text("Return self/value."),
             "__doc__" if self.name == "__rtruediv__" => ctx.text("Return value/self."),
+            "__doc__" if self.name == "__mod__" => ctx.text("Return self%value."),
+            "__doc__" if self.name == "__rmod__" => ctx.text("Return value%self."),
             "__doc__" if self.name == "__floordiv__" => ctx.text("Return self//value."),
             "__doc__" if self.name == "__rfloordiv__" => ctx.text("Return value//self."),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
-            "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__floordiv__" | "__rfloordiv__") => {
+            "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__mod__" | "__rmod__" | "__floordiv__" | "__rfloordiv__") => {
                 ctx.text("($self, value, /)")
             }
             "__text_signature__" if self.name == "endswith" => {
