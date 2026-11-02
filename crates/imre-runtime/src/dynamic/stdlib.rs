@@ -782,7 +782,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
             | "finditer",
         )
-        | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
+        | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator")
         | ("enum", "_simple_enum")
         | (
             "functools",
