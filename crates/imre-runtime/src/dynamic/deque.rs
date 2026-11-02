@@ -394,12 +394,14 @@ pub(super) fn copy(ctx: &mut Context, receiver: Id) -> Result<Id> {
     }
     let result = ctx.call(class, args, Vec::new())?;
     if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Deque(_)) {
+        let receiver_name = ctx.type_name(receiver);
+        let result_name = ctx.type_name(result);
         return Err(Error::new(
             "TypeError",
             format!(
                 "{}() must return a deque, not {}",
-                ctx.type_name(receiver),
-                ctx.type_name(result)
+                &receiver_name[..receiver_name.floor_char_boundary(200)],
+                &result_name[..result_name.floor_char_boundary(200)]
             ),
         ));
     }
