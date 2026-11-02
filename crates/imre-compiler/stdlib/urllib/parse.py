@@ -324,3 +324,106 @@ def unquote_plus(string, encoding='utf-8', errors='replace'):
     """
     string = string.replace('+', ' ')
     return unquote(string, encoding, errors)
+
+
+_hexdig = '0123456789ABCDEFabcdef'
+_hextobyte = None
+
+
+def unquote_to_bytes(string):
+    """Decode percent escapes and return the resulting bytes."""
+    if not string:
+        # Is it a string-like object?
+        string.split
+        return b''
+    if isinstance(string, str):
+        string = string.encode('utf-8')
+    bits = string.split(b'%')
+    if len(bits) == 1:
+        return bytes(string)
+    res = bytearray(bits[0])
+    append = res.extend
+    # Delay the initialization of the table to not waste memory
+    # if the function is never called
+    global _hextobyte
+    if _hextobyte is None:
+        _hextobyte = {(a + b).encode(): bytes.fromhex(a + b)
+                      for a in _hexdig for b in _hexdig}
+    for item in bits[1:]:
+        try:
+            append(_hextobyte[item[:2]])
+            append(item[2:])
+        except KeyError:
+            append(b'%')
+            append(item)
+    return bytes(res)
+
+
+def parse_qs(qs, keep_blank_values=False, strict_parsing=False,
+             encoding='utf-8', errors='replace', max_num_fields=None, separator='&'):
+    """Parse a query into lists of values grouped by name."""
+    result = {}
+    for name, value in parse_qsl(qs, keep_blank_values, strict_parsing, encoding=encoding,
+                                 errors=errors, max_num_fields=max_num_fields,
+                                 separator=separator, _stacklevel=2):
+        if name in result:
+            result[name].append(value)
+        else:
+            result[name] = [value]
+    return result
+
+
+def parse_qsl(qs, keep_blank_values=False, strict_parsing=False,
+              encoding='utf-8', errors='replace', max_num_fields=None, separator='&', *, _stacklevel=1):
+    """Parse a query into name/value pairs in field order."""
+    if not separator or not isinstance(separator, (str, bytes)):
+        raise ValueError('Separator must be of type string or bytes.')
+    text = isinstance(qs, str)
+    if text:
+        if not isinstance(separator, str):
+            separator = str(separator, 'ascii')
+
+        def _unquote(s):
+            return unquote_plus(s, encoding=encoding, errors=errors)
+    elif qs is None:
+        return []
+    else:
+        # A memoryview may be strided; take its bytes in logical order.
+        if isinstance(qs, memoryview):
+            qs = qs.tobytes()
+        try:
+            # Latin-1 maps each octet to one character and reads the buffer
+            # directly, bypassing __bytes__ on subclasses.
+            qs = str(qs, 'latin-1')
+        except TypeError:
+            if qs:
+                raise
+            warnings.warn(f"Accepting {type(qs).__name__} objects with "
+                          "false value in urllib.parse.parse_qsl() is deprecated as of 3.14",
+                          DeprecationWarning, stacklevel=_stacklevel + 1)
+            return []
+        if isinstance(separator, str):
+            separator = bytes(separator, 'ascii')
+        separator = str(separator, 'latin-1')
+
+        def _unquote(s):
+            return unquote_to_bytes(s.replace('+', ' ').encode('latin-1'))
+
+    if not qs:
+        return []
+    if max_num_fields is not None and max_num_fields < 1 + qs.count(separator):
+        raise ValueError('Max number of fields exceeded')
+
+    result = []
+    for field in qs.split(separator):
+        if field or strict_parsing:
+            name, has_eq, value = field.partition('=')
+            if not has_eq and strict_parsing:
+                if not text:
+                    field = field.encode('latin-1')
+                raise ValueError('bad query field: %r' % (field,))
+            if value or keep_blank_values:
+                name = _unquote(name)
+                value = _unquote(value)
+                result.append((name, value))
+    return result

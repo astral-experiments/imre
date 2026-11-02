@@ -21,7 +21,7 @@ mod bytes;
 pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
     bytes_contains, bytes_contains_int, concat_bytes, owned_input as owned_bytes_input,
-    repeat_bytes, rsplit_bytes, rstrip_bytes,
+    repeat_bytes, rstrip_bytes, split_bytes,
 };
 pub(crate) mod cache_paths;
 mod calendar;

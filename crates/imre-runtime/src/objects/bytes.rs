@@ -296,16 +296,19 @@ pub(crate) fn bytes_contains_int(haystack: &[u8], needle: &Int) -> Result<bool> 
     Ok(memchr::memchr(byte, haystack).is_some())
 }
 
-/// A field covering the entire immutable input retains its original owner.
-pub(crate) fn rsplit_bytes(
+/// Split a byte buffer at a subsequence or runs of ASCII whitespace. A field
+/// covering the full input can reuse its owner only for immutable bytes.
+pub(crate) fn split_bytes(
     data: &[u8],
     separator: Option<&[u8]>,
     limit: usize,
+    reverse: bool,
+    immutable: bool,
 ) -> Result<Vec<Option<Bytes>>> {
     let mut parts = Vec::new();
     let mut push = |field: &[u8]| -> Result<()> {
         parts.try_reserve(1).map_err(|_| Error::memory_error())?;
-        let owned = if field.len() == data.len() {
+        let owned = if immutable && field.len() == data.len() {
             None
         } else {
             let mut bytes = allocate(field.len())?;
@@ -315,40 +318,69 @@ pub(crate) fn rsplit_bytes(
         parts.push(owned);
         Ok(())
     };
-    let mut end = data.len();
     if let Some(sep) = separator {
         if sep.is_empty() {
             return Err(Error::new(Kind::ValueError, "empty separator"));
         }
-        for start in memchr::memmem::rfind_iter(data, sep).take(limit) {
-            push(&data[start + sep.len()..end])?;
-            end = start;
+        if reverse {
+            let mut end = data.len();
+            for start in memchr::memmem::rfind_iter(data, sep).take(limit) {
+                push(&data[start + sep.len()..end])?;
+                end = start;
+            }
+            push(&data[..end])?;
+        } else {
+            let mut start = 0;
+            for end in memchr::memmem::find_iter(data, sep).take(limit) {
+                push(&data[start..end])?;
+                start = end + sep.len();
+            }
+            push(&data[start..])?;
         }
-        push(&data[..end])?;
     } else {
         let whitespace = |b: u8| matches!(b, b' ' | b'\t'..=b'\r');
-        let mut splits = 0;
-        loop {
-            while end > 0 && whitespace(data[end - 1]) {
-                end -= 1;
-            }
-            if end == 0 {
+        let mut rest = data;
+        for splits in 0.. {
+            rest = if reverse {
+                let end = rest
+                    .iter()
+                    .rposition(|&b| !whitespace(b))
+                    .map_or(0, |i| i + 1);
+                &rest[..end]
+            } else {
+                let start = rest
+                    .iter()
+                    .position(|&b| !whitespace(b))
+                    .unwrap_or(rest.len());
+                &rest[start..]
+            };
+            if rest.is_empty() {
                 break;
             }
             if splits == limit {
-                push(&data[..end])?;
+                push(rest)?;
                 break;
             }
-            let start = data[..end]
-                .iter()
-                .rposition(|&b| whitespace(b))
-                .map_or(0, |i| i + 1);
-            push(&data[start..end])?;
-            end = start;
-            splits += 1;
+            if reverse {
+                let start = rest
+                    .iter()
+                    .rposition(|&b| whitespace(b))
+                    .map_or(0, |i| i + 1);
+                push(&rest[start..])?;
+                rest = &rest[..start];
+            } else {
+                let end = rest
+                    .iter()
+                    .position(|&b| whitespace(b))
+                    .unwrap_or(rest.len());
+                push(&rest[..end])?;
+                rest = &rest[end..];
+            }
         }
     }
-    parts.reverse();
+    if reverse {
+        parts.reverse();
+    }
     Ok(parts)
 }
 
