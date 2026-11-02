@@ -31,6 +31,8 @@ impl BuiltinDescriptor {
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
+            Some(("set", attr)) => Some(("set", attr, &["issubset"][..])),
+            Some(("frozenset", attr)) => Some(("frozenset", attr, &["issubset"][..])),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
