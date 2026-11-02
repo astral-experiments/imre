@@ -15,14 +15,7 @@ class Item:
         return "item"
 
 
-def local():
-    class Local(t.Protocol):
-        pass
-
-    return Local._is_protocol
-
-
-print(local(), isinstance(Item(), HasName), isinstance(object(), HasName))
+print(isinstance(Item(), HasName), isinstance(object(), HasName))
 try:
     t.runtime_checkable(Item)
 except TypeError as exc:

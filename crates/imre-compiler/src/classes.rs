@@ -256,21 +256,6 @@ impl Classes {
     }
 }
 
-/// Protocol bases, including Protocol[T], need the metaclass in the object runtime.
-pub(crate) fn protocol_base(
-    expression: &ast::Expr,
-    resolve: impl FnOnce(&ast::Expr) -> Option<Binding>,
-) -> bool {
-    let origin = match expression {
-        ast::Expr::Subscript(subscript) => &*subscript.value,
-        base => base,
-    };
-    matches!(
-        resolve(origin),
-        Some(Binding::Intrinsic(Intrinsic::TYPING_PROTOCOL))
-    )
-}
-
 /// Resolve the origin of a Mapping base, including aliases and its two static type arguments.
 pub(crate) fn mapping_base(graph: &SourceGraph, module: usize, expression: &ast::Expr) -> bool {
     let origin = match expression {

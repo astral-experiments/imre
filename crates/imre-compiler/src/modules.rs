@@ -3051,6 +3051,18 @@ impl SourceGraph {
         resolve_binding(&self.modules, module, expression)
     }
 
+    /// Recognize Protocol and Protocol[T] at the point where the class is defined.
+    pub(crate) fn is_protocol_base(&self, module: ModuleId, expression: &ast::Expr) -> bool {
+        let origin = match expression {
+            ast::Expr::Subscript(subscript) => &*subscript.value,
+            base => base,
+        };
+        matches!(
+            self.resolve(module, origin),
+            Some(Binding::Intrinsic(Intrinsic::TYPING_PROTOCOL))
+        ) && self.session.is_typing_protocol(module, origin)
+    }
+
     /// An import binds its name throughout the function, even before the import executes.
     fn local_static_binding(
         &self,

@@ -459,6 +459,16 @@ impl Session {
         )
     }
 
+    pub(crate) fn is_typing_protocol(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{SpecialFormType, Type as Ty};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(
+            expression.inferred_type(&model),
+            Some(Ty::SpecialForm(SpecialFormType::Protocol))
+        )
+    }
+
     /// Resolve a bare `object` base at the point where the class is defined.
     pub(crate) fn builtin_object_base(&self, module: usize, base: &Expr) -> bool {
         base.as_name_expr().is_some_and(|name| name.id == "object")
