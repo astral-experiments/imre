@@ -905,6 +905,7 @@ pub(crate) fn compile(
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
         "xoptions":startup.map(|(flags, _)| &flags.xoptions),
         "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
+        "unbuffered":startup.is_some_and(|(flags, _)| flags.unbuffered),
         "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),

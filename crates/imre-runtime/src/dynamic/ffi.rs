@@ -653,6 +653,9 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     let options: Vec<String> =
         serde_json::from_value(config["warnoptions"].take()).unwrap_or_default();
     config["warnoptions"] = crate::sys::startup_warning_options(ignore_environment, options).into();
+    if config["unbuffered"].as_bool() == Some(true) {
+        crate::imre_stdio_unbuffered_init();
+    }
     crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
     config["utf8_mode"] = crate::sys::imre_sys_utf8_mode().into();
     config["warn_default_encoding"] = config["warn_default_encoding"]
