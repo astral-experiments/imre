@@ -100,20 +100,39 @@ pub(in crate::dynamic) struct Pattern {
 }
 
 impl Pattern {
-    /// Scanner patterns use internal program state with no Python source to compare.
+    /// Synthetic Scanner patterns do not have a Python pattern object to compare.
     pub(in crate::dynamic) fn same_program(&self, other: &Self) -> bool {
-        self.source != NONE
-            && other.source != NONE
-            && self.flags == other.flags
-            && self.bytes == other.bytes
-            && self.engine_source == other.engine_source
+        if self.source == NONE
+            || other.source == NONE
+            || self.flags != other.flags
+            || self.bytes != other.bytes
+            || self.assertions.len() != other.assertions.len()
+            || !self
+                .assertions
+                .iter()
+                .zip(&other.assertions)
+                .all(|((a, x), (b, y))| {
+                    a == b && x.kind == y.kind && x.width == y.width && x.program == y.program
+                })
+        {
+            return false;
+        }
+        if self.engine_source == other.engine_source {
+            return true;
+        }
+        // str subclasses may compare equal despite different spellings. Compare their
+        // compiled states, independent of spelling and capture names, before calling __eq__.
+        !matches!(self.regex, Matcher::Lookahead(_))
+            && !matches!(other.regex, Matcher::Lookahead(_))
+            && matches!((split::retry_nfa(self), split::retry_nfa(other)), (Ok(a), Ok(b)) if a.states() == b.states())
     }
 
     pub(in crate::dynamic) fn program_hash(&self) -> i64 {
-        crate::python_hash::bytes(self.engine_source.as_bytes())
-            ^ self.flags
-            ^ i64::from(self.bytes)
+        // Equal state programs can have different spellings (for example noncapturing groups).
+        // The shared group layout is also invariant under capture renaming.
+        self.flags ^ i64::from(self.bytes) ^ (self.group_count() as i64).rotate_left(7)
     }
+
     pub(in crate::dynamic) fn repr(&self, ctx: &Context) -> String {
         let mut source = ctx.repr(self.source);
         if let Some((end, _)) = source.char_indices().nth(200) {
@@ -832,6 +851,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
                     name,
                     Guard {
                         regex: guard,
+                        program: hir.to_string(),
                         kind,
                         width,
                     },
