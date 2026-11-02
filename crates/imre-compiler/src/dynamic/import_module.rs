@@ -4,6 +4,18 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "doctest" => Some((
+            "doctest.py",
+            concat!(
+                include_str!("../../stdlib/doctest.py"),
+                "\n",
+                include_str!("../../stdlib/doctest_boxed.py"),
+            ),
+        )),
+        "_imre_doctest" => Some((
+            "_imre_doctest.py",
+            include_str!("../../stdlib/_imre_doctest.py"),
+        )),
         "traceback" => Some((
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),
