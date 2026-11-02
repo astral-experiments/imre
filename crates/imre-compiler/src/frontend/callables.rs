@@ -556,6 +556,11 @@ impl Checker<'_> {
             return self.invoke_descriptor(call, callable, method);
         }
         if let Type::Class(class) = callable.ty
+            && self.bundled_mock_class(class, "_PatchFactory")
+        {
+            return Err(self.object_runtime_export("unittest.mock.patch", call));
+        }
+        if let Type::Class(class) = callable.ty
             && self.native_mock(class)
         {
             return self.mock_arguments(call, class, callable, "_record");
