@@ -582,7 +582,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ClassMethod { .. } if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
-        Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
+        Value::Coroutine { .. }
+            if super::generator_protocol::coroutine_method("coroutine", attr) =>
+        {
             "coroutine"
         }
         Value::CoroutineWrapper(_)

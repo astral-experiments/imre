@@ -1898,6 +1898,12 @@ impl IntrinsicModule {
             }
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
             (Self::Sys, "getsizeof") => Intrinsic::ObjectRuntimeExport("sys.getsizeof"),
+            (Self::Sys, "get_coroutine_origin_tracking_depth") => {
+                Intrinsic::ObjectRuntimeExport("sys.get_coroutine_origin_tracking_depth")
+            }
+            (Self::Sys, "set_coroutine_origin_tracking_depth") => {
+                Intrinsic::ObjectRuntimeExport("sys.set_coroutine_origin_tracking_depth")
+            }
             (Self::Sys, "get_asyncgen_hooks") => {
                 Intrinsic::ObjectRuntimeExport("sys.get_asyncgen_hooks")
             }

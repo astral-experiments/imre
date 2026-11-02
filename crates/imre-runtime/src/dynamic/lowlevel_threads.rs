@@ -34,6 +34,7 @@ pub(super) struct Workers {
     pub(super) default_stderr: Option<Id>,
     pub(super) default_unraisable_hook: Option<Id>,
     pub(super) asyncgen_hooks: [Id; 2],
+    pub(super) coroutine_origin_depth: u32,
     running: Vec<(Arc<AtomicBool>, Vec<Id>)>,
 }
 

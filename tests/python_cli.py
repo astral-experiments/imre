@@ -2436,8 +2436,9 @@ def report(text):
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
-        coroutine_fixture = fixtures / "boxed_prelinked_coroutine.py"
-        compare("-IB", coroutine_fixture, native_args=("run", coroutine_fixture, "--runtime-imports", "--quiet"))
+        for name in ("boxed_prelinked_coroutine.py", "boxed_coroutine_origin.py"):
+            coroutine_fixture = fixtures / name
+            compare("-IB", coroutine_fixture, native_args=("run", coroutine_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
         compare(
@@ -3039,6 +3040,7 @@ for name in ("md4", "ripemd160"):
             "boxed_min.py",
             "boxed_generator_delegation.py",
             "boxed_source_coroutine.py",
+            "boxed_coroutine_origin.py",
             "boxed_source_async_with.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",

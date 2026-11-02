@@ -122,6 +122,20 @@ pub fn direct_method<'a>(
     .then_some(field)
 }
 
+/// Python locates attribute loads and optimized method calls at the attribute name.
+pub fn expression_position(
+    expr: &ast::Expr,
+    imports: &BTreeSet<String>,
+    spellings: Option<&Names>,
+) -> TextSize {
+    match expr {
+        ast::Expr::Attribute(field) => field.attr.start(),
+        ast::Expr::Call(call) => direct_method(call, imports, spellings)
+            .map_or_else(|| expr.start(), |field| field.attr.start()),
+        _ => expr.start(),
+    }
+}
+
 /// Check explicit keyword names before lowering can mangle class-private names.
 pub fn repeated_keyword(node: ast::AnyNodeRef<'_>) -> Option<&ast::Keyword> {
     use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};

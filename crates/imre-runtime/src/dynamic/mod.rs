@@ -2110,6 +2110,12 @@ impl Context {
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
+        if name == "coroutine" {
+            let origin = self.readonly_member("coroutine", "cr_origin");
+            let key = self.heap.code_name("cr_origin");
+            let dictionary = self.dict(vec![(key, origin)]);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == deque::CLASS {
             deque::install(self);
         }
@@ -3235,6 +3241,10 @@ impl Context {
                 self.bind(scope, "byteorder", byteorder);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
+                for name in ["get_coroutine_origin_tracking_depth", "set_coroutine_origin_tracking_depth"] {
+                    let callable = self.builtin(&format!("sys.{name}"));
+                    self.bind(scope, name, callable);
+                }
                 for name in [
                     "audit",
                     "addaudithook",

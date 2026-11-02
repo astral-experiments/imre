@@ -265,6 +265,39 @@ impl Context {
             .publish_fault_frames(crate::fault_handler::generation());
     }
 
+    /// Capture code metadata at creation without extending the life of any caller frame.
+    pub(super) fn coroutine_origin(&mut self) -> Id {
+        let depth = self.threads.coroutine_origin_depth as usize;
+        if depth == 0 {
+            return NONE;
+        }
+        let mut frames = Vec::new();
+        for index in (0..self.heap.frames.len()).rev() {
+            let frame = &self.heap.frames[index];
+            let Some(location) = &frame.location else {
+                continue;
+            };
+            if frame.code == NONE {
+                continue;
+            }
+            let code = self.code_object(frame.code);
+            let line = match (frame.expression, &code.body) {
+                (ExpressionPosition::Line(line), _) => line,
+                (ExpressionPosition::Offset(offset), Body::Source(program)) => {
+                    program.expression_line(offset).unwrap_or(location.line)
+                }
+                _ => location.line,
+            };
+            let (file, name) = (code.filename, code.name);
+            let line = self.int(i64::from(line));
+            frames.push(self.alloc(Value::Tuple(vec![file, line, name])));
+            if frames.len() == depth {
+                break;
+            }
+        }
+        self.alloc(Value::Tuple(frames))
+    }
+
     /// Return the same Python frame to introspection and traceback construction.
     pub(super) fn active_frame(&mut self, depth: usize) -> Result<Option<(Location, Id)>> {
         let Some((index, _)) = self
@@ -922,7 +955,10 @@ pub(super) enum Value {
     },
     Code(CodeObject),
     // The coroutine owns its private suspended frame. Each await iterator owns the coroutine.
-    Coroutine(Id),
+    Coroutine {
+        frame: Id,
+        origin: Id,
+    },
     CoroutineWrapper(Id),
     Generator {
         owner: FrameOwner,
@@ -1266,7 +1302,7 @@ impl Value {
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
             Self::Generator { .. } => "generator",
-            Self::Coroutine(_) => "coroutine",
+            Self::Coroutine { .. } => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
             Self::NoDefault => "NoDefaultType",
             Self::TypeAlias { .. } => "typing.TypeAliasType",
@@ -1524,7 +1560,8 @@ impl Value {
                 visit.extend(constructor);
             }
             Self::Cell(value) => visit.extend(value),
-            Self::Coroutine(frame) | Self::CoroutineWrapper(frame) => visit.push(*frame),
+            Self::Coroutine { frame, origin } => visit.extend([*frame, *origin]),
+            Self::CoroutineWrapper(coroutine) => visit.push(*coroutine),
             Self::Function {
                 closure,
                 scope,
@@ -2253,12 +2290,21 @@ impl FrameOwner {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub(super) enum ExpressionPosition {
+    #[default]
+    Statement,
+    Line(u32),
+    Offset(ruff_text_size::TextSize),
+}
+
 struct Frame {
     owner: FrameOwner,
     scope: Id,
     code: Id,
     live: Vec<Id>,
     location: Option<Location>,
+    expression: ExpressionPosition,
     object: Option<Id>,
     inherited: Id,
     active: Id,
@@ -2274,6 +2320,7 @@ impl Frame {
             code,
             live: Vec::new(),
             location: None,
+            expression: ExpressionPosition::Statement,
             object: None,
             inherited,
             active: inherited,
@@ -3139,6 +3186,13 @@ impl Heap {
             .nth((level.max(1) - 1) as usize)
     }
 
+    pub(super) fn replace_expression(
+        &mut self,
+        position: ExpressionPosition,
+    ) -> ExpressionPosition {
+        std::mem::replace(&mut self.frames.last_mut().unwrap().expression, position)
+    }
+
     pub fn current_location(&self) -> Option<Location> {
         self.frames.last()?.location.clone()
     }
@@ -3518,6 +3572,7 @@ impl Heap {
         frame.active = active;
         let line = location.line;
         frame.location = Some(location);
+        frame.expression = ExpressionPosition::Statement;
         frame.live.clear();
         frame.live.extend(live);
         self.set_statement_line(line);

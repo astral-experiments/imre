@@ -2670,6 +2670,9 @@ impl<'a> Checker<'a> {
         {
             return Err(self.object_builtin_error(attribute.attr.as_str(), attribute));
         }
+        if matches!(receiver.ty, Type::Coroutine(_)) && attribute.attr.as_str() == "cr_origin" {
+            return Err(self.object_builtin_error("coroutine.cr_origin", attribute));
+        }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
         }
@@ -4907,6 +4910,11 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if matches!(receiver.ty, Type::Coroutine(_))
+                            && attr.attr.as_str() == "cr_origin"
+                        {
+                            return Err(self.object_builtin_error("coroutine.cr_origin", attr));
+                        }
                         if receiver.ty == Type::CodecInfo
                             && matches!(
                                 attr.attr.as_str(),
@@ -11160,6 +11168,16 @@ impl<'a> Checker<'a> {
             self.reject_builtin_keywords(call)?;
             let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
             return Ok(self.implementation_hasattr(receiver.clone(), key));
+        }
+        if matches!(
+            (name.id.as_str(), args.len()),
+            ("getattr", 2 | 3) | ("hasattr" | "delattr", 2) | ("setattr", 3)
+        ) && self.unshadowed_builtin(&call.func, name.id.as_str())
+            && matches!(args[0].ty, Type::Coroutine(_))
+            && matches!(&args[1].kind, ExprKind::Str(member) if member == "cr_origin")
+        {
+            self.reject_builtin_keywords(call)?;
+            return Err(self.object_builtin_error("coroutine.cr_origin", call));
         }
         if self.unshadowed_builtin(&call.func, "getattr")
             && let [receiver, attribute] | [receiver, attribute, _] = args.as_slice()
