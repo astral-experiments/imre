@@ -1,136 +1,14 @@
 //! BufferedReader over a native FileIO retains that raw object and its descriptor.
 
 use super::super::{builtins, files, os_error};
-use super::{BufferedFd, Context, Error, FALSE, Id, MemoryStream, NONE, Result, TRUE, Value};
-use super::{descriptor_buffer, file_io};
+use super::descriptor_buffer::{self, backing, ssize};
+use super::{Context, Error, FALSE, Id, NONE, Result, Value};
 use files::{BinaryFile, ReadSource};
 
 pub(super) const METHODS: &[&str] = &[
     "__init__", "raw", "closed", "name", "mode", "readable", "seekable", "isatty", "fileno",
     "flush", "close", "tell", "seek", "read", "read1", "readinto", "readline",
 ];
-
-fn backing(ctx: &Context, receiver: Id) -> Option<Id> {
-    match ctx.heap.get(receiver) {
-        Value::File(_) => Some(receiver),
-        Value::Instance {
-            memory_stream: Some(MemoryStream::BufferedReader(buffer)),
-            ..
-        } => Some(*buffer),
-        _ => None,
-    }
-}
-
-fn native_raw(ctx: &Context, raw: Id, methods: &[&str]) -> Result<std::rc::Rc<file_io::RawFile>> {
-    // Going straight to the descriptor is valid only while the Python raw methods
-    // are native. The instance dictionary can change after the buffer is created.
-    if ctx
-        .heap
-        .get(raw)
-        .instance_class()
-        .and_then(|class| ctx.heap.get(class).io_kind())
-        == Some("FileIO")
-        && !methods
-            .iter()
-            .any(|method| ctx.raw_instance_field(raw, method).is_some())
-        && let Some(handle) = file_io::state(ctx, raw)
-    {
-        return Ok(handle);
-    }
-    Err(Error::new(
-        "NotImplementedError",
-        "BufferedReader with Python raw methods is unsupported",
-    ))
-}
-
-/// Verify the native fast path after any argument conversion that can run Python.
-pub(super) fn check_raw(ctx: &Context, receiver: Id, fd: &BufferedFd, name: &str) -> Result<()> {
-    if matches!(ctx.heap.get(receiver), Value::File(_)) {
-        return Ok(());
-    }
-    let methods: &[&str] = match name {
-        "read" => &["read", "readall", "readinto"],
-        "read1" | "readline" | "readinto" => &["readinto"],
-        "seek" => &["seek", "seekable", "tell"],
-        "close" => &["flush", "close"],
-        _ => std::slice::from_ref(&name),
-    };
-    if fd.uses_raw(&native_raw(ctx, fd.raw, methods)?) {
-        Ok(())
-    } else {
-        Err(Error::new(
-            "NotImplementedError",
-            "reinitialized BufferedReader raw FileIO is unsupported",
-        ))
-    }
-}
-
-fn ssize(ctx: &mut Context, value: Id) -> Result<i64> {
-    ctx.index_integer(value)?.to_i64().ok_or_else(|| {
-        Error::new(
-            "OverflowError",
-            "Python int too large to convert to C ssize_t",
-        )
-    })
-}
-
-fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [raw, capacity] = builtins::bind_builtin_arguments(
-        "BufferedReader",
-        args,
-        kwargs,
-        ["raw", "buffer_size"],
-        1,
-    )?;
-    let raw = raw.expect("required argument");
-    let capacity = capacity
-        .map(|n| ssize(ctx, n))
-        .transpose()?
-        .unwrap_or(super::DEFAULT_BUFFER_SIZE);
-
-    let readable = ctx.lookup_attr(raw, "readable")?;
-    if ctx.call(readable, vec![], Vec::new())? != TRUE {
-        return Err(Error::new(
-            "UnsupportedOperation",
-            "File or stream is not readable.",
-        ));
-    }
-    if capacity <= 0 {
-        return Err(Error::new(
-            "ValueError",
-            "buffer size must be strictly positive",
-        ));
-    }
-    let raw_handle = native_raw(
-        ctx,
-        raw,
-        &[
-            "close", "flush", "readable", "seekable", "isatty", "fileno", "tell", "seek", "read",
-            "readall", "readinto",
-        ],
-    )?;
-    if backing(ctx, receiver).is_some() {
-        return Err(Error::new(
-            "NotImplementedError",
-            "BufferedReader reinitialization is unsupported",
-        ));
-    }
-    // BufReader::with_capacity allocates infallibly. Bound user-controlled sizes
-    // to the same maximum that open() passes to the native buffer.
-    if capacity as u64 > crate::text_output::binary_capacity(i128::MAX) as u64 {
-        return Err(Error::new(
-            "NotImplementedError",
-            "explicit BufferedReader buffers above 8 MiB are unsupported",
-        ));
-    }
-    let buffer = BufferedFd::new(raw, raw_handle, true, capacity as usize);
-    let buffer = ctx.alloc(BinaryFile::Descriptor(buffer).into_value()?);
-    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
-        unreachable!("uninitialized BufferedReader instance")
-    };
-    *memory_stream = Some(MemoryStream::BufferedReader(buffer));
-    Ok(NONE)
-}
 
 fn validate(name: &str, count: usize, kwargs: &[(String, Id)]) -> Result<()> {
     if !kwargs.is_empty() {
@@ -163,7 +41,7 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if name == "__init__" {
-        return initialize(ctx, receiver, args, kwargs);
+        return descriptor_buffer::initialize(ctx, receiver, args, kwargs, true);
     }
     validate(name, args.len(), kwargs)?;
     let target = if name == "readinto" {

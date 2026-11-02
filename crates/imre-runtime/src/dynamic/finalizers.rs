@@ -34,6 +34,7 @@ impl Context {
         let generator = matches!(self.heap.get(owner), Value::Generator { .. });
         let found = scan.is_some() || generator || self.slot(owner, "__del__").is_some();
         self.heap.take_finalizer(owner, found);
+        super::stdlib::io::note_writer_finalizer(self, owner);
         if !found {
             return;
         }
