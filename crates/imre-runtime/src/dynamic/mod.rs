@@ -2094,8 +2094,8 @@ impl Context {
         } else if matches!(name, "datetime.timezone" | stdlib::datetime::TZINFO) {
             stdlib::datetime::install_members(self, name);
         }
-        if name == "typing.TypeVar" {
-            typing::install_typevar_namespace(self, value);
+        if let Some(class) = typing::ParameterClass::lookup(name) {
+            class.install(self, value);
         }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));

@@ -44,3 +44,30 @@ def current():
         print(error)
     else:
         raise AssertionError("member accepted unrelated receiver")
+
+    from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
+
+    P = ParamSpec("P")
+    parameters = (P, P.args, P.kwargs, TypeVarTuple("Ts"))
+    for parameter in parameters:
+        cls = type(parameter)
+        members = vars(cls)
+        assert type(members) is MappingProxyType
+        assert members["__doc__"] == cls.__doc__ and cls.__doc__
+        assert members["__module__"] == cls.__module__ == "typing"
+    for cls, marker in ((ParamSpecArgs, P.args), (ParamSpecKwargs, P.kwargs)):
+        origin = vars(cls)["__origin__"]
+        assert origin is cls.__origin__ and origin.__objclass__ is cls
+        assert origin.__get__(marker) is marker.__origin__ is P
+        assert vars(cls)["__hash__"] is None
+        compare = vars(cls)["__eq__"]
+        assert type(compare).__name__ == "wrapper_descriptor"
+        assert compare.__get__(marker)(cls(P))
+    for parameter in (variable, P, parameters[-1]):
+        cls = type(parameter)
+        method = vars(cls)["has_default"]
+        assert method is cls.has_default and method.__objclass__ is cls
+        assert type(method).__name__ == "method_descriptor"
+        assert method.__get__(parameter)() is parameter.has_default() is False
+    assert isinstance(ParamSpec.__name__, str)
+    assert vars(ParamSpec)["__name__"].__get__(P) == "P"
