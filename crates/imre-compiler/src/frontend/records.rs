@@ -999,8 +999,8 @@ impl Checker<'_> {
         node: &impl Ranged,
         diagnostic: &str,
     ) -> String {
-        if self.native_mock(class) && !name.starts_with('_') {
-            return self.object_runtime_export("live unittest.mock.Mock attributes", node);
+        if name == "object" && self.bundled_mock_class(class, "_PatchFactory") {
+            return self.object_runtime_export("unittest.mock.patch.object", node);
         }
         if matches!(
             name,
@@ -1012,6 +1012,9 @@ impl Checker<'_> {
         ) && self.unittest_case(class)
         {
             return self.object_runtime_export(name, node);
+        }
+        if self.native_mock(class) && !name.starts_with('_') {
+            return self.object_runtime_export("live unittest.mock.Mock attributes", node);
         }
         if matches!(name, "loadTestsFromName" | "loadTestsFromNames")
             && self.unittest_subclass(class, "TestLoader")

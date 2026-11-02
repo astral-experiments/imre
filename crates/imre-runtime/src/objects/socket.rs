@@ -6,7 +6,7 @@ use super::{Bytes, Int, Object, Storage, StorageCell, Str, c_int, errno_error};
 use num_traits::ToPrimitive;
 use std::ffi::{CStr, CString};
 use std::io;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::ptr;
 
@@ -284,17 +284,54 @@ pub extern "C" fn imre_socket_new(family: usize, ty: usize, proto: usize) -> *co
     )
 }
 
-fn resolve(host: &str) -> Result<Ipv4Addr> {
-    match host {
-        "" => return Ok(Ipv4Addr::UNSPECIFIED),
-        "<broadcast>" => return Ok(Ipv4Addr::BROADCAST),
-        _ => {}
+/// Resolve one Internet address with CPython's wildcard and broadcast rules.
+fn lookup_ip(host: &[u8], family: i32) -> Result<IpAddr> {
+    if host.is_empty() && family == libc::AF_INET {
+        return Ok(Ipv4Addr::UNSPECIFIED.into());
     }
-    if let Ok(ip) = host.parse() {
+    if host == b"<broadcast>" {
+        return Ok(Ipv4Addr::BROADCAST.into());
+    }
+    if let Ok(text) = std::str::from_utf8(host)
+        && let Ok(ip) = text.parse::<IpAddr>()
+        && (family == libc::AF_UNSPEC || ip.is_ipv4())
+    {
         return Ok(ip);
     }
-    let rows = getaddrinfo(Some(host), None, libc::AF_INET, 0, 0, 0)?;
-    Ok(endpoint(&rows[0].addr.ipv4()?).0)
+    let list = if host.is_empty() {
+        address_list(
+            None,
+            Some(b"0"),
+            family,
+            libc::SOCK_DGRAM,
+            0,
+            libc::AI_PASSIVE,
+        )?
+    } else {
+        address_list(Some(host), None, family, 0, 0, 0)?
+    };
+    // SAFETY: address_list returns a non-null owned list with initialized address lengths.
+    let addr = unsafe {
+        let first = &*list.0;
+        if host.is_empty() && !first.ai_next.is_null() {
+            return Err(Error::new(
+                Kind::OSError,
+                "wildcard resolved to multiple address",
+            ));
+        }
+        InternetAddress::read(first.ai_addr, first.ai_addrlen)?
+    };
+    Ok(match addr {
+        InternetAddress::V4(v4) => endpoint(&v4).0.into(),
+        InternetAddress::V6(v6) => Ipv6Addr::from(v6.sin6_addr.s6_addr).into(),
+    })
+}
+
+pub(crate) fn hostbyname(host: &[u8]) -> Result<Ipv4Addr> {
+    match lookup_ip(host, libc::AF_INET)? {
+        IpAddr::V4(ip) => Ok(ip),
+        IpAddr::V6(_) => Err(Error::new(Kind::OSError, "address family mismatched")),
+    }
 }
 
 pub(crate) struct AddressInfo {
@@ -376,21 +413,14 @@ fn address_list(
 }
 
 pub(crate) fn getaddrinfo(
-    host: Option<&str>,
-    service: Option<&str>,
+    host: Option<&[u8]>,
+    service: Option<&[u8]>,
     family: i32,
     ty: i32,
     protocol: i32,
     flags: i32,
 ) -> Result<Vec<AddressInfo>> {
-    let list = address_list(
-        host.map(str::as_bytes),
-        service.map(str::as_bytes),
-        family,
-        ty,
-        protocol,
-        flags,
-    )?;
+    let list = address_list(host, service, family, ty, protocol, flags)?;
     let mut cursor = list.0;
     let mut rows = Vec::new();
     // SAFETY: all nodes and canonical names remain live until the list guard is dropped.
@@ -514,83 +544,185 @@ fn is_reverse_owner(addr: std::net::IpAddr, alias: &str) -> bool {
     alias.eq_ignore_ascii_case(&owner)
 }
 
-/// Reverse resolution must consider aliases before falling back to the primary name.
-/// Copy both while the legacy resolver's hostent is protected.
+pub(crate) struct HostEntry {
+    pub(crate) name: String,
+    pub(crate) aliases: Vec<String>,
+    pub(crate) addresses: Vec<String>,
+}
+
+/// Copy a possibly unaligned, null-terminated pointer list from a live hostent.
+unsafe fn host_list<T>(
+    mut list: *mut *mut libc::c_char,
+    mut copy: impl FnMut(*mut libc::c_char) -> Result<T>,
+) -> Result<Vec<T>> {
+    let mut result = Vec::new();
+    if !list.is_null() {
+        loop {
+            // SAFETY: the caller keeps the storage live and libc terminates the list with a null entry.
+            let item = unsafe { list.read_unaligned() };
+            if item.is_null() {
+                break;
+            }
+            result.push(copy(item)?);
+            // SAFETY: a non-null entry is followed by at least the terminator.
+            list = unsafe { list.add(1) };
+        }
+    }
+    Ok(result)
+}
+
+/// Copy the names and address bytes while the resolver's hostent storage is live.
+unsafe fn copy_host(host: *const libc::hostent, family: i32, length: i32) -> Result<HostEntry> {
+    // SAFETY: the caller supplies the resolver's initialized hostent and keeps its
+    // backing storage alive and exclusive until this function returns.
+    unsafe {
+        let Some(host) = host.as_ref() else {
+            unsafe extern "C" {
+                fn imre_socket_host_errno() -> libc::c_int;
+            }
+            // CPython's gethost_common reads h_errno even when gethostbyaddr_r supplied
+            // a separate error code. Read it before calling another libc function.
+            let code = imre_socket_host_errno();
+            let msg = CStr::from_ptr(libc::hstrerror(code)).to_string_lossy();
+            return Err(Error::from_errno(Kind::HError, code, &msg, None, None));
+        };
+        if host.h_addrtype != family || host.h_length != length || host.h_name.is_null() {
+            return Err(errno_error(io::Error::from_raw_os_error(
+                libc::EAFNOSUPPORT,
+            )));
+        }
+        let name = |s: *mut libc::c_char| {
+            let bytes = CStr::from_ptr(s).to_bytes();
+            std::str::from_utf8(bytes)
+                .map(str::to_owned)
+                .map_err(|err| super::bytes::decode_error(bytes, err))
+        };
+        Ok(HostEntry {
+            name: name(host.h_name)?,
+            aliases: host_list(host.h_aliases, name)?,
+            addresses: host_list(host.h_addr_list, |p| {
+                if family == libc::AF_INET {
+                    Ok(Ipv4Addr::from(p.cast::<[u8; 4]>().read_unaligned()).to_string())
+                } else {
+                    ipv6_text(&p.cast::<libc::in6_addr>().read_unaligned())
+                }
+            })?,
+        })
+    }
+}
+
+fn reverse_host(addr: IpAddr) -> Result<HostEntry> {
+    let (bytes, family): (&[u8], _) = match addr {
+        IpAddr::V4(ip) => (&ip.octets(), libc::AF_INET),
+        IpAddr::V6(ip) => (&ip.octets(), libc::AF_INET6),
+    };
+    let length = bytes.len() as i32;
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn gethostbyaddr_r(
+                addr: *const libc::c_void,
+                len: libc::socklen_t,
+                family: libc::c_int,
+                entry: *mut libc::hostent,
+                buffer: *mut libc::c_char,
+                buflen: usize,
+                result: *mut *mut libc::hostent,
+                host_error: *mut libc::c_int,
+            ) -> libc::c_int;
+        }
+        // CPython supplies 16 KiB of aligned storage minus one byte in a single call.
+        let mut buffer = [0u64; 16384 / size_of::<u64>()];
+        let mut entry = std::mem::MaybeUninit::uninit();
+        let mut result = ptr::null_mut();
+        let mut host_error = 0;
+        // SAFETY: the caller-owned buffers remain live while copy_host reads the result.
+        unsafe {
+            gethostbyaddr_r(
+                bytes.as_ptr().cast(),
+                length as _,
+                family,
+                entry.as_mut_ptr(),
+                buffer.as_mut_ptr().cast(),
+                size_of_val(&buffer) - 1,
+                &raw mut result,
+                &raw mut host_error,
+            );
+            copy_host(result, family, length)
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn gethostbyaddr(
+                addr: *const libc::c_void,
+                len: libc::socklen_t,
+                family: libc::c_int,
+            ) -> *mut libc::hostent;
+        }
+        static REVERSE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = REVERSE.lock().unwrap_or_else(|err| err.into_inner());
+        // SAFETY: the input bytes live through the call. Darwin returns per-thread
+        // resolver storage; copy it before another legacy lookup on this thread.
+        unsafe {
+            let result = gethostbyaddr(bytes.as_ptr().cast(), length as _, family);
+            copy_host(result, family, length)
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        Err(Error::new(
+            Kind::NotImplementedError,
+            "reverse host lookup requires Linux or macOS",
+        ))
+    }
+}
+
+pub(crate) fn hostbyaddr(host: &[u8]) -> Result<HostEntry> {
+    reverse_host(lookup_ip(host, libc::AF_UNSPEC)?)
+}
+
+pub(crate) fn hostname() -> Result<Vec<u8>> {
+    let mut buffer = [0u8; 1024];
+    let n = buffer.len() - 1;
+    // SAFETY: the buffer has n writable bytes and a trailing zero even if truncated.
+    checked(unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), n) }).map_err(errno_error)?;
+    Ok(CStr::from_bytes_until_nul(&buffer)
+        .unwrap()
+        .to_bytes()
+        .to_vec())
+}
+
 pub(crate) fn fqdn(name: &str) -> Result<String> {
-    use std::net::{IpAddr, ToSocketAddrs};
-    use std::sync::Mutex;
-    unsafe extern "C" {
-        fn gethostbyaddr(
-            addr: *const libc::c_void,
-            len: libc::socklen_t,
-            family: libc::c_int,
-        ) -> *mut libc::hostent;
-    }
-    static REVERSE: Mutex<()> = Mutex::new(());
-    let mut name = name.trim().to_owned();
-    if name.is_empty() || name == "0.0.0.0" {
-        let mut buffer = [0u8; 256];
-        let n = buffer.len() - 1;
-        // SAFETY: the buffer has n writable bytes and a trailing zero even if truncated.
-        checked(unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), n) })
-            .map_err(errno_error)?;
-        name = CStr::from_bytes_until_nul(&buffer)
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-    }
+    let name = match name.trim() {
+        "" | "0.0.0.0" | "::" => String::from_utf8_lossy(&hostname()?).into_owned(),
+        host => host.to_owned(),
+    };
     if name.as_bytes().contains(&0) {
         return Err(Error::new(
             Kind::TypeError,
             "gethostbyaddr() argument 1 must be encoded string without null bytes",
         ));
     }
-    let addr = name.parse::<IpAddr>().ok().or_else(|| {
-        (name.as_str(), 0)
-            .to_socket_addrs()
-            .ok()?
-            .next()
-            .map(|address| address.ip())
-    });
-    let Some(addr) = addr else {
-        return Ok(name);
+    let entry = lookup_ip(name.as_bytes(), libc::AF_UNSPEC)
+        .and_then(|ip| reverse_host(ip).map(|host| (ip, host)));
+    let (_ip, entry) = match entry {
+        Ok(result) => result,
+        Err(e) if e.is_os_error() => return Ok(name),
+        Err(e) => return Err(e),
     };
-    let _guard = REVERSE.lock().unwrap_or_else(|error| error.into_inner());
-    // SAFETY: the address bytes live through gethostbyaddr. Its terminated name
-    // and aliases remain valid until another legacy lookup on this thread.
-    unsafe {
-        let host = match addr {
-            IpAddr::V4(ip) => gethostbyaddr(ip.octets().as_ptr().cast(), 4, libc::AF_INET),
-            IpAddr::V6(ip) => gethostbyaddr(ip.octets().as_ptr().cast(), 16, libc::AF_INET6),
-        };
-        if host.is_null() || (*host).h_name.is_null() {
-            return Ok(name);
-        }
-        let primary = CStr::from_ptr((*host).h_name)
-            .to_string_lossy()
-            .into_owned();
-        if primary.contains('.') {
-            return Ok(primary);
-        }
-        let mut aliases = (*host).h_aliases;
-        while !aliases.is_null() {
-            // CPython's gethost_common also accepts unaligned hostent pointer lists.
-            let entry = aliases.read_unaligned();
-            if entry.is_null() {
-                break;
+    if !entry.name.contains('.') {
+        for alias in entry.aliases {
+            #[cfg(target_vendor = "apple")]
+            if is_reverse_owner(_ip, &alias) {
+                continue;
             }
-            aliases = aliases.add(1);
-            let alias = CStr::from_ptr(entry).to_string_lossy();
             if alias.contains('.') {
-                #[cfg(target_vendor = "apple")]
-                if is_reverse_owner(addr, &alias) {
-                    continue;
-                }
-                return Ok(alias.into_owned());
+                return Ok(alias);
             }
         }
-        Ok(primary)
     }
+    Ok(entry.name)
 }
 
 #[unsafe(no_mangle)]
@@ -729,7 +861,7 @@ pub(crate) fn ipv6_address(
 }
 
 pub(crate) fn address(host: &str, port: i64, name: &str) -> Result<libc::sockaddr_in> {
-    let ip = resolve(host)?;
+    let ip = hostbyname(host.as_bytes())?;
     let port = u16::try_from(port).map_err(|_| port_error(name))?;
     // SAFETY: zero is a valid initial sockaddr_in, including target-specific padding.
     let mut addr: libc::sockaddr_in = unsafe { std::mem::zeroed() };

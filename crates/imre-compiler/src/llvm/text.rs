@@ -80,6 +80,10 @@ impl Emitter<'_, '_> {
                 "call ptr @imre_unicode_normalize(ptr {source}, ptr {})",
                 args[1].value.operand,
             )),
+            TextOperation::CaseMap { title } => self.checked_instruction(format!(
+                "call ptr @imre_str_case_map(ptr {source}, i32 {})",
+                u32::from(title),
+            )),
             TextOperation::Lower => {
                 self.checked_instruction(format!("call ptr @imre_str_lower(ptr {source})"))
             }

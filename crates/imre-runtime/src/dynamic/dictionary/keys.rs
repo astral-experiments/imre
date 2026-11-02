@@ -491,6 +491,20 @@ impl Context {
         if let Value::Union(union) = *self.heap.get(key) {
             return union.hash(self).map(ControlFlow::Break);
         }
+        if let Value::MemoryView { owner, hash } = *self.heap.get(key) {
+            if let Some(hash) = hash {
+                return Ok(ControlFlow::Break(hash));
+            }
+            let owner = Self::memoryview_owner(owner)?;
+            let hash = self.with_buffer_export(key, |ctx| {
+                ctx.dictionary_hash(owner)?;
+                Ok(crate::python_hash::bytes(ctx.bytes_like(key)?))
+            })?;
+            if let Value::MemoryView { hash: cached, .. } = self.heap.get_mut(key) {
+                *cached = Some(hash);
+            }
+            return Ok(ControlFlow::Break(hash));
+        }
         if let Value::Weak(wr) = *self.heap.get(key) {
             if wr.kind != super::super::weakref::Kind::Reference {
                 return Err(self.unhashable(key));

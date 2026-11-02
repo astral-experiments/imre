@@ -320,6 +320,7 @@ impl Checker<'_> {
                 ("importlib.metadata", "PackageNotFoundError"),
                 ("csv", "Error"),
                 ("socket", "gaierror"),
+                ("socket", "herror"),
             ]
             .into_iter()
             .find(|(module, name)| symbol.exported_by(module, name))?;

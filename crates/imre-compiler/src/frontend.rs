@@ -2575,6 +2575,9 @@ impl<'a> Checker<'a> {
         if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
             return Err(self.object_builtin_error(method, attribute));
         }
+        if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
+            return Err(self.object_builtin_error("binary file metadata", attribute));
+        }
         if attribute.attr.as_str() == "readinto"
             && matches!(receiver.ty, Type::BinaryIO | Type::BytesIO)
         {
@@ -5394,6 +5397,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
             Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
             Some(Binding::Intrinsic(Intrinsic::GaiError)) => Some(68),
+            Some(Binding::Intrinsic(Intrinsic::HError)) => Some(72),
             Some(Binding::Intrinsic(Intrinsic::BinasciiError)) => Some(69),
             Some(Binding::Intrinsic(Intrinsic::BinasciiIncomplete)) => Some(70),
             Some(Binding::Intrinsic(Intrinsic::PackageNotFoundError)) => Some(71),
@@ -6277,6 +6281,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Bytes(bytes.to_vec()),
                     });
                 }
+                Intrinsic::Stdin => return Err(self.object_runtime_export("sys.stdin", expression)),
                 Intrinsic::Stdout => return Ok(self.stdout_value()),
                 Intrinsic::OriginalStdout | Intrinsic::Stderr => {
                     return Ok(Expr {
@@ -7706,7 +7711,13 @@ impl<'a> Checker<'a> {
                     receiver.ty,
                     Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
                 ) && ir::StrDescriptor::named(attribute.attr.as_str()).is_some_and(|method| {
-                    method.is_predicate() || method == ir::StrDescriptor::ZFill
+                    method.is_predicate()
+                        || matches!(
+                            method,
+                            ir::StrDescriptor::ZFill
+                                | ir::StrDescriptor::Title
+                                | ir::StrDescriptor::SwapCase
+                        )
                 }) {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),
@@ -9695,6 +9706,8 @@ impl<'a> Checker<'a> {
             if matches!(
                 attribute.attr.as_str(),
                 "splitlines"
+                    | "title"
+                    | "swapcase"
                     | "isalnum"
                     | "isascii"
                     | "isalpha"
@@ -9705,7 +9718,7 @@ impl<'a> Checker<'a> {
                     | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.splitlines_or_predicate(
+                return self.splitlines_or_unary_text(
                     Self::string_value(receiver),
                     attribute.attr.as_str(),
                     call,

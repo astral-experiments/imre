@@ -7,6 +7,7 @@ def create():
 
 def current():
     annotation_cache()
+    factory_bases()
     namespace = {"label": "compiled", "value": 9}
     cls = make_dataclass("Item", [("value", int, field(default=3))],
                          namespace=namespace, kw_only=True)
@@ -46,3 +47,25 @@ def annotation_cache():
         return cls
 
     assert make_dataclass('Changed', [('value', int)], decorator=decorator).__annotations__ == {'name': str}
+
+
+def factory_bases():
+    events = []
+
+    class Marker:
+        def __set_name__(self, owner, name):
+            events.append((owner, name))
+
+    class Base:
+        def __init_subclass__(cls):
+            events.append((cls, "hook"))
+
+    class Other:
+        pass
+
+    cls = make_dataclass("Derived", [("n", int)], bases=(Base, Other),
+                         namespace={"marker": Marker()})
+    assert events == [(cls, "marker"), (cls, "hook")]
+    assert cls.__bases__ == (Base, Other)
+    assert cls.__mro__ == (cls, Base, Other, object)
+    assert isinstance(cls(3), Base) and cls(3).n == 3

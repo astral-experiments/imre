@@ -119,8 +119,9 @@ def _boxedAssertion(self, context, method, expected, regex, args, kwargs):
             raise TypeError(repr(next(iter(kwargs))) + " is an invalid keyword argument for this function")
         return context(self, expected, msg, regex)
     callback = args[0]
-    name = getattr(callback, "__name__", None)
-    if name is None:
+    try:
+        name = callback.__name__
+    except AttributeError:
         name = str(callback)
     with context(self, expected, None, regex, name):
         callback(*args[1:], **kwargs)

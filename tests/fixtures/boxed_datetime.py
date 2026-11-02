@@ -129,7 +129,119 @@ def test_now():
             raise AssertionError("invalid now() arguments accepted")
 
 
+def test_subclass_construction():
+    class Date(date):
+        pass
+
+    class Clock(time):
+        pass
+
+    class Delta(timedelta):
+        pass
+
+    class Moment(dt):
+        def __new__(cls, year, label):
+            return super().__new__(cls, year, 2, 1, minute=42, fold=1)
+
+        def __init__(self, year, label):
+            self.label = label
+
+    class Grandchild(Moment):
+        pass
+
+    value = Grandchild(2000, label="leap")
+    assert type(value) is Grandchild and isinstance(value, dt) and isinstance(value, date)
+    assert (value.year, value.minute, value.fold, value.label) == (2000, 42, 1, "leap")
+    assert value.toordinal() == date(2000, 2, 1).toordinal()
+    assert type(dt.__new__(Moment, 2000, 1, 1)) is Moment
+    assert repr(value) == "Grandchild(2000, 2, 1, 0, 42, fold=1)"
+    assert date.__repr__(value) == "Grandchild(2000, 2, 1)"
+    assert str(value) == "2000-02-01 00:42:00"
+
+    class BadFormat(Grandchild):
+        @property
+        def isoformat(self):
+            raise AttributeError("blocked format")
+
+    try:
+        str(BadFormat(2000, "leap"))
+    except AttributeError as error:
+        assert str(error) == "blocked format"
+    else:
+        raise AssertionError("calendar formatting ignored a descriptor error")
+
+    assert repr(Clock(7, 8)) == "Clock(7, 8)"
+    assert repr(Delta(0)) == "Delta(0)"
+    assert not Delta() and Delta(seconds=1)
+
+    class Custom(Delta):
+        def __repr__(self):
+            return "custom " + super().__repr__()
+        def __bool__(self):
+            return True
+
+    custom = Custom()
+    assert repr(custom) == "custom Custom(0)" and bool(custom)
+    assert str(custom) == "0:00:00"
+
+    class HasLength(Delta):
+        def __len__(self):
+            return 5
+
+    assert not HasLength()
+
+    assert Date(2024, 2, 29).day == 29
+    assert Clock(microsecond=321).microsecond == 321
+    assert Delta(days=1, seconds=2).total_seconds() == 86402
+
+    class Shadow(Date):
+        year = "overridden"
+        @property
+        def day(self):
+            return self.month
+
+    shadow = Shadow(2024, 2, 29)
+    assert shadow.year == "overridden" and shadow.day == 2
+    try:
+        shadow.month = 7
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("calendar field was writable")
+
+    class Other(Date):
+        def __new__(cls):
+            return "foreign result"
+        def __init__(self):
+            raise AssertionError("initializer called for a foreign result")
+
+
+    class Mixin:
+        __slots__ = ()
+
+    class Mixed(Mixin, dt, date):
+        pass
+
+    assert Mixed(2001, 2, 3).year == 2001
+    try:
+        class Bad(date, time):
+            pass
+    except TypeError as error:
+        assert str(error) == "multiple bases have instance lay-out conflict"
+    else:
+        raise AssertionError("incompatible native layouts accepted")
+
+    assert Other() == "foreign result"
+    try:
+        date.__new__(Moment, 2000, 1, 1)
+    except TypeError as error:
+        assert "is not safe" in str(error)
+    else:
+        raise AssertionError("date allocated an incompatible datetime layout")
+
+
 def current():
+    test_subclass_construction()
     test_now()
     test_time_of_day()
     test_http_date()
@@ -170,6 +282,28 @@ def test_calendar_ordering():
             print(str(error))
         else:
             raise AssertionError("ordered incompatible calendar operands")
+
+
+    class Declines(date):
+        def __lt__(self, other):
+            return NotImplemented
+
+        def __gt__(self, other):
+            return NotImplemented
+
+    class Reflected(Declines):
+        def __gt__(self, other):
+            return "reflected"
+
+    first = Declines(2000, 2, 28)
+    try:
+        first < Declines(2000, 2, 29)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("both calendar ordering hooks declined")
+    assert first < leap
+    assert (first < Reflected(2000, 2, 29)) == "reflected"
 
 
 if __name__ == "__main__":

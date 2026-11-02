@@ -1,9 +1,13 @@
 use super::{Expr, Visitor, ast, resolve, visitor};
 use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 
-/// Python sources used only by the boxed importer.
+/// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "traceback" => Some((
+            "traceback.py",
+            include_str!("../../stdlib/traceback_stack.py"),
+        )),
         "linecache" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             const UPSTREAM: &str = include_str!(
@@ -59,6 +63,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/annotationlib.py"),
         )),
         "functools" => Some(("functools.py", include_str!("../../stdlib/functools.py"))),
+        "hashlib" => Some(("hashlib.py", include_str!("../../stdlib/hashlib.py"))),
         // CPython 3.14.5 pathlib and its glob and NT path dependencies. See stdlib/docstrings/LICENSE.
         "pathlib" => Some((
             "pathlib/__init__.py",
@@ -174,7 +179,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "importlib/_bootstrap_external.py",
             include_str!("../../stdlib/importlib/source_loader.py"),
         )),
-        _ => None,
+        _ => crate::modules::bundled_runtime_source(name),
     }
 }
 
