@@ -1499,7 +1499,7 @@ pub(super) fn method(
         }
     })?;
     if name == "__new__" {
-        return ctx.new_string(owner, receiver, args, kwargs);
+        return ctx.new_immutable_scalar(owner, receiver, args, kwargs);
     }
     let original_receiver = receiver;
     let receiver = if owner == "bytes"

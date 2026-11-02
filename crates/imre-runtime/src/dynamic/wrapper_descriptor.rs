@@ -89,6 +89,7 @@ impl BuiltinDescriptor {
             Some(("int", attr)) => Some(("int", attr, &["__trunc__"][..])),
             Some(("float", attr)) => Some(("float", attr, &["__trunc__", "as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
+            Some(("complex", attr)) => Some(("complex", attr, &["__complex__"][..])),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("memoryview", attr)) => Some(("memoryview", attr, builtins::MEMORYVIEW_METHODS)),
             Some(("BaseException", attr)) => {
@@ -150,6 +151,8 @@ impl BuiltinDescriptor {
                             | "__reduce__"
                             | "__reduce_ex__"
                             | "__replace__"
+                            | "__bytes__"
+                            | "__complex__"
                             | "__fspath__"
                             | "__format__"
                             | "__enter__"
@@ -473,6 +476,9 @@ impl BuiltinDescriptor {
                     ("find", "__doc__") if self.owner == "bytes" => {
                         "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nReturn -1 on failure."
                     }
+                    ("__bytes__", "__doc__") => "Convert this value to exact type bytes.",
+                    ("__complex__", "__doc__") => "Convert this value to exact type complex.",
+                    ("__bytes__" | "__complex__", _) => "($self, /)",
                     ("count" | "find", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
