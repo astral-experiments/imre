@@ -5,6 +5,16 @@ from os import chown, mkfifo, supports_dir_fd, supports_effective_ids, supports_
 
 
 def current():
+    assert os.openpty is posix.openpty
+    master, slave = os.openpty()
+    try:
+        assert os.isatty(master) and os.isatty(slave)
+        assert not os.get_inheritable(master) and not os.get_inheritable(slave)
+        assert os.write(slave, b"pty") == 3
+        assert os.read(master, 3) == b"pty"
+    finally:
+        os.close(slave)
+        os.close(master)
     assert os.listdir in os.supports_fd
     capabilities = (supports_dir_fd, supports_fd, supports_follow_symlinks, supports_effective_ids)
     operations = (os.lstat, os.open, os.rmdir, os.stat, os.unlink, os.remove, os.fstat)
@@ -39,6 +49,12 @@ def current():
     assert mkfifo is os.mkfifo and mkfifo is posix.mkfifo
     assert mkfifo not in supports_fd and mkfifo not in supports_follow_symlinks
     if sys.platform == "linux":
+        read_fd, write_fd = os.pipe2(0)
+        try:
+            assert os.get_inheritable(read_fd) and os.get_inheritable(write_fd)
+        finally:
+            os.close(write_fd)
+            os.close(read_fd)
         assert mkfifo in supports_dir_fd
         from os import MFD_CLOEXEC, memfd_create
         assert memfd_create is posix.memfd_create and MFD_CLOEXEC == posix.MFD_CLOEXEC

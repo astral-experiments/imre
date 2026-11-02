@@ -2175,6 +2175,7 @@ pub(crate) enum FdOperation {
     SetBlocking,
     GetInheritable,
     SetInheritable,
+    OpenPty,
 }
 
 /// Filesystem copy operations using the same ordered pair of path operands.
