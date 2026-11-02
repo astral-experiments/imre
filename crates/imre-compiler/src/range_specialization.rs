@@ -6,7 +6,9 @@
 
 use std::collections::HashMap;
 
-use crate::ir::{Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions};
+use crate::ir::{
+    self, ChildMut, Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions,
+};
 use crate::ranges;
 
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
@@ -150,60 +152,10 @@ fn rewrite_block(
     plans: &mut HashMap<*const Statement, Plan>,
 ) {
     for statement in body {
-        match statement {
-            Statement::Assign(_, value)
-            | Statement::Expr(value)
-            | Statement::Return(value)
-            | Statement::Assert(value) => rewrite_expression(value, locals, plans),
-            Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
-                for value in [a, b, c] {
-                    rewrite_expression(value, locals, plans);
-                }
-            }
-            Statement::SetField(a, _, b) | Statement::AugmentField(a, _, _, b) => {
-                rewrite_expression(a, locals, plans);
-                rewrite_expression(b, locals, plans);
-            }
-            Statement::Scope { body, .. } => rewrite_block(body, locals, plans),
-            Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
-                rewrite_expression(test, locals, plans);
-                rewrite_block(yes, locals, plans);
-                rewrite_block(no, locals, plans);
-            }
-            Statement::For {
-                args, body, orelse, ..
-            } => {
-                for arg in args {
-                    rewrite_expression(arg, locals, plans);
-                }
-                rewrite_block(body, locals, plans);
-                rewrite_block(orelse, locals, plans);
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                rewrite_block(body, locals, plans);
-                for handler in handlers {
-                    rewrite_block(&mut handler.body, locals, plans);
-                }
-                rewrite_block(orelse, locals, plans);
-                rewrite_block(finalbody, locals, plans);
-            }
-            Statement::Raise(value) => {
-                if let Some(value) = value {
-                    rewrite_expression(value, locals, plans);
-                }
-            }
-            Statement::Move(..)
-            | Statement::Clear(_)
-            | Statement::IterNext { .. }
-            | Statement::Break
-            | Statement::Continue
-            | Statement::Exhaust => {}
-        }
+        ir::statement_children_mut(statement, |child| match child {
+            ChildMut::Expression(value) => rewrite_expression(value, locals, plans),
+            ChildMut::Suite(body) => rewrite_block(body, locals, plans),
+        });
         if let Some(plan) = plans.remove(&std::ptr::from_ref(statement)) {
             rewrite_loop(statement, locals, plan);
         }
@@ -215,71 +167,11 @@ fn rewrite_expression(
     locals: &mut Vec<Type>,
     plans: &mut HashMap<*const Statement, Plan>,
 ) {
-    match &mut expression.kind {
-        ExprKind::Scope { body, value, .. } => {
-            rewrite_block(body, locals, plans);
-            rewrite_expression(value, locals, plans);
-        }
-        ExprKind::List(values)
-        | ExprKind::Tuple(values)
-        | ExprKind::Set { values, .. }
-        | ExprKind::Compare(values, _)
-        | ExprKind::Boolean(_, values)
-        | ExprKind::Builtin(_, values) => {
-            for value in values {
-                rewrite_expression(value, locals, plans);
-            }
-        }
-        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-            for value in &mut args.values {
-                rewrite_expression(value, locals, plans);
-            }
-        }
-        ExprKind::Callable { receiver, .. } => {
-            if let Some(receiver) = receiver {
-                rewrite_expression(receiver, locals, plans);
-            }
-        }
-        ExprKind::Invoke { callable, args } => {
-            rewrite_expression(callable, locals, plans);
-            for value in &mut args.values {
-                rewrite_expression(value, locals, plans);
-            }
-        }
-        ExprKind::Dict { entries, .. } => {
-            for (key, value) in entries {
-                rewrite_expression(key, locals, plans);
-                rewrite_expression(value, locals, plans);
-            }
-        }
-        ExprKind::Bind(_, value)
-        | ExprKind::Present(value)
-        | ExprKind::Absent(value)
-        | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
-        | ExprKind::Field(value, _) => rewrite_expression(value, locals, plans),
-        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-            rewrite_expression(left, locals, plans);
-            rewrite_expression(right, locals, plans);
-        }
-        ExprKind::Conditional(test, yes, no) => {
-            rewrite_expression(test, locals, plans);
-            rewrite_expression(yes, locals, plans);
-            rewrite_expression(no, locals, plans);
-        }
-        ExprKind::Exception { message, .. } => {
-            if let Some(message) = message {
-                rewrite_expression(message, locals, plans);
-            }
-        }
-        ExprKind::Int(_)
-        | ExprKind::Float(_)
-        | ExprKind::Bool(_)
-        | ExprKind::Str(_)
-        | ExprKind::Bytes(_)
-        | ExprKind::None
-        | ExprKind::Local(_) => {}
+    if let ExprKind::Scope { body, value, .. } = &mut expression.kind {
+        rewrite_block(body, locals, plans);
+        rewrite_expression(value, locals, plans);
+    } else {
+        ir::children_mut(expression, |child| rewrite_expression(child, locals, plans));
     }
 }
 
