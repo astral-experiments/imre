@@ -4,6 +4,7 @@ import sys
 from posix import openpty
 import posixpath as path
 import stat as st
+from posix import chown, fchown, geteuid, getgid, getgroups, getuid, lchown
 from posix import _exit
 from posix import pread, pwrite, readinto
 from _collections_abc import _check_methods

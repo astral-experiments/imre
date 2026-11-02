@@ -81,6 +81,10 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         }
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        "pwd" if matches!(function, "getpwall" | "getpwnam" | "getpwuid") => {
+            Some((module, function))
+        }
         #[cfg(target_os = "linux")]
         "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
         "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
@@ -1409,6 +1413,7 @@ impl Context {
                     Some(
                         class @ ("time.struct_time"
                         | stdlib::fixed_structseq::UNRAISABLE_ARGS
+                        | stdlib::fixed_structseq::PASSWD
                         | stdlib::fixed_structseq::HASH_INFO
                         | stdlib::fixed_structseq::THREAD_INFO
                         | stdlib::fixed_structseq::SCHED_PARAM
@@ -1565,6 +1570,7 @@ impl Context {
                         Some(
                             class @ ("time.struct_time"
                             | stdlib::fixed_structseq::UNRAISABLE_ARGS
+                            | stdlib::fixed_structseq::PASSWD
                             | stdlib::fixed_structseq::HASH_INFO
                             | stdlib::fixed_structseq::THREAD_INFO
                             | stdlib::fixed_structseq::SCHED_PARAM
@@ -3901,6 +3907,7 @@ impl Context {
                 if let Some(
                     owner @ ("time.struct_time"
                     | stdlib::fixed_structseq::UNRAISABLE_ARGS
+                    | stdlib::fixed_structseq::PASSWD
                     | stdlib::fixed_structseq::HASH_INFO
                     | stdlib::fixed_structseq::THREAD_INFO
                     | stdlib::fixed_structseq::SCHED_PARAM

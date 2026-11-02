@@ -30,6 +30,8 @@ mod hmac;
 mod inspect;
 pub(super) mod itertools;
 pub(super) mod locale;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) mod pwd;
 pub(super) mod tempfile;
 pub(super) mod time;
 mod tokenize;
@@ -132,6 +134,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "subprocess"
             | "warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
+        || (cfg!(any(target_os = "linux", target_os = "macos")) && name == "pwd")
         || has_lazy_attributes(name)
 }
 
@@ -697,7 +700,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("posix.{name}"))
         }
         #[cfg(unix)]
-        ("os" | "posix", "getuid" | "getgid" | "getgroups") => {
+        ("os" | "posix", "getuid" | "geteuid" | "getgid" | "getgroups") => {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
@@ -1412,6 +1415,7 @@ pub(super) fn call(
             | "posix.abort"
             | "posix.getpid"
             | "posix.getuid"
+            | "posix.geteuid"
             | "posix.getgid"
             | "posix.getgroups"
             | "sys._jit.is_available"
@@ -1455,6 +1459,7 @@ pub(super) fn call(
             #[cfg(unix)]
             "posix.abort" => unsafe { libc::abort() },
             "posix.getpid" => ctx.int(i64::from(std::process::id())),
+            "posix.geteuid" => ctx.alloc(Value::Int(crate::objects::os::geteuid())),
             "posix.getuid" => ctx.alloc(Value::Int(crate::objects::os::getuid())),
             "posix.getgid" => ctx.alloc(Value::Int(crate::objects::os::getgid())),
             "posix.getgroups" => {
@@ -1471,6 +1476,10 @@ pub(super) fn call(
             // As in typed SysJitPredicate, Imre compiles before the process starts.
             _ => FALSE,
         });
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(function @ ("getpwall" | "getpwnam" | "getpwuid")) = name.strip_prefix("pwd.") {
+        return pwd::call(ctx, function, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "fcntl.fcntl" {
