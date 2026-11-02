@@ -1356,7 +1356,6 @@ impl Context {
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
             Value::Instance { class, .. }
-            | Value::CodecInfo { class, .. }
             | Value::Class {
                 metaclass: Some(class),
                 ..
@@ -3419,19 +3418,6 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::CodecInfo {
-                ref entry,
-                encode,
-                decode,
-                text_encoding_override,
-                ..
-            } => match name {
-                "encode" => return Ok(encode),
-                "_is_text_encoding" => return Ok(text_encoding_override.unwrap_or(TRUE)),
-                "name" => return Ok(self.text(entry.codec().name())),
-                "decode" => return Ok(decode),
-                _ => {}
-            },
             Value::Hmac(mac) => match name {
                 "digest_size" => return Ok(mac.digest_size),
                 "block_size" => return Ok(mac.block_size),
@@ -3952,33 +3938,6 @@ impl Context {
         }
         Err(self.missing_attribute(obj, name))
     }
-    fn update_codec_text_encoding(
-        &mut self,
-        obj: Id,
-        name: &str,
-        value: Option<Id>,
-    ) -> Result<bool> {
-        if name != "_is_text_encoding" {
-            return Ok(false);
-        }
-        let Value::CodecInfo {
-            text_encoding_override,
-            ..
-        } = self.heap.get_mut(obj)
-        else {
-            return Ok(false);
-        };
-        let previous = std::mem::replace(text_encoding_override, value);
-        if previous.is_none() && value.is_none() {
-            return Err(self.missing_attribute(obj, name));
-        }
-        if let Some(old) = previous
-            && Some(old) != value
-        {
-            self.heap.weak_edge_removed(old);
-        }
-        Ok(true)
-    }
 
     /// A missing T_OBJECT member reads as None, even after repeated deletions.
     fn update_key_wrapper_field(&mut self, obj: Id, name: &str, value: Option<Id>) -> Result<bool> {
@@ -4150,7 +4109,6 @@ impl Context {
             return self.update_exception_field(obj, name, None);
         }
         if self.update_key_wrapper_field(obj, name, None)?
-            || self.update_codec_text_encoding(obj, name, None)?
             || self.update_os_field(obj, name, None)?
         {
             return Ok(());
@@ -4884,7 +4842,6 @@ impl Context {
             return self.update_exception_field(obj, name, Some(value));
         }
         if self.update_key_wrapper_field(obj, name, Some(value))?
-            || self.update_codec_text_encoding(obj, name, Some(value))?
             || self.update_os_field(obj, name, Some(value))?
         {
             return Ok(());

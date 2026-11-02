@@ -6424,6 +6424,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::UrlSplit => {
                     return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
                 }
+                Intrinsic::CodecGetWriter => {
+                    return Err(self.object_builtin_error("codecs.getwriter", expression));
+                }
                 Intrinsic::SplitResult { .. } => {
                     return Err(self.scoped_builtin_error("urllib.parse result class", expression));
                 }
