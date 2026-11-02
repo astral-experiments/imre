@@ -27,6 +27,20 @@ def current():
 
     unpacked, = ts
     assert unpacked is Unpack[ts]
+
+    def vararg_annotation(items):
+        def variadic(*args: *items):
+            pass
+        return variadic.__annotations__["args"]
+
+    assert vararg_annotation(ts) is unpacked
+    try:
+        vararg_annotation((int, str))
+    except ValueError as exc:
+        assert str(exc) == "too many values to unpack (expected 1, got 2)"
+    else:
+        raise AssertionError("accepted two items in a starred annotation")
+
     assert get_origin(unpacked) is Unpack
     assert get_args(unpacked) == unpacked.__parameters__ == (ts,)
     assert repr(unpacked) == "typing.Unpack[Ts]"
