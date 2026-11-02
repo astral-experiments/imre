@@ -527,7 +527,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
         (
             "traceback",
-            "clear_frames" | "format_exc" | "format_exception" | "print_exc" | "print_exception",
+            "_frame_locals" | "clear_frames" | "format_exc" | "format_exception" | "print_exc"
+            | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
         ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
         ("types", "ModuleType") => ctx.builtin("module"),
@@ -1172,6 +1173,10 @@ pub(super) fn call(
         }
         ctx.heap.clear_frame(frame)?;
         return Ok(NONE);
+    }
+    if name == "traceback._frame_locals" {
+        let frame = single_argument("_frame_locals", "frame", args, kwargs)?;
+        return traceback::frame_locals(ctx, frame);
     }
     if name == "traceback.clear_frames" {
         let tb = single_argument("clear_frames", "tb", args, kwargs)?;

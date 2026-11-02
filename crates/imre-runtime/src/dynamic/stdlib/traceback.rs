@@ -65,6 +65,15 @@ impl FrameLine<'_> {
     }
 }
 
+/// Capture the bindings that FrameSummary will immediately convert to representations.
+pub(super) fn frame_locals(ctx: &mut Context, frame: Id) -> Result<Id> {
+    match *ctx.heap.get(frame) {
+        Value::PythonFrame { scope: NONE, .. } => Ok(ctx.dict(Vec::new())),
+        Value::PythonFrame { scope, code, .. } => ctx.locals_for_code(scope, code),
+        _ => ctx.lookup_attr(frame, "f_locals"),
+    }
+}
+
 /// Visit the public traceback protocol, ignoring frames that cannot be cleared yet.
 pub(super) fn clear_frames(ctx: &mut Context, mut tb: Id) -> Result<Id> {
     let runtime_error = ctx.builtin("RuntimeError");
