@@ -1732,6 +1732,16 @@ pub(super) fn call(
         return os::sysconf::call(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    if let Some(op @ ("sched_get_priority_min" | "sched_get_priority_max")) =
+        name.strip_prefix("posix.")
+    {
+        return os::scheduler::priority_bound(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.sched_yield" {
+        return os::scheduler::yield_cpu(args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
         return os::scheduler::get_policy(ctx, args, kwargs);
     }

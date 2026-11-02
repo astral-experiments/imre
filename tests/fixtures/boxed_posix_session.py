@@ -32,7 +32,15 @@ def current():
     parent_sid = os.getsid(CurrentProcess())
     assert os.getpgid is posix.getpgid and os.setpgid is posix.setpgid
     group = os.getpgid(pid=CurrentProcess())
-    assert group == os.getpgid(os.getpid())
+    assert os.getpgrp is posix.getpgrp
+    assert os.getpgrp() == group == os.getpgid(os.getpid())
+    for args, kwargs in [((0,), {}), ((), {"pid": 0})]:
+        try:
+            os.getpgrp(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("getpgrp accepted an argument")
     if os.getpid() != parent_sid:
         assert os.setpgid(CurrentProcess(), group) is None
     assert parent_sid == os.getsid(os.getpid())

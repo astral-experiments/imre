@@ -2749,7 +2749,9 @@ impl Context {
             let posix = if name == "os" { Some(self.module("posix")?) } else { None };
             #[cfg(target_os = "linux")]
             stdlib::posix_spawn::initialize(self, scope, posix)?;
-            for attr in ["chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups"] {
+            for attr in [
+                "chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups", "getpgrp",
+            ] {
                 let value = match posix {
                     Some(posix) => self.lookup_attr(posix, attr)?,
                     None => self.builtin(&format!("posix.{attr}")),
@@ -2921,6 +2923,13 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 if source.is_none() {
                     let posix = self.module("posix")?;
+                    for attr in stdlib::os::scheduler::PRIORITY_AND_YIELD {
+                        match self.lookup_attr(posix, attr) {
+                            Ok(value) => self.bind(scope, attr, value),
+                            Err(error) if self.is_attribute_error(&error) => continue,
+                            Err(error) => return Err(error),
+                        }
+                    }
                     for attr in [
                         "ptsname",
                         "O_NOCTTY",

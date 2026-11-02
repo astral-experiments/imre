@@ -500,7 +500,7 @@ pub(in crate::dynamic) mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
-    if matches!(name, "getpgid" | "setpgid") {
+    if matches!(name, "getpgid" | "getpgrp" | "setpgid") {
         return cfg!(unix);
     }
     if name == "_exit" {
@@ -1253,15 +1253,21 @@ pub(super) fn descriptor(
         // SAFETY: posix_fallocate borrows the fd and takes signed offsets by value.
         return posix_file_call(ctx, || unsafe { libc::posix_fallocate(fd, offset, length) });
     }
-    if name == "getppid" {
+    #[cfg(unix)]
+    if matches!(name, "getpgrp" | "getppid") {
         if !args.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!("posix.getppid() takes no arguments ({} given)", args.len()),
+                format!("posix.{name}() takes no arguments ({} given)", args.len()),
             ));
         }
-        // SAFETY: getppid reads the calling process's parent PID and takes no arguments.
-        return Ok(ctx.int(i64::from(unsafe { libc::getppid() })));
+        // SAFETY: both calls read identifiers for the current process and take no pointers.
+        let id = if name == "getpgrp" {
+            unsafe { libc::getpgrp() }
+        } else {
+            unsafe { libc::getppid() }
+        };
+        return Ok(ctx.int(i64::from(id)));
     }
     if name == "kill" {
         let [pid, signal] = args else {

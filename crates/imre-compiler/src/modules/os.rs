@@ -126,6 +126,15 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "sched_param" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_param")
         }
+        "sched_get_priority_min" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_get_priority_min")
+        }
+        "sched_get_priority_max" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_get_priority_max")
+        }
+        "sched_yield" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_yield")
+        }
         "sched_getscheduler" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_getscheduler")
         }
@@ -143,6 +152,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "WIFSTOPPED" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.WIFSTOPPED"),
         "execv" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.execv"),
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
+        "getpgrp" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpgrp"),
         "getpgid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpgid"),
         "setpgid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.setpgid"),
         "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),
