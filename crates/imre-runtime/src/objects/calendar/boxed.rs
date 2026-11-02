@@ -395,7 +395,7 @@ impl Calendar {
         with(&self.0, |v| calendar_text(v, true))
     }
 
-    /// Use the receiver's class name but the descriptor owner's field layout.
+    /// Render civil fields with the receiver's class name. The caller formats its Python timezone.
     pub(crate) fn subtype_repr(&self, class: &str, as_date: bool) -> String {
         let mut text = String::new();
         let mut out = super::super::values::ReprWriter(&mut text);
