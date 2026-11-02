@@ -1017,9 +1017,9 @@ impl Context {
 
     /// Consult ABC hooks and registrations without the public protocol argument guards.
     pub(super) fn abc_subclass_check(&mut self, child: Id, parent: Id) -> Result<bool> {
-        let protocol = self.is_protocol_declaration(parent);
+        let abc = self.is_bundled_abc(parent);
         let key = [parent, child];
-        if protocol && let Some(&result) = self.heap.protocol_subclass_cache.get(&key) {
+        if abc && let Some(&result) = self.heap.abc_subclass_cache.get(&key) {
             return Ok(result);
         }
         let result = if self.has_abc_subclass_hook(parent)
@@ -1027,14 +1027,18 @@ impl Context {
         {
             matched
         } else {
+            // A direct registry hit bypasses the positive cache in _abc.
+            if abc && self.heap.abc_registrations.contains(&[parent, child]) {
+                return Ok(true);
+            }
             self.subclass(child, parent)
         };
-        if protocol {
+        if abc {
             self.heap
-                .protocol_subclass_cache
+                .abc_subclass_cache
                 .try_reserve(1)
                 .map_err(|_| Error::new("MemoryError", ""))?;
-            self.heap.protocol_subclass_cache.insert(key, result);
+            self.heap.abc_subclass_cache.insert(key, result);
         }
         Ok(result)
     }
@@ -3758,8 +3762,11 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
-                if name == "_abc_caches_clear" && self.is_protocol_declaration(obj) {
-                    let callable = self.builtin("abc._abc_caches_clear");
+                if matches!(name, "_abc_caches_clear" | "_abc_registry_clear")
+                    && metaclass_member.is_none()
+                    && self.is_bundled_abc(obj)
+                {
+                    let callable = self.builtin(&format!("abc.{name}"));
                     return Ok(self.alloc(Value::Method {
                         callable,
                         receiver: obj,
