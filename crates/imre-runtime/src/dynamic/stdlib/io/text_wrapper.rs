@@ -45,6 +45,7 @@ pub(super) const METHODS: &[&str] = &[
     "readline",
     "seek",
     "tell",
+    "truncate",
 ];
 
 pub(super) fn property(name: &str) -> bool {
@@ -652,6 +653,37 @@ pub(super) fn next(
     w.input.borrow_mut().clear_snapshot();
     w.telling.set(w.seekable);
     Err(Error::new("StopIteration", ""))
+}
+
+/// Flush the text stream, then pass the original position to its current binary buffer.
+pub(super) fn truncate(
+    ctx: &mut Context,
+    receiver: Id,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "TextIOWrapper.truncate() takes no keyword arguments",
+        ));
+    }
+    super::argument_count("TextIOWrapper", "truncate", args.len())?;
+    let buffer = |ctx: &Context| match ctx.heap.get(receiver) {
+        Value::TextFile(file) => file
+            .buffer
+            .ok_or_else(|| Error::new("ValueError", "underlying buffer has been detached")),
+        _ => Wrapper::from_receiver(ctx, receiver)?.binary(),
+    };
+    buffer(ctx)?;
+    invoke(ctx, receiver, "flush", vec![])?;
+    let stream = buffer(ctx)?;
+    invoke(
+        ctx,
+        stream,
+        "truncate",
+        vec![args.first().copied().unwrap_or(NONE)],
+    )
 }
 
 /// Dispatch to the text layer while keeping the supplied buffer and its overrides observable.

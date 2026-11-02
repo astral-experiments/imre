@@ -227,6 +227,16 @@ def current():
         else:
             raise AssertionError("read from a detached buffer")
 
+    class TruncatingBuffer(io.BytesIO):
+        def truncate(self, pos):
+            return (self.getvalue(), pos)
+
+    marker = object()
+    with io.TextIOWrapper(TruncatingBuffer(), encoding="utf-8") as stream:
+        stream.write("é")
+        assert stream.truncate() == (b"\xc3\xa9", None)
+        assert stream.truncate(marker)[1] is marker
+
     print("wrapped binary streams")
 
 
