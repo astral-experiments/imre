@@ -668,6 +668,7 @@ impl Builtin {
             | Self::DequePop { .. }
             | Self::DequeIndex
             | Self::DequeGet { .. }
+            | Self::DequeRotate
             | Self::DequeSet
             | Self::DequeDelete { .. }
             | Self::Pop

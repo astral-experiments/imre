@@ -1547,6 +1547,7 @@ pub(crate) enum Builtin {
     },
     DequeClear,
     DequeReverse,
+    DequeRotate,
     DequeGet {
         method: bool,
     },
