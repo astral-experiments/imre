@@ -169,6 +169,33 @@ def check_writev():
         os.close(writer)
 
 
+def check_pwritev():
+    from os import pwritev
+
+    assert pwritev is os.pwritev is posix.pwritev
+    with tempfile.TemporaryFile() as target:
+        fd = target.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        assert pwritev(fd, [b"X", bytearray(b"Y"), memoryview(b"Z")], 2) == 3
+        assert os.pread(fd, 6, 0) == b"abXYZf"
+        expect_errno(pwritev, (fd, [b"!"], -2), errno.EINVAL)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+        if hasattr(os, "RWF_APPEND"):
+            try:
+                n = pwritev(fd, [b"!", b"?"], 0, os.RWF_APPEND)
+            except NotImplementedError:
+                pass  # The linked libc implements only pwritev.
+            except OSError as error:
+                assert error.errno in (errno.EINVAL, errno.EOPNOTSUPP)
+            else:
+                assert n == 2 and os.pread(fd, 8, 0) == b"abXYZf!?"
+                assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+                assert pwritev(fd, [b"+"], -1, os.RWF_APPEND) == 1
+                assert os.lseek(fd, 0, os.SEEK_CUR) == 9
+                assert os.pread(fd, 9, 0) == b"abXYZf!?+"
+
+
 def check_splice():
     from os import splice
 
@@ -205,6 +232,7 @@ def current():
         check_readv()
         check_preadv()
         check_writev()
+        check_pwritev()
     assert os.strerror is posix.strerror
     try:
         os.fstat(-1)
