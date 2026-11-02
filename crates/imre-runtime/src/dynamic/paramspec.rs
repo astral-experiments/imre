@@ -36,6 +36,31 @@ impl Marker {
 }
 
 pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    const NAMES: [&str; 6] = [
+        "name",
+        "bound",
+        "covariant",
+        "contravariant",
+        "infer_variance",
+        "default",
+    ];
+    if args.len() + kwargs.len() <= NAMES.len() {
+        if args.len() > 1 {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "paramspec() takes exactly 1 positional argument ({} given)",
+                    args.len()
+                ),
+            ));
+        }
+        if args.is_empty() && !kwargs.iter().any(|(name, _)| name == "name") {
+            return Err(Error::new(
+                "TypeError",
+                "paramspec() missing required argument 'name' (pos 1)",
+            ));
+        }
+    }
     let [
         name,
         bound,
@@ -43,20 +68,7 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
         contravariant,
         infer_variance,
         default,
-    ] = builtins::bind_method_arguments(
-        "paramspec",
-        args,
-        kwargs,
-        [
-            "name",
-            "bound",
-            "covariant",
-            "contravariant",
-            "infer_variance",
-            "default",
-        ],
-        1,
-    )?;
+    ] = builtins::bind_method_arguments("paramspec", args, kwargs, NAMES, 1)?;
     let name = name.ok_or_else(|| {
         Error::new(
             "TypeError",
@@ -68,7 +80,11 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
             "TypeError",
             format!(
                 "paramspec() argument 'name' must be str, not {}",
-                ctx.type_name(name)
+                if name == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(name)
+                }
             ),
         ));
     }

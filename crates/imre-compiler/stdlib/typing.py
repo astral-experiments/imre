@@ -1006,7 +1006,7 @@ def _type_check(arg, message, is_argument=True, module=None, *, allow_special_fo
     if (
         origin is _typing.Generic
         or (protocol is not None and origin is protocol)
-        or (not allow_special_forms and (origin is ClassVar or origin is Final))
+        or (not allow_special_forms and (origin is ClassVar or (is_argument and origin is Final)))
     ):
         raise TypeError(f"{repr(arg)} is not valid as type argument")
     if type(arg) is tuple:

@@ -1419,12 +1419,13 @@ pub(super) fn call(
             let owner = format!("typing.{owner}");
             if !matches!(ctx.heap.get(*left), Value::ParamSpecMarker(kind, _) if kind.class() == owner)
             {
+                let actual = match ctx.heap.get(*left) {
+                    Value::ParamSpecMarker(kind, _) => kind.class(),
+                    _ => ctx.type_name(*left),
+                };
                 return Err(Error::new(
                     "TypeError",
-                    format!(
-                        "descriptor '{method}' requires a '{owner}' object but received a '{}'",
-                        ctx.type_name(*left)
-                    ),
+                    format!("descriptor '{method}' requires a '{owner}' object but received a '{actual}'"),
                 ));
             }
             let op = if method == "__eq__" { "==" } else { "!=" };

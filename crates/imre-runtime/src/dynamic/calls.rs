@@ -3515,9 +3515,7 @@ impl Context {
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
         }
-        if name == "cell_contents"
-            && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_))
-        {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
             self.heap.replace_cell(obj, None);
             return Ok(());
         }
@@ -4212,9 +4210,7 @@ impl Context {
                 Some(value),
             );
         }
-        if name == "cell_contents"
-            && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_))
-        {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
             self.heap.replace_cell(obj, Some(value));
             return Ok(());
         }
@@ -5579,8 +5575,7 @@ impl Context {
                     if !self.scope_data(local).names.contains_key(n) {
                         let val = self.dict_entries(kwdefaults).and_then(|entries| {
                             entries.iter().find_map(|&(key, value)| {
-                                matches!(self.heap.get(key), Value::Str(text) if text == n)
-                                    .then_some(value)
+                                matches!(self.heap.get(key), Value::Str(text) if text == n).then_some(value)
                             })
                         });
                         if let Some(val) = val {
@@ -5908,8 +5903,7 @@ impl Context {
             frame.class_namespace.get_or_insert_with(Default::default).annotation_scratch = Some(annotations);
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
-        let explicit_annotations = self
-            .scope_name(scope, "__annotations__")
+        let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
