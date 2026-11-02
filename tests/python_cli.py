@@ -1453,7 +1453,7 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
-        for name in ("boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py"):
+        for name in ("boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py", "boxed_thread_dangling.py"):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":

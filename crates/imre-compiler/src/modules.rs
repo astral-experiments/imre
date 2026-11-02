@@ -1282,6 +1282,25 @@ impl IntrinsicModule {
             (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Types, "CodeType") => Intrinsic::NominalClass("code"),
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Threading, "Thread") => Intrinsic::ObjectRuntimeExport("threading.Thread"),
+            (Self::Threading, "_dangling") => Intrinsic::ObjectRuntimeExport("threading._dangling"),
+            (Self::Threading, "main_thread") => {
+                Intrinsic::ObjectRuntimeExport("threading.main_thread")
+            }
+            (Self::Threading, "current_thread") => {
+                Intrinsic::ObjectRuntimeExport("threading.current_thread")
+            }
+            (Self::Threading, "enumerate") => Intrinsic::ObjectRuntimeExport("threading.enumerate"),
+            (Self::Threading, "active_count") => {
+                Intrinsic::ObjectRuntimeExport("threading.active_count")
+            }
+            (Self::Thread | Self::Threading, "get_ident") => {
+                Intrinsic::ObjectRuntimeExport("_thread.get_ident")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Thread | Self::Threading, "get_native_id") => {
+                Intrinsic::ObjectRuntimeExport("_thread.get_native_id")
+            }
             (Self::Thread, "allocate_lock") => {
                 Intrinsic::ObjectRuntimeExport("_thread.allocate_lock")
             }
@@ -1304,6 +1323,7 @@ impl IntrinsicModule {
             }
             (Self::WeakRef, "ref") => Intrinsic::ObjectRuntimeExport("weakref.ref"),
             (Self::WeakRef, "WeakMethod") => Intrinsic::ObjectRuntimeExport("weakref.WeakMethod"),
+            (Self::WeakRef, "WeakSet") => Intrinsic::ObjectRuntimeExport("weakref.WeakSet"),
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
             (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },

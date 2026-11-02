@@ -34,6 +34,7 @@ mod super_object;
 mod thread_callback;
 mod thread_local;
 mod thread_lock;
+mod thread_worker;
 mod typing;
 mod union;
 mod value;
@@ -90,6 +91,7 @@ impl IteratorSlice<'_> {
 
 pub(crate) struct Context {
     threads: lowlevel_threads::Workers,
+    workers: thread_worker::Registry,
     heap: Heap,
     config: serde_json::Value,
     executable: PathBuf,
@@ -2108,9 +2110,14 @@ impl Context {
             _ => {}
         }
         if name == "_thread" && source.is_none() {
-            for function in ["start_new_thread", "_count"] {
+            for function in ["start_new_thread", "_count", "get_ident"] {
                 let value = self.builtin(&format!("_thread.{function}"));
                 self.bind(scope, function, value);
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                let id = self.builtin("_thread.get_native_id");
+                self.bind(scope, "get_native_id", id);
             }
         }
         if let Some((path, body)) = source {
@@ -2159,6 +2166,17 @@ impl Context {
                 && let Some(class) = self.scope_name(scope, "PatternError")
             {
                 self.classes.insert("re.PatternError".into(), class);
+            }
+            if name == "threading"
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("threading.py"))
+                && let (Some(class), Some(main)) = (
+                    self.scope_name(scope, "Thread"),
+                    self.scope_name(scope, "_main_thread"),
+                )
+            {
+                self.register_thread_run(class, main);
             }
             if name == "decimal"
                 && self.config["bundled_root"]
