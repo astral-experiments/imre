@@ -536,7 +536,9 @@ fn datetime_arithmetic(
             };
             return Err(Error::new(
                 "TypeError",
-                format!("descriptor '{name}' requires a 'datetime.datetime' object but received a '{kind}'"),
+                format!(
+                    "descriptor '{name}' requires a 'datetime.datetime' object but received a '{kind}'"
+                ),
             ));
         }
     };

@@ -709,7 +709,10 @@ mod tests {
         let already_reaped = waitpid(pid, libc::WNOHANG).unwrap_err();
 
         assert_eq!(early.map_err(|error| error.into_parts().0).unwrap(), [0, 0]);
-        assert_eq!(exited.map_err(|error| error.into_parts().0).unwrap(), [pid, 37 << 8]);
+        assert_eq!(
+            exited.map_err(|error| error.into_parts().0).unwrap(),
+            [pid, 37 << 8]
+        );
         assert_eq!(already_reaped.into_parts().0, "ChildProcessError");
     }
 }

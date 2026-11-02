@@ -513,9 +513,9 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
         )));
     }
     let method = match ctx.heap.get(value) {
-        Value::Calendar { value: calendar, .. }
-            if matches!(calendar.class(), "date" | "datetime" | "time") =>
-        {
+        Value::Calendar {
+            value: calendar, ..
+        } if matches!(calendar.class(), "date" | "datetime" | "time") => {
             Some(ctx.lookup_attr(value, "__format__")?)
         }
         _ => ctx.bound_slot(value, "__format__")?,
