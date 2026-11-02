@@ -30,6 +30,7 @@ mod namedtuple;
 mod namespace;
 mod namespace_init;
 mod namespace_repr;
+mod object_size;
 mod object_state;
 mod operators;
 mod os_error;
@@ -2105,6 +2106,9 @@ impl Context {
             self.builtin("BaseException.add_note");
             self.builtin("BaseException.with_traceback");
         }
+        if let Some(symbol) = object_size::descriptor(name) {
+            self.builtin(symbol);
+        }
         let methods = match name {
             "type" => &["mro"][..],
             "object" => &[
@@ -3010,6 +3014,7 @@ impl Context {
                 for name in [
                     "audit",
                     "addaudithook",
+                    "getsizeof",
                     "getrecursionlimit",
                     "setrecursionlimit",
                     "_getframe",

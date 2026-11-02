@@ -180,6 +180,14 @@ impl BuiltinDescriptor {
         let (owner, name) = match symbol {
             "type.__init__" => ("type", "__init__"),
             "object.__format__" => ("object", "__format__"),
+            "object.__sizeof__" => ("object", "__sizeof__"),
+            "dict.__sizeof__" => ("dict", "__sizeof__"),
+            "int.__sizeof__" => ("int", "__sizeof__"),
+            "str.__sizeof__" => ("str", "__sizeof__"),
+            "bytearray.__sizeof__" => ("bytearray", "__sizeof__"),
+            "list.__sizeof__" => ("list", "__sizeof__"),
+            "set.__sizeof__" => ("set", "__sizeof__"),
+            "frozenset.__sizeof__" => ("frozenset", "__sizeof__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
@@ -241,6 +249,7 @@ impl BuiltinDescriptor {
             method: matches!(
                 name,
                 "__format__"
+                    | "__sizeof__"
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"

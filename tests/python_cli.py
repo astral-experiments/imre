@@ -2404,6 +2404,7 @@ def report(text):
             "boxed_interactive.py",
             "boxed_relative_package_imports.py",
             "boxed_sys_getframe.py",
+            "boxed_sys_getsizeof.py",
             "boxed_sys_audit.py",
             "boxed_sys_audit_recursion.py",
             "boxed_sys_recursion_limit.py",
