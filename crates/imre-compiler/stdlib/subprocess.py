@@ -185,7 +185,11 @@ class Popen:
         else:
             self._communication_started = True
             if self.text_mode and input is not None:
-                input = input.encode(self.stdin.encoding, self.stdin.errors)
+                # The selector registers stdin from the original input. Encoding
+                # an empty string can produce a BOM even though no bytes are sent.
+                write_input = bool(input)
+                encoded = input.encode(self.stdin.encoding, self.stdin.errors)
+                input = encoded if write_input else None
         out, err, expired, remaining = _process.communicate(self._handle, input, timeout, use_select)
         if expired:
             error = TimeoutExpired(self.args, timeout if remaining is None else remaining,

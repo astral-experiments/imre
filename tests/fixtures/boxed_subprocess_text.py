@@ -51,4 +51,12 @@ def current():
                             "are supplied but different. Pass one or the other.")
     else:
         raise AssertionError("conflicting text options accepted")
+    for encoding in ("utf-16", "utf-32-be"):
+        with subprocess.Popen(["/bin/cat"], stdin=pipe, stdout=pipe, encoding=encoding) as child:
+            assert child.communicate("A😀\r\nB") == ("A😀\nB", None)
+    # A successful read of any byte would make this child exit 1.
+    cmd = ["/bin/sh", "-c", "test -z \"$(od -An -tx1)\""]
+    with subprocess.Popen(cmd, stdin=pipe, stdout=pipe, encoding="utf-16") as child:
+        assert child.communicate("") == ("", None)
+        assert child.returncode == 0
     print("Popen text pipes passed")
