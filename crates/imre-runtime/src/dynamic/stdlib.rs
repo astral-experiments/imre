@@ -1957,6 +1957,9 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("typing.") {
         return super::typing::call(ctx, operation, args, kwargs);
     }
+    if name == "collections.abc._CallableGenericAlias" {
+        return super::typing::abc_callable_alias(ctx, args, kwargs);
+    }
     if name == "types.GenericAlias" {
         if !kwargs.is_empty() {
             return Err(Error::new(

@@ -2477,6 +2477,7 @@ def report(text):
             "boxed_typing_protocol.py",
             "boxed_typing_typevar_members.py",
             "boxed_typing_alias_namespaces.py",
+            "boxed_abc_callable_alias.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
             "boxed_typing_async_collection_aliases.py",
