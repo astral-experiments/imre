@@ -17,10 +17,11 @@ impl Context {
         arguments: Id,
         keywords: Id,
         mark: usize,
+        scope: Id,
     ) -> Result<Id> {
         let args = self.items(arguments)?;
         let kwargs = self.keyword_args(keywords)?;
-        let result = self.call(callable, args, kwargs)?;
+        let result = self.call_in_scope(scope, callable, args, kwargs)?;
         self.finish_call_operands(mark, result);
         Ok(result)
     }
@@ -925,7 +926,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     finish_at(ctx, result, unsafe { span.as_ref() })
 }
 
-/// Invoke a compiled call using the root mark taken before its operands were evaluated.
+/// Accept calls from native objects generated before lexical call scopes were passed.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_call_at(
     ctx: *mut Context,
@@ -935,12 +936,27 @@ pub(super) unsafe extern "C" fn imre_dyn_call_at(
     mark: usize,
     span: *const [u32; 4],
 ) -> Id {
+    // SAFETY: both entry points accept the same context, operands, mark and optional position.
+    unsafe { imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, NONE) }
+}
+
+/// Invoke a compiled call using the root mark taken before its operands were evaluated.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    args: Id,
+    kwargs: Id,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
     // SAFETY: the generated caller owns the context and supplies a null or static position.
     let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = ctx.call_packed(callable, args, kwargs, mark);
+    let result = ctx.call_packed(callable, args, kwargs, mark, scope);
     finish_at(ctx, result, span)
 }
 
