@@ -6003,21 +6003,31 @@ impl Context {
                 .entry("__doc__".to_owned())
                 .or_insert(NONE);
         }
-        if let Some((body, cell)) = exposed_body {
+        if let Some(body) = exposed_body {
+            if let Some(cell) = body.class_cell {
+                self.heap.replace_cell(cell, Some(class));
+            }
             // type.__new__ replaces the body namespace with the finished type's dictionary.
             let dict = self.class_namespace_dict(scope, false);
             let extras = self
-                .dict_entries(body)
+                .dict_entries(body.mapping)
                 .expect("class body dictionary")
                 .iter()
                 .copied()
                 .filter(|&(key, _)| self.string_storage(key).is_none())
                 .collect::<Vec<_>>();
-            for (key, value) in extras {
-                self.put_item(dict, key, value)?;
-            }
-            if let Some(cell) = cell {
+            if let Some(cell) = body.dict_cell {
                 self.heap.replace_cell(cell, Some(dict));
+            }
+            if !extras.is_empty() {
+                for (key, value) in extras {
+                    self.put_item(dict, key, value)?;
+                }
+                let warnings = self.module("warnings")?;
+                let warn = self.lookup_attr(warnings, "warn")?;
+                let message = self.text(format!("non-string key in the __dict__ of class {name:.200}"));
+                let category = self.builtin("RuntimeWarning");
+                self.call(warn, vec![message, category], Vec::new())?;
             }
         }
         self.initialize_class_members(class, scope)?;
