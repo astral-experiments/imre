@@ -739,32 +739,40 @@ impl Function<'_, '_> {
                 &self.source.private_names
             ));
         }
-        if params.is_some() && uses_class_cell(&body) {
+        if (params.is_some() || matches!(body, Body::Expression(_))) && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
-        let generator = if let Body::GeneratorFunction((stmts, is_async)) = &body {
+        let generator = match &body {
+            Body::GeneratorFunction((stmts, is_async)) => {
+                let first = stmts[0].start();
+                let start = first.to_usize();
+                let end = stmts.last().unwrap().end().to_usize();
+                let prefix = self.source.text[..start].rsplit('\n').next().unwrap();
+                let indent = if prefix.chars().all(char::is_whitespace) {
+                    prefix
+                } else {
+                    " "
+                };
+                // Slice the suite as written so indentation inside multiline strings survives.
+                let header = if *is_async { "async def" } else { "def" };
+                let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
+                Some((first, text))
+            }
+            Body::Expression(expr) if imre_ast::code_flags::yields_in_expression(expr) => {
+                let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
+                Some((expr.start(), format!("def _():\n return ({text})")))
+            }
+            _ => None,
+        }
+        .map(|(first, text)| {
             if !self.source.method_imports.is_empty() {
                 signature["method_imports"] = json!(self.source.method_imports);
             }
-            let first = stmts[0].start();
             if let Some(owner) = self.source.private_names.suite_owner(first) {
                 signature["private_scope"] = json!([owner, self.source.string_annotations]);
             }
-            let start = first.to_usize();
-            let end = stmts.last().unwrap().end().to_usize();
-            let prefix = self.source.text[..start].rsplit('\n').next().unwrap();
-            let indent = if prefix.chars().all(char::is_whitespace) {
-                prefix
-            } else {
-                " "
-            };
-            // Slice the suite as written so indentation inside multiline strings survives.
-            let header = if *is_async { "async def" } else { "def" };
-            let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
-            Some((self.output.data(text.as_bytes()), self.source.line(first)))
-        } else {
-            None
-        };
+            (self.output.data(text.as_bytes()), self.source.line(first))
+        });
         let mut closure_names = ClosureNames {
             include_nested_reads: matches!(&body, Body::Statements(_) | Body::GeneratorFunction(_)),
             ..ClosureNames::default()

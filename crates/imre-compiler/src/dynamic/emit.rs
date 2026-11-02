@@ -305,6 +305,7 @@ impl Output {
                 f.statements(stmts);
             }
             Body::GeneratorFunction(_) => {}
+            Body::Expression(expr) if imre_ast::code_flags::yields_in_expression(expr) => {}
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class),
             Body::Unsupported(stmt, reason) => {

@@ -210,6 +210,29 @@ def delegate(child):
 
 
 def current():
+    seen = []
+    make = lambda value: (yield seen.append(value))
+    stream = make(7)
+    assert seen == []
+    assert next(stream) is None and seen == [7]
+    try:
+        stream.send(12)
+    except StopIteration as done:
+        assert done.value == 12
+    else:
+        raise AssertionError("lambda did not return the sent value")
+
+    nested = lambda: (lambda: (yield from (3, 4)))
+    assert list(nested()()) == [3, 4]
+
+    class Private:
+        __token = 9
+        values = lambda self: (yield self.__token)
+        owner = lambda: (yield __class__)
+
+    assert list(Private().values()) == [9]
+    assert list(Private.owner()) == [Private]
+
     formatted_lifetime()
     chain = iter([7, 8])
     for _ in range(96):
