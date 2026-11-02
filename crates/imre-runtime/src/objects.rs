@@ -107,7 +107,8 @@ pub(crate) use text::{UrlInput, capitalize, case_map, case_map_points, urlquote,
 pub(crate) use text::{
     count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
     ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
-    python_islower, python_isspace, python_istitle, python_isupper, split_parts,
+    python_isidentifier, python_islower, python_isspace, python_istitle, python_isupper,
+    split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};

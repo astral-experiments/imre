@@ -459,6 +459,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "isascii",
     "isalpha",
     "isdigit",
+    "isidentifier",
     "islower",
     "isspace",
     "istitle",

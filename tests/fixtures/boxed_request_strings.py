@@ -132,6 +132,11 @@ def current():
             print(error)
     bound_title = Digit.TWO.istitle
     print(bound_title(), str.istitle(Digit.TWO))
+    for value, expected in (("", False), ("_2", True), ("class", True), ("1a", False),
+                            (Text("a\u0301"), True), ("\u0301a", False), (Text("a\ud800"), False)):
+        assert value.isidentifier() is expected
+        assert str.isidentifier(value) is expected
+    assert str.isidentifier.__text_signature__ == "($self, /)"
     bound_digit = Digit.TWO.isdigit
     print(bound_digit(), str.isalpha(Digit.TWO))
     for value in (Text("é"), Text("²"), "\ud800", Text("7\udfff"), Text("a\udfff"),
