@@ -123,6 +123,13 @@ enum RenderRoot<'a> {
     Exception(&'a Error),
 }
 
+#[derive(Clone, Copy)]
+enum FormatLookup {
+    Repr,
+    Str,
+    MethodName,
+}
+
 enum FormatPart {
     Value(Id, bool),
     TypeArgument(Id, bool),
@@ -1264,8 +1271,8 @@ impl Context {
             root,
             quoted,
             true,
-            |ctx, id, quoted, work, ancestors, remaining| {
-                ctx.element_format(id, quoted, work, ancestors, remaining)
+            |ctx, id, lookup, work, ancestors, remaining| {
+                ctx.element_format(id, lookup, work, ancestors, remaining)
             },
         )
     }
@@ -1330,6 +1337,9 @@ impl Context {
 
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
+        if let Some(result) = super::paramspec::repr(self, id) {
+            return result.map(Some);
+        }
         let Some((class, slot)) = self.format_slot(id, "__repr__") else {
             return Ok(None);
         };
@@ -1353,17 +1363,30 @@ impl Context {
         Ok(Some(result))
     }
 
+    /// Look up a method's live qualified name, falling back only when that attribute is absent.
+    fn bound_method_name(&mut self, callable: Id) -> Result<Option<Id>> {
+        for attribute in ["__qualname__", "__name__"] {
+            match self.lookup_attr(callable, attribute) {
+                Ok(name) => return Ok(self.string_storage(name)),
+                Err(error) if self.is_attribute_error(&error) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(None)
+    }
+
     /// Keep pending children alive while a hook mutates and reenters its container.
     fn element_format(
         &mut self,
         id: Id,
-        quoted: bool,
+        lookup: FormatLookup,
         work: &mut [FormatPart],
         ancestors: &[Id],
         sequence_words: Option<usize>,
     ) -> Result<Option<String>> {
-        if self.format_slot(id, "__repr__").is_none()
-            && (quoted || self.format_slot(id, "__str__").is_none())
+        if !matches!(lookup, FormatLookup::MethodName)
+            && self.format_slot(id, "__repr__").is_none()
+            && (matches!(lookup, FormatLookup::Repr) || self.format_slot(id, "__str__").is_none())
         {
             return Ok(None);
         }
@@ -1380,10 +1403,10 @@ impl Context {
         }
         self.repr_ancestors.extend_from_slice(ancestors);
         let previous = std::mem::replace(&mut self.repr_sequence_words, sequence_words);
-        let converted = if quoted {
-            self.repr_override(id)
-        } else {
-            builtins::call(self, "str", &[id], &[]).map(Some)
+        let converted = match lookup {
+            FormatLookup::Repr => self.repr_override(id),
+            FormatLookup::Str => builtins::call(self, "str", &[id], &[]).map(Some),
+            FormatLookup::MethodName => self.bound_method_name(id),
         };
         self.repr_sequence_words = previous;
         let result = converted.and_then(|value| {
@@ -1540,7 +1563,7 @@ impl Context {
         mut element_repr: impl FnMut(
             &mut C,
             Id,
-            bool,
+            FormatLookup,
             &mut [FormatPart],
             &[Id],
             Option<usize>,
@@ -1805,7 +1828,7 @@ impl Context {
                     if let Some(text) = element_repr(
                         &mut ctx,
                         id,
-                        false,
+                        FormatLookup::Str,
                         &mut work,
                         &active,
                         remaining_sequence_words,
@@ -1833,7 +1856,7 @@ impl Context {
                         && let Some(text) = element_repr(
                             &mut ctx,
                             id,
-                            true,
+                            FormatLookup::Repr,
                             &mut work,
                             &active,
                             remaining_sequence_words,
@@ -1857,6 +1880,29 @@ impl Context {
                         ));
                     }
                     match ctx.heap.get(storage) {
+                        Value::Method { callable, receiver, explicit }
+                            if *explicit || matches!(ctx.heap.get(*callable), Value::Function { .. }) =>
+                        {
+                            let (callable, receiver) = (*callable, *receiver);
+                            append_rendered_text(&mut output, "<bound method ")?;
+                            push_frame(&mut work, Part::Text(">"))?;
+                            push_frame(&mut work, Part::Value(receiver, true))?;
+                            if let Value::Function { fields, .. } = ctx.heap.get(callable) {
+                                append_rendered_text(&mut output, ctx.str_value(fields.qualname)?)?;
+                            } else {
+                                let name = element_repr(
+                                    &mut ctx,
+                                    callable,
+                                    FormatLookup::MethodName,
+                                    &mut work,
+                                    &active,
+                                    remaining_sequence_words,
+                                )?;
+                                append_rendered_text(&mut output, name.as_deref().unwrap_or("?"))?;
+                            }
+                            append_rendered_text(&mut output, " of ")?;
+                            continue;
+                        }
                         Value::Union(union) => {
                             type_words += 24;
                             if type_words > type_budget {
@@ -3778,7 +3824,12 @@ impl Context {
                 });
             }
         }
-        if op == "|" && matches!(self.heap.get(a), Value::Union(_) | Value::TypeVar(_)) {
+        if op == "|"
+            && matches!(
+                self.heap.get(a),
+                Value::Union(_) | Value::TypeVar(_) | Value::ParamSpec(_)
+            )
+        {
             return super::union::make(self, &[a, b]);
         }
         if let Some(result) = self.binary_special(op, a, b)? {
@@ -4396,6 +4447,13 @@ impl Context {
                 })
         }) {
             return Ok(None);
+        }
+        if matches!(op, "==" | "!=")
+            && let (Value::ParamSpecMarker(left, _), Value::ParamSpecMarker(right, _)) =
+                (self.heap.get(a), self.heap.get(b))
+            && left == right
+        {
+            return super::paramspec::compare(self, op, a, b).map(Some);
         }
         if matches!(op, "==" | "!=")
             && let Value::MemoryView { owner, .. } = self.heap.get(a)

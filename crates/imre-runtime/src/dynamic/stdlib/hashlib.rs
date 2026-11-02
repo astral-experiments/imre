@@ -77,44 +77,15 @@ pub(super) fn algorithms(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    // The public Python wrapper binds name before the provider binds the remaining arguments.
-    let name = super::option(args, 0, kwargs, "name")
-        .map_err(|_| {
-            Error::new(
-                "TypeError",
-                "__hash_new() got multiple values for argument 'name'",
-            )
-        })?
-        .ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                "__hash_new() missing 1 required positional argument: 'name'",
-            )
-        })?;
-    let blake = match ctx.str_value(name) {
-        Ok("blake2b") => Some("blake2b"),
-        Ok("blake2s") => Some("blake2s"),
-        _ => None,
-    };
-    if let Some(name) = blake {
-        let args = args.get(1..).unwrap_or_default();
-        if kwargs.iter().any(|(key, _)| key == "name") {
-            let remaining: Vec<_> = kwargs
-                .iter()
-                .filter(|(key, _)| key != "name")
-                .cloned()
-                .collect();
-            return blake2::new(ctx, name, args, &remaining);
-        }
-        return blake2::new(ctx, name, args, kwargs);
-    }
-    let [_, data, flag, string] = super::builtins::bind_method_arguments(
+    let [name, data, flag, string] = super::builtins::bind_method_arguments(
         "new",
         args,
         kwargs,
         ["name", "data", "usedforsecurity", "string"],
         2,
     )?;
+    let name =
+        name.ok_or_else(|| Error::new("TypeError", "new() missing required argument 'name'"))?;
     let name = ctx.str_value(name).map_err(|_| {
         let ty = if name == NONE {
             "None"

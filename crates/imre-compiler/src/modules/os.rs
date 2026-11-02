@@ -16,6 +16,23 @@ pub(crate) fn credential_arity(name: &str) -> usize {
 }
 
 pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
+    #[cfg(target_os = "linux")]
+    {
+        let policy = match name {
+            "SCHED_OTHER" => Some(libc::SCHED_OTHER),
+            "SCHED_NORMAL" => Some(libc::SCHED_NORMAL),
+            "SCHED_FIFO" => Some(libc::SCHED_FIFO),
+            "SCHED_RR" => Some(libc::SCHED_RR),
+            "SCHED_BATCH" => Some(libc::SCHED_BATCH),
+            "SCHED_IDLE" => Some(libc::SCHED_IDLE),
+            "SCHED_DEADLINE" => Some(libc::SCHED_DEADLINE),
+            "SCHED_RESET_ON_FORK" => Some(libc::SCHED_RESET_ON_FORK),
+            _ => None,
+        };
+        if let Some(policy) = policy {
+            return Some(Intrinsic::IntConstant(i64::from(policy)));
+        }
+    }
     if cfg!(unix) {
         let common = [
             "getuid", "geteuid", "getgid", "getegid", "setuid", "seteuid", "setgid", "setegid",
@@ -38,6 +55,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
         "mkdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkdir"),
         "mkfifo" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkfifo"),
+        "sched_getscheduler" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_getscheduler")
+        }
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
         "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),

@@ -1,7 +1,7 @@
 """POSIX signal numbers, the process alarm, and Linux pending signals."""
 
 import _signal
-from _signal import alarm
+from _signal import alarm, default_int_handler
 from enum import IntEnum as _IntEnum
 
 
@@ -36,4 +36,12 @@ else:
         SIGTERM = _signal.SIGTERM
 
 
+class Handlers(_IntEnum):
+    """An enumeration."""
+
+    SIG_DFL = _signal.SIG_DFL
+    SIG_IGN = _signal.SIG_IGN
+
+
 globals().update(Signals.__members__)
+globals().update(Handlers.__members__)

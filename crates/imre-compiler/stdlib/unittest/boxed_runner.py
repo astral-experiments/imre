@@ -11,21 +11,6 @@ def _boxedResultDetail(error):
     return "".join(traceback.format_exception(kind, value, tb))
 
 
-class _CaseResultDispatch(TestResult):
-    # Case phases use private helpers; public callbacks and state belong to
-    # the observer supplied by the runner, even for a duck-typed result.
-    def __init__(self, observer):
-        self._observer = observer
-        for name in ("startTest", "stopTest", "addSuccess", "addError", "addFailure", "stop"):
-            setattr(self, name, getattr(observer, name))
-        if hasattr(observer, "addSkip"):
-            self.addSkip = observer.addSkip
-        self.skipped = getattr(observer, "skipped", ())
-
-    def __getattr__(self, name):
-        return getattr(self._observer, name)
-
-
 def _addError(self, test, error):
     if self.failfast:
         self.stop()

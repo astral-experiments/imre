@@ -328,6 +328,8 @@ pub(super) fn change_environment(
 mod chmod;
 mod links;
 mod mkfifo;
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod scheduler;
 mod unlink;
 mod utime;
 

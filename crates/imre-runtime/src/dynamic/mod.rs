@@ -28,6 +28,7 @@ mod namespace_repr;
 mod object_state;
 mod operators;
 mod os_error;
+mod paramspec;
 mod property;
 mod range;
 mod slice;
@@ -97,6 +98,11 @@ impl IteratorSlice<'_> {
     }
 }
 
+struct ExposedClassBody {
+    mapping: Id,
+    annotation_cell: Option<Id>,
+}
+
 pub(crate) struct Context {
     threads: lowlevel_threads::Workers,
     workers: thread_worker::Registry,
@@ -130,6 +136,8 @@ pub(crate) struct Context {
     // The running frozen bootstrap keeps its globals even if its registry entry is replaced.
     bootstrap_globals: Id,
     classes: HashMap<String, Id>,
+    // The Python enum bases use native layouts but have writable class dictionaries.
+    enum_scopes: HashMap<Id, Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
@@ -253,7 +261,8 @@ impl Context {
             | ("bytes", Value::Bytes(_))
             | ("bytearray", Value::ByteArray(_))
             | ("set", Value::Set { frozen: false, .. })
-            | ("frozenset", Value::Set { frozen: true, .. }) => true,
+            | ("frozenset", Value::Set { frozen: true, .. })
+            | (thread_local::CLASS, Value::ThreadLocal(_)) => true,
             _ => false,
         }
     }
@@ -1514,6 +1523,20 @@ impl Context {
         }
     }
 
+    /// Expose the current class-body mapping and use it for subsequent name bindings.
+    fn active_class_namespace(&mut self, scope: Id) -> Id {
+        if let Some(dict) = self.scope_data(scope).namespace {
+            return dict;
+        }
+        let dict = self.class_namespace_dict(scope, true);
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.namespace = Some(dict);
+        frame.names.clear();
+        dict
+    }
+
     /// Share the class namespace cell across source-loaded and precompiled method providers.
     pub(super) fn class_annotation_dict_cell(&mut self, scope: Id) -> Id {
         if let Some(cell) = self
@@ -1524,27 +1547,22 @@ impl Context {
         {
             return cell;
         }
-        let dict = self.class_namespace_dict(scope, true);
+        let dict = self.active_class_namespace(scope);
         let cell = self.alloc(Value::Cell(Some(dict)));
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         frame.class_namespace.as_mut().unwrap().annotation_dict_cell = Some(cell);
-        frame.namespace = Some(dict);
-        frame.names.clear();
         cell
     }
 
-    /// Preserve edits made through an annotator's cell before type creation copies the class body.
-    fn finish_annotation_body(&mut self, scope: Id) -> Result<Option<(Id, Id)>> {
+    /// Copy the bindings from an exposed class-body namespace before creating the type.
+    fn finish_class_namespace(&mut self, scope: Id) -> Result<Option<ExposedClassBody>> {
         let frame = self.scope_data(scope);
-        let Some((cell, body)) = frame
-            .class_namespace
-            .as_ref()
-            .and_then(|ns| ns.annotation_dict_cell.zip(ns.dictionary))
-        else {
+        let Some(body) = frame.namespace else {
             return Ok(None);
         };
+        let annotation_cell = frame.class_namespace.as_ref().and_then(|ns| ns.annotation_dict_cell);
         let names: indexmap::IndexMap<String, Id> = self
             .dict_entries(body)
             .expect("class body dictionary")
@@ -1552,7 +1570,7 @@ impl Context {
             .filter_map(|&(key, value)| {
                 self.str_value(key)
                     .ok()
-                    .filter(|&name| name != "__classdictcell__")
+                    .filter(|&name| annotation_cell.is_none() || name != "__classdictcell__")
                     .map(|name| (name.to_owned(), value))
             })
             .collect();
@@ -1563,10 +1581,12 @@ impl Context {
         frame.names = names;
         frame.namespace = None;
         frame.class_namespace.as_mut().unwrap().dictionary = None;
-        let key = self.text("__classdictcell__");
-        self.put_item(body, key, cell)?;
         self.heap.keep(body);
-        Ok(Some((cell, body)))
+        if let Some(cell) = annotation_cell {
+            let key = self.text("__classdictcell__");
+            self.put_item(body, key, cell)?;
+        }
+        Ok(Some(ExposedClassBody { mapping: body, annotation_cell }))
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
@@ -1803,6 +1823,9 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if builtins::is_enum_base(name) {
+            self.install_enum_base(value, name);
+        }
         if let Some(constants) = crate::objects::Calendar::class_constants(name) {
             stdlib::datetime::install_members(self, name);
             for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
@@ -1852,10 +1875,6 @@ impl Context {
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
-            "enum.IntEnum" | "enum.IntFlag" => {
-                self.builtin("int.__repr__");
-                &[]
-            }
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => &["__repr__"],
             "int" => {
@@ -1880,6 +1899,7 @@ impl Context {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
+            thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
@@ -2372,7 +2392,19 @@ impl Context {
                 self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
-            "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
+            "posix" if source.is_none() => stdlib::os::scheduler::initialize(self, scope),
+            #[cfg(unix)]
+            "_signal" if source.is_none() => {
+                #[cfg(target_os = "linux")]
+                stdlib::signal::initialize(self, scope);
+                for (name, disposition) in [("SIG_DFL", libc::SIG_DFL), ("SIG_IGN", libc::SIG_IGN)]
+                {
+                    let value = self.int(disposition as i64);
+                    self.bind(scope, name, value);
+                }
+                let handler = self.builtin("_signal.default_int_handler");
+                self.bind(scope, "default_int_handler", handler);
+            }
             #[cfg(target_os = "linux")]
             "_imre_signal" if source.is_none() => {
                 let factory = self.builtin("_imre_signal.make_signals");
@@ -2422,6 +2454,34 @@ impl Context {
             "math" if source.is_none() => {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
+            }
+            "hashlib" => {
+                let native_new = self.builtin("hashlib.new");
+                self.bind(scope, "_native_new", native_new);
+            }
+            "_blake2" => {
+                for name in ["blake2b", "blake2s"] {
+                    let class = crate::objects::HashState::public_constructor(name).unwrap();
+                    let constructor = self.builtin(class);
+                    self.bind(scope, name, constructor);
+                    for attr in [
+                        "SALT_SIZE",
+                        "PERSON_SIZE",
+                        "MAX_KEY_SIZE",
+                        "MAX_DIGEST_SIZE",
+                    ] {
+                        let constant =
+                            crate::objects::HashState::class_constant(class, attr).unwrap();
+                        let value = self.int(constant as i64);
+                        self.bind(
+                            scope,
+                            &format!("{}_{attr}", name.to_ascii_uppercase()),
+                            value,
+                        );
+                    }
+                }
+                let threshold = self.int(2048);
+                self.bind(scope, "_GIL_MINSIZE", threshold);
             }
             "_datetime" => {
                 for name in ["date", "datetime", "time", "timedelta", "timezone"] {

@@ -528,6 +528,7 @@ pub(crate) enum IntrinsicModule {
     Socket,
     SocketNative,
     Hashlib,
+    Blake2,
     Hmac,
     Types,
     Base64,
@@ -890,6 +891,7 @@ impl Intrinsic {
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
     pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
     pub(crate) const TEXT_IO_BASE: Self = Self::ObjectRuntimeExport("io.TextIOBase");
+    pub(crate) const TYPING_PROTOCOL: Self = Self::ObjectRuntimeExport("typing.Protocol");
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
 
     /// Subclasses of these immutable types keep their calendar value in the object runtime.
@@ -1019,6 +1021,7 @@ impl IntrinsicModule {
             "socket" => Some(Self::Socket),
             "_socket" => Some(Self::SocketNative),
             "hashlib" => Some(Self::Hashlib),
+            "_blake2" => Some(Self::Blake2),
             "hmac" => Some(Self::Hmac),
             "base64" => Some(Self::Base64),
             "binascii" => Some(Self::Binascii),
@@ -1705,6 +1708,13 @@ impl IntrinsicModule {
             (Self::DoctestRuntime, "execute") => Intrinsic::DocExecute,
             (Self::MockRuntime, "mark_call_list") => Intrinsic::MockCallList { mark: true },
             (Self::MockRuntime, "is_call_list") => Intrinsic::MockCallList { mark: false },
+            (Self::Typing, "ParamSpec") => Intrinsic::ObjectRuntimeExport("typing.ParamSpec"),
+            (Self::Typing, "ParamSpecArgs") => {
+                Intrinsic::ObjectRuntimeExport("typing.ParamSpecArgs")
+            }
+            (Self::Typing, "ParamSpecKwargs") => {
+                Intrinsic::ObjectRuntimeExport("typing.ParamSpecKwargs")
+            }
             (Self::Typing, "TypeVarTuple") => Intrinsic::ObjectRuntimeExport("typing.TypeVarTuple"),
             (Self::Typing, "Unpack") => Intrinsic::ObjectRuntimeExport("typing.Unpack"),
             (Self::Typing, "NoDefault") => Intrinsic::ObjectRuntimeExport("typing.NoDefault"),
@@ -1734,6 +1744,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.no_type_check_decorator")
             }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
+            (Self::Typing, "Protocol") => Intrinsic::TYPING_PROTOCOL,
             (Self::Typing, "runtime_checkable") => {
                 Intrinsic::ObjectRuntimeExport("typing.runtime_checkable")
             }
@@ -1987,6 +1998,35 @@ impl IntrinsicModule {
                 _ => return None,
             }),
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
+            (Self::Blake2, "blake2b") => Intrinsic::ObjectRuntimeExport("_blake2.blake2b"),
+            (Self::Blake2, "blake2s") => Intrinsic::ObjectRuntimeExport("_blake2.blake2s"),
+            (Self::Blake2, "_GIL_MINSIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2._GIL_MINSIZE")
+            }
+            (Self::Blake2, "BLAKE2B_SALT_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2B_SALT_SIZE")
+            }
+            (Self::Blake2, "BLAKE2B_PERSON_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2B_PERSON_SIZE")
+            }
+            (Self::Blake2, "BLAKE2B_MAX_KEY_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2B_MAX_KEY_SIZE")
+            }
+            (Self::Blake2, "BLAKE2B_MAX_DIGEST_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2B_MAX_DIGEST_SIZE")
+            }
+            (Self::Blake2, "BLAKE2S_SALT_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_SALT_SIZE")
+            }
+            (Self::Blake2, "BLAKE2S_PERSON_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_PERSON_SIZE")
+            }
+            (Self::Blake2, "BLAKE2S_MAX_KEY_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_MAX_KEY_SIZE")
+            }
+            (Self::Blake2, "BLAKE2S_MAX_DIGEST_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_MAX_DIGEST_SIZE")
+            }
             (Self::Hashlib, "md5") => Intrinsic::NamedHash("md5"),
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
             (Self::Hmac, "new") => Intrinsic::ObjectRuntimeExport("hmac.new"),
@@ -2094,6 +2134,11 @@ impl IntrinsicModule {
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "IntEnum") => Intrinsic::IntEnum,
+            (Self::Enum, "IntFlag") => Intrinsic::ObjectRuntimeExport("enum.IntFlag"),
+            (Self::Enum, "global_enum") => Intrinsic::ObjectRuntimeExport("enum.global_enum"),
+            (Self::Enum, "global_enum_repr") => Intrinsic::ObjectRuntimeExport("enum.global_enum_repr"),
+            (Self::Enum, "global_flag_repr") => Intrinsic::ObjectRuntimeExport("enum.global_flag_repr"),
+            (Self::Enum, "global_str") => Intrinsic::ObjectRuntimeExport("enum.global_str"),
             (Self::Enum, "_simple_enum") => Intrinsic::SimpleEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections | Self::CollectionsNative, "_count_elements") => {
@@ -3216,6 +3261,18 @@ impl SourceGraph {
             return self.local_import_value(module, expression, import);
         }
         resolve_binding(&self.modules, module, expression)
+    }
+
+    /// Recognize Protocol and Protocol[T] at the point where the class is defined.
+    pub(crate) fn is_protocol_base(&self, module: ModuleId, expression: &ast::Expr) -> bool {
+        let origin = match expression {
+            ast::Expr::Subscript(subscript) => &*subscript.value,
+            base => base,
+        };
+        matches!(
+            self.resolve(module, origin),
+            Some(Binding::Intrinsic(Intrinsic::TYPING_PROTOCOL))
+        ) && self.session.is_typing_protocol(module, origin)
     }
 
     /// An import binds its name throughout the function, even before the import executes.
@@ -4438,6 +4495,7 @@ impl<'a> Loader<'a> {
             self.needs_object_imports |= matches!(
                 module,
                 IntrinsicModule::Ast
+                    | IntrinsicModule::Blake2
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp

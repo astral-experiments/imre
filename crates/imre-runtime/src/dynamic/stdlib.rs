@@ -105,7 +105,8 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
-        "_datetime"
+        "_blake2"
+            | "_datetime"
             | "_imre_ordered_dict"
             | "_opcode"
             | "atexit"
@@ -549,6 +550,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "typing",
             "TypeVar"
+            | "ParamSpec"
+            | "ParamSpecArgs"
+            | "ParamSpecKwargs"
             | "TypeVarTuple"
             | "_new_typeddict"
             | "_UnpackGenericAlias"
@@ -578,11 +582,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
-            if let Some(class) = crate::objects::HashState::public_constructor(name) =>
+            if crate::objects::HashState::public_constructor(name).is_none()
+                && crate::objects::HashState::algorithms().any(|alg| alg == name) =>
         {
-            ctx.builtin(class)
-        }
-        ("hashlib", name) if crate::objects::HashState::algorithms().any(|alg| alg == name) => {
             ctx.alloc(Value::Native(format!("hashlib.{name}")))
         }
         ("hashlib", "algorithms_available" | "algorithms_guaranteed") => {
@@ -769,7 +771,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
             | "quote_plus" | "quote_from_bytes" | "urlencode",
         )
-        | ("hashlib", "new" | "file_digest")
+        | ("hashlib", "file_digest")
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | (
             "re",
@@ -999,6 +1001,26 @@ pub(super) fn call(
     }
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
+    }
+    #[cfg(unix)]
+    if name == "_signal.default_int_handler" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_signal.default_int_handler() takes no keyword arguments",
+            ));
+        }
+        if args.len() != 2 {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "default_int_handler expected 2 arguments, got {}",
+                    args.len()
+                ),
+            ));
+        }
+        os::c_int(ctx, args[0])?;
+        return Err(Error::new("KeyboardInterrupt", ""));
     }
     #[cfg(unix)]
     if name == "_signal.alarm" {
@@ -1507,6 +1529,10 @@ pub(super) fn call(
     {
         return os::descriptor(ctx, op, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if name == "posix.sched_getscheduler" {
+        return os::scheduler::get_policy(ctx, args, kwargs);
+    }
     if name == "posix.urandom" {
         return os::urandom(ctx, args, kwargs);
     }
@@ -1828,7 +1854,11 @@ pub(super) fn call(
                 return Ok(FALSE);
             }
             ("native_iterator", [obj], []) => {
-                return Ok(if ctx.is_native_iterator(*obj) { TRUE } else { FALSE });
+                return Ok(if ctx.is_native_iterator(*obj) {
+                    TRUE
+                } else {
+                    FALSE
+                });
             }
             ("slot_bases", [class], []) => return ctx.dataclass_slot_bases(*class),
             ("slotted_type", [old, namespace], []) => {
@@ -1905,7 +1935,7 @@ pub(super) fn call(
     if matches!(name, "enum.auto.__init__" | "enum.auto.__repr__") {
         return ctx.auto_method(name, args, kwargs);
     }
-    if matches!(name, "enum.Enum.__repr__" | "enum.Enum.__str__" | "enum.Enum.__format__") {
+    if matches!(name, "enum.Enum.__repr__" | "enum.Flag.__repr__" | "enum.Enum.__str__" | "enum.Enum.__format__") {
         return ctx.float_enum_display(name, args, kwargs);
     }
     if name == "enum.Enum.__copy__" {
@@ -1966,6 +1996,9 @@ pub(super) fn call(
         && crate::objects::HashState::is_provider_class(class)
     {
         return hashlib::provider_method(ctx, class, method, args, kwargs);
+    }
+    if let Some(class) = crate::objects::HashState::provider_class(name) {
+        return hashlib::hash(ctx, class.rsplit_once('.').unwrap().1, args, kwargs);
     }
     if let Some(algorithm) = name.strip_prefix("hashlib.")
         && crate::objects::HashState::algorithms().any(|name| name == algorithm)

@@ -118,6 +118,7 @@ impl BuiltinDescriptor {
             "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
+            "str.__str__" => ("str", "__str__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
             "dict.__ior__" => ("dict", "__ior__"),
@@ -232,9 +233,7 @@ impl BuiltinDescriptor {
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
             deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
-            "bool" | "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"
-            | "frozenset" => ctx.builtin_slot_accepts(receiver, self.owner),
-            _ => matches!(ctx.heap.get(receiver), Value::ThreadLocal(_)),
+            _ => ctx.builtin_slot_accepts(receiver, self.owner),
         };
         if !accepts {
             return Err(Error::new(

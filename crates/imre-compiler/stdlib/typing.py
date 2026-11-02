@@ -1006,7 +1006,11 @@ def TypeAlias(self, parameters):
     raise TypeError(f"{self} is not subscriptable")
 
 
-def _type_check(arg, message, *, allow_special_forms=False):
+def _type_check(arg, message, is_argument=True, module=None, *, allow_special_forms=False, owner=None):
+    if arg is None:
+        arg = type(None)
+    elif isinstance(arg, str):
+        arg = _make_forward_ref(arg, module, owner, is_class=allow_special_forms)
     protocol = getattr(_typing, "Protocol", None)
     if isinstance(arg, _SpecialForm) and arg in (LiteralString, NoReturn, Never, Self, TypeAlias):
         return arg
@@ -1018,7 +1022,7 @@ def _type_check(arg, message, *, allow_special_forms=False):
     if (
         origin is _typing.Generic
         or (protocol is not None and origin is protocol)
-        or (not allow_special_forms and (origin is ClassVar or origin is Final))
+        or (not allow_special_forms and (origin is ClassVar or (is_argument and origin is Final)))
     ):
         raise TypeError(f"{repr(arg)} is not valid as type argument")
     if type(arg) is tuple:

@@ -82,6 +82,7 @@ const FUNCTIONS: &[&str] = &[
     "max",
     "ord",
     "chr",
+    "hex",
     "divmod",
     "round",
     "callable",
@@ -93,6 +94,7 @@ const FUNCTIONS: &[&str] = &[
     "issubclass",
     "getattr",
     "globals",
+    "locals",
     "vars",
     "setattr",
     "delattr",
@@ -208,8 +210,11 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
-    (matches!(owner, "object" | "dict" | "float" | "int" | "str") || is_exception(owner))
-        .then_some(owner)
+    (matches!(
+        owner,
+        "object" | "dict" | "float" | "int" | "str" | super::thread_local::CLASS
+    ) || is_exception(owner))
+    .then_some(owner)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
@@ -394,6 +399,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
+    "__str__",
     "__format__",
     "__repr__",
     "capitalize",
@@ -549,6 +555,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "socket.socket"
         }
+        Value::BufferedRandom(..) if attr == "writelines" => "file",
         Value::BufferedRandom(..) if super::stdlib::tempfile::METHODS.contains(&attr) => {
             "BufferedRandom"
         }
@@ -972,9 +979,14 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        if scope != NONE && matches!(self.heap.get(callable), Value::Native(name) if name == "eval")
-        {
-            return self.eval_source(scope, &args, &kwargs);
+        if scope != NONE && let Value::Native(name) = self.heap.get(callable) {
+            match name.as_str() {
+                "eval" => return self.eval_source(scope, &args, &kwargs),
+                "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
+                    return self.frame_locals(scope);
+                }
+                _ => {}
+            }
         }
         if scope != NONE
             && args.is_empty()
@@ -1236,6 +1248,7 @@ pub(super) fn call(
                 translation::translate(ctx, owner, args, kwargs)
             }
             "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
@@ -1408,6 +1421,11 @@ pub(super) fn call(
             arity(name, args, 2, 3)?;
             ctx.exec_source(args[0], args[1], args.get(2).copied(), None)
         }
+        "hex" => {
+            let value = one_positional_arg("hex", args, kwargs)?;
+            let number = ctx.index_integer(value)?;
+            Ok(ctx.text(format!("{:#x}", number.big().as_ref())))
+        }
         "abs" => {
             if !kwargs.is_empty() {
                 return Err(type_error("abs() takes no keyword arguments"));
@@ -1474,27 +1492,28 @@ pub(super) fn call(
                     }
                     result => result,
                 },
-                [] => Err(Error::new(
-                    "NotImplementedError",
-                    "vars() requires caller locals",
-                )),
+                [] => ctx.frame_locals(ctx.heap.current_scope()),
                 _ => Err(type_error(format!(
                     "vars expected at most 1 argument, got {}",
                     args.len()
                 ))),
             }
         }
-        "globals" => {
+        "globals" | "locals" => {
             if !kwargs.is_empty() {
-                return Err(type_error("globals() takes no keyword arguments"));
+                return Err(type_error(format!("{name}() takes no keyword arguments")));
             }
             if !args.is_empty() {
                 return Err(type_error(format!(
-                    "globals() takes no arguments ({} given)",
+                    "{name}() takes no arguments ({} given)",
                     args.len()
                 )));
             }
-            ctx.module_globals(ctx.heap.current_scope())
+            if name == "globals" {
+                ctx.module_globals(ctx.heap.current_scope())
+            } else {
+                ctx.frame_locals(ctx.heap.current_scope())
+            }
         }
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;

@@ -1847,12 +1847,21 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
+        compare("-B", fixtures / "typing_protocol_import.py")
+        compare(
+            "-B", "-c",
+            "import typing as t\ndef build():\n    class P(t.Protocol): pass\n"
+            "    return P._is_protocol\nprint(build())",
+        )
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
         io_registration = fixtures / "io_abc_registration.py"
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        memory_writer = fixtures / "io_buffered_writer_bytesio.py"
+        compare("-IB", memory_writer, native_args=("run", memory_writer, "--quiet"))
         writer_fixture = fixtures / "io_buffered_writer_type.py"
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
@@ -1934,6 +1943,7 @@ def report(text):
             "boxed_code_objects.py",
             "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",
+            "boxed_bound_method_repr.py",
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
             "boxed_namedtuple_factory.py",
@@ -2138,6 +2148,8 @@ def report(text):
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",
             "boxed_function_defaults.py",
+            "boxed_reprlib.py",
+            "boxed_asyncio_policy.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
             "boxed_set_issubset.py",
@@ -2162,6 +2174,7 @@ def report(text):
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_registry.py",
+            "boxed_unittest_default_result.py",
             "boxed_unittest_runner_warnings.py",
             "boxed_unittest_runner_durations.py",
             "boxed_unittest_class_cleanup.py",
@@ -2173,6 +2186,7 @@ def report(text):
             "boxed_itertools_count.py",
             "boxed_enum_descriptors.py",
             "boxed_enum_auto.py",
+            "boxed_global_enum.py",
             "boxed_float_enum.py",
             "boxed_print_streams.py",
             "boxed_redirect_streams.py",
@@ -2190,6 +2204,7 @@ def report(text):
             "boxed_module_type.py",
             "boxed_source_module_getattr.py",
             "boxed_thread_local.py",
+            "boxed_thread_local_subclass.py",
             "boxed_threading_lock.py",
             "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
@@ -2310,6 +2325,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_posix_sched_getscheduler.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())

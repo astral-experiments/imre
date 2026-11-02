@@ -29,14 +29,36 @@ def _decode(data, stream):
     return data.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _exec_search_path(env):
+    """Read the POSIX search path independently of the child's saved environment."""
+    from os import environ, fsdecode, fsencode
+    if env is None:
+        env = environ
+    try:
+        path = env.get("PATH")
+    except TypeError:
+        path = None
+    try:
+        byte_path = env[b"PATH"]
+    except (KeyError, TypeError):
+        pass
+    else:
+        if path is not None:
+            raise ValueError("env cannot contain 'PATH' and b'PATH' keys")
+        path = byte_path
+    if path is None:
+        return b"/bin:/usr/bin"
+    if isinstance(path, bytes):
+        path = fsdecode(path)
+    return b":".join(fsencode(part) for part in path.split(":"))
+
+
 class Popen:
     _handle = None
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
                  stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True,
                  universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False, pipesize=-1):
-        if executable is not None:
-            raise NotImplementedError("an alternate subprocess executable is unsupported")
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -68,7 +90,7 @@ class Popen:
         self.args = args
         self.pipesize = pipesize
         self._sigint_wait_secs = 0.25
-        self._handle = _process.launch(args, stdin, stdout, stderr, close_fds,
+        self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
                                        restore_signals, cwd, env, bufsize, pipesize,
                                        encoding if self.text_mode else None,
                                        errors if self.text_mode else None, shell, start_new_session)

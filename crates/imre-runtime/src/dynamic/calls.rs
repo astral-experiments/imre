@@ -42,6 +42,8 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         #[cfg(target_os = "linux")]
         "_signal" if function == "sigpending" => Some((module, function)),
+        #[cfg(unix)]
+        "_signal" if function == "default_int_handler" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
@@ -174,6 +176,21 @@ impl Context {
     ) -> Option<T> {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return lookup(class).or_else(|| {
+                if let Value::Native(kind) = self.heap.get(class)
+                    && builtins::is_enum_base(kind)
+                {
+                    let scalar = match kind.as_str() {
+                        "enum.IntEnum" | "enum.IntFlag" => Some("int"),
+                        "enum.StrEnum" => Some("str"),
+                        _ => None,
+                    };
+                    return scalar
+                        .into_iter()
+                        .chain((kind != "enum.Enum").then_some("enum.Enum"))
+                        .chain(["object"])
+                        .filter_map(|name| self.builtins.get(name))
+                        .find_map(|&base| lookup(base));
+                }
                 if matches!(self.heap.get(class), Value::Native(name) if name == "datetime.datetime") {
                     self.builtins.get("datetime.date").and_then(|&base| lookup(base))
                 } else {
@@ -213,14 +230,12 @@ impl Context {
                 };
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
-            // ReprEnum keeps int.__repr__ for str(), independently of __repr__ on the enum.
-            Value::Native(kind)
-                if name == "__str__" && matches!(kind.as_str(), "enum.IntEnum" | "enum.IntFlag") =>
-            {
-                self.builtins.get("int.__repr__").copied()
-            }
-            Value::Native(kind) if builtins::is_enum_base(kind) => {
-                self.builtins.get(&format!("enum.Enum.{name}")).copied()
+            Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&class) => {
+                self.namespace_binding(self.scope_data(scope), name).or_else(|| {
+                    if name == "_numeric_repr_" && matches!(self.heap.get(class), Value::Native(kind) if kind == "enum.IntFlag") {
+                        self.builtins.get("repr").copied()
+                    } else { None }
+                })
             }
             Value::Native(kind)
                 if name == "__hash__"
@@ -262,6 +277,7 @@ impl Context {
                         | "str"
                         | "property"
                         | "module"
+                        | super::thread_local::CLASS
                         | weakref::REFERENCE_TYPE
                 ) || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
@@ -637,6 +653,9 @@ impl Context {
     }
 
     pub(super) fn callable(&self, value: Id) -> bool {
+        if matches!(self.heap.get(value), Value::ConstEvaluator(_)) {
+            return true;
+        }
         matches!(
             self.heap.get(value),
             Value::Class { .. }
@@ -750,6 +769,7 @@ impl Context {
                             | "object.__getattribute__"
                             | "enum.auto.__init__"
                             | "enum.auto.__repr__"
+                            | "enum.Flag.__repr__"
                             | "enum.Enum.__repr__"
                             | "enum.Enum.__str__"
                             | "enum.Enum.__format__"
@@ -1057,6 +1077,9 @@ impl Context {
             Value::Repeat(_) => "itertools.repeat",
             Value::TupleGetter { .. } => super::namedtuple::GETTER,
             Value::TypeVar(_) => "typing.TypeVar",
+            Value::ParamSpec(_) => "typing.ParamSpec",
+            Value::ParamSpecMarker(kind, _) => kind.class(),
+            Value::ConstEvaluator(_) => "constevaluator",
             Value::TypeVarTuple { .. } => "typing.TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
@@ -1157,6 +1180,10 @@ impl Context {
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
+                            | "typing.ParamSpec"
+                            | "typing.ParamSpecArgs"
+                            | "typing.ParamSpecKwargs"
+                            | "constevaluator"
                             | "typing.TypeVarTuple"
                             | "typing._UnpackGenericAlias"
                             | "NoDefaultType"
@@ -1679,7 +1706,12 @@ impl Context {
 
     /// Resolve an immediately called attribute before its arguments are evaluated.
     pub(super) fn lookup_method(&mut self, obj: Id, name: &str) -> Result<Id> {
-        if name == "writelines" && matches!(self.heap.get(obj), Value::File(_)) {
+        if name == "writelines"
+            && matches!(
+                self.heap.get(obj),
+                Value::BufferedRandom(..) | Value::File(_)
+            )
+        {
             // A direct call reports the defining IOBase descriptor in argument errors.
             let callable = self.builtin("_IOBase.writelines");
             return Ok(self.alloc(Value::Method {
@@ -1705,6 +1737,11 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if let Some(&scope) = self.enum_scopes.get(&obj) {
+            if let Some(value) = self.enum_base_attribute(obj, scope, name)? {
+                return Ok(value);
+            }
+        }
         if matches!(name, "numerator" | "denominator") {
             let receiver = match self.heap.get(obj) {
                 Value::Int(_) | Value::Bool(_) => Some(obj),
@@ -1874,6 +1911,9 @@ impl Context {
             && let Some(message) = self.import_error_message(obj, None)
         {
             return Ok(message);
+        }
+        if let Some(value) = super::paramspec::attribute(self, obj, name) {
+            return value;
         }
         if let Some(value) = super::typing::attribute(self, obj, name) {
             return value;
@@ -2132,6 +2172,12 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "_signal.default_int_handler" => {
+                        return Ok(self.text("The default handler for SIGINT installed by Python.\n\nIt raises KeyboardInterrupt."));
+                    }
+                    "__text_signature__" if symbol == "_signal.default_int_handler" => {
+                        return Ok(self.text("($module, signalnum, frame, /)"));
+                    }
                     "__doc__" if symbol == "_signal.sigpending" => {
                         return Ok(self.text("Examine pending signals.\n\nReturns a set of signal numbers that are pending for delivery to\nthe calling thread."));
                     }
@@ -2158,6 +2204,15 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "_io.text_encoding" => {
                         return Ok(self.text("($module, encoding, stacklevel=2, /)"));
+                    }
+                    "__doc__" if symbol == "posix.sched_getscheduler" => {
+                        return Ok(self.text(concat!(
+                            "Get the scheduling policy for the process identified by pid.\n\n",
+                            "Passing 0 for pid returns the scheduling policy for the calling process.",
+                        )));
+                    }
+                    "__text_signature__" if symbol == "posix.sched_getscheduler" => {
+                        return Ok(self.text("($module, pid, /)"));
                     }
                     "__doc__" if symbol == "posix.urandom" => {
                         return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));
@@ -2724,7 +2779,7 @@ impl Context {
             Value::Native(ref class) if class == super::thread_local::CLASS => match name {
                 "__module__" => return Ok(self.text("_thread")),
                 "__name__" | "__qualname__" => return Ok(self.text("_local")),
-                attr if super::thread_local::is_method(attr) => {
+                attr if attr == "__new__" || super::thread_local::is_method(attr) => {
                     return Ok(self.builtin(&format!("{class}.{attr}")));
                 }
                 _ => {}
@@ -3516,6 +3571,7 @@ impl Context {
                     return Ok(self.builtin("dict.__new__"));
                 }
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
+                Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 Value::Class { .. } | Value::Instance { .. } => {
                     let class = self.heap.get(base).instance_class().unwrap_or(base);
@@ -3615,6 +3671,9 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        if let Some(result) = super::paramspec::update(self, obj, name, None) {
+            return result;
+        }
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
@@ -3774,6 +3833,9 @@ impl Context {
                 } else {
                     Err(self.missing_attribute(obj, name))
                 }
+            }
+            Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&obj) => {
+                return self.update_enum_base(scope, name, None);
             }
             Value::Class { scope, .. } => {
                 if matches!(name, "__annotations__" | "__annotate__")
@@ -3935,6 +3997,18 @@ impl Context {
             }
         }
         layout
+    }
+
+    /// Slots and data descriptor methods operate on the object even with a thread-specific dictionary.
+    pub(super) fn local_data_attribute(&self, class: Id, name: &str, writing: bool) -> bool {
+        if self.instance_layout(class, name).active_slot {
+            return true;
+        }
+        self.class_attr(class, name).is_some_and(|member| {
+            self.native_data_descriptor(member)
+                || self.data_descriptor(member)
+                    && (writing || self.slot(member, "__get__").is_some())
+        })
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
@@ -4205,6 +4279,9 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if let Some(result) = super::paramspec::update(self, obj, name, Some(value)) {
+            return result;
+        }
         if self.builtins.get("abc.ABCMeta") == Some(&obj)
             && matches!(
                 name,
@@ -4558,6 +4635,9 @@ impl Context {
                     self.heap.weak_edge_removed(previous);
                 }
             }
+            Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&obj) => {
+                self.update_enum_base(scope, name, Some(value))?;
+            }
             Value::Class { scope, .. } => {
                 if name == "__dict__" {
                     return Err(Error::new(
@@ -4615,7 +4695,7 @@ impl Context {
 
     /// The first non-Python base owns the instance layout. Native classes
     /// represented with a class namespace (e.g. BytesIO) have no Python class cell.
-    fn allocation_base(&self, class: Id) -> Option<Id> {
+    pub(super) fn allocation_base(&self, class: Id) -> Option<Id> {
         self.find_in_mro(class, |base| self.owns_allocation(base).then_some(base))
     }
 
@@ -4905,6 +4985,29 @@ impl Context {
         }))
     }
 
+    /// Invoke the initializer found on the type, including its descriptor binding.
+    pub(super) fn call_initializer(
+        &mut self,
+        init: Id,
+        instance: Id,
+        class: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<()> {
+        let init = self.bind_attribute(init, instance, class)?;
+        let result = self.call(init, args, kwargs)?;
+        if result != NONE {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "__init__() should return None, not '{}'",
+                    self.type_name(result)
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     /// Count a generated NamedTuple repr frame like a runtime-loaded Python call.
     pub(super) fn check_call_depth(&self, additional: usize) -> Result<()> {
         if self.call_depth.max(self.heap.python_depth()) + additional
@@ -4924,6 +5027,9 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
+        if let Value::ConstEvaluator(value) = *self.heap.get(callable) {
+            return super::paramspec::eval(self, value, &args, &kwargs);
+        }
         // Binding a descriptor can call Python before it returns its target.
         if matches!(self.heap.get(callable), Value::Instance { .. }) {
             return self.with_slot_depth(
@@ -5049,6 +5155,9 @@ impl Context {
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
+            Value::Native(name) if name == "_thread._local.__new__" => {
+                super::thread_local::allocate(self, &args, &kwargs)
+            }
             Value::Native(name) if name == "tuple.__new__" => {
                 if args.first().is_some_and(|&class| matches!(self.heap.get(class), Value::Native(name) if name == stdlib::flags::TYPE)) {
                     return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
@@ -5532,17 +5641,7 @@ impl Context {
                 };
                 let actual = self.exact_type(instance)?;
                 if let Some(init) = self.class_attr(actual, "__init__") {
-                    let init = self.bind_attribute(init, instance, actual)?;
-                    let result = self.call(init, args, kwargs)?;
-                    if result != NONE {
-                        return Err(Error::new(
-                            "TypeError",
-                            format!(
-                                "__init__() should return None, not '{}'",
-                                self.type_name(result)
-                            ),
-                        ));
-                    }
+                    self.call_initializer(init, instance, actual, args, kwargs)?;
                 } else if new.is_none()
                     && !native_tzinfo_new
                     && string_base.is_none()
@@ -6068,7 +6167,7 @@ impl Context {
         self.execute(code, scope, FrameOwner::Function(body))?;
         let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
-        let annotation_body = self.finish_annotation_body(scope)?;
+        let exposed_body = self.finish_class_namespace(scope)?;
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
@@ -6174,20 +6273,29 @@ impl Context {
                 .entry("__doc__".to_owned())
                 .or_insert(NONE);
         }
-        if let Some((cell, body)) = annotation_body {
+        if let Some(body) = exposed_body {
             // type.__new__ replaces the body namespace with the finished type's dictionary.
             let dict = self.class_namespace_dict(scope, false);
             let extras = self
-                .dict_entries(body)
+                .dict_entries(body.mapping)
                 .expect("class body dictionary")
                 .iter()
                 .copied()
                 .filter(|&(key, _)| self.string_storage(key).is_none())
                 .collect::<Vec<_>>();
-            for (key, value) in extras {
-                self.put_item(dict, key, value)?;
+            if let Some(cell) = body.annotation_cell {
+                self.heap.replace_cell(cell, Some(dict));
             }
-            self.heap.replace_cell(cell, Some(dict));
+            if !extras.is_empty() {
+                for (key, value) in extras {
+                    self.put_item(dict, key, value)?;
+                }
+                self.emit_builtin_warning(
+                    crate::objects::exceptions::Kind::RuntimeWarning,
+                    &format!("non-string key in the __dict__ of class {name:.200}"),
+                    1,
+                )?;
+            }
         }
         self.initialize_class_members(class, scope)?;
         if let Some(kind) = enum_kind {
