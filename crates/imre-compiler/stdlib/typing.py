@@ -5,11 +5,13 @@ import builtins as _builtins
 import functools
 import sys as _sys
 import typing as _typing
+import _collections_abc as _abc
 from _collections_abc import Generator as _Generator, Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from _collections_abc import Reversible as _Reversible, Sized as _Sized
 from collections.abc import ByteString as _ByteString
 from collections import Counter as _Counter, defaultdict as _defaultdict
+from collections import ChainMap as _ChainMap, OrderedDict as _OrderedDict, deque as _deque
 from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
@@ -21,6 +23,65 @@ from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
 # From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def _is_unpacked_typevartuple(x: Any) -> bool:
+    # Need to check 'is True' here
+    # See: https://github.com/python/cpython/issues/137706
+    return ((not isinstance(x, type)) and
+            getattr(x, '__typing_is_unpacked_typevartuple__', False) is True)
+
+
+def _collect_type_parameters(args, *, enforce_default_ordering: bool = True):
+    """Collect all type parameters in args
+    in order of first appearance (lexicographic order).
+
+    For example::
+
+        >>> P = ParamSpec('P')
+        >>> T = TypeVar('T')
+        >>> _collect_type_parameters((T, Callable[P, T]))
+        (~T, ~P)
+    """
+    # required type parameter cannot appear after parameter with default
+    default_encountered = False
+    # or after TypeVarTuple
+    type_var_tuple_encountered = False
+    parameters = []
+    for t in args:
+        if isinstance(t, type):
+            # We don't want __parameters__ descriptor of a bare Python class.
+            pass
+        elif isinstance(t, tuple):
+            # `t` might be a tuple, when `ParamSpec` is substituted with
+            # `[T, int]`, or `[int, *Ts]`, etc.
+            for x in t:
+                for collected in _collect_type_parameters([x]):
+                    if collected not in parameters:
+                        parameters.append(collected)
+        # Native TypeVar and TypeVarTuple have substitution slots but do not expose
+        # their bound __typing_subst__ methods to Python yet.
+        elif isinstance(t, (TypeVar, TypeVarTuple)) or hasattr(t, '__typing_subst__'):
+            if t not in parameters:
+                if enforce_default_ordering:
+                    if type_var_tuple_encountered and t.has_default():
+                        raise TypeError('Type parameter with a default'
+                                        ' follows TypeVarTuple')
+
+                    if t.has_default():
+                        default_encountered = True
+                    elif default_encountered:
+                        raise TypeError(f'Type parameter {t!r} without a default'
+                                        ' follows type parameter with a default')
+
+                parameters.append(t)
+        else:
+            if _is_unpacked_typevartuple(t):
+                type_var_tuple_encountered = True
+            for x in getattr(t, '__parameters__', ()):
+                if x not in parameters:
+                    parameters.append(x)
+    return tuple(parameters)
+
+
 def _caller(depth=1, default='__main__'):
     try:
         return _sys._getframemodulename(depth + 1) or default
@@ -1920,6 +1981,19 @@ Tuple.__doc__ = \
     To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
     """
 Awaitable = _SpecialGenericAlias(_Awaitable, 1)
+AbstractSet = _SpecialGenericAlias(_abc.Set, 1, name="AbstractSet")
+AsyncGenerator = _SpecialGenericAlias(_abc.AsyncGenerator, 2, defaults=(type(None),))
+AsyncIterable = _SpecialGenericAlias(_abc.AsyncIterable, 1)
+Collection = _SpecialGenericAlias(_abc.Collection, 1)
+Container = _SpecialGenericAlias(_abc.Container, 1)
+Coroutine = _SpecialGenericAlias(_abc.Coroutine, 3)
+Hashable = _SpecialGenericAlias(_abc.Hashable, 0)
+ItemsView = _SpecialGenericAlias(_abc.ItemsView, 2)
+KeysView = _SpecialGenericAlias(_abc.KeysView, 1)
+MappingView = _SpecialGenericAlias(_abc.MappingView, 1)
+MutableSequence = _SpecialGenericAlias(_abc.MutableSequence, 1)
+MutableSet = _SpecialGenericAlias(_abc.MutableSet, 1)
+ValuesView = _SpecialGenericAlias(_abc.ValuesView, 1)
 AsyncIterator = _SpecialGenericAlias(_AsyncIterator, 1)
 Generator = _SpecialGenericAlias(_Generator, 3, defaults=(type(None), type(None)))
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
@@ -1950,12 +2024,16 @@ Type.__doc__ = \
 
     At this point the type checker knows that joe has type BasicUser.
     """
+Deque = _SpecialGenericAlias(_deque, 1, name="Deque")
 Counter = _SpecialGenericAlias(_Counter, 1)
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
+OrderedDict = _SpecialGenericAlias(_OrderedDict, 2)
+ChainMap = _SpecialGenericAlias(_ChainMap, 2)
 Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
+Iterator = _SpecialGenericAlias(_abc.Iterator, 1)
 Reversible = _SpecialGenericAlias(_Reversible, 1)
 Sized = _SpecialGenericAlias(_Sized, 0)
 ByteString = _DeprecatedGenericAlias(_ByteString, 0, removal_version=(3, 17))
@@ -1988,7 +2066,7 @@ def _rebuild_builtin_alias(alias, args):
 def _substitute_alias_arguments(args, replacements):
     result = []
     for arg in args:
-        if not isinstance(arg, type) and getattr(arg, "__typing_is_unpacked_typevartuple__", False) is True:
+        if _is_unpacked_typevartuple(arg):
             result.extend(replacements[arg.__args__[0]])
         else:
             result.append(_substitute_alias_argument(arg, replacements))

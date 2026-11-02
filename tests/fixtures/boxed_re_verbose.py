@@ -4,6 +4,12 @@ import re
 def current():
     for invalid, message, position in (
         ("(?i)a**", "multiple repeat", 6),
+        ("a(?-i)", "missing :", 5),
+        (b"\xff(?i-)", "missing flag", 5),
+        ("(?x) (?i) Ạ(?-im)", "missing :", 16),
+        ("a(?i-i)", "missing :", 6),
+        ("(?-a)", "bad inline flags: cannot turn off flags 'a', 'u' and 'L'", 4),
+        ("a**(?-i)", "multiple repeat", 2),
         (rb"x{1,2}+?", "multiple repeat", 7),
         ("^*", "nothing to repeat", 1),
         ("(^*)**", "nothing to repeat", 2),
@@ -26,6 +32,59 @@ def current():
     assert re.compile(r"\<*a++")
     assert re.compile(r"x\b{start}*a++")
     assert re.compile("(?mx)# tail\\\n a**\n a")
+
+    for source, text, expected in [
+        ("(?x) # (?s)\n (?i)(?m)^abc", "ABC", re.X | re.I | re.M | re.U),
+        (b"(?#prefix)(?i)a", b"A", re.I),
+    ]:
+        pattern = re.compile(source)
+        assert pattern.pattern == source and pattern.flags == expected
+        assert pattern.fullmatch(text)
+    high = chr(0xd800)
+    source = "(?#" + high + ") (?i) " + high + "a"
+    pattern = re.compile(source, re.X)
+    assert pattern.pattern is source and pattern.flags == re.X | re.I | re.U
+    assert pattern.fullmatch(high + "A").group() == high + "A"
+    assert pattern.fullmatch(chr(0xf0000) + "A") is None
+    assert re.fullmatch("(?x) (?im:a) b", "Ab")
+    assert re.fullmatch(r"\(\?i\)", "(?i)")
+    assert re.fullmatch(r"[(?i)]+", "(?i)")
+    assert re.fullmatch("(?x)# (?-i)\n(?i-m:a)", "A")
+    assert re.fullmatch(r"[(?-i)]+", "(?i)")
+    assert re.fullmatch("(?x:a # (?i)\n b)", "ab")
+    assert re.fullmatch(r"(?# (?i\))(?i)a", "A")
+    assert re.fullmatch(r"(?i)(?-i:s)i", "sI")
+    assert re.fullmatch(r"(?i)(?-i:s)i", "SI") is None
+    for source, pos in [
+        ("é(?i)", 1),
+        (high + "(?i)", 1),
+        ("(?x)(?#" + high + ") " + high + "(?i)", 11),
+        ("(?im:foo)(?i)", 9),
+        (b"\xff(?m)", 1),
+        ("(?x) # c\n a(?s)", 11),
+        ("(^)?(?(1)(?i)a)", 9),
+        ("($)?(?(1)|(?i)a)", 10),
+    ]:
+        try:
+            re.compile(source)
+        except re.PatternError as error:
+            assert error.pattern == source and error.pos == pos
+            assert error.msg == "global flags not at the start of the expression"
+        else:
+            raise AssertionError(source)
+    try:
+        re.compile("a(?i)", re.A | re.U)
+    except re.PatternError as error:
+        assert error.msg == "global flags not at the start of the expression" and error.pos == 1
+    else:
+        raise AssertionError("misplaced global flag with conflicting modes accepted")
+    for source in (r"\q(?i)", "*(?i)", "[z-a](?i)", "(?P<!>a)(?i)", "a(?L)"):
+        try:
+            re.compile(source)
+        except re.PatternError as error:
+            assert error.msg != "global flags not at the start of the expression"
+        else:
+            raise AssertionError(source)
 
     for flags in (0, re.X):
         assert re.fullmatch(r"([\1])\078", "\x01\x078", flags).group(1) == "\x01"

@@ -1476,6 +1476,27 @@ def main():
         )
         compare("-IB", decorated)
 
+        tuple_dir = root / "tuple_dir.py"
+        for source in (
+            "print(dir((1, 2)))",
+            "from collections import namedtuple\nT = namedtuple('T', 'x')\nprint('x' in dir(T(1)))",
+        ):
+            tuple_dir.write_text(source + "\n")
+            compare("-B", tuple_dir, native_args=("run", tuple_dir, "--quiet"))
+
+        unrelated = root / "unrelated_asdict.py"
+        unrelated.write_text(
+            "from collections import namedtuple\n"
+            "Point = namedtuple('Point', 'x y')\n"
+            "class Other:\n"
+            "    def _asdict(self): return 37\n"
+            "def read(other: Other):\n"
+            "    saved = other._asdict\n"
+            "    return other._asdict(), saved()\n"
+            "print(read(Other()))\n"
+        )
+        compare("-B", unrelated, native_args=("run", unrelated, "--quiet"))
+
         locale_script = root / "get_locale.py"
         locale_script.write_text(
             "from _locale import LC_ALL, setlocale\n"
@@ -2476,14 +2497,17 @@ def report(text):
             "boxed_typing_literal.py",
             "boxed_typing_protocol.py",
             "boxed_typing_typevar_members.py",
+            "boxed_typing_parameter_collector.py",
             "boxed_typing_alias_namespaces.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
             "boxed_typing_async_collection_aliases.py",
+            "boxed_typing_abc_aliases.py",
             "boxed_typing_alias_defaults.py",
             "boxed_typing_type.py",
             "boxed_type_alias_statements.py",
             "boxed_typing_mapping.py",
+            "boxed_typing_concrete_collections.py",
             "boxed_typing_iterable.py",
             "boxed_typing_regex_aliases.py",
             "boxed_pprint.py",

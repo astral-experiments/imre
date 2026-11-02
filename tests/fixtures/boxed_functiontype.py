@@ -13,6 +13,8 @@ def documented():
 
 
 def current():
+    assert type(original) is types.FunctionType
+    assert (types.FunctionType.__module__, types.FunctionType.__qualname__) == ("builtins", "function")
     copied = types.FunctionType(original.__code__, original.__globals__, "copied", (4,), kwdefaults={"y": 3})
     print(copied(), copied.__name__, copied.__qualname__, copied.__defaults__, copied.__kwdefaults__)
     print(copied.__globals__ is original.__globals__)

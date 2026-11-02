@@ -52,6 +52,9 @@ pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
             | "datetime.datetime.utcnow"
             | "datetime.datetime.utcfromtimestamp"
             | "datetime.datetime.combine"
+            | "datetime.date.today"
+            | "datetime.date.fromtimestamp"
+            | "datetime.date.fromordinal"
     )
 }
 
@@ -93,6 +96,9 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "weekday",
                 "timetuple",
                 "strftime",
+                "fromordinal",
+                "fromtimestamp",
+                "today",
             ],
         ),
         "datetime.datetime" => (
@@ -881,6 +887,8 @@ pub(super) fn call(
         "datetime.__add__" | "datetime.__radd__" | "datetime.__sub__" | "datetime.__rsub__" => {
             datetime_arithmetic(ctx, &method["datetime.".len()..], args, kwargs)
         }
+        "date.today" | "date.fromtimestamp" => fromutc::date_constructor(ctx, method, args, kwargs),
+        "date.fromordinal" => date_fromordinal(ctx, args, kwargs),
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
@@ -1297,20 +1305,25 @@ fn new_time(ctx: &mut Context, fields: [i32; 5], tz: Id) -> Result<Id> {
     ))
 }
 
-fn time_class_args<'a>(ctx: &mut Context, method: &str, args: &'a [Id]) -> Result<(Id, &'a [Id])> {
+fn calendar_class_args<'a>(
+    ctx: &mut Context,
+    owner: &'static str,
+    method: &str,
+    args: &'a [Id],
+) -> Result<(Id, &'a [Id])> {
     let Some((&class, args)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            format!("descriptor '{method}' of 'datetime.time' object needs an argument"),
+            format!("descriptor '{method}' of '{owner}' object needs an argument"),
         ));
     };
-    let base = ctx.builtin("datetime.time");
+    let base = ctx.builtin(owner);
     if !ctx.is_type_object(class) {
         let kind = ctx.exact_type(class)?;
         return Err(Error::new(
             "TypeError",
             format!(
-                "descriptor '{method}' for type 'datetime.time' needs a type, not a '{}' as arg 2",
+                "descriptor '{method}' for type '{owner}' needs a type, not a '{}' as arg 2",
                 ctx.class_name(kind)
             ),
         ));
@@ -1319,7 +1332,7 @@ fn time_class_args<'a>(ctx: &mut Context, method: &str, args: &'a [Id]) -> Resul
         return Err(Error::new(
             "TypeError",
             format!(
-                "descriptor '{method}' requires a subtype of 'datetime.time' but received '{}'",
+                "descriptor '{method}' requires a subtype of '{owner}' but received '{}'",
                 ctx.class_name(class)
             ),
         ));
@@ -1327,8 +1340,30 @@ fn time_class_args<'a>(ctx: &mut Context, method: &str, args: &'a [Id]) -> Resul
     Ok((class, args))
 }
 
+fn date_fromordinal(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, args) = calendar_class_args(ctx, "datetime.date", "fromordinal", args)?;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "fromordinal() takes no keyword arguments",
+        ));
+    }
+    let &[ordinal] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "fromordinal() takes exactly 1 argument ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let fields = Calendar::ordinal_fields(ctx.index_c_int(ordinal)?)?;
+    let args = fields.into_iter().map(|n| ctx.int(i64::from(n))).collect();
+    ctx.call(class, args, vec![])
+}
+
 fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (class, args) = time_class_args(ctx, "strptime", args)?;
+    let (class, args) = calendar_class_args(ctx, "datetime.time", "strptime", args)?;
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -1364,7 +1399,7 @@ fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Res
 }
 
 fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (class, args) = time_class_args(ctx, "fromisoformat", args)?;
+    let (class, args) = calendar_class_args(ctx, "datetime.time", "fromisoformat", args)?;
     let name = ctx.class_qualname(class);
     let input = crate::dynamic::builtins::one_positional_arg(
         &format!("{name}.fromisoformat"),

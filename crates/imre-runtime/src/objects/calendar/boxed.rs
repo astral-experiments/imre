@@ -358,6 +358,18 @@ impl Calendar {
         ]
     }
 
+    pub(crate) fn ordinal_fields(ordinal: i32) -> Result<[i32; 3], Error> {
+        if ordinal < 1 {
+            return Err(Error::new(Kind::ValueError, "ordinal must be >= 1"));
+        }
+        // A subtype constructor can accept a year past 9999. Decode within one
+        // Gregorian cycle, then restore the full year before calling Python.
+        let days = ordinal - 1;
+        let cycles = days / 146_097;
+        let (year, month, day) = ymd(i128::from(days % 146_097 + 1));
+        Ok([year + 400 * cycles, month, day])
+    }
+
     pub(crate) fn ordinal(&self) -> i64 {
         with(&self.0, |v| match v {
             Value::DateOnly(ord) => *ord as i64,

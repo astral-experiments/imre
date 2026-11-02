@@ -91,9 +91,11 @@ fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<
     Ok(struct_time(ctx, values, zone, offset))
 }
 
-fn civil(ctx: &mut Context, stamp: Id, utc: bool) -> Result<ClockParts> {
+pub(super) fn civil(ctx: &mut Context, stamp: Option<Id>, utc: bool) -> Result<ClockParts> {
+    let Some(stamp) = stamp else {
+        return Ok(ClockParts::from_float(wall_time(), utc)?);
+    };
     match ctx.heap.get(ctx.scalar_value(stamp)) {
-        Value::None => Ok(ClockParts::from_float(wall_time(), utc)?),
         Value::Float(n) => Ok(ClockParts::from_float(*n, utc)?),
         _ => Ok(ClockParts::from_int(&ctx.index_integer(stamp)?, utc)?),
     }
@@ -175,6 +177,43 @@ pub(super) fn call(
         ));
     }
     match name {
+        "get_clock_info" => {
+            let [name] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "get_clock_info() takes exactly 1 argument ({} given)",
+                        args.len()
+                    ),
+                ));
+            };
+            let name = ctx.string_storage(*name).ok_or_else(|| {
+                let kind = if *name == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(*name)
+                };
+                Error::new(
+                    "TypeError",
+                    format!("get_clock_info() argument 1 must be str, not {kind}"),
+                )
+            })?;
+            // PyArg_ParseTuple's "s" rejects unencodable Unicode and embedded NULs.
+            let name = codecs::encode_text(ctx, name, None, None)?;
+            if name.contains(&0) {
+                return Err(Error::new("ValueError", "embedded null character"));
+            }
+            let (implementation, monotonic, resolution) = crate::objects::time::clock_info(&name)?;
+            let class = crate::dynamic::namespace::class(ctx)?;
+            let info = ctx.instance(class, None);
+            let implementation = ctx.text(implementation);
+            ctx.set_attr(info, "implementation", implementation)?;
+            ctx.set_attr(info, "monotonic", builtins::boolean(monotonic))?;
+            ctx.set_attr(info, "adjustable", builtins::boolean(!monotonic))?;
+            let resolution = ctx.alloc(Value::Float(resolution));
+            ctx.set_attr(info, "resolution", resolution)?;
+            Ok(info)
+        }
         "sleep" => {
             let [seconds] = args else {
                 return Err(Error::new(
@@ -311,7 +350,11 @@ pub(super) fn call(
                     ),
                 ));
             }
-            let parts = civil(ctx, args.first().copied().unwrap_or(NONE), name == "gmtime")?;
+            let parts = civil(
+                ctx,
+                args.first().copied().filter(|&stamp| stamp != NONE),
+                name == "gmtime",
+            )?;
             if name == "ctime" {
                 return Ok(ctx.text(ctime_text(parts.fields, 0)));
             }

@@ -113,54 +113,9 @@ pub(crate) fn written(function: &Function) -> Vec<bool> {
 }
 
 fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec<bool> {
-    let mut written = function.expression_rebound();
-    ir::walk_statements(&function.body, &mut |statement| match statement {
-        Statement::Assign(slot, value) => written[*slot] |= !permitted(value),
-        Statement::Clear(slot) => written[*slot] = true,
-        Statement::Move(target, source) => {
-            written[*target] = true;
-            written[*source] = true;
-        }
-        Statement::Scope { clear, .. } => {
-            for &slot in clear {
-                written[slot] = true;
-            }
-        }
-        Statement::For {
-            target,
-            cursor,
-            stop,
-            step,
-            ..
-        } => {
-            for &slot in [target, cursor, stop, step] {
-                written[slot] = true;
-            }
-        }
-        Statement::IterNext {
-            key, value, ready, ..
-        } => {
-            written[*key] = true;
-            written[*ready] = true;
-            if let Some(slot) = value {
-                written[*slot] = true;
-            }
-        }
-        Statement::Try { handlers, .. } => {
-            for handler in handlers {
-                if let Some(slot) = handler.name {
-                    written[slot] = true;
-                }
-            }
-        }
-        _ => {}
-    });
-    ir::walk_expressions(&function.body, &mut |expression| {
-        if let ExprKind::Scope { clear, .. } = &expression.kind {
-            for &slot in clear {
-                written[slot] = true;
-            }
-        }
+    let mut written = vec![false; function.locals.len()];
+    ir::walk_writes(&function.body, |slot, value| {
+        written[slot] |= !value.is_some_and(&permitted);
     });
     written
 }

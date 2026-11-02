@@ -9854,10 +9854,12 @@ impl<'a> Checker<'a> {
                     ),
                 ));
             }
+            self.check_namedtuple_asdict(attribute, None)?;
             let receiver = match receiver {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
+            self.check_namedtuple_asdict(attribute, Some(receiver.ty))?;
             if let Some(result) =
                 self.url_result_method(&receiver, attribute.attr.as_str(), call)?
             {
@@ -10615,12 +10617,30 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::Bytes, vec![value]),
             });
         }
+        let tuple_dir = self.unshadowed_builtin(&call.func, "dir")
+            && call.arguments.keywords.is_empty()
+            && call.arguments.args.len() == 1;
+        if tuple_dir {
+            // Static tuple declarations may be used as constructors but not as first-class values.
+            let target = &call.arguments.args[0];
+            if self.unshadowed_builtin(target, "tuple")
+                || matches!(
+                    self.namedtuple_factory(target),
+                    Some((crate::types::TupleOrigin::Declaration(_), _))
+                )
+            {
+                return Err(self.object_builtin_error("dir", call));
+            }
+        }
         let args = call
             .arguments
             .args
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if tuple_dir && self.types.is_plain_or_declared_tuple(args[0].ty) {
+            return Err(self.object_builtin_error("dir", call));
+        }
         if let [operand] = args.as_slice()
             && matches!(operand.ty, Type::Str | Type::StrLiteral(_) | Type::Bytes)
             && self.unshadowed_builtin(&call.func, "type")
