@@ -2894,6 +2894,11 @@ impl Context {
                     _ => {}
                 }
             }
+            Value::Native(ref class)
+                if matches!(name, "__bases__" | "__mro__") && builtins::is_exported_type(class) =>
+            {
+                return Ok(self.builtin_hierarchy_tuple(obj, name));
+            }
             Value::Native(ref builtin)
                 if name == "__name__" && self.builtins.get(builtin) == Some(&obj) =>
             {
