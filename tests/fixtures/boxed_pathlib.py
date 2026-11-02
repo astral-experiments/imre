@@ -2,10 +2,14 @@ import glob
 import ntpath
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib.types import PathInfo
 from urllib.request import pathname2url
 
 
 def current():
+    assert isinstance(Path(".").info, PathInfo)
+    assert not isinstance(object(), PathInfo)
+
     path = PurePosixPath("parent")
     assert not path.joinpath("child").is_absolute()
     assert path.joinpath("/child").is_absolute()
