@@ -35,7 +35,8 @@ def main():
         calls.clear()
         with factory(Path(), "w+b", 8, None, None, None, True, acquire) as f:
             assert calls == ["path", "open"]
-            assert isinstance(f, io.BufferedRandom) and f.raw.name == spelling
+            assert type(f).__name__ == "BufferedRandom" and f.raw.name == spelling
+            assert f.readable() and f.writable() and f.seekable()
             assert f.fileno() == descriptors[-1]
             f.write(b"abc")
             f.seek(0)
