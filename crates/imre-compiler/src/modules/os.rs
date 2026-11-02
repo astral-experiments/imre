@@ -197,6 +197,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "openpty" => Intrinsic::Fd(FdOperation::OpenPty),
         "pipe" => Intrinsic::Fd(FdOperation::Pipe),
         "pipe2" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::Pipe2),
+        "device_encoding" if cfg!(unix) => Intrinsic::Fd(FdOperation::DeviceEncoding),
         "isatty" => Intrinsic::Fd(FdOperation::Isatty),
         "get_blocking" => Intrinsic::Fd(FdOperation::GetBlocking),
         "set_blocking" => Intrinsic::Fd(FdOperation::SetBlocking),

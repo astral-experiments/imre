@@ -1,7 +1,7 @@
 """POSIX filesystem spellings for runtime-loaded modules."""
 import abc
 import sys
-from posix import openpty
+from posix import device_encoding, openpty
 import posixpath as path
 import stat as st
 from posix import chown, fchown, geteuid, getgid, getgroups, getuid, lchown
