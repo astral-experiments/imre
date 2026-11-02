@@ -3076,6 +3076,8 @@ for name in ("md4", "ripemd160"):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_exports.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-EOOB", "-Werror::ResourceWarning", "-X", "utf8=0",
+                    "-c", imports + "arithmetic.interpreter_flags()")
             plugin.write_bytes((fixtures / "boxed_subprocess_interruptible_read.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_pass_fds.py").read_bytes())
