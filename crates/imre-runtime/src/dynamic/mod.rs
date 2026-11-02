@@ -93,6 +93,7 @@ pub(crate) struct Context {
     heap: Heap,
     config: serde_json::Value,
     executable: PathBuf,
+    helper_executable: String,
     argv: Id,
     sys_path: Id,
     default_encoding: Id,

@@ -503,7 +503,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
             path_text(ctx, &layout(ctx)?.prefix)?
         }
-        ("sys", "executable" | "_base_executable") => path_text(ctx, &ctx.executable.clone())?,
+        ("sys", "executable" | "_base_executable") => ctx.text(ctx.helper_executable.clone()),
         ("sys", "maxsize") => ctx.int(isize::MAX as i64),
         ("sys", "platform") => ctx.text(if cfg!(target_os = "macos") {
             "darwin"

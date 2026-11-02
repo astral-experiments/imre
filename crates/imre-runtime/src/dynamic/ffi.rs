@@ -587,8 +587,10 @@ pub(super) fn new_context<S: Into<String>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
 ) -> Context {
-    let executable = config["executable"]
-        .as_str()
+    let launcher = config["executable"].as_str();
+    let helper_executable =
+        launcher.map_or_else(crate::objects::python_executable_text, str::to_owned);
+    let executable = launcher
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
@@ -597,6 +599,7 @@ pub(super) fn new_context<S: Into<String>>(
         threads: Default::default(),
         config,
         executable,
+        helper_executable,
         argv: NONE,
         sys_path: NONE,
         default_encoding: NONE,
