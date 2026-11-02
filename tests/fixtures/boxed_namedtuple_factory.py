@@ -47,6 +47,20 @@ def current():
     assert Declared.__orig_bases__ == (NamedTuple,)
     assert Declared("kept").label == "kept"
 
+    Point = namedtuple('Point', 'self y')
+    class Pixel(Point):
+        pass
+    before = Pixel(1, 2)
+    after = before._replace(self=3)
+    assert type(after) is Pixel and tuple(after) == (3, 2) and tuple(before) == (1, 2)
+    assert Point.__replace__ is Point._replace
+    try:
+        before._replace(y=4, width=5)
+    except TypeError as error:
+        assert str(error) == "Got unexpected field names: ['width']"
+    else:
+        raise AssertionError("unknown field name accepted")
+
     assert namedtuple.__module__ == "collections" and namedtuple.__name__ == "namedtuple"
     assert type(namedtuple) is type(current)
     assert ">>> Point =" in namedtuple.__doc__
