@@ -760,7 +760,7 @@ pub(super) enum Value {
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
-    /// A contiguous read-only view keeps its original bytes exporter alive until release.
+    /// A contiguous view retains its original exporter until release.
     MemoryView {
         owner: Option<Id>,
         hash: Option<i64>,
@@ -2756,6 +2756,27 @@ impl Heap {
         reachable
     }
 
+    /// A view can be unreachable before the next sweep. Check its actual lifetime
+    /// before resizing a previously exported array, without running Python callbacks.
+    pub(super) fn has_live_array_view(
+        &self,
+        array: Id,
+        roots: impl Iterator<Item = Id>,
+    ) -> Result<bool> {
+        let mut cycles = CycleSet::new(self.slots.len())?;
+        self.mark_reference_survivors(roots, &mut cycles);
+        let live = self.slots.iter().any(|slot| {
+            slot.marked()
+                && matches!(slot.value, Some(Value::MemoryView { owner: Some(owner), .. })
+                    if owner == array || matches!(self.get(owner),
+                        Value::Instance { scalar: Some(storage), .. } if *storage == array))
+        });
+        for slot in &self.slots {
+            slot.trace.set(UNMARKED);
+        }
+        Ok(live)
+    }
+
     pub(super) fn slot_count(&self) -> usize {
         self.slots.len()
     }
@@ -3072,16 +3093,20 @@ impl Heap {
             self.collect_next_statement = true;
             return None;
         };
+        self.mark_reference_survivors(globals, &mut cycles);
+        self.sweep()
+    }
+
+    fn mark_reference_survivors(&self, globals: impl Iterator<Item = Id>, cycles: &mut CycleSet) {
         // A weakref callback can drop an unrelated owner. Keep its graph intact
         // for Python dispatch when this sweep releases temporary callback roots.
         self.mark(globals.chain(self.ordinary_finalizers.iter().copied()));
-        self.identify_cycles(&mut cycles);
+        self.identify_cycles(cycles);
         // Peeling leaves both cycles and their unreachable descendants. Every
         // strong child of a member is therefore already live or itself a member.
         for id in cycles.members() {
             self.slots[id as usize].trace.set(END);
         }
-        self.sweep()
     }
 
     pub(super) fn full_collection_active(&self) -> bool {

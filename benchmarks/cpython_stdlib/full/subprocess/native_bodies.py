@@ -17,10 +17,11 @@ from suite_native import Toolchain, native_method, run_in_fixtures, testcase_fix
 # The subprocess operation, method body, and assertions all run in the binary.
 PROCESS_CASE = "test.test_subprocess.ProcessTestCase."
 EPIPE_CASES = {PROCESS_CASE + "test_communicate_epipe", PROCESS_CASE + "test_communicate_epipe_only_stdin"}
+NONBYTE_VIEW_CASE = PROCESS_CASE + "test_communicate_memoryview_input_nonbyte"
 FD_LEAK_CASE = PROCESS_CASE + "test_communicate_pipe_fd_leak"
 PIPE_BUF_CASE = PROCESS_CASE + "test_communicate_pipe_buf"
 ZERO_CMD_CASES = EPIPE_CASES | {FD_LEAK_CASE}
-BOXED_CASES = ZERO_CMD_CASES | {PIPE_BUF_CASE, PROCESS_CASE + "test_communicate_memoryview_input"}
+BOXED_CASES = ZERO_CMD_CASES | {PIPE_BUF_CASE, NONBYTE_VIEW_CASE, PROCESS_CASE + "test_communicate_memoryview_input"}
 METHODS = {
     "ContextManagerTests": {
         "test_returncode": "int",
@@ -34,6 +35,7 @@ METHODS = {
         "test_stdout_stderr_pipe": "bytes",
         "test_communicate_stdin": "int",
         "test_communicate_memoryview_input": None,
+        "test_communicate_memoryview_input_nonbyte": None,
         "test_communicate_epipe": None,
         "test_communicate_epipe_only_stdin": None,
         "test_communicate_pipe_buf": None,
@@ -91,6 +93,8 @@ def subprocess_method(tools, directory, source, cls, case_id, fixture):
         # setUpModule can replace the fallback Python command with a checked executable.
         args = lambda: test_subprocess.ZERO_RETURN_CMD
         preamble += "\nZERO_RETURN_CMD = tuple(sys.argv[1:])\n"
+    elif case_id == NONBYTE_VIEW_CASE:
+        preamble += "import select\n"
     elif case_id == PIPE_BUF_CASE:
         from test import support
         preamble += f"import os\n\nclass support:\n    PIPE_MAX_SIZE = {support.PIPE_MAX_SIZE!r}\n"

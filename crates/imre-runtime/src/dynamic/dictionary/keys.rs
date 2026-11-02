@@ -496,6 +496,12 @@ impl Context {
                 return Ok(ControlFlow::Break(hash));
             }
             let owner = Self::memoryview_owner(owner)?;
+            if matches!(self.heap.get(self.scalar_value(owner)), Value::Array(_)) {
+                return Err(Error::new(
+                    "ValueError",
+                    "cannot hash writable memoryview object",
+                ));
+            }
             let hash = self.with_buffer_export(key, |ctx| {
                 ctx.dictionary_hash(owner)?;
                 Ok(crate::python_hash::bytes(ctx.bytes_like(key)?))
