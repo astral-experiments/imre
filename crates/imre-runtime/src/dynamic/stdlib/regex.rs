@@ -579,19 +579,15 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     // the literal guard without extending Python's word-category membership.
     let literal_guards = !bytes && (flags & IGNORECASE == 0 || ascii);
     let translate = |spelling: &str| {
-        let mut translated = imre_regex::translate_pattern(
+        imre_regex::translate_pattern_with_line_mode(
             spelling,
             flags & VERBOSE != 0,
             alphabet(bytes, ascii, flags),
             flags & DOTALL != 0,
             literal_guards,
-        )?
-        .source;
-        if flags & MULTILINE != 0 && translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
-            translated.truncate(translated.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
-            translated.push('$');
-        }
-        Ok(translated)
+            flags & MULTILINE != 0,
+        )
+        .map(|parsed| parsed.source)
     };
     let build = |source: String| {
         let matcher = build_regex(&source, bytes, flags, &[])?;

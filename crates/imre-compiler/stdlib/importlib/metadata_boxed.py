@@ -62,6 +62,15 @@ class Distribution:
         return distribution_files(self)
 
     @property
+    def origin(self):
+        text = self.read_text('direct_url.json')
+        if text is None:
+            return None
+        from json import loads
+        from types import SimpleNamespace
+        return loads(text, object_hook=lambda data: SimpleNamespace(**data))
+
+    @property
     def _normalized_name(self):
         return _normalize(self.name)
 

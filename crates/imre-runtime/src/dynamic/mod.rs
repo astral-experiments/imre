@@ -1850,10 +1850,7 @@ impl Context {
                 let id = stdlib::datetime::store(self, value, NONE);
                 self.builtins.insert(format!("{name}.{field}"), id);
             }
-        } else if name == "datetime.timezone" {
-            self.builtin(stdlib::datetime::TZINFO);
-            self.builtin("datetime.timezone.__getinitargs__");
-        } else if name == stdlib::datetime::TZINFO {
+        } else if matches!(name, "datetime.timezone" | stdlib::datetime::TZINFO) {
             stdlib::datetime::install_members(self, name);
         }
         if builtins::is_exception(name) {
@@ -2558,6 +2555,7 @@ impl Context {
                 }
             }
             "_locale" => stdlib::locale::install(self, module, scope)?,
+            "time" => stdlib::time::install_timezone(self, scope)?,
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => stdlib::io::install_native(self, scope, module),

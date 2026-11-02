@@ -1894,6 +1894,8 @@ def report(text):
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
         io_registration = fixtures / "io_abc_registration.py"
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
+        override_fixture = fixtures / "boxed_typing_override.py"
+        compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
         memory_writer = fixtures / "io_buffered_writer_bytesio.py"
@@ -1979,6 +1981,7 @@ def report(text):
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
+            "boxed_inspect_getmodule.py",
             "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
@@ -2064,6 +2067,7 @@ def report(text):
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
+            "boxed_re_multiline_dollar.py",
             "boxed_re_positive_lookahead.py",
             "boxed_re_lookahead.py",
             "boxed_re_split.py",
@@ -2087,6 +2091,7 @@ def report(text):
             "boxed_email_addresses.py",
             "boxed_http_message.py",
             "boxed_time.py",
+            "boxed_time_timezone.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
             "boxed_buffered_partial_write.py",
@@ -2112,7 +2117,9 @@ def report(text):
             "boxed_binary_bytes_paths.py",
             "boxed_buffered_readlines.py",
             "boxed_os_descriptor_io.py",
+            "boxed_os_ftruncate.py",
             "boxed_os_waitpid.py",
+            "boxed_posix_session.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
             "boxed_os_makedirs.py",
@@ -2137,6 +2144,7 @@ def report(text):
             "boxed_warnings.py",
             "boxed_oserror.py",
             "boxed_type_identity.py",
+            "boxed_type_namespace.py",
             "boxed_singleton_types.py",
             "boxed_singleton_subclass.py",
             "boxed_function_closure_cells.py",
@@ -2296,6 +2304,7 @@ def report(text):
             "boxed_csv.py",
             "boxed_bytes_count.py",
             "boxed_bytes_separators.py",
+            "boxed_binary_splitlines.py",
             "boxed_bytes_join.py",
             "boxed_bytes_fromhex.py",
             "boxed_binary_endswith.py",
@@ -2370,6 +2379,7 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-IB", "-c", imports + "arithmetic.core_limits_child()")
             shim = root / "secrets_entropy.so"
             subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
             probe = root / "entropy.py"

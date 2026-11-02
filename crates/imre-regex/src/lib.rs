@@ -177,13 +177,25 @@ pub fn translate_pattern(
     dotall: bool,
     literal_guards: bool,
 ) -> Result<FixedPattern, String> {
+    translate_pattern_with_line_mode(pattern, verbose, alphabet, dotall, literal_guards, false)
+}
+
+/// Translate a boxed pattern with the matcher's line mode for zero-width anchors.
+pub fn translate_pattern_with_line_mode(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    literal_guards: bool,
+    multiline: bool,
+) -> Result<FixedPattern, String> {
     let (output, groups) = tokenize(
         pattern,
         verbose,
         alphabet,
         dotall,
         literal_guards,
-        Grammar::Standard,
+        Grammar::Standard { multiline },
     )?;
     analyze(output, groups)
 }
@@ -225,7 +237,7 @@ pub fn lookahead_or_scoped_source(
 
 #[derive(Clone, Copy, PartialEq)]
 enum Grammar {
-    Standard,
+    Standard { multiline: bool },
     Lookahead,
     LookaheadOrScoped,
 }
@@ -326,7 +338,7 @@ fn tokenize(
     literal_guards: bool,
     grammar: Grammar,
 ) -> Result<(String, Vec<Option<String>>), String> {
-    let lookahead = grammar != Grammar::Standard;
+    let lookahead = !matches!(grammar, Grammar::Standard { .. });
     let mut escapes = Escapes {
         alphabet,
         bracketed_word: false,
@@ -579,7 +591,7 @@ fn tokenize(
                 can_repeat = c == '.';
                 u64::from(can_repeat)
             }
-            '$' if lookahead => {
+            '$' if grammar != (Grammar::Standard { multiline: false }) => {
                 // Literals are escaped, so the runtime can lower this anchor using its line mode.
                 output.push('$');
                 can_repeat = false;

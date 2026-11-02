@@ -41,11 +41,7 @@ fn file_block_size(size: impl TryInto<i64>) -> i64 {
 
 /// Truncate a live raw or buffered disk descriptor without changing its position.
 pub(super) fn truncate_fd(fd: RawFd, size: i64) -> Result<()> {
-    // SAFETY: ftruncate accepts an integer descriptor and size.
-    if unsafe { libc::ftruncate(fd, size) } < 0 {
-        return Err(os_error(std::io::Error::last_os_error()));
-    }
-    Ok(())
+    os::truncate(fd, size).map_err(os_error)
 }
 
 fn closed() -> Error {

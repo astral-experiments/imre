@@ -1,6 +1,9 @@
 from sys import path
 from types import GenericAlias
 import typing as t
+
+rendered_spec = t.ParamSpec("P")
+assert repr((rendered_spec, rendered_spec.args, rendered_spec.kwargs)) == "(~P, P.args, P.kwargs)"
 from typing import BinaryIO, KT, TextIO, VT
 from typing import T as typing_T
 

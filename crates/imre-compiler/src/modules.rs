@@ -144,6 +144,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
+        "dis" => Some(("dis.py", include_str!("../stdlib/dis.py"))),
         "opcode" => Some(("opcode.py", include_str!("../stdlib/opcode.py"))),
         "_opcode_metadata" => Some((
             "_opcode_metadata.py",
@@ -1386,6 +1387,11 @@ impl IntrinsicModule {
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "tzset") => Intrinsic::ObjectRuntimeExport("time.tzset"),
+            (Self::Time, "timezone") => Intrinsic::ObjectRuntimeExport("time.timezone"),
+            (Self::Time, "altzone") => Intrinsic::ObjectRuntimeExport("time.altzone"),
+            (Self::Time, "daylight") => Intrinsic::ObjectRuntimeExport("time.daylight"),
+            (Self::Time, "tzname") => Intrinsic::ObjectRuntimeExport("time.tzname"),
             (Self::Time, "ctime") => Intrinsic::ObjectRuntimeExport("time.ctime"),
             (Self::Time, "time_ns") => Intrinsic::ObjectRuntimeExport("time.time_ns"),
             (Self::Time, "monotonic") => Intrinsic::ObjectRuntimeExport("time.monotonic"),
@@ -1448,6 +1454,7 @@ impl IntrinsicModule {
             (Self::Inspect, "BoundArguments") => {
                 Intrinsic::ObjectRuntimeExport("inspect.BoundArguments")
             }
+            (Self::Inspect, "getmodule") => Intrinsic::ObjectRuntimeExport("inspect.getmodule"),
             (Self::Inspect, "signature") => Intrinsic::ObjectRuntimeExport("inspect.signature"),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
@@ -1778,6 +1785,7 @@ impl IntrinsicModule {
             (Self::Typing, "get_protocol_members") => {
                 Intrinsic::ObjectRuntimeExport("typing.get_protocol_members")
             }
+            (Self::Typing, "override") => Intrinsic::ObjectRuntimeExport("typing.override"),
             (Self::Typing, "is_protocol") => Intrinsic::ObjectRuntimeExport("typing.is_protocol"),
             (Self::Typing, "Annotated") => Intrinsic::ObjectRuntimeExport("typing.Annotated"),
             (Self::Typing, "ForwardRef") => Intrinsic::ObjectRuntimeExport("typing.ForwardRef"),
@@ -2264,6 +2272,8 @@ impl IntrinsicModule {
             (Self::Fcntl, "F_GETPIPE_SZ") => Intrinsic::ObjectRuntimeExport("fcntl.F_GETPIPE_SZ"),
             (Self::Fcntl, "F_SETPIPE_SZ") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETPIPE_SZ"),
             (Self::Resource, "getrlimit") => Intrinsic::ObjectRuntimeExport("resource.getrlimit"),
+            (Self::Resource, "setrlimit") => Intrinsic::ObjectRuntimeExport("resource.setrlimit"),
+            (Self::Resource, "RLIMIT_CORE") => Intrinsic::ObjectRuntimeExport("resource.RLIMIT_CORE"),
             (Self::Resource, "RLIMIT_STACK") => {
                 Intrinsic::ObjectRuntimeExport("resource.RLIMIT_STACK")
             }
@@ -4483,9 +4493,11 @@ impl<'a> Loader<'a> {
                         } else {
                             Binding::Module(self.load_module(&child_name)?)
                         }
-                    } else if self.modules[target].is_bundled("http.client") {
-                        // The checked source defines fixed-layout headers. Other imports
-                        // are resolved by the full Python module at run time.
+                    } else if self.modules[target].is_bundled("http.client")
+                        || self.modules[target].is_bundled("dis")
+                    {
+                        // http.client supplies names beyond its checked header types.
+                        // dis imports opcode's public names with a wildcard.
                         Binding::ConditionalValue
                     } else {
                         return Err(format!(

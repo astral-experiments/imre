@@ -47,7 +47,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
-        "resource" if function == "getrlimit" => Some((module, function)),
+        "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
         "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
         "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
         "hashlib"
@@ -2260,7 +2260,10 @@ impl Context {
                     "__text_signature__" if symbol == "fcntl.fcntl" => {
                         return Ok(self.text("($module, fd, cmd, arg=0, /)"));
                     }
-                    "__doc__" if symbol == "resource.getrlimit" => return Ok(NONE),
+                    "__doc__" if module == "resource" => return Ok(NONE),
+                    "__text_signature__" if symbol == "resource.setrlimit" => {
+                        return Ok(self.text("($module, resource, limits, /)"));
+                    }
                     "__text_signature__" if symbol == "resource.getrlimit" => {
                         return Ok(self.text("($module, resource, /)"));
                     }
@@ -5967,40 +5970,58 @@ impl Context {
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        let members = class_scope
-            .class_body
-            .take()
-            .unwrap()
-            .into_iter()
-            .map(|name| (class_scope.names[&name], name))
-            .collect::<Vec<_>>();
-        if let Some(dict) = class_scope.class_namespace.as_ref().and_then(|namespace| {
-            namespace.annotation_dict_cell.and(namespace.dictionary)
-        }) {
-            class_scope.namespace = Some(dict);
-            class_scope.names.retain(|name, _| name == "__qualname__");
+        let body = class_scope.class_body.take().unwrap();
+        if let Some(namespace) = class_scope.class_namespace.as_ref()
+            && let Some(dict) = namespace.dictionary
+        {
+            if namespace.annotation_dict_cell.is_some() {
+                class_scope.namespace = Some(dict);
+                class_scope.names.retain(|name, _| name == "__qualname__");
+            }
+            let members = self.dict_entries(dict).expect("class dictionary").to_vec();
+            for &(key, _) in &members {
+                self.heap.keep(key);
+            }
+            self.set_class_member_names(class, members, |_, key| key)
+        } else {
+            let members = body
+                .into_iter()
+                .map(|name| {
+                    let value = class_scope.names[&name];
+                    (name, value)
+                })
+                .collect();
+            self.set_class_member_names(class, members, Self::text)
         }
-        // A hook may replace an attribute and execute code that triggers collection.
-        for &(value, _) in &members {
+    }
+
+    /// Use the snapshotted keys and values even when an earlier hook mutates the class.
+    fn set_class_member_names<K>(
+        &mut self,
+        class: Id,
+        members: Vec<(K, Id)>,
+        key_object: impl Fn(&mut Self, K) -> Id,
+    ) -> Result<()> {
+        for &(_, value) in &members {
             self.heap.keep(value);
         }
-        for (value, name) in members {
+        for (key, value) in members {
             if matches!(self.heap.get(value), Value::Property(_)) {
-                let name = self.text(name);
+                let name = key_object(self, key);
                 let Value::Property(property) = self.heap.get_mut(value) else {
                     unreachable!()
                 };
                 property.name = Some(name);
-            } else if let Some(set_name) = self.slot(value, "__set_name__") {
-                let name = self.text(name);
-                self.call(set_name, vec![value, class, name], Vec::new())?;
+            } else if let Some(set_name) = self.bound_slot(value, "__set_name__")? {
+                let name = key_object(self, key);
+                self.call(set_name, vec![class, name], Vec::new())?;
             }
         }
         Ok(())
     }
 
     /// Select the most derived compatible metaclass before executing a boxed class body.
-    fn select_class_metaclass(
+    pub(super) fn select_class_metaclass(
         &mut self,
         bases: &[Id],
         explicit: Option<Id>,
@@ -6307,7 +6328,12 @@ impl Context {
             && bases
                 .iter()
                 .all(|&base| base == object || self.allocation_base(base) == Some(object));
-        let class = self.allocate_class_with_slots(name.clone(), scope, bases, ordinary_slots)?;
+        let layout = if ordinary_slots {
+            super::typing::ClassLayout::OrdinarySlots
+        } else {
+            super::typing::ClassLayout::Specialized
+        };
+        let class = self.allocate_class_with_slots(name.clone(), scope, bases, layout)?;
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
             unreachable!()
         };

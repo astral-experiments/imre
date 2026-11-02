@@ -81,6 +81,7 @@ impl BoxedPopen {
         env: Option<ByteEnvironment>,
         bufsize: Int,
         pipesize: Int,
+        start_new_session: bool,
         warn_line_buffering: &mut dyn FnMut() -> Result<()>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
@@ -130,6 +131,8 @@ impl BoxedPopen {
             search_path,
             warn_line_buffering: Some(warn_line_buffering),
             environment: env,
+            // A new session uses the ordinary child-settings path with no group or umask change.
+            child: start_new_session.then_some((0, Int::small(-1).unwrap().0, true)),
             ..Default::default()
         };
         for (i, ((mode, fd), shift)) in streams.iter().zip([12, 0, 4]).enumerate() {
