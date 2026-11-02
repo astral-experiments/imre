@@ -2765,6 +2765,7 @@ for name in ("md4", "ripemd160"):
             "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
             "boxed_contextmanager.py",
+            "boxed_contextlib_aclosing.py",
             "boxed_total_ordering.py",
             "boxed_cmp_to_key.py",
             "boxed_lru_insert_eviction.py",

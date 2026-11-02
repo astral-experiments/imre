@@ -1735,6 +1735,7 @@ impl IntrinsicModule {
             (Self::Contextlib, "AbstractAsyncContextManager") => {
                 Intrinsic::ObjectRuntimeExport("contextlib.AbstractAsyncContextManager")
             }
+            (Self::Contextlib, "aclosing") => Intrinsic::ObjectRuntimeExport("contextlib.aclosing"),
             (Self::Contextlib, "closing") => Intrinsic::ObjectRuntimeExport("contextlib.closing"),
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "warn") => Intrinsic::ObjectRuntimeExport("warnings.warn"),
