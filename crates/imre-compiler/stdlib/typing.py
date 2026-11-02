@@ -1130,6 +1130,78 @@ def assert_never(arg, /):
     raise AssertionError(f"Expected code to be unreachable, but got: {value}")
 
 
+# Runtime overload registration from CPython 3.14.5 Lib/typing.py.
+def _overload_dummy(*args, **kwds):
+    """Helper for @overload to raise when called."""
+    raise NotImplementedError(
+        "You should not call an overloaded function. "
+        "A series of @overload-decorated functions "
+        "outside a stub module should always be followed "
+        "by an implementation that is not @overload-ed.")
+
+
+# {module: {qualname: {firstlineno: func}}}
+_overload_registry = _defaultdict(functools.partial(_defaultdict, dict))
+
+
+def overload(func):
+    """Decorator for overloaded functions/methods.
+
+    In a stub file, place two or more stub definitions for the same
+    function in a row, each decorated with @overload.
+
+    For example::
+
+        @overload
+        def utf8(value: None) -> None: ...
+        @overload
+        def utf8(value: bytes) -> bytes: ...
+        @overload
+        def utf8(value: str) -> bytes: ...
+
+    In a non-stub file (i.e. a regular .py file), do the same but
+    follow it with an implementation.  The implementation should *not*
+    be decorated with @overload::
+
+        @overload
+        def utf8(value: None) -> None: ...
+        @overload
+        def utf8(value: bytes) -> bytes: ...
+        @overload
+        def utf8(value: str) -> bytes: ...
+        def utf8(value):
+            ...  # implementation goes here
+
+    The overloads for a function can be retrieved at runtime using the
+    get_overloads() function.
+    """
+    # classmethod and staticmethod
+    f = getattr(func, "__func__", func)
+    try:
+        _overload_registry[f.__module__][f.__qualname__][f.__code__.co_firstlineno] = func
+    except AttributeError:
+        # Not a normal function; ignore.
+        pass
+    return _overload_dummy
+
+
+def get_overloads(func):
+    """Return all defined overloads for *func* as a sequence."""
+    # classmethod and staticmethod
+    f = getattr(func, "__func__", func)
+    if f.__module__ not in _overload_registry:
+        return []
+    mod_dict = _overload_registry[f.__module__]
+    if f.__qualname__ not in mod_dict:
+        return []
+    return list(mod_dict[f.__qualname__].values())
+
+
+def clear_overloads():
+    """Clear all overloads in the registry."""
+    _overload_registry.clear()
+
+
 # Runtime decorator from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
 def final(f):
     """Decorator to indicate final methods and final classes.
