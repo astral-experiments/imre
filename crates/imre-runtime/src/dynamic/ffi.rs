@@ -705,6 +705,7 @@ pub(super) fn new_context<S: Into<String>>(
         modules: NONE,
         import_missing: NONE,
         bootstrap_globals: NONE,
+        import_registry_installed: false,
         bootstrap_file_spec: NONE,
         finder_external: NONE,
         classes: HashMap::new(),
@@ -763,7 +764,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // The module registry now owns sys. Its startup temporaries must not
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
-        let main = ctx.module("__main__")?;
+        ctx.install_import_registry()?;
+        let main = ctx.load_bootstrap_module("__main__", None, NONE)?
+            .ok_or_else(|| Context::missing_module("__main__"))?;
         if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
             ctx.run_module_as_main(name)
         } else {

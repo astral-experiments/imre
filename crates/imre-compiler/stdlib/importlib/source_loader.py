@@ -4,7 +4,6 @@ import _imp
 import sys
 
 from _imre_importlib import (
-    _zip_path_importers,
     cache_name as _cache_name,
     get_code as _registered_code,
     loader_fields as _loader_fields,
@@ -12,6 +11,7 @@ from _imre_importlib import (
     source_name as _source_name,
     warn_debug_override as _warn_debug_override,
     warn_loader_deprecation as _warn_loader_deprecation,
+    warn_import as _warn_import,
 )
 from os import fspath as _fspath, sep
 
@@ -37,17 +37,6 @@ if _is_frozen:
 else:
     # The package connects the selected core after this module has executed.
     _bootstrap = None
-
-
-def _invalidate_default_path_caches():
-    if hasattr(sys, "path_hooks") or hasattr(sys, "path_importer_cache"):
-        raise NotImplementedError("custom sys.path_hooks and sys.path_importer_cache")
-    for path, finder in list(_zip_path_importers.items()):
-        if finder is None or not path.startswith("/"):
-            del _zip_path_importers[path]
-        elif hasattr(finder, "invalidate_caches"):
-            finder.invalidate_caches()
-    _finder_external._NamespacePath._epoch += 1
 
 
 def _bless_my_loader(module_globals):

@@ -156,12 +156,20 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"
             ),
         )),
-        "_py_warnings" => Some((
-            "_py_warnings.py",
-            include_str!(
-                "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"
-            ),
-        )),
+        "_py_warnings" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some(("_py_warnings.py", SOURCE.get_or_init(|| {
+                const UPSTREAM: &str = include_str!(
+                    "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"
+                );
+                // Native import warnings may be emitted while all imports are disabled.
+                // Dispatch their WarningMessage without priming the Python line cache.
+                UPSTREAM
+                    .replace("def warn_explicit(", "_native_import_warning = object()\n\ndef warn_explicit(")
+                    .replace("    import linecache\n    linecache.getlines(filename, module_globals)",
+                             "    if module_globals is not _native_import_warning:\n        import linecache\n        linecache.getlines(filename, module_globals)")
+            })))
+        }
         "re" => Some(("re.py", include_str!("../stdlib/re.py"))),
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
@@ -1374,6 +1382,9 @@ impl IntrinsicModule {
             }
             (Self::ImportlibMetadata, "entry_points") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.entry_points")
+            }
+            (Self::ImportlibMachinery, "PathFinder") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.PathFinder")
             }
             (Self::ImportlibMachinery, "FileFinder") => {
                 Intrinsic::ObjectRuntimeExport("importlib.machinery.FileFinder")
