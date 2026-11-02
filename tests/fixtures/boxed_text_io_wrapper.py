@@ -17,6 +17,8 @@ class Wrapper(io.TextIOWrapper):
 
 def current():
     assert original_type is type(sys.stdout) is io.TextIOWrapper is _io.TextIOWrapper
+    assert sys.stdout.truncate.__self__ is sys.stdout
+    assert sys.stderr.truncate.__self__ is sys.stderr
     assert repr(original_type) == "<class '_io.TextIOWrapper'>"
     assert repr(Wrapper) == f"<class '{Wrapper.__module__}.{Wrapper.__qualname__}'>"
     assert isinstance(sys.stderr, io.TextIOBase) and isinstance(sys.stdout, (bytes, io.TextIOWrapper))
