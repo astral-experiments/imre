@@ -215,3 +215,6 @@ class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
 _PatchFactory.__call__ = _patch_attribute
 _PatchFactory.dict = staticmethod(_BoxedDictionaryPatch)
 _PatchFactory.object = staticmethod(_patch_object)
+
+
+patch = _PatchFactory()
