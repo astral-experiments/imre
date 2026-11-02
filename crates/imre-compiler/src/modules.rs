@@ -1075,6 +1075,9 @@ impl IntrinsicModule {
             (Self::ImportlibResourcesAbc, "TraversableResources") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.TraversableResources")
             }
+            (Self::ImportlibResources, "as_file") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.as_file")
+            }
             (Self::ImportlibResources, "files") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.files")
             }
