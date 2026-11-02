@@ -4714,6 +4714,7 @@ impl<'a> Checker<'a> {
                 if let ast::Expr::Call(call) = &*expression.value
                     && self.resolve(&call.func)
                         == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
+                    && call.arguments.find_keyword("stdout").is_some()
                 {
                     Some(Statement::Expr(self.process_run(call, true)?))
                 } else if let ast::Expr::Call(call) = &*expression.value
@@ -6339,12 +6340,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::OsSeparator { alternate }, vec![]),
                     });
                 }
-                Intrinsic::OsDevnull => {
-                    return Ok(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str("/dev/null".into()),
-                    });
-                }
+                Intrinsic::StringConstant(value) => return Ok(unpacking::string(value)),
                 Intrinsic::LogRecordFlag(mask) => {
                     return Ok(logging_records::op(
                         ir::LogRecordOperation::Flag,
@@ -8065,6 +8061,12 @@ impl<'a> Checker<'a> {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::TextClosed, vec![receiver]),
                     });
+                }
+                if attribute.attr.as_str() == "object"
+                    && let Type::Class(class) = receiver.ty
+                    && self.bundled_mock_class(class, "_PatchFactory")
+                {
+                    return Err(self.object_runtime_export("unittest.mock.patch.object", attribute));
                 }
                 if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
                     return self.read_setup_field(receiver, attribute, field);

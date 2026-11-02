@@ -436,7 +436,10 @@ impl PurePath {
 
     pub(super) fn is_absolute(&self) -> bool {
         if self.windows {
-            self.text.starts_with(r"\\") || (!self.root.is_empty() && !self.drive.is_empty())
+            // ntpath.isabs checks the normalized spelling, including a colon after a root separator.
+            let mut chars = self.text.chars();
+            chars.next();
+            self.text.starts_with(r"\\") || chars.as_str().starts_with(r":\")
         } else {
             !self.root.is_empty()
         }

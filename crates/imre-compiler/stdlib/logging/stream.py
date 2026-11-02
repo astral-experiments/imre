@@ -52,7 +52,7 @@ class Handler:
     def format(self, record: LogRecord) -> str:
         fmt = self.formatter
         if fmt is None:
-            return _default_formatter.format(record)
+            return _defaultFormatter.format(record)
         return fmt.format(record)
 
     def emit(self, record: LogRecord | None) -> None:
@@ -103,9 +103,7 @@ class StreamHandler(Handler):
 
     def flush(self) -> None:
         with self.lock:
-            stream = self.stream
-            if stream is not None:
-                stream.flush()
+            _flush_handler_stream(self)
 
     def emit(self, record: LogRecord | None) -> None:
         if record is None:

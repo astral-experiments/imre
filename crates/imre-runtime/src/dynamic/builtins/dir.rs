@@ -23,24 +23,8 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     };
     let names = if let Some(method) = ctx.bound_slot(object, "__dir__")? {
         ctx.call(method, vec![], vec![])?
-    } else if let Value::Module {
-        scope,
-        name,
-        constructor,
-        ..
-    } = ctx.heap.get(object)
-    {
-        let scope = *scope;
-        if let Some(method) = ctx.scope_name(scope, "__dir__") {
-            ctx.call(method, vec![], vec![])?
-        } else if constructor.is_none() && super::super::stdlib::has_lazy_attributes(name) {
-            return Err(Error::new(
-                "NotImplementedError",
-                "dir() cannot enumerate lazy native module exports",
-            ));
-        } else {
-            ctx.module_globals(scope)?
-        }
+    } else if let Value::Module { scope, .. } = *ctx.heap.get(object) {
+        ctx.module_dir(object, scope)?
     } else {
         object_names(ctx, object)?
     };
@@ -158,7 +142,7 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             if scope
                 .class_namespace
                 .as_ref()
-                .is_some_and(|ns| ns.annotation_thunks.is_some())
+                .is_some_and(|ns| ns.annotation_sites.is_some() || ns.annotation_thunks.is_some())
             {
                 names.insert("__annotate_func__".to_owned());
             }

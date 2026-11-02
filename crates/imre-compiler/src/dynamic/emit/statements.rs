@@ -276,7 +276,8 @@ impl Function<'_, '_> {
                             let sig = self.text("{}");
                             let defaults = self.op("dict", &[]);
                             let thunk = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
-                            self.op("annotate_deferred", &[&self.scope.clone(), &key, &thunk]);
+                            let offset = v.start().to_u32();
+                            self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
                         } else {
                             let value =
                                 if self.class_locals.is_some() && self.source.string_annotations {
@@ -493,12 +494,21 @@ impl Function<'_, '_> {
                         continue;
                     };
                     let module = self.import(&name);
-                    for alias in &v.names {
+                    let fromlist = self.op("list", &[]);
+                    let names: Vec<_> = v
+                        .names
+                        .iter()
+                        .map(|alias| self.code_name(alias.name.as_str()))
+                        .collect();
+                    for attr in &names {
+                        self.op("append", &[&fromlist, attr]);
+                    }
+                    self.op("fromlist", &[&module, &fromlist]);
+                    for (alias, attr) in v.names.iter().zip(names) {
                         if alias.name.as_str() == "*" {
                             self.op("import_star", &[&self.scope.clone(), &module]);
                             continue;
                         }
-                        let attr = self.code_name(alias.name.as_str());
                         let value = self.op("from", &[&module, &attr]);
                         self.bind(
                             alias.asname.as_ref().unwrap_or(&alias.name).as_str(),

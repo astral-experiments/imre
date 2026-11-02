@@ -63,6 +63,22 @@ def check_command_stdin(imre, run):
         assert actual.stdout == reference.stdout and actual.stderr == reference.stderr == b""
 
 
+def check_sysconfig_build(imre, root, run):
+    fixture = Path(__file__).with_name("fixtures") / "boxed_sysconfig_build.py"
+    project = root / "build-tree"
+    modules = project / "Modules"
+    modules.mkdir(parents=True)
+    alias = root / "build-link"
+    alias.symlink_to(project, target_is_directory=True)
+    empty = root / "empty-build-tree"
+    (empty / "Modules" / "Setup").mkdir(parents=True)
+    for home, extra in ((project, {}), (empty, {"_PYTHON_PROJECT_BASE": alias.name})):
+        (modules / "Setup").unlink(missing_ok=True)
+        (modules / "Setup.local").touch()
+        result = run(imre, "-B", fixture, project, home, empty, extra=extra)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"build markers passed\n", b""), result
+
+
 def check_io_compaction_allocation(imre, root, run):
     fixture = Path(__file__).with_name("fixtures") / "refuse_io_compaction.c"
     wrapper = root / "refuse_io_compaction.o"
@@ -904,6 +920,9 @@ def check_pickle_reductions(imre, root, run):
                 shared = ("\0\n\r\\\x1aéĀ🍏", 1 << 2048, -2147483649, True, None)
                 assert value[:6] == (shared, shared, ("rebuilt", protocol), ("rebuilt", protocol), "37", ())
                 assert value[0] is value[1] and value[2] is value[3]
+                payload = bytes(range(256))
+                assert value[7] == (b"", payload[:-1], payload, payload, ("rebuilt", protocol))
+                assert value[7][2] is value[7][3]
                 graph, small, wide, replaced, recursive = value[6]
                 assert graph["self"] is graph and graph["left"] is graph["right"]
                 assert graph["distinct"] == graph["left"] == {} and graph["distinct"] is not graph["left"]
@@ -984,6 +1003,7 @@ def main():
             check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
+            check_sysconfig_build(imre, root, run)
             check_ffi_result_roots(imre, root, run)
             check_weak_proxy_root_allocation(imre, root, run)
             check_noncallable_allocation(imre, run, marked_call_flags)
@@ -1320,6 +1340,28 @@ def main():
             extra={"PYTHONDONTWRITEBYTECODE": "1", "IMREFLAGS": "--bogus"},
         )
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
+        compare(
+            "-B", "-c",
+            "import atexit, gc, sys\n"
+            "class SelfRemoving:\n"
+            "    def __call__(self): atexit.unregister(self)\n"
+            "    def __del__(self): atexit.register(print, 'registered during cleanup')\n"
+            "atexit.register(SelfRemoving())\n"
+            "atexit._run_exitfuncs()\n"
+            "assert atexit._ncallbacks() == 0\n"
+            "def first(label, *, flag):\n"
+            "    import __main__\n"
+            "    print(label, flag, __main__.message)\n"
+            "atexit.register(first, 'oldest', flag=7)\n"
+            "@atexit.register\n"
+            "def newest():\n"
+            "    print('newest')\n"
+            "    atexit.unregister(first)\n"
+            "message = 'retained'\n"
+            "gc.collect()\n"
+            "sys.exit(37)\n",
+            status=37,
+        )
         compare("-IB", "-c", "raise SystemExit")
         compare("-IB", "-c", "from sys import exit\nexit(None)")
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
@@ -1360,6 +1402,8 @@ scope = {}
 exec(compile(r"x = ('\ud800', '\ufffd' r'\udfff' '\udfff')", "<literal>", "exec"), scope)
 print(ascii(scope["x"]))
 print(ascii(ast.literal_eval(r"'\ud800' '�' '\udfff'")))
+exec(compile(r"def f(x: '\udfff'): pass", "<annotation>", "exec"), scope)
+print(ascii(scope["f"].__annotations__))
 try:
     compile(r"'\t\udfff'", "<docstring>", "exec")
 except UnicodeEncodeError as exc:
@@ -1537,6 +1581,11 @@ def report(text):
     view = fields.items()
     fields.update(count=len(text.splitlines(keepends=True)))
     print("{{{name}}}: {count}".format(**fields))
+    for template in ("{absent}", "{name:{width}}", "{it's missing}"):
+        try:
+            template.format(**fields)
+        except KeyError as err:
+            print(str(err), err.args)
     print("%(name)s/%(count)d" % fields)
     for key, value in view:
         print(key, value)
@@ -1665,8 +1714,10 @@ def report(text):
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
         for name in (
+            "boxed_threading_deprecated_accessors.py",
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
             "boxed_thread_dangling.py", "boxed_threading_rlock.py",
+            "boxed_threading_condition_event.py",
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
@@ -1697,6 +1748,8 @@ def report(text):
             "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
         )
+        compare("-IB", fixtures / "boxed_unittest_named_loader.py")
+        compare("-IB", fixtures / "boxed_unittest_patch.py")
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",
@@ -1709,6 +1762,7 @@ def report(text):
             "boxed_slice_deep_repr.py",
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
+            "boxed_source_except.py",
             "boxed_relative_package_imports.py",
             "boxed_sys_getframe.py",
             "boxed_sys_audit.py",
@@ -1724,6 +1778,7 @@ def report(text):
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
+            "boxed_int_from_bytes.py",
             "boxed_divmod_slots.py",
             "boxed_complex.py",
             "boxed_float.py",
@@ -1732,6 +1787,7 @@ def report(text):
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
+            "boxed_binary_strip.py",
             "boxed_class_union.py",
             "boxed_bytes_octal.py",
             "boxed_contextvars.py",
@@ -1754,6 +1810,7 @@ def report(text):
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
+            "boxed_class_annotation_sites.py",
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
@@ -1771,10 +1828,13 @@ def report(text):
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
             "boxed_re_split.py",
+            "boxed_re_match_subscript.py",
+            "boxed_re_sub.py",
             "boxed_re_findall_empty.py",
             "boxed_re_scanner.py",
             "boxed_re_escape.py",
             "boxed_datetime.py",
+            "boxed_timedelta_multiply.py",
             "boxed_dataclasses.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
@@ -1785,9 +1845,11 @@ def report(text):
             "boxed_time_strftime.py",
             "boxed_codecs.py",
             "boxed_io_exports.py",
+            "boxed_io_reimport.py",
             "boxed_io_text_encoding.py",
             "boxed_io_protocols.py",
             "boxed_selector_wide_fds.py",
+            "boxed_select_selector.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
             "boxed_os_descriptor_io.py",
@@ -1800,6 +1862,7 @@ def report(text):
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
+            "boxed_exception_notes.py",
             "boxed_warning_categories.py",
             "boxed_warnings.py",
             "boxed_oserror.py",
@@ -1812,8 +1875,12 @@ def report(text):
             "boxed_function_call.py",
             "boxed_any_generator.py",
             "boxed_global.py",
+            "boxed_configparser.py",
             "boxed_logging.py",
+            "boxed_logging_formatter.py",
             "boxed_logging_file.py",
+            "boxed_logging_adapter.py",
+            "boxed_logging_file_error.py",
             "boxed_class_attribute.py",
             "boxed_missing_attribute_owners.py",
             "boxed_request_strings.py",
@@ -1829,12 +1896,10 @@ def report(text):
             "boxed_unittest_subclass.py",
             "boxed_unittest_not_has_attr.py",
             "boxed_unittest_not_equal.py",
-            "boxed_unittest_less_equal.py",
+            "boxed_unittest_ordering.py",
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_assert_warns.py",
             "boxed_unittest_assert_regex.py",
-            "boxed_unittest_patch.py",
-            "boxed_unittest_named_loader.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
             "boxed_frozenset.py",
@@ -1878,12 +1943,15 @@ def report(text):
             "boxed_itertools_repeat.py",
             "boxed_itertools_chain.py",
             "boxed_itertools_cycle.py",
+            "boxed_itertools_batched.py",
             "boxed_itertools_combinations.py",
             "boxed_itertools_permutations.py",
             "boxed_itertools_product.py",
             "boxed_itertools_groupby.py",
+            "boxed_itertools_filterfalse.py",
             "boxed_object_new.py",
             "boxed_module_type.py",
+            "boxed_source_module_getattr.py",
             "boxed_thread_local.py",
             "boxed_threading_lock.py",
             "boxed_import_depth.py",
@@ -1900,6 +1968,7 @@ def report(text):
             "boxed_sequence_repeat.py",
             "boxed_sequence_order.py",
             "boxed_json_containers.py",
+            "boxed_json_module_doc.py",
             "boxed_deque.py",
             "boxed_deque_deep_equal.py",
             "boxed_deque_cycle_callbacks.py",
@@ -1948,6 +2017,8 @@ def report(text):
                 check_slice_stack(imre, imports, root, env)
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_json_module_doc.py":
+                compare("-IOOB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_recursive_repr.py":
                 for limit in (640, 4300, 0):
                     compare(
@@ -1956,6 +2027,10 @@ def report(text):
                     )
         if os.name == "posix":
             check_unittest_file_discovery(imre, root, run)
+            plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_capabilities.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
@@ -1970,6 +2045,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             shim = root / "secrets_entropy.so"
             subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
             probe = root / "entropy.py"

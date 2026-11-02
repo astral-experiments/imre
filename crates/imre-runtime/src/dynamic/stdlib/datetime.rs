@@ -34,22 +34,39 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
         "datetime.date" => (
             "datetime.date",
             &FIELDS[..3],
-            &["__repr__", "__str__", "toordinal", "weekday", "timetuple"],
+            &[
+                "__format__",
+                "__repr__",
+                "__str__",
+                "ctime",
+                "isoweekday",
+                "toordinal",
+                "weekday",
+                "timetuple",
+            ],
         ),
         "datetime.datetime" => (
             "datetime.datetime",
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
-            &["__repr__", "__str__", "timetuple"],
+            &["__repr__", "__str__", "ctime", "timetuple"],
         ),
         "datetime.time" => (
             "datetime.time",
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
-            &["__repr__", "__str__"],
+            &["__format__", "__repr__", "__str__"],
         ),
         "datetime.timedelta" => (
             "datetime.timedelta",
             &["days", "seconds", "microseconds"],
-            &["__bool__", "__repr__", "__str__", "total_seconds"],
+            &[
+                "__bool__",
+                "__neg__",
+                "__mul__",
+                "__rmul__",
+                "__repr__",
+                "__str__",
+                "total_seconds",
+            ],
         ),
         _ => return None,
     };
@@ -195,6 +212,104 @@ fn field_type_error(ctx: &Context, owner: &str, field: &str, receiver: Id) -> Er
     )
 }
 
+fn delta_component(ctx: &mut Context, value: Id) -> Result<i32> {
+    ctx.index_integer(value)?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+/// Integer subclasses can return arbitrary objects from multiplication. CPython splits
+/// that result with divmod and validates the normalized microsecond and second fields.
+fn split_delta_component(ctx: &mut Context, value: Id, unit: i32) -> Result<(Id, i32)> {
+    let divisor = ctx.int(i64::from(unit));
+    let result = ctx.divmod(value, divisor)?;
+    let tuple = ctx.tuple_items(result)?.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "divmod() returned non-tuple (type {})",
+                ctx.type_name(result)
+            ),
+        )
+    })?;
+    let [quotient, remainder] = tuple.as_slice() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("divmod() returned a tuple of size {}", tuple.len()),
+        ));
+    };
+    let remainder = delta_component(ctx, *remainder)?;
+    if !(0..unit).contains(&remainder) {
+        return Err(Error::new(
+            "TypeError",
+            "divmod() returned a value out of range",
+        ));
+    }
+    Ok((*quotient, remainder))
+}
+
+fn multiply_delta(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let name = method.rsplit('.').next().unwrap();
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("descriptor '{name}' of 'datetime.timedelta' object needs an argument"),
+        ));
+    };
+    let duration = calendar(ctx, receiver, "timedelta").ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{name}' requires a 'datetime.timedelta' object but received a '{}'",
+                ctx.type_name(receiver)
+            ),
+        )
+    })?;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("wrapper {name}() takes no keyword arguments"),
+        ));
+    }
+    let &[factor] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("expected 1 argument, got {}", args.len()),
+        ));
+    };
+    if !matches!(
+        ctx.heap.get(ctx.scalar_value(factor)),
+        Value::Int(_) | Value::Bool(_)
+    ) {
+        return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+    }
+    let us = ctx.alloc(Value::Int(crate::Int::new(
+        duration.delta_microseconds().into(),
+    )));
+    let product = ctx.binary("*", factor, us)?;
+    let micros = if let Value::Int(n) = ctx.heap.get(product) {
+        n.clone()
+    } else {
+        let (seconds, micros) = split_delta_component(ctx, product, 1_000_000)?;
+        let (days, seconds) = split_delta_component(ctx, seconds, 86_400)?;
+        let days = delta_component(ctx, days)?;
+        let total =
+            (i128::from(days) * 86_400 + i128::from(seconds)) * 1_000_000 + i128::from(micros);
+        crate::Int::new(total.into())
+    };
+    Ok(store(
+        ctx,
+        Calendar::from_delta_microseconds(&micros)?,
+        NONE,
+    ))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     method: &str,
@@ -214,6 +329,7 @@ pub(super) fn call(
     }
     match method {
         "time" => time(ctx, args, kwargs),
+        "timedelta.__mul__" | "timedelta.__rmul__" => multiply_delta(ctx, method, args, kwargs),
         "datetime.combine" => {
             let [day, clock, tz] = bind("combine", args, kwargs, ["date", "time", "tzinfo"])?;
             let day = required(day, "combine()", "date", 1)?;
@@ -387,6 +503,42 @@ pub(super) fn call(
             };
             Ok(store(ctx, result, tz))
         }
+        "date.__format__" | "time.__format__" => {
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "__format__() takes no keyword arguments",
+                ));
+            }
+            let [receiver, spec] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__format__() takes exactly 1 argument ({} given)",
+                        args.len().saturating_sub(1)
+                    ),
+                ));
+            };
+            let storage = ctx.string_storage(*spec).ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "__format__() argument 1 must be str, not {}",
+                        if *spec == NONE {
+                            "None"
+                        } else {
+                            ctx.type_name(*spec)
+                        }
+                    ),
+                )
+            })?;
+            if ctx.truth(storage)? {
+                let strftime = ctx.lookup_attr(*receiver, "strftime")?;
+                return ctx.call(strftime, vec![*spec], vec![]);
+            }
+            let string = ctx.builtin("str");
+            ctx.call(string, vec![*receiver], vec![])
+        }
         "date.__repr__"
         | "datetime.__repr__"
         | "time.__repr__"
@@ -396,10 +548,14 @@ pub(super) fn call(
         | "time.__str__"
         | "timedelta.__str__"
         | "timedelta.__bool__"
+        | "timedelta.__neg__"
         | "datetime.timetuple"
         | "date.timetuple"
         | "date.toordinal"
         | "datetime.toordinal"
+        | "date.ctime"
+        | "datetime.ctime"
+        | "date.isoweekday"
         | "date.weekday"
         | "datetime.weekday"
         | "timedelta.total_seconds" => {
@@ -416,6 +572,8 @@ pub(super) fn call(
             let value = calendar(ctx, args[0], class)
                 .ok_or_else(|| Error::new("TypeError", format!("expected datetime.{class}")))?;
             Ok(match operation {
+                "__neg__" if value.delta_parts() == (0, 0, 0) => ctx.scalar_value(args[0]),
+                "__neg__" => store(ctx, value.negate_delta()?, NONE),
                 "__bool__" => {
                     if value.delta_parts() == (0, 0, 0) {
                         FALSE
@@ -458,6 +616,14 @@ pub(super) fn call(
                 }
                 "total_seconds" => ctx.alloc(Value::Float(value.seconds())),
                 "toordinal" => ctx.int(value.ordinal()),
+                "ctime" => {
+                    let mut fields = value.timetuple();
+                    if class == "date" {
+                        fields[3..6].fill(0);
+                    }
+                    ctx.text(super::time::ctime_text(fields, 4))
+                }
+                "isoweekday" => ctx.int((value.ordinal() - 1) % 7 + 1),
                 "weekday" => ctx.int((value.ordinal() - 1) % 7),
                 "timetuple" => {
                     let mut fields = value.timetuple();

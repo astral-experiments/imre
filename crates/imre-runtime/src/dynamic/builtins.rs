@@ -33,6 +33,42 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
     }
 }
 
+/// Methods declared on BaseException and inherited by every native exception type.
+pub(super) fn base_exception_method(name: &str) -> Option<&'static str> {
+    match name {
+        "add_note" => Some("BaseException.add_note"),
+        "with_traceback" => Some("BaseException.with_traceback"),
+        _ => None,
+    }
+}
+
+/// Native exception ancestors in MRO order, excluding the class itself and object.
+pub(super) fn exception_ancestors(
+    kind: imre_ast::exceptions::Kind,
+) -> impl Iterator<Item = &'static str> {
+    use imre_ast::exceptions::Kind::*;
+    // These are the exception types with native boxed children. UnsupportedOperation
+    // inherits from both OSError and ValueError, in that order.
+    [
+        ConnectionError,
+        OSError,
+        UnicodeError,
+        ValueError,
+        ArithmeticError,
+        LookupError,
+        ImportError,
+        NameError,
+        RuntimeError,
+        SyntaxError,
+        Warning,
+        Exception,
+        BaseException,
+    ]
+    .into_iter()
+    .filter(move |&base| base != kind && kind.matches(base))
+    .map(|base| base.name())
+}
+
 const FUNCTIONS: &[&str] = &[
     "len",
     "hash",
@@ -292,9 +328,12 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "copy",
     "endswith",
     "extend",
+    "lstrip",
     "reverse",
+    "rstrip",
     "split",
     "startswith",
+    "strip",
 ];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
@@ -302,11 +341,13 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "__repr__",
     "decode",
     "endswith",
+    "lstrip",
     "rfind",
     "rsplit",
     "rstrip",
     "split",
     "startswith",
+    "strip",
     "translate",
 ];
 
@@ -559,7 +600,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_)
             if matches!(
                 attr,
-                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "scanner"
+                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "sub" | "scanner"
             ) =>
         {
             "pattern"
@@ -871,6 +912,24 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "BaseException.add_note" {
+        let Some((&exception, args)) = args.split_first() else {
+            return Err(type_error(
+                "unbound method BaseException.add_note() needs an argument",
+            ));
+        };
+        if !matches!(ctx.heap.get(exception), Value::Raised(_)) {
+            let kind = ctx
+                .builtin_type_name(exception)
+                .unwrap_or_else(|| ctx.type_name(exception));
+            return Err(type_error(format!(
+                "descriptor 'add_note' for 'BaseException' objects doesn't apply to a '{kind}' object"
+            )));
+        }
+        let note = one_positional_arg(name, args, kwargs)?;
+        ctx.add_exception_note(exception, note)?;
+        return Ok(NONE);
+    }
     if name == "object.__getattribute__" {
         let Some((&object, values)) = args.split_first() else {
             return Err(type_error(
@@ -907,7 +966,10 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
-    if matches!(name, "object.__hash__" | "object.__repr__") {
+    if matches!(
+        name,
+        "object.__hash__" | "object.__repr__" | "object.__str__"
+    ) {
         let method = name.trim_start_matches("object.");
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
@@ -927,6 +989,13 @@ pub(super) fn call(
         }
         if method == "__repr__" {
             return ctx.object_repr(receiver);
+        }
+        if method == "__str__" {
+            if let Some(value) = ctx.repr_override(receiver)? {
+                return Ok(value);
+            }
+            let repr = ctx.checked_format(receiver, true)?;
+            return Ok(ctx.text(repr));
         }
         return Ok(ctx.int(Context::identity_hash(receiver)));
     }
@@ -949,6 +1018,19 @@ pub(super) fn call(
             return Ok(NONE);
         }
         if args.len() != 1 || !kwargs.is_empty() {
+            if let Some(&receiver) = args.first() {
+                let tuple = ctx.builtin("tuple");
+                if ctx.instance_of(receiver, tuple) {
+                    let class = ctx.exact_type(receiver)?;
+                    if ctx
+                        .class_attr(class, "__init__")
+                        .is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__"))
+                    {
+                        // Tuple subtypes consume their constructor arguments in __new__.
+                        return Ok(NONE);
+                    }
+                }
+            }
             return Err(type_error(
                 "object.__init__() takes exactly one argument (the instance to initialize)",
             ));
@@ -1003,6 +1085,7 @@ pub(super) fn call(
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
+            "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {
                 translation::maketrans(ctx, name, args, kwargs)
@@ -1014,7 +1097,12 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if matches!(method, "decode" | "endswith" | "split" | "startswith") => {
+            "bytearray"
+                if matches!(
+                    method,
+                    "decode" | "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+                ) =>
+            {
                 text::method(ctx, owner, method, args, kwargs)
             }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
@@ -1458,8 +1546,10 @@ pub(super) fn call(
                     ..
                 } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
-                Value::DictView { dict, .. } | Value::MappingProxy(dict) => {
-                    collections::entries(ctx, *dict)?.len()
+                Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
+                Value::MappingProxy(_) => {
+                    let mapping = ctx.mapping_proxy_target(args[0]);
+                    return call(ctx, "len", &[mapping], &[]);
                 }
                 Value::Class { .. } => {
                     let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;
@@ -1613,8 +1703,10 @@ pub(super) fn call(
                 return Err(Error::new("ValueError", "Empty module name"));
             }
             let result = ctx.module(&name)?;
-            if ctx.optional_truth(fromlist, false)? {
-                return Ok(result);
+            if let Some(list) = fromlist
+                && ctx.truth(list)?
+            {
+                return ctx.prepare_fromlist(result, list);
             }
             ctx.module(name.split('.').next().unwrap())
         }

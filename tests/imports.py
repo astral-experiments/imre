@@ -37,6 +37,13 @@ REJECTED = {
         "records.py": "from imre import struct as layout\n@layout\nclass Point:\n    x: float\n",
         "main.py": "from records import Point\nfrom weakref import ref\nref(Point(1.0))\n",
     }, "weakref.ref requires native Python object operations"),
+    "patch_object_checks_replacement": ({
+        "main.py": (
+            "from unittest.mock import patch\nclass Owner:\n    value = 0\n"
+            "def replacement(number: int) -> int:\n    return number\n"
+            "with patch.object(Owner, 'value', replacement('wrong')):\n    pass\n"
+        ),
+    }, "expected int, got str"),
     "unused_struct_keeps_return_checks": ({
         "main.py": "from struct import Struct as Format\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
     }, "expected int, got str"),
@@ -177,6 +184,13 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "patch_object_as_value": {
+        "main.py": (
+            "from unittest.mock import patch\nclass Owner:\n    value = 1\n"
+            "patcher = patch.object\nwith patcher(Owner, 'value', 2):\n    assert Owner.value == 2\n"
+            "assert Owner.value == 1\n"
+        ),
+    },
     "optional_platform_import": {
         "main.py": "import configure\nfrom adapter import present, absent\nprint(present, absent)\n",
         "configure.py": "import sys\nsys.platform = 'test-platform'\nprint('configure')\n",
@@ -474,6 +488,7 @@ ACCEPTED = {
         "main.py": (FIXTURES.parent / "boxed_resources_as_file.py").read_text(),
         "data/__init__.py": "",
         "data/message.txt": "hello\n",
+        "data/directory-payload.txt": "directory payload\n",
     },
     "source_loader_path_stats": {
         "main.py": (

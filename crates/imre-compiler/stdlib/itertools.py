@@ -131,6 +131,43 @@ def _make_cycle(_allocate, _advance):
 cycle = _make_cycle(_itertools._cycle_allocate, _itertools._cycle_next)
 
 
+def _make_filterfalse(_allocate, _state):
+    class filterfalse:
+        """Yield items for which the predicate is false, testing items directly for None."""
+
+        __slots__ = ()
+
+        def __new__(cls, predicate, iterable, /, **kwargs):
+            if kwargs and getattr(cls, "__init__", None) is getattr(__class__, "__init__", None):
+                raise TypeError("filterfalse() takes no keyword arguments")
+            return _allocate(__class__, cls, bool if predicate is None else predicate, iterable)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            source, predicate = _state(__class__, self)
+            while True:
+                item = next(source)
+                if not predicate(item):
+                    return item
+
+        def __reduce__(self):
+            raise TypeError("cannot pickle 'filterfalse' object")
+
+        def __reduce_ex__(self, protocol, /):
+            if _index(protocol) < 2 or type(self).__reduce__ is not __class__.__reduce__:
+                return self.__reduce__()
+            name = "itertools.filterfalse" if type(self) is __class__ else type(self).__name__
+            raise TypeError(f"cannot pickle '{name}' object")
+
+    filterfalse.__qualname__ = "filterfalse"
+    return filterfalse
+
+
+filterfalse = _make_filterfalse(_itertools._filterfalse_allocate, _itertools._filterfalse_state)
+
+
 class _Combination:
     __slots__ = ("_pool", "_indices", "_stopped")
 
@@ -226,6 +263,71 @@ class product:
             indices[position] = 0
         self._stopped = True
         return result
+
+
+class batched:
+    """Batch data into tuples of length n. The last batch may be shorter than n.
+
+Loops over the input iterable and accumulates data into tuples
+up to size n.  The input is consumed lazily, just enough to
+fill a batch.  The result is yielded as soon as a batch is full
+or when the input iterable is exhausted.
+
+    >>> for batch in batched('ABCDEFG', 3):
+    ...     print(batch)
+    ...
+    ('A', 'B', 'C')
+    ('D', 'E', 'F')
+    ('G',)
+
+If "strict" is True, raises a ValueError if the final batch is shorter
+than n."""
+
+    __slots__ = ()
+
+    def __new__(cls, /, iterable, n, *, strict=False):
+        if not issubclass(cls, __class__):
+            raise TypeError("expected a batched subclass")
+        size = _ssize_index(n)
+        strict = bool(strict)
+        if size < 1:
+            raise ValueError("n must be at least one")
+        source = iter(iterable)
+        self = object.__new__(cls)
+        _batched_state.__set__(self, (source, size, strict))
+        return self
+
+    def __init__(self, *args, **kwargs):
+        # All state is set by __new__; calling the inherited initializer is inert.
+        if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+            object.__init__(self, *args, **kwargs)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        state = _batched_state.__get__(self)
+        if state is None:
+            raise StopIteration
+        source, size, strict = state
+        # Reserve the entire batch before advancing the input.
+        items = [None] * size
+        for i in range(size):
+            try:
+                items[i] = next(source)
+            except StopIteration:
+                break
+            except BaseException:
+                _batched_state.__set__(self, None)
+                raise
+        else:
+            return tuple(items)
+        if i and not strict:
+            return tuple(items[:i])
+        _batched_state.__set__(self, None)
+        if i:
+            raise ValueError("batched(): incomplete batch")
+        raise StopIteration
 
 
 class groupby:

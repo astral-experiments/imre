@@ -1340,6 +1340,23 @@ pub(super) fn call(
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
         }
+        ("get_origin" | "get_args", [v])
+            if matches!(ctx.heap.get(*v), Value::Instance { .. })
+                && ctx
+                    .module_value("typing", "_AnnotatedAlias")
+                    .is_some_and(|class| ctx.instance_of(*v, class)) =>
+        {
+            if operation == "get_origin" {
+                let typing = ctx.module("typing")?;
+                ctx.lookup_attr(typing, "Annotated")
+            } else {
+                let origin = ctx.lookup_attr(*v, "__origin__")?;
+                // Keep the origin rooted across a metadata descriptor lookup.
+                let args = ctx.alloc(Value::Tuple(vec![origin]));
+                let metadata = ctx.lookup_attr(*v, "__metadata__")?;
+                ctx.op("+", args, metadata, NONE)
+            }
+        }
         ("get_origin", [v]) => Ok(match ctx.heap.get(*v) {
             Value::Instance { .. }
                 if ctx
@@ -1659,19 +1676,38 @@ impl Context {
         if bases.is_empty() {
             bases.push(self.builtin("object"));
         }
-        let ancestors = self.linearized_bases(&bases)?;
+        let ancestors = self.linearized_bases(&bases, false)?;
         self.check_member_slot_bases(&bases, &ancestors)?;
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
-        mro.extend_from_slice(&ancestors);
+        // Keep allocation and special-slot dispatch on their existing native layout.
+        // The published MRO includes the declaring classes of inherited exception methods.
+        if ancestors.iter().any(|&base| {
+            matches!(self.heap.get(base), Value::Native(name) if super::builtins::is_exception(name))
+        }) {
+            mro.extend(self.linearized_bases(&bases, true)?);
+        } else {
+            mro.extend_from_slice(&ancestors);
+        }
         let slot_names = self.declared_slot_names(scope)?;
-        let members = if self.scope_data(scope).class_namespace.as_ref().is_some_and(|ns| ns.member_slots) {
-            self.prepare_slot_members(&name, scope, &bases, slot_names.as_deref().unwrap_or_default())?
+        let members = if self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .is_some_and(|ns| ns.member_slots)
+        {
+            self.prepare_slot_members(
+                &name,
+                scope,
+                &bases,
+                slot_names.as_deref().unwrap_or_default(),
+            )?
         } else {
             Vec::new()
         };
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
         let class = self.alloc(Value::Class {
+            io_kind: None,
             metaclass: None,
             namedtuple_fields,
             name,

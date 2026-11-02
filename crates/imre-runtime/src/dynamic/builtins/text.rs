@@ -11,22 +11,13 @@ use ruff_python_literal::format::{
 };
 
 use super::super::operators::append_rendered_text;
-use super::super::stdlib::codecs::encode_text;
+use super::super::stdlib::codecs::{decode_named, encode_text};
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
 
 mod bytes_fields;
 mod maketrans;
-
-fn decode(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) -> Result<Id> {
-    let encoding = encoding
-        .map(|id| ctx.str_value(id))
-        .transpose()?
-        .unwrap_or("utf-8");
-    let codec = crate::objects::Codec::lookup(encoding)?;
-    super::super::stdlib::codecs::decode_bytes(ctx, codec, ctx.scalar_value(id), errors)
-}
 
 pub(super) fn construct(
     ctx: &mut Context,
@@ -105,7 +96,7 @@ pub(super) fn construct(
                 return Ok(ctx.text(""));
             };
             if encoding.is_some() || errors.is_some() {
-                return decode(ctx, value, encoding, errors);
+                return decode_named(ctx, ctx.scalar_value(value), encoding, errors);
             }
             let target = ctx.weak_proxy_target(value)?;
             if target != value {
@@ -445,7 +436,15 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
             ctx.type_name(spec)
         )));
     }
-    if let Some(method) = ctx.bound_slot(value, "__format__")? {
+    let method = match ctx.heap.get(value) {
+        Value::Calendar { value: calendar, .. }
+            if matches!(calendar.class(), "date" | "datetime" | "time") =>
+        {
+            Some(ctx.lookup_attr(value, "__format__")?)
+        }
+        _ => ctx.bound_slot(value, "__format__")?,
+    };
+    if let Some(method) = method {
         let spec = match spec {
             Some(spec) => spec,
             None => ctx
@@ -604,7 +603,10 @@ fn format_string(
                     .iter()
                     .find(|(k, _)| k == &key)
                     .map(|(_, id)| *id)
-                    .ok_or_else(|| Error::new("KeyError", key))?,
+                    .ok_or_else(|| {
+                        let key = ctx.text(key);
+                        ctx.lookup_error("KeyError", key)
+                    })?,
             };
             for access in field.parts {
                 value = match access {
@@ -1256,9 +1258,13 @@ pub(super) fn method(
     if name == "__new__" {
         return ctx.new_string(owner, receiver, args, kwargs);
     }
+    let original_receiver = receiver;
     let receiver = if owner == "bytes"
-        || (owner == "bytearray" && matches!(name, "endswith" | "split" | "startswith"))
-    {
+        || (owner == "bytearray"
+            && matches!(
+                name,
+                "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+            )) {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
             (owner, ctx.heap.get(storage)),
@@ -1282,7 +1288,7 @@ pub(super) fn method(
     if name == "decode" || name == "encode" {
         let [encoding, errors] = bind(name, args, kwargs, ["encoding", "errors"])?;
         return if name == "decode" {
-            decode(ctx, receiver, encoding, errors)
+            decode_named(ctx, ctx.scalar_value(receiver), encoding, errors)
         } else {
             let b = encode_text(ctx, receiver, encoding, errors)?;
             Ok(ctx.alloc(Value::Bytes(b)))
@@ -1466,15 +1472,16 @@ pub(super) fn method(
         );
         return Ok(ctx.alloc(Value::Int(found)));
     }
-    if name == "rstrip"
-        && let Value::Bytes(data) = ctx.heap.get(receiver)
-    {
+    if matches!(owner, "bytes" | "bytearray") && matches!(name, "strip" | "lstrip" | "rstrip") {
         if !kwargs.is_empty() {
-            return Err(type_error("bytes.rstrip() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "{}.{name}() takes no keyword arguments",
+                ctx.type_name(original_receiver)
+            )));
         }
         if args.len() > 1 {
             return Err(type_error(format!(
-                "rstrip expected at most 1 argument, got {}",
+                "{name} expected at most 1 argument, got {}",
                 args.len()
             )));
         }
@@ -1482,11 +1489,23 @@ pub(super) fn method(
             .first()
             .copied()
             .filter(|&id| id != NONE)
-            .map(|id| ctx.bytes_like(id))
+            .map(|id| match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::Array(array) => Ok(array.as_bytes()),
+                _ => ctx.bytes_like(id),
+            })
             .transpose()?
             .unwrap_or(b" \t\n\x0b\x0c\r");
-        return Ok(match crate::objects::rstrip_bytes(data, chars)? {
-            Some(trimmed) => ctx.alloc(Value::Bytes(trimmed)),
+        let immutable = owner == "bytes";
+        let trimmed = crate::objects::strip_bytes(
+            ctx.bytes_like(receiver)?,
+            chars,
+            name != "rstrip",
+            name != "lstrip",
+            immutable && original_receiver == receiver,
+        )?;
+        return Ok(match trimmed {
+            Some(data) if immutable => ctx.alloc(Value::Bytes(data)),
+            Some(data) => ctx.alloc(Value::ByteArray(data)),
             None => receiver,
         });
     }

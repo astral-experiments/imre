@@ -117,6 +117,10 @@ impl Calendar {
         make_delta(mask, words).map(Self)
     }
 
+    pub(crate) fn negate_delta(&self) -> Result<Self, Error> {
+        negate_delta(&self.0).map(Self)
+    }
+
     pub(crate) fn seconds(&self) -> f64 {
         total_seconds(delta(&self.0))
     }
@@ -242,6 +246,14 @@ impl Calendar {
             Value::Date { local, .. } => (local.div_euclid(DAY) + 1) as i64,
             _ => unreachable!(),
         })
+    }
+
+    pub(crate) fn delta_microseconds(&self) -> i128 {
+        delta(&self.0)
+    }
+
+    pub(crate) fn from_delta_microseconds(us: &Int) -> Result<Self, Error> {
+        try_owner(Value::Delta(validate_delta(&us.big())?)).map(Self)
     }
 
     pub(crate) fn delta_parts(&self) -> (i128, i128, i128) {

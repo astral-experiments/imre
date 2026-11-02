@@ -114,7 +114,7 @@ pub(super) unsafe fn spawn(
     cmd: &OwnedWord,
     config: &popen::LaunchConfig,
     streams: u32,
-    redirects: popen::Redirects,
+    mut redirects: popen::Redirects<'_>,
     allow_spawn: bool,
     child_attributes: impl FnOnce(bool) -> Result<ChildAttributes>,
 ) -> Result<Child> {
@@ -137,9 +137,23 @@ pub(super) unsafe fn spawn(
             streams,
             redirects.fds,
         );
+    // CPython's posix_spawn mapping converter allows an initial '=' but requires
+    // a nonempty key. The fork/exec environment list rejects '=' anywhere.
+    if let Some(env) = &redirects.environment
+        && env.iter().any(|(key, _)| {
+            if direct {
+                key.is_empty() || key[1..].contains(&b'=')
+            } else {
+                key.contains(&b'=')
+            }
+        })
+    {
+        let error = Error::new(Kind::ValueError, "illegal environment variable name");
+        return Err(popen::error_after_handles(pending, !direct, error));
+    }
     // SAFETY: validation and copying complete before the command may fork.
     let (launch, cwd, attributes) = unsafe {
-        prepare_command(cmd, config, || {
+        prepare_command(cmd, config, redirects.environment.take(), || {
             let attributes = child_attributes(direct)?;
             if redirects.oversized && !direct {
                 return Err(c_int_overflow());
@@ -160,10 +174,14 @@ pub(super) unsafe fn spawn(
     } else {
         streams & !(1 << 17) // pass_fds closes all other inherited descriptors
     };
+    let failure_site = redirects.failure_site.take();
     launch
         .spawn_tagged(cwd.as_ref(), streams, redirects, attributes)
         .map_err(|err| {
             let (site, err) = decode(err);
+            if let Some(slot) = failure_site {
+                *slot = site.map(|site| (site, direct));
+            }
             // SAFETY: failure does not release the original command or its arguments.
             let name = site.map(|site| unsafe {
                 match site {

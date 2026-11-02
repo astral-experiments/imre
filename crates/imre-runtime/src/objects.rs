@@ -18,10 +18,11 @@ pub(crate) use binascii::{base64_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
 mod bytes;
+pub(crate) use bytes::DecodeIssue;
 pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
     bytes_contains, bytes_contains_int, concat_bytes, owned_input as owned_bytes_input,
-    repeat_bytes, rstrip_bytes, split_bytes,
+    repeat_bytes, split_bytes, strip_bytes,
 };
 pub(crate) mod cache_paths;
 mod calendar;
@@ -29,7 +30,10 @@ pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
 mod chainmap;
 mod charmaps;
 mod codecs;
-pub(crate) use codecs::{Codec, CodecInfo, decoding_error, unknown_handler, utf8_prefix};
+pub(crate) use codecs::{
+    Codec, CodecInfo, StrEncoder, Utf16Order, decoding_error, normalize as normalize_codec,
+    unknown_handler, utf8_prefix,
+};
 mod contexts;
 mod contextvars;
 mod copying;
@@ -69,6 +73,7 @@ pub(crate) mod locks;
 pub(crate) mod logging;
 pub(crate) use logging::record::{brace_integer_field, percent_float_field, percent_integer_field};
 mod mappings;
+pub(crate) use mappings::IntKey;
 mod module_specs;
 mod namespaces;
 pub(crate) mod os;
@@ -78,7 +83,7 @@ mod paths;
 pub(crate) use paths::{directory_entries, exists, is_file, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
-pub(crate) use processes::initial_environment;
+pub(crate) use processes::{BoxedPipe, BoxedPopen, initial_environment};
 mod random;
 pub(crate) use random::{choice_index, imre_random_float};
 pub(crate) mod readiness;

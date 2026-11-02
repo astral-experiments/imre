@@ -16,13 +16,37 @@ impl Context {
         }
     }
 
+    /// Borrow the immutable MRO tuple retained by a completed Python class.
+    pub(super) fn published_mro(&self, class: Id) -> Option<&[Id]> {
+        let Value::Class { scope, .. } = self.heap.get(class) else {
+            return None;
+        };
+        let namespace = self.scope_data(*scope).class_namespace.as_ref()?;
+        match self.heap.get(namespace.mro) {
+            Value::Tuple(bases) => Some(bases),
+            _ => None,
+        }
+    }
+
     pub(super) fn lineage(&mut self, class: Id) -> Vec<Id> {
+        self.base_lineage(class, false)
+    }
+
+    fn base_lineage(&mut self, class: Id, published: bool) -> Vec<Id> {
+        if published && let Some(mro) = self.published_mro(class) {
+            return mro.to_vec();
+        }
         let mut lineage = vec![class];
         if let Value::Class { ancestors, .. } = self.heap.get(class) {
             lineage.extend(ancestors);
         } else {
             if let Value::Native(name) = self.heap.get(class) {
                 match name.as_str() {
+                    name if published && let Some(kind) = builtins::exception_kind(name) => {
+                        for base in builtins::exception_ancestors(kind) {
+                            lineage.push(self.builtin(base));
+                        }
+                    }
                     "bool" => lineage.push(self.builtin("int")),
                     "datetime.datetime" => lineage.push(self.builtin("datetime.date")),
                     "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum" => {
@@ -42,12 +66,12 @@ impl Context {
     }
 
     /// Merge the base lineages in C3 order so cooperative methods visit each base once.
-    pub(super) fn linearized_bases(&mut self, bases: &[Id]) -> Result<Vec<Id>> {
+    pub(super) fn linearized_bases(&mut self, bases: &[Id], published: bool) -> Result<Vec<Id>> {
         if bases.is_empty() {
             return Ok(vec![self.builtin("object")]);
         }
         if let [base] = bases {
-            return Ok(self.lineage(*base));
+            return Ok(self.base_lineage(*base, published));
         }
         for (index, base) in bases.iter().enumerate() {
             if bases[..index].contains(base) {
@@ -57,7 +81,10 @@ impl Context {
                 ));
             }
         }
-        let lineages: Vec<_> = bases.iter().map(|&base| self.lineage(base)).collect();
+        let lineages: Vec<_> = bases
+            .iter()
+            .map(|&base| self.base_lineage(base, published))
+            .collect();
         let mut paths: Vec<&[Id]> = lineages.iter().map(Vec::as_slice).collect();
         paths.push(bases);
         let mut order = Vec::new();
@@ -190,7 +217,8 @@ impl Context {
             _ => {}
         }
         if owner != NONE {
-            let lineage = self.lineage(owner);
+            let exception_method = builtins::base_exception_method(name).is_some();
+            let lineage = self.base_lineage(owner, exception_method);
             let after = lineage.iter().skip_while(|&&class| class != start).skip(1);
             let instance = if owner == receiver { NONE } else { receiver };
             for &class in after {
@@ -199,7 +227,10 @@ impl Context {
                 }
                 // Native types inherit object's subclass hook. An intervening Python
                 // mixin still takes precedence over object in the new class's MRO.
-                if name != "__init_subclass__" && matches!(self.heap.get(class), Value::Native(_)) {
+                if name != "__init_subclass__"
+                    && let Value::Native(kind) = self.heap.get(class)
+                    && !(exception_method && builtins::is_exception(kind))
+                {
                     match self.lookup_attr(class, name) {
                         Ok(value) => return self.bind_attribute(value, instance, owner),
                         Err(error) if error.kind == "AttributeError" => {}

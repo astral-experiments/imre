@@ -167,6 +167,7 @@ def current():
     assert pathsep is os.pathsep is path_list_sep is os.path.pathsep is posixpath.pathsep
     assert linesep is os.linesep and linesep == "\n"
     assert not hasattr(posixpath, "linesep")
+    assert os.extsep == os.path.extsep == posixpath.extsep == "."
     assert pathsep == ":"
     assert ":λ::some path:".split(pathsep) == ["", "λ", "", "some path", ""]
     assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join

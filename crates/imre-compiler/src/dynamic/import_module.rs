@@ -8,6 +8,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),
         )),
+        "subprocess" if cfg!(unix) => {
+            Some(("subprocess.py", include_str!("../../stdlib/subprocess.py")))
+        }
         "linecache" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             const UPSTREAM: &str = include_str!(
@@ -45,7 +48,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
                         section("def ismodule(object):", "def isclass(object):"),
-                        section("def formatannotation(", "def formatannotationrelativeto("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),
                         &classes,
@@ -54,6 +56,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "urllib.request" => Some((
+            "urllib/request.py",
+            include_str!("../../stdlib/urllib/request.py"),
+        )),
         "urllib.parse" => Some((
             "urllib/parse.py",
             include_str!("../../stdlib/urllib/parse.py"),
@@ -63,6 +69,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/annotationlib.py"),
         )),
         "functools" => Some(("functools.py", include_str!("../../stdlib/functools.py"))),
+        "sysconfig" if cfg!(target_os = "linux") => {
+            Some(("sysconfig.py", include_str!("../../stdlib/sysconfig.py")))
+        }
         "hashlib" => Some(("hashlib.py", include_str!("../../stdlib/hashlib.py"))),
         // CPython 3.14.5 pathlib and its glob and NT path dependencies. See stdlib/docstrings/LICENSE.
         "pathlib" => Some((

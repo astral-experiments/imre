@@ -229,8 +229,9 @@ impl Context {
                 let name = copy_label(self.str_value(b)?)?;
                 self.module(&name)
             }
+            "fromlist" => self.prepare_fromlist(a, b),
             "from" => self.import_from(a, b),
-            "import_star" => self.import_star(a, b, false),
+            "import_star" => self.import_star(a, b),
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {
@@ -423,6 +424,9 @@ impl Context {
                 .next_item(a)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
+            "neg" if matches!(self.heap.get(a), Value::Calendar { value, .. } if value.class() == "timedelta") => {
+                stdlib::call(self, "datetime.timedelta.__neg__", &[a], &[])
+            }
             "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
                 Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
             }
@@ -661,6 +665,7 @@ pub(super) fn new_context<S: Into<String>>(
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
+        exit_callbacks: Vec::new(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
@@ -720,7 +725,7 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    match ctx.module("__main__") {
+    let status = match ctx.module("__main__") {
         Ok(_) => 0,
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
             Some(status) => status.report(),
@@ -763,7 +768,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             eprintln!("{error}");
             1
         }
-    }
+    };
+    ctx.workers.join_before_exit_callbacks();
+    atexit::run(&mut ctx);
+    status
 }
 
 fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
@@ -947,6 +955,21 @@ pub(super) unsafe extern "C" fn imre_dyn_generator_body(
         let source = unsafe { cstr(source) };
         code.body = value::Body::PendingGenerator { source, body_line };
     }
+}
+
+/// Record a class annotation only when its statement executes.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_class_annotation(
+    ctx: *mut Context,
+    scope: Id,
+    name: Id,
+    thunk: Id,
+    offset: u32,
+) -> Id {
+    // SAFETY: the compiler passes the active context and handles from the current class body.
+    let ctx = unsafe { &mut *ctx };
+    let result = ctx.record_class_annotation(scope, name, thunk, offset);
+    finish(ctx, result)
 }
 
 /// Static per-definition record emitted beside its native entry point.
@@ -1333,6 +1356,7 @@ impl Context {
                 .chain(self.native_code_objects.values())
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
+                .chain(&self.exit_callbacks)
                 .copied()
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())

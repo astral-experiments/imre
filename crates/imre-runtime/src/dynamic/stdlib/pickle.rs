@@ -93,6 +93,11 @@ impl Pickler {
                             }
                         }
                     }
+                    Value::Bytes(bytes) if self.protocol >= 3 => {
+                        encoding::bytes(&mut self.out, self.protocol, bytes)?;
+                        self.remember(ctx, obj)?;
+                    }
+                    Value::Bytes(_) => self.save_legacy_bytes(ctx, obj)?,
                     Value::Dict(_) => self.save_dict(ctx, obj)?,
                     Value::Function { .. } | Value::Class { .. } | Value::Native(_) => {
                         self.save_global(ctx, obj, None)?;
@@ -102,6 +107,26 @@ impl Pickler {
                 Ok(())
             },
         )
+    }
+
+    /// Protocols before BINBYTES reconstruct through bytes() or _codecs.encode(text, "latin1").
+    fn save_legacy_bytes(&mut self, ctx: &mut Context, obj: Id) -> Result<()> {
+        let Value::Bytes(bytes) = ctx.heap.get(obj) else {
+            unreachable!()
+        };
+        let (func, args) = if bytes.is_empty() {
+            (ctx.builtin("bytes"), Vec::new())
+        } else {
+            let text = crate::objects::Codec::Latin1.decode(bytes, None)?;
+            let text = ctx.text(text);
+            let latin1 = ctx
+                .heap
+                .source_string_constant("latin1")
+                .ok_or_else(crate::Error::allocation)?;
+            (ctx.builtin("codecs.encode"), vec![text, latin1])
+        };
+        let args = ctx.alloc(Value::Tuple(args));
+        self.save_reduce(ctx, obj, func, args)
     }
 
     fn save_dict(&mut self, ctx: &mut Context, obj: Id) -> Result<()> {
@@ -286,8 +311,12 @@ impl Pickler {
                 "native pickle does not yet support reduction state, items or state setters",
             ));
         }
-        self.save(ctx, fields[0])?;
-        self.save(ctx, fields[1])?;
+        self.save_reduce(ctx, obj, fields[0], fields[1])
+    }
+
+    fn save_reduce(&mut self, ctx: &mut Context, obj: Id, func: Id, args: Id) -> Result<()> {
+        self.save(ctx, func)?;
+        self.save(ctx, args)?;
         self.out.push(b'R');
         if let Some(&index) = self.memo.get(&obj) {
             // A reconstructor argument can reach this object through a mutable container.

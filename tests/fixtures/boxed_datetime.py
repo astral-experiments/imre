@@ -240,7 +240,79 @@ def test_subclass_construction():
         raise AssertionError("date allocated an incompatible datetime layout")
 
 
+def test_timedelta_negation():
+    class Delta(timedelta):
+        @property
+        def days(self):
+            raise AssertionError("negation read a Python attribute")
+
+    class Override(Delta):
+        def __neg__(self):
+            return "overridden"
+
+    zero = timedelta()
+    assert -zero is zero
+    assert -timedelta(microseconds=1) == timedelta(-1, 86399, 999999)
+    assert -timedelta(-1, 86399, 999999) == timedelta(microseconds=1)
+    assert -timedelta.min == timedelta(days=999999999)
+    assert -timedelta(days=999999999) == timedelta.min
+    try:
+        -timedelta.max
+    except OverflowError as error:
+        assert str(error) == "days=-1000000000; must have magnitude <= 999999999"
+    else:
+        raise AssertionError("negation exceeded the minimum duration")
+
+    inherited = -Delta(microseconds=5)
+    assert type(inherited) is timedelta and inherited == timedelta(microseconds=-5)
+    custom = Override(days=1)
+    assert -custom == "overridden"
+    assert timedelta.__neg__(custom) == timedelta(days=-1)
+
+
+def test_calendar_format():
+    class Day(date):
+        def __str__(self):
+            return "custom day"
+
+        def strftime(self, spec):
+            return "called " + spec
+
+    class Moment(dt):
+        pass
+
+    class Clock(time):
+        def strftime(self, spec):
+            return 37
+
+    day = Day(2024, 2, 29)
+    assert dt.__format__ is date.__format__
+    assert type(date.__format__).__name__ == type(time.__format__).__name__ == "method_descriptor"
+    assert type(day.__format__).__name__ == "builtin_function_or_method"
+    assert format(day) == "custom day" and day.__format__("%Y") == "called %Y"
+    moment = Moment(2024, 2, 29)
+    moment.strftime = lambda spec: "instance " + spec
+    assert format(moment, "%m") == "instance %m"
+    assert format(date(2024, 2, 29)) == "2024-02-29"
+    assert Clock().__format__("%H") == 37
+    try:
+        format(Clock(), "%H")
+    except TypeError as exc:
+        assert str(exc) == "__format__ must return a str, not int"
+    else:
+        raise AssertionError("format accepted a non-string result")
+    for value in (day, dt(2024, 2, 29), time()):
+        try:
+            value.__format__(123)
+        except TypeError as exc:
+            assert str(exc) == "__format__() argument 1 must be str, not int"
+        else:
+            raise AssertionError("non-string format specifier accepted")
+
+
 def current():
+    test_calendar_format()
+    test_timedelta_negation()
     test_subclass_construction()
     test_now()
     test_time_of_day()
@@ -261,6 +333,7 @@ def current():
     else:
         raise AssertionError("invalid timezone accepted")
     test_calendar_ordering()
+    test_calendar_day_methods()
 
 
 def test_calendar_ordering():
@@ -304,6 +377,24 @@ def test_calendar_ordering():
         raise AssertionError("both calendar ordering hooks declined")
     assert first < leap
     assert (first < Reflected(2000, 2, 29)) == "reflected"
+
+
+def test_calendar_day_methods():
+    class Stamp(dt):
+        def weekday(self):
+            raise AssertionError("native isoweekday called weekday")
+
+        def timetuple(self):
+            raise AssertionError("native ctime called timetuple")
+
+        def ctime(self):
+            return "custom " + super().ctime()
+
+    value = Stamp(30, 12, 31, 22, 23, 24, tzinfo=UTC)
+    assert value.ctime() == "custom Tue Dec 31 22:23:24 0030"
+    assert date.ctime(value) == "Tue Dec 31 00:00:00 0030"
+    assert date(1, 1, 1).ctime() == "Mon Jan  1 00:00:00 0001"
+    assert value.isoweekday() == 2 and date(2024, 3, 3).isoweekday() == 7
 
 
 if __name__ == "__main__":

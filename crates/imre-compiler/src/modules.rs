@@ -193,6 +193,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 ).to_owned() + wrappers
             })))
         }
+        // CPython 3.14.5 Lib/configparser.py.
+        "configparser" => Some(("configparser.py", include_str!("../stdlib/configparser.py"))),
         "contextlib" => Some((
             "contextlib.py",
             concat!(
@@ -204,7 +206,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "\n",
                 include_str!("../stdlib/contextlib_redirect.py"),
                 "\n",
-                include_str!("../stdlib/contextlib_contextmanager.py")
+                include_str!("../stdlib/contextlib_contextmanager.py"),
+                "\n",
+                include_str!("../stdlib/contextlib_suppress.py")
             ),
         )),
         "_imre_socketserver_poll" => Some((
@@ -229,6 +233,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/logging/stream.py"),
                 "\n",
                 include_str!("../stdlib/logging/records.py"),
+                "\n",
+                include_str!("../stdlib/logging/formatters.py"),
                 "\n",
                 include_str!("../stdlib/logging/boxed.py"),
             ),
@@ -380,6 +386,7 @@ pub(crate) enum IntrinsicModule {
     Tomli,
     TomliW,
     Shutil,
+    Resource,
     Random,
     Secrets,
     Sysconfig,
@@ -418,6 +425,7 @@ pub(crate) enum IntrinsicModule {
     Threading,
     Thread,
     Codecs,
+    CodecsNative,
     Socket,
     SocketNative,
     Hashlib,
@@ -585,7 +593,7 @@ pub(crate) enum Intrinsic {
     ModuleType,
     GetSysconfigPath,
     OsPathExists,
-    OsDevnull,
+    StringConstant(&'static str),
     SysExit,
     ShlexSplit,
     ShlexQuote,
@@ -836,6 +844,7 @@ impl IntrinsicModule {
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
+            "resource" if cfg!(target_os = "linux") => Some(Self::Resource),
             "random" => Some(Self::Random),
             "secrets" => Some(Self::Secrets),
             "sysconfig" => Some(Self::Sysconfig),
@@ -894,6 +903,7 @@ impl IntrinsicModule {
             "threading" => Some(Self::Threading),
             "_thread" => Some(Self::Thread),
             "codecs" => Some(Self::Codecs),
+            "_codecs" => Some(Self::CodecsNative),
             "socket" => Some(Self::Socket),
             "_socket" => Some(Self::SocketNative),
             "hashlib" => Some(Self::Hashlib),
@@ -1007,6 +1017,7 @@ impl IntrinsicModule {
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
+            (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Struct, "Struct") => Intrinsic::ObjectRuntimeExport("struct.Struct"),
             (Self::Struct, "calcsize") => Intrinsic::ObjectRuntimeExport("struct.calcsize"),
@@ -1148,6 +1159,7 @@ impl IntrinsicModule {
             (Self::Logging, "INFO") => Intrinsic::LogLevel(20),
             (Self::Abc, "ABC") => Intrinsic::Abc,
             (Self::Abc, "ABCMeta") => Intrinsic::AbcMeta,
+            (Self::Abc, "get_cache_token") => Intrinsic::ObjectRuntimeExport("abc.get_cache_token"),
             (Self::Abc, "abstractmethod") => Intrinsic::AbstractMethod,
             (Self::Asyncio, "create_subprocess_exec") => Intrinsic::CreateSubprocessExec,
             (Self::Asyncio, "run") => Intrinsic::RunLoop,
@@ -1190,6 +1202,7 @@ impl IntrinsicModule {
             (Self::Contextlib, "redirect_stderr") => {
                 Intrinsic::ObjectRuntimeExport("contextlib.redirect_stderr")
             }
+            (Self::Contextlib, "suppress") => Intrinsic::ObjectRuntimeExport("contextlib.suppress"),
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
@@ -1412,6 +1425,8 @@ impl IntrinsicModule {
             (Self::Typing, "MutableMapping") => {
                 Intrinsic::ObjectRuntimeExport("typing.MutableMapping")
             }
+            (Self::Typing, "get_args") => Intrinsic::ObjectRuntimeExport("typing.get_args"),
+            (Self::Typing, "get_origin") => Intrinsic::ObjectRuntimeExport("typing.get_origin"),
             (Self::Typing, "get_type_hints") => {
                 Intrinsic::ObjectRuntimeExport("typing.get_type_hints")
             }
@@ -1424,6 +1439,8 @@ impl IntrinsicModule {
             }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
             (Self::Typing, "is_protocol") => Intrinsic::ObjectRuntimeExport("typing.is_protocol"),
+            (Self::Typing, "Annotated") => Intrinsic::ObjectRuntimeExport("typing.Annotated"),
+            (Self::Typing, "ForwardRef") => Intrinsic::ObjectRuntimeExport("typing.ForwardRef"),
             (Self::Typing, "Required") => Intrinsic::ObjectRuntimeExport("typing.Required"),
             (Self::Typing, "NotRequired") => Intrinsic::ObjectRuntimeExport("typing.NotRequired"),
             (Self::Typing, "ReadOnly") => Intrinsic::ObjectRuntimeExport("typing.ReadOnly"),
@@ -1459,15 +1476,23 @@ impl IntrinsicModule {
             (Self::Threading, "_RLock") => Intrinsic::ObjectRuntimeExport("threading._RLock"),
             (Self::Threading, "_PyRLock") => Intrinsic::ObjectRuntimeExport("threading._PyRLock"),
             (Self::Threading, "_CRLock") => Intrinsic::ObjectRuntimeExport("threading._CRLock"),
+            (Self::Threading, "Condition") => Intrinsic::ObjectRuntimeExport("threading.Condition"),
+            (Self::Threading, "Event") => Intrinsic::ObjectRuntimeExport("threading.Event"),
             (Self::Threading, "Thread") => Intrinsic::ObjectRuntimeExport("threading.Thread"),
             (Self::Threading, "_dangling") => Intrinsic::ObjectRuntimeExport("threading._dangling"),
             (Self::Threading, "main_thread") => {
                 Intrinsic::ObjectRuntimeExport("threading.main_thread")
             }
+            (Self::Threading, "currentThread") => {
+                Intrinsic::ObjectRuntimeExport("threading.currentThread")
+            }
             (Self::Threading, "current_thread") => {
                 Intrinsic::ObjectRuntimeExport("threading.current_thread")
             }
             (Self::Threading, "enumerate") => Intrinsic::ObjectRuntimeExport("threading.enumerate"),
+            (Self::Threading, "activeCount") => {
+                Intrinsic::ObjectRuntimeExport("threading.activeCount")
+            }
             (Self::Threading, "active_count") => {
                 Intrinsic::ObjectRuntimeExport("threading.active_count")
             }
@@ -1551,6 +1576,7 @@ impl IntrinsicModule {
                 "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
                 "IPV6_V6ONLY" => "_socket.IPV6_V6ONLY",
                 "SO_REUSEADDR" => "_socket.SO_REUSEADDR",
+                "SO_REUSEPORT" => "_socket.SO_REUSEPORT",
                 "SO_SNDBUF" => "_socket.SO_SNDBUF",
                 "TCP_NODELAY" => "_socket.TCP_NODELAY",
                 "SHUT_RD" => "_socket.SHUT_RD",
@@ -1597,6 +1623,10 @@ impl IntrinsicModule {
             (Self::Socket, "EAI_SERVICE") => Intrinsic::ObjectRuntimeExport("socket.EAI_SERVICE"),
             (Self::Socket, "SOL_TCP") => Intrinsic::ObjectRuntimeExport("socket.SOL_TCP"),
             (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
+            (Self::Socket, "create_server") => {
+                Intrinsic::ObjectRuntimeExport("socket.create_server")
+            }
+            (Self::Socket, "SO_REUSEPORT") => Intrinsic::ObjectRuntimeExport("socket.SO_REUSEPORT"),
             (Self::Socket, "has_dualstack_ipv6") => {
                 Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")
             }
@@ -1768,7 +1798,11 @@ impl IntrinsicModule {
             (Self::Itertools, "combinations_with_replacement") => {
                 Intrinsic::Combinatorial(crate::ir::Combinatorial::CombinationsWithReplacement)
             }
+            (Self::Itertools, "batched") => Intrinsic::ObjectRuntimeExport("itertools.batched"),
             (Self::Itertools, "count") => Intrinsic::Count,
+            (Self::Itertools, "filterfalse") => {
+                Intrinsic::ObjectRuntimeExport("itertools.filterfalse")
+            }
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
             (Self::Itertools, "cycle") => Intrinsic::Cycle,
@@ -1808,6 +1842,13 @@ impl IntrinsicModule {
             }
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
+            }
+            (Self::Resource, "getrlimit") => Intrinsic::ObjectRuntimeExport("resource.getrlimit"),
+            (Self::Resource, "RLIMIT_STACK") => {
+                Intrinsic::ObjectRuntimeExport("resource.RLIMIT_STACK")
+            }
+            (Self::Resource, "RLIM_INFINITY") => {
+                Intrinsic::ObjectRuntimeExport("resource.RLIM_INFINITY")
             }
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },
@@ -1876,7 +1917,8 @@ impl IntrinsicModule {
             (Self::Os, "fsdecode") => Intrinsic::FsDecode,
             (Self::Os, "fsencode") => Intrinsic::FsEncode,
             (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
-            (Self::Os, "devnull") => Intrinsic::OsDevnull,
+            (Self::Os, "devnull") => Intrinsic::StringConstant("/dev/null"),
+            (Self::Os | Self::OsPath | Self::PosixPath, "extsep") => Intrinsic::StringConstant("."),
             (Self::GenericPath | Self::PosixPath, "commonprefix") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
             }
