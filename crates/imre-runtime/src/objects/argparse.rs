@@ -54,6 +54,7 @@ enum Action {
 #[derive(Deserialize)]
 struct OptionSpec {
     action: Action,
+    metavar: Option<String>,
     flag: String,
     dest: String,
     positional: bool,

@@ -83,14 +83,14 @@ impl OptionSpec {
     }
 
     fn label(&self, summary: bool, color: bool) -> String {
-        let mut metavar = if !self.has_choices {
-            if self.positional() {
-                self.dest()
-            } else {
-                self.dest().to_uppercase()
-            }
-        } else {
+        let mut metavar = if let Some(metavar) = &self.metavar {
+            metavar.clone()
+        } else if self.has_choices {
             format!("{{{}}}", self.choices_text(",", false))
+        } else if self.positional() {
+            self.dest()
+        } else {
+            self.dest().to_uppercase()
         };
         if self.positional() {
             if summary {
@@ -811,6 +811,7 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
             let value = match (name, option) {
                 ("prog", _) => prog.to_owned(),
                 ("dest", Some(option)) => option.dest(),
+                ("metavar", Some(option)) => option.metavar.as_deref().unwrap_or("None").to_owned(),
                 ("type", Some(option)) => option.converter.as_deref().unwrap_or("None").to_owned(),
                 ("default", Some(option)) if option.path_default => {
                     super::super::paths::normalize(option.default.as_deref().unwrap()).to_string()

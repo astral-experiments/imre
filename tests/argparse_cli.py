@@ -46,7 +46,11 @@ CASES = {
         ["--unit", "ab"], ["--unit=c", "-.１２"], ["--label"], ["--label=-42"],
         ["--note", "red"], ["--note=42"],
     ],
-    "format": [[], ["--help"], ["--mode", "text"], ["--unknown"]],
+    "format": [
+        [], ["--help"], ["--mode", "text", "--fast", "--choice", "a"], ["--mode", "invalid"], ["--unknown"],
+        ["empty", "--help"], ["empty", "--nil", "ok", "--a", "value"], ["empty", "--nil"],
+        ["hidden", "--help"], ["hidden", "--param1"], ["hidden", "--param1", "--param2"],
+    ],
     "blank_help": [[], ["format"], ["print"], ["parse"]],
     "counts": [
         [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
