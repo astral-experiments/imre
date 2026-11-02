@@ -355,6 +355,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "count",
     "decode",
     "endswith",
+    "find",
     "join",
     "lstrip",
     "rfind",

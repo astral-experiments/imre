@@ -756,6 +756,7 @@ impl Context {
                             | "object.__str__"
                             | "bytes.count"
                             | "bytes.decode"
+                            | "bytes.find"
                             | "bytes.rfind"
                             | "bytes.rsplit"
                             | "bytes.rstrip"

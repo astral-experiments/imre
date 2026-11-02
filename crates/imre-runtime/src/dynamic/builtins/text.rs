@@ -1410,7 +1410,7 @@ pub(super) fn method(
     if matches!(
         (owner, name),
         ("str", "find" | "rfind" | "count" | "index")
-            | ("bytes", "count" | "rfind")
+            | ("bytes", "count" | "find" | "rfind")
             | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
         if !kwargs.is_empty() {
@@ -1522,7 +1522,13 @@ pub(super) fn method(
                 });
                 return Ok(ctx.int(count as i64));
             }
-            let offset = window.and_then(|v| memchr::memmem::rfind(v, needle));
+            let offset = window.and_then(|v| {
+                if name == "find" {
+                    memchr::memmem::find(v, needle)
+                } else {
+                    memchr::memmem::rfind(v, needle)
+                }
+            });
             return Ok(ctx.int(offset.map_or(-1, |at| (start + at) as i64)));
         }
         if name == "count" {
