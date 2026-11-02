@@ -49,6 +49,29 @@ REJECTED = {
             "with patch.object(Owner, 'value', replacement('wrong')):\n    pass\n"
         ),
     }, "expected int, got str"),
+    "unused_chdir_preserves_checked_calls": ({
+        "main.py": "from os import chdir\ndef path(n: int) -> int:\n    return n\npath('wrong')\n",
+    }, "expected int, got str"),
+    "posix_chdir_checks_path": ({
+        "main.py": "from posix import chdir as cd\ndef path(n: int) -> int:\n    return n\ncd(path=path('wrong'))\n",
+    }, "expected int, got str"),
+    "captured_chdir_keeps_callback_checks": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int) -> int:\n    return n\n"
+            "move = chdir\nmove('.')\npath('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
+    "captured_chdir_preserves_callable_parameter": ({
+        "main.py": (
+            "from os import chdir\nfrom typing import Callable\n"
+            "def invoke(cb: Callable[[int], int]) -> int:\n"
+            "    move = chdir\n    move('.')\n    return cb('wrong')\n"
+            "def identity(n: int) -> int:\n    return n\nprint(invoke(identity))\n"
+        ),
+    }, "invalid-argument-type"),
+    "chdir_keeps_subsequent_checks": ({
+        "main.py": "import os\ndef path(n: int) -> int:\n    return n\nos.chdir('.')\npath('wrong')\n",
+    }, "expected int, got str"),
     "unused_struct_keeps_return_checks": ({
         "main.py": "from struct import Struct as Format\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
     }, "expected int, got str"),
@@ -222,6 +245,24 @@ ACCEPTED = {
             "patcher = patch.object\nwith patcher(Owner, 'value', 2):\n    assert Owner.value == 2\n"
             "assert Owner.value == 1\n"
         ),
+    },
+    "optional_import_error_alternatives": {
+        "main.py": "from pkg.adapter import chosen, available, recovered\nprint(chosen, available, recovered)\n",
+        "pkg/__init__.py": "",
+        "pkg/adapter.py": (
+            "try:\n    import absent.plugin as chosen\n"
+            "except ImportError:\n    from .fallback import value as chosen\n"
+            "try:\n    from .preferred import value as available\n"
+            "except ImportError:\n    from .unexpected import value as available\n"
+            "try:\n    from .broken import value as recovered\n"
+            "except ImportError:\n    from .fallback import value as recovered\n"
+            "from . import after\n"
+        ),
+        "pkg/preferred.py": "print('preferred')\nvalue = 23\n",
+        "pkg/broken.py": "print('broken')\nraise ImportError('provider unavailable')\n",
+        "pkg/fallback.py": "print('fallback')\nvalue = 17\n",
+        "pkg/unexpected.py": "raise AssertionError('unselected fallback executed')\n",
+        "pkg/after.py": "print('after')\n",
     },
     "optional_platform_import": {
         "main.py": "import configure\nfrom adapter import present, absent\nprint(present, absent)\n",
@@ -521,6 +562,26 @@ ACCEPTED = {
         "data/__init__.py": "",
         "data/message.txt": "hello\n",
         "data/directory-payload.txt": "directory payload\n",
+    },
+    "source_loader_compile_override": {
+        "main.py": (
+            "from importlib.machinery import SourceFileLoader\n"
+            "from types import ModuleType\n"
+            "class PluginLoader(SourceFileLoader):\n"
+            "    def get_data(self, path):\n"
+            "        data = super().get_data(path)\n"
+            "        self.source_to_code = self.compile_plugin\n"
+            "        return data\n"
+            "    def compile_plugin(self, data, path):\n"
+            "        assert data == b'value = 1' and path == self.path\n"
+            "        return compile('value = 2', path, 'exec')\n"
+            "path = __file__ + '.plugin.py'\n"
+            "with open(path, 'wb') as out:\n"
+            "    out.write(b'value = 1')\n"
+            "module = ModuleType('plugin')\n"
+            "PluginLoader('plugin', path).exec_module(module)\n"
+            "assert module.value == 2\n"
+        ),
     },
     "source_loader_path_stats": {
         "main.py": (

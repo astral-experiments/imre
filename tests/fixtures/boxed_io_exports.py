@@ -1,5 +1,6 @@
 import _io
 import io
+import sys
 from io import __all__ as exports
 
 
@@ -11,6 +12,7 @@ def current():
         "TextIOBase TextIOWrapper UnsupportedOperation SEEK_SET SEEK_CUR SEEK_END "
         "DEFAULT_BUFFER_SIZE text_encoding IncrementalNewlineDecoder Reader Writer"
     ).split()
+    assert all(sys._is_interned(name) for name in exports)
     assert io.BlockingIOError is _io.BlockingIOError is BlockingIOError
     assert not hasattr(_io, "__all__")
     try:

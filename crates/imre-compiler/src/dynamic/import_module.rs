@@ -13,6 +13,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/json/boxed_init.py"),
             ),
         )),
+        "json.encoder" => Some((
+            "json/encoder.py",
+            include_str!("../../stdlib/json/encoder.py"),
+        )),
         "json.decoder" => Some((
             "json/decoder.py",
             include_str!("../../stdlib/json/decoder.py"),
@@ -20,6 +24,16 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "json.scanner" => Some((
             "json/scanner.py",
             include_str!("../../stdlib/json/scanner.py"),
+        )),
+        // A fresh _collections module exports the same accelerator type. Keep its
+        // Python wrappers around native storage in their own module namespace.
+        "_collections" => Some((
+            "_collections.py",
+            "from _imre_ordered_dict import OrderedDict\n",
+        )),
+        "_imre_ordered_dict" => Some((
+            "_imre_ordered_dict.py",
+            include_str!("../../stdlib/_imre_ordered_dict.py"),
         )),
         "traceback" => Some((
             "traceback.py",
@@ -73,6 +87,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "bisect" => Some(("bisect.py", include_str!("../../stdlib/bisect.py"))),
         "urllib.error" => Some((
             "urllib/error.py",
             include_str!("../../stdlib/urllib/error.py"),
@@ -118,6 +133,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/tempfile/names.py"),
                 "\n",
                 include_str!("../../stdlib/tempfile/boxed_spool.py"),
+                "\n",
+                include_str!("../../stdlib/tempfile/directory.py"),
             ),
         )),
         "doctest" => Some((

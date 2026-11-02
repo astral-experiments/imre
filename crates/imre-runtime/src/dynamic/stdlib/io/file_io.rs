@@ -2,7 +2,7 @@
 
 use std::cell::Cell;
 use std::io::ErrorKind;
-use std::os::fd::{IntoRawFd, RawFd};
+use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
@@ -306,11 +306,7 @@ pub(in crate::dynamic) fn open(
             None,
         )?;
         let handle = state(ctx, raw).expect("initialized FileIO");
-        let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
-        let buffer =
-            files::BinaryFile::Descriptor(super::BufferedFd::new(raw, handle, reading, capacity))
-                .into_value()?;
-        let buffer = ctx.heap.alloc_file_writer(buffer)?;
+        let buffer = buffered_descriptor(ctx, raw, handle, reading)?;
         if binary {
             return Ok(buffer);
         }
@@ -447,6 +443,50 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         opener,
         None,
     )
+}
+
+fn buffered_descriptor(
+    ctx: &mut Context,
+    raw: Id,
+    handle: Rc<RawFile>,
+    reading: bool,
+) -> Result<Id> {
+    let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
+    let buffer =
+        files::BinaryFile::Descriptor(super::BufferedFd::new(raw, handle, reading, capacity))
+            .into_value()?;
+    ctx.heap.alloc_file_writer(buffer)
+}
+
+impl Context {
+    /// Wrap mkstemp's read/write descriptor in a write-only buffered Python stream.
+    pub(in crate::dynamic) fn named_temporary_writer(
+        &mut self,
+        file: std::fs::File,
+        name: Id,
+    ) -> Result<Id> {
+        self.module("io")?;
+        let fd = file.as_raw_fd();
+        let raw = self.instance(self.builtins["_io.FileIO"], None);
+        initialize_file(
+            self,
+            raw,
+            name,
+            mode("wb"),
+            true,
+            DescriptorLookup::Resolved(Some(fd)),
+            None,
+            None,
+        )?;
+        // FileIO takes ownership of a passed descriptor only after successful initialization.
+        let _ = file.into_raw_fd();
+        let handle = state(self, raw).expect("initialized FileIO");
+        let result = buffered_descriptor(self, raw, handle.clone(), false);
+        if result.is_err() {
+            handle.close()?;
+        }
+        result
+    }
 }
 
 /// Expose the child stream and the native communication cursor through the same file.

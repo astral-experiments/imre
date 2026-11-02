@@ -2600,6 +2600,9 @@ impl<'a> Checker<'a> {
         {
             return Err(self.object_builtin_error("binary readinto", attribute));
         }
+        if receiver.ty == Type::BinaryIO && attribute.attr.as_str() == "writelines" {
+            return Err(self.object_builtin_error("binary writelines", attribute));
+        }
         if let Type::Class(class) = receiver.ty
             && self.native_mock(class)
             && self.module
@@ -6036,7 +6039,13 @@ impl<'a> Checker<'a> {
     }
 
     fn object_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
-        let error = self.object_runtime_export(name, node);
+        self.graph.needs_object_runtime.set(true);
+        self.scoped_builtin_error(name, node)
+    }
+
+    /// Select the object provider only when this precise diagnostic reaches the driver.
+    fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
+        let error = self.object_export_error(name, node);
         self.graph
             .object_builtin_errors
             .borrow_mut()
@@ -6280,6 +6289,9 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::Chdir => {
+                    return Err(self.scoped_builtin_error("posix.chdir", expression));
+                }
                 Intrinsic::TracebackFormatter(name) => {
                     return Err(self.object_export_error(name, expression));
                 }
@@ -9004,6 +9016,23 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 return self.credential_call(call, name);
             }
+            Some(Binding::Intrinsic(Intrinsic::Chdir)) => {
+                // The boxed provider performs path and fd conversion. Check the operands
+                // here and keep checking subsequent expressions with its known None result.
+                for arg in &call.arguments.args {
+                    self.evaluated_argument(if let ast::Expr::Starred(star) = arg {
+                        &star.value
+                    } else {
+                        arg
+                    })?;
+                }
+                for keyword in &call.arguments.keywords {
+                    self.evaluated_argument(&keyword.value)?;
+                }
+                let error = self.scoped_builtin_error("posix.chdir", call);
+                self.defer_object_error(&error);
+                return Ok(Expr::none());
+            }
             Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
                 self.arguments(call, &[], None)?;
                 return Ok(Expr {
@@ -9861,6 +9890,9 @@ impl<'a> Checker<'a> {
             }
             if attribute.attr.as_str() == "fromkeys" && self.types.mapping(receiver.ty).is_some() {
                 return self.dict_fromkeys(call, None, Some(receiver));
+            }
+            if receiver.ty == Type::BinaryIO && attribute.attr.as_str() == "writelines" {
+                return Err(self.object_builtin_error("binary writelines", call));
             }
             self.reject_builtin_keywords(call)?;
             if receiver.ty == Type::StringIO

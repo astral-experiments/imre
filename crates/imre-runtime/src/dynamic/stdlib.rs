@@ -28,7 +28,7 @@ mod hashlib;
 mod hmac;
 mod inspect;
 pub(super) mod itertools;
-mod locale;
+pub(super) mod locale;
 pub(super) mod tempfile;
 mod time;
 mod tokenize;
@@ -40,6 +40,7 @@ mod logging;
 mod marshal;
 mod math;
 mod metadata;
+pub(super) mod monitoring;
 mod operator;
 mod ordered_dict;
 pub(super) mod os;
@@ -101,7 +102,10 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    matches!(name, "atexit" | "builtins" | "errno" | "genericpath" | "itertools")
+    matches!(
+        name,
+        "_imre_ordered_dict" | "atexit" | "builtins" | "errno" | "genericpath" | "itertools"
+    )
         || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }
@@ -424,7 +428,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
+        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd") => {
+            ctx.builtin(&format!("math.{name}"))
+        }
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
@@ -436,7 +442,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "default_directory"
             | "open_named" | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
-        ("_locale", "getencoding" | "setlocale") => ctx.builtin(&format!("_locale.{name}")),
+        ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
         ("_locale", "LC_COLLATE") => ctx.int(libc::LC_COLLATE.into()),
         ("_locale", "LC_CTYPE") => ctx.int(libc::LC_CTYPE.into()),
@@ -586,6 +592,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("resource", "RLIMIT_STACK") => ctx.int(i64::from(libc::RLIMIT_STACK)),
         #[cfg(target_os = "linux")]
         ("resource", "RLIM_INFINITY") => resource::limit(ctx, resource::INFINITY),
+        ("random", "randrange") => ctx.builtin("random.randrange"),
         ("secrets", "choice") => ctx.builtin("secrets.choice"),
         ("select", "select" | "poll") => ctx.builtin(&format!("select.{name}")),
         ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
@@ -729,7 +736,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
-        | ("_imre_json", "loads")
+        | ("_imre_json", "loads" | "surrogate_text")
         | ("_imre_linecache", "source_lines")
         | (
             "_imre_metadata",
@@ -746,7 +753,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
-        | ("_json", "encode_basestring" | "encode_basestring_ascii")
+        | ("_json", "_imre_encode_one_shot" | "encode_basestring" | "encode_basestring_ascii")
         | ("random", "random" | "choice")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
@@ -1299,6 +1306,9 @@ pub(super) fn call(
             ));
         }
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
+    }
+    if name == "random.randrange" {
+        return random::randrange(ctx, args, kwargs);
     }
     if matches!(name, "random.choice" | "secrets.choice") {
         return random::choice(ctx, args, kwargs, name == "secrets.choice");
@@ -2093,6 +2103,8 @@ pub(super) fn call(
             return json::encode_basestring(ctx, name, args, kwargs);
         }
         "json.loads" => (1, &["s"]),
+        "_json._imre_encode_one_shot" => (10, &[]),
+        "_imre_json.surrogate_text" => (1, &[]),
         "_imre_json.loads" => (2, &[]),
         "json.dump" => (2, JSON_DUMP_KEYWORDS),
         "json.dumps" => (1, &JSON_DUMP_KEYWORDS[1..]),
@@ -2102,6 +2114,16 @@ pub(super) fn call(
         "hash.update" => (2, &[]),
         "hash.copy" => (1, &[]),
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
+        "file.writelines" | "_IOBase.writelines" => {
+            let receiver = argument(args, 0)?;
+            return io::lines(
+                ctx,
+                receiver,
+                name.strip_prefix("_IOBase.").unwrap_or(name),
+                &args[1..],
+                kwargs,
+            );
+        }
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
         "struct.unpack" | "file.read" | "file.read1" | "file.readline" | "file.readlines"
@@ -2332,6 +2354,15 @@ pub(super) fn call(
         "struct.unpack" => {
             let (_, layout) = structure::parse(ctx, argument(args, 0)?)?;
             structure::unpack(ctx, &layout, argument(args, 1)?)?
+        }
+        "_json._imre_encode_one_shot" => json::one_shot(ctx, args)?,
+        "_imre_json.surrogate_text" => {
+            let storage = ctx.scalar_value(argument(args, 0)?);
+            if matches!(ctx.heap.get(storage), Value::SurrogateStr(_)) {
+                storage
+            } else {
+                NONE
+            }
         }
         "_imre_json.loads" => json::loads(ctx, argument(args, 0)?, Some(argument(args, 1)?))?,
         "json.loads" => {

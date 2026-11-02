@@ -353,23 +353,6 @@ fn filtered(
 
 const LINE_OVERFLOW: &str = "Python int too large to convert to C ssize_t";
 
-/// Report an abandoned directory stream through the active ResourceWarning filters.
-pub(crate) fn unclosed_scandir(module: &str, filename: &str, line: isize, iterator: &str) {
-    let diagnostic = match filtered(1, module, line, || {
-        format!("unclosed scandir iterator {iterator}")
-    }) {
-        Ok(None) => return,
-        Ok(Some((Action::Error, message))) => format!(
-            "Exception ignored while finalizing scandir iterator {iterator}:\nResourceWarning: {message}"
-        ),
-        Ok(Some((_, message))) => format!("{filename}:{line}: ResourceWarning: {message}"),
-        Err(()) => format!(
-            "Exception ignored while finalizing scandir iterator {iterator}:\nOverflowError: {LINE_OVERFLOW}"
-        ),
-    };
-    let _ = crate::sys::write_stderr(&diagnostic, true);
-}
-
 /// Report the unreaped handle before the destructor performs its own poll.
 pub(super) fn unobserved_child(pid: libc::pid_t) {
     const LINE: isize = 1139; // subprocess.Popen.__del__

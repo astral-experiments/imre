@@ -748,7 +748,7 @@ pub(super) enum Value {
         decode: Id,
     },
     CodecDecoder(crate::objects::Codec),
-    Hash(std::rc::Rc<std::cell::RefCell<crate::objects::HashState>>),
+    Hash(crate::objects::SharedHash),
     Hmac(Hmac),
     Struct {
         format: String,
@@ -810,6 +810,8 @@ pub(super) enum Value {
         scope: Id,
         origin: Option<Id>,
         initializing: bool,
+        // Exception class retained by this generation of the _locale module.
+        locale_error: Option<Id>,
         // Imported modules are resolved separately from independently constructed ones.
         constructor: Option<Id>,
     },
@@ -1064,7 +1066,7 @@ impl Value {
             Self::Str(_) | Self::SurrogateStr(_) => "str",
             Self::Map { .. } => "map",
             Self::Filter { .. } => "filter",
-            Self::Hash(state) => state.borrow().class_name(),
+            Self::Hash(state) => state.lock().class_name(),
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
@@ -1294,7 +1296,7 @@ impl Value {
                     visit.extend([*value, *key]);
                 }
             }
-            Self::Scandir(scan) => visit.push(scan.source),
+            Self::Scandir(scan) => visit.push(scan.source.get()),
             Self::DirEntry(entry) => {
                 visit.extend([entry.name, entry.path]);
                 visit.extend(entry.cached_objects());
@@ -1337,9 +1339,11 @@ impl Value {
                 scope,
                 origin,
                 constructor,
+                locale_error,
                 ..
             } => {
                 visit.push(*scope);
+                visit.extend(locale_error);
                 visit.extend(origin);
                 visit.extend(constructor);
             }

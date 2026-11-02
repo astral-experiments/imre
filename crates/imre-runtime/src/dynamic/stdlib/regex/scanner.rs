@@ -163,13 +163,14 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         return Err(Error::new("RuntimeError", "invalid SRE code"));
     }
     let source = branches.join("|");
-    let regex =
-        build_regex(&source, false, effective).map_err(|e| Error::new("re.PatternError", e))?;
+    let regex = build_regex(&source, false, effective, &[])
+        .map_err(|e| Error::new("re.PatternError", e))?;
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(Pattern {
         source: NONE,
         flags,
         bytes: false,
         engine_source: source,
+        assertions: Vec::new(),
         regex,
         full: OnceCell::new(),
         split_retry: OnceCell::new(),

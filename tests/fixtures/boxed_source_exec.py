@@ -478,6 +478,36 @@ def annotated(arg: (lambda: (shadowed, (shadowed := 4)))):
             raise AssertionError(text)
 
 
+def method_argument_lifetime():
+    import gc
+
+    events = []
+
+    class Target:
+        def __call__(self, value):
+            events.append(value)
+
+        def __del__(self):
+            events.append("released")
+
+    class Holder:
+        pass
+
+    holder = Holder()
+
+    def argument():
+        del holder.method
+        gc.collect()
+        events.append("argument")
+        return "called"
+
+    for source in ("holder.method(argument())", "holder.method(value=argument())"):
+        holder.method = Target()
+        exec(source, {"holder": holder, "argument": argument})
+        assert events == ["argument", "called", "released"], events
+        events.clear()
+
+
 def source_eval():
     make = tuple
     assert eval("make([2, 1])") == (2, 1)
@@ -497,6 +527,7 @@ def source_eval():
 
 def current():
     source_eval()
+    method_argument_lifetime()
     named_bindings()
     source_annotations()
     source_genexpr()

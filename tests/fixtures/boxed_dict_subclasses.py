@@ -2,7 +2,19 @@
 
 
 def ordered_dictionary():
+    import _collections
+    import importlib
+    import sys
     from collections import OrderedDict
+
+    assert OrderedDict is _collections.OrderedDict
+    assert OrderedDict.__module__ == "collections"
+    del sys.modules["_collections"]
+    try:
+        fresh = importlib.import_module("_collections")
+        assert fresh.OrderedDict is OrderedDict
+    finally:
+        sys.modules["_collections"] = _collections
 
     source = OrderedDict(b=[2], a=[1])
     assert source != OrderedDict(a=[1], b=[2])
@@ -81,6 +93,24 @@ def ordered_dictionary():
     source.clear()
     source["self"] = source
     assert repr(source) == "OrderedDict({'self': ...})"
+
+    from copy import copy, deepcopy
+
+    class Slotted(OrderedDict):
+        __slots__ = ("x", "y")
+
+    original = Slotted(a=[1], b=[2])
+    original.x = original["b"]
+    original.label = original["a"]
+    original.move_to_end("a")
+    assert original.__getstate__() == ({"label": original.label}, {"x": original.x})
+    shallow = copy(original)
+    deep = deepcopy(original)
+    for clone in (shallow, deep):
+        assert type(clone) is Slotted and list(clone) == ["b", "a"]
+        assert clone.x is clone["b"] and clone.label is clone["a"]
+        assert not hasattr(clone, "y")
+    assert shallow.x is original.x and deep.x is not original.x
 
     moved = OrderedDict(a=1, b=2, c=3)
     moved.move_to_end("a")

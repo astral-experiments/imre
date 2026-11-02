@@ -738,6 +738,7 @@ dependencies = [
  "md-5",
  "memchr",
  "num-bigint",
+ "num-integer",
  "num-traits",
  "regex-automata",
  "regex-syntax",

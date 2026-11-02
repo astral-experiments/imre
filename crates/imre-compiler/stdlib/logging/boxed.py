@@ -1,26 +1,10 @@
 """Logging for Python modules executed by the native object runtime."""
 import sys
 import warnings
+from _thread import RLock as _Lock
 from types import GenericAlias
 import weakref
 import _imre_logging as _native
-
-
-class _Lock:
-    def __init__(self):
-        self._lock = _native.lock()
-
-    def acquire(self):
-        return _native.acquire(self._lock)
-
-    def release(self):
-        _native.release(self._lock)
-
-    def __enter__(self):
-        return self.acquire()
-
-    def __exit__(self, exc_type, exc, traceback):
-        self.release()
 
 
 _lock = _Lock()
@@ -166,9 +150,10 @@ def _handle_error(record):
         del exc
 
 
-class FileHandler(StreamHandler):
-    terminator = "\n"
+StreamHandler.terminator = "\n"
 
+
+class FileHandler(StreamHandler):
     def __init__(self, filename, mode="a", encoding=None, delay=False, errors=None):
         self.baseFilename = os.path.abspath(os.fspath(filename))
         self.mode = mode
@@ -213,6 +198,27 @@ class FileHandler(StreamHandler):
     def __repr__(self):
         return "<%s %s (%s)>" % (type(self).__name__, self.baseFilename,
                                   getLevelName(self.level))
+
+
+class _StderrHandler(StreamHandler):
+    """
+    This class is like a StreamHandler using sys.stderr, but always uses
+    whatever sys.stderr is currently set to rather than the value of
+    sys.stderr at handler construction time.
+    """
+    def __init__(self, level=NOTSET):
+        """
+        Initialize the handler.
+        """
+        Handler.__init__(self, level)
+
+    @property
+    def stream(self):
+        return sys.stderr
+
+
+_defaultLastResort = _StderrHandler(WARNING)
+lastResort = _defaultLastResort
 
 
 class Filterer(object):
@@ -674,19 +680,34 @@ class Logger(Filterer):
         self.callHandlers(record)
 
     def callHandlers(self, record):
-        current = self
-        found = False
-        while current is not None:
-            for handler in current.handlers:
-                found = True
-                if record.levelno >= handler.level:
-                    handler.handle(record)
-            if not current.propagate:
-                break
-            current = current.parent
-        if not found and record.levelno >= WARNING:
-            sys.stderr.write(_defaultFormatter.format(record) + "\n")
-            sys.stderr.flush()
+        """
+        Pass a record to all relevant handlers.
+
+        Loop through all handlers for this logger and its parents in the
+        logger hierarchy. If no handler was found, output a one-off error
+        message to sys.stderr. Stop searching up the hierarchy whenever a
+        logger with the "propagate" attribute set to zero is found - that
+        will be the last logger whose handlers are called.
+        """
+        c = self
+        found = 0
+        while c:
+            for hdlr in c.handlers:
+                found = found + 1
+                if record.levelno >= hdlr.level:
+                    hdlr.handle(record)
+            if not c.propagate:
+                c = None    #break out
+            else:
+                c = c.parent
+        if (found == 0):
+            if lastResort:
+                if record.levelno >= lastResort.level:
+                    lastResort.handle(record)
+            elif raiseExceptions and not self.manager.emittedNoHandlerWarning:
+                sys.stderr.write("No handlers could be found for logger"
+                                 " \"%s\"\n" % self.name)
+                self.manager.emittedNoHandlerWarning = True
 
     def info(self, msg, *args, **kwargs):
         """

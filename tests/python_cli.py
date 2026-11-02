@@ -1444,11 +1444,31 @@ sys.path.append("unused")""",
         )
         (root / "surrogate_module.py").write_text(r'value = f"\udfff{3}"')
         compare("-c", "import sys, surrogate_module; sys.path.append('unused'); print(repr(surrogate_module.value))")
-        rejected = run(imre, "-c", r"""import sys
+        compare("-c", r"""import sys, ast
 sys.path.append("unused")
-compile(r"value = '\ud800'", "<literal>", "exec")""")
-        assert rejected.returncode == 1 and not rejected.stdout, rejected
-        assert b"NotImplementedError: runtime source: surrogate string escapes" in rejected.stderr, rejected.stderr
+scope = {}
+exec(compile(r"x = ('\ud800', '\ufffd' r'\udfff' '\udfff')", "<literal>", "exec"), scope)
+print(ascii(scope["x"]))
+print(ascii(ast.literal_eval(r"'\ud800' '�' '\udfff'")))
+print(ascii(eval(r"'\ud800'")), ascii(eval(compile(r"'\udfff'", "<literal>", "eval"))))
+exec(compile(r"def f(x: '\udfff'): pass", "<annotation>", "exec"), scope)
+print(ascii(scope["f"].__annotations__))
+for expression, expected in [(r"f'\ud800{3}'", "\ud8003"), (r"f'{3}' '\udfff'", "3\udfff")]:
+    exec(compile("formatted = " + expression, "<fstring>", "exec"), scope)
+    assert scope["formatted"] == expected
+sys.displayhook = lambda value: print(ascii(value))
+exec(compile(r"'\udfff'", "<interactive>", "single"), scope)
+try:
+    compile(r"'\t\udfff'", "<docstring>", "exec")
+except UnicodeEncodeError as exc:
+    print(ascii(exc.args))""")
+        compare("-OO", "-c", r"""import sys
+sys.path.append("unused")
+scope = {}
+exec(compile("class C:\n " + r"'\udfff'" + "\n def f(self):\n  " + r"'\ud800'", "<doc>", "exec"), scope)
+sys.displayhook = lambda value: print(ascii(value))
+exec(compile(r"'\udfff'", "<interactive>", "single"), scope)
+print(scope["C"].__doc__, scope["C"].f.__doc__)""")
         assert run(imre, "-c").returncode == 2
         assert run(imre, "-I", "missing.py").returncode == 2
 
@@ -1757,6 +1777,7 @@ def report(text):
             "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
             "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
             "boxed_thread_bound_lock.py",
+            "boxed_thread_hash_update.py",
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
@@ -1797,6 +1818,17 @@ def report(text):
             "reference = union.__args__[-1]\n"
             "print(type(reference).__name__, reference.__forward_arg__)",
         )
+        monitoring_entry = root / "monitoring_entry.py"
+        (root / "monitoring_helper.py").write_text(
+            "from sys import monitoring\ndef line_mask():\n    return monitoring.events.LINE\n"
+        )
+        for program in (
+            "from monitoring_helper import line_mask\nprint(line_mask())\n",
+            "import sys\nprint(sys.monitoring.events.LINE)\n",
+            "from sys import monitoring\nprint(monitoring.events.LINE)\n",
+        ):
+            monitoring_entry.write_text(program)
+            compare("-EB", monitoring_entry, native_args=("run", monitoring_entry, "--quiet"))
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         compare("-IB", fixtures / "boxed_unittest_patch.py")
         call_args = fixtures / "unittest_mock_call_args.py"
@@ -1830,6 +1862,7 @@ def report(text):
             "boxed_sys_hash_info.py",
             "boxed_sys_flags.py",
             "boxed_sys_jit.py",
+            "boxed_sys_monitoring_events.py",
             "boxed_bytes_add.py",
             "boxed_binary_iterators.py",
             "boxed_array.py",
@@ -1843,6 +1876,7 @@ def report(text):
             "boxed_float.py",
             "boxed_round.py",
             "boxed_math_rounding.py",
+            "boxed_math_gcd.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
@@ -1853,6 +1887,8 @@ def report(text):
             "boxed_temporary_file.py",
             "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
+            "boxed_named_temporary_writer.py",
+            "boxed_temporary_directory.py",
             "boxed_tempfile_default_directory.py",
             "boxed_tempfile_mktemp.py",
             "boxed_tempfile_wrapper.py",
@@ -1863,6 +1899,7 @@ def report(text):
             "boxed_lru_cache_metadata.py",
             "boxed_functools_cache.py",
             "boxed_functools_reduce.py",
+            "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
             "boxed_contextmanager.py",
             "boxed_total_ordering.py",
@@ -1888,6 +1925,7 @@ def report(text):
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
+            "boxed_re_positive_lookahead.py",
             "boxed_re_split.py",
             "boxed_re_match_subscript.py",
             "boxed_re_sub.py",
@@ -1913,9 +1951,11 @@ def report(text):
             "boxed_io_reimport.py",
             "boxed_io_text_encoding.py",
             "boxed_locale.py",
+            "boxed_locale_error.py",
             "boxed_io_protocols.py",
             "boxed_io_abc_registration.py",
             "boxed_logging_handler_list.py",
+            "boxed_logging_rlock.py",
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
@@ -1931,6 +1971,7 @@ def report(text):
             "boxed_select.py",
             "boxed_urlsplit.py",
             "boxed_urllib_request.py",
+            "boxed_urllib_file.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
@@ -2048,6 +2089,7 @@ def report(text):
             "boxed_json_containers.py",
             "boxed_json_decoder.py",
             "boxed_json_module_doc.py",
+            "boxed_json_encoder.py",
             "boxed_json_quote.py",
             "boxed_deque.py",
             "boxed_deque_deep_equal.py",
@@ -2120,6 +2162,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_os_chdir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_capabilities.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
@@ -2210,6 +2254,11 @@ except ImportError:
             "print(errno.errorcode is errorcode, errno.errorcode[errno.EADDRINUSE])\n",
         )
         (root / "chunks.bin").write_bytes(b"0a\r\n\xffx!\n")
+        compare(
+            "-IB", "-c",
+            "with open('written.bin', 'wb') as f:\n    f.writelines([b'a', b'b'])\n"
+            "with open('written.bin', 'rb') as f:\n    print(f.read())",
+        )
         plugin.write_bytes((Path(__file__).with_name("fixtures") / "boxed_io.py").read_bytes())
         compare("-IB", "-c", imports + "arithmetic.exercise('chunks.bin')")
         compare(
