@@ -38,6 +38,13 @@ try:
         assert str(exc) == "peek of closed file"
     else:
         raise AssertionError("closed reader allowed peek")
+    memory = io.BytesIO()
+    with io.FileIO(src, "r") as raw, NativePair(raw, memory, 4) as mixed:
+        assert mixed.peek() == b"ab\nc" and mixed.read(1) == b"a"
+        assert mixed.write(b"xyz") == 3 and memory.getvalue() == b""
+        assert mixed.flush() is None and memory.getvalue() == b"xyz"
+        assert mixed.write(b"!") == 1
+    assert raw.closed and memory.closed
     raw_in = io.FileIO(src, "r")
     raw_out = io.FileIO(dst, "w")
     with Pair(raw_in, raw_out, 4) as pair:
