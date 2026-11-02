@@ -19,9 +19,28 @@ pub(super) fn compile(
     original: String,
 ) -> Result<(String, Matcher), String> {
     let ascii = bytes || flags & ASCII != 0;
-    if locale_dependent(pattern, flags) {
+    let locale_case = locale_dependent(pattern, flags);
+    let fold = if locale_case {
+        #[cfg(target_os = "linux")]
+        {
+            // CPython tests a negated locale set separately against lower and upper.
+            // Word membership and boundaries also need the locale's own classifier.
+            if !bytes
+                || flags & IGNORECASE == 0
+                || pattern.contains("[^")
+                || locale_dependent(pattern, super::LOCALE)
+            {
+                return Err(original);
+            }
+            ByteFold::Locale
+        }
+        #[cfg(not(target_os = "linux"))]
         return Err(original);
-    }
+    } else if bytes && flags & IGNORECASE != 0 {
+        ByteFold::Ascii
+    } else {
+        ByteFold::None
+    };
     let Ok((mut source, groups)) = imre_regex::backtracking_source(
         pattern,
         flags & VERBOSE != 0,
@@ -30,6 +49,11 @@ pub(super) fn compile(
     ) else {
         return Err(original);
     };
+    // The Python tokenizer emits \k<N> only for a real reference. Literal
+    // backslashes are hex-escaped, including within assertions or classes.
+    if locale_case && !source.contains(r"\k<") {
+        return Err(original);
+    }
     // Raw, octal, and hex high-byte literals all translate to \xNN. Even in
     // bytes mode the VM encodes these literals as UTF-8.
     if bytes
@@ -72,14 +96,68 @@ pub(super) fn compile(
     } else {
         BytesMode::Unicode
     };
-    let matcher = Lookahead::new(&source, groups, mode, bytes && flags & IGNORECASE != 0)?;
+    let matcher = Lookahead::new(&source, groups, mode, fold)?;
     Ok((source, Matcher::Lookahead(Box::new(matcher))))
+}
+
+#[derive(Clone, Copy)]
+enum ByteFold {
+    None,
+    Ascii,
+    #[cfg(target_os = "linux")]
+    Locale,
+}
+
+impl ByteFold {
+    fn subject(self, input: &[u8]) -> Result<Cow<'_, [u8]>, String> {
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::Locale => {
+                // The compiled expression contains ASCII literals and classes. They
+                // retain their meaning as long as locale folding never crosses the
+                // ASCII boundary. Backreferences compare the real locale lowercase.
+                let lower = crate::sys::with_process_locale(|| {
+                    let mut table = [0u8; 256];
+                    for byte in 0..=u8::MAX {
+                        // SAFETY: both ctype calls accept an unsigned char promoted to int.
+                        let (lo, hi) = unsafe {
+                            (
+                                libc::tolower(i32::from(byte)) as u8,
+                                libc::toupper(i32::from(byte)) as u8,
+                            )
+                        };
+                        if byte.is_ascii() {
+                            if lo != byte.to_ascii_lowercase() || hi != byte.to_ascii_uppercase() {
+                                return None;
+                            }
+                        } else if lo.is_ascii() || hi.is_ascii() {
+                            return None;
+                        }
+                        table[usize::from(byte)] = lo;
+                    }
+                    Some(table)
+                })
+                .ok_or("unsupported case mapping for byte backreferences in the current locale")?;
+                if input.iter().any(|&b| lower[usize::from(b)] != b) {
+                    Ok(Cow::Owned(
+                        input.iter().map(|&b| lower[usize::from(b)]).collect(),
+                    ))
+                } else {
+                    Ok(Cow::Borrowed(input))
+                }
+            }
+            Self::Ascii if input.iter().any(u8::is_ascii_uppercase) => {
+                Ok(Cow::Owned(input.to_ascii_lowercase()))
+            }
+            _ => Ok(Cow::Borrowed(input)),
+        }
+    }
 }
 
 pub(super) struct Lookahead {
     search: Regex,
     mode: BytesMode,
-    fold_bytes: bool,
+    fold: ByteFold,
     anchored: OnceCell<Result<Regex, Error>>,
     nonempty: OnceCell<Result<Regex, Error>>,
     pub(super) groups: GroupInfo,
@@ -90,7 +168,7 @@ impl Lookahead {
         source: &str,
         groups: GroupInfo,
         mode: BytesMode,
-        fold_bytes: bool,
+        fold: ByteFold,
     ) -> Result<Self, String> {
         let search = RegexBuilder::new(source)
             .bytes_mode(mode)
@@ -102,7 +180,7 @@ impl Lookahead {
         Ok(Self {
             search,
             mode,
-            fold_bytes,
+            fold,
             groups,
             anchored: OnceCell::new(),
             nonempty: OnceCell::new(),
@@ -110,7 +188,7 @@ impl Lookahead {
     }
 
     pub(super) fn with_source(&self, source: &str) -> Result<Self, String> {
-        Self::new(source, self.groups.clone(), self.mode, self.fold_bytes)
+        Self::new(source, self.groups.clone(), self.mode, self.fold)
     }
 
     /// Preserve the prefix for anchors, and make endpos the assertion's end of input.
@@ -121,6 +199,8 @@ impl Lookahead {
         captures: &mut Captures,
     ) -> Result<(), String> {
         captures.clear();
+        // Captures still index the original subject one byte per folded byte.
+        let haystack = self.fold.subject(&input.haystack()[..input.end()])?;
         let regex = if nonempty || input.get_anchored() == Anchored::Yes {
             let cache = if nonempty {
                 &self.nonempty
@@ -143,14 +223,6 @@ impl Lookahead {
             }
         } else {
             &self.search
-        };
-        let haystack = &input.haystack()[..input.end()];
-        // Bytes IGNORECASE folds ASCII only. Folding the subject keeps backreferences
-        // exact for captures mixing ASCII and high bytes. Spans still index the original.
-        let haystack = if self.fold_bytes && haystack.iter().any(u8::is_ascii_uppercase) {
-            Cow::Owned(haystack.to_ascii_lowercase())
-        } else {
-            Cow::Borrowed(haystack)
         };
         if let Some(found) = regex
             .captures_from_pos(haystack.as_ref(), input.start())
