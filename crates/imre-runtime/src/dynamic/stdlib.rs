@@ -421,7 +421,15 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
             "_imre_dataclasses",
-            "field_identifier" | "make_type" | "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata" | "slotted_type" | "retarget_class_cell",
+            "field_identifier"
+            | "make_type"
+            | "is_defaultdict"
+            | "load_global"
+            | "loaded_module"
+            | "members"
+            | "metadata"
+            | "slotted_type"
+            | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
             ctx.builtin(&format!("{module}.{name}"))
@@ -1059,15 +1067,23 @@ pub(super) fn call(
         return Ok(if receiver.is_some() { NONE } else { dict });
     }
     if name == "sys._getframemodulename" {
-        let [depth] =
-            builtins::bind_method_arguments("_getframemodulename", &args[1..], kwargs, ["depth"], 1)?;
+        let [depth] = builtins::bind_method_arguments(
+            "_getframemodulename",
+            &args[1..],
+            kwargs,
+            ["depth"],
+            1,
+        )?;
         let depth = match depth {
             Some(value) => frame_depth(ctx, value)?,
             None => 0,
         };
         let argument = ctx.int(i64::from(depth));
         audit::event(ctx, name, &[argument])?;
-        return Ok(ctx.heap.caller_module_at(depth.max(0) as usize).unwrap_or(NONE));
+        return Ok(ctx
+            .heap
+            .caller_module_at(depth.max(0) as usize)
+            .unwrap_or(NONE));
     }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
@@ -1611,9 +1627,14 @@ pub(super) fn call(
             ("make_type", [name, bases, members], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
                 if name.contains('\0') {
-                    return Err(Error::new("ValueError", "type name must not contain null characters"));
+                    return Err(Error::new(
+                        "ValueError",
+                        "type name must not contain null characters",
+                    ));
                 }
-                let bases = ctx.tuple_items(*bases)?.ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
+                let bases = ctx
+                    .tuple_items(*bases)?
+                    .ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
                 return ctx.dataclass_from_namespace(name, bases, *members, "types", false, true);
             }
             ("is_defaultdict", [obj], []) => {
@@ -1638,12 +1659,17 @@ pub(super) fn call(
             }
             ("retarget_class_cell", [method, old, new], []) => {
                 // Compiled methods keep the implicit __class__ cell apart from ordinary freevars.
-                if let Value::Function { class_cell: Some(cell), code, .. } = *ctx.heap.get(*method)
+                if let Value::Function {
+                    class_cell: Some(cell),
+                    code,
+                    ..
+                } = *ctx.heap.get(*method)
                     && matches!(ctx.heap.get(cell), Value::ClassCell(Some(owner)) if owner == old)
                 {
                     let parameters = ctx.code_object(code).parameters;
-                    let sig: serde_json::Value = serde_json::from_str(ctx.str_value(parameters)?)
-                        .map_err(|e| Error::new("SystemError", e.to_string()))?;
+                    let sig: serde_json::Value =
+                        serde_json::from_str(ctx.str_value(parameters)?)
+                            .map_err(|e| Error::new("SystemError", e.to_string()))?;
                     if sig["class_cell"] == true {
                         *ctx.heap.get_mut(cell) = Value::ClassCell(Some(*new));
                         ctx.heap.weak_edge_removed(*old);
@@ -1652,7 +1678,9 @@ pub(super) fn call(
                 }
                 return Ok(FALSE);
             }
-            ("slotted_type", [old, namespace], []) => return ctx.slotted_dataclass(*old, *namespace),
+            ("slotted_type", [old, namespace], []) => {
+                return ctx.slotted_dataclass(*old, *namespace);
+            }
             ("members", [class], []) => {
                 if let Value::Class { scope, .. } = *ctx.heap.get(*class) {
                     let names = ctx.scope_data(scope).names.clone();

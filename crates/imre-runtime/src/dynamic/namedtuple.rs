@@ -82,15 +82,22 @@ pub(super) fn doc_method(
         return match (name, rest) {
             ("__get__", [obj] | [obj, _]) if *obj != NONE => ctx.read_slot_member(member, *obj),
             ("__get__", [_, owner]) if *owner != NONE => Ok(member),
-            ("__get__", [_] | [_, _]) => Err(Error::new("TypeError", "__get__(None, None) is invalid")),
-            ("__set__", [obj, value]) => ctx.write_slot_member(member, *obj, Some(*value)).map(|()| NONE),
+            ("__get__", [_] | [_, _]) => {
+                Err(Error::new("TypeError", "__get__(None, None) is invalid"))
+            }
+            ("__set__", [obj, value]) => ctx
+                .write_slot_member(member, *obj, Some(*value))
+                .map(|()| NONE),
             ("__delete__", [obj]) => ctx.write_slot_member(member, *obj, None).map(|()| NONE),
             ("__reduce__", []) => {
                 let get = ctx.builtin("getattr");
                 let args = ctx.alloc(Value::Tuple(vec![owner, field]));
                 Ok(ctx.alloc(Value::Tuple(vec![get, args])))
             }
-            _ => Err(Error::new("TypeError", format!("invalid arguments to {name}"))),
+            _ => Err(Error::new(
+                "TypeError",
+                format!("invalid arguments to {name}"),
+            )),
         };
     }
     let field = match ctx.heap.get(member) {

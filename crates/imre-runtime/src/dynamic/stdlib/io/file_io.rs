@@ -353,9 +353,7 @@ pub(in crate::dynamic) fn open(
         "r" | "rt" | "tr" => crate::objects::TextFile::open(path, 0)
             .map(Value::TextFile)
             .map_err(Error::from),
-        _ => {
-            files::BinaryFile::open(path, filename, mode).and_then(files::BinaryFile::into_value)
-        }
+        _ => files::BinaryFile::open(path, filename, mode).and_then(files::BinaryFile::into_value),
     };
     match file {
         Ok(file) if writing => ctx.heap.alloc_file_writer(file),
