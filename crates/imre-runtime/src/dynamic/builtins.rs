@@ -253,6 +253,7 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
                 | "NotImplementedType"
                 | "ellipsis"
                 | "code"
+                | "coroutine"
                 | "cell"
                 | "function"
                 | "module"
@@ -279,6 +280,7 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
         name,
         "iterator"
             | "generator"
+            | "coroutine_wrapper"
             | "list_iterator"
             | "list_reverseiterator"
             | "tuple_iterator"
@@ -410,6 +412,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             super::stdlib::os::scandir::ENTRY
         }
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
+        Value::HandlerLock(_) if super::thread_rlock::is_method(attr) => super::thread_rlock::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
@@ -433,6 +436,14 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if matches!(attr, "send" | "throw" | "close") => "generator",
+        Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
+            "coroutine"
+        }
+        Value::CoroutineWrapper(_)
+            if super::generator_protocol::coroutine_method("coroutine_wrapper", attr) =>
+        {
+            "coroutine_wrapper"
+        }
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::ByteArray(_)
             if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
@@ -596,15 +607,15 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "function"
         }
         Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
-            "contextvars.ContextVar"
+            "_contextvars.ContextVar"
         }
         Value::Context(_)
             if matches!(attr, "copy" | "run" | "get" | "keys" | "values" | "items") =>
         {
-            "contextvars.Context"
+            "_contextvars.Context"
         }
         Value::ContextToken { .. } if matches!(attr, "__enter__" | "__exit__") => {
-            "contextvars.Token"
+            "_contextvars.Token"
         }
         _ => return None,
     };
@@ -626,7 +637,7 @@ fn arity(name: &str, args: &[Id], min: usize, max: usize) -> Result<()> {
 }
 
 /// Read the sole positional argument of a CPython `METH_O` builtin.
-fn one_positional_arg(name: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+pub(super) fn one_positional_arg(name: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(type_error(format!("{name}() takes no keyword arguments")));
     }
@@ -913,20 +924,26 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
-    if name == "object.__hash__" {
+    if matches!(name, "object.__hash__" | "object.__repr__") {
+        let method = name.trim_start_matches("object.");
         let Some((&receiver, rest)) = args.split_first() else {
-            return Err(type_error(
-                "descriptor '__hash__' of 'object' object needs an argument",
-            ));
+            return Err(type_error(format!(
+                "descriptor '{method}' of 'object' object needs an argument"
+            )));
         };
         if !kwargs.is_empty() {
-            return Err(type_error("wrapper __hash__() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "wrapper {method}() takes no keyword arguments"
+            )));
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__repr__" {
+            return ctx.object_repr(receiver);
         }
         return Ok(ctx.int(Context::identity_hash(receiver)));
     }
@@ -957,6 +974,16 @@ pub(super) fn call(
     }
     if let Some((owner, method)) = name.split_once('.') {
         return match owner {
+            "coroutine" | "coroutine_wrapper" => {
+                positional(name, kwargs)?;
+                let (min, max) = match method {
+                    "send" => (2, 2),
+                    "throw" => (2, 4),
+                    _ => (1, 1),
+                };
+                arity(name, args, min, max)?;
+                ctx.call_coroutine_method(owner, method, args)
+            }
             "generator" if method == "send" => {
                 let [generator, value] = args else {
                     return Err(type_error("generator.send() takes exactly one argument"));
@@ -1218,16 +1245,7 @@ pub(super) fn call(
                     args.len()
                 )));
             };
-            let (Ok(left), Ok(right)) = (ctx.as_int(*a), ctx.as_int(*b)) else {
-                return Err(type_error(format!(
-                    "unsupported operand type(s) for divmod(): '{}' and '{}'",
-                    ctx.type_name(*a),
-                    ctx.type_name(*b)
-                )));
-            };
-            let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
-            let remainder = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 4)?));
-            Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])))
+            ctx.divmod(*a, *b)
         }
         "hash" => {
             positional(name, kwargs)?;
@@ -1505,70 +1523,7 @@ pub(super) fn call(
             super::static_method::construct(ctx, *callable)
         }
         "property" => super::property::construct(ctx, args, kwargs),
-        "open" => {
-            arity(name, args, 0, 4)?;
-            let [path, mode, buffering, encoding] = bind(
-                name,
-                args,
-                kwargs,
-                ["file", "mode", "buffering", "encoding"],
-            )?;
-            let filename = path.ok_or_else(|| type_error("open requires a file"))?;
-            let buffering = buffering
-                .map(|value| ctx.index_integer(value))
-                .transpose()?
-                .map_or(Some(-1), |n| n.to_i64().and_then(|n| i32::try_from(n).ok()))
-                .ok_or_else(|| {
-                    Error::new("OverflowError", "Python int too large to convert to C int")
-                })?;
-            if buffering == 0 {
-                return super::stdlib::io::open_raw(ctx, filename, mode, encoding);
-            }
-            if buffering > 0 {
-                return Err(Error::new(
-                    "ValueError",
-                    "explicit buffer sizes are unsupported",
-                ));
-            }
-            let path = ctx.str_value(filename)?;
-            let mode = mode.map(|id| ctx.str_value(id)).transpose()?.unwrap_or("r");
-            if let Some(encoding) = encoding.filter(|&value| value != NONE) {
-                if mode.contains('b') {
-                    return Err(Error::new(
-                        "ValueError",
-                        "binary mode doesn't take an encoding argument",
-                    ));
-                }
-                let encoding = ctx.str_value(encoding)?;
-                if !matches!(
-                    crate::objects::Codec::lookup(encoding)?,
-                    crate::objects::Codec::Utf8 { signature: false }
-                ) {
-                    return Err(Error::new(
-                        "ValueError",
-                        "text files require UTF-8 encoding",
-                    ));
-                }
-            }
-            let text_mode = match mode {
-                "r" | "rt" | "tr" => Some(0),
-                "w" | "wt" | "tw" => Some(1),
-                _ => None,
-            };
-            let writing = mode.contains(['w', 'a', 'x']);
-            let file = match text_mode {
-                Some(mode) => crate::objects::TextFile::open(path, mode)
-                    .map(Value::TextFile)
-                    .map_err(Error::from),
-                None => super::stdlib::BinaryFile::open(path, mode)
-                    .and_then(super::stdlib::BinaryFile::into_value),
-            };
-            match file {
-                Ok(file) if writing => ctx.heap.alloc_file_writer(file),
-                Ok(file) => Ok(ctx.alloc(file)),
-                Err(error) => Err(ctx.with_open_filename(error, filename)?),
-            }
-        }
+        "open" => super::stdlib::io::open(ctx, args, kwargs),
         "__import__" => {
             let [module, _, _, fromlist, level] = bind(
                 name,

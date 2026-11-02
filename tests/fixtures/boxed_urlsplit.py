@@ -1,6 +1,6 @@
 import urllib
 from urllib import parse
-from urllib.parse import SplitResult, SplitResultBytes, unquote, urlsplit, urlunsplit
+from urllib.parse import SplitResult, SplitResultBytes, unquote, unquote_plus, urlsplit, urlunsplit
 
 
 def current():
@@ -16,6 +16,30 @@ def current():
         result_type = parse.ParseResultBytes if isinstance(url, bytes) else parse.ParseResult
         print(type(parsed) is result_type, isinstance(parsed, result_type), tuple(parsed), parsed.params)
         print(parsed.geturl(), parse.urlunparse(parsed))
+    class CustomSplit(str):
+        def lstrip(self, chars):
+            return self
+        def replace(self, old, new):
+            return self
+        def split(self, sep, maxsplit):
+            return ('changed?', 'override')
+    assert parse.urldefrag(CustomSplit('path#frag')).geturl() == 'changed?#override'
+
+    assert parse.unwrap(' < URL:https://example.test/a?b#c > ') == 'https://example.test/a?b#c'
+    assert parse.unwrap('url:path') == 'url:path'
+
+    class Redirect(str):
+        def lstrip(self, chars):
+            return 'ALT:path?#changed'
+
+    assert parse.urldefrag(Redirect('other:path#old')).geturl() == 'alt:path?#changed'
+    regular = Redirect('other:path')
+    assert parse.urldefrag(regular).url is regular
+    for url in ("doc?#", "doc?#part", b"doc?#", b"doc?#part"):
+        result = parse.urldefrag(url)
+        result_type = parse.DefragResultBytes if isinstance(url, bytes) else parse.DefragResult
+        print(type(result) is result_type, isinstance(result, tuple), result._fields)
+        print(tuple(result), result.url, result.fragment, result.geturl())
     try:
         print(parse.urlparse("http://example:oracle").port)
     except ValueError as error:
@@ -56,6 +80,7 @@ def current():
     print(urlsplit(url=" /a\tb#f", scheme="http", allow_fragments=False))
     print(unquote(string="%FF+caf%C3%A9"), unquote(b"%FF", encoding="latin-1"))
     print(unquote("%", errors="werkzeug.url_quote"), unquote("untouched", encoding=None))
+    print(unquote_plus("x+%2B%FF", encoding="latin-1"), parse.unquote_plus("a+b%FF", errors="ignore"))
     parts = urlsplit("https://example:bad/path")
     print(parts.path, parts.hostname)
     try:

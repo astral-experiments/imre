@@ -4,11 +4,13 @@
 use super::value::{Body, Code, Location};
 use super::{Context, Error, Id, NONE, Result, Value, copy_label, ffi};
 use crate::objects::locks::PrimitiveLock;
+use crate::objects::logging::HandlerLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 enum Argument {
     Lock(Arc<PrimitiveLock>),
+    RLock(Arc<HandlerLock>),
     Builtin(&'static str),
 }
 
@@ -137,6 +139,7 @@ impl Callback {
             let id = slot.ok_or_else(unsupported)?;
             let value = match ctx.heap.get(id) {
                 Value::PrimitiveLock(lock) => Argument::Lock(Arc::clone(lock)),
+                Value::HandlerLock(lock) => Argument::RLock(Arc::clone(lock)),
                 Value::Native(name) if !high_level && name == "_thread._count" => {
                     Argument::Builtin("_thread._count")
                 }
@@ -196,8 +199,11 @@ impl Callback {
         for value in self.values {
             let id = match value {
                 Argument::Lock(lock) => *aliases
-                    .entry(Arc::as_ptr(&lock))
+                    .entry(Arc::as_ptr(&lock).cast::<()>())
                     .or_insert_with(|| ctx.alloc(Value::PrimitiveLock(lock))),
+                Argument::RLock(lock) => *aliases
+                    .entry(Arc::as_ptr(&lock).cast::<()>())
+                    .or_insert_with(|| ctx.alloc(Value::HandlerLock(lock))),
                 Argument::Builtin(name) => ctx.builtin(name),
             };
             args.push(id);

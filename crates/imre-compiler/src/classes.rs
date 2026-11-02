@@ -233,6 +233,10 @@ impl Classes {
             .map(|(def, node)| (*def, node.as_ref()))
             .collect::<Vec<_>>();
         let definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
+        // An inner class uses the object runtime, but every fixed class must validate first.
+        if let Some(error) = graph.class_body_error.borrow().as_ref() {
+            return Err(error.clone());
+        }
         let data_names: HashSet<_> = definitions
             .iter()
             .flat_map(|class| {
@@ -464,6 +468,7 @@ fn collect_class(
         // override which could select a different callable at runtime.
         let member = match statement {
             ast::Stmt::FunctionDef(f) => Some(f.name.as_str()),
+            ast::Stmt::ClassDef(c) => Some(c.name.as_str()),
             ast::Stmt::AnnAssign(a) => a.target.as_name_expr().map(|n| n.id.as_str()),
             ast::Stmt::Assign(a) => a
                 .targets
@@ -871,6 +876,16 @@ fn collect_class(
                 exception_aliases.insert(name.id.to_string(), target);
             }
             ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {}
+            ast::Stmt::ClassDef(nested) if !is_enum && dataclass.is_none() && !exception_layout => {
+                let name = nested.name.as_str();
+                if !names.insert(name.to_owned()) {
+                    return Err(module.error(nested, "duplicate class binding"));
+                }
+                class_bindings.insert(name.to_owned());
+                graph.class_body_error.borrow_mut().get_or_insert_with(|| {
+                    module.error(nested, "nested classes require native class construction")
+                });
+            }
             ast::Stmt::Pass(_) => {}
             ast::Stmt::If(branch)
                 if branch
@@ -888,7 +903,7 @@ fn collect_class(
                     branch,
                     "conditional method definitions require native class construction",
                 );
-                graph.conditional_method_error.replace(Some(error.clone()));
+                graph.class_body_error.replace(Some(error.clone()));
                 return Err(error);
             }
             _ => {

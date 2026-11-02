@@ -1,15 +1,39 @@
 """Stream annotations and special forms for the runtime typing module."""
 
+import builtins as _builtins
 import typing as _typing
 from _collections_abc import MutableMapping as _MutableMapping
+from collections import defaultdict as _defaultdict
 from functools import lru_cache
-from typing import Generic, TypeVar
+from typing import Any, Callable, Generic, Protocol, TypeVar
 
 
 T = TypeVar("T")
 KT = TypeVar("KT")
 VT = TypeVar("VT")
 AnyStr = TypeVar("AnyStr", bytes, str)
+
+
+# Protocol introspection from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def is_protocol(tp: type, /) -> _builtins.bool:
+    """Return True if the given type is a Protocol.
+
+    Example::
+
+        >>> from typing import Protocol, is_protocol
+        >>> class P(Protocol):
+        ...     def a(self) -> str: ...
+        ...     b: int
+        >>> is_protocol(P)
+        True
+        >>> is_protocol(int)
+        False
+    """
+    return (
+        isinstance(tp, type)
+        and getattr(tp, '_is_protocol', False)
+        and tp != _typing.Protocol
+    )
 
 
 class IO(Generic[AnyStr]):
@@ -22,6 +46,172 @@ class BinaryIO(IO[bytes]):
 
 class TextIO(IO[str]):
     __slots__ = ()
+
+
+# TypedDict creation and nominal recognition from CPython 3.14.5 Lib/typing.py.
+class _TypedDictMeta(type):
+    __call__ = dict
+
+    def __subclasscheck__(cls, other):
+        raise TypeError("TypedDict does not support instance and class checks")
+
+    __instancecheck__ = __subclasscheck__
+
+
+def _typeddict_field(value):
+    if value is None:
+        return type(None)
+    value = _type_check(value, "TypedDict field must be a type")
+    if not isinstance(value, type):
+        raise NotImplementedError("TypedDict field qualifiers and non-class annotations are unsupported")
+    return value
+
+
+def _configure_typeddict(cls, fields, total, declared=False, thunks=None):
+    def checked_thunk(thunk):
+        def evaluate():
+            return _typeddict_field(thunk())
+        return evaluate
+
+    if thunks is None:
+        annotations = {key: _typeddict_field(tp) for key, tp in fields.items()}
+    else:
+        # Keep the original class namespace's lazy cache. The public annotator
+        # also needs to reevaluate fields after that cache has been populated.
+        deferred = {key: checked_thunk(thunk) for key, thunk in thunks.items()}
+        thunks.update(deferred)
+        eager = {key: _typeddict_field(tp) for key, tp in fields.items() if key not in deferred}
+        annotations = dict(eager)
+        for key, thunk in deferred.items():
+            annotations[key] = thunk()
+
+    def __annotate__(format):
+        if format == 4:
+            if declared and fields:
+                raise NotImplementedError("TypedDict class STRING annotations require their source expressions")
+            result = {}
+            for name, tp in fields.items():
+                if tp is None:
+                    result[name] = "None"
+                elif tp is type(None):
+                    result[name] = "NoneType"
+                else:
+                    result[name] = (tp.__qualname__ if tp.__module__ == "builtins" else
+                                    f"{tp.__module__}.{tp.__qualname__}")
+            return result
+        if format in (1, 3):
+            if thunks is None:
+                return dict(annotations)
+            result = dict(eager)
+            for key, thunk in deferred.items():
+                result[key] = thunk()
+            return result
+        raise NotImplementedError(format)
+
+    cls.__annotate__ = __annotate__
+    if thunks is None:
+        cls.__annotations__ = dict(annotations)
+    required = set()
+    optional = set()
+    for key in fields:
+        if total:
+            required.add(key)
+        else:
+            optional.add(key)
+    cls.__required_keys__ = frozenset(required)
+    cls.__optional_keys__ = frozenset(optional)
+    cls.__readonly_keys__ = frozenset()
+    cls.__mutable_keys__ = frozenset(fields)
+    cls.__total__ = total
+
+
+_typeddict_sentinel = object()
+
+
+def TypedDict(typename, fields=_typeddict_sentinel, /, *, total=True):
+    """A simple typed namespace. At runtime it is equivalent to a plain dict.
+
+    TypedDict creates a dictionary type such that a type checker will expect all
+    instances to have a certain set of keys, where each key is
+    associated with a value of a consistent type. This expectation
+    is not checked at runtime.
+
+    Usage::
+
+        >>> class Point2D(TypedDict):
+        ...     x: int
+        ...     y: int
+        ...     label: str
+        ...
+        >>> a: Point2D = {'x': 1, 'y': 2, 'label': 'good'}  # OK
+        >>> b: Point2D = {'z': 3, 'label': 'bad'}           # Fails type check
+        >>> Point2D(x=1, y=2, label='first') == dict(x=1, y=2, label='first')
+        True
+
+    The type info can be accessed via the Point2D.__annotations__ dict, and
+    the Point2D.__required_keys__ and Point2D.__optional_keys__ frozensets.
+    TypedDict supports an additional equivalent form::
+
+        Point2D = TypedDict('Point2D', {'x': int, 'y': int, 'label': str})
+
+    By default, all keys must be present in a TypedDict. It is possible
+    to override this by specifying totality::
+
+        class Point2D(TypedDict, total=False):
+            x: int
+            y: int
+
+    This means that a Point2D TypedDict can have any of the keys omitted. A type
+    checker is only expected to support a literal False or True as the value of
+    the total argument. True is the default, and makes all items defined in the
+    class body be required.
+
+    The Required and NotRequired special forms can also be used to mark
+    individual keys as being required or not required::
+
+        class Point2D(TypedDict):
+            x: int               # the "x" key must always be present (Required is the default)
+            y: NotRequired[int]  # the "y" key can be omitted
+
+    See PEP 655 for more details on Required and NotRequired.
+
+    The ReadOnly special form can be used
+    to mark individual keys as immutable for type checkers::
+
+        class DatabaseUser(TypedDict):
+            id: ReadOnly[int]  # the "id" key must not be modified
+            username: str      # the "username" key can be changed
+
+    """
+    if fields is _typeddict_sentinel or fields is None:
+        raise NotImplementedError("the deprecated TypedDict fields argument requires warnings._deprecated")
+    fields = dict(fields)
+    td = _typing._new_typeddict(typename, False)
+    td.__orig_bases__ = (TypedDict,)
+    _configure_typeddict(td, fields, total)
+    return td
+
+
+_TypedDict = _typing._new_typeddict("TypedDict", True)
+TypedDict.__mro_entries__ = lambda bases: (_TypedDict,)
+
+
+def is_typeddict(tp):
+    """Check if an annotation is a TypedDict class.
+
+    For example::
+
+        >>> from typing import TypedDict
+        >>> class Film(TypedDict):
+        ...     title: str
+        ...     year: int
+        ...
+        >>> is_typeddict(Film)
+        True
+        >>> is_typeddict(dict)
+        False
+    """
+    return isinstance(tp, _TypedDictMeta)
 
 
 # Runtime assertions from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
@@ -463,6 +653,7 @@ Tuple.__doc__ = \
     """
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
 Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
+DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
 
@@ -636,3 +827,93 @@ def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, fo
         result = _resolve_hint(value, globalns, localns, obj, (), include_extras)
         hints[name] = type(None) if result is None else result
     return hints
+
+
+# PEP 681 decorator from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+class _IdentityCallable(Protocol):
+    def __call__[T](self, arg: T, /) -> T:
+        ...
+
+
+def dataclass_transform(
+    *,
+    eq_default: _builtins.bool = True,
+    order_default: _builtins.bool = False,
+    kw_only_default: _builtins.bool = False,
+    frozen_default: _builtins.bool = False,
+    field_specifiers: tuple[type[Any] | Callable[..., Any], ...] = (),
+    **kwargs: Any,
+) -> _IdentityCallable:
+    """Decorator to mark an object as providing dataclass-like behaviour.
+
+    The decorator can be applied to a function, class, or metaclass.
+
+    Example usage with a decorator function::
+
+        @dataclass_transform()
+        def create_model[T](cls: type[T]) -> type[T]:
+            ...
+            return cls
+
+        @create_model
+        class CustomerModel:
+            id: int
+            name: str
+
+    On a base class::
+
+        @dataclass_transform()
+        class ModelBase: ...
+
+        class CustomerModel(ModelBase):
+            id: int
+            name: str
+
+    On a metaclass::
+
+        @dataclass_transform()
+        class ModelMeta(type): ...
+
+        class ModelBase(metaclass=ModelMeta): ...
+
+        class CustomerModel(ModelBase):
+            id: int
+            name: str
+
+    The ``CustomerModel`` classes defined above will
+    be treated by type checkers similarly to classes created with
+    ``@dataclasses.dataclass``.
+    For example, type checkers will assume these classes have
+    ``__init__`` methods that accept ``id`` and ``name``.
+
+    The arguments to this decorator can be used to customize this behavior:
+    - ``eq_default`` indicates whether the ``eq`` parameter is assumed to be
+        ``True`` or ``False`` if it is omitted by the caller.
+    - ``order_default`` indicates whether the ``order`` parameter is
+        assumed to be True or False if it is omitted by the caller.
+    - ``kw_only_default`` indicates whether the ``kw_only`` parameter is
+        assumed to be True or False if it is omitted by the caller.
+    - ``frozen_default`` indicates whether the ``frozen`` parameter is
+        assumed to be True or False if it is omitted by the caller.
+    - ``field_specifiers`` specifies a static list of supported classes
+        or functions that describe fields, similar to ``dataclasses.field()``.
+    - Arbitrary other keyword arguments are accepted in order to allow for
+        possible future extensions.
+
+    At runtime, this decorator records its arguments in the
+    ``__dataclass_transform__`` attribute on the decorated object.
+    It has no other runtime effect.
+
+    See PEP 681 for more details.
+    """
+    def decorator(cls_or_fn):
+        cls_or_fn.__dataclass_transform__ = {
+            "eq_default": eq_default,
+            "order_default": order_default,
+            "kw_only_default": kw_only_default,
+            "frozen_default": frozen_default,
+            "field_specifiers": field_specifiers,
+            "kwargs": kwargs,
+        }
+        return cls_or_fn
+    return decorator

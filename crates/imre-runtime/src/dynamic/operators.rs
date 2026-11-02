@@ -310,11 +310,16 @@ impl Context {
         Ok(self.require_index_result(value)?.1)
     }
 
+    /// Convert an index to the signed C long used by Python's native argument parser.
+    pub(super) fn index_c_long(&mut self, value: Id) -> Result<i64> {
+        self.index_integer(value)?.to_i64().ok_or_else(|| {
+            Error::new("OverflowError", "Python int too large to convert to C long")
+        })
+    }
+
     /// Convert an index to the signed C int used by Python's native argument parser.
     pub(super) fn index_c_int(&mut self, value: Id) -> Result<i32> {
-        let long = self.index_integer(value)?.to_i64().ok_or_else(|| {
-            Error::new("OverflowError", "Python int too large to convert to C long")
-        })?;
+        let long = self.index_c_long(value)?;
         i32::try_from(long).map_err(|_| {
             Error::new(
                 "OverflowError",
@@ -2112,8 +2117,18 @@ impl Context {
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
 
-    /// Render a class using its Python module and qualified name.
-    fn class_repr(&self, name: &str, scope: Id) -> String {
+    /// Render the receiver's identity without invoking its own __repr__ slot.
+    pub(super) fn object_repr(&mut self, receiver: Id) -> Result<Id> {
+        let class = self.exact_type(receiver)?;
+        let name = match self.heap.get(class) {
+            Value::Class { name, scope, .. } => self.qualified_class_name(name, *scope),
+            Value::Native(name) => name.clone(),
+            _ => self.type_name(receiver).to_owned(),
+        };
+        Ok(self.text(format!("<{name} object at {receiver:#x}>")))
+    }
+
+    fn qualified_class_name(&self, name: &str, scope: Id) -> String {
         let scope = self.scope_data(scope);
         let attr = |key: &str| {
             scope
@@ -2124,12 +2139,15 @@ impl Context {
                     _ => None,
                 })
         };
-        let module = attr("__module__").unwrap_or(&scope.module);
-        let name = attr("__qualname__").unwrap_or(name);
-        if module == "builtins" {
-            format!("<class '{name}'>")
+        let module = if scope.names.contains_key("__module__") {
+            attr("__module__")
         } else {
-            format!("<class '{module}.{name}'>")
+            Some(scope.module.as_str())
+        };
+        let name = attr("__qualname__").unwrap_or(name);
+        match module {
+            None | Some("builtins") => name.to_owned(),
+            Some(module) => format!("{module}.{name}"),
         }
     }
 
@@ -2156,6 +2174,15 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if let Value::HandlerLock(lock) = self.heap.get(self.scalar_value(id)) {
+            let (state, owner, depth) = match lock.state() {
+                Some((owner, depth)) => ("locked", owner, depth),
+                None => ("unlocked", 0, 0),
+            };
+            let class = self.type_name(id);
+            return format!("<{state} {class} object owner={owner} count={depth} at {id:#x}>");
+        }
+
         if let Value::Instance { class, .. } = value
             && self.classes.get("re.RegexFlag") == Some(class)
             && let Some((_, name, bits)) = self.enum_member(id)
@@ -2388,7 +2415,9 @@ impl Context {
                 "<attribute '__weakref__' of '{}' objects>",
                 self.weakref_descriptor_owner(*owner)
             ),
-            Value::Class { name, scope, .. } => self.class_repr(name, *scope),
+            Value::Class { name, scope, .. } => {
+                format!("<class '{}'>", self.qualified_class_name(name, *scope))
+            }
             Value::Method {
                 callable,
                 explicit: false,
@@ -3815,6 +3844,74 @@ impl Context {
         };
         let result = self.call(method, vec![other], vec![])?;
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
+    }
+
+    /// Try divmod's numeric slots in order, including the inherited slot of integer subclasses.
+    pub(super) fn divmod(&mut self, a: Id, b: Id) -> Result<Id> {
+        let class = |value| {
+            self.heap.get(value).instance_class().or_else(|| {
+                self.builtin_type_name(value)
+                    .and_then(|name| self.builtins.get(name).copied())
+            })
+        };
+        let (left, right) = (class(a), class(b));
+        let python_slot = |value| {
+            self.slot(value, "__divmod__").is_some() || self.slot(value, "__rdivmod__").is_some()
+        };
+        let reflected_first = match (left, right) {
+            (Some(left), Some(right))
+                if left != right && self.direct_subclass(right, left) && python_slot(b) =>
+            {
+                !python_slot(a) || self.reflected_divmod_overridden(left, right)?
+            }
+            _ => false,
+        };
+        for reflected in [reflected_first, !reflected_first] {
+            if reflected && left == right {
+                continue;
+            }
+            let (receiver, hook, other) = if reflected {
+                (b, "__rdivmod__", a)
+            } else {
+                (a, "__divmod__", b)
+            };
+            if self.slot(receiver, hook).is_some() {
+                if let Some(result) = self.operator_slot(receiver, hook, other)? {
+                    return Ok(result);
+                }
+            } else if let (Ok(x), Ok(y)) = (self.as_int(a), self.as_int(b)) {
+                let quotient = self.alloc(Value::Int(crate::integer_binary(&x, &y, 3)?));
+                let remainder = self.alloc(Value::Int(crate::integer_binary(&x, &y, 4)?));
+                return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
+            }
+        }
+        Err(Error::new(
+            "TypeError",
+            format!(
+                "unsupported operand type(s) for divmod(): '{}' and '{}'",
+                self.type_name(a),
+                self.type_name(b)
+            ),
+        ))
+    }
+
+    /// Compare the attributes on the two classes after applying descriptor binding.
+    fn reflected_divmod_overridden(&mut self, left: Id, right: Id) -> Result<bool> {
+        let right = match self.lookup_attr(right, "__rdivmod__") {
+            Ok(slot) => slot,
+            Err(error) if self.is_attribute_error(&error) => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let left = match self.lookup_attr(left, "__rdivmod__") {
+            Ok(slot) => slot,
+            Err(error) if self.is_attribute_error(&error) => return Ok(true),
+            Err(error) => return Err(error),
+        };
+        if left == right {
+            return Ok(false);
+        }
+        let different = self.binary("!=", left, right)?;
+        self.truth(different)
     }
 
     /// Call a container subclass override or its inherited native comparison.

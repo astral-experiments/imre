@@ -34,6 +34,7 @@ mod super_object;
 mod thread_callback;
 mod thread_local;
 mod thread_lock;
+mod thread_rlock;
 mod thread_worker;
 mod typing;
 mod union;
@@ -413,6 +414,7 @@ impl Context {
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
                 | Value::Generator { .. }
+                | Value::CoroutineWrapper(_)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
@@ -551,6 +553,7 @@ impl Context {
                 | Value::Filter { .. }
                 | Value::Zip { .. }
                 | Value::Generator { .. }
+                | Value::CoroutineWrapper(_)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
@@ -839,6 +842,11 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        if matches!(self.heap.get(id), Value::CoroutineWrapper(_)) {
+            return self
+                .call_coroutine_method("coroutine_wrapper", "__next__", &[id])
+                .map(Some);
+        }
         if let Value::Scandir(scan) = self.heap.get(id) {
             return stdlib::os::scandir::advance(self, scan.clone());
         }
@@ -1996,6 +2004,10 @@ impl Context {
         origin: Option<Id>,
         source: Option<(PathBuf, importlib::SourceBody)>,
     ) -> Result<()> {
+        if name == "_thread" && source.is_none() {
+            let rlock = self.builtin(thread_rlock::CLASS);
+            self.bind(scope, "RLock", rlock);
+        }
         match name {
             "_thread" => {
                 for name in ["allocate_lock", "allocate"] {
@@ -2068,7 +2080,7 @@ impl Context {
             }
             "sys" => {
                 self.bind(scope, "modules", self.modules);
-                for name in ["audit", "addaudithook"] {
+                for name in ["audit", "addaudithook", "_getframe"] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,

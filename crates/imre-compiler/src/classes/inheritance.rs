@@ -48,6 +48,14 @@ pub(super) fn resolve(
                     other => other,
                 };
                 match graph.resolve(definition.module, origin) {
+                    Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                        "codecs.IncrementalDecoder",
+                    ))) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "codec base class requires object lowering")
+                        );
+                    }
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
                         if args.args.len() == 1 && args.keywords.is_empty() => {}
                     Some(Binding::Intrinsic(Intrinsic::Abc)) => {}

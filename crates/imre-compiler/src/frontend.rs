@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+pub(crate) use imre_ast::exceptions::builtin_id as exception_kind;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
@@ -488,91 +489,6 @@ const RESERVED: &[&str] = &[
     "__doc__",
     "__file__",
 ];
-
-/// Indices are runtime ABI categories. Empty entries belong to imported modules.
-pub(crate) fn exception_kind(name: &str) -> Option<u32> {
-    match name {
-        "NotImplementedError" => return Some(37),
-        "UnicodeEncodeError" => return Some(38),
-        "NameError" => return Some(39),
-        "UnboundLocalError" => return Some(40),
-        "RecursionError" => return Some(43),
-        "ReferenceError" => return Some(53),
-        "BufferError" => return Some(54),
-        "GeneratorExit" => return Some(59),
-        "StopAsyncIteration" => return Some(60),
-        "KeyboardInterrupt" => return Some(61),
-        "SyntaxError" => return Some(55),
-        "IndentationError" => return Some(56),
-        "BlockingIOError" => return Some(44),
-        "ConnectionError" => return Some(45),
-        "BrokenPipeError" => return Some(46),
-        "ConnectionAbortedError" => return Some(47),
-        "ConnectionRefusedError" => return Some(48),
-        "ConnectionResetError" => return Some(49),
-        "InterruptedError" => return Some(50),
-        "TimeoutError" => return Some(51),
-        "Warning" => return Some(80),
-        "RuntimeWarning" => return Some(81),
-        "DeprecationWarning" => return Some(82),
-        "EncodingWarning" => return Some(83),
-        "UserWarning" => return Some(84),
-        "PendingDeprecationWarning" => return Some(85),
-        "SyntaxWarning" => return Some(86),
-        "FutureWarning" => return Some(87),
-        "ImportWarning" => return Some(88),
-        "UnicodeWarning" => return Some(89),
-        "BytesWarning" => return Some(90),
-        "ResourceWarning" => return Some(91),
-        _ => {}
-    }
-    if name == "ImportError" {
-        return Some(41);
-    }
-    if name == "ModuleNotFoundError" {
-        return Some(42);
-    }
-    if name == "StopIteration" {
-        return Some(35);
-    }
-    if name == "ExceptionGroup" {
-        return Some(34);
-    }
-    if name == "SystemExit" {
-        return Some(32);
-    }
-    [
-        "BaseException",
-        "Exception",
-        "ArithmeticError",
-        "ZeroDivisionError",
-        "OverflowError",
-        "LookupError",
-        "IndexError",
-        "KeyError",
-        "ValueError",
-        "AssertionError",
-        "RuntimeError",
-        "EOFError",
-        "OSError",
-        "TypeError",
-        "AttributeError",
-        "MemoryError",
-        "SystemError",
-        "UnicodeError",
-        "UnicodeDecodeError",
-        // UnsupportedOperation belongs to io, not the builtin namespace.
-        "",
-        "FileNotFoundError",
-        "PermissionError",
-        "IsADirectoryError",
-        "NotADirectoryError",
-        "FileExistsError",
-    ]
-    .iter()
-    .position(|candidate| !candidate.is_empty() && *candidate == name)
-    .map(|kind| kind as u32)
-}
 
 fn reserved(name: &str) -> bool {
     RESERVED.contains(&name) || exception_kind(name).is_some()
@@ -1882,6 +1798,16 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::StatResult)) => return Ok(types.stat_result()),
         Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes })) => {
             return Ok(types.url_split_result(bytes));
+        }
+        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+            name @ ("urllib.parse.DefragResult" | "urllib.parse.DefragResultBytes"),
+        ))) => {
+            graph.needs_object_runtime.set(true);
+            return Err(error(
+                source,
+                expression,
+                &format!("{name} requires native Python object operations"),
+            ));
         }
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {

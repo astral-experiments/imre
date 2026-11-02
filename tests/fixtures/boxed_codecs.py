@@ -1,7 +1,25 @@
 import codecs
 
 
+class EchoDecoder(codecs.IncrementalDecoder):
+    def decode(self, input, final=False):
+        return self.errors, input, final
+
+
 def current():
+    decoder = codecs.IncrementalDecoder(errors="replace")
+    assert decoder.errors == "replace"
+    assert decoder.getstate() == (b"", 0)
+    assert decoder.reset() is None
+    assert decoder.setstate((b"", 0)) is None
+    try:
+        decoder.decode(b"")
+    except NotImplementedError:
+        pass
+    else:
+        raise AssertionError("base decoder accepted input")
+    assert EchoDecoder().decode(b"x", final=True) == ("strict", b"x", True)
+
     class Text(str):
         def encode(self, *args, **kwargs):
             raise AssertionError("codecs.encode called str.encode")

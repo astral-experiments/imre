@@ -32,14 +32,17 @@ impl Socket {
         if fd == -1 {
             return Ok(());
         }
-        // SAFETY: the object relinquishes the descriptor before close. Do not retry
-        // on EINTR: the kernel may have reused the number. Python can also have
-        // explicitly closed fileno() via os.close; EBADF is an ordinary socket error.
-        match checked(unsafe { libc::close(fd) }) {
-            Ok(_) => Ok(()),
-            Err(e) if e.raw_os_error() == Some(libc::ECONNRESET) => Ok(()),
-            Err(e) => Err(e),
-        }
+        close_fd(fd)
+    }
+}
+
+/// Close a raw socket descriptor once, including when close reports EINTR.
+pub(crate) fn close_fd(fd: RawFd) -> io::Result<()> {
+    // SAFETY: close takes only a descriptor number. Retrying could close a reused fd.
+    match checked(unsafe { libc::close(fd) }) {
+        Ok(_) => Ok(()),
+        Err(e) if e.raw_os_error() == Some(libc::ECONNRESET) => Ok(()),
+        Err(e) => Err(e),
     }
 }
 

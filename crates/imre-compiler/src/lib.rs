@@ -244,8 +244,8 @@ fn object_fallback<T>(
         return Err(error);
     }
     let operation = graph.as_ref().and_then(|g| {
-        if g.conditional_method_error.borrow().as_ref() == Some(&error) {
-            Some(dynamic::ObjectOperation::ConditionalMethods(g))
+        if g.class_body_error.borrow().as_ref() == Some(&error) {
+            Some(dynamic::ObjectOperation::ClassBody(g))
         } else {
             g.object_builtin_errors
                 .borrow()

@@ -20,11 +20,19 @@ pub(super) struct Program {
     literals: HashMap<ruff_text_size::TextRange, Id>,
     pub(super) string_roots: Id,
     first_line: u32,
-    generator: bool,
+    kind: FunctionKind,
     locals: HashSet<String>,
+    reads: BTreeSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
     private_names: Option<Rc<imre_ast::Names>>,
     instructions: Vec<(u32, Instruction)>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FunctionKind {
+    Plain,
+    Generator,
+    Coroutine,
 }
 
 enum Instruction {
@@ -48,6 +56,7 @@ enum Instruction {
     Assert(ast::StmtAssert),
     Unless(ast::Expr, usize),
     Iter(ast::Expr),
+    Await(ast::Expr),
     Next(Option<ast::Expr>, usize),
     Jump(usize),
     Break(usize),
@@ -75,7 +84,7 @@ struct Definition {
 
 enum DefinitionKind {
     Function(Box<ast::Parameters>),
-    Class(Vec<ast::Expr>),
+    Class(Option<Box<ast::Arguments>>),
 }
 
 /// CPython records self.X stores from code units immediately enclosed by a class.
@@ -240,6 +249,7 @@ struct CompiledStrings<'a, 'ctx> {
     constants: &'ctx mut HashMap<ruff_text_size::TextRange, Id>,
     roots: Vec<Id>,
     pending: Vec<&'a ast::Expr>,
+    reads: &'ctx mut BTreeSet<String>,
     exhausted: bool,
 }
 
@@ -310,6 +320,9 @@ impl<'a> CompiledStrings<'a, '_> {
             match expr {
                 ast::Expr::Name(name) => {
                     class_cell |= matches!(name.id.as_str(), "super" | "__class__");
+                    if name.ctx == ast::ExprContext::Load {
+                        self.reads.insert(name.id.to_string());
+                    }
                     self.heap.code_name(name.id.as_str());
                 }
                 ast::Expr::Attribute(attr) => {
@@ -370,9 +383,11 @@ impl Program {
         &'a mut self,
         heap: &mut value::Heap,
         shared: &mut HashMap<&'a str, Id>,
-    ) -> Result<Id> {
+    ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
+        let mut nested_reads = BTreeSet::new();
         let mut strings = CompiledStrings {
+            reads: &mut self.reads,
             heap,
             shared,
             constants: &mut self.literals,
@@ -382,9 +397,10 @@ impl Program {
         };
         for (_, op) in &mut self.instructions {
             match op {
-                Instruction::Eval(e) | Instruction::Unless(e, _) | Instruction::Iter(e) => {
-                    strings.visit_expr(e)
-                }
+                Instruction::Eval(e)
+                | Instruction::Unless(e, _)
+                | Instruction::Iter(e)
+                | Instruction::Await(e) => strings.visit_expr(e),
                 Instruction::EnterWith { item, .. } => {
                     strings.visit_expr(&item.context_expr);
                     if let Some(target) = &item.optional_vars {
@@ -433,7 +449,8 @@ impl Program {
                     let child =
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
-                    let roots = child.prepare_strings(strings.heap, strings.shared)?;
+                    let (roots, reads) = child.prepare_strings(strings.heap, strings.shared)?;
+                    nested_reads.extend(reads.iter().cloned());
                     if roots != NONE {
                         strings.keep(roots)?;
                     }
@@ -444,11 +461,8 @@ impl Program {
                         DefinitionKind::Function(parameters) => {
                             strings.visit_parameters(parameters)
                         }
-                        DefinitionKind::Class(bases) => {
-                            for base in bases {
-                                strings.visit_expr(base);
-                            }
-                        }
+                        DefinitionKind::Class(Some(args)) => strings.visit_arguments(args),
+                        DefinitionKind::Class(None) => {}
                     }
                 }
                 Instruction::ClassStart | Instruction::ClassEnd => {}
@@ -481,7 +495,15 @@ impl Program {
             }
         }
         (self.string_roots, self.class_cell) = strings.finish()?;
-        Ok(self.string_roots)
+        if self.class_attributes.is_some() {
+            // Methods skip the class namespace when resolving free variables.
+            self.reads.retain(|name| !self.locals.contains(name));
+            self.reads.extend(nested_reads);
+        } else {
+            self.reads.extend(nested_reads);
+            self.reads.retain(|name| !self.locals.contains(name));
+        }
+        Ok((self.string_roots, &self.reads))
     }
 
     fn new(filename: Rc<str>, name: &str) -> Self {
@@ -495,8 +517,9 @@ impl Program {
             literals: HashMap::new(),
             string_roots: NONE,
             first_line: 1,
-            generator: false,
+            kind: FunctionKind::Plain,
             locals: HashSet::new(),
+            reads: BTreeSet::new(),
             method_imports: Rc::default(),
             private_names: None,
             instructions: Vec::new(),
@@ -504,7 +527,7 @@ impl Program {
     }
 
     // A suspended expression supplies its result when execution resumes.
-    fn lower_yield(
+    fn lower_suspension(
         &mut self,
         expr: ast::Expr,
         line: u32,
@@ -514,6 +537,11 @@ impl Program {
             ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) if !function => {
                 return Err(Error::new("SyntaxError", "'yield' outside function"));
             }
+            ast::Expr::Await(a) if self.kind == FunctionKind::Coroutine => {
+                self.instructions.push((line, Instruction::Await(*a.value)));
+                self.instructions.push((line, Instruction::Delegate));
+                return Ok(None);
+            }
             ast::Expr::Yield(y) => Instruction::Yield(y.value.map(|value| *value)),
             ast::Expr::YieldFrom(y) => {
                 self.instructions.push((line, Instruction::Iter(*y.value)));
@@ -521,7 +549,7 @@ impl Program {
             }
             value => return Ok(Some(value)),
         };
-        self.generator = true;
+        self.kind = FunctionKind::Generator;
         self.instructions.push((line, op));
         Ok(None)
     }
@@ -584,7 +612,7 @@ impl Program {
             let line = lines.partition_point(|n| *n <= stmt.start().to_usize()) as u32;
             let op = match stmt {
                 Stmt::Pass(_) => continue,
-                Stmt::Expr(s) => match self.lower_yield(*s.value, line, function)? {
+                Stmt::Expr(s) => match self.lower_suspension(*s.value, line, function)? {
                     Some(expr) => Instruction::Eval(expr),
                     None => continue,
                 },
@@ -592,7 +620,7 @@ impl Program {
                     for target in &s.targets {
                         self.declare_target(target)?;
                     }
-                    match self.lower_yield(*s.value, line, function)? {
+                    match self.lower_suspension(*s.value, line, function)? {
                         Some(value) => Instruction::Assign(s.targets, value),
                         None => Instruction::BindSent(s.targets),
                     }
@@ -604,7 +632,7 @@ impl Program {
                     self.locals.insert(name.id.to_string());
                     // Local annotations establish the binding without evaluating the annotation.
                     let Some(value) = s.value else { continue };
-                    match self.lower_yield(*value, line, function)? {
+                    match self.lower_suspension(*value, line, function)? {
                         Some(value) => Instruction::Assign(vec![*s.target], value),
                         None => Instruction::BindSent(vec![*s.target]),
                     }
@@ -641,7 +669,7 @@ impl Program {
                         self.instructions.push((line, Instruction::Return(None)));
                         continue;
                     };
-                    match self.lower_yield(*value, line, function)? {
+                    match self.lower_suspension(*value, line, function)? {
                         Some(value) => Instruction::Return(Some(value)),
                         None => Instruction::ReturnSent,
                     }
@@ -674,14 +702,27 @@ impl Program {
                     }
                     Instruction::From(module.to_owned(), s.level, names)
                 }
-                Stmt::FunctionDef(s) if !s.is_async && s.type_params.is_none() && !function => {
-                    if self.class_attributes.is_some()
+                Stmt::FunctionDef(s) if s.type_params.is_none() => {
+                    if (function || self.class_attributes.is_some())
                         && (s.returns.is_some()
                             || s.parameters.iter().any(|p| p.annotation().is_some()))
                     {
-                        return Err(unsupported("annotated method definition"));
+                        return Err(unsupported(if function {
+                            "annotated nested function definition"
+                        } else {
+                            "annotated method definition"
+                        }));
                     }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    child
+                        .locals
+                        .extend(s.parameters.iter().map(|p| p.name().to_string()));
+                    if s.is_async {
+                        if imre_ast::code_flags::is_generator(&s.body) {
+                            return Err(unsupported("async generator function"));
+                        }
+                        child.kind = FunctionKind::Coroutine;
+                    }
                     child.lower(s.body, lines, true, None)?;
                     self.locals.insert(s.name.to_string());
                     Instruction::Define(Definition {
@@ -692,16 +733,16 @@ impl Program {
                     })
                 }
                 Stmt::ClassDef(mut s) if s.type_params.is_none() => {
-                    let bases = match s.arguments {
-                        Some(args)
-                            if !args.keywords.is_empty()
-                                || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))) =>
-                        {
-                            return Err(unsupported("class keywords or expanded bases"));
-                        }
-                        Some(args) => args.args.into_iter().collect(),
-                        None => Vec::new(),
-                    };
+                    if let Some(args) = &s.arguments
+                        && (args
+                            .keywords
+                            .iter()
+                            .any(|kw| kw.arg.as_deref() != Some("total"))
+                            || args.keywords.len() > 1
+                            || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))))
+                    {
+                        return Err(unsupported("class keywords or expanded bases"));
+                    }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     let spellings = child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
@@ -720,7 +761,7 @@ impl Program {
                         binding: s.name.to_string(),
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::Class(bases),
+                        kind: DefinitionKind::Class(s.arguments),
                     })
                 }
                 Stmt::Break(_) => {
@@ -1127,8 +1168,8 @@ impl Context {
             filename,
             first_line: program.first_line,
             module_definition: program.name == program.qualname,
+            coroutine: program.kind == FunctionKind::Coroutine,
             body: Body::Source(program),
-            coroutine: false,
             flags: None,
             parameters: parameters.unwrap_or(NONE),
             nested: Vec::new(),
@@ -1515,21 +1556,27 @@ impl Context {
     }
 
     pub(super) fn call_source(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
-        let generator = match &self.code_object(code).body {
-            Body::Source(program) => program.generator,
-            Body::PendingGenerator { .. } => true,
+        let kind = match &self.code_object(code).body {
+            Body::Source(program) => program.kind,
+            Body::PendingGenerator { .. } => FunctionKind::Generator,
             Body::Native(_) => unreachable!("source function"),
         };
-        if generator {
-            Ok(self.alloc(Value::Generator {
+        if kind != FunctionKind::Plain {
+            let frame = self.alloc(Value::Generator {
                 owner,
+                frame: None,
                 code,
                 scope,
                 iterators: Vec::new(),
                 protected: Vec::new(),
                 offset: Some(0),
                 running: false,
-            }))
+            });
+            Ok(if kind == FunctionKind::Coroutine {
+                self.alloc(Value::Coroutine(frame))
+            } else {
+                frame
+            })
         } else {
             match self.run_source(
                 code,
@@ -1583,7 +1630,7 @@ impl Context {
         program.method_imports = Rc::new(signature.method_imports);
         program.private_names = private_names;
         program.first_line = code.first_line;
-        program.generator = true;
+        program.kind = FunctionKind::Generator;
         program.lower(std::mem::take(&mut def.body), &lines, true, None)?;
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
@@ -1609,13 +1656,24 @@ impl Context {
                 "generator.send requires a generator",
             ));
         };
+        let coroutine = self.code_object(code).coroutine;
+        let kind = if coroutine { "coroutine" } else { "generator" };
         if running {
-            return Err(Error::new("ValueError", "generator already executing"));
+            return Err(Error::new(
+                "ValueError",
+                format!("{kind} already executing"),
+            ));
+        }
+        if coroutine && offset.is_none() {
+            return Err(Error::new(
+                "RuntimeError",
+                "cannot reuse already awaited coroutine",
+            ));
         }
         if sent != NONE && offset == Some(0) {
             return Err(Error::new(
                 "TypeError",
-                "can't send non-None value to a just-started generator",
+                format!("can't send non-None value to a just-started {kind}"),
             ));
         }
         let next = if sent == NONE || matches!(self.code_object(code).body, Body::Native(_)) {
@@ -1700,13 +1758,13 @@ impl Context {
             }
         }
         let Value::Generator {
-            owner,
             code,
             scope,
             iterators,
             protected,
             running,
             offset,
+            ..
         } = self.heap.get_mut(id)
         else {
             unreachable!()
@@ -1721,7 +1779,7 @@ impl Context {
             };
         };
         *running = true;
-        let (code, frame_scope, owner) = (*code, *scope, *owner);
+        let (code, frame_scope) = (*code, *scope);
         let mut active = std::mem::take(iterators);
         let mut blocks = std::mem::take(protected);
         self.heap.disarm_generator_finalizer(id);
@@ -1734,9 +1792,9 @@ impl Context {
                     && cursor.advanced.is_none()
                     && cursor.sent == NONE
                     && cursor.thrown.is_none();
-                self.run_source(code, frame_scope, owner, cursor)
+                self.run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
             })
-            .map_err(|error| self.generator_error(error));
+            .map_err(|error| self.frame_error(error, code));
         let suspended_at_delegate = matches!(&result, Ok(Step::Yield(_, ip))
             if matches!(&self.code_object(code).body, Body::Source(program)
                 if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate)))));
@@ -1745,6 +1803,7 @@ impl Context {
             offset,
             scope,
             owner,
+            frame,
             iterators,
             protected,
             ..
@@ -1755,8 +1814,10 @@ impl Context {
         *running = matches!(result, Ok(Step::Advance(..)));
         let completed = match result {
             Ok(step @ (Step::Yield(_, ip) | Step::Advance(_, ip, _) | Step::Rejected(_, ip))) => {
-                let needs_finalizer = matches!(step, Step::Yield(..))
-                    && (!blocks.is_empty() || suspended_at_delegate);
+                // A failed lookup of the delegate's throw method leaves it suspended.
+                let needs_finalizer = matches!(step, Step::Rejected(..))
+                    || (matches!(step, Step::Yield(..))
+                        && (!blocks.is_empty() || suspended_at_delegate));
                 *offset = Some(ip);
                 *iterators = active;
                 *protected = blocks;
@@ -1769,6 +1830,7 @@ impl Context {
             Err(error) => Err(error),
         };
         *scope = NONE;
+        *frame = None;
         *owner = FrameOwner::Module(NONE);
         self.heap.disarm_generator_finalizer(id);
         if self.heap.tracks_finalizers()
@@ -2289,6 +2351,10 @@ impl Context {
                 let value = eval(self, e)?;
                 iterators.push(self.iterator(value)?);
             }
+            Instruction::Await(e) => {
+                let value = eval(self, e)?;
+                iterators.push(self.await_iterator(value)?);
+            }
             Instruction::Next(_, _) | Instruction::Delegate => {
                 let delegated = matches!(op, Instruction::Delegate);
                 let iter = *iterators.last().expect("active source iterator");
@@ -2296,7 +2362,7 @@ impl Context {
                 let item = if let Some(outcome) = advanced.take() {
                     outcome?
                 } else if thrown.is_none()
-                    && code.generator
+                    && code.kind != FunctionKind::Plain
                     && let Value::Generator { code, .. } = self.heap.get(iter)
                     && !matches!(self.code_object(*code).body, Body::Native(_))
                 {
@@ -2400,14 +2466,22 @@ impl Context {
                 let defaults = self.dict(vec![]);
                 let mut bases = None;
                 let sig = match &definition.kind {
-                    DefinitionKind::Class(expressions) => {
+                    DefinitionKind::Class(args) => {
                         let mut values = Vec::new();
-                        for expression in expressions {
-                            let base = eval(self, expression)?;
-                            self.heap.keep(base);
-                            values.push(base);
+                        let mut total = None;
+                        if let Some(args) = args {
+                            for expression in &args.args {
+                                let base = eval(self, expression)?;
+                                self.heap.keep(base);
+                                values.push(base);
+                            }
+                            if let Some(keyword) = args.find_keyword("total") {
+                                let value = eval(self, &keyword.value)?;
+                                self.heap.keep(value);
+                                total = Some(value);
+                            }
                         }
-                        bases = Some(self.alloc(Value::List(values)));
+                        bases = Some((self.alloc(Value::List(values)), total));
                         serde_json::json!({})
                     }
                     DefinitionKind::Function(p) => {
@@ -2428,6 +2502,9 @@ impl Context {
                             }
                         }
                         sig["class_cell"] = serde_json::json!(child.class_cell);
+                        sig["scope_locals"] =
+                            serde_json::json!(child.locals.iter().collect::<BTreeSet<_>>());
+                        sig["scope_locals_complete"] = true.into();
                         sig
                     }
                 };
@@ -2441,7 +2518,23 @@ impl Context {
                     *existing
                 } else {
                     let parameters = self.text(sig.to_string());
+                    let freevars = if code.name != "<module>"
+                        && code.class_attributes.is_none()
+                        && child.class_attributes.is_none()
+                        && !child.class_cell
+                    {
+                        self.enclosing_freevars(scope, child.reads.iter().map(String::as_str))
+                    } else {
+                        None
+                    };
                     let id = self.box_source_code(child.clone(), Some(parameters));
+                    if let Some(names) = freevars {
+                        let Value::Code(nested) = self.heap.get_mut(id) else {
+                            unreachable!()
+                        };
+                        nested.freevars = names;
+                        nested.closure_supported = true;
+                    }
                     let Value::Code(parent) = self.heap.get_mut(owner) else {
                         unreachable!()
                     };
@@ -2455,9 +2548,8 @@ impl Context {
                     scope
                 };
                 let mut value = self.source_function(code, defining_scope, defaults);
-                if let Some(bases) = bases {
-                    let name = self.heap.code_name(&child.name);
-                    value = self.class(name, bases, value)?;
+                if let Some((bases, total)) = bases {
+                    value = self.class(bases, value, total, false)?;
                 }
                 for decorator in decorators.into_iter().rev() {
                     value = self.call(decorator, vec![value], Vec::new())?;
