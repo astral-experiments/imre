@@ -852,11 +852,15 @@ def check_unittest_file_discovery(imre, root, run):
             "class Late(unittest.TestCase):\n"
             "    def test_body(self):\n"
             "        for member in Marker: self.fail(member.name)\n"
+            "    def test_util(self):\n"
+            "        from unittest.util import safe_repr\n"
+            "        self.assertIs(safe_repr, unittest.util.safe_repr)\n"
+            "        self.assertEqual(safe_repr(None), 'None')\n"
         )
         for command in ((sys.executable, "-B", entry), (executable,)):
             result = run(*command, directory)
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, b"1 ['test_late.Late.test_body'] 0\n", b"",
+                0, b"2 ['test_late.Late.test_body'] 0\n", b"",
             ), result
 
 
