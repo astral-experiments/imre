@@ -58,13 +58,43 @@ class _TypedDictMeta(type):
     __instancecheck__ = __subclasscheck__
 
 
-def _typeddict_field(value):
+def _typeddict_forward_ref(arg, module=None, owner=None):
+    from annotationlib import ForwardRef
+    from ast import parse
+    # typing._make_forward_ref eagerly checks the syntax, without resolving names.
+    source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
+    try:
+        parse(source, "<string>", "eval")
+    except SyntaxError:
+        raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
+    return ForwardRef(arg, module=module, owner=owner)
+
+
+def _typeddict_field(value, module, owner=None):
     if value is None:
         return type(None)
-    value = _type_check(value, "TypedDict field must be a type")
-    if not isinstance(value, type):
-        raise NotImplementedError("TypedDict field qualifiers and non-class annotations are unsupported")
-    return value
+    if isinstance(value, str):
+        return _typeddict_forward_ref(value, module, owner)
+    message = "TypedDict('Name', {f0: t0, f1: t1, ...}); each t must be a type"
+    return _type_check(value, message)
+
+
+def _typeddict_qualifiers(tp):
+    qualifiers = set()
+    annotated = getattr(_typing, "Annotated", None)
+    while True:
+        origin = _typing.get_origin(tp)
+        if origin is not None and origin is annotated:
+            args = _typing.get_args(tp)
+            if not args:
+                break
+            tp = args[0]
+        elif origin is Required or origin is NotRequired or origin is ReadOnly:
+            qualifiers.add(origin)
+            tp, = _typing.get_args(tp)
+        else:
+            break
+    return qualifiers
 
 
 def _typeddict_annotation_strings(annotations):
@@ -144,7 +174,7 @@ def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
     for key, tp in fields.items():
         if thunks is not None and key in thunks:
             tp = thunks[key]()
-        annotations[key] = _typeddict_field(tp)
+        annotations[key] = _typeddict_field(tp, cls.__module__, cls)
 
     def __annotate__(format):
         result = {}
@@ -162,7 +192,7 @@ def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
         if format in (1, 3):
             for name, tp in annotations.items():
                 if thunks is not None and name in thunks:
-                    tp = _typeddict_field(thunks[name]())
+                    tp = _typeddict_field(thunks[name](), cls.__module__)
                 result[name] = tp
             return result
         raise NotImplementedError(format)
@@ -182,15 +212,21 @@ def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
         optional |= base_optional
         readonly.update(namespace.get("__readonly_keys__", ()))
         mutable.update(namespace.get("__mutable_keys__", ()))
-    for key in annotations:
-        if total:
+    for key, tp in annotations.items():
+        qualifiers = _typeddict_qualifiers(tp)
+        if Required in qualifiers or (NotRequired not in qualifiers and total):
             required.add(key)
             optional.discard(key)
         else:
             optional.add(key)
             required.discard(key)
-        mutable.add(key)
-        readonly.discard(key)
+        if ReadOnly in qualifiers:
+            if key in mutable:
+                raise TypeError(f"Cannot override mutable key {key!r} with read-only key")
+            readonly.add(key)
+        else:
+            mutable.add(key)
+            readonly.discard(key)
     cls.__required_keys__ = frozenset(required)
     cls.__optional_keys__ = frozenset(optional)
     cls.__readonly_keys__ = frozenset(readonly)
@@ -594,6 +630,73 @@ def _type_check(arg, message, *, allow_special_forms=False):
     if type(arg) is tuple:
         raise TypeError(f"{message} Got {repr(arg)[:100]}.")
     return arg
+
+
+def _typeddict_qualifier_alias(form, parameters):
+    item = _type_check(parameters, f"{form._name} accepts only a single type.")
+    if isinstance(item, str):
+        item = _typeddict_forward_ref(item)
+    return _typing._GenericAlias(form, (type(None) if item is None else item,))
+
+
+@_SpecialForm
+def Required(self, parameters):
+    """Special typing construct to mark a TypedDict key as required.
+
+    This is mainly useful for total=False TypedDicts.
+
+    For example::
+
+        class Movie(TypedDict, total=False):
+            title: Required[str]
+            year: int
+
+        m = Movie(
+            title='The Matrix',  # typechecker error if key is omitted
+            year=1999,
+        )
+
+    There is no runtime checking that a required key is actually provided
+    when instantiating a related TypedDict.
+    """
+    return _typeddict_qualifier_alias(self, parameters)
+
+
+@_SpecialForm
+def NotRequired(self, parameters):
+    """Special typing construct to mark a TypedDict key as potentially missing.
+
+    For example::
+
+        class Movie(TypedDict):
+            title: str
+            year: NotRequired[int]
+
+        m = Movie(
+            title='The Matrix',  # typechecker error if key is omitted
+            year=1999,
+        )
+    """
+    return _typeddict_qualifier_alias(self, parameters)
+
+
+@_SpecialForm
+def ReadOnly(self, parameters):
+    """A special typing construct to mark an item of a TypedDict as read-only.
+
+    For example::
+
+        class Movie(TypedDict):
+            title: ReadOnly[str]
+            year: int
+
+        def mutate_movie(m: Movie) -> None:
+            m["year"] = 1992  # allowed
+            m["title"] = "The Matrix"  # typechecker error
+
+    There is no runtime checking for this property.
+    """
+    return _typeddict_qualifier_alias(self, parameters)
 
 
 @_SpecialForm
