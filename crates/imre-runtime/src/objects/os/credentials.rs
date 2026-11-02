@@ -117,29 +117,34 @@ setter!(imre_os_setreuid, setreuid, libc::uid_t, real, effective);
 setter!(imre_os_setregid, setregid, libc::gid_t, real, effective);
 
 #[cfg(target_os = "linux")]
+pub(crate) use saved::{getresgid, getresuid};
+
+#[cfg(target_os = "linux")]
 mod saved {
     use super::*;
 
     macro_rules! getter3 {
         ($name:ident, $sys:ident, $id:ty) => {
+            pub(crate) fn $sys() -> Result<[Int; 3]> {
+                let (mut real, mut effective, mut saved) = (0, 0, 0);
+                // SAFETY: all three ID slots live across the syscall.
+                checked(unsafe { libc::$sys(&mut real, &mut effective, &mut saved) })?;
+                Ok([real, effective, saved].map(|id| result_id(id as u64, <$id>::MAX as u64)))
+            }
+
             /// # Safety
             /// The caller owns three writable tuple slots.
             #[unsafe(no_mangle)]
             pub unsafe extern "C" fn $name(out: *mut usize) {
-                let (mut real, mut effective, mut saved) = (0, 0, 0);
-                // SAFETY: all three ID slots live across the syscall, and out
-                // is written only after the kernel returned successfully.
-                unsafe {
-                    finish(
-                        checked(libc::$sys(&mut real, &mut effective, &mut saved)).map(|_| {
-                            for (i, id) in [real, effective, saved].into_iter().enumerate() {
-                                out.add(i)
-                                    .write(result_id(id as u64, <$id>::MAX as u64).into_raw());
-                            }
-                        }),
-                        (),
-                    );
-                }
+                finish(
+                    $sys().map(|ids| {
+                        for (i, id) in ids.into_iter().enumerate() {
+                            // SAFETY: the caller owns all three slots.
+                            unsafe { out.add(i).write(id.into_raw()) };
+                        }
+                    }),
+                    (),
+                );
             }
         };
     }

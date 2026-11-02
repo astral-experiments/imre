@@ -2787,6 +2787,23 @@ impl Context {
                 };
                 self.bind(scope, attr, value);
             }
+            for attr in [
+                "getegid",
+                #[cfg(target_os = "linux")]
+                "getresgid",
+                #[cfg(target_os = "linux")]
+                "getresuid",
+            ] {
+                let value = match posix {
+                    Some(module) => match self.lookup_attr(module, attr) {
+                        Ok(value) => value,
+                        Err(error) if self.is_attribute_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    },
+                    None => self.builtin(&format!("posix.{attr}")),
+                };
+                self.bind(scope, attr, value);
+            }
         }
         match name {
             "_frozen_importlib_external" | "importlib._bootstrap_external" => {

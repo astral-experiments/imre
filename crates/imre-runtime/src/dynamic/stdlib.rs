@@ -1443,6 +1443,9 @@ pub(super) fn call(
             | "posix.getuid"
             | "posix.geteuid"
             | "posix.getgid"
+            | "posix.getegid"
+            | "posix.getresgid"
+            | "posix.getresuid"
             | "posix.getgroups"
             | "posix.cpu_count"
             | "sys._jit.is_available"
@@ -1489,6 +1492,17 @@ pub(super) fn call(
             "posix.geteuid" => ctx.alloc(Value::Int(crate::objects::os::geteuid())),
             "posix.getuid" => ctx.alloc(Value::Int(crate::objects::os::getuid())),
             "posix.getgid" => ctx.alloc(Value::Int(crate::objects::os::getgid())),
+            "posix.getegid" => ctx.alloc(Value::Int(crate::objects::os::getegid())),
+            #[cfg(target_os = "linux")]
+            "posix.getresgid" | "posix.getresuid" => {
+                let ids = if name == "posix.getresgid" {
+                    crate::objects::os::getresgid()?
+                } else {
+                    crate::objects::os::getresuid()?
+                };
+                let values = ids.into_iter().map(|id| ctx.alloc(Value::Int(id))).collect();
+                ctx.alloc(Value::Tuple(values))
+            }
             "posix.getgroups" => {
                 let groups = crate::objects::os::getgroups()?
                     .into_iter()
