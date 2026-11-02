@@ -117,12 +117,12 @@ branches. Skipped tests count toward the suite size only.
 | `dataclasses` | 230 | 276 | Selected cases across builds, including ten run together with mock and defaultdict |
 | `datetime` | 314 | 1,098 | The first 543 cases produced verdicts before the intact run timed out |
 | `fnmatch` | 24 | 24 | Complete suite on `main` |
-| `functools` | 52 | 329 | 52 of 87 selected cases on one development build |
+| `functools` | 91 | 329 | 89 passed in the intact 325-case primary module, plus two selected passes |
 | `hashlib` | 65 | 82 | Selected and intact runs (45 passed together on `main`) |
 | `importlib` | 15 | 1,346 | 15 of 16 selected cases in both import modes |
 | `io` | 110 | 1,038 | 110 of 123 selected cases across five test suites |
 | `itertools` | 107 | 138 | Selected cases on one development tree |
-| `json` | 109 | 216 | Selected cases across builds (103 passed together) |
+| `json` | 117 | 216 | 111 passed together before timeout, plus six earlier selected passes |
 | `logging` | 30 | 272 | 30 source-isolated methods run together with their fixtures |
 | `os` | 38 | 579 | 25 intact genericpath cases and 13 selected OS cases whose module teardown errored |
 | `pathlib` | 225 | 1,369 | 220 in the intact development run and five more in a 139-case selection |
@@ -136,7 +136,7 @@ branches. Skipped tests count toward the suite size only.
 | `typing` | 107 | 712 | Selected tests across development builds |
 | `unittest` | 160 | 1,090 | Intact package runner discovered 244 cases and started 213 |
 | `urllib` | 84 | 178 | Selected cases |
-| **Total** | **4,082** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **4,129** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
