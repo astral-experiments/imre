@@ -19,6 +19,7 @@ except ImportError:
     pass
 
 if sys.platform == "linux":
+    from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
     import posix as _posix
     from posix import pipe2

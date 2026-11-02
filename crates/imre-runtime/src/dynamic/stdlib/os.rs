@@ -497,7 +497,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
         || (cfg!(target_os = "linux")
-            && matches!(name, "posix_fadvise" | "posix_fallocate" | "sendfile"))
+            && matches!(name, "lockf" | "posix_fadvise" | "posix_fallocate" | "sendfile"))
 }
 
 /// Retry a POSIX call that returns its error number directly instead of setting errno.
@@ -1194,6 +1194,24 @@ pub(super) fn descriptor(
         let low = c_int(ctx, *low)?;
         let high = c_int(ctx, *high)?;
         native::close_range(low, high);
+        return Ok(NONE);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "lockf" {
+        let [fd, command, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("lockf expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let command = c_int(ctx, *command)?;
+        let length = file_offset(ctx, *length)?;
+        let audit_fd = ctx.int(i64::from(fd));
+        let audit_command = ctx.int(i64::from(command));
+        let audit_length = ctx.int(length);
+        super::audit::event(ctx, "os.lockf", &[audit_fd, audit_command, audit_length])?;
+        native::lockf(fd, command, length)?;
         return Ok(NONE);
     }
     if name == "ftruncate" {
