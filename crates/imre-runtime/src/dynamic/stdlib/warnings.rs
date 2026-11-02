@@ -106,8 +106,11 @@ impl Context {
                         args
                     }
                     Origin::FrozenImport(_) => {
-                        let bootstrap = self.module("_frozen_importlib")?;
-                        let globals = self.lookup_attr(bootstrap, "__dict__")?;
+                        // Some closed graphs run the native bootstrap without importing its module.
+                        if self.bootstrap_globals == NONE {
+                            self.bootstrap_globals = self.dict(Vec::new());
+                        }
+                        let globals = self.bootstrap_globals;
                         let registry = match self.dict_named_item(globals, "__warningregistry__") {
                             Some(registry) => registry,
                             None => {

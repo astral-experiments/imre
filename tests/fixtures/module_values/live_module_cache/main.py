@@ -89,9 +89,14 @@ assert modules['pkg'] is original.keep and original.keep.child is child
 modules['pkg'] = original
 original.replacement = 42
 message = "Cannot set an attribute on 'pkg' for child module 'replace_parent'"
-with warnings.catch_warnings(record=True) as caught:
-    warnings.simplefilter('always', ImportWarning)
-    child = import_module('pkg.replace_parent')
+bootstrap = modules['_frozen_importlib']
+try:
+    modules['_frozen_importlib'] = None
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always', ImportWarning)
+        child = import_module('pkg.replace_parent')
+finally:
+    modules['_frozen_importlib'] = bootstrap
 assert child is modules['pkg.replace_parent'] and modules['pkg'] == 42
 assert len(caught) == 1 and caught[0].category is ImportWarning
 assert str(caught[0].message) == message

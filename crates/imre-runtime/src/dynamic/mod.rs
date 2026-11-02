@@ -126,6 +126,8 @@ pub(crate) struct Context {
     // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
     modules: Id,
     import_missing: Id,
+    // The running frozen bootstrap keeps its globals even if its registry entry is replaced.
+    bootstrap_globals: Id,
     classes: HashMap<String, Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
@@ -2319,6 +2321,9 @@ impl Context {
                 self.bind(scope, "ENABLE_SPECIALIZATION_FT", disabled);
             }
             "_frozen_importlib" => {
+                if self.bootstrap_globals == NONE {
+                    self.bootstrap_globals = self.module_globals(scope)?;
+                }
                 let external = self.module("_frozen_importlib_external")?;
                 self.bind(scope, "_bootstrap_external", external);
             }
