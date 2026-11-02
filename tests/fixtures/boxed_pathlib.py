@@ -43,6 +43,7 @@ def current():
 
     assert pathname2url("a#b c") == "a%23b%20c"
     if os.name == "posix":
+        check_literal_scan()
         assert pathname2url(Path("é")) == "%C3%A9"
         assert pathname2url(os.fsdecode(b"/bad\xff")) == "///bad%FF"
         assert Path("//server/a?b").as_uri() == "file:////server/a%3Fb"
@@ -52,3 +53,27 @@ def current():
         pass
     else:
         raise AssertionError("relative path accepted as a file URI")
+
+
+def check_literal_scan():
+    import shutil
+    import tempfile
+
+    root = Path(tempfile.mkdtemp())
+    try:
+        name = os.fsdecode(b"Report-\xff.txt")
+        nested = root / "nested"
+        nested.mkdir()
+        top = root / name
+        leaf = nested / name
+        direct = root.glob(name, case_sensitive=True)
+        recursive = root.rglob(name, case_sensitive=True)
+        top.write_bytes(b"")
+        leaf.write_bytes(b"")
+        assert list(direct) == [top]
+        assert set(recursive) == {top, leaf}
+        assert list(root.glob(os.fsdecode(b"report-\xff.txt"), case_sensitive=True)) == []
+        assert list(root.rglob("missing" + name, case_sensitive=True)) == []
+        assert list(root.glob("nested/*", case_sensitive=True)) == [leaf]
+    finally:
+        shutil.rmtree(root)
