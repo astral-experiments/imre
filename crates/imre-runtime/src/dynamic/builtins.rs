@@ -1572,7 +1572,7 @@ pub(super) fn call(
                 {
                     ctx.check_heap_method_receiver(class, field, values[0])?;
                     true
-                } else if owner == "int" {
+                } else if owner == "int" || Context::dict_view_owner(owner).is_some() {
                     ctx.builtin_slot_accepts(values[0], owner)
                 } else if owner == "typing.Union" {
                     matches!(ctx.heap.get(values[0]), Value::Union(_))
@@ -1593,6 +1593,13 @@ pub(super) fn call(
                     "AttributeError",
                     format!("attribute '{field}' of '{owner}' objects is not writable"),
                 ))
+            }
+            "_dictview_mapping" => {
+                let receiver = noargs_method_receiver(ctx, method, "mapping", args, kwargs)?;
+                let Value::DictView { dict, .. } = *ctx.heap.get(receiver) else {
+                    unreachable!("dictionary view receiver checked");
+                };
+                Ok(ctx.alloc(Value::MappingProxy(dict)))
             }
             "_int_getset" => integer::rational_field(ctx, method, args),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
