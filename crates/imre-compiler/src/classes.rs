@@ -1541,6 +1541,22 @@ fn check_initializer(
                 }
                 continue;
             }
+            if let ast::Expr::Subscript(item) = target
+                && let ast::Expr::Attribute(field) = &*item.value
+                && matches!(&*field.value, ast::Expr::Name(name) if name.id == receiver)
+                && declared.contains(field.attr.as_str())
+            {
+                // Storing an item reads the container and its index. It initializes no field.
+                let mut use_self = SelfUse(receiver, None, &initialized);
+                use_self.visit_expr(target);
+                if let Some(expr) = use_self.1 {
+                    return Err(module.error(
+                        expr,
+                        "a subscript assignment cannot expose self or read an uninitialized field",
+                    ));
+                }
+                continue;
+            }
             let ast::Expr::Attribute(attribute) = target else {
                 return Err(module.error(target, "__init__ must assign a declared self.field"));
             };

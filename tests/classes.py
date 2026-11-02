@@ -69,6 +69,8 @@ REJECTED = {
     "nested_class_after_invalid_class": "class Bad:\n    x: int\n    x: str\nclass Outer:\n    class Inner: pass\n",
     **INVALID_OBJECT_BASES,
     "weak_proxy_callback": "import weakref\nclass Target:\n    pass\ndef callback(proxy: Target) -> None:\n    pass\ntarget = Target()\nweakref.proxy(target, callback)\n",
+    "constructor_uninitialized_container": "class C:\n    data: dict[int, int]\n    def __init__(self):\n        self.data[0] = 1\n        self.data = {}\n",
+    "constructor_uninitialized_index": "class C:\n    data: dict[int, int]\n    key: int\n    def __init__(self):\n        self.data = {}\n        self.data[self.key] = 1\n        self.key = 0\n",
     "inferred_field_reads_itself": FORMAT_INIT.replace("v=1", "v=self.path"),
     "inferred_field_invalid_format_arg": FORMAT_INIT.replace("v=1", "v=[1]"),
     "inferred_field_type_is_shadowed": "class str: pass\n" + FORMAT_INIT,
