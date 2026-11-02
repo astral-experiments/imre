@@ -182,6 +182,7 @@ REJECTED = {
     "mixed_positionals": 'parser.add_argument("input", "--other")',
     "foreign_converter": 'parser.add_argument("--number", type=complex)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
+    "metavar_digit_limit": f"parser.add_argument('-n', type=int, choices=[0x{'f' * 600}], metavar='N')",
     "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
     "escaped_builder": "copy = parser",
     "bad_template": 'parser.add_argument("--key", help="%(value)s")',

@@ -678,6 +678,13 @@ fn option(
     } else {
         None
     };
+    // An explicit metavar defers integer choice formatting until it is actually needed.
+    if metavar.is_some() && choice_digits.is_some() {
+        return Err(module.error(
+            call,
+            "static argparse cannot defer digit-limited choices with a custom metavar",
+        ));
+    }
     Ok((
         OptionField {
             name: dest.clone(),
