@@ -1,4 +1,4 @@
-//! Read into exported buffers with one sequential or positioned Linux scatter read.
+//! Linux scatter reads and gather writes over exported buffers.
 
 use super::{Context, Error, Id, Result, Value};
 use std::{
@@ -29,14 +29,14 @@ fn is_sequence(ctx: &Context, id: Id) -> bool {
         ) || ctx.slot(id, "__getitem__").is_some())
 }
 
-fn writable_span(ctx: &Context, id: Id) -> Result<(Id, Range<usize>)> {
-    if let Some(span) = ctx.writable_byte_span(id)? {
+fn buffer_span(ctx: &Context, id: Id, writable: bool) -> Result<(Id, Range<usize>)> {
+    if let Some(span) = ctx.contiguous_byte_span(id, writable)? {
         return Ok(span);
     }
     match ctx.heap.get(ctx.scalar_value(id)) {
         Value::Bytes(_) => Err(Error::new("BufferError", "Object is not writable.")),
         Value::MemoryView { .. } => {
-            let reason = if ctx.view_is_readonly(id)? {
+            let reason = if writable && ctx.view_is_readonly(id)? {
                 "memoryview: underlying buffer is not writable"
             } else {
                 "memoryview: underlying buffer is not C-contiguous"
@@ -85,17 +85,18 @@ fn preadv2() -> Option<Preadv2> {
     })
 }
 
-enum Read {
-    Sequential,
+enum Transfer {
+    Read,
+    Write,
     Positioned(FileOffset),
     PositionedWithFlags(Preadv2, i64, i32),
 }
 
-fn read_exported(
+fn transfer_exported(
     ctx: &mut Context,
     fd: i32,
     spans: &[(Id, Range<usize>)],
-    read: Read,
+    transfer: Transfer,
 ) -> Result<Id> {
     let mut vectors = Vec::new();
     vectors.try_reserve_exact(spans.len()).map_err(no_memory)?;
@@ -110,8 +111,14 @@ fn read_exported(
             let (base, length) = match bases.entry(*storage) {
                 Entry::Occupied(entry) => *entry.get(),
                 Entry::Vacant(entry) => {
-                    let bytes = ctx.writable_storage_bytes(*storage)?;
-                    *entry.insert((bytes.as_mut_ptr(), bytes.len()))
+                    let backing = if matches!(transfer, Transfer::Write) {
+                        let bytes = ctx.owner_bytes(*storage)?;
+                        (bytes.as_ptr().cast_mut(), bytes.len())
+                    } else {
+                        let bytes = ctx.writable_storage_bytes(*storage)?;
+                        (bytes.as_mut_ptr(), bytes.len())
+                    };
+                    *entry.insert(backing)
                 }
             };
             if range.end > length {
@@ -130,10 +137,12 @@ fn read_exported(
         // SAFETY: each iovec addresses live exported storage until the syscall returns.
         // No Rust slice into those buffers or Python callback is live during the call.
         let n = unsafe {
-            match read {
-                Read::Sequential => libc::readv(fd, iov, count),
-                Read::Positioned(offset) => read_at(fd, iov, count, offset),
-                Read::PositionedWithFlags(call, offset, flags) => {
+            match transfer {
+                Transfer::Read => libc::readv(fd, iov, count),
+                // writev only reads iov_base, including for immutable bytes.
+                Transfer::Write => libc::writev(fd, iov, count),
+                Transfer::Positioned(offset) => read_at(fd, iov, count, offset),
+                Transfer::PositionedWithFlags(call, offset, flags) => {
                     call(fd, iov, count, offset, flags)
                 }
             }
@@ -155,34 +164,52 @@ pub(super) fn readv(
     buffers: Id,
     position: Option<(i64, i32)>,
 ) -> Result<Id> {
+    let name = if position.is_some() {
+        "preadv2"
+    } else {
+        "readv"
+    };
+    with_vectors(ctx, fd, buffers, name, || {
+        Ok(match position {
+            None => Transfer::Read,
+            Some((offset, flags)) => match preadv2() {
+                Some(call) => Transfer::PositionedWithFlags(call, offset, flags),
+                None if flags == 0 => Transfer::Positioned(
+                    FileOffset::try_from(offset)
+                        .map_err(|_| Error::new("OverflowError", "offset does not fit in off_t"))?,
+                ),
+                None => {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "preadv2: flags unavailable on this platform",
+                    ));
+                }
+            },
+        })
+    })
+}
+
+pub(super) fn writev(ctx: &mut Context, fd: i32, buffers: Id) -> Result<Id> {
+    crate::initialize_io();
+    with_vectors(ctx, fd, buffers, "writev", || Ok(Transfer::Write))
+}
+
+fn with_vectors(
+    ctx: &mut Context,
+    fd: i32,
+    buffers: Id,
+    name: &str,
+    select: impl FnOnce() -> Result<Transfer>,
+) -> Result<Id> {
     if !is_sequence(ctx, buffers) {
-        let name = if position.is_some() {
-            "preadv2"
-        } else {
-            "readv"
-        };
         return Err(Error::new(
             "TypeError",
             format!("{name}() arg 2 must be a sequence"),
         ));
     }
     let count = ctx.sequence_len(buffers)?;
-    let read = match position {
-        None => Read::Sequential,
-        Some((offset, flags)) => match preadv2() {
-            Some(call) => Read::PositionedWithFlags(call, offset, flags),
-            None if flags == 0 => Read::Positioned(
-                FileOffset::try_from(offset)
-                    .map_err(|_| Error::new("OverflowError", "offset does not fit in off_t"))?,
-            ),
-            None => {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "preadv2: flags unavailable on this platform",
-                ));
-            }
-        },
-    };
+    let transfer = select()?;
+    let writable = !matches!(transfer, Transfer::Write);
     let mut spans = Vec::new();
     spans.try_reserve_exact(count).map_err(no_memory)?;
     let mark = ctx.buffer_exports.len();
@@ -190,13 +217,13 @@ pub(super) fn readv(
         for index in 0..count {
             let key = ctx.int(index as i64);
             let item = ctx.get_item(buffers, key)?;
-            let (storage, range) = writable_span(ctx, item)?;
+            let (storage, range) = buffer_span(ctx, item, writable)?;
             // Pin this view and backing before the next __getitem__ runs Python.
             ctx.buffer_exports.try_reserve(2).map_err(no_memory)?;
             ctx.buffer_exports.extend([item, storage]);
             spans.push((storage, range));
         }
-        read_exported(ctx, fd, &spans, read)
+        transfer_exported(ctx, fd, &spans, transfer)
     })();
     ctx.buffer_exports.truncate(mark);
     result
