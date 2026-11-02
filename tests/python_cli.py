@@ -3094,6 +3094,9 @@ for name in ("md4", "ripemd160"):
                         extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
                     )
         if os.name == "posix":
+            raw_environment = {b"RAW_\xff": b"value_\xff", "LC_ALL": "C"}
+            compare("-B", "-c", r"import os; print(ascii(os.getenv('RAW_\udcff')))", extra=raw_environment)
+            compare("-B", "-c", r"from os import getenvb as read; print(read(b'RAW_\xff'))", extra=raw_environment)
             compare("-B", "-c", "import os; print('PATH' in list(os.environ.keys()))")
             compare("-B", "-c", """from os import environb as env
 keys = env.keys()
