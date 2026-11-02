@@ -1,4 +1,8 @@
-from itertools import cycle
+import itertools
+from itertools import *
+
+assert cycle is itertools.cycle and count is itertools.count and repeat is itertools.repeat
+assert "_cycle_next" not in globals()
 
 
 def current():
