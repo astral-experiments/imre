@@ -39,7 +39,9 @@ def exchange(server, version, cafile, hostname, expected):
                 else:
                     with peer:
                         assert not expected
-                        observed["binding"] = peer.get_channel_binding().hex()
+                        binding = peer.get_channel_binding()
+                        assert binding
+                        observed["binding"] = binding.hex()
                         observed["protocol"] = peer.version()
                         peer.sendall(b"LOCAL TLS\n")
                         with peer.makefile("rb") as reply:
@@ -54,8 +56,10 @@ def exchange(server, version, cafile, hostname, expected):
                                   observed=observed, exit=child.returncode, stdout=line + tail,
                                   stderr=errors)), flush=True)
     assert child.returncode == 0
-    marker = "PEER_REJECTED" if expected else "BINDING " + observed["binding"]
-    assert marker in tail
+    if expected:
+        assert any(line.startswith("PEER_REJECTED ") for line in tail.splitlines())
+    else:
+        assert "BINDING " + observed["binding"] in tail.splitlines()
 
 
 def main():
