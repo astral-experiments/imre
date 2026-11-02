@@ -3144,18 +3144,15 @@ impl Heap {
         } = cycles;
         unowned.clear();
         incoming.fill(0);
-        for slot in &self.slots {
+        for (id, slot) in self.slots.iter().enumerate() {
             if !slot.marked()
                 && let Some(value) = &slot.value
             {
+                unowned.push(id);
                 self.unreachable_children(value, |child| incoming[child] += 1);
             }
         }
-        for (id, slot) in self.slots.iter().enumerate() {
-            if !slot.marked() && slot.value.is_some() && incoming[id] == 0 {
-                unowned.push(id);
-            }
-        }
+        unowned.retain(|&id| incoming[id] == 0);
         while let Some(id) = unowned.pop() {
             if first_finalizer.is_none() && self.slots[id].finalization == Finalization::Pending {
                 first_finalizer = Some(id as Id);
