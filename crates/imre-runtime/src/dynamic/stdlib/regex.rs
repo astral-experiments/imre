@@ -369,6 +369,8 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
             continue;
         }
         let escaped = chars.next();
+        // Only the Python tokenizer knows the class context across verbose comments.
+        prefer_translation |= matches!(escaped, Some('0'..='7'));
         if ascii && let Some(class) = escaped.and_then(imre_regex::ascii_class) {
             result.push_str(class);
             continue;
