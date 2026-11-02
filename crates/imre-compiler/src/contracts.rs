@@ -333,6 +333,7 @@ impl Builtin {
                 | ProcessOperation::PopenCleanup
                 | ProcessOperation::Call { .. }
                 | ProcessOperation::AsyncSpawn { .. } => Contract::new(true, Unknown),
+                ProcessOperation::GetPid => Contract::new(false, PreservesLists),
                 ProcessOperation::Executable
                 | ProcessOperation::PopenPid
                 | ProcessOperation::PopenActive

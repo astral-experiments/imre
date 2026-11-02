@@ -2325,6 +2325,7 @@ pub(crate) enum ProcessOperation {
     EnvironSet {
         bytes: bool,
     },
+    GetPid,
     GetCwd {
         bytes: bool,
     },
