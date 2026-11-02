@@ -100,6 +100,13 @@ enum Instruction {
         handler: usize,
     },
     ExitWith,
+    EnterExcept {
+        handler: usize,
+        end: usize,
+    },
+    ExceptMatch(ast::Expr, usize),
+    BindException(String),
+    ClearException(String),
     StartFinally,
     EndFinally,
     Delegate,
@@ -296,6 +303,13 @@ enum Transfer {
     Raise(Id),
 }
 
+#[derive(Clone, Copy)]
+enum HandlerKind {
+    Finally,
+    Except,
+    With(Id),
+}
+
 /// A protected source region survives yields, including yields in its cleanup.
 #[derive(Clone)]
 pub(super) struct FinallyBlock {
@@ -304,12 +318,16 @@ pub(super) struct FinallyBlock {
     end: usize,
     depth: usize,
     pending: Option<Transfer>,
-    exit: Option<Id>,
+    kind: HandlerKind,
 }
 
 impl FinallyBlock {
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> {
-        self.exit.into_iter().chain(match self.pending {
+        let exit = match self.kind {
+            HandlerKind::With(exit) => Some(exit),
+            _ => None,
+        };
+        exit.into_iter().chain(match self.pending {
             Some(Transfer::Raise(id) | Transfer::Return(id)) => Some(id),
             _ => None,
         })
@@ -709,6 +727,7 @@ impl Program {
                 Instruction::Eval(e)
                 | Instruction::Unless(e, _)
                 | Instruction::Iter(e)
+                | Instruction::ExceptMatch(e, _)
                 | Instruction::Await(e) => strings.visit_expr(e),
                 Instruction::Match { subject, cases, .. } => {
                     strings.visit_expr(subject);
@@ -730,7 +749,9 @@ impl Program {
                         strings.visit_expr(target);
                     }
                 }
-                Instruction::DeleteName(name) => {
+                Instruction::DeleteName(name)
+                | Instruction::BindException(name)
+                | Instruction::ClearException(name) => {
                     strings.heap.code_name(name);
                 }
                 Instruction::DeleteItem(item) => {
@@ -817,6 +838,7 @@ impl Program {
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
                 | Instruction::ExitWith
+                | Instruction::EnterExcept { .. }
                 | Instruction::StartFinally
                 | Instruction::EndFinally
                 | Instruction::Delegate => {}
@@ -1412,16 +1434,95 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::Try(s)
-                    if s.handlers.is_empty() && s.orelse.is_empty() && !s.finalbody.is_empty() =>
-                {
+                Stmt::Try(s) if !s.is_star && !s.handlers.is_empty() && s.finalbody.is_empty() => {
+                    let entry = self.instructions.len();
+                    self.instructions
+                        .push((line, Instruction::EnterExcept { handler: 0, end: 0 }));
+                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    // On fallthrough, leave the protected body before running the else suite.
+                    self.instructions.push((line, Instruction::StartFinally));
+                    let handler = self.instructions.len();
+                    let mut handled = Vec::new();
+                    let count = s.handlers.len();
+                    for (i, ast::ExceptHandler::ExceptHandler(h)) in
+                        s.handlers.into_iter().enumerate()
+                    {
+                        if h.type_.is_none() && i + 1 < count {
+                            return Err(Error::new(
+                                "SyntaxError",
+                                "default 'except:' must be last",
+                            ));
+                        }
+                        let handler_line =
+                            lines.partition_point(|n| *n <= h.start().to_usize()) as u32;
+                        let check = h.type_.map(|class| {
+                            let i = self.instructions.len();
+                            self.instructions
+                                .push((handler_line, Instruction::ExceptMatch(*class, 0)));
+                            i
+                        });
+                        let cleanup = h.name.map(|name| {
+                            let name = name.to_string();
+                            self.locals.insert(name.clone());
+                            self.instructions
+                                .push((handler_line, Instruction::BindException(name.clone())));
+                            let entry = self.instructions.len();
+                            self.instructions.push((
+                                handler_line,
+                                Instruction::EnterFinally { handler: 0, end: 0 },
+                            ));
+                            (entry, name)
+                        });
+                        self.lower(h.body, lines, function, active.as_deref_mut())?;
+                        if let Some((entry, name)) = cleanup {
+                            // The implicit finally clears the target on fallthrough, unwind and generator close.
+                            self.instructions
+                                .push((handler_line, Instruction::StartFinally));
+                            let handler = self.instructions.len();
+                            self.instructions
+                                .push((handler_line, Instruction::ClearException(name)));
+                            self.instructions
+                                .push((handler_line, Instruction::EndFinally));
+                            let end = self.instructions.len();
+                            self.instructions[entry].1 = Instruction::EnterFinally { handler, end };
+                        }
+                        handled.push(self.instructions.len());
+                        self.instructions.push((handler_line, Instruction::Jump(0)));
+                        if let Some(i) = check {
+                            let next = self.instructions.len();
+                            let Instruction::ExceptMatch(_, next_handler) =
+                                &mut self.instructions[i].1
+                            else {
+                                unreachable!()
+                            };
+                            *next_handler = next;
+                        }
+                    }
+                    self.instructions.push((line, Instruction::EndFinally));
+                    let end = self.instructions.len();
+                    self.instructions[entry].1 = Instruction::EnterExcept { handler, end };
+                    self.lower(s.orelse, lines, function, active.as_deref_mut())?;
+                    let done = self.instructions.len();
+                    for i in handled {
+                        self.instructions[i].1 = Instruction::Jump(done);
+                    }
+                    continue;
+                }
+                Stmt::Try(mut s) if !s.is_star && !s.finalbody.is_empty() => {
+                    let finalbody = std::mem::take(&mut s.finalbody);
                     let enter = self.instructions.len();
                     self.instructions
                         .push((line, Instruction::EnterFinally { handler: 0, end: 0 }));
-                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    // The finally surrounds the handlers and else suite as well as the try body.
+                    let protected = if s.handlers.is_empty() {
+                        s.body
+                    } else {
+                        std::iter::once(Stmt::Try(s)).collect()
+                    };
+                    self.lower(protected, lines, function, active.as_deref_mut())?;
                     self.instructions.push((line, Instruction::StartFinally));
                     let handler = self.instructions.len();
-                    self.lower(s.finalbody, lines, function, active.as_deref_mut())?;
+                    self.lower(finalbody, lines, function, active.as_deref_mut())?;
                     self.instructions.push((line, Instruction::EndFinally));
                     let end = self.instructions.len();
                     self.instructions[enter].1 = Instruction::EnterFinally { handler, end };
@@ -2552,7 +2653,10 @@ impl Context {
                 let iter = cursor.iterators.pop().expect("inner iterator");
                 self.release_loop_iterator(iter);
             }
-            if block.pending.is_none() {
+            if block.pending.is_none()
+                && (!matches!(block.kind, HandlerKind::Except)
+                    || matches!(transfer, Transfer::Raise(_)))
+            {
                 block.pending = Some(transfer);
                 cursor.ip = block.handler;
                 return Ok(None);
@@ -2702,14 +2806,19 @@ impl Context {
                 } else if let Some((_, op)) = op {
                     cursor.ip += 1;
                     match op {
-                        Instruction::EnterFinally { handler, end } => {
+                        Instruction::EnterFinally { handler, end }
+                        | Instruction::EnterExcept { handler, end } => {
                             cursor.protected.push(FinallyBlock {
                                 start: cursor.ip,
                                 handler: *handler,
                                 end: *end,
                                 depth: cursor.iterators.len(),
                                 pending: None,
-                                exit: None,
+                                kind: if matches!(op, Instruction::EnterExcept { .. }) {
+                                    HandlerKind::Except
+                                } else {
+                                    HandlerKind::Finally
+                                },
                             });
                             continue;
                         }
@@ -3090,7 +3199,7 @@ impl Context {
                     end: handler + 2,
                     depth: iterators.len(),
                     pending: None,
-                    exit: Some(exit),
+                    kind: HandlerKind::With(exit),
                 });
                 if let Some(target) = &item.optional_vars {
                     self.bind_target(code, scope, target, value)?;
@@ -3098,7 +3207,9 @@ impl Context {
             }
             Instruction::ExitWith => {
                 let block = cursor.protected.last_mut().expect("active context manager");
-                let exit = block.exit.expect("context manager exit");
+                let HandlerKind::With(exit) = block.kind else {
+                    unreachable!("context manager exit");
+                };
                 let exception = match block.pending {
                     Some(Transfer::Raise(error)) => error,
                     _ => NONE,
@@ -3112,7 +3223,41 @@ impl Context {
                     });
                 }
             }
+            Instruction::BindException(name) => {
+                self.bind_source_name(scope, name, self.heap.active_exception())?;
+            }
+            Instruction::ClearException(name) => {
+                self.bind_source_name(scope, name, NONE)?;
+                let key = self.heap.code_name(name);
+                self.op("delname", scope, key, NONE)?;
+            }
+            Instruction::ExceptMatch(class, next_handler) => {
+                let class = eval(self, class)?;
+                let base = self.builtin("BaseException");
+                let items = self.tuple_items(class)?;
+                let classes = items.as_deref().unwrap_or(std::slice::from_ref(&class));
+                if !classes
+                    .iter()
+                    .all(|&target| self.direct_subclass(target, base))
+                {
+                    return Err(Error::new(
+                        "TypeError",
+                        "catching classes that do not inherit from BaseException is not allowed",
+                    ));
+                }
+                let Value::Raised(error) = self.heap.get(self.heap.active_exception()) else {
+                    unreachable!("matching an active exception")
+                };
+                // Python except clauses use the actual inheritance chain, ignoring ABC registration.
+                if !classes.iter().any(|&target| match error.class() {
+                    Some(actual) => self.direct_subclass(actual, target),
+                    None => self.raised_error_matches(error, target),
+                }) {
+                    *ip = *next_handler;
+                }
+            }
             Instruction::EnterFinally { .. }
+            | Instruction::EnterExcept { .. }
             | Instruction::StartFinally
             | Instruction::EndFinally
             | Instruction::Jump(_)
