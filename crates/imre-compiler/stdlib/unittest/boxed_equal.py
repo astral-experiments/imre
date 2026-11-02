@@ -269,3 +269,39 @@ def assertAlmostEqual(self, first, second, places=None, msg=None,
 
 
 TestCase.assertAlmostEqual = assertAlmostEqual
+
+
+# From CPython 3.14.5 unittest.case. See ../docstrings/LICENSE.
+def _tail_type_check(self, s, tails, msg):
+    if not isinstance(tails, tuple):
+        tails = (tails,)
+    for tail in tails:
+        if isinstance(tail, str):
+            if not isinstance(s, str):
+                self.fail(self._formatMessage(msg,
+                        f'Expected str, not {type(s).__name__}'))
+        elif isinstance(tail, (bytes, bytearray)):
+            if not isinstance(s, (bytes, bytearray)):
+                self.fail(self._formatMessage(msg,
+                        f'Expected bytes, not {type(s).__name__}'))
+
+
+def assertEndsWith(self, s, suffix, msg=None):
+    try:
+        if s.endswith(suffix):
+            return
+    except (AttributeError, TypeError):
+        self._tail_type_check(s, suffix, msg)
+        raise
+    from unittest.util import safe_repr
+    a = safe_repr(s, short=True)
+    b = safe_repr(suffix)
+    if isinstance(suffix, tuple):
+        standardMsg = f"{a} doesn't end with any of {b}"
+    else:
+        standardMsg = f"{a} doesn't end with {b}"
+    self.fail(self._formatMessage(msg, standardMsg))
+
+
+TestCase._tail_type_check = _tail_type_check
+TestCase.assertEndsWith = assertEndsWith
