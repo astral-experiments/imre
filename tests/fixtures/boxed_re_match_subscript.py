@@ -85,4 +85,27 @@ def current():
         assert str(error) == "expected string or bytes-like object, got 'memoryview'"
     else:
         raise AssertionError("released subject accepted")
+    high, low, private = chr(0xd800), chr(0xdfff), chr(0xf0000)
+    source = "(?P<odd>" + high + ")(" + low + ")"
+    pattern = re.compile(source, re.I)
+    subject = private + low + high + low
+    match = pattern.search(subject)
+    assert pattern.pattern is source and match.string is subject
+    assert match.span() == (2, 4) and match["odd"] == high and match[2] == low
+    flagged = re.compile("(?im)(?P<letter>a)" + high)
+    assert flagged.flags == re.I | re.M | re.U
+    assert flagged.fullmatch("A" + high).lastgroup == "letter"
+    assert pattern.search(private + low) is None
+    assert re.fullmatch(high + "|x", private) is None
+    assert re.fullmatch(high + "|x", "x")[0] == "x"
+    for bad, pos, message in [
+        (high + "(", 1, "missing ), unterminated subpattern"),
+        ("(?P<foo" + high + ">x)", 4, "bad character in group name " + repr("foo" + high)),
+    ]:
+        try:
+            re.compile(bad)
+        except re.PatternError as error:
+            assert error.pattern is bad and error.pos == pos and error.msg == message
+        else:
+            raise AssertionError("invalid pattern accepted")
     print("text and bytes match groups passed")
