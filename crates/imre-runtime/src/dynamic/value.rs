@@ -1325,6 +1325,7 @@ impl Value {
                 visit.extend(extras.iter().map(|&(_, id)| id));
             }
             Self::Dict(entries) => {
+                visit.extend(entries.ordered_nodes().iter().map(|&(key, _)| key));
                 for (key, value) in entries {
                     visit.extend([*value, *key]);
                 }
@@ -1694,7 +1695,7 @@ pub(super) struct DictIterator {
     position: usize,
     reverse: bool,
     remaining: usize,
-    order_state: Option<(usize, usize, usize)>,
+    order_state: Option<usize>,
 }
 
 impl DictIterator {
@@ -1737,7 +1738,7 @@ impl DictIterator {
         dict: Id,
         kind: DictViewKind,
         size: usize,
-        order_state: Option<(usize, usize, usize)>,
+        ordered: Option<(usize, usize)>,
         reverse_end: Option<usize>,
     ) -> Self {
         Self {
@@ -1746,8 +1747,8 @@ impl DictIterator {
             expected_len: Some(size),
             position: reverse_end.unwrap_or(0),
             reverse: reverse_end.is_some(),
-            remaining: size,
-            order_state,
+            remaining: ordered.map_or(size, |(_, count)| count),
+            order_state: ordered.map(|(revision, _)| revision),
         }
     }
 
@@ -1790,7 +1791,9 @@ impl DictIterator {
     /// Resolve the retained key through the dictionary, including user hash and equality hooks.
     fn ordered_index(ctx: &mut Context, storage: Id, key: Id) -> Result<usize> {
         let (_, index) = ctx.find_dictionary_key(storage, key, None)?;
-        index.ok_or_else(|| ctx.lookup_error("KeyError", key))
+        index
+            .filter(|&i| ctx.stored_entries(storage).ordered_rank(i).is_some())
+            .ok_or_else(|| ctx.lookup_error("KeyError", key))
     }
 
     /// Read a logical order rank or a plain dictionary slot, in the cursor's direction.
@@ -1805,10 +1808,10 @@ impl DictIterator {
             } else {
                 Some(position)
             };
-            rank.filter(|&rank| rank < entries.len()).map(|rank| {
-                let (key, value) = entries[entries.ordered_dense(rank)];
-                (rank, key, value)
-            })
+            let rank = rank?;
+            let &(key, _) = entries.ordered_nodes().get(rank)?;
+            // Ordered cursors resolve the retained key against the live dictionary.
+            Some((rank, key, NONE))
         } else if self.reverse {
             entries.before(position)
         } else {
@@ -1831,7 +1834,7 @@ impl DictIterator {
                 self.dict = None;
                 return Ok(None);
             }
-            if order != entries.order_state() || self.expected_len != Some(entries.len()) {
+            if order != entries.order_state() {
                 self.dict = None;
                 return Err(Error::new(
                     "RuntimeError",
@@ -1841,17 +1844,19 @@ impl DictIterator {
         }
         if self.expected_len != Some(entries.len()) {
             self.expected_len = None;
-            return Err(Error::new(
-                "RuntimeError",
-                "dictionary changed size during iteration",
-            ));
+            let message = if self.order_state.is_some() {
+                "OrderedDict changed size during iteration"
+            } else {
+                "dictionary changed size during iteration"
+            };
+            return Err(Error::new("RuntimeError", message));
         }
         let entry = self.entry_at(entries, self.position);
         let Some((position, mut key, value)) = entry else {
             self.dict = None;
             return Ok(None);
         };
-        if !self.reverse && self.remaining == 0 {
+        if self.order_state.is_none() && !self.reverse && self.remaining == 0 {
             self.dict = None;
             return Err(Error::new(
                 "RuntimeError",
@@ -1881,7 +1886,7 @@ impl DictIterator {
             }
         }
         self.position = if self.reverse { position } else { position + 1 };
-        self.remaining = self.remaining.saturating_sub(1);
+        self.remaining -= 1;
         Ok(Some((storage, key, value)))
     }
 }

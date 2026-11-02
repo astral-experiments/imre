@@ -194,18 +194,18 @@ impl Index {
 }
 
 impl Entries {
-    /// Identify changes to insertion positions even when the live size is restored.
-    pub(in super::super) fn order_state(&self) -> (usize, usize, usize) {
-        (
-            self.next,
-            self.index.as_ref().map_or(0, |index| index.generation),
-            self.order.as_ref().map_or(0, |order| order.revision),
-        )
+    /// Ordered iterators track node mutations separately from the size of the base dict.
+    pub(in super::super) fn order_state(&self) -> usize {
+        self.order.as_ref().map_or(0, |order| order.revision)
     }
 
     /// Remove all pairs and invalidate lookups suspended in a key comparison.
     pub(in super::super) fn clear(&mut self) -> Vec<(Id, Id)> {
         let old = std::mem::take(self);
+        self.order = old.order;
+        if let Some(order) = &mut self.order {
+            order.by_dense.clear();
+        }
         if let Some(index) = old.index {
             let size = (self.usable + 1).next_power_of_two();
             let mut index = index;
@@ -240,13 +240,7 @@ impl Entries {
                 }),
                 None => None,
             },
-            order: match &self.order {
-                Some(order) => Some(super::Order {
-                    indices: copy(&order.indices)?,
-                    revision: order.revision,
-                }),
-                None => None,
-            },
+            order: None,
             next: self.next,
             usable: self.usable,
         })
@@ -338,15 +332,46 @@ impl Context {
         last: bool,
     ) -> Result<()> {
         let entries = self.stored_entries(dict);
-        let Some(end) = entries.len().checked_sub(1) else {
-            return Err(self.lookup_error("KeyError", key));
-        };
-        if entries[entries.ordered_dense(if last { end } else { 0 })].0 == key {
+        let nodes = entries.ordered_nodes();
+        if (if last { nodes.last() } else { nodes.first() }).is_some_and(|&(node, _)| node == key) {
             return Ok(());
         }
         let (_, dense) = self.find_dictionary_key(dict, key, None)?;
-        let dense = dense.ok_or_else(|| self.lookup_error("KeyError", key))?;
-        self.stored_entries_mut(dict).move_to_end(dense, last)
+        let entries = self.stored_entries(dict);
+        let rank = dense
+            .and_then(|i| entries.ordered_rank(i))
+            .ok_or_else(|| self.lookup_error("KeyError", key))?;
+        self.stored_entries_mut(dict).move_to_end(rank, last);
+        Ok(())
+    }
+
+    /// Unlink the node once the backing entry has been removed successfully.
+    pub(in super::super) fn unlink_ordered_rank(&mut self, dict: Id, rank: usize) {
+        let key = self.stored_entries_mut(dict).unlink_ordered_rank(rank);
+        self.heap.weak_edge_removed(key);
+    }
+
+    pub(in super::super) fn clear_ordered_dict(&mut self, dict: Id) {
+        let removed = self
+            .stored_entries_mut(dict)
+            .order
+            .as_mut()
+            .map(|order| {
+                order.revision = order.revision.wrapping_add(1);
+                std::mem::take(&mut order.keys)
+            })
+            .unwrap_or_default();
+        let finalize = self.heap.has_unbound_finalizer(super::super::NONE)
+            && removed
+                .iter()
+                .any(|&(key, _)| self.heap.could_own_finalizer(key, true));
+        for (key, _) in removed {
+            self.heap.weak_edge_removed(key);
+        }
+        super::super::builtins::clear_container(self, dict);
+        if finalize {
+            self.collect_unreachable();
+        }
     }
 
     fn stored_entries_mut(&mut self, dict: Id) -> &mut Entries {
@@ -991,6 +1016,40 @@ impl Context {
     ) -> Result<Id> {
         self.heap.keep(value);
         let (hash, index) = self.find_dictionary_key(dict, key, known_hash)?;
+        self.store_dictionary_value(dict, key, value, hash, index, overwrite)
+    }
+
+    pub(in super::super) fn set_ordered_dictionary_key(
+        &mut self,
+        dict: Id,
+        key: Id,
+        value: Id,
+    ) -> Result<Id> {
+        self.heap.keep(value);
+        let (hash, index) = self.find_dictionary_key(dict, key, None)?;
+        let entries = self.stored_entries_mut(dict);
+        let dense = index.unwrap_or(entries.len());
+        let append = index.and_then(|i| entries.ordered_rank(i)).is_none();
+        if append {
+            entries.reserve_ordered_node()?;
+        }
+        self.store_dictionary_value(dict, key, value, hash, index, true)?;
+        if append {
+            self.stored_entries_mut(dict)
+                .link_ordered_key(dense, key, hash);
+        }
+        Ok(value)
+    }
+
+    fn store_dictionary_value(
+        &mut self,
+        dict: Id,
+        key: Id,
+        value: Id,
+        hash: i64,
+        index: Option<usize>,
+        overwrite: bool,
+    ) -> Result<Id> {
         let entries = self.stored_entries_mut(dict);
         if let Some(i) = index {
             if !overwrite {

@@ -4,11 +4,14 @@ mod keys;
 
 use std::ops::{Deref, DerefMut};
 
-use super::{Error, Id, Result};
+use super::{Id, Result};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Order {
-    indices: Vec<usize>,
+    // Explicit dict descriptors can remove a value while the order node still owns its key.
+    keys: Vec<(Id, i64)>,
+    // Each live base-dict entry may have an associated order node.
+    by_dense: Vec<Option<usize>>,
     revision: usize,
 }
 
@@ -91,7 +94,7 @@ impl Entries {
     pub(super) fn push(&mut self, value: (Id, Id), hash: i64) -> Result<()> {
         if let Some(order) = &mut self.order {
             order
-                .indices
+                .by_dense
                 .try_reserve(1)
                 .map_err(|_| crate::Error::memory_error())?;
         }
@@ -114,12 +117,12 @@ impl Entries {
                 .map_err(|_| crate::Error::memory_error())?;
             positions.push(self.next);
         }
-        if let Some(order) = &mut self.order {
-            order.indices.push(self.values.len());
-        }
         index.push(hash, self.next);
         self.next += 1;
         self.values.push(value);
+        if let Some(order) = &mut self.order {
+            order.by_dense.push(None);
+        }
         Ok(())
     }
 
@@ -144,56 +147,80 @@ impl Entries {
             keys.remove(index, position);
         }
         if let Some(order) = &mut self.order {
-            order.indices.retain_mut(|dense| {
-                if *dense == index {
-                    return false;
-                }
-                if *dense > index {
-                    *dense -= 1;
-                }
-                true
-            });
+            order.by_dense.remove(index);
         }
         Ok(self.values.remove(index))
     }
 
-    /// Map the ordered view's rank to an entry in the underlying dict.
-    pub(super) fn ordered_dense(&self, rank: usize) -> usize {
-        self.order
-            .as_ref()
-            .map_or(rank, |order| order.indices[rank])
+    /// The accelerated OrderedDict's key nodes, independent of base dict entries.
+    pub(super) fn ordered_nodes(&self) -> &[(Id, i64)] {
+        self.order.as_ref().map_or(&[], |order| &order.keys)
     }
 
-    /// Move an existing key without changing the underlying dict's insertion order.
-    fn move_to_end(&mut self, dense: usize, last: bool) -> Result<()> {
-        let endpoint = if last { self.len() - 1 } else { 0 };
-        if self.ordered_dense(endpoint) == dense {
-            return Ok(());
-        }
+    pub(super) fn ordered_rank(&self, dense: usize) -> Option<usize> {
+        self.order.as_ref().and_then(|order| order.by_dense[dense])
+    }
+
+    fn reserve_ordered_node(&mut self) -> Result<()> {
         if self.order.is_none() {
-            let mut indices = Vec::new();
-            indices
+            let mut by_dense = Vec::new();
+            by_dense
                 .try_reserve_exact(self.len())
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            indices.extend(0..self.len());
+                .map_err(|_| crate::Error::memory_error())?;
+            by_dense.resize(self.len(), None);
             self.order = Some(Order {
-                indices,
-                revision: 0,
+                by_dense,
+                ..Order::default()
             });
         }
-        let order = self.order.as_mut().expect("ordered entries");
-        let rank = order
-            .indices
-            .iter()
-            .position(|&i| i == dense)
-            .expect("live ordered key");
-        if last {
-            order.indices[rank..].rotate_left(1);
-        } else {
-            order.indices[..=rank].rotate_right(1);
+        self.order
+            .as_mut()
+            .unwrap()
+            .keys
+            .try_reserve(1)
+            .map_err(|_| crate::Error::memory_error().into())
+    }
+
+    fn link_ordered_key(&mut self, dense: usize, key: Id, hash: i64) {
+        let order = self.order.as_mut().expect("reserved ordered node");
+        order.by_dense[dense] = Some(order.keys.len());
+        order.keys.push((key, hash));
+        order.revision = order.revision.wrapping_add(1);
+    }
+
+    fn unlink_ordered_rank(&mut self, rank: usize) -> Id {
+        let order = self.order.as_mut().expect("live ordered node");
+        let (key, _) = order.keys.remove(rank);
+        for other in order.by_dense.iter_mut().flatten() {
+            if *other > rank {
+                *other -= 1;
+            }
         }
         order.revision = order.revision.wrapping_add(1);
-        Ok(())
+        key
+    }
+
+    fn move_to_end(&mut self, rank: usize, last: bool) {
+        let order = self.order.as_mut().expect("live ordered key");
+        let end = if last { order.keys.len() - 1 } else { 0 };
+        if rank == end {
+            return;
+        }
+        if last {
+            order.keys[rank..].rotate_left(1);
+        } else {
+            order.keys[..=rank].rotate_right(1);
+        }
+        for other in order.by_dense.iter_mut().flatten() {
+            if *other == rank {
+                *other = end;
+            } else if last && *other > rank {
+                *other -= 1;
+            } else if !last && *other < rank {
+                *other += 1;
+            }
+        }
+        order.revision = order.revision.wrapping_add(1);
     }
 
     pub(super) fn insertion_end(&self) -> usize {

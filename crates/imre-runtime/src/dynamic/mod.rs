@@ -636,10 +636,10 @@ impl Context {
             dict,
             kind,
             entries.len(),
-            ordered.then(|| entries.order_state()),
+            ordered.then(|| (entries.order_state(), entries.ordered_nodes().len())),
             reverse.then(|| {
                 if ordered {
-                    entries.len()
+                    entries.ordered_nodes().len()
                 } else {
                     entries.insertion_end()
                 }

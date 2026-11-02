@@ -1,7 +1,10 @@
 """OrderedDict backed by the runtime's ordered dictionary storage."""
 
 from _collections import (
+    _ordered_dict_clear,
+    _ordered_dict_delitem,
     _ordered_dict_equal,
+    _ordered_dict_setitem,
     _ordered_dict_move_to_end,
     _ordered_dict_pop,
     _ordered_dict_popitem,
@@ -35,6 +38,15 @@ def _ordered_dict_update(target, other):
         target[key] = value
 
 
+def _ordered_dict_update_args(target, args, kwargs):
+    if len(args) > 1:
+        raise TypeError(f"expected at most 1 argument, got {len(args)}")
+    if args:
+        _ordered_dict_update(target, args[0])
+    if kwargs:
+        _ordered_dict_update(target, kwargs)
+
+
 def _ordered_dict_union(left, right):
     if not issubclass(type(left), dict) or not issubclass(type(right), dict):
         return NotImplemented
@@ -49,12 +61,23 @@ class OrderedDict(dict):
 
     def __init__(self, /, *args, **kwargs):
         _ordered_dict_receiver(self, "__init__")
-        if len(args) > 1:
-            raise TypeError(f"expected at most 1 argument, got {len(args)}")
-        if args:
-            _ordered_dict_update(self, args[0])
-        if kwargs:
-            _ordered_dict_update(self, kwargs)
+        _ordered_dict_update_args(self, args, kwargs)
+
+    def update(self, /, *args, **kwargs):
+        _ordered_dict_receiver(self, "update")
+        _ordered_dict_update_args(self, args, kwargs)
+
+    def __setitem__(self, key, value, /):
+        _ordered_dict_receiver(self, "__setitem__")
+        _ordered_dict_setitem(self, key, value)
+
+    def __delitem__(self, key, /):
+        _ordered_dict_receiver(self, "__delitem__")
+        _ordered_dict_delitem(self, key)
+
+    def clear(self, /):
+        _ordered_dict_receiver(self, "clear")
+        _ordered_dict_clear(self)
 
     def __iter__(self):
         return iter(_ordered_dict_view(self, "keys"))

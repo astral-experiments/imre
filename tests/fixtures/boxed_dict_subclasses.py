@@ -89,6 +89,59 @@ def ordered_dictionary():
     else:
         raise AssertionError("cursor missed a deletion and reinsertion")
     assert next(cursor, None) is None
+    # A dict descriptor only changes the backing table. The OrderedDict node
+    # still owns its key and reports the missing value on ordered traversal.
+    for remove in (dict.__delitem__, dict.pop, dict.popitem):
+        mixed = OrderedDict([("spam", 1), ("ham", 2)])
+        if remove is dict.popitem:
+            assert remove(mixed) == ("ham", 2)
+            missing = "ham"
+        else:
+            remove(mixed, "spam")
+            missing = "spam"
+        assert missing not in mixed and len(mixed) == 1
+        try:
+            repr(mixed)
+        except KeyError as error:
+            assert error.args == (missing,)
+        else:
+            raise AssertionError("dict removal unlinked an OrderedDict node")
+        mixed.clear()
+        assert not list(mixed)
+    dict.__setitem__(mixed, "hidden", 1)
+    assert list(dict.keys(mixed)) == ["hidden"] and list(mixed) == []
+    mixed["visible"] = 2
+    del mixed["visible"]
+    assert list(mixed) == [] and mixed["hidden"] == 1
+
+    class EqualKey:
+        def __hash__(self):
+            return 23
+        def __eq__(self, other):
+            return isinstance(other, EqualKey)
+
+    resident, node = EqualKey(), EqualKey()
+    mixed.clear()
+    dict.__setitem__(mixed, resident, 1)
+    mixed[node] = 2
+    mixed[resident] = 3
+    assert next(iter(dict.keys(mixed))) is resident
+    assert next(iter(mixed)) is node
+    mixed["other"] = 4
+    mixed.move_to_end(resident)
+    assert list(mixed)[-1] is node and mixed.pop(resident) == 3
+    assert list(mixed) == ["other"]
+
+    class DoubleValues(OrderedDict):
+        def __setitem__(self, key, value):
+            super().__setitem__(key, 2 * value)
+
+    updates = DoubleValues()
+    updates.update(a=1)
+    OrderedDict.update(updates, [("b", 2)])
+    dict.update(updates, hidden=3)
+    assert list(updates.items()) == [("a", 2), ("b", 4)] and updates["hidden"] == 3
+
     endpoints = OrderedDict(a=1, b=2, c=3)
     assert endpoints.popitem(last=False) == ("a", 1)
     assert endpoints.popitem() == ("c", 3)
