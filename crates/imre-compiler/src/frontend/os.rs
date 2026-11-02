@@ -1,6 +1,7 @@
 use super::*;
 use crate::ir::{FdOperation, ProcessOperation};
 
+mod copy_file_range;
 mod credentials;
 
 impl Checker<'_> {
@@ -81,6 +82,9 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         use FdOperation::*;
 
+        if op == CopyFileRange {
+            return self.copy_file_range(call);
+        }
         if matches!(op, Read | Write) {
             let (name, returns) = if op == Read {
                 ("read", Type::Bytes)
@@ -230,6 +234,9 @@ impl Checker<'_> {
         let returns = match op {
             Close | SetBlocking | SetInheritable | Unlink | Remove => Type::None,
             TransferFd | Write | Open | Seek | Dup | Dup2 => Type::Int,
+            CopyFileRange | CheckCopyCount | CheckCopyOffset => {
+                unreachable!("copy_file_range has its own argument conversion")
+            }
             Read => Type::Bytes,
             Pipe | Pipe2 | OpenPty => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,

@@ -94,6 +94,9 @@ impl Emitter<'_, '_> {
                 });
             }
             FdOperation::TransferFd => "transfer_fd",
+            FdOperation::CopyFileRange => "copy_file_range",
+            FdOperation::CheckCopyCount => "check_copy_count",
+            FdOperation::CheckCopyOffset => "check_copy_offset",
             FdOperation::Read => "read",
             FdOperation::Write => "write",
             FdOperation::Close => "close",
