@@ -23,6 +23,84 @@ class _Lock:
 
 _lock = _Lock()
 _handlers = weakref.WeakValueDictionary()
+_handlerList = []
+
+
+def _removeHandlerRef(wr):
+    """
+    Remove a handler reference from the internal cleanup list.
+    """
+    # This function can be called during module teardown, when globals are
+    # set to None. It can also be called from another thread. So we need to
+    # pre-emptively grab the necessary globals and check if they're None,
+    # to prevent race conditions and failures during interpreter shutdown.
+    handlers, lock = _handlerList, _lock
+    if lock and handlers:
+        with lock:
+            try:
+                handlers.remove(wr)
+            except ValueError:
+                pass
+
+
+def _addHandlerRef(handler):
+    """
+    Add a handler to the internal cleanup list using a weak reference.
+    """
+    with _lock:
+        _handlerList.append(weakref.ref(handler, _removeHandlerRef))
+
+
+def _handler_init(self, level=NOTSET):
+    self.filters = []
+    self._name = None
+    self.level = _checkLevel(level)
+    self.formatter = None
+    self._closed = False
+    _addHandlerRef(self)
+    self.createLock()
+
+
+# Typed handlers register their fixed-layout record after construction.
+_handler_init.__name__ = Handler.__init__.__name__
+_handler_init.__qualname__ = Handler.__init__.__qualname__
+Handler.__init__ = _handler_init
+del _handler_init
+
+
+def shutdown(handlerList=_handlerList):
+    """
+    Perform any cleanup actions in the logging system (e.g. flushing
+    buffers).
+
+    Should be called at application exit.
+    """
+    for wr in reversed(handlerList[:]):
+        #errors might occur, for example, if files are locked
+        #we just ignore them if raiseExceptions is not set
+        try:
+            h = wr()
+            if h:
+                try:
+                    h.acquire()
+                    # MemoryHandlers might not want to be flushed on close,
+                    # but circular imports prevent us scoping this to just
+                    # those handlers.  hence the default to True.
+                    if getattr(h, 'flushOnClose', True):
+                        h.flush()
+                    h.close()
+                except (OSError, ValueError):
+                    # Ignore errors which might be caused
+                    # because handlers have been closed but
+                    # references to them are still around at
+                    # application exit.
+                    pass
+                finally:
+                    h.release()
+        except: # ignore everything, as we're shutting down
+            if raiseExceptions:
+                raise
+            #else, swallow
 
 
 def _handler_level(level):
