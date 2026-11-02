@@ -37,7 +37,8 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
         *start = None;
         return Ok(NONE);
     }
-    let text = &subject_bytes(ctx, subject, re.bytes)?[..end];
+    // The scanner holds the storage it acquired when it was created.
+    let text = &subject_bytes(ctx, ctx.scalar_value(subject), re.bytes)?[..end];
     let mut caps = re.regex.create_captures();
     let retry_match = retry
         && match split::nonempty(&re, text, start, &mut caps) {
