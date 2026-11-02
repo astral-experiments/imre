@@ -537,7 +537,7 @@ pub(crate) fn join_parse_fields(fields: [&str; 6], scheme_uses_netloc: bool) -> 
     )
 }
 
-mod join;
+pub(crate) mod join;
 
 /// # Safety
 /// The rooted record has five fields of the same string/bytes layout.
