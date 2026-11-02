@@ -97,6 +97,7 @@ T = TypeVar("T")
 KT = TypeVar("KT")
 VT = TypeVar("VT")
 AnyStr = TypeVar("AnyStr", bytes, str)
+Text = str
 
 
 # Protocol introspection from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
