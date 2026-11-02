@@ -2718,9 +2718,10 @@ impl Context {
                     self.format_value(*callable, true, active)
                 )
             }
+            Value::Cached { .. } => format!("<functools._lru_cache_wrapper object at {id:#x}>"),
             Value::Function { fields, .. } => {
                 format!(
-                    "<function {}>",
+                    "<function {} at {id:#x}>",
                     self.format_value(fields.qualname, false, active)
                 )
             }

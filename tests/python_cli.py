@@ -1966,6 +1966,13 @@ def report(text):
             "reference = union.__args__[-1]\n"
             "print(type(reference).__name__, reference.__forward_arg__)",
         )
+        split_entry = root / "split_identity.py"
+        split_entry.write_text(
+            "from urllib.parse import urlsplit\n"
+            "first = urlsplit('http://host/a')\n"
+            "print(first is urlsplit('http://host/a'), first is urlsplit(b'http://host/a'))\n"
+        )
+        compare("-IB", split_entry, native_args=("run", split_entry, "--quiet"))
         hex_entry = root / "hex_entry.py"
         for program in (
             "class Offset:\n    def __index__(self): return -(1 << 100)\nprint(hex(Offset()))",

@@ -32,10 +32,13 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
         let registry = ctx.alloc(Value::List(items));
         ctx.bind(scope, name, registry);
     }
+    for name in ["urlsplit", "urlparse"] {
+        let operation = ctx.builtin(&format!("urllib.parse.{name}"));
+        ctx.bind(scope, &format!("_imre_{name}"), operation);
+    }
     for name in [
         "_check_netloc",
         "urljoin",
-        "urlparse",
         "urlunparse",
         PARSE,
         PARSE_BYTES,
