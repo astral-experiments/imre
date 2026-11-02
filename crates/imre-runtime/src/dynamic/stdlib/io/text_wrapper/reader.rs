@@ -1,12 +1,14 @@
-use super::{Codec, Context, Id, Result};
+use super::{Codec, Context, Id, Result, StreamCodec};
 
 /// Keep incomplete encoding sequences and CRLF pairs across arbitrary binary read boundaries.
 pub(super) struct Reader {
     text: String,
     cursor: usize,
-    tail: Vec<u8>,
+    pub(super) tail: Vec<u8>,
     cr: bool,
-    beginning: bool,
+    pub(super) beginning: bool,
+    pub(super) order: i32,
+    pub(super) wide_snapshot: bool,
     seen: u8,
     // Most UTF-8 characters have the same size in the input and in our text buffer.
     // Keep only positions at which those sizes differ or the newline decoder has state.
@@ -49,6 +51,8 @@ impl Reader {
             tail: Vec::new(),
             cr: false,
             beginning,
+            order: 0,
+            wide_snapshot: false,
             seen: 0,
             boundaries: Vec::new(),
             mapped: true,
@@ -68,6 +72,7 @@ impl Reader {
     }
     pub(super) fn clear_snapshot(&mut self) {
         self.snapshot = Snapshot::None;
+        self.wide_snapshot = false;
     }
     pub(super) fn after_seek(beginning: bool, absolute: bool) -> Self {
         let mut reader = Self::at(beginning);
@@ -114,7 +119,7 @@ impl Reader {
             extra,
         }))
     }
-    pub(super) fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
+    pub(super) fn position(&self, ctx: &mut Context, end: Id, newline_width: usize) -> Result<Id> {
         match &self.snapshot {
             Snapshot::None => return Ok(end),
             // Absolute seek starts with an empty snapshot. After iteration there are no
@@ -174,19 +179,42 @@ impl Reader {
             .map(|b| i64::from(b.extra_bytes))
             .sum();
         let raw = ctx.as_integer(end)?;
-        Ok(ctx.int(raw - (rest.len() + self.tail.len() + usize::from(self.cr)) as i64 - extra))
+        Ok(ctx.int(
+            raw - (rest.len() + self.tail.len() + usize::from(self.cr) * newline_width) as i64
+                - extra,
+        ))
     }
     pub(super) fn chunk(
         &mut self,
         bytes: &[u8],
-        codec: Codec,
+        codec: StreamCodec,
         end: bool,
-    ) -> Result<(Codec, Vec<u8>)> {
+    ) -> Result<(StreamCodec, Vec<u8>)> {
+        if let StreamCodec::Utf16(order) = codec {
+            let mut raw = Vec::new();
+            raw.try_reserve(
+                self.tail
+                    .len()
+                    .checked_add(bytes.len())
+                    .ok_or_else(crate::Error::allocation)?,
+            )
+            .map_err(|_| crate::Error::allocation())?;
+            raw.extend_from_slice(&self.tail);
+            raw.extend_from_slice(bytes);
+            let order = if order != 0 || self.beginning {
+                order
+            } else if self.order != 0 {
+                self.order
+            } else {
+                super::NATIVE_ORDER
+            };
+            return Ok((StreamCodec::Utf16(order), raw));
+        }
         let mut raw = std::mem::take(&mut self.tail);
         raw.try_reserve(bytes.len())
             .map_err(|_| crate::Error::allocation())?;
         raw.extend_from_slice(bytes);
-        let utf8 = matches!(codec, Codec::Utf8 { .. });
+        let utf8 = matches!(codec, StreamCodec::Registered(Codec::Utf8 { .. }));
         if utf8
             && !end
             && !raw.is_empty()
@@ -197,8 +225,12 @@ impl Reader {
         {
             self.tail = raw.split_off(start);
         }
-        let codec = if !self.beginning && matches!(codec, Codec::Utf8 { signature: true }) {
-            Codec::Utf8 { signature: false }
+        let codec = if !self.beginning
+            && matches!(
+                codec,
+                StreamCodec::Registered(Codec::Utf8 { signature: true })
+            ) {
+            StreamCodec::Registered(Codec::Utf8 { signature: false })
         } else {
             codec
         };
@@ -224,7 +256,7 @@ impl Reader {
         &mut self,
         decoded: &str,
         raw: &[u8],
-        codec: Codec,
+        codec: StreamCodec,
         newline: Option<&str>,
         end: bool,
         telling: bool,
@@ -248,14 +280,43 @@ impl Reader {
         }
         self.chunk_start = self.text.len();
         let aligned = raw == decoded.as_bytes()
-            || matches!(codec, Codec::Utf8 { signature: true })
-                && raw.strip_prefix(b"\xef\xbb\xbf") == Some(decoded.as_bytes());
+            || matches!(
+                codec,
+                StreamCodec::Registered(Codec::Utf8 { signature: true })
+            ) && raw.strip_prefix(b"\xef\xbb\xbf") == Some(decoded.as_bytes());
         let single_byte = !aligned
-            && (matches!(codec, Codec::Latin1)
-                || matches!(codec, Codec::CodePage(_))
-                    && codec
-                        .decode(raw, None)
-                        .is_ok_and(|strict| strict == decoded));
+            && match codec {
+                StreamCodec::Registered(Codec::Latin1) => true,
+                StreamCodec::Registered(page @ Codec::CodePage(_)) => {
+                    page.decode(raw, None).is_ok_and(|strict| strict == decoded)
+                }
+                _ => false,
+            };
+        let wide = match codec {
+            StreamCodec::Utf16(order) => {
+                let little = order < 0;
+                decoded
+                    .encode_utf16()
+                    .flat_map(|c| {
+                        if little {
+                            c.to_le_bytes()
+                        } else {
+                            c.to_be_bytes()
+                        }
+                    })
+                    .eq(raw.iter().copied())
+            }
+            _ => false,
+        };
+        let width = |c: char| {
+            if wide {
+                c.len_utf16() * 2
+            } else if single_byte {
+                1
+            } else {
+                c.len_utf8()
+            }
+        };
         let universal = matches!(newline, None | Some(""));
         let pending = usize::from(self.cr);
         let length = decoded
@@ -265,10 +326,10 @@ impl Reader {
         self.text
             .try_reserve(length)
             .map_err(|_| crate::Error::allocation())?;
-        let boundaries = if universal || single_byte {
+        let boundaries = if universal || single_byte || wide {
             decoded
                 .chars()
-                .filter(|&c| universal && c == '\r' || single_byte && !c.is_ascii())
+                .filter(|&c| universal && c == '\r' || width(c) != c.len_utf8())
                 .count()
                 + pending
         } else {
@@ -277,7 +338,7 @@ impl Reader {
         self.boundaries
             .try_reserve(boundaries)
             .map_err(|_| crate::Error::allocation())?;
-        self.mapped &= aligned || single_byte;
+        self.mapped &= aligned || single_byte || wide;
         if universal {
             let translate = newline.is_none();
             for c in decoded.chars() {
@@ -286,13 +347,13 @@ impl Reader {
                     if c == '\n' {
                         self.seen |= 4;
                         if !translate {
-                            self.push('\r', 1, true);
+                            self.push('\r', width('\r'), true);
                         }
-                        self.push('\n', if translate { 2 } else { 1 }, false);
+                        self.push('\n', width('\n') * if translate { 2 } else { 1 }, false);
                         continue;
                     }
                     self.seen |= 1;
-                    self.push(if translate { '\n' } else { '\r' }, 1, true);
+                    self.push(if translate { '\n' } else { '\r' }, width('\r'), true);
                 }
                 if c == '\r' {
                     self.cr = true;
@@ -300,17 +361,17 @@ impl Reader {
                     if c == '\n' {
                         self.seen |= 2;
                     }
-                    self.push(c, if single_byte { 1 } else { c.len_utf8() }, false);
+                    self.push(c, width(c), false);
                 }
             }
             if end && self.cr {
                 self.seen |= 1;
-                self.push(if translate { '\n' } else { '\r' }, 1, true);
+                self.push(if translate { '\n' } else { '\r' }, width('\r'), true);
                 self.cr = false;
             }
-        } else if single_byte {
+        } else if single_byte || wide {
             for c in decoded.chars() {
-                self.push(c, 1, false);
+                self.push(c, width(c), false);
             }
         } else {
             self.text.push_str(decoded);
