@@ -195,6 +195,7 @@ impl Context {
             Value::Native(kind) if kind == "object" => match name {
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
                 "__format__" => self.builtins.get("object.__format__").copied(),
+                "__getstate__" => self.builtins.get("object.__getstate__").copied(),
                 "__reduce__" => self.builtins.get("object.__reduce__").copied(),
                 "__reduce_ex__" => self.builtins.get("object.__reduce_ex__").copied(),
                 "__init_subclass__" => self.builtins.get("object.__init_subclass__").copied(),
@@ -990,6 +991,7 @@ impl Context {
         Some(match self.heap.get(obj) {
             Value::Module { .. } => self.type_name(obj),
             Value::DefaultDict { .. } => "collections.defaultdict",
+            Value::Partial { .. } => "functools.partial",
             Value::Cached { .. } => "functools._lru_cache_wrapper",
             Value::KeyWrapper { .. } => KEY_WRAPPER,
             Value::PartialPlaceholder => "functools._PlaceholderType",
@@ -1058,6 +1060,7 @@ impl Context {
                             | KEY_WRAPPER
                             | "functools._PlaceholderType"
                             | "functools._lru_cache_wrapper"
+                            | "functools.partial"
                             | HashState::CLASS
                             | HashState::XOF_CLASS
                             | "operator.attrgetter"
@@ -2916,7 +2919,8 @@ impl Context {
                 return Ok(TRUE);
             }
             Value::Native(ref class)
-                if class == "object" && matches!(name, "__reduce__" | "__reduce_ex__") =>
+                if class == "object"
+                    && matches!(name, "__getstate__" | "__reduce__" | "__reduce_ex__") =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
@@ -3245,6 +3249,17 @@ impl Context {
                 let init = self.builtin("object.__init__");
                 return self.bind_attribute(init, obj, tuple);
             }
+        }
+        if name == "__getstate__" {
+            let callable = self.builtin("object.__getstate__");
+            if self.builtin_type_name(obj) == Some("type") {
+                return Ok(callable);
+            }
+            return Ok(self.alloc(Value::Method {
+                callable,
+                receiver: obj,
+                explicit: false,
+            }));
         }
         let base = self.scalar_value(obj);
         if name == "__format__" {
@@ -3761,6 +3776,44 @@ impl Context {
             .get(name)
             .copied()
             .or_else(|| self.dict_named_item(self.dict_storage((*namespace)?)?, name))
+    }
+
+    /// Return the live instance dictionary for default object state, bypassing attribute hooks.
+    pub(super) fn pickle_instance_state_dict(&mut self, obj: Id) -> Result<Id> {
+        let dictionary = match *self.heap.get(obj) {
+            Value::Instance {
+                class,
+                ref fields,
+                namespace,
+                ..
+            } if (!fields.is_empty() || namespace.is_some())
+                && self.class_instances_have_dict(class) =>
+            {
+                Some(self.instance_dictionary(obj, class))
+            }
+            Value::Module { scope, .. } => Some(self.module_globals(scope)?),
+            Value::Function { fields, .. } => self.function_attr(obj, fields, "__dict__")?,
+            Value::Raised(ref error) => error.trace.as_ref().and_then(|trace| trace.dictionary),
+            Value::Partial { dictionary, .. } => dictionary,
+            Value::StaticMethod { dictionary, .. } | Value::Cached { dictionary, .. } => {
+                Some(dictionary)
+            }
+            Value::Class { scope, .. }
+                if self.classes.get(super::namespace::CLASS) != Some(&obj) =>
+            {
+                let proxy = self.class_dictionary(scope);
+                Some(self.mapping_proxy_target(proxy))
+            }
+            _ => None,
+        };
+        Ok(dictionary
+            .filter(|&dictionary| {
+                !self
+                    .dict_entries(dictionary)
+                    .expect("instance dictionary")
+                    .is_empty()
+            })
+            .unwrap_or(NONE))
     }
 
     /// Lazily expose the dictionary that subsequent ordinary attribute operations use.
@@ -4635,6 +4688,9 @@ impl Context {
                     return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
                 }
                 super::namedtuple::allocate(self, &args, &kwargs)
+            }
+            Value::Native(name) if name == "object.__getstate__" => {
+                self.object_getstate(&args, &kwargs)
             }
             Value::Native(name)
                 if matches!(name.as_str(), "object.__reduce__" | "object.__reduce_ex__") =>

@@ -322,7 +322,7 @@ fn unittest_skip_decorator(
 }
 
 pub(crate) fn defines_pickle_reducer(node: &ast::StmtClassDef) -> bool {
-    let reducer = |name: &str| matches!(name, "__reduce__" | "__reduce_ex__");
+    let reducer = |name: &str| matches!(name, "__reduce__" | "__reduce_ex__" | "__getstate__");
     let binding = |target: &ast::Expr| {
         target
             .as_name_expr()
