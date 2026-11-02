@@ -1476,10 +1476,16 @@ impl IntrinsicModule {
             (Self::Threading, "main_thread") => {
                 Intrinsic::ObjectRuntimeExport("threading.main_thread")
             }
+            (Self::Threading, "currentThread") => {
+                Intrinsic::ObjectRuntimeExport("threading.currentThread")
+            }
             (Self::Threading, "current_thread") => {
                 Intrinsic::ObjectRuntimeExport("threading.current_thread")
             }
             (Self::Threading, "enumerate") => Intrinsic::ObjectRuntimeExport("threading.enumerate"),
+            (Self::Threading, "activeCount") => {
+                Intrinsic::ObjectRuntimeExport("threading.activeCount")
+            }
             (Self::Threading, "active_count") => {
                 Intrinsic::ObjectRuntimeExport("threading.active_count")
             }
