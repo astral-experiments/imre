@@ -423,6 +423,26 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_timedelta_remainder():
+    unit = timedelta(microseconds=3)
+    for left, right, quotient, remainder in ((7, 3, 2, 1), (-7, 3, -3, 2),
+                                             (7, -3, -3, -2), (-7, -3, 2, -1)):
+        a = timedelta(microseconds=left)
+        b = timedelta(microseconds=right)
+        assert a % b == timedelta(microseconds=remainder)
+        assert divmod(a, b) == (quotient, a % b)
+        assert b.__rdivmod__(a) == divmod(a, b)
+    assert divmod(timedelta.max, timedelta.resolution) == (86399999999999999999, timedelta(0))
+    assert timezone(unit).utcoffset(None) % timedelta(minutes=1) == unit
+    assert unit.__mod__(5) is NotImplemented
+    try:
+        divmod(unit, timedelta(0))
+    except ZeroDivisionError:
+        pass
+    else:
+        raise AssertionError("accepted zero timedelta divisor")
+
+
 def test_timedelta_positive_and_absolute():
     zero = timedelta()
     assert +zero is zero and abs(zero) is zero
@@ -735,6 +755,7 @@ def current():
     test_calendar_format()
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
+    test_timedelta_remainder()
     test_subclass_construction()
     test_now()
     test_time_fromisoformat()
