@@ -161,14 +161,7 @@ pub(super) fn initialize(
             format!("{owner} reinitialization is unsupported"),
         ));
     }
-    // Both standard Rust buffer constructors allocate infallibly.
-    if capacity as u64 > crate::text_output::binary_capacity(i128::MAX) as u64 {
-        return Err(Error::new(
-            "NotImplementedError",
-            format!("explicit {owner} buffers above 8 MiB are unsupported"),
-        ));
-    }
-    let mut fd = BufferedFd::new(raw, handle, reading, capacity as usize);
+    let mut fd = BufferedFd::new(raw, handle, reading, capacity as usize)?;
     if !reading {
         fd.drop_fallback = Some(Cell::new(true));
     }
@@ -410,29 +403,42 @@ pub(in crate::dynamic) struct BufferedFd {
 }
 
 impl BufferedFd {
-    pub(super) fn new(raw: Id, handle: Rc<RawFile>, reading: bool, capacity: usize) -> Self {
+    pub(super) fn new(
+        raw: Id,
+        handle: Rc<RawFile>,
+        reading: bool,
+        capacity: usize,
+    ) -> Result<Self> {
         let mut descriptor = Descriptor {
             handle: handle.clone(),
             raw_position: None,
             last_read: 0,
         };
         let buffer = if reading {
+            // std::io::BufReader cannot adopt fallibly reserved storage.
+            if capacity > crate::text_output::binary_capacity(i128::MAX) {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "explicit BufferedReader buffers above 8 MiB are unsupported",
+                ));
+            }
             let _ = descriptor.stream_position();
             Buffer::Reader(BufReader::with_capacity(capacity, descriptor))
         } else {
-            Buffer::Writer(BinaryOutput::with_buffer(
-                Vec::with_capacity(capacity),
-                descriptor,
-            ))
+            let mut pending = Vec::new();
+            pending
+                .try_reserve_exact(capacity)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            Buffer::Writer(BinaryOutput::with_buffer(pending, descriptor))
         };
-        Self {
+        Ok(Self {
             raw,
             reading,
             writing: !reading,
             handle,
             drop_fallback: None,
             buffer: RefCell::new(Some(buffer)),
-        }
+        })
     }
 
     pub(super) fn update(raw: Id, handle: Rc<RawFile>, capacity: usize) -> Result<Self> {

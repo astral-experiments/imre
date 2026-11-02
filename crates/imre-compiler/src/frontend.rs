@@ -10965,6 +10965,12 @@ impl<'a> Checker<'a> {
     /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let args = &call.arguments;
+        if !gzip
+            && self.unshadowed_builtin(&call.func, "open")
+            && args.find_argument_value("opener", 7).is_some()
+        {
+            return Err(self.object_builtin_error("open with opener", call));
+        }
         // The typed BinaryIO ABI carries neither raw write results nor a buffer size.
         if !gzip
             && self.unshadowed_builtin(&call.func, "open")
