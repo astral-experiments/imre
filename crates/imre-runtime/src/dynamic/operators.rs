@@ -3496,15 +3496,104 @@ impl Context {
             source
         };
         self.visit_set_operand(source, |ctx, key, hash| {
-            if let Some(index) = ctx.find_dictionary_key(target, key, hash)?.1 {
-                let Value::Set { entries, .. } = ctx.heap.get_mut(target) else {
-                    unreachable!()
-                };
-                let (removed, _) = entries.remove(index)?;
-                ctx.heap.weak_edge_removed(removed);
+            ctx.discard_difference_key(target, key, hash)
+        })
+    }
+
+    fn discard_difference_key(&mut self, target: Id, key: Id, hash: Option<i64>) -> Result<()> {
+        if let Some(index) = self.find_dictionary_key(target, key, hash)?.1 {
+            let Value::Set { entries, .. } = self.heap.get_mut(target) else {
+                unreachable!()
+            };
+            let (removed, _) = entries.remove(index)?;
+            self.heap.weak_edge_removed(removed);
+        }
+        Ok(())
+    }
+
+    fn filter_difference(&mut self, result: Id, left: Id, right: Id) -> Result<()> {
+        self.visit_set_operand(left, |ctx, key, hash| {
+            ctx.heap.keep(key);
+            if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
+                ctx.set_dictionary_key(result, key, NONE, hash, false)?;
             }
             Ok(())
         })
+    }
+
+    /// Return a fresh base set, preserving stored hashes and comparison direction
+    /// for a first set or exact dictionary. Later operands are discarded in order.
+    pub(super) fn set_difference(&mut self, receiver: Id, mut operands: &[Id]) -> Result<Id> {
+        let frozen = matches!(self.heap.get(receiver), Value::Set { frozen: true, .. });
+        let result = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen,
+        });
+        let indexed = operands.first().and_then(|&other| {
+            let storage = self.scalar_value(other);
+            if matches!(self.heap.get(storage), Value::Set { .. }) {
+                Some(storage)
+            } else if matches!(self.heap.get(other), Value::Dict(_)) {
+                Some(other)
+            } else {
+                None
+            }
+        });
+        if let Some(right) = indexed
+            && self.stored_entries(receiver).len() >> 2 <= self.stored_entries(right).len()
+        {
+            self.filter_difference(result, receiver, right)?;
+            operands = &operands[1..];
+        } else {
+            builtins::update_set(self, result, receiver)?;
+        }
+        for &source in operands {
+            if matches!(self.heap.get(self.scalar_value(source)), Value::Set { .. }) {
+                self.set_difference_update(result, source)?;
+            } else {
+                self.subtract_iterable(result, source)?;
+            }
+        }
+        Ok(result)
+    }
+
+    /// Release temporary iterators before the next operand. A finalizer or a
+    /// generator's finally clause may mutate that operand.
+    fn subtract_iterable(&mut self, result: Id, source: Id) -> Result<()> {
+        let roots = self.heap.temporary_mark();
+        let iterator = self.iterator(source)?;
+        self.heap.keep(iterator);
+        let step = self.heap.temporary_mark();
+        let mut failed_key = None;
+        let scan: Result<()> = (|| {
+            let mut limit = self.heap.streaming_collection_limit();
+            loop {
+                self.collect_streaming_garbage(&mut limit);
+                let Some(key) = self.next_item(iterator)? else {
+                    return Ok(());
+                };
+                self.heap.keep(key);
+                failed_key = Some(key);
+                self.discard_difference_key(result, key, None)?;
+                failed_key = None;
+                self.discard_truth(step);
+            }
+        })();
+        self.heap.release_temporaries_since(roots);
+        if let Err(error) = &scan {
+            for id in error.roots() {
+                self.heap.keep(id);
+            }
+        }
+        let key_mark = self.heap.temporary_mark();
+        if let Some(key) = failed_key {
+            self.heap.keep(key);
+        }
+        let iterator_mark = self.heap.temporary_mark();
+        self.heap.keep(iterator);
+        self.discard_truth(iterator_mark);
+        self.discard_truth(key_mark);
+        scan
     }
 
     /// Compute set difference or intersection, including reflected dictionary-view operands.
@@ -3531,13 +3620,7 @@ impl Context {
                 && !mutate
                 && self.stored_entries(left).len() >> 2 <= self.stored_entries(right).len()
             {
-                self.visit_set_operand(left, |ctx, key, hash| {
-                    ctx.heap.keep(key);
-                    if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
-                        ctx.set_dictionary_key(result, key, NONE, hash, false)?;
-                    }
-                    Ok(())
-                })?;
+                self.filter_difference(result, left, right)?;
                 return Ok(result);
             }
             if let Value::DictView {

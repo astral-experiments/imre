@@ -62,8 +62,16 @@ impl BuiltinDescriptor {
                 Some(("BaseException", attr, &["add_note", "with_traceback"][..]))
             }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
-            Some(("set", attr)) => Some(("set", attr, &["__reduce__", "issubset", "update"][..])),
-            Some(("frozenset", attr)) => Some(("frozenset", attr, &["__reduce__", "issubset"][..])),
+            Some(("set", attr)) => Some((
+                "set",
+                attr,
+                &["__reduce__", "difference", "issubset", "update"][..],
+            )),
+            Some(("frozenset", attr)) => Some((
+                "frozenset",
+                attr,
+                &["__reduce__", "difference", "issubset"][..],
+            )),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
