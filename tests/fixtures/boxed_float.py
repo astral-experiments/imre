@@ -41,6 +41,26 @@ def current():
         else:
             raise AssertionError("accepted invalid __getformat__ argument")
 
+    for value, ratio in (
+        (-0.0, (0, 1)),
+        (9.5, (19, 2)),
+        (-0.1, (-3602879701896397, 1 << 55)),
+        (5e-324, (1, 1 << 1074)),
+        (1.7976931348623157e308, (((1 << 53) - 1) << 971, 1)),
+    ):
+        assert value.as_integer_ratio() == ratio
+    assert Weight(-1.5).as_integer_ratio() == (-3, 2)
+    assert float.as_integer_ratio(Weight(0.5)) == (1, 2)
+    for args, kwargs, kind in (((), {}, TypeError), ((1,), {}, TypeError),
+                               ((0.5, 1), {}, TypeError), ((0.5,), {"x": 1}, TypeError),
+                               ((nan,), {}, ValueError), ((float("-inf"),), {}, OverflowError)):
+        try:
+            float.as_integer_ratio(*args, **kwargs)
+        except kind as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("accepted invalid as_integer_ratio call")
+
     weight = Weight("1.5")
     assert type(weight) is Weight and isinstance(weight, float)
     assert float(weight) == 1.5 and weight + 0.5 == 2.0

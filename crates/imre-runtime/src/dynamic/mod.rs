@@ -31,6 +31,7 @@ mod source_code;
 mod static_method;
 mod stdlib;
 mod super_object;
+mod templatelib;
 mod thread_callback;
 mod thread_local;
 mod thread_lock;
@@ -401,6 +402,7 @@ impl Context {
         matches!(
             self.heap.get(id),
             Value::Iterator { .. }
+                | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
@@ -446,6 +448,12 @@ impl Context {
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
+            Value::Template {
+                strings,
+                interpolations,
+            } => {
+                return self.template_iterator(strings, interpolations);
+            }
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::Deque(ref ring) => {
                 let cursor = deque::iterator(id, ring, false);
@@ -543,7 +551,8 @@ impl Context {
         let value = self.heap.get(source);
         if matches!(
             value,
-            Value::SequenceIterator { .. }
+            Value::TemplateIter { .. }
+                | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::Scandir(_)
@@ -881,6 +890,7 @@ impl Context {
             }
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
+            Value::TemplateIter { .. } => return self.next_template_item(id),
             Value::DictIterator(iter) => return (*iter).next(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Enumerate { input, .. } => {
@@ -1111,6 +1121,8 @@ impl Context {
         if matches!(
             self.heap.get(id),
             Value::AstWalk { .. }
+                | Value::Template { .. }
+                | Value::TemplateIter { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1634,6 +1646,7 @@ impl Context {
         let methods = match name {
             "object" => &["__hash__", "__format__", "__init_subclass__"],
             "dict" => builtins::DICT_METHODS,
+            "function" => &["__call__"],
             "collections.defaultdict" => {
                 self.builtin("dict");
                 &[
@@ -1655,7 +1668,7 @@ impl Context {
             }
             "property" => property::METHODS,
             "int" => &["bit_length", "to_bytes", "__format__"],
-            "float" => &["__format__", "__getformat__"],
+            "float" => &["__format__", "__getformat__", "as_integer_ratio"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
@@ -2009,6 +2022,13 @@ impl Context {
             self.bind(scope, "RLock", rlock);
         }
         match name {
+            #[cfg(target_os = "linux")]
+            "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
+            #[cfg(target_os = "linux")]
+            "_imre_signal" if source.is_none() => {
+                let factory = self.builtin("_imre_signal.make_signals");
+                self.bind(scope, "make_signals", factory);
+            }
             "_thread" => {
                 for name in ["allocate_lock", "allocate"] {
                     let factory = self.builtin(&format!("_thread.{name}"));
@@ -2052,6 +2072,7 @@ impl Context {
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
+            "socket" if source.is_none() => stdlib::import_socket_constants(self, scope)?,
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
@@ -2069,6 +2090,8 @@ impl Context {
                 self.module("io")?;
                 let open = self.builtin("open");
                 self.bind(scope, "open", open);
+                let text_encoding = self.builtin("_io.text_encoding");
+                self.bind(scope, "text_encoding", text_encoding);
                 for name in ["BytesIO", "StringIO", "TextIOWrapper", "FileIO"] {
                     let class = self.builtins[&format!("_io.{name}")];
                     self.bind(scope, name, class);

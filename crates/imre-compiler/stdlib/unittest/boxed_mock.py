@@ -119,6 +119,9 @@ class Mock(_FixedMock):
 
     @return_value.setter
     def return_value(self, value):
+        if value is DEFAULT:
+            self._node._result = -1
+            return
         self._adopt(value, "()")
         child = super().return_value
         child._node._configured_return = value
@@ -137,7 +140,9 @@ class Mock(_FixedMock):
         if effect is not None:
             if isinstance(effect, BaseException) or isinstance(effect, type) and issubclass(effect, BaseException):
                 raise effect
-            return effect(*args, **kwargs)
+            result = effect(*args, **kwargs)
+            if result is not DEFAULT:
+                return result
         return self.return_value
 
     def reset_mock(self, visited=None, *, return_value=False, side_effect=False):

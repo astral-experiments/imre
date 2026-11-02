@@ -83,6 +83,12 @@ class SourceFileLoader:
         filename = self.get_filename(fullname).rpartition(sep)[2]
         return filename.rsplit(".", 1)[0] == "__init__" and fullname.rpartition(".")[2] != "__init__"
 
+    def get_resource_reader(self, name=None):
+        if name is not None and self.name != name:
+            raise ImportError(f"loader for {self.name} cannot handle {name}", name=name)
+        from importlib.resources._filesystem import FileReader
+        return FileReader(self)
+
     def path_stats(self, path):
         return _path_stats(path)
 

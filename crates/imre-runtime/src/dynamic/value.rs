@@ -51,6 +51,11 @@ pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
+const EMPTY_TUPLE: Id = 5;
+
+pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
+pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
+pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Location {
@@ -264,22 +269,67 @@ impl Context {
         if let Some(object) = frame.object {
             return Ok(Some((location, object)));
         }
-        let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
-        let globals = self.module_globals(scope)?;
-        let object = self.alloc(Value::PythonFrame {
-            scope,
-            code,
-            globals,
-            lineno: location.line,
-        });
-        if let FrameOwner::Generator(id) = owner {
-            let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
-                unreachable!()
+        // An escaped ordinary frame owns its caller even after both functions return.
+        // Materialize the missing prefix iteratively, stopping at a cached frame or
+        // a generator whose resumer is meaningful only during this activation.
+        let start = self.heap.frames[..=index]
+            .iter()
+            .rposition(|frame| {
+                frame.object.is_some()
+                    || (matches!(frame.owner, FrameOwner::Generator(_)) && frame.location.is_some())
+            })
+            .unwrap_or(0);
+        let mut previous = NONE;
+        for position in start..=index {
+            let frame = &self.heap.frames[position];
+            if let Some(object) = frame.object {
+                previous = object;
+                continue;
+            }
+            let Some(line) = frame.location.as_ref().map(|loc| loc.line) else {
+                continue;
             };
-            *frame = Some(object);
+            if frame.code == NONE {
+                continue;
+            }
+            let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
+            let globals = self.module_globals(scope)?;
+            let object = self.alloc(Value::PythonFrame {
+                scope,
+                code,
+                globals,
+                back: (!matches!(owner, FrameOwner::Generator(_))).then_some(previous),
+                lineno: line,
+            });
+            if let FrameOwner::Generator(id) = owner {
+                let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
+                    unreachable!()
+                };
+                *frame = Some(object);
+            }
+            self.heap.frames[position].object = Some(object);
+            previous = object;
         }
-        self.heap.frames[index].object = Some(object);
-        Ok(Some((location, object)))
+        Ok(Some((location, previous)))
+    }
+
+    /// A suspended or finished generator has no resumer; an active one may have a new caller.
+    pub(super) fn generator_frame_back(&mut self, object: Id) -> Result<Id> {
+        let Some(index) = self
+            .heap
+            .frames
+            .iter()
+            .rposition(|frame| frame.object == Some(object))
+        else {
+            return Ok(NONE);
+        };
+        let Some(caller) = self.heap.frames[..index]
+            .iter()
+            .rposition(|frame| frame.code != NONE && frame.location.is_some())
+        else {
+            return Ok(NONE);
+        };
+        Ok(self.materialize_frame(caller)?.map_or(NONE, |(_, id)| id))
     }
 
     pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
@@ -650,6 +700,21 @@ pub(super) enum Value {
     DirEntry(super::stdlib::os::scandir::Entry),
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Slice([Id; 3]),
+    Template {
+        strings: Id,
+        interpolations: Id,
+    },
+    TemplateIter {
+        strings: Id,
+        interpolations: Id,
+        from_strings: bool,
+    },
+    Interpolation {
+        value: Id,
+        expression: Id,
+        conversion: Id,
+        format_spec: Id,
+    },
     Range(super::range::Range),
     RangeIterator(super::range::Cursor),
     Str(String),
@@ -775,6 +840,7 @@ pub(super) enum Value {
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
         weak_reference: Option<Box<super::weakref::Reference>>,
+        cycle: Option<Box<super::stdlib::itertools::Cycle>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -803,6 +869,8 @@ pub(super) enum Value {
         scope: Id,
         code: Id,
         globals: Id,
+        // Ordinary frames retain their caller. Generator frames resolve their live resumer.
+        back: Option<Id>,
         lineno: u32,
     },
     Method {
@@ -904,13 +972,17 @@ pub(super) enum Value {
     },
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
+    RegexScanner {
+        pattern: Id,
+        subject: Id,
+        start: Option<usize>,
+        end: usize,
+        retry: bool,
+    },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     NamedFileCloser(crate::Shared<std::cell::RefCell<super::stdlib::tempfile::NamedCloser>>),
     BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
-    RegexMatch {
-        groups: Vec<Option<Id>>,
-        names: HashMap<String, usize>,
-    },
+    RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
     Context(std::rc::Rc<HashMap<Id, Id>>),
     ContextVar {
         name: Id,
@@ -977,8 +1049,12 @@ impl Value {
             Self::DequeIterator { .. } => super::deque::ITERATOR,
             Self::List(_) => "list",
             Self::CallableIterator(_) => "callable_iterator",
+            Self::RegexScanner { .. } => "_sre.SRE_Scanner",
             Self::Tuple(_) => "tuple",
             Self::Slice(_) => "slice",
+            Self::Template { .. } => TEMPLATE_TYPE,
+            Self::TemplateIter { .. } => TEMPLATE_ITER_TYPE,
+            Self::Interpolation { .. } => INTERPOLATION_TYPE,
             Self::Range(_) => "range",
             Self::Scandir(_) => super::stdlib::os::scandir::ITER,
             Self::DirEntry(_) => super::stdlib::os::scandir::ENTRY,
@@ -1151,6 +1227,21 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::Template {
+                strings,
+                interpolations,
+            }
+            | Self::TemplateIter {
+                strings,
+                interpolations,
+                ..
+            } => visit.extend([*strings, *interpolations]),
+            Self::Interpolation {
+                value,
+                expression,
+                conversion,
+                format_spec,
+            } => visit.extend([*value, *expression, *conversion, *format_spec]),
             Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
@@ -1285,6 +1376,7 @@ impl Value {
                 dictionary,
                 scalar,
                 weak_reference,
+                cycle,
                 memory_stream,
                 property,
             } => {
@@ -1293,6 +1385,9 @@ impl Value {
                 }
                 if let Some(reference) = weak_reference {
                     visit.push(reference.callback);
+                }
+                if let Some(cycle) = cycle {
+                    cycle.children(visit);
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
@@ -1352,12 +1447,19 @@ impl Value {
                 scope,
                 code,
                 globals,
+                back,
                 ..
-            } => visit.extend([*scope, *code, *globals]),
+            } => {
+                visit.extend([*scope, *code, *globals]);
+                visit.extend(*back);
+            }
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
+            Self::RegexScanner {
+                pattern, subject, ..
+            } => visit.extend([*pattern, *subject]),
             Self::RegexPattern(pattern) => visit.push(pattern.source),
-            Self::RegexMatch { groups, .. } => visit.extend(groups.iter().flatten()),
+            Self::RegexMatch(m) => visit.extend([m.pattern, m.subject]),
             Self::File(file) => {
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
@@ -1734,6 +1836,7 @@ impl CycleSet {
 pub(super) struct Heap {
     slots: Vec<Slot>,
     gc_order: GcOrder,
+    linked_string_constants: HashMap<i64, Id>,
     full_collection: Option<CycleSet>,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
     interned: HashMap<crate::StrOwner, InternedString>,
@@ -1818,9 +1921,11 @@ impl Heap {
                 Slot::new(Value::Bool(true)),
                 Slot::new(Value::Ellipsis),
                 Slot::new(Value::NotImplemented),
+                Slot::new(Value::Tuple(Vec::new())),
             ],
             gc_order: GcOrder::EMPTY,
             full_collection: None,
+            linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
             free_head: END,
@@ -1994,10 +2099,31 @@ impl Heap {
         self.alloc_slot(value)
     }
 
+    /// Linked code owns these immutable constants for the lifetime of its context.
+    pub(super) fn linked_string_constant(
+        &mut self,
+        slot: Id,
+        build: impl FnOnce(&mut Self) -> Id,
+    ) -> Id {
+        let Value::Int(key) = self.get(slot) else {
+            unreachable!("compiler constant slot")
+        };
+        let key = key.to_i64().expect("compiler constant slot fits in i64");
+        if let Some(&value) = self.linked_string_constants.get(&key) {
+            return value;
+        }
+        let value = build(self);
+        self.linked_string_constants.insert(key, value);
+        value
+    }
+
     /// Packing an array skips tracking when its elements all have non-GC types.
     /// Even an untracked child tuple has a GC type. A folded literal belongs to
     /// the code constants and cannot itself be garbage owned by a cycle.
     pub(super) fn packed_tuple(&mut self, items: Vec<Id>, constant: bool) -> Id {
+        if items.is_empty() {
+            return EMPTY_TUPLE;
+        }
         let untracked = constant
             || items.iter().all(|&child| {
                 !matches!(self.get(child), Value::Tuple(_) | Value::Native(_))
@@ -2395,8 +2521,26 @@ impl Heap {
         })
     }
 
+    pub fn current_code(&self) -> Id {
+        self.frames.last().unwrap().code
+    }
+
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
+    }
+
+    /// Python stack levels start at one and exclude the native root frame.
+    pub fn warning_frame(&self, level: i32) -> Option<(Location, Id)> {
+        self.frames
+            .iter()
+            .rev()
+            .filter_map(|frame| {
+                frame
+                    .location
+                    .clone()
+                    .map(|location| (location, frame.scope))
+            })
+            .nth((level.max(1) - 1) as usize)
     }
 
     pub fn current_location(&self) -> Option<Location> {
@@ -2419,7 +2563,8 @@ impl Heap {
     fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut MarkQueue<'_>) {
         pending.extend(globals);
         pending.extend(self.full_collection_members());
-        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
+        pending.extend(self.linked_string_constants.values().copied());
+        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED, EMPTY_TUPLE]);
         pending.extend(
             self.interned
                 .values()
@@ -2667,14 +2812,26 @@ impl Heap {
         let active = self.caught_exception(caught);
         let frame = self.frames.last_mut().unwrap();
         frame.active = active;
-        if let Some(id) = frame.object
-            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
-        {
-            *lineno = location.line;
-        }
+        let line = location.line;
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
+        self.set_statement_line(line);
+    }
+
+    /// A match statement can execute separate pattern and guard expressions in one step.
+    pub(super) fn set_statement_line(&mut self, line: u32) {
+        let frame = self.frames.last_mut().unwrap();
+        frame
+            .location
+            .as_mut()
+            .expect("active source location")
+            .line = line;
+        if let Some(id) = frame.object
+            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
+        {
+            *lineno = line;
+        }
     }
 
     /// A discarded owner or the allocation threshold has requested a sweep.

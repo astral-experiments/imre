@@ -6,9 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::ir::{
-    self, ChildMut, Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions,
-};
+use crate::ir::{self, ChildMut, Compare, Expr, ExprKind, Module, Statement, Type};
 use crate::ranges;
 
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
@@ -34,7 +32,7 @@ pub(crate) fn specialize(module: &mut Module) {
                 if function.expression_rebound().into_iter().any(|value| value) {
                     return plans;
                 }
-                visit_statements(&function.body, &mut |statement| {
+                ir::walk_statements(&function.body, &mut |statement| {
                     let Statement::For {
                         args, body, orelse, ..
                     } = statement
@@ -93,51 +91,9 @@ fn literal(expression: &Expr) -> Option<i64> {
     }
 }
 
-/// Visits ordinary statement blocks and, separately, every eager expression's
-/// statement roots. The shared expression walker already visits nested scopes.
-fn visit_statements(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
-    visit_block(body, visit);
-    walk_expressions(body, &mut |expression| {
-        if let ExprKind::Scope { body, .. } = &expression.kind {
-            visit_block(body, visit);
-        }
-    });
-}
-
-fn visit_block(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
-    for statement in body {
-        visit(statement);
-        match statement {
-            Statement::Scope { body, .. } => visit_block(body, visit),
-            Statement::If(_, yes, no) | Statement::While(_, yes, no) => {
-                visit_block(yes, visit);
-                visit_block(no, visit);
-            }
-            Statement::For { body, orelse, .. } => {
-                visit_block(body, visit);
-                visit_block(orelse, visit);
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                visit_block(body, visit);
-                for handler in handlers {
-                    visit_block(&handler.body, visit);
-                }
-                visit_block(orelse, visit);
-                visit_block(finalbody, visit);
-            }
-            _ => {}
-        }
-    }
-}
-
 fn contains_loop(body: &[Statement]) -> bool {
     let mut found = false;
-    visit_statements(body, &mut |statement| {
+    ir::walk_statements(body, &mut |statement| {
         found |= matches!(statement, Statement::For { .. } | Statement::While(..));
     });
     found
@@ -255,7 +211,7 @@ fn local(slot: usize) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::Binary;
+    use crate::ir::{Binary, walk_expressions};
     use crate::ranges::IntRange;
 
     fn module(source: &str) -> Module {
@@ -283,7 +239,7 @@ def scan(data: bytes) -> None:
         let small = facts.small_locals(function);
         let mut fast = 0;
         let mut fallback = 0;
-        visit_statements(&function.body, &mut |statement| {
+        ir::walk_statements(&function.body, &mut |statement| {
             let Statement::For {
                 target,
                 cursor,
@@ -358,7 +314,7 @@ def scan(limit: int) -> None:
         });
         let mut fast = 0;
         let mut fallback = 0;
-        visit_statements(body, &mut |statement| {
+        ir::walk_statements(body, &mut |statement| {
             if matches!(statement, Statement::For { .. }) {
                 if facts.range_cursor(statement).is_some() {
                     fast += 1;
@@ -396,7 +352,7 @@ def nested_else(outer: int, inner: int) -> None:
         for function in &module.functions {
             let mut loops = 0;
             let mut fast = 0;
-            visit_statements(&function.body, &mut |statement| {
+            ir::walk_statements(&function.body, &mut |statement| {
                 if matches!(statement, Statement::For { .. }) {
                     loops += 1;
                     fast += usize::from(facts.range_cursor(statement).is_some());

@@ -1,3 +1,10 @@
+from enum import StrEnum
+
+
+class Digit(StrEnum):
+    TWO = "²"
+
+
 class Index:
     def __index__(self):
         return -3
@@ -14,6 +21,14 @@ class DescriptorOwner:
 
 class Text(str):
     pass
+
+
+class CustomPredicates(str):
+    def isalpha(self):
+        return "custom alpha"
+
+    def isdigit(self):
+        return "custom digit"
 
 
 class CustomAlnum(str):
@@ -108,6 +123,19 @@ def current():
         try:
             method("")
         except ValueError as error:
+            print(error)
+    bound_digit = Digit.TWO.isdigit
+    print(bound_digit(), str.isalpha(Digit.TWO))
+    for value in (Text("é"), Text("²"), "\ud800", Text("7\udfff"), Text("a\udfff"),
+                  CustomPredicates("a"), CustomPredicates("1")):
+        bound_alpha = value.isalpha
+        bound_digit = value.isdigit
+        print(bound_alpha(), str.isalpha(value), bound_digit(), str.isdigit(value))
+    for call in (lambda: str.isalpha(), lambda: str.isdigit(None), lambda: "a".isalpha(0),
+                 lambda: "2".isdigit(unexpected=0)):
+        try:
+            call()
+        except TypeError as error:
             print(error)
     print(text.partition("missing")[0] is text, text.rpartition("missing")[2] is text)
     print("aaa".partition("aa"), "aaa".rpartition("aa"))

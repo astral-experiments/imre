@@ -777,6 +777,35 @@ def check_class_metadata_allocation(imre, run, flags):
 
 
 
+def check_pending_signals(imre, root, env):
+    import signal
+
+    fixture = Path(__file__).resolve().with_name("fixtures") / "boxed_signal_pending.py"
+    native = root / "signal-pending"
+    subprocess.run([imre, "build", fixture, "--runtime-imports", "-o", native], check=True, env=env)
+    for delivered, expected in (
+        (0, 0),
+        (signal.SIGUSR1, signal.SIGUSR1),
+        (signal.SIGUSR2, signal.SIGUSR2),
+        (signal.SIGRTMIN + 1, signal.SIGRTMIN + 1),
+        (signal.SIGUSR2, signal.SIGUSR1),
+    ):
+        def queue_before_exec():
+            if delivered:
+                signal.pthread_sigmask(signal.SIG_BLOCK, {delivered})
+                os.kill(os.getpid(), delivered)
+
+        result = subprocess.run(
+            [native, str(int(expected))], env=env, capture_output=True,
+            preexec_fn=queue_before_exec, timeout=30,
+        )
+        if delivered == expected:
+            assert result.returncode == 0 and result.stderr == b"", result
+            assert result.stdout == f"verified pending signals {int(expected)}\n".encode(), result
+        else:
+            assert result.returncode == 1 and b"unexpected pending signals" in result.stderr, result
+
+
 def check_marshal_allocation(exe):
     import resource
     import select
@@ -889,6 +918,7 @@ def main():
             )
 
         if sys.platform.startswith("linux"):
+            check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
             check_ffi_result_roots(imre, root, run)
@@ -1031,6 +1061,42 @@ def main():
                 "    except TypeError as e: print(str(e))",
                 "os", "posix",
             )
+
+        for mode in ("0", "1"):
+            compare(
+                "-I", "-X", f"utf8={mode}", "-c",
+                "import io; print(io.text_encoding(None))",
+            )
+        compare(
+            "-I", "-X", "warn_default_encoding", "-W", "error::EncodingWarning", "-c",
+            "from _io import text_encoding\n"
+            "try: text_encoding(None)\n"
+            "except EncodingWarning as exc: print(str(exc))",
+        )
+
+        compare(
+            "-X", "warn_default_encoding", "-Walways", "-c",
+            "from io import text_encoding\n"
+            "import io, sys, warnings\n"
+            "def hook(message, category, filename, lineno, file, line):\n"
+            "    print(type(message) is category is EncodingWarning, str(message), filename, lineno, file, line)\n"
+            "    raise OSError('from hook')\n"
+            "original = sys.stderr\n"
+            "sys.stderr = io.StringIO()\n"
+            "text_encoding(None, 1)\n"
+            "print(sys.stderr.getvalue().strip())\n"
+            "sys.stderr = original\n"
+            "warnings.showwarning = hook\n"
+            "try: text_encoding(None, 1)\n"
+            "except OSError as exc: print(exc)\n"
+            "warnings.showwarning = 42\n"
+            "try: text_encoding(None, 1)\n"
+            "except TypeError as exc: print(exc)",
+        )
+        compare(
+            "-X", "warn_default_encoding", "-Werror::EncodingWarning", "-c",
+            "from io import text_encoding\n__name__ = None\nprint(text_encoding(None, 1))",
+        )
 
         subset_method = root / "set_issubset.py"
         for statement in (
@@ -1566,6 +1632,7 @@ def report(text):
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
+            "boxed_typing_no_type_check.py",
             "boxed_typing_assert_type.py",
             "boxed_typing_typeddict.py",
             "boxed_typing_dataclass_transform.py",
@@ -1574,12 +1641,15 @@ def report(text):
             "boxed_typing_protocol.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
+            "boxed_typing_type.py",
             "boxed_typing_mapping.py",
             "boxed_formatter.py",
+            "boxed_template_literals.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
             "boxed_re_split.py",
             "boxed_re_findall_empty.py",
+            "boxed_re_scanner.py",
             "boxed_datetime.py",
             "boxed_dataclasses.py",
             "boxed_dataclass_init_annotations.py",
@@ -1588,6 +1658,7 @@ def report(text):
             "boxed_time.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_io_text_encoding.py",
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
@@ -1600,6 +1671,7 @@ def report(text):
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
             "boxed_warning_categories.py",
+            "boxed_warnings.py",
             "boxed_oserror.py",
             "boxed_type_identity.py",
             "boxed_singleton_types.py",
@@ -1607,6 +1679,7 @@ def report(text):
             "boxed_function_closure_cells.py",
             "boxed_function_closure_edges.py",
             "boxed_functiontype.py",
+            "boxed_function_call.py",
             "boxed_any_generator.py",
             "boxed_global.py",
             "boxed_logging.py",
@@ -1619,11 +1692,13 @@ def report(text):
             "boxed_unittest_assert_almost_equal.py",
             "boxed_unittest_assert_count_equal.py",
             "boxed_unittest_membership.py",
+            "boxed_unittest_endswith.py",
             "boxed_unittest_instance.py",
             "boxed_unittest_subclass.py",
             "boxed_unittest_not_has_attr.py",
             "boxed_unittest_not_equal.py",
             "boxed_unittest_assert_raises.py",
+            "boxed_unittest_assert_regex.py",
             "boxed_unittest_patch.py",
             "boxed_unittest_seal.py",
             "boxed_unittest_identity.py",
@@ -1646,6 +1721,7 @@ def report(text):
             "boxed_setattr.py",
             "boxed_super.py",
             "boxed_property_setter.py",
+            "boxed_cached_property.py",
             "boxed_staticmethod.py",
             "boxed_item_assignment.py",
             "boxed_bytecache.py",
@@ -1654,6 +1730,7 @@ def report(text):
             "boxed_unittest_result_registry.py",
             "boxed_unittest_class_cleanup.py",
             "boxed_posixpath.py",
+            "boxed_linecache.py",
             "boxed_stat.py",
             "boxed_signal.py",
             "boxed_itertools_count.py",
@@ -1664,6 +1741,7 @@ def report(text):
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",
             "boxed_itertools_chain.py",
+            "boxed_itertools_cycle.py",
             "boxed_itertools_combinations.py",
             "boxed_itertools_permutations.py",
             "boxed_itertools_product.py",
@@ -1713,6 +1791,7 @@ def report(text):
             "boxed_csv.py",
             "boxed_bytes_separators.py",
             "boxed_bytes_fromhex.py",
+            "boxed_binary_endswith.py",
             "boxed_struct.py",
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
@@ -1745,6 +1824,9 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_mimetypes.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_urandom.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            os.symlink(b"unresolved-\xff", root / "readlink-source")
+            plugin.write_bytes((fixtures / "boxed_os_readlink.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

@@ -112,6 +112,7 @@ impl Imports {
                     | "importlib.machinery"
                     | "traceback"
                     | "unittest.case"
+                    | "string.templatelib"
             )
         {
             self.runtime_imports = true;
@@ -239,7 +240,8 @@ impl<'a> Visitor<'a> for Imports {
                     }
                     if imp.level == 0
                         && ((name == "operator" && boxed_operator(suffix))
-                            || (name == "sys" && boxed_sys_export(suffix)))
+                            || (name == "sys" && boxed_sys_export(suffix))
+                            || (name == "string" && suffix == "templatelib"))
                     {
                         self.runtime_imports = true;
                     }
@@ -411,6 +413,7 @@ pub(crate) fn compile(
             "unittest",
             "SystemExit",
             "__import__",
+            "templatelib",
         ]
         .iter()
         .any(|name| src.contains(name))
@@ -623,6 +626,7 @@ pub(crate) fn compile(
     // These bundled initializers depend only on native modules and may be selected by name at runtime.
     for name in [
         "__hello__",
+        "_tokenize",
         "ast",
         "codecs",
         "genericpath",
@@ -630,6 +634,8 @@ pub(crate) fn compile(
         "re",
         "signal",
         "stat",
+        "string",
+        "string.templatelib",
         "zipimport",
     ] {
         if !seen.contains(name)
@@ -652,7 +658,9 @@ pub(crate) fn compile(
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
         "ignore_environment":startup.is_some_and(|(flags, _)| flags.ignore_environment),
         "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
-        "utf8_mode":startup.map(|(flags, _)| flags.utf8_mode),
+        "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
+        "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
+        "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),

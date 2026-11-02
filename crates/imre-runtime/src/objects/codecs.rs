@@ -34,14 +34,16 @@ impl CodePage {
 
 static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
 static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
+static CP437: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(6, "cp437"));
 
-const CODEC_NAMES: [&str; 6] = [
+const CODEC_NAMES: [&str; 7] = [
     "ascii",
     "iso8859-1",
     "utf-8",
     "utf-8-sig",
     "cp1251",
     "cp424",
+    "cp437",
 ];
 
 thread_local! {
@@ -271,6 +273,7 @@ impl Codec {
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
             "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
             "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
+            "cp437" | "437" | "cspc8codepage437" | "ibm437" => Ok(Self::CodePage(&CP437)),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
                 Ok(Self::Latin1)

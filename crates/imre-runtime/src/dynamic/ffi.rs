@@ -142,6 +142,30 @@ impl Context {
 
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
+            "template_interpolation" => {
+                let (Value::List(meta) | Value::Tuple(meta)) = self.heap.get(c) else {
+                    unreachable!("compiled interpolation metadata");
+                };
+                let &[conversion, spec] = meta.as_slice() else {
+                    unreachable!("compiled interpolation metadata length");
+                };
+                self.template_interpolation(a, b, conversion, spec)
+            }
+            "template_literal" => {
+                let parts = self.items(a)?;
+                self.template_literal(&parts)
+            }
+            "build_template" => {
+                let interpolations = self.items(b)?;
+                Ok(self.template_from_literal(a, interpolations))
+            }
+            "linked_string_tuple" => {
+                let items = self.items(a)?;
+                Ok(self
+                    .heap
+                    .linked_string_constant(b, |heap| heap.packed_tuple(items, true)))
+            }
+            "linked_string" => Ok(self.heap.linked_string_constant(b, |_| a)),
             "match_class" => self.match_class(a, b, c),
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),
@@ -565,6 +589,19 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
             .as_bool()
             .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
     );
+    let options: Vec<String> =
+        serde_json::from_value(config["warnoptions"].take()).unwrap_or_default();
+    config["warnoptions"] = crate::sys::startup_warning_options(ignore_environment, options).into();
+    crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
+    config["utf8_mode"] = crate::sys::imre_sys_utf8_mode().into();
+    config["warn_default_encoding"] = config["warn_default_encoding"]
+        .as_bool()
+        .unwrap_or_else(|| {
+            !ignore_environment
+                && std::env::var_os("PYTHONWARNDEFAULTENCODING")
+                    .is_some_and(|value| !value.is_empty())
+        })
+        .into();
     if !ignore_environment {
         config["pycache_prefix"] = std::env::var("PYTHONPYCACHEPREFIX")
             .ok()
@@ -573,7 +610,13 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     }
     crate::python_hash::initialize(ignore_environment);
     crate::integer_text::imre_integer_digits_init(u32::from(ignore_environment));
-    crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
+    if let Some(options) = config["warnoptions"].as_array() {
+        for option in options.iter().filter_map(|value| value.as_str()) {
+            if let Err(reason) = crate::objects::warnings::startup_filter(option) {
+                eprintln!("Invalid -W option ignored: {reason}");
+            }
+        }
+    }
     // SAFETY: main supplies argc pointers to NUL-terminated strings that remain
     // valid while the constructor consumes this iterator.
     let args = unsafe { slice::from_raw_parts(argv, argc as usize) }

@@ -1108,7 +1108,7 @@ pub(crate) fn lower_with_caller_cache(
     }
     Ok((
         ir::Module {
-            command_flags: graph.command_startup.as_ref().map(|(flags, _)| *flags),
+            command_flags: graph.command_startup.as_ref().map(|(flags, _)| flags.clone()),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,
@@ -6252,6 +6252,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::TracebackFormatter(name) => {
                     return Err(self.object_export_error(name, expression));
                 }
+                Intrinsic::CachedProperty => {
+                    return Err(self.object_runtime_export("functools.cached_property", expression));
+                }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
                 }
@@ -6414,6 +6417,9 @@ impl<'a> Checker<'a> {
                 (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
             }
             ast::Expr::FString(value) => return self.fstring(value),
+            ast::Expr::TString(_) => {
+                return Err(self.object_builtin_error("template literal", expression));
+            }
             ast::Expr::Lambda(lambda) => return self.lambda_value(lambda, None, None),
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
@@ -7689,8 +7695,11 @@ impl<'a> Checker<'a> {
                     }
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
-                if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
-                    && matches!(attribute.attr.as_str(), "isascii" | "islower")
+                if matches!(
+                    receiver.ty,
+                    Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
+                ) && ir::StrDescriptor::named(attribute.attr.as_str())
+                    .is_some_and(ir::StrDescriptor::is_predicate)
                 {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),
@@ -8890,6 +8899,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
                 return Err(self.object_export_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
+                return Err(self.object_runtime_export("functools.cached_property", call));
+            }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
             }
@@ -9634,7 +9646,14 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 attribute.attr.as_str(),
-                "splitlines" | "isalnum" | "isascii" | "isspace" | "islower" | "isupper"
+                "splitlines"
+                    | "isalnum"
+                    | "isascii"
+                    | "isalpha"
+                    | "isdigit"
+                    | "isspace"
+                    | "islower"
+                    | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.splitlines_or_predicate(

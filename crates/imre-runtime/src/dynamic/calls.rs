@@ -39,7 +39,10 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             Some(("_functools", function))
         }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
+        #[cfg(target_os = "linux")]
+        "_signal" if function == "sigpending" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
+        "_io" if function == "text_encoding" => Some((module, function)),
         "zlib" if function == "adler32" => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -158,8 +161,9 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (matches!(name, "__repr__" | "issubset")
-                    && matches!(kind.as_str(), "set" | "frozenset")) =>
+                ) || (kind == "function" && name == "__call__")
+                    || (matches!(name, "__repr__" | "issubset")
+                        && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -966,6 +970,9 @@ impl Context {
                             | stdlib::os::scandir::ITER
                             | super::thread_rlock::CLASS
                             | super::thread_lock::CLASS
+                            | value::TEMPLATE_TYPE
+                            | value::TEMPLATE_ITER_TYPE
+                            | value::INTERPOLATION_TYPE
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
@@ -1157,6 +1164,9 @@ impl Context {
             | (stdlib::os::scandir::ITER, Value::Scandir(_))
             | (super::thread_rlock::CLASS, Value::HandlerLock(_))
             | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
+            | (value::TEMPLATE_TYPE, Value::Template { .. })
+            | (value::TEMPLATE_ITER_TYPE, Value::TemplateIter { .. })
+            | (value::INTERPOLATION_TYPE, Value::Interpolation { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
                 qualified,
@@ -1654,6 +1664,12 @@ impl Context {
                 let owner = self.builtin("frame");
                 return self.bind_attribute(method, obj, owner);
             }
+            Value::PythonFrame { back, .. } if name == "f_back" => {
+                return match back {
+                    Some(caller) => Ok(caller),
+                    None => self.generator_frame_back(obj),
+                };
+            }
             Value::PythonFrame { globals, .. } if name == "f_globals" => return Ok(globals),
             Value::PythonFrame { code, .. } if name == "f_code" => {
                 if !self.audit_hooks.is_empty() {
@@ -1800,11 +1816,32 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "_signal.sigpending" => {
+                        return Ok(self.text("Examine pending signals.\n\nReturns a set of signal numbers that are pending for delivery to\nthe calling thread."));
+                    }
                     "__doc__" if symbol == "_thread.allocate" => {
                         return Ok(self.text("An obsolete synonym of allocate_lock()."));
                     }
                     "__doc__" if symbol == "_thread.allocate_lock" => {
                         return Ok(self.text("Create a new lock object. See help(type(threading.Lock())) for\ninformation about locks."));
+                    }
+                    "__doc__" if symbol == "_io.text_encoding" => {
+                        return Ok(self.text(concat!(
+                            "A helper function to choose the text encoding.\n",
+                            "\n",
+                            "When encoding is not None, this function returns it.\n",
+                            "Otherwise, this function returns the default text encoding\n",
+                            "(i.e. \"locale\" or \"utf-8\" depends on UTF-8 mode).\n",
+                            "\n",
+                            "This function emits an EncodingWarning if encoding is None and\n",
+                            "sys.flags.warn_default_encoding is true.\n",
+                            "\n",
+                            "This can be used in APIs with an encoding=None parameter.\n",
+                            "However, please consider using encoding=\"utf-8\" for new APIs.",
+                        )));
+                    }
+                    "__text_signature__" if symbol == "_io.text_encoding" => {
+                        return Ok(self.text("($module, encoding, stacklevel=2, /)"));
                     }
                     "__doc__" if symbol == "posix.urandom" => {
                         return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));
@@ -1847,6 +1884,7 @@ impl Context {
                         if matches!(
                             symbol.as_str(),
                             "posix.getpid"
+                                | "_signal.sigpending"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
                                 | "_thread._count"
@@ -1946,6 +1984,11 @@ impl Context {
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
                 }
+                if name == "__call__" {
+                    let class = self.builtin("function");
+                    let descriptor = self.builtin("function.__call__");
+                    return self.bind_attribute(descriptor, obj, class);
+                }
             }
             Value::Method {
                 callable, receiver, ..
@@ -2039,6 +2082,14 @@ impl Context {
                     }
                 }
             },
+            Value::RegexScanner { pattern, .. } if name == "pattern" => return Ok(pattern),
+            Value::RegexMatch(ref m) if name == "re" => return Ok(m.pattern),
+            Value::RegexMatch(ref m) if name == "string" => return Ok(m.subject),
+            Value::RegexMatch(ref m) if name == "lastindex" => {
+                if let Some(branch) = m.lexicon_branch(self) {
+                    return Ok(self.int(branch as i64));
+                }
+            }
             Value::RegexPattern(ref pattern) if name == "flags" => {
                 return Ok(self.int(pattern.flags));
             }
@@ -2075,7 +2126,8 @@ impl Context {
             }
             Value::GetSetDescriptor {
                 owner, name: field, ..
-            } if HashState::is_provider_class(owner) => match name {
+            } if HashState::is_provider_class(owner) || owner == value::TEMPLATE_TYPE => match name
+            {
                 "__objclass__" => return Ok(self.builtin(owner)),
                 "__name__" => return Ok(self.text(field)),
                 "__qualname__" => {
@@ -2205,6 +2257,28 @@ impl Context {
                 "__module__" => return Ok(self.text("datetime")),
                 _ => {}
             },
+            Value::Template { strings, .. } if name == "strings" => return Ok(strings),
+            Value::Template { interpolations, .. } if name == "interpolations" => {
+                return Ok(interpolations);
+            }
+            Value::Template { interpolations, .. } if name == "values" => {
+                return self.template_values(interpolations);
+            }
+            Value::Interpolation { value, .. } if name == "value" => return Ok(value),
+            Value::Interpolation { expression, .. } if name == "expression" => {
+                return Ok(expression);
+            }
+            Value::Interpolation { conversion, .. } if name == "conversion" => {
+                return Ok(conversion);
+            }
+            Value::Interpolation { format_spec, .. } if name == "format_spec" => {
+                return Ok(format_spec);
+            }
+            Value::Native(ref class) if let Some(class) = super::templatelib::class_name(class) => {
+                if let Some(attr) = self.template_class_attr(class, name) {
+                    return Ok(attr);
+                }
+            }
             Value::DirEntry(ref entry) if name == "name" => return Ok(entry.name),
             Value::DirEntry(ref entry) if name == "path" => return Ok(entry.path),
             Value::Native(ref class)
@@ -2336,7 +2410,9 @@ impl Context {
             Value::Socket(ref socket) if name == "family" => {
                 return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
             }
-            Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
+            Value::Socket(ref socket) if name == "type" => {
+                return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
+            }
             Value::BufferedRandom(ref file) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
@@ -2637,6 +2713,7 @@ impl Context {
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
+                    || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(class.as_str(), "set" | "frozenset"))
@@ -2645,6 +2722,7 @@ impl Context {
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
                     || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
+                    || (class == "float" && name == "as_integer_ratio")
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
@@ -2977,6 +3055,7 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         self.check_thread_reporting_binding(obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
@@ -3504,6 +3583,7 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
             && (builtins::is_static_gc_type(class)
@@ -3874,6 +3954,7 @@ impl Context {
             dictionary,
             property,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
             fields: Default::default(),
             scalar: None,
@@ -3885,6 +3966,14 @@ impl Context {
     fn allocation_base(&self, class: Id) -> Option<Id> {
         self.find_in_mro(class, |base| match self.heap.get(base) {
             Value::Native(_) => Some(base),
+            // Generic and Protocol are bootstrapped with a class namespace, but
+            // inherit object.__new__ and do not supply native instance storage.
+            Value::Class { .. }
+                if self.classes.get("typing.Generic") == Some(&base)
+                    || self.classes.get("typing.Protocol") == Some(&base) =>
+            {
+                None
+            }
             Value::Class { scope, .. } if self.scope_data(*scope).class_cell.is_none() => {
                 Some(base)
             }
@@ -3990,6 +4079,7 @@ impl Context {
             dictionary: None,
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }
@@ -4036,6 +4126,7 @@ impl Context {
             scalar: Some(text),
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }
@@ -4132,6 +4223,27 @@ impl Context {
                 }
                 Ok(result)
             }
+            Value::Native(name) if name == "function.__call__" => {
+                let mut arguments = args.into_iter();
+                let function = arguments.next().ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        "descriptor '__call__' of 'function' object needs an argument",
+                    )
+                })?;
+                if !matches!(self.heap.get(function), Value::Function { .. }) {
+                    let actual = self
+                        .builtin_type_name(function)
+                        .unwrap_or_else(|| self.type_name(function));
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "descriptor '__call__' requires a 'function' object but received a '{actual}'"
+                        ),
+                    ));
+                }
+                self.call(function, arguments.collect(), kwargs)
+            }
             Value::Native(name) if name == "classmethod.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "classmethod", &args, &kwargs)
             }
@@ -4168,6 +4280,7 @@ impl Context {
                             | "StopIteration.__init__"
                             | "float.__format__"
                             | "float.__getformat__"
+                            | "float.as_integer_ratio"
                     )
                     || !name.contains('.')
                     || matches!(

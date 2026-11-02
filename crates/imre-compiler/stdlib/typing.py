@@ -279,6 +279,59 @@ def final(f):
     return f
 
 
+# Based on CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def no_type_check(arg):
+    """Decorator to indicate that annotations are not type hints.
+
+    The argument must be a class or function; if it is a class, it
+    applies recursively to all methods and classes defined in that class
+    (but not to methods defined in its superclasses or subclasses).
+
+    This mutates the function(s) or class(es) in place.
+    """
+    if isinstance(arg, type):
+        from types import FunctionType, MethodType
+
+        if type(arg) is type:
+            # Only Python class dictionaries can contain definitions to mark.
+            # Native descriptor names advertised by dir() need not be materialized.
+            names = set()
+            for base in getattr(arg, '__mro__', (arg,)):
+                for key, value in getattr(base, '__dict__', {}).items():
+                    if key == '__annotations__' and type(value) is dict:
+                        # An annotations dict cannot be a declared function or class.
+                        # Looking it up can force unrelated deferred annotations.
+                        continue
+                    names.add(key)
+            names = sorted(names)
+        else:
+            names = dir(arg)
+        for key in names:
+            obj = getattr(arg, key)
+            if (
+                not hasattr(obj, '__qualname__')
+                or obj.__qualname__ != f'{arg.__qualname__}.{obj.__name__}'
+                or getattr(obj, '__module__', None) != arg.__module__
+            ):
+                # We only modify objects that are defined in this type directly.
+                # If classes / methods are nested in multiple layers,
+                # we will modify them when processing their direct holders.
+                continue
+            # Instance, class, and static methods:
+            if isinstance(obj, FunctionType):
+                obj.__no_type_check__ = True
+            if isinstance(obj, MethodType):
+                obj.__func__.__no_type_check__ = True
+            # Nested types:
+            if isinstance(obj, type):
+                no_type_check(obj)
+    try:
+        arg.__no_type_check__ = True
+    except TypeError:  # built-in classes
+        pass
+    return arg
+
+
 # Optional and the special form protocol from CPython 3.14.5 Lib/typing.py.
 # See stdlib/docstrings/LICENSE. Union and the type parameters are native exports.
 class _Final:
@@ -653,6 +706,30 @@ Tuple.__doc__ = \
     """
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
 Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
+Type = _SpecialGenericAlias(type, 1, name="Type", inst=False)
+Type.__doc__ = \
+    """Deprecated alias to builtins.type.
+
+    builtins.type or typing.Type can be used to annotate class objects.
+    For example, suppose we have the following classes::
+
+        class User: ...  # Abstract base for User classes
+        class BasicUser(User): ...
+        class ProUser(User): ...
+        class TeamUser(User): ...
+
+    And a function that takes a class argument that's a subclass of
+    User and returns an instance of the corresponding class::
+
+        def new_user[U](user_class: Type[U]) -> U:
+            user = user_class()
+            # (Here we could write the user object to a database)
+            return user
+
+        joe = new_user(BasicUser)
+
+    At this point the type checker knows that joe has type BasicUser.
+    """
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 

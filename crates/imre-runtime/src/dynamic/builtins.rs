@@ -345,13 +345,15 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
-pub(super) const BYTEARRAY_METHODS: &[&str] =
-    &["__repr__", "append", "clear", "copy", "extend", "reverse"];
+pub(super) const BYTEARRAY_METHODS: &[&str] = &[
+    "__repr__", "append", "clear", "copy", "endswith", "extend", "reverse",
+];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
     "__mod__",
     "__repr__",
     "decode",
+    "endswith",
     "rfind",
     "rsplit",
     "rstrip",
@@ -371,6 +373,8 @@ pub(super) const STR_METHODS: &[&str] = &[
     "format",
     "isalnum",
     "isascii",
+    "isalpha",
+    "isdigit",
     "islower",
     "isspace",
     "isupper",
@@ -415,6 +419,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::HandlerLock(_) if super::thread_rlock::is_method(attr) => super::thread_rlock::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
+        Value::Float(_) if attr == "as_integer_ratio" => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
         Value::RangeIterator(iter)
@@ -588,11 +593,17 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "file"
         }
         Value::RegexPattern(_)
-            if matches!(attr, "findall" | "match" | "fullmatch" | "search" | "split") =>
+            if matches!(
+                attr,
+                "findall" | "match" | "fullmatch" | "search" | "split" | "scanner"
+            ) =>
         {
             "pattern"
         }
-        Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
+        Value::RegexScanner { .. } if matches!(attr, "match" | "search") => "scanner",
+        Value::RegexMatch(_) if matches!(attr, "group" | "groups" | "start" | "end" | "span") => {
+            "match"
+        }
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
         Value::Filter { .. } if matches!(attr, "__iter__" | "__next__") => "filter",
         Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
@@ -1015,6 +1026,7 @@ pub(super) fn call(
             }
             "module" => ctx.module_method(method, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
+            "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),
             "bytes" | "bytearray" if method == "maketrans" => {
@@ -1027,7 +1039,9 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
+            "bytearray" if matches!(method, "decode" | "endswith") => {
+                text::method(ctx, owner, method, args, kwargs)
+            }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if BYTEARRAY_METHODS.contains(&method) => {
                 text::bytearray_method(ctx, name, method, args, kwargs)

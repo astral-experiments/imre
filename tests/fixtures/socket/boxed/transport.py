@@ -1,5 +1,6 @@
 """Runtime-imported AF_INET operations used by the synchronous WSGI transport."""
 import errno
+import _socket
 import socket
 
 def check_bind_error(server):
@@ -40,6 +41,8 @@ def run():
     assert canonical == "" and addr == ("127.0.0.1", 0)
     with socket.socket(family, kind, protocol) as listener, socket.socket() as client:
         assert type(listener) is type(client) is socket.socket
+        assert socket.SocketType is _socket.SocketType is _socket.socket
+        assert isinstance(listener, socket.SocketType) and not isinstance(1, socket.SocketType)
         level, option = socket.SOL_SOCKET, socket.SO_REUSEADDR
         assert listener.getsockopt(level, option) == 0
         listener.setsockopt(level, option, 1)
