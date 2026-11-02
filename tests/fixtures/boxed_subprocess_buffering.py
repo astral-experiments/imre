@@ -26,6 +26,31 @@ def current():
             if size != 0:
                 assert writer.raw.closed and reader.raw.closed
 
+    for value, expected in ((None, -1), (1, 1)):
+        with subprocess.Popen(["/bin/true"], stdin=pipe, stdout=pipe, stderr=pipe,
+                              pipesize=value) as child:
+            assert child.pipesize == expected and child.wait() == 0
+        assert child.stdin.closed and child.stdout.closed and child.stderr.closed
+
+    try:
+        subprocess.Popen(["/bin/true"], pipesize="invalid")
+    except TypeError as exc:
+        assert str(exc) == "pipesize must be an integer"
+    else:
+        raise AssertionError("invalid pipesize accepted without a pipe")
+
+    class IntSubclass(int):
+        pass
+
+    for redirect, exception in ((subprocess.STDOUT, ValueError), (int("-2"), ValueError),
+                                (IntSubclass(-2), TypeError)):
+        try:
+            subprocess.Popen(["/bin/true"], stdout=redirect, pipesize="invalid")
+        except (ValueError, TypeError) as exc:
+            assert type(exc) is exception
+        else:
+            raise AssertionError("invalid stdout and pipesize accepted")
+
     # An empty read1 buffer performs just one raw read, without prefetching.
     with subprocess.Popen(["/bin/sh", "-c", "printf abcdefgh"], stdout=pipe, bufsize=4) as child:
         assert child.wait() == 0
