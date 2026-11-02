@@ -3711,6 +3711,7 @@ impl Heap {
 
     /// A tracing sweep also releases ordinary expression temporaries. Exclude the
     /// dead objects that refcounting alone would release from the Python GC count.
+    /// The incoming counts must start at zero.
     fn identify_cycles(&self, cycles: &mut CycleSet) -> Option<Id> {
         let mut first_finalizer = None;
         let CycleSet {
@@ -3719,7 +3720,6 @@ impl Heap {
             ..
         } = cycles;
         unowned.clear();
-        incoming.fill(0);
         for (id, slot) in self.slots.iter().enumerate() {
             if self.traces[id].get() == UNMARKED
                 && let Some(value) = &slot.value
@@ -3934,6 +3934,7 @@ impl Heap {
                 .then_some(id as Id)
         });
         self.mark(globals.chain(outside));
+        cycles.incoming.fill(0);
         self.identify_cycles(&mut cycles);
         let count = cycles
             .members()
@@ -4271,7 +4272,8 @@ mod reachability_tests {
         let Value::List(items) = heap.get_mut(survivor) else {
             unreachable!()
         };
-        items.push(child);
+        // The survivor has two incoming owners before resurrection.
+        items.extend([child, survivor]);
         let Value::List(items) = heap.get_mut(doomed) else {
             unreachable!()
         };
