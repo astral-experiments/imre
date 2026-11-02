@@ -13,6 +13,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/json/boxed_init.py"),
             ),
         )),
+        "json.encoder" => Some((
+            "json/encoder.py",
+            include_str!("../../stdlib/json/encoder.py"),
+        )),
         "json.decoder" => Some((
             "json/decoder.py",
             include_str!("../../stdlib/json/decoder.py"),

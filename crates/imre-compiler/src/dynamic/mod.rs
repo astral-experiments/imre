@@ -107,6 +107,8 @@ impl Imports {
                 name,
                 "_imp"
                     | "atexit"
+                    | "json"
+                    | "json.encoder"
                     | "sysconfig"
                     | "platform"
                     | "keyword"
@@ -436,6 +438,7 @@ pub(crate) fn compile(
             "keyword",
             "site",
             "importlib",
+            "json",
             "operator",
             "struct",
             "traceback",
@@ -686,6 +689,10 @@ pub(crate) fn compile(
         "genericpath",
         "hashlib",
         "itertools",
+        "json",
+        "json.decoder",
+        "json.encoder",
+        "json.scanner",
         "platform",
         "re",
         "signal",
