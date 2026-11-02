@@ -2308,7 +2308,7 @@ impl Context {
     }
 
     /// Attach the filename after tokenization, just as compile does for string input.
-    fn source_decode_error(
+    pub(super) fn source_decode_error(
         &mut self,
         error: crate::objects::SourceDecodeError,
         filename: Id,

@@ -116,7 +116,22 @@ def check_template_nodes():
         assert type(field.format_spec) is ast.Constant and field.format_spec.value == "ax"
 
 
+def check_encoded_source():
+    for source in (bytes, bytearray, memoryview):
+        data = source(b"# coding: latin-1\r\n'caf\xe9'")
+        node = ast.parse(data, "encoded.py", mode="eval").body
+        assert node.value == "café" and node.lineno == 2
+    assert ast.parse(b"\xef\xbb\xbf3", mode="eval").body.value == 3
+    try:
+        ast.parse(b"# coding: no-such-encoding\n0", "broken.py")
+    except SyntaxError as error:
+        assert error.filename == "broken.py" and error.lineno == 0
+    else:
+        raise AssertionError("accepted an unknown source encoding")
+
+
 def current():
+    check_encoded_source()
     check_comparison_nodes()
     check_template_nodes()
     decorated_source = (

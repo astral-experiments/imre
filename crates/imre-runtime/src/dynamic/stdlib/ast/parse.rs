@@ -530,13 +530,13 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let [src, filename, mode] =
         builtins::bind("parse", args, kwargs, ["source", "filename", "mode"])?;
     let copy = |text: &str| crate::Str::try_new(text).map_err(|_| crate::Error::allocation());
-    let source = copy(ctx.str_value(src.ok_or_else(|| {
+    let source = src.ok_or_else(|| {
         Error::new(
             "TypeError",
             "parse() missing 1 required positional argument: 'source'",
         )
-    })?)?)?;
-    let filename = copy(
+    })?;
+    let filename_text = copy(
         filename
             .map(|f| ctx.str_value(f))
             .transpose()?
@@ -547,7 +547,28 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             .transpose()?
             .unwrap_or("exec"),
     )?;
-    parse_source(ctx, &source, &filename, &mode, false)
+    let text = if ctx.string_storage(source).is_some() {
+        copy(ctx.str_value(source)?)?
+    } else {
+        ctx.check_buffer_exporter(source)?;
+        let data = match ctx.buffer_storage(source)? {
+            Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
+            Value::Array(array) => array.as_bytes(),
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    "compile() arg 1 must be a string, bytes or AST object",
+                ));
+            }
+        };
+        crate::objects::decode_compile_source(data)
+            .map_err(|error| {
+                let name = filename.unwrap_or_else(|| ctx.text(filename_text.as_str()));
+                ctx.source_decode_error(error, name)
+            })?
+            .into()
+    };
+    parse_source(ctx, &text, &filename_text, &mode, false)
 }
 
 pub(super) fn parse_source(
