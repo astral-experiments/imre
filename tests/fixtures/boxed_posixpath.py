@@ -274,6 +274,31 @@ def current():
                 assert borrowed.read() == b"abcdefghij"
         finally:
             os.close(replacement)
+
+        with open(path, "wb") as stream:
+            stream.write(b"first\r\nsecond\n\rlast")
+        for newline in ("\n", "\r", "\r\n"):
+            with open(Path(path), "r", -1, "utf-8", None, newline) as stream:
+                assert stream.read() == "first\r\nsecond\n\rlast"
+
+        calls = []
+        class FallbackPath(Path):
+            def __index__(self):
+                calls.append("index")
+                if len(calls) == 1:
+                    raise TypeError("use the pathname")
+                return alternate.fileno()
+
+            def __fspath__(self):
+                calls.append("fspath")
+                return self.value
+
+        value = FallbackPath(path)
+        with open(__file__, "rb", buffering=0) as alternate:
+            with open(value, "rt", encoding="utf-8", newline="\n") as stream:
+                assert stream.name is value and stream.read() == "first\r\nsecond\n\rlast"
+            assert calls == ["index", "fspath"]
+            assert alternate.read(6) == b"import"
     finally:
         os.unlink(path)
 

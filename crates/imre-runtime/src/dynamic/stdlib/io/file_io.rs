@@ -180,6 +180,20 @@ fn check_open_string(ctx: &mut Context, value: Id, name: &str, expected: &str) -
     Ok(())
 }
 
+enum DescriptorLookup {
+    FromArgument,
+    Resolved(Option<RawFd>),
+}
+
+/// FileIO falls back to the filesystem protocol when conversion to a C descriptor fails.
+fn descriptor_from_argument(ctx: &mut Context, file: Id) -> Option<RawFd> {
+    ctx.index_value(file)
+        .ok()
+        .flatten()
+        .and_then(|n| n.to_i64())
+        .and_then(|n| RawFd::try_from(n).ok())
+}
+
 /// Resolve the public open() arguments before opening the underlying file.
 pub(in crate::dynamic) fn open(
     ctx: &mut Context,
@@ -257,14 +271,10 @@ pub(in crate::dynamic) fn open(
         return open_raw(ctx, raw_arg, raw_mode, binary, owns);
     }
     let text_output = !binary && !mode_text.contains('+') && mode_text.contains(['w', 'a', 'x']);
-    // FileIO falls back to __fspath__ only when conversion to a C descriptor fails.
-    let fd = ctx
-        .index_value(raw_arg)
-        .ok()
-        .flatten()
-        .and_then(|n| n.to_i64())
-        .and_then(|n| RawFd::try_from(n).ok());
-    if fd.is_some() || text_output {
+    let text_input_with_newline =
+        buffering < 0 && newline.is_some() && matches!(mode_text, "r" | "rt" | "tr");
+    let fd = descriptor_from_argument(ctx, raw_arg);
+    if fd.is_some() || text_output || text_input_with_newline {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
@@ -291,7 +301,7 @@ pub(in crate::dynamic) fn open(
             raw_arg,
             self::mode(&raw_mode),
             owns,
-            fd,
+            DescriptorLookup::Resolved(fd),
             None,
             None,
         )?;
@@ -427,7 +437,16 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             .unwrap_or("r"),
     );
     let owns = closefd.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
-    initialize_file(ctx, receiver, path, selected_mode, owns, None, opener, None)
+    initialize_file(
+        ctx,
+        receiver,
+        path,
+        selected_mode,
+        owns,
+        DescriptorLookup::FromArgument,
+        opener,
+        None,
+    )
 }
 
 /// Expose the child stream and the native communication cursor through the same file.
@@ -448,7 +467,7 @@ pub(in crate::dynamic) fn popen_pipe(
         number,
         self::mode(mode),
         true,
-        Some(fd),
+        DescriptorLookup::Resolved(Some(fd)),
         None,
         Some(pipe.clone()),
     )?;
@@ -468,7 +487,7 @@ fn initialize_file(
     path: Id,
     selected_mode: Result<(u32, &'static str)>,
     owns: bool,
-    selected_fd: Option<RawFd>,
+    descriptor: DescriptorLookup,
     opener: Option<Id>,
     pipe: Option<BoxedPipe>,
 ) -> Result<Id> {
@@ -484,14 +503,10 @@ fn initialize_file(
             "bool is used as a file descriptor",
         )?;
     }
-    // CPython tries PyLong_AsInt, then the filesystem protocol if conversion fails.
-    let descriptor = selected_fd.or_else(|| {
-        ctx.index_value(path)
-            .ok()
-            .flatten()
-            .and_then(|n| n.to_i64())
-            .and_then(|n| RawFd::try_from(n).ok())
-    });
+    let descriptor = match descriptor {
+        DescriptorLookup::FromArgument => descriptor_from_argument(ctx, path),
+        DescriptorLookup::Resolved(fd) => fd,
+    };
     let encoded;
     let pathname = match descriptor {
         Some(fd) if fd < 0 => return Err(Error::new("ValueError", "negative file descriptor")),
