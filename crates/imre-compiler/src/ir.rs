@@ -1059,7 +1059,7 @@ pub(crate) enum Builtin {
     SysPlatform,
     SysThreadInfo,
     SysThreadText {
-        version: bool,
+        field: u32,
     },
     SysImplementation,
     SysStdlibModuleNames,
