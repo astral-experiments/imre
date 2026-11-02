@@ -617,6 +617,30 @@ def starred_calls():
     events.clear()
     exec("answer = collect(mark(1), *spread(), *(), label=mark(3))", scope)
     assert scope["answer"] == ((1, 2), 3) and events == [1, "iter", 3]
+    events.clear()
+    exec("answer = (mark(1), *spread(), *(), mark(3))", scope)
+    assert scope["answer"] == (1, 2, 3) and events == [1, "iter", 3]
+
+    import gc
+    import weakref
+
+    cursor_refs = []
+
+    class Empty:
+        def __next__(self):
+            raise StopIteration
+
+    class Source:
+        def __iter__(self):
+            cursor = Empty()
+            cursor_refs.append(weakref.ref(cursor))
+            return cursor
+
+    def released():
+        gc.collect()
+        return cursor_refs[0]() is None
+
+    assert eval("(*source, released())", {"source": Source(), "released": released}) == (True,)
 
     for source in ("collect(**{}, label=1, label=2)", "collect(label=1, **{}, label=2)"):
         events.clear()
