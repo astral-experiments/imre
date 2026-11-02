@@ -2514,6 +2514,10 @@ impl Context {
                     return Ok(value);
                 }
                 if stdlib::is_module(module) {
+                    if !stdlib::has_lazy_attributes(module) {
+                        let class = self.builtin("module");
+                        return self.module_instance_attribute(obj, class, scope, name);
+                    }
                     let value = stdlib::attribute(self, &module.to_owned(), name)?;
                     self.bind(scope, name, value);
                     return Ok(value);

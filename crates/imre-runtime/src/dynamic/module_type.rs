@@ -3,6 +3,85 @@ use super::{Context, Error, Id, NONE, Result, Value, builtins};
 pub(super) const DOC: &str = "Create a module object.\n\nThe name must be a string; the optional doc argument can have any type.";
 
 impl Context {
+    /// Copy live exports from a module in their original order. A failing lookup
+    /// leaves earlier bindings visible, just like successive assignments.
+    pub(super) fn import_star(&mut self, scope: Id, module: Id) -> Result<Id> {
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(module);
+        let (names, implicit) = match self.lookup_attr(module, "__all__") {
+            Ok(names) => {
+                // Packages also preload child modules from their fromlist before binding.
+                if let Value::Module { scope, .. } = *self.heap.get(module)
+                    && self.scope_name(scope, "__path__").is_some()
+                {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "wildcard imports from package __all__",
+                    ));
+                }
+                (names, false)
+            }
+            Err(error) if self.is_builtin_error(&error, "AttributeError") => {
+                // Some intrinsic namespaces synthesize names on first attribute lookup.
+                // Their currently materialized dictionary is not their public API.
+                if let Value::Module { name, .. } = self.heap.get(module)
+                    && super::stdlib::has_lazy_attributes(name)
+                {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        format!("wildcard export enumeration for native module '{name}'"),
+                    ));
+                }
+                let namespace = self.lookup_attr(module, "__dict__")?;
+                let entries = self.dict_entries(namespace).ok_or_else(|| {
+                    Error::new("TypeError", "module namespace must be a dictionary")
+                })?;
+                let keys = entries.iter().map(|&(key, _)| key).collect();
+                (self.alloc(Value::List(keys)), true)
+            }
+            Err(error) => return Err(error),
+        };
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(names);
+        // Native dictionaries have no sequence item slot. Python subclasses do.
+        if let Some(kind @ ("dict" | "collections.defaultdict")) = self.builtin_type_name(names) {
+            return Err(Error::new("TypeError", format!("{kind} is not a sequence")));
+        }
+        for index in 0.. {
+            let index = self.int(index);
+            let key = match self.get_item(names, index) {
+                Ok(key) => key,
+                Err(error) if self.is_builtin_error(&error, "IndexError") => break,
+                Err(error) => return Err(error),
+            };
+            let name = match self.str_value(key) {
+                Ok(name) => super::copy_label(name)?,
+                Err(_) => {
+                    let module_name = self.lookup_attr(module, "__name__")?;
+                    let module_name = self.str_value(module_name)?;
+                    let (item, attr) = if implicit {
+                        ("Key", "__dict__")
+                    } else {
+                        ("Item", "__all__")
+                    };
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "{item} in {module_name}.{attr} must be str, not {}",
+                            self.type_name(key)
+                        ),
+                    ));
+                }
+            };
+            if implicit && name.starts_with('_') {
+                continue;
+            }
+            let value = self.lookup_attr(module, &name)?;
+            self.bind_source_name(scope, &name, value)?;
+        }
+        Ok(NONE)
+    }
+
     /// Module attributes use the live namespace and the concrete module subclass's descriptors.
     pub(super) fn module_instance_attribute(
         &mut self,
