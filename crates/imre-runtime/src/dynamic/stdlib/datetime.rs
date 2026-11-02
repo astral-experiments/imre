@@ -55,6 +55,7 @@ pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
             | "datetime.date.today"
             | "datetime.date.fromtimestamp"
             | "datetime.date.fromordinal"
+            | "datetime.date.fromisocalendar"
     )
 }
 
@@ -103,6 +104,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "timetuple",
                 "strftime",
                 "fromordinal",
+                "fromisocalendar",
                 "fromtimestamp",
                 "today",
             ],
@@ -894,6 +896,7 @@ pub(super) fn call(
             datetime_arithmetic(ctx, &method["datetime.".len()..], args, kwargs)
         }
         "date.today" | "date.fromtimestamp" => fromutc::date_constructor(ctx, method, args, kwargs),
+        "date.fromisocalendar" => date_fromisocalendar(ctx, args, kwargs),
         "date.fromordinal" => date_fromordinal(ctx, args, kwargs),
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
@@ -1363,7 +1366,29 @@ fn date_fromordinal(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             ),
         ));
     };
-    let fields = Calendar::ordinal_fields(ctx.index_c_int(ordinal)?)?;
+    let ordinal = ctx.index_c_int(ordinal)?;
+    date_from_ordinal(ctx, class, ordinal)
+}
+
+fn date_fromisocalendar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, args) = calendar_class_args(ctx, "datetime.date", "fromisocalendar", args)?;
+    let argument = required_args("fromisocalendar", args, kwargs, &["year", "week", "day"])?;
+    let mut component = |i| {
+        ctx.index_c_int(argument(i)?).map_err(|err| {
+            let overflow = ctx.builtin("OverflowError");
+            if ctx.raised_error_matches(&err, overflow) {
+                Error::new("ValueError", "ISO calendar component out of range")
+            } else {
+                err
+            }
+        })
+    };
+    let ordinal = Calendar::iso_week_ordinal(component(0)?, component(1)?, component(2)?)?;
+    date_from_ordinal(ctx, class, ordinal)
+}
+
+fn date_from_ordinal(ctx: &mut Context, class: Id, ordinal: i32) -> Result<Id> {
+    let fields = Calendar::ordinal_fields(ordinal)?;
     let args = fields.into_iter().map(|n| ctx.int(i64::from(n))).collect();
     ctx.call(class, args, vec![])
 }
