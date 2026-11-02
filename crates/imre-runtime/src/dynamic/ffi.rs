@@ -28,6 +28,19 @@ impl Context {
         {
             self.finish_call_operands(mark, result);
         }
+        self.check_call_return(result)
+    }
+
+    /// A Python call expression checks for delivery after the callee's native work completes.
+    pub(super) fn check_call_return(&mut self, result: Id) -> Result<Id> {
+        #[cfg(unix)]
+        if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
+            && crate::signals::is_main()
+        {
+            // A Python handler can delete the last other reference and force collection.
+            self.heap.keep(result);
+            self.dispatch_signals()?;
+        }
         Ok(result)
     }
 

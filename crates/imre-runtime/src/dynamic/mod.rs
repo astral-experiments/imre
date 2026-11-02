@@ -3093,6 +3093,11 @@ impl Context {
             _ => {}
         }
         if name == "_thread" && source.is_none() {
+            #[cfg(unix)]
+            {
+                let interrupt = self.builtin("_thread.interrupt_main");
+                self.bind(scope, "interrupt_main", interrupt);
+            }
             for function in ["start_new_thread", "_count", "get_ident"] {
                 let value = self.builtin(&format!("_thread.{function}"));
                 self.bind(scope, function, value);
