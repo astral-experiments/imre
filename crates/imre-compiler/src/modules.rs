@@ -1556,6 +1556,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.no_type_check_decorator")
             }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
+            (Self::Typing, "get_protocol_members") => {
+                Intrinsic::ObjectRuntimeExport("typing.get_protocol_members")
+            }
             (Self::Typing, "is_protocol") => Intrinsic::ObjectRuntimeExport("typing.is_protocol"),
             (Self::Typing, "Annotated") => Intrinsic::ObjectRuntimeExport("typing.Annotated"),
             (Self::Typing, "ForwardRef") => Intrinsic::ObjectRuntimeExport("typing.ForwardRef"),
