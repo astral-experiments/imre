@@ -221,12 +221,12 @@ fn current_codeset() -> String {
     // SAFETY: the caller holds the process-locale lock while copying libc's storage.
     let name = unsafe { libc::nl_langinfo(libc::CODESET) };
     if name.is_null() {
-        return "UTF-8".to_owned();
+        return "utf-8".to_owned();
     }
     // SAFETY: the non-null NUL-terminated encoding name remains valid under the lock.
     let name = unsafe { CStr::from_ptr(name) };
     if name.to_bytes().is_empty() {
-        "UTF-8".to_owned()
+        "utf-8".to_owned()
     } else {
         name.to_string_lossy().into_owned()
     }

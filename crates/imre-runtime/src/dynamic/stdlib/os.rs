@@ -451,7 +451,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
     if name == "_exit" {
         return cfg!(unix);
     }
-    if matches!(name, "pread" | "pwrite" | "readinto") {
+    if matches!(name, "device_encoding" | "pread" | "pwrite" | "readinto") {
         return cfg!(unix);
     }
     matches!(
@@ -880,6 +880,16 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "device_encoding" {
+        let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
+            unreachable!("device_encoding requires a descriptor");
+        };
+        return Ok(match native::device_encoding(c_int(ctx, fd)?) {
+            None => NONE,
+            Some(std::borrow::Cow::Borrowed(name)) => ctx.heap.code_name(name),
+            Some(std::borrow::Cow::Owned(name)) => ctx.text(name),
+        });
+    }
     if name == "access" {
         return access(ctx, args, kwargs);
     }
