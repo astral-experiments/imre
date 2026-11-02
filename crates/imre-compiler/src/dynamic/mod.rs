@@ -658,8 +658,10 @@ pub(crate) fn compile(
     }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
+    let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let config = serde_json::json!({
         "bundled_root":bundled_root,
+        "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
         "implementation_version":env!("CARGO_PKG_VERSION"),
         "archive_suffix":format!(".{}",crate::NATIVE_ARCHIVE_EXTENSION),
@@ -674,7 +676,6 @@ pub(crate) fn compile(
         "executable":startup.map(|(_, executable)| executable),
         "command":command.is_some(),"paths":paths,
     });
-    let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     check_returns()?;
     let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
     Ok(Some(Compilation {
