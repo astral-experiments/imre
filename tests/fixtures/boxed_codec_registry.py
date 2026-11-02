@@ -57,10 +57,22 @@ expected = b"\xe4\xee \xf1\xe2\xe8\xe4\xe0\xed\xe8\xff\n"
 assert stream.getvalue() == expected
 try:
     writer.write("x☃")
-except UnicodeEncodeError:
+except UnicodeEncodeError as error:
+    assert (error.object, error.start, error.end) == ("x☃", 1, 2)
     assert stream.getvalue() == expected
 else:
     raise AssertionError("strict writer accepted an unencodable character")
+
+
+def replace_snowman(error):
+    assert (error.object, error.start, error.end) == ("ё☃!", 1, 2)
+    return b"<snow>", error.end
+
+
+codecs.register_error("boxed_writer_snowman", replace_snowman)
+writer.errors = "boxed_writer_snowman"
+writer.write("ё☃!")
+assert stream.getvalue() == expected + b"\xb8<snow>!"
 
 
 calls = []
