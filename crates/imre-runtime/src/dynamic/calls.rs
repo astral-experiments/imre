@@ -223,6 +223,22 @@ impl Context {
         dictionary
     }
 
+    /// Keep the dictionary absent until first used, so wrapping an untouched partial can flatten it.
+    fn partial_dictionary(&mut self, obj: Id, dictionary: Option<Id>) -> Id {
+        if let Some(dictionary) = dictionary {
+            return dictionary;
+        }
+        let dictionary = self.dict(Vec::new());
+        let Value::Partial {
+            dictionary: field, ..
+        } = self.heap.get_mut(obj)
+        else {
+            unreachable!()
+        };
+        *field = Some(dictionary);
+        dictionary
+    }
+
     /// Instance attributes use raw dict storage even when __dict__ was set to a subclass.
     fn dictionary_field(&mut self, dictionary: Option<Id>, name: &str) -> Result<Option<Id>> {
         let Some(dictionary) = dictionary else {
@@ -1855,8 +1871,11 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("generator.{name}")));
             }
-            Value::Native(ref class) if class == "staticmethod" && name == "__get__" => {
-                return Ok(self.builtin("staticmethod.__get__"));
+            Value::Native(ref class)
+                if matches!(class.as_str(), "classmethod" | "staticmethod")
+                    && name == "__get__" =>
+            {
+                return Ok(self.builtin(&format!("{class}.__get__")));
             }
             Value::Native(ref class)
                 if class == "property" && super::property::METHODS.contains(&name) =>
@@ -2255,21 +2274,20 @@ impl Context {
                 owner,
             } => return self.super_attribute(start, receiver, owner, name),
             Value::Partial {
-                coroutine_marker: Some(mark),
-                ..
-            } if name == "_is_coroutine_marker" => {
-                return Ok(mark);
-            }
-            Value::Partial {
                 function,
                 args,
                 keywords,
-                ..
+                dictionary,
             } => match name {
                 "func" => return Ok(function),
                 "args" => return Ok(args),
                 "keywords" => return Ok(keywords),
-                _ => {}
+                "__dict__" => return Ok(self.partial_dictionary(obj, dictionary)),
+                _ => {
+                    if let Some(value) = self.dictionary_field(dictionary, name)? {
+                        return Ok(value);
+                    }
+                }
             },
             Value::File(ref handle) if name == "closed" => {
                 return Ok(if handle.closed() { TRUE } else { FALSE });
@@ -2959,7 +2977,10 @@ impl Context {
             return Ok(());
         }
         if name == "__dict__"
-            && matches!(self.heap.get(obj), Value::Raised(_) | Value::Cached { .. })
+            && matches!(
+                self.heap.get(obj),
+                Value::Raised(_) | Value::Cached { .. } | Value::Partial { .. }
+            )
         {
             return Err(Error::new("TypeError", "cannot delete __dict__"));
         }
@@ -2995,6 +3016,13 @@ impl Context {
         }
         self.check_instance_field(obj, name)?;
         match *self.heap.get(obj) {
+            Value::Partial { dictionary, .. } => {
+                if matches!(name, "func" | "args" | "keywords") {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
+                }
+                let dictionary = self.partial_dictionary(obj, dictionary);
+                self.update_dictionary_field(obj, dictionary, name, None)
+            }
             Value::Cached { dictionary, .. } => {
                 if name == "__dict__" {
                     return Err(Error::new("TypeError", "cannot delete __dict__"));
@@ -3533,7 +3561,10 @@ impl Context {
             return Ok(());
         }
         if name == "__dict__"
-            && matches!(self.heap.get(obj), Value::Raised(_) | Value::Cached { .. })
+            && matches!(
+                self.heap.get(obj),
+                Value::Raised(_) | Value::Cached { .. } | Value::Partial { .. }
+            )
         {
             if self.dict_storage(value).is_none() {
                 return Err(Error::new(
@@ -3546,6 +3577,13 @@ impl Context {
             }
             match self.heap.get_mut(obj) {
                 Value::Raised(error) => error.tracing().dictionary = Some(value),
+                Value::Partial { dictionary, .. } => {
+                    if let Some(old) = dictionary.replace(value)
+                        && old != value
+                    {
+                        self.heap.weak_edge_removed(old);
+                    }
+                }
                 Value::Cached { dictionary, .. } => {
                     let old = std::mem::replace(dictionary, value);
                     if old != value {
@@ -3612,6 +3650,15 @@ impl Context {
             return Ok(());
         }
         self.check_instance_field(obj, name)?;
+        if let Value::Partial { dictionary, .. } = *self.heap.get(obj)
+            && name != "__class__"
+        {
+            if matches!(name, "func" | "args" | "keywords") {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
+            let dictionary = self.partial_dictionary(obj, dictionary);
+            return self.update_dictionary_field(obj, dictionary, name, Some(value));
+        }
         if let Value::Cached { dictionary, .. } = *self.heap.get(obj)
             && name != "__class__"
         {
@@ -3654,11 +3701,6 @@ impl Context {
                 ) =>
             {
                 return Err(Error::new("AttributeError", "readonly attribute"));
-            }
-            Value::Partial {
-                coroutine_marker, ..
-            } if name == "_is_coroutine_marker" => {
-                *coroutine_marker = Some(value);
             }
             Value::Property(property) if name == "__doc__" => property.doc = value,
             Value::Complex(_) if matches!(name, "real" | "imag") => {
@@ -3986,6 +4028,9 @@ impl Context {
                     return Err(error);
                 }
                 Ok(result)
+            }
+            Value::Native(name) if name == "classmethod.__get__" => {
+                wrapper_descriptor::descriptor_get(self, "classmethod", &args, &kwargs)
             }
             Value::Native(name) if name == "wrapper_descriptor.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "wrapper_descriptor", &args, &kwargs)
