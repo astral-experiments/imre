@@ -715,6 +715,7 @@ pub(crate) fn compile(
         "stat",
         "string",
         "string.templatelib",
+        "subprocess",
         "zipimport",
     ]
     .into_iter()

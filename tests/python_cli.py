@@ -993,11 +993,26 @@ def check_unittest_file_discovery(imre, root, run):
         (directory / "test_skipped.py").write_text(
             "import unittest\nraise unittest.SkipTest('unavailable module')\n"
         )
+        count = 3
+        if os.name == "posix":
+            (directory / "test_process_exports.py").write_text(
+                "import subprocess as _process, unittest as _unittest\n"
+                "from subprocess import __all__ as _exports\n"
+                "from subprocess import *\n"
+                "_names = [name for name in globals() if not name.startswith('_')]\n"
+                "class Exports(_unittest.TestCase):\n"
+                "    def test_star(self):\n"
+                "        self.assertEqual(_names, _exports)\n"
+                "        for name in _exports:\n"
+                "            self.assertIs(globals()[name], getattr(_process, name))\n"
+                "        self.assertEqual(check_output(['/bin/sh', '-c', 'printf captured']), b'captured')\n"
+            )
+            count += 1
         for command in ((sys.executable, "-B", entry), (executable,)):
             result = run(*command, directory)
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, b"3 ['test_late.Late.test_body'] 0\n"
-                b"[('unittest.loader.ModuleSkipped.test_skipped', 'unavailable module')]\n", b"",
+                0, f"{count} ['test_late.Late.test_body'] 0\n".encode()
+                + b"[('unittest.loader.ModuleSkipped.test_skipped', 'unavailable module')]\n", b"",
             ), result
 
 
