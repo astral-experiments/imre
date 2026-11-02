@@ -1,6 +1,5 @@
 //! Text encoding and buffering over the original Python binary stream.
 
-use num_traits::ToPrimitive;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -9,7 +8,10 @@ use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
 use crate::dynamic::builtins::boolean;
 use crate::objects::{Codec, DecodeIssue, FixedUnicode};
 
+mod cookie;
 mod reader;
+mod replay;
+use cookie::Cookie;
 mod reconfigure;
 use reader::Reader;
 
@@ -75,10 +77,6 @@ impl StreamCodec {
             Some((format, bom)) => Self::Wide { format, bom },
             None => Self::Registered(Codec::by_key(&key, encoding)?),
         })
-    }
-
-    fn detects_bom(self) -> bool {
-        matches!(self, Self::Wide { bom: true, .. })
     }
 }
 
@@ -352,27 +350,6 @@ impl Wrapper {
         Ok(())
     }
 
-    fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
-        let input = self.input.borrow();
-        let width = match self.decoder.get().codec {
-            StreamCodec::Wide { format, .. } => format.width(),
-            StreamCodec::Registered(_) => 1,
-        };
-        let offset = input.position(ctx, end, width)?;
-        if !self.decoder.get().codec.detects_bom() || !input.wide_snapshot {
-            return Ok(offset);
-        }
-        let flag = match input.order {
-            0 if input.beginning => 2u128,
-            order if order == -NATIVE_ORDER => 1,
-            _ => return Ok(offset),
-        };
-        // TextIOWrapper cookies store the newline decoder's flags above the raw offset.
-        let flag = flag << usize::from(matches!(self.newline.get(), None | Some("")));
-        let cookie = (flag << 64) | u128::from(ctx.as_integer(offset)? as u64);
-        Ok(ctx.alloc(Value::Int(crate::Int::new(cookie.into()))))
-    }
-
     fn write(&self, ctx: &mut Context, receiver: Id, value: Id) -> Result<Id> {
         if !self.writable.get() {
             return Err(Error::new("UnsupportedOperation", "not writable"));
@@ -513,6 +490,17 @@ impl Wrapper {
                     vec![ctx.int(w.chunk_size.get() as i64)],
                 )
             };
+            // A Python read method may seek or reinitialize the wrapper. The snapshot
+            // describes the decoder before the call, as in TextIOWrapper._read_chunk.
+            let mut snapshot = if all {
+                None
+            } else {
+                w.input.borrow().capture(
+                    w.decoder.get().codec,
+                    w.decoder_newline.get(),
+                    w.telling.get(),
+                )?
+            };
             let data = invoke(ctx, buffer, method, args)?;
             let w = Self::from_receiver(ctx, receiver)?;
             w.binary()?;
@@ -527,64 +515,21 @@ impl Wrapper {
             })?;
             let end = all || bytes.is_empty();
             let decoder = w.decoder.get();
-            let (codec, raw) = w.input.borrow_mut().chunk(bytes, decoder.codec, end)?;
-            let raw = ctx.alloc(Value::Bytes(raw));
-            // The ordinary native codec entry owns error handling. A registered handler
-            // may run Python, so release the reader borrow before invoking it.
-            let errors = ctx.scalar_value(decoder.errors);
-            let (decoded, consumed, signature, resolved) = match codec {
-                StreamCodec::Registered(c) => (
-                    codecs::decode_bytes(ctx, c, raw, Some(errors))?,
-                    ctx.bytes_like(raw)?.len(),
-                    0,
-                    codec,
-                ),
-                StreamCodec::Wide { format, bom } => {
-                    let errors = ctx.str_value(errors)?.to_owned();
-                    let requested = if bom { 0 } else { format.byte_order() };
-                    let (decoded, consumed, order) =
-                        codecs::decode_wide_chunk(ctx, raw, &errors, format, requested, end)?;
-                    let data = ctx.bytes_like(raw)?;
-                    let width = format.width();
-                    if bom && order == 0 && consumed >= width {
-                        let err = DecodeIssue {
-                            encoding: format.codec_name(true),
-                            start: 0,
-                            end: width,
-                            reason: "Stream does not start with BOM",
-                        }
-                        .error(data);
-                        return Err(ctx.decode_error(err));
-                    }
-                    let consumed = consumed.min(data.len());
-                    let mut reader = w.input.borrow_mut();
-                    reader.save_tail(&data[consumed..])?;
-                    let signature = if bom && order != 0 { width } else { 0 };
-                    reader.order = order;
-                    if order != 0 {
-                        reader.beginning = false;
-                    }
-                    if !all && w.telling.get() {
-                        reader.wide_snapshot = true;
-                    }
-                    let resolved = StreamCodec::Wide {
-                        format: format.with_order(order),
-                        bom: false,
-                    };
-                    (decoded, consumed, signature, resolved)
-                }
-            };
+            let newline = w.decoder_newline.get();
+            let telling = w.telling.get();
+            if let Some(saved) = &mut snapshot {
+                let raw = Rc::make_mut(&mut saved.input);
+                raw.try_reserve(bytes.len())
+                    .map_err(|_| crate::Error::allocation())?;
+                raw.extend_from_slice(bytes);
+            }
+            let byte_count = bytes.len();
+            let chunk = w.input.borrow_mut().chunk(bytes, decoder.codec, end)?;
+            let count = decode_chunk(ctx, &w.input, decoder, newline, chunk, end)?;
             let mut input = w.input.borrow_mut();
-            input.append(
-                ctx.str_value(decoded)?,
-                &ctx.bytes_like(raw)?[signature.min(consumed)..consumed],
-                resolved,
-                w.decoder_newline.get(),
-                end,
-                !all && w.telling.get(),
-            )?;
             if !all {
-                let nonempty = input.final_chunk_has_text();
+                input.record(snapshot, byte_count, count, telling);
+                let nonempty = count != 0;
                 input.decoded_chunk_nonempty = (!line || !end || nonempty).then_some(nonempty);
                 if line && end {
                     if nonempty {
@@ -605,6 +550,50 @@ impl Wrapper {
             }
         }
     }
+}
+
+/// Decode into either the live stream or a temporary decoder replaying a saved position.
+fn decode_chunk(
+    ctx: &mut Context,
+    input: &RefCell<Reader>,
+    decoder: Coder,
+    newline: Option<&str>,
+    (codec, bytes): (StreamCodec, Vec<u8>),
+    end: bool,
+) -> Result<usize> {
+    let raw = ctx.alloc(Value::Bytes(bytes));
+    let errors = ctx.scalar_value(decoder.errors);
+    // Registered error handlers can reenter the stream; no reader borrow spans decoding.
+    let decoded = match codec {
+        StreamCodec::Registered(c) => codecs::decode_bytes(ctx, c, raw, Some(errors))?,
+        StreamCodec::Wide { format, bom } => {
+            let errors = ctx.str_value(errors)?.to_owned();
+            let requested = if bom { 0 } else { format.byte_order() };
+            let (decoded, consumed, order) =
+                codecs::decode_wide_chunk(ctx, raw, &errors, format, requested, end)?;
+            let data = ctx.bytes_like(raw)?;
+            if bom && order == 0 && consumed >= format.width() {
+                let issue = DecodeIssue {
+                    encoding: format.codec_name(true),
+                    start: 0,
+                    end: format.width(),
+                    reason: "Stream does not start with BOM",
+                };
+                let error = issue.error(data);
+                return Err(ctx.decode_error(error));
+            }
+            let mut reader = input.borrow_mut();
+            reader.save_tail(&data[consumed.min(data.len())..])?;
+            reader.order = order;
+            if order != 0 {
+                reader.beginning = false;
+            }
+            decoded
+        }
+    };
+    input
+        .borrow_mut()
+        .append(ctx.str_value(decoded)?, newline, end)
 }
 
 /// Advance the concrete text iterator. Only an empty line restores telling at EOF.
@@ -827,53 +816,66 @@ pub(super) fn call(
             };
             invoke(ctx, receiver, "flush", vec![])?;
             if whence == 2 {
-                Wrapper::from_receiver(ctx, receiver)?
-                    .input
-                    .borrow_mut()
-                    .discard();
+                let w = Wrapper::from_receiver(ctx, receiver)?;
+                let mut input = w.input.borrow_mut();
+                input.discard();
+                input.reset_decoder();
+                drop(input);
+                let zero = ctx.int(0);
+                let end = ctx.int(2);
+                let position = Wrapper::invoke_buffer(ctx, receiver, "seek", vec![zero, end])?;
+                let beginning = ctx.checked_equal(position, zero)?;
+                let w = Wrapper::from_receiver(ctx, receiver)?;
+                w.write_start.set(beginning);
+                w.utf8_signature_pending.set(beginning);
+                return Ok(position);
             }
-            let wide_cookie = if w.decoder.get().codec.detects_bom() {
-                offset.big().to_u128().filter(|n| n >> 64 > 0)
-            } else {
-                None
-            };
-            if let Some(bits) = wide_cookie {
-                let shift = usize::from(matches!(w.newline.get(), None | Some("")));
-                let flags = bits >> 64;
-                if flags != 1 << shift && flags != 2 << shift {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "native text position needs a decoder snapshot",
-                    ));
-                }
-            }
-            let byte_offset = match wide_cookie {
-                Some(bits) => i64::try_from(bits as u64).ok(),
-                None => offset.to_i64(),
-            }
-            .ok_or_else(|| Error::new("OverflowError", "seek position out of range"))?;
-            let off = ctx.int(byte_offset);
-            let dir = ctx.int(whence);
-            let position = Wrapper::invoke_buffer(ctx, receiver, "seek", vec![off, dir])?;
-            let beginning = !ctx.truth(position)?;
+
+            let state = Cookie::parse(&offset)?;
+            let off = ctx.int(state.start);
+            Wrapper::invoke_buffer(ctx, receiver, "seek", vec![off])?;
             let w = Wrapper::from_receiver(ctx, receiver)?;
-            let mut input = Reader::after_seek(beginning, whence == 0);
-            if let Some(bits) = wide_cookie {
-                let flag = (bits >> 64) >> usize::from(matches!(w.newline.get(), None | Some("")));
-                input.beginning = flag == 2;
-                if flag == 1 {
-                    input.order = -NATIVE_ORDER;
-                }
-                input.wide_snapshot = true;
+            w.input
+                .borrow_mut()
+                .after_seek(state, w.decoder.get().codec, w.decoder_newline.get());
+
+            if state.skip != 0 {
+                // Even an EOF-only cookie must issue read(0). The underlying file
+                // may have changed since tell(), so decode the actual bytes returned.
+                let size = ctx.int(i64::from(state.feed));
+                let data = Wrapper::invoke_buffer(ctx, receiver, "read", vec![size])?;
+                let Value::Bytes(bytes) = ctx.heap.get(ctx.scalar_value(data)) else {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "underlying read() should have returned a bytes object, not '{}'",
+                            ctx.type_name(data)
+                        ),
+                    ));
+                };
+                let w = Wrapper::from_receiver(ctx, receiver)?;
+                let decoder = w.decoder.get();
+                let mut input = w.input.borrow_mut();
+                input.seek_input(state.flags, bytes)?;
+                let chunk = input.chunk(bytes, decoder.codec, state.eof)?;
+                drop(input);
+                let chars = decode_chunk(
+                    ctx,
+                    &w.input,
+                    decoder,
+                    w.decoder_newline.get(),
+                    chunk,
+                    state.eof,
+                )?;
+                let mut input = w.input.borrow_mut();
+                input.decoded_chunk_nonempty = Some(chars != 0);
+                input.skip_chars(state.skip as usize)?;
             }
-            w.input.replace(input);
+            let w = Wrapper::from_receiver(ctx, receiver)?;
+            let beginning = state.start == 0 && state.flags == 0;
             w.write_start.set(beginning);
             w.utf8_signature_pending.set(beginning);
-            Ok(if wide_cookie.is_some() {
-                cookie
-            } else {
-                position
-            })
+            Ok(cookie)
         }
         _ => Err(Error::new(
             "AttributeError",
