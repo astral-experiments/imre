@@ -332,6 +332,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
         name,
         "access"
             | "open"
+            | "waitpid"
             | "readlink"
             | "scandir"
             | "remove"
@@ -653,6 +654,25 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    if name == "waitpid" {
+        let [pid, options] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("waitpid expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let pid = c_int(ctx, *pid)?;
+        let options = c_int(ctx, *options)?;
+        // Reserve the result before consuming a child status from the kernel.
+        let mut result = Vec::new();
+        result
+            .try_reserve_exact(2)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for value in native::waitpid(pid, options)? {
+            result.push(ctx.int(i64::from(value)));
+        }
+        return Ok(ctx.alloc(Value::Tuple(result)));
     }
     if name == "pipe" {
         if !args.is_empty() {
