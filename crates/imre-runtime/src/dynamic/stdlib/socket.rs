@@ -412,8 +412,8 @@ pub(super) fn call(
         )?,
         "accept" => {
             let (child, peer) = native::accept(&s)?;
-            let child = ctx.alloc(Value::Socket(child));
             let peer = pack_address(ctx, &peer)?;
+            let child = ctx.alloc(Value::Socket(child));
             return Ok(ctx.alloc(Value::Tuple(vec![child, peer])));
         }
         "getsockname" => return pack_address(ctx, &native::sockname(&s)?),
