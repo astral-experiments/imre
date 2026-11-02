@@ -41,7 +41,7 @@ def label(ax, x, y, text, size, *, color=INK, align="left", mono=False):
     )
 
 
-def benchmark_card(height, title, subtitle, metadata):
+def benchmark_card(height, title, metadata):
     fig = plt.figure(figsize=(WIDTH / 96, height / 96), dpi=96)
     ax = fig.add_axes((0, 0, 1, 1), xlim=(0, WIDTH), ylim=(height, 0))
     ax.set_axis_off()
@@ -72,7 +72,6 @@ def benchmark_card(height, title, subtitle, metadata):
     label(ax, 91, 57, "IMRE / BENCHMARKS", 13, color=MUTED, mono=True)
     label(ax, 872, 57, metadata, 13, color=MUTED, align="right", mono=True)
     label(ax, 46, 114, title, 32)
-    label(ax, 48, 158, subtitle, 16, color=MUTED)
     return fig, ax
 
 
@@ -158,17 +157,18 @@ def bars(
 
 def workload_panels(rows, path):
     row_count = (len(rows) + 1) // 2
-    height = 192 + 180 * row_count + 27
+    panel_top = 144
+    height = panel_top + 180 * row_count + 27
     runs = len(rows[0][0]["samples_ns"])
     fig, ax = benchmark_card(
         height,
         "Comparing Imre, Rust and CPython",
-        "Median runtime. Scales vary by workload. Speedups compare Imre with CPython.",
         f"{runs} runs per engine",
     )
     for i, (case, medians) in enumerate(rows):
-        x, y = 48 + i % 2 * 423, 192 + i // 2 * 180
-        rule(ax, x, y, x + 401, y)
+        x, y = 48 + i % 2 * 423, panel_top + i // 2 * 180
+        if i >= 2:
+            rule(ax, x, y, x + 401, y)
         label(
             ax,
             x + 4,
@@ -218,8 +218,15 @@ def frozen_flask_panel(report, path):
     fig, ax = benchmark_card(
         408,
         "Frozen Flask throughput",
-        f"{settings['requests']:,} requests per round, split across health checks, HTML greetings and JSON sums.",
         f"{rounds} rounds · {concurrency} clients",
+    )
+    label(
+        ax,
+        48,
+        158,
+        f"{settings['requests']:,} requests per round, split across health checks, HTML greetings and JSON sums.",
+        16,
+        color=MUTED,
     )
     rule(ax, 48, 192, 872, 192)
     label(ax, 52, 217, "Median requests per second", 17)
