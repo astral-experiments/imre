@@ -161,6 +161,7 @@ struct ClassInfo {
     methods: Vec<HashMap<String, Signature>>,
     setters: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
+    raising_methods: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
     setup_fields: unittest_setup::Slots,
@@ -392,6 +393,7 @@ impl ClassInfo {
             methods: vec![HashMap::new(); fields.len()],
             setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
+            raising_methods: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
             setup_fields,
@@ -735,6 +737,15 @@ pub(crate) fn lower_with_caller_cache(
                 classes.keyword_copies.insert(signature.id);
             }
             if kind == crate::classes::MethodKind::Instance {
+                let after_doc = usize::from(docstring_literal(&method.body).is_some());
+                if module.archive.is_none()
+                    && class.methods[index].decorator_list.is_empty()
+                    && !signature.asynchronous
+                    && matches!(&method.body[after_doc..], [ast::Stmt::Raise(_)])
+                    && !imre_ast::code_flags::is_generator(&method.body)
+                {
+                    classes.raising_methods.insert(signature.id);
+                }
                 instance_signatures.insert(origin, signature.clone());
             }
             let table = if class.method_kinds[index] == crate::classes::MethodKind::PropertySetter {
@@ -2550,6 +2561,7 @@ impl<'a> Checker<'a> {
     ) -> Option<&'static str> {
         let name = match attribute.attr.as_str() {
             "difference_update" => "set.difference_update",
+            "update" => "set.update",
             "issubset" => "set.issubset",
             _ => return None,
         };
@@ -4726,7 +4738,10 @@ impl<'a> Checker<'a> {
                 {
                     return Ok((vec![Statement::Expr(self.expr(&expression.value)?)], false));
                 } else {
-                    Some(Statement::Expr(self.expr(&expression.value)?))
+                    let value = self.expr(&expression.value)?;
+                    // Only a direct call selects one implementation; a dispatched override may return.
+                    let falls_through = !matches!(&value.kind, ExprKind::Call(id, _) if self.classes.raising_methods.contains(id));
+                    return Ok((vec![Statement::Expr(value)], falls_through));
                 }
             }
             ast::Stmt::Delete(delete) => {
@@ -6340,12 +6355,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::OsSeparator { alternate }, vec![]),
                     });
                 }
-                Intrinsic::OsDevnull => {
-                    return Ok(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str("/dev/null".into()),
-                    });
-                }
+                Intrinsic::StringConstant(value) => return Ok(unpacking::string(value)),
                 Intrinsic::LogRecordFlag(mask) => {
                     return Ok(logging_records::op(
                         ir::LogRecordOperation::Flag,
@@ -7885,17 +7895,8 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
                     });
                 }
-                if matches!(attribute.attr.as_str(), "min" | "max" | "resolution")
-                    && matches!(
-                        receiver.ty,
-                        Type::Calendar(
-                            ir::CalendarType::Date
-                                | ir::CalendarType::DateTime
-                                | ir::CalendarType::Delta
-                        ) | Type::ClockTime
-                    )
-                {
-                    return Err(self.object_runtime_export("datetime class constants", attribute));
+                if calendar::boxed_member(receiver.ty, attribute.attr.as_str()) {
+                    return Err(self.object_runtime_export("datetime instance member", attribute));
                 }
                 if let Type::Calendar(kind) = receiver.ty {
                     return self.calendar_attribute(kind, receiver, attribute);
@@ -9268,6 +9269,11 @@ impl<'a> Checker<'a> {
             return self.environ_method(attribute, call);
         }
         if let ast::Expr::Attribute(attr) = call.func.as_ref()
+            && matches!(attr.attr.as_str(), "__reduce__" | "__reduce_ex__")
+        {
+            self.calendar_class_attribute(attr)?;
+        }
+        if let ast::Expr::Attribute(attr) = call.func.as_ref()
             && self.resolve(&attr.value)
                 == Some(Binding::Intrinsic(Intrinsic::Calendar(
                     ir::CalendarType::DateTime,
@@ -9678,6 +9684,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::ZipFile {
                 return self.zipfile_method(receiver, attribute, call);
+            }
+            if calendar::boxed_member(receiver.ty, attribute.attr.as_str()) {
+                return Err(self.object_runtime_export("datetime instance member", attribute));
             }
             if let Type::Calendar(kind) = receiver.ty {
                 return self.calendar_method(kind, receiver, attribute, call);

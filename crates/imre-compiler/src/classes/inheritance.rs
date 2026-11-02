@@ -56,6 +56,23 @@ pub(super) fn resolve(
                             module.error(argument, "codec base class requires object lowering")
                         );
                     }
+                    Some(Binding::Intrinsic(
+                        Intrinsic::IO_BASE
+                        | Intrinsic::RAW_IO_BASE
+                        | Intrinsic::BUFFERED_IO_BASE
+                        | Intrinsic::TEXT_IO_BASE
+                        | Intrinsic::ObjectRuntimeExport(
+                            "_io._IOBase"
+                            | "_io._RawIOBase"
+                            | "_io._BufferedIOBase"
+                            | "_io._TextIOBase",
+                        ),
+                    )) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "I/O base subclasses require object lowering")
+                        );
+                    }
                     Some(Binding::Intrinsic(base)) if base.is_subclassable_calendar() => {
                         graph.needs_object_runtime.set(true);
                         return Err(

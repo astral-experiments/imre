@@ -213,7 +213,7 @@ def check_select_result_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_select_result.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     source = fixtures / "boxed_select_result_allocation.py"
     for optimization in (0, 3):
@@ -266,7 +266,7 @@ def check_select_input_root_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_select_input_roots.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     source = fixtures / "boxed_select_input_root_allocation.py"
     for optimization in (0, 3):
@@ -311,7 +311,7 @@ def check_boxed_json_callback_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_json_callback_arguments.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_json_callback_arguments as fixture; "
     source = root / "json_callback_probe.py"
@@ -344,7 +344,7 @@ def marked_call_refusal_flags(root):
     subprocess.run(["cc", "-c", fixture, "-o", wrapper], check=True)
     return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
 
 
@@ -394,7 +394,7 @@ def call_allocation_flags(root):
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
     return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_call_at,--wrap=imre_dyn_op_at,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_op_at,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
     ])
 
 
@@ -900,9 +900,17 @@ def check_pickle_reductions(imre, root, run):
     work.mkdir()
     (work / fixture.name).write_bytes(fixture.read_bytes())
     entry = work / "main.py"
-    entry.write_text("from boxed_pickle_reduction import produce\nproduce()\n")
     sys.path.insert(0, str(work))  # CPython must import the reconstruction function by name.
     try:
+        from boxed_pickle_reduction import LabeledTuple
+
+        obj = LabeledTuple((3, 4))
+        obj.label = {"back": obj}
+        streams = [pickle.dumps((obj, obj.label), protocol) for protocol in range(6)]
+        entry.write_text(
+            "from boxed_pickle_reduction import consume, produce\n"
+            f"consume({streams!r})\nproduce()\n"
+        )
         for optimization in (0, 3):
             executable = work / f"pickle-O{optimization}"
             build = run(imre, "build", entry, "--module-root", work, "--runtime-imports",
@@ -1697,6 +1705,8 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
+        io_registration = fixtures / "io_abc_registration.py"
+        compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
@@ -1737,6 +1747,7 @@ def report(text):
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
         )
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
+        compare("-IB", fixtures / "boxed_unittest_patch.py")
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",
@@ -1750,6 +1761,7 @@ def report(text):
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
             "boxed_source_except.py",
+            "boxed_interactive.py",
             "boxed_relative_package_imports.py",
             "boxed_sys_getframe.py",
             "boxed_sys_audit.py",
@@ -1784,6 +1796,7 @@ def report(text):
             "boxed_named_temporary_file.py",
             "boxed_tempfile_default_directory.py",
             "boxed_tempfile_mktemp.py",
+            "boxed_tempfile_wrapper.py",
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
@@ -1817,17 +1830,21 @@ def report(text):
             "boxed_re_verbose.py",
             "boxed_re_split.py",
             "boxed_re_match_subscript.py",
+            "boxed_re_sub.py",
             "boxed_re_findall_empty.py",
             "boxed_re_scanner.py",
             "boxed_re_escape.py",
             "boxed_datetime.py",
             "boxed_timedelta_multiply.py",
+            "boxed_timedelta_scale.py",
+            "boxed_timedelta_floordiv.py",
             "boxed_dataclasses.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
+            "boxed_http_message.py",
             "boxed_time.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
@@ -1835,6 +1852,7 @@ def report(text):
             "boxed_io_reimport.py",
             "boxed_io_text_encoding.py",
             "boxed_io_protocols.py",
+            "boxed_io_abc_registration.py",
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
@@ -1849,6 +1867,7 @@ def report(text):
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
+            "boxed_exception_notes.py",
             "boxed_warning_categories.py",
             "boxed_warnings.py",
             "boxed_oserror.py",
@@ -1874,6 +1893,7 @@ def report(text):
             "boxed_map_capwords.py",
             "boxed_module_globals.py",
             "boxed_dir.py",
+            "boxed_module_dir.py",
             "boxed_unittest_assert_almost_equal.py",
             "boxed_unittest_assert_count_equal.py",
             "boxed_unittest_membership.py",
@@ -1886,7 +1906,6 @@ def report(text):
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_assert_warns.py",
             "boxed_unittest_assert_regex.py",
-            "boxed_unittest_patch.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
             "boxed_frozenset.py",
@@ -1930,10 +1949,12 @@ def report(text):
             "boxed_itertools_repeat.py",
             "boxed_itertools_chain.py",
             "boxed_itertools_cycle.py",
+            "boxed_itertools_batched.py",
             "boxed_itertools_combinations.py",
             "boxed_itertools_permutations.py",
             "boxed_itertools_product.py",
             "boxed_itertools_groupby.py",
+            "boxed_itertools_filterfalse.py",
             "boxed_object_new.py",
             "boxed_module_type.py",
             "boxed_source_module_getattr.py",
@@ -1941,6 +1962,7 @@ def report(text):
             "boxed_threading_lock.py",
             "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
+            "boxed_dict_union.py",
             "boxed_abc_metaclass.py",
             "boxed_mapping_abc.py",
             "boxed_user_containers.py",
@@ -1954,6 +1976,7 @@ def report(text):
             "boxed_sequence_order.py",
             "boxed_json_containers.py",
             "boxed_json_module_doc.py",
+            "boxed_json_quote.py",
             "boxed_deque.py",
             "boxed_deque_deep_equal.py",
             "boxed_deque_cycle_callbacks.py",
@@ -1981,6 +2004,7 @@ def report(text):
             "boxed_standard_base64.py",
             "boxed_csv.py",
             "boxed_bytes_separators.py",
+            "boxed_bytes_join.py",
             "boxed_bytes_fromhex.py",
             "boxed_binary_endswith.py",
             "boxed_struct.py",
@@ -2004,6 +2028,14 @@ def report(text):
                 compare("-IB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_json_module_doc.py":
                 compare("-IOOB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_interactive.py":
+                for stdio in ("utf-8:strict", "utf-8:surrogateescape", "ascii:surrogateescape",
+                              "cp1251:surrogateescape", "utf-8-sig:strict", "ascii:replace", "ascii:ignore"):
+                    compare("-B", "-c", imports + "arithmetic.original_stream()",
+                            extra={"PYTHONIOENCODING": stdio})
+                for hook in (False, True):
+                    compare("-B", "-c", imports + f"arithmetic.first_write({hook})",
+                            extra={"PYTHONIOENCODING": "utf-8-sig:strict"})
             if fixture == "boxed_recursive_repr.py":
                 for limit in (640, 4300, 0):
                     compare(

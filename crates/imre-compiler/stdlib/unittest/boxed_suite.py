@@ -41,15 +41,14 @@ def _runRegistered(self, case, name):
     if getattr(cls, "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False):
         reason = getattr(cls, "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
         self._skipCase(case, name, reason)
-    elif (getattr(case, "__unittest_expecting_failure__", False)
-          or getattr(method, "__unittest_expecting_failure__", False)):
-        _runExpectedCase(self, case, name, method)
     else:
-        self._runCase(case, name, case.setUp, method, case.tearDown)
+        _runBoxedCase(self, case, name, method)
 
 
-def _runExpectedCase(dispatch, test, name, method):
+def _runBoxedCase(dispatch, test, name, method):
     result = dispatch._observer if isinstance(dispatch, _CaseResultDispatch) else dispatch
+    expecting_failure = (getattr(test, "__unittest_expecting_failure__", False)
+                         or getattr(method, "__unittest_expecting_failure__", False))
     result.startTest(test)
     try:
         dispatch._startCase(name)
@@ -59,7 +58,7 @@ def _runExpectedCase(dispatch, test, name, method):
             with outcome.testPartExecutor(test):
                 test._callSetUp()
             if outcome.success:
-                outcome.expecting_failure = True
+                outcome.expecting_failure = expecting_failure
                 with outcome.testPartExecutor(test):
                     test._callTestMethod(method)
                 outcome.expecting_failure = False
@@ -67,7 +66,10 @@ def _runExpectedCase(dispatch, test, name, method):
                     test._callTearDown()
             test.doCleanups()
             if outcome.success:
-                if outcome.expectedFailure is None:
+                if not expecting_failure:
+                    result.addSuccess(test)
+                    dispatch._mark(".", "ok")
+                elif outcome.expectedFailure is None:
                     test._addUnexpectedSuccess(result)
                 else:
                     test._addExpectedFailure(result, outcome.expectedFailure)
@@ -78,36 +80,38 @@ def _runExpectedCase(dispatch, test, name, method):
         result.stopTest(test)
 
 
-_subtestEnter = _SubTestContext.__enter__
-_subtestExit = _SubTestContext.__exit__
-
-
 def _boxedSubTestEnter(self):
-    _subtestEnter(self)
+    if self.entered:
+        raise AttributeError("'_GeneratorContextManager' object has no attribute 'args'")
+    self.entered = True
     outcome = getattr(self.case, "_outcome", None)
     if outcome is not None and outcome.result_supports_subtests:
-        subtest = _SubTest(self.case.id(), self._description())
-        subtest.test_case = self.case
-        subtest.failureException = self.case.failureException
+        self.parent = self.case._subtest
+        parents = () if self.parent is None else self.parent.params.maps
+        params = case._OrderedChainMap(self.params, *parents)
+        message = self.message if self.has_message else case._subtest_msg_sentinel
+        subtest = case._SubTest(self.case, message, params)
+        self.case._subtest = subtest
         self._executor = outcome.testPartExecutor(subtest, True)
         self._executor.__enter__()
 
 
 def _boxedSubTestExit(self, typ, value, tb):
     outcome = getattr(self.case, "_outcome", None)
-    if outcome is None:
-        return _subtestExit(self, typ, value, tb)
+    if outcome is None or not outcome.result_supports_subtests:
+        return False
     try:
-        if not outcome.result_supports_subtests:
-            return False
         suppressed = self._executor.__exit__(typ, value, tb)
+        if typ is not None and not suppressed:
+            return False
         if outcome.expectedFailure or (not outcome.success and getattr(outcome.result, "failfast", False)):
             raise case._ShouldStop
         return suppressed
     finally:
-        self._leave()
+        self.case._subtest = self.parent
 
 
+TestCase._subtest = None
 _SubTestContext.__enter__ = _boxedSubTestEnter
 _SubTestContext.__exit__ = _boxedSubTestExit
 

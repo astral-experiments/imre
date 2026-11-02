@@ -136,6 +136,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "math"
             | "unicodedata"
             | "json"
+            | "_json"
             | "_imre_logging"
             | "_imre_subprocess"
             | "_imre_dataclasses"
@@ -437,6 +438,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "loaded_module"
             | "members"
             | "metadata"
+            | "native_iterator"
+            | "slot_bases"
             | "slotted_type"
             | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
@@ -605,7 +608,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
-        ("posixpath", "join" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("posixpath", "dirname") => ctx.builtin("os.path.dirname"),
         ("os" | "posix", "getcwd" | "getcwdb") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -684,7 +687,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
         | ("_imre_linecache", "source_lines")
-        | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
+        | (
+            "_imre_metadata",
+            "filenames" | "dedent" | "exists" | "read_text" | "zip_names" | "zip_open" | "zip_read",
+        )
         | (
             "_imre_posixpath",
             "exists" | "extension_start" | "isdir" | "isfile" | "islink" | "relative_parts"
@@ -696,6 +702,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
+        | ("_json", "encode_basestring" | "encode_basestring_ascii")
         | ("random", "random" | "choice")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
@@ -1097,6 +1104,10 @@ pub(super) fn call(
             .caller_module_at(depth.max(0) as usize)
             .unwrap_or(NONE));
     }
+    if name == "sys.displayhook" {
+        let value = builtins::one_positional_arg(name, &args[1..], kwargs)?;
+        return super::displayhook::default_hook(ctx, value);
+    }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
     }
@@ -1455,6 +1466,12 @@ pub(super) fn call(
     if name == "itertools._cycle_next" {
         return itertools::cycle_next(ctx, args, kwargs);
     }
+    if name == "itertools._filterfalse_allocate" {
+        return itertools::filterfalse_allocate(ctx, args, kwargs);
+    }
+    if name == "itertools._filterfalse_state" {
+        return itertools::filterfalse_state(ctx, args, kwargs);
+    }
     if name == "itertools._chain_allocate" {
         let [base, class, source] = args else {
             return Err(Error::new(
@@ -1651,7 +1668,7 @@ pub(super) fn call(
                 let bases = ctx
                     .tuple_items(*bases)?
                     .ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
-                return ctx.dataclass_from_namespace(name, bases, *members, "types", false, true);
+                return ctx.make_dataclass_type(name, bases, *members);
             }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
@@ -1694,6 +1711,10 @@ pub(super) fn call(
                 }
                 return Ok(FALSE);
             }
+            ("native_iterator", [obj], []) => {
+                return Ok(if ctx.is_native_iterator(*obj) { TRUE } else { FALSE });
+            }
+            ("slot_bases", [class], []) => return ctx.dataclass_slot_bases(*class),
             ("slotted_type", [old, namespace], []) => {
                 return ctx.slotted_dataclass(*old, *namespace);
             }
@@ -1968,7 +1989,7 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer")) =
+    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer" | "findall")) =
         name.strip_prefix("pattern.")
     {
         return regex::search(ctx, method, args, kwargs);
@@ -2012,6 +2033,9 @@ pub(super) fn call(
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
+        "_json.encode_basestring" | "_json.encode_basestring_ascii" => {
+            return json::encode_basestring(ctx, name, args, kwargs);
+        }
         "json.loads" => (1, &["s"]),
         "json.dump" => (2, JSON_DUMP_KEYWORDS),
         "json.dumps" => (1, &JSON_DUMP_KEYWORDS[1..]),
@@ -2023,9 +2047,9 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "pattern.findall" | "file.read" | "file.read1" | "file.readline"
+        "struct.unpack" | "file.read" | "file.read1" | "file.readline"
         | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
-        "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "match.group" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" | "match.groupdict" => (2, &["default"]),
         "match.start" | "match.end" | "match.span" => (2, &[]),

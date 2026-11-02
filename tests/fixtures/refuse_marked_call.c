@@ -10,7 +10,7 @@ void *__real_malloc(size_t);
 void *__real_realloc(void *, size_t);
 void *__real_calloc(size_t, size_t);
 uint64_t __real_imre_dyn_lit(void *, int, const unsigned char *, size_t);
-uint64_t __real_imre_dyn_call_at(void *, uint64_t, uint64_t, uint64_t, size_t, const uint32_t (*)[4]);
+uint64_t __real_imre_dyn_scoped_call_at(void *, uint64_t, uint64_t, uint64_t, size_t, const uint32_t (*)[4], uint64_t);
 
 static int deny(size_t size) {
     if (!active) return 0;
@@ -40,15 +40,15 @@ uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, siz
     return result;
 }
 
-uint64_t __wrap_imre_dyn_call_at(void *ctx, uint64_t callable, uint64_t args, uint64_t kwargs, size_t mark, const uint32_t (*span)[4]) {
-    if (!armed) return __real_imre_dyn_call_at(ctx, callable, args, kwargs, mark, span);
+uint64_t __wrap_imre_dyn_scoped_call_at(void *ctx, uint64_t callable, uint64_t args, uint64_t kwargs, size_t mark, const uint32_t (*span)[4], uint64_t scope) {
+    if (!armed) return __real_imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, scope);
     armed = 0;
     const char *setting = getenv("IMRE_TEST_CALL_REFUSE_NTH");
     target = setting ? strtoul(setting, NULL, 10) : 0;
     persistent = getenv("IMRE_TEST_CALL_REFUSE_ALL") != NULL;
     count = refused = 0;
     active = 1;
-    uint64_t result = __real_imre_dyn_call_at(ctx, callable, args, kwargs, mark, span);
+    uint64_t result = __real_imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, scope);
     active = 0;
     dprintf(2, "call_summary %u %u\n", count, refused);
     return result;

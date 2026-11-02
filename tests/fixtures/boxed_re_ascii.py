@@ -137,3 +137,25 @@ def current():
     else:
         assert variable.fullmatch("bb").group(1) == "b"
         assert variable.fullmatch("ab") is None
+
+    for spelling, name, word in (
+        ("(?P<if>ab)(?P=if)", "if", "ab"),
+        ("(?P<état>é)(?P=état)", "état", "é"),
+        (b"(?P<word>\xff)(?P=word)", "word", b"\xff"),
+    ):
+        pattern = re.compile(spelling)
+        assert pattern.fullmatch(word + word).group(name) == word
+        assert pattern.fullmatch(word) is None
+
+    for spelling, message, position in (
+        ("é(?P<?foo>x)", "bad character in group name '?foo'", 5),
+        ("(?P=<foo>)", "bad character in group name '<foo>'", 4),
+        ("(?P<a.b>x)", "bad character in group name 'a.b'", 4),
+        (b"(?P<\xb5>x)", r"bad character in group name '\xb5'", 4),
+    ):
+        try:
+            re.compile(spelling)
+        except re.PatternError as error:
+            assert (error.msg, error.pattern, error.pos) == (message, spelling, position)
+        else:
+            raise AssertionError("invalid group name accepted")

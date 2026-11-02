@@ -91,6 +91,57 @@ pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     Ok(item)
 }
 
+pub(super) fn filterfalse_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [base, class, predicate, iterable] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "invalid filterfalse allocation arguments",
+        ));
+    };
+    if !kwargs.is_empty()
+        || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
+        if *class == *base || ancestors.contains(base))
+    {
+        return Err(Error::new("TypeError", "expected a filterfalse subclass"));
+    }
+    let source = ctx.iterator(*iterable)?;
+    ctx.heap.keep(source);
+    let state = ctx.alloc(Value::Tuple(vec![source, *predicate]));
+    ctx.heap.keep(state);
+    let result = ctx.instance(*class, None);
+    let Value::Instance { member_values, .. } = ctx.heap.get_mut(result) else {
+        unreachable!("fresh filterfalse instance")
+    };
+    // The declaring class keys this private slot, so subclass descriptors cannot intercept it.
+    member_values
+        .get_or_insert_with(Default::default)
+        .insert(*base, state);
+    Ok(result)
+}
+
+pub(super) fn filterfalse_state(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if let [base, receiver] = args
+        && kwargs.is_empty()
+        && matches!(ctx.heap.get(*base), Value::Class { .. })
+        && let Value::Instance {
+            member_values: Some(values),
+            ..
+        } = ctx.heap.get(*receiver)
+        && let Some(&state) = values.get(base)
+    {
+        return Ok(state);
+    }
+    Err(Error::new("TypeError", "expected a filterfalse instance"))
+}
+
 /// Build the shared repeat cursor, converting a supplied count exactly once.
 pub(super) fn repeat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let missing = || {

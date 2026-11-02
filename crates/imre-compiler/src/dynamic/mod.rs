@@ -522,6 +522,10 @@ pub(crate) fn compile(
             return Ok(None);
         }
         let mut names = imports.names;
+        // A late import of native pickle also needs its bundled reader and dependencies.
+        if imports.uses_import_builtin {
+            names.push((0, "pickle".to_owned()));
+        }
         // Importing array registers its type with MutableSequence. A runtime
         // __import__ can select array without naming it in a static import.
         if imports.uses_import_builtin

@@ -33,6 +33,42 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
     }
 }
 
+/// Methods declared on BaseException and inherited by every native exception type.
+pub(super) fn base_exception_method(name: &str) -> Option<&'static str> {
+    match name {
+        "add_note" => Some("BaseException.add_note"),
+        "with_traceback" => Some("BaseException.with_traceback"),
+        _ => None,
+    }
+}
+
+/// Native exception ancestors in MRO order, excluding the class itself and object.
+pub(super) fn exception_ancestors(
+    kind: imre_ast::exceptions::Kind,
+) -> impl Iterator<Item = &'static str> {
+    use imre_ast::exceptions::Kind::*;
+    // These are the exception types with native boxed children. UnsupportedOperation
+    // inherits from both OSError and ValueError, in that order.
+    [
+        ConnectionError,
+        OSError,
+        UnicodeError,
+        ValueError,
+        ArithmeticError,
+        LookupError,
+        ImportError,
+        NameError,
+        RuntimeError,
+        SyntaxError,
+        Warning,
+        Exception,
+        BaseException,
+    ]
+    .into_iter()
+    .filter(move |&base| base != kind && kind.matches(base))
+    .map(|base| base.name())
+}
+
 const FUNCTIONS: &[&str] = &[
     "len",
     "hash",
@@ -241,6 +277,7 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "zip"
             | "itertools.count"
             | "itertools.repeat"
+            | "_io.BufferedRandom"
             | "_io.BufferedReader"
             | "_io.BufferedWriter"
             | super::deque::ITERATOR
@@ -305,6 +342,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "__repr__",
     "decode",
     "endswith",
+    "join",
     "lstrip",
     "rfind",
     "rsplit",
@@ -376,7 +414,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::HandlerLock(_) if super::thread_rlock::is_method(attr) => super::thread_rlock::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
-        Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
+        Value::Int(_) | Value::Bool(_) if matches!(attr, "__add__" | "bit_length" | "to_bytes") => "int",
         Value::Float(_) if attr == "as_integer_ratio" => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
@@ -870,12 +908,52 @@ fn delete_attribute(
     Ok(NONE)
 }
 
+impl Context {
+    /// Direct Python calls carry their lexical scope, including inlined comprehensions.
+    pub(super) fn call_in_scope(
+        &mut self,
+        scope: Id,
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        if scope != NONE
+            && args.is_empty()
+            && kwargs.is_empty()
+            && matches!(self.heap.get(callable), Value::Native(name) if name == "dir")
+            && self.scope_data(scope).parent.is_none()
+        {
+            let namespace = self.module_globals(scope)?;
+            return collections::sorted(self, &[namespace], &[]);
+        }
+        self.call(callable, args, kwargs)
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "BaseException.add_note" {
+        let Some((&exception, args)) = args.split_first() else {
+            return Err(type_error(
+                "unbound method BaseException.add_note() needs an argument",
+            ));
+        };
+        if !matches!(ctx.heap.get(exception), Value::Raised(_)) {
+            let kind = ctx
+                .builtin_type_name(exception)
+                .unwrap_or_else(|| ctx.type_name(exception));
+            return Err(type_error(format!(
+                "descriptor 'add_note' for 'BaseException' objects doesn't apply to a '{kind}' object"
+            )));
+        }
+        let note = one_positional_arg(name, args, kwargs)?;
+        ctx.add_exception_note(exception, note)?;
+        return Ok(NONE);
+    }
     if name == "object.__getattribute__" {
         let Some((&object, values)) = args.split_first() else {
             return Err(type_error(
@@ -1039,6 +1117,7 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
+            "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
             "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
