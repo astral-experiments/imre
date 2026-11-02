@@ -685,7 +685,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("hashlib", "new" | "file_digest")
         | ("hmac", "new" | "HMAC" | "compare_digest")
-        | ("re", "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split")
+        | (
+            "re",
+            "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall",
+        )
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "_simple_enum")
         | (
