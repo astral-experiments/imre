@@ -27,7 +27,28 @@ def probe(default: tuple[str, str] | None) -> None:
         print(str(e))
 
 
+def pop_pairs() -> None:
+    row = [2]
+    rows = {"old": [1], "new": row, "deleted": [3]}
+    rows["old"] = [4]
+    del rows["deleted"]
+    alias = rows
+    key, value = alias.popitem()
+    print(key)
+    print(len(rows))
+    value.append(5)
+    print(row[1])
+    rows[key] = value
+    print(dict.popitem(rows)[0])
+    print(rows.popitem()[1][0])
+    try:
+        rows.popitem()
+    except KeyError as e:
+        print(str(e))
+
+
 def main() -> None:
+    pop_pairs()
     probe(None)
     probe(("fallback", "kept"))
     nullable: dict[int, str | None] = {1: None}

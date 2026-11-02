@@ -33,6 +33,59 @@ def current():
     assert child().inherited() == "inherited"
     assert events == [("first", child), ("second", child), ("subclass", child, 7)]
 
+    class DefaultMeta(type):
+        pass
+    assert DefaultMeta.__init__ is type.__init__
+
+    calls = []
+    class InitializingMeta(DefaultMeta):
+        def __init__(cls, name, bases, body, **kw):
+            super().__init__(name, bases, body, **kw)
+            calls.append((cls, name, bases, body, kw))
+            cls.generated = name.lower()
+
+    supplied = {"marker": object()}
+    parent = InitializingMeta("Parent", (Base,), supplied, label=1)
+    class Child(parent, label=2):
+        saved_body = locals()
+
+    dynamic = type("Dynamic", (Child,), {}, label=3)
+    assert [event[0] for event in calls] == [parent, Child, dynamic]
+    assert calls[0][3] is supplied and calls[1][3] is Child.saved_body
+    assert [event[4]["label"] for event in calls] == [1, 2, 3]
+    assert calls[1][2] == (parent,) and type(dynamic) is InitializingMeta
+    assert dynamic.generated == "dynamic" and parent.marker is supplied["marker"]
+    assert "generated" not in supplied and "generated" not in Child.saved_body
+
+    from abc import ABCMeta
+    class Redirect(ABCMeta):
+        def __new__(meta, name, bases, body):
+            if name == "Redirected":
+                return parent
+            return ABCMeta.__new__(meta, name, bases, body)
+
+    class RedirectBase(metaclass=Redirect):
+        pass
+
+    calls.clear()
+    body = {}
+    assert type("Redirected", (RedirectBase,), body) is parent
+    assert Redirect("Redirected", (RedirectBase,), body) is parent
+    assert calls == [(parent, "Redirected", (RedirectBase,), body, {})]
+    assert calls[0][3] is body
+
+    calls.clear()
+    created = []
+    class Delegating(InitializingMeta):
+        def __new__(meta, name, bases, namespace):
+            created.append(name)
+            return super().__new__(meta, name, bases, namespace)
+
+    raw = type.__new__(Delegating, "Raw", (), {})
+    assert type(raw) is Delegating and not calls and not created
+    combined = Delegating("Combined", (), body)
+    assert created == ["Combined"] and calls == [(combined, "Combined", (), body, {})]
+
     reader = make_reader()
     cell = reader.__closure__[0]
     rebound = type("Rebound", (), {"__classcell__": cell})

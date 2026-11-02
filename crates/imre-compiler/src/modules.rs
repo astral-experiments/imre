@@ -2035,6 +2035,9 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Types, "get_original_bases") => {
+                Intrinsic::ObjectRuntimeExport("types.get_original_bases")
+            }
             (Self::Types, "new_class") => Intrinsic::ObjectRuntimeExport("types.new_class"),
             (Self::Types, "prepare_class") => Intrinsic::ObjectRuntimeExport("types.prepare_class"),
             (Self::Types, "resolve_bases") => Intrinsic::ObjectRuntimeExport("types.resolve_bases"),
@@ -2217,6 +2220,9 @@ impl IntrinsicModule {
             (Self::Socket, "EAI_SERVICE") => Intrinsic::ObjectRuntimeExport("socket.EAI_SERVICE"),
             (Self::Socket, "SOL_TCP") => Intrinsic::ObjectRuntimeExport("socket.SOL_TCP"),
             (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
+            (Self::Socket, "create_connection") => {
+                Intrinsic::ObjectRuntimeExport("socket.create_connection")
+            }
             (Self::Socket, "create_server") => {
                 Intrinsic::ObjectRuntimeExport("socket.create_server")
             }
@@ -2548,6 +2554,7 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Fcntl, "fcntl") => Intrinsic::ObjectRuntimeExport("fcntl.fcntl"),
+            (Self::Fcntl, "FD_CLOEXEC") => Intrinsic::ObjectRuntimeExport("fcntl.FD_CLOEXEC"),
             (Self::Fcntl, "F_GETFD") => Intrinsic::ObjectRuntimeExport("fcntl.F_GETFD"),
             (Self::Fcntl, "F_SETFD") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETFD"),
             (Self::Fcntl, "F_GETFL") => Intrinsic::ObjectRuntimeExport("fcntl.F_GETFL"),
@@ -2675,6 +2682,7 @@ impl IntrinsicModule {
             (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),
             (Self::PosixPath, "basename") => Intrinsic::PosixPath(PosixPathOperation::Basename),
             (Self::PosixPath, "dirname") => Intrinsic::PosixPath(PosixPathOperation::Dirname),
+            (Self::PosixPath, "ismount") => Intrinsic::ObjectRuntimeExport("posixpath.ismount"),
             (Self::PosixPath, "split") => Intrinsic::ObjectRuntimeExport("posixpath.split"),
             (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),

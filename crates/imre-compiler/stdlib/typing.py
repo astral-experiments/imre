@@ -13,6 +13,7 @@ from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
 from _typing import _idfunc
 from typing import Any, Callable, Generic, Protocol, TypeVar
+from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
 # From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
@@ -1887,6 +1888,12 @@ def _reduce_callable_alias(alias):
     return getitem, (Callable, args)
 
 
+def _rebuild_builtin_alias(alias, args):
+    from types import GenericAlias
+    result = GenericAlias(alias.__origin__, args)
+    return next(iter(result)) if alias.__unpacked__ else result
+
+
 def _substitute_alias_arguments(args, replacements):
     result = []
     for arg in args:
@@ -1910,7 +1917,7 @@ def _substitute_alias_argument(arg, replacements):
         return arg
     from types import GenericAlias
     if type(arg) is GenericAlias:
-        return GenericAlias(arg.__origin__, _substitute_alias_arguments(arg.__args__, replacements))
+        return _rebuild_builtin_alias(arg, _substitute_alias_arguments(arg.__args__, replacements))
     if _typing.get_origin(arg) is _typing.Union:
         return _typing.Union[_substitute_alias_arguments(arg.__args__, replacements)]
     subargs = []
@@ -1963,14 +1970,17 @@ def _prepare_typevartuple(pack, alias, args):
 
 
 def _specialize_generic_alias_uncached(alias, args):
-    if alias.__origin__ is Generic or alias.__origin__ is Protocol:
+    from types import GenericAlias
+    if type(alias) is not GenericAlias and (alias.__origin__ is Generic or alias.__origin__ is Protocol):
         raise TypeError(f"Cannot subscript already-subscripted {alias}")
     parameters = alias.__parameters__
     if not parameters:
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
-    expanded = _unpack_alias_args(_type_convert(arg) for arg in args)
+    if type(alias) is not GenericAlias:
+        args = tuple(_type_convert(arg) for arg in args)
+    expanded = _unpack_alias_args(args)
     for parameter in parameters:
         if isinstance(parameter, _typing.TypeVarTuple):
             expanded = _prepare_typevartuple(parameter, alias, expanded)
@@ -1993,6 +2003,8 @@ def _specialize_generic_alias_uncached(alias, args):
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
     args = _substitute_alias_arguments(alias.__args__, replacements)
+    if type(alias) is GenericAlias:
+        return _rebuild_builtin_alias(alias, args)
     if isinstance(alias, _typing.Union):
         return _typing.Union[args]
     if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):

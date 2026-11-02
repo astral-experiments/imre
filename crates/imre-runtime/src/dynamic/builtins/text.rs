@@ -107,6 +107,11 @@ pub(super) fn construct(
             if matches!(ctx.heap.get(value), Value::Str(_) | Value::SurrogateStr(_)) {
                 return Ok(value);
             }
+            if let Value::Calendar { tzname, .. } = *ctx.heap.get(value)
+                && tzname != NONE
+            {
+                return Ok(tzname);
+            }
             let string_hook = ctx.bound_slot(value, "__str__")?;
             if string_hook.is_none()
                 && let Value::Raised(error) = ctx.heap.get(value)
@@ -1181,6 +1186,20 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     Ok(ctx.text(output))
 }
 
+/// Convert the optional start and end in argument order, honoring the index protocol.
+fn search_bounds(
+    ctx: &mut Context,
+    args: &[Id],
+) -> Result<(Option<crate::Int>, Option<crate::Int>)> {
+    let mut bound = |arg: Option<&Id>| match arg {
+        None | Some(&NONE) => Ok(None),
+        Some(&arg) => ctx.index_value(arg)?.map(Some).ok_or_else(|| {
+            type_error("slice indices must be integers or None or have an __index__ method")
+        }),
+    };
+    Ok((bound(args.get(1))?, bound(args.get(2))?))
+}
+
 /// Convert a split limit through the index protocol, treating negative limits as unlimited.
 fn split_limit(ctx: &mut Context, max: Option<Id>) -> Result<usize> {
     let Some(id) = max else {
@@ -1439,6 +1458,101 @@ fn replace_points(ctx: &mut Context, receiver: Id, old: Id, new: Id, limit: usiz
     Ok(ctx.text_codepoints(result))
 }
 
+/// Justify a Unicode string using Python code point widths, including lone surrogates.
+fn justify(
+    ctx: &mut Context,
+    receiver: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(type_error(format!(
+            "str.{name}() takes no keyword arguments"
+        )));
+    }
+    let Some((&width, extra)) = args.split_first() else {
+        return Err(type_error(format!(
+            "{name} expected at least 1 argument, got 0"
+        )));
+    };
+    if extra.len() > 1 {
+        return Err(type_error(format!(
+            "{name} expected at most 2 arguments, got {}",
+            args.len()
+        )));
+    }
+    let width = crate::objects::zfill::width(&ctx.index_integer(width)?)?;
+    let fill = if let Some(&id) = extra.first() {
+        match ctx.heap.get(ctx.scalar_value(id)) {
+            Value::Str(s) => s
+                .chars()
+                .next()
+                .filter(|c| c.len_utf8() == s.len())
+                .map(u32::from),
+            Value::SurrogateStr(points) => match points.as_slice() {
+                [point] => Some(*point),
+                _ => None,
+            },
+            _ => {
+                return Err(type_error(format!(
+                    "The fill character must be a unicode character, not {}",
+                    ctx.type_name(id)
+                )));
+            }
+        }
+        .ok_or_else(|| type_error("The fill character must be exactly one character long"))?
+    } else {
+        u32::from(' ')
+    };
+    let storage = ctx.string_storage(receiver).unwrap();
+    let source = ctx.heap.get(storage);
+    let len = match source {
+        Value::Str(s) => s.chars().count(),
+        Value::SurrogateStr(s) => s.len(),
+        _ => unreachable!(),
+    };
+    let margin = width.saturating_sub(len);
+    if margin == 0 && (receiver == storage || len == 0) {
+        return Ok(storage);
+    }
+    let left = match name {
+        "ljust" => 0,
+        "rjust" => margin,
+        // CPython assigns the extra character on the left only for an odd target width.
+        _ => margin / 2 + (margin & width & 1),
+    };
+    let memory_error = || Error::new("MemoryError", "");
+    let result = if let Value::Str(s) = source
+        && let Some(ch) = char::from_u32(fill).or((margin == 0).then_some(' '))
+    {
+        let size = margin
+            .checked_mul(ch.len_utf8())
+            .and_then(|bytes| bytes.checked_add(s.len()))
+            .ok_or_else(memory_error)?;
+        let mut padded = String::new();
+        padded.try_reserve_exact(size).map_err(|_| memory_error())?;
+        padded.extend(std::iter::repeat_n(ch, left));
+        padded.push_str(s);
+        padded.extend(std::iter::repeat_n(ch, margin - left));
+        Value::Str(padded)
+    } else {
+        let mut points = Vec::new();
+        points
+            .try_reserve_exact(len + margin)
+            .map_err(|_| memory_error())?;
+        points.resize(left, fill);
+        match source {
+            Value::Str(s) => points.extend(s.chars().map(u32::from)),
+            Value::SurrogateStr(s) => points.extend_from_slice(s),
+            _ => unreachable!(),
+        }
+        points.resize(len + margin, fill);
+        Value::SurrogateStr(points)
+    };
+    ctx.heap.fresh_string(result)
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -1499,7 +1613,7 @@ pub(super) fn method(
         }
     })?;
     if name == "__new__" {
-        return ctx.new_string(owner, receiver, args, kwargs);
+        return ctx.new_immutable_scalar(owner, receiver, args, kwargs);
     }
     let original_receiver = receiver;
     let receiver = if owner == "bytes"
@@ -1535,6 +1649,9 @@ pub(super) fn method(
         } else {
             encode_text_object(ctx, receiver, encoding, errors)
         };
+    }
+    if owner == "str" && matches!(name, "center" | "ljust" | "rjust") {
+        return justify(ctx, receiver, name, args, kwargs);
     }
     if name == "zfill" {
         let width = one_positional_arg("str.zfill", args, kwargs)?;
@@ -1612,14 +1729,7 @@ pub(super) fn method(
                 "{name}() argument 1 must be str, not {kind}"
             )));
         }
-        let mut bound = |arg: Option<&Id>| match arg {
-            None | Some(&NONE) => Ok(None),
-            Some(&arg) => ctx.index_value(arg)?.map(Some).ok_or_else(|| {
-                type_error("slice indices must be integers or None or have an __index__ method")
-            }),
-        };
-        let start = bound(args.get(1))?;
-        let end = bound(args.get(2))?;
+        let (start, end) = search_bounds(ctx, args)?;
         if owner != "str" {
             let len = ctx.bytes_like(receiver)?.len() as i64;
             let index = |n: &crate::Int| {
@@ -2034,60 +2144,63 @@ pub(super) fn method(
     if matches!(name, "startswith" | "endswith") {
         positional(name, kwargs)?;
         arity(name, args, 1, 3)?;
-        let source = ctx.str_value(receiver)?;
-        let length = source.chars().count() as i64;
-        let bound = |i: i64| {
-            if i < 0 {
-                length.saturating_add(i).max(0)
-            } else {
-                i
+        let (start, end) = search_bounds(ctx, args)?;
+        enum Window<'a> {
+            Utf8(&'a str),
+            Points(&'a [u32]),
+        }
+        let start = start.as_ref();
+        let end = end.as_ref();
+        let part = match ctx.heap.get(ctx.scalar_value(receiver)) {
+            Value::Str(text) => {
+                crate::objects::search_window(text, start, end).map(|(part, _)| Window::Utf8(part))
             }
-        };
-        let start = args
-            .get(1)
-            .filter(|&&id| id != NONE)
-            .map(|&x| ctx.as_integer(x))
-            .transpose()?
-            .map(bound)
-            .unwrap_or(0);
-        let end = args
-            .get(2)
-            .filter(|&&id| id != NONE)
-            .map(|&x| ctx.as_integer(x))
-            .transpose()?
-            .map(bound)
-            .unwrap_or(length)
-            .min(length);
-        let byte_at = |index: i64| {
-            if index >= length {
-                source.len()
-            } else {
-                source
-                    .char_indices()
-                    .nth(index as usize)
-                    .map_or(source.len(), |(byte, _)| byte)
+            Value::SurrogateStr(points) => {
+                crate::objects::codepoint_search_window(points, start, end)
+                    .map(|(part, _)| Window::Points(part))
             }
+            _ => return Err(type_error("expected str")),
         };
-        let part = source.get(byte_at(start)..byte_at(end)).unwrap_or_default();
+        let prefix = name == "startswith";
         let tuple = ctx.tuple_items(args[0])?;
         let candidates = tuple.as_deref().unwrap_or(&args[..1]);
         for &id in candidates {
-            if ctx.string_storage(id).is_none() {
+            let Some(storage) = ctx.string_storage(id) else {
                 let kind = ctx.type_name(id);
                 return Err(type_error(if tuple.is_some() {
                     format!("tuple for {name} must only contain str, not {kind:.100}")
                 } else {
                     format!("{name} first arg must be str or a tuple of str, not {kind:.100}")
                 }));
-            }
-            let needle = ctx.str_value(id)?;
-            if start <= end
-                && (if name == "startswith" {
-                    part.starts_with(needle)
-                } else {
-                    part.ends_with(needle)
-                })
-            {
+            };
+            let Some(part) = &part else {
+                continue;
+            };
+            let matched = match (part, ctx.heap.get(storage), prefix) {
+                (Window::Utf8(text), Value::Str(needle), true) => text.starts_with(needle),
+                (Window::Utf8(text), Value::Str(needle), false) => text.ends_with(needle),
+                // SurrogateStr storage always contains at least one surrogate.
+                (Window::Utf8(_), Value::SurrogateStr(_), _) => false,
+                (Window::Points(points), Value::SurrogateStr(needle), true) => {
+                    points.starts_with(needle)
+                }
+                (Window::Points(points), Value::SurrogateStr(needle), false) => {
+                    points.ends_with(needle)
+                }
+                (Window::Points(points), Value::Str(needle), _) => {
+                    let mut input = points.iter().copied();
+                    if prefix {
+                        needle.chars().all(|ch| input.next() == Some(u32::from(ch)))
+                    } else {
+                        needle
+                            .chars()
+                            .rev()
+                            .all(|ch| input.next_back() == Some(u32::from(ch)))
+                    }
+                }
+                _ => unreachable!("validated str affix"),
+            };
+            if matched {
                 return Ok(TRUE);
             }
         }

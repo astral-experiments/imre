@@ -1492,6 +1492,27 @@ def main():
                 "for w in caught: print(w.filename, w.lineno, w.category.__name__, str(w.message))",
             )
 
+            for statement, connect in (
+                ("import socket as net", "net.create_connection"),
+                ("from socket import create_connection as dial", "dial"),
+            ):
+                compare(
+                    "-c", f"{statement}\n"
+                    "import socket\n"
+                    "with socket.socket() as listener:\n"
+                    "    listener.bind(('127.0.0.1', 0))\n"
+                    "    address = listener.getsockname()\n"
+                    f"    try: {connect}(address, timeout=2)\n"
+                    "    except ConnectionRefusedError: pass\n"
+                    "    else: raise AssertionError('unopened listener accepted a connection')\n"
+                    "    listener.listen()\n"
+                    f"    with {connect}(address, timeout=2) as client:\n"
+                    "        peer, _ = listener.accept()\n"
+                    "        with peer:\n"
+                    "            client.sendall(b'x')\n"
+                    "            assert peer.recv(1) == b'x'\n",
+                )
+
         for mode in ("0", "1"):
             compare(
                 "-I", "-X", f"utf8={mode}", "-c",
@@ -2192,6 +2213,8 @@ def report(text):
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
+        metaclass_new = fixtures / "ordinary_metaclass_new.py"
+        compare("-IB", metaclass_new, native_args=("run", metaclass_new, "--runtime-imports", "--quiet"))
         class_locals = fixtures / "boxed_class_locals.py"
         compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
         generic = fixtures / "module_generic_function.py"

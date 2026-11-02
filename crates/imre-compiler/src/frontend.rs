@@ -161,6 +161,8 @@ struct ClassInfo {
     methods: Vec<HashMap<String, Signature>>,
     setters: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
+    /// Original base called by a constructor with statically forwarded packs.
+    forwarded_initializers: HashMap<usize, DefinitionId>,
     raising_methods: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
@@ -393,6 +395,7 @@ impl ClassInfo {
             methods: vec![HashMap::new(); fields.len()],
             setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
+            forwarded_initializers: HashMap::new(),
             raising_methods: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
@@ -719,7 +722,13 @@ pub(crate) fn lower_with_caller_cache(
                 })]
                 .into();
             }
-            let defaults = keyword_forwarding::prepare(graph, module_id, &mut method);
+            let (defaults, forwarded_base) = keyword_forwarding::prepare_method(
+                graph,
+                module_id,
+                &mut method,
+                context,
+                &classes.declarations,
+            );
             let mut signature = signature(
                 &method,
                 graph,
@@ -744,6 +753,9 @@ pub(crate) fn lower_with_caller_cache(
                 && signature.returns != Type::Str
             {
                 return Err(module.error(&method, &format!("{} must return str", method.name)));
+            }
+            if let Some(base) = forwarded_base {
+                classes.forwarded_initializers.insert(signature.id, base);
             }
             if keyword_copy {
                 classes.keyword_copies.insert(signature.id);
@@ -8640,6 +8652,36 @@ impl<'a> Checker<'a> {
         self.call_with_key_view(call, None, receiver)
     }
 
+    fn dict_popitem(
+        &self,
+        call: &ast::ExprCall,
+        receiver: Expr,
+        args: &[ast::Expr],
+    ) -> Result<Expr, String> {
+        if !args.is_empty() || !call.arguments.keywords.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "dict.popitem() takes no arguments",
+            ));
+        }
+        let Some((key, value)) = self
+            .types
+            .mapping(receiver.ty)
+            .filter(|&(k, v)| receiver.ty == self.types.dict(k, v))
+        else {
+            return Err(error(
+                self.source,
+                call,
+                "dict.popitem requires a plain dictionary",
+            ));
+        };
+        Ok(Expr {
+            ty: self.types.tuple(vec![key, value]),
+            kind: ExprKind::Builtin(Builtin::DictPopItem, vec![receiver]),
+        })
+    }
+
     /// Evaluate the receiver, key and default before the mapping probes its table.
     fn dict_setdefault(
         &mut self,
@@ -8713,6 +8755,9 @@ impl<'a> Checker<'a> {
                 return self.call_super_method(call, method, base);
             }
         }
+        if let Some(expr) = self.call_direct_base_initializer(call)? {
+            return Ok(expr);
+        }
         if let Some(expr) = self.explicit_exception_initializer(call)? {
             return Ok(expr);
         }
@@ -8768,6 +8813,20 @@ impl<'a> Checker<'a> {
             if self.resolve(&method.value) == Some(Binding::Intrinsic(Intrinsic::Deque)) {
                 return self.sequence_reverse(stdlib::ReverseSequence::Deque, None, call);
             }
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "popitem"
+            && self.unshadowed_builtin(&method.value, "dict")
+        {
+            let Some((owner, rest)) = call.arguments.args.split_first() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "unbound dict.popitem requires a receiver",
+                ));
+            };
+            let receiver = self.expr(owner)?;
+            return self.dict_popitem(call, receiver, rest);
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && matches!(method.attr.as_str(), "clear" | "setdefault")
@@ -10201,6 +10260,9 @@ impl<'a> Checker<'a> {
                 });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
+                if attribute.attr.as_str() == "popitem" {
+                    return self.dict_popitem(call, receiver, &call.arguments.args);
+                }
                 if attribute.attr.as_str() == "copy" {
                     if !call.arguments.is_empty() {
                         return Err(error(self.source, call, "dict.copy() takes no arguments"));
@@ -10236,7 +10298,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), loop-head items(), and keys() in a key union",
+                        "supported dictionary methods are clear(), copy(), update(), get(key[, default]), pop(key[, default]), popitem() on plain dictionaries, loop-head items(), and keys() in a key union",
                     ));
                 }
                 let integer = (!pop && matches!(key_type, Type::IntEnum(_))).then_some(Type::Int);

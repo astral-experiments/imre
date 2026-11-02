@@ -1,4 +1,77 @@
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value};
+
+/// Advance the current child, obtaining another from the outer iterator only on exhaustion.
+pub(super) fn chain_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [base, receiver] = args else {
+        return Err(Error::new("TypeError", "expected a chain instance"));
+    };
+    if !matches!(ctx.heap.get(*receiver), Value::Instance { class, .. } if ctx.direct_subclass(*class, *base))
+    {
+        return Err(Error::new("TypeError", "expected a chain instance"));
+    }
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "chain.__next__() takes no keyword arguments",
+        ));
+    }
+    let roots = ctx.heap.temporary_mark();
+    ctx.heap.keep(*receiver);
+    let step = ctx.heap.temporary_mark();
+    let mut limit = ctx.heap.streaming_collection_limit();
+    let result = (|| loop {
+        let Value::Instance { fields, .. } = ctx.heap.get(*receiver) else {
+            return Err(Error::new("TypeError", "expected a chain instance"));
+        };
+        let (Some(&source), Some(&active)) = (fields.get("_sources"), fields.get("_active")) else {
+            return Err(Error::new("TypeError", "invalid chain state receiver"));
+        };
+        if source == NONE {
+            return Err(Error::new("StopIteration", ""));
+        }
+        let active = if active == NONE {
+            ctx.heap.keep(source);
+            let child = ctx
+                .next_item(source)
+                .and_then(|item| item.ok_or_else(|| Error::new("StopIteration", "")))
+                .inspect_err(|_| set_chain_field(ctx, *receiver, "_sources", NONE))?;
+            ctx.heap.keep(child);
+            let active = match ctx.iterator(child) {
+                Ok(active) => active,
+                Err(error) => {
+                    set_chain_field(ctx, *receiver, "_active", NONE);
+                    set_chain_field(ctx, *receiver, "_sources", NONE);
+                    return Err(error);
+                }
+            };
+            set_chain_field(ctx, *receiver, "_active", active);
+            active
+        } else {
+            active
+        };
+        // A callback can advance this same chain and replace either cursor.
+        ctx.heap.keep(active);
+        if let Some(item) = ctx.next_item(active)? {
+            return Ok(item);
+        }
+        set_chain_field(ctx, *receiver, "_active", NONE);
+        ctx.heap.release_temporaries_since(step);
+        ctx.collect_streaming_garbage(&mut limit);
+    })();
+    ctx.heap.release_temporaries_since(roots);
+    result
+}
+
+fn set_chain_field(ctx: &mut Context, receiver: Id, key: &str, value: Id) {
+    let Value::Instance { fields, .. } = ctx.heap.get_mut(receiver) else {
+        unreachable!("live chain instance")
+    };
+    if let Some(slot) = fields.get_mut(key) {
+        *slot = value;
+    } else {
+        fields.insert(key.to_owned(), value);
+    }
+}
 
 const COUNT: &str = "itertools.count";
 const REPEAT: &str = "itertools.repeat";

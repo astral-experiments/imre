@@ -57,19 +57,20 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
                 start += 1;
             }
         }
-        re.regex
-            .captures(
-                Input::new(text).range(start..end).anchored(if anchored {
-                    Anchored::Yes
-                } else {
-                    Anchored::No
-                }),
-                &mut caps,
-            )
-            .map_err(|message| re.match_error(ctx, message))?;
+        if let Err(message) = re.regex.captures(
+            Input::new(text).range(start..end).anchored(if anchored {
+                Anchored::Yes
+            } else {
+                Anchored::No
+            }),
+            &mut caps,
+        ) {
+            return Err(re.match_error(ctx, message));
+        }
     } else if !retry_match {
         caps.set_pattern(None);
     }
+    let last = re.last_capture(text, &caps);
     let spans: Vec<_> = group_spans(&caps).collect();
     let matched = caps.is_match().then(|| spans[0]).flatten();
     let Value::RegexScanner { start, retry, .. } = ctx.heap.get_mut(scanner) else {
@@ -79,6 +80,7 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
     let Some(span) = matched else { return Ok(NONE) };
     *retry = span.is_empty();
     Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
+        last,
         pattern,
         subject,
         spans,
@@ -169,6 +171,7 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         assertions: Vec::new(),
         regex,
         full: OnceCell::new(),
+        close_order: OnceCell::new(),
         split_retry: OnceCell::new(),
     }))))
 }

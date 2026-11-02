@@ -183,6 +183,44 @@ pub(crate) fn super_init(call: &ast::ExprCall) -> bool {
     super_method(call).is_some_and(|(method, _)| method.attr.as_str() == "__init__")
 }
 
+/// Resolve an explicit initializer on the lexical parent and the current receiver.
+pub(crate) fn direct_base_init(
+    graph: &SourceGraph,
+    module: usize,
+    parent: DefinitionId,
+    initializer: &ast::StmtFunctionDef,
+    call: &ast::ExprCall,
+) -> bool {
+    let Some(method) = call.func.as_attribute_expr() else {
+        return false;
+    };
+    let Some(receiver) = initializer.parameters.iter_non_variadic_params().next() else {
+        return false;
+    };
+    if method.attr.as_str() != "__init__"
+        || !matches!(call.arguments.args.first(), Some(ast::Expr::Name(n)) if n.id.as_str() == receiver.name().as_str())
+        || graph.resolve(module, &method.value) != Some(Binding::Definition(parent))
+    {
+        return false;
+    }
+    let mut root = &*method.value;
+    while let ast::Expr::Attribute(attr) = root {
+        root = &attr.value;
+    }
+    let Some(root) = root.as_name_expr() else {
+        return false;
+    };
+    // A parameter or local variable with the same spelling takes precedence over the module binding.
+    !initializer
+        .parameters
+        .iter()
+        .any(|p| p.name() == root.id.as_str())
+        && !ast::helpers::any_over_body(
+            &initializer.body,
+            |expr| matches!(expr, ast::Expr::Name(n) if n.id == root.id && n.ctx != ast::ExprContext::Load),
+        )
+}
+
 /// Infer storage from an exact builtin value. The constructor still evaluates
 /// the original expression, including every format argument and its errors.
 fn literal_field_annotation(

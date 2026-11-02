@@ -39,6 +39,8 @@ pub(super) fn format_builtin(name: &str, args: Vec<Expr>) -> Expr {
             ty: Type::Str,
             kind: ExprKind::Builtin(Builtin::Repr, args),
         }
+    } else if args[0].ty == Type::Calendar(C::Zone) {
+        op(Op::ZoneName, Type::Str, args)
     } else {
         op(Op::Text { iso: false }, Type::Str, args)
     };
@@ -100,6 +102,7 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
             receiver,
             Type::Calendar(C::Date | C::DateTime) | Type::ClockTime
         ),
+        "__str__" | "__repr__" => receiver == Type::Calendar(C::Zone),
         "__mod__" | "__rmod__" | "__divmod__" | "__rdivmod__" => {
             receiver == Type::Calendar(C::Delta)
         }

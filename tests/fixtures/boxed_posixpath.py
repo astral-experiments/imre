@@ -5,7 +5,7 @@ import posix
 import posixpath
 from os import altsep, fspath, linesep, pathsep, sep
 from os.path import altsep as path_altsep, pathsep as path_list_sep, sep as path_sep
-from posixpath import abspath, normpath
+from posixpath import abspath, ismount, normpath
 
 
 class Path:
@@ -79,6 +79,17 @@ def current():
         assert os.path.samefile(f1=__file__, f2=__file__)
         assert os.path.sameopenfile(fp1=fd, fp2=fd)
     missing = __file__ + ".missing"
+    assert ismount is posixpath.ismount is os.path.ismount
+    assert os.path.ismount(path=Path(b"/"))
+    assert not os.path.ismount(__file__)
+    assert not os.path.ismount(missing)
+    mount_link = "imre-boxed-link-to-root"
+    os.symlink("/", mount_link)
+    try:
+        assert not ismount(mount_link)
+        assert ismount(mount_link + "/")
+    finally:
+        os.unlink(mount_link)
     try:
         os.path.getsize(missing)
     except FileNotFoundError as error:

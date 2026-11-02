@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import inspect
+from abc import get_cache_token
+from collections.abc import Awaitable, Coroutine, Generator
+from types import CoroutineType
 
 
 class Manager:
@@ -32,6 +35,17 @@ async def read_value(manager) -> int:
 manager = Manager()
 pending = read_value(manager)
 assert inspect.iscoroutinefunction(read_value)
+assert type(pending) is CoroutineType
+assert Awaitable.__subclasshook__(CoroutineType) is True
+assert Coroutine.__subclasshook__(CoroutineType) is True
+assert isinstance(pending, Coroutine) and isinstance(pending, Awaitable)
+token = get_cache_token()
+assert Coroutine.register(CoroutineType) is CoroutineType
+assert get_cache_token() == token
+
+wrapper = pending.__await__()
+assert isinstance(wrapper, Generator)
+assert not isinstance(wrapper, Coroutine) and not isinstance(wrapper, Awaitable)
 assert pending.cr_code is read_value.__code__
 assert manager.events == []
 try:

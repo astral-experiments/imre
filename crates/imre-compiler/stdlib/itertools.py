@@ -6,7 +6,7 @@ from operator import index as _index
 from sys import maxsize as _maxsize
 
 
-def _make_chain(_get, _set, _allocate):
+def _make_chain(_advance, _set, _allocate):
     class chain:
         """Yield items from each iterable in order."""
 
@@ -24,26 +24,14 @@ def _make_chain(_get, _set, _allocate):
             return self
 
         def __next__(self):
-            while _get(self, False) is not None:
-                if _get(self, True) is None:
-                    try:
-                        active = iter(next(_get(self, False)))
-                        _set(self, True, active)
-                    except BaseException:
-                        _set(self, False, None)
-                        raise
-                try:
-                    return next(_get(self, True))
-                except StopIteration:
-                    _set(self, True, None)
-            raise StopIteration
+            return _advance(__class__, self)
 
 
     chain.__qualname__ = "chain"
     return chain
 
 
-chain = _make_chain(_itertools._chain_get, _itertools._chain_set, _itertools._chain_allocate)
+chain = _make_chain(_itertools._chain_next, _itertools._chain_set, _itertools._chain_allocate)
 
 
 def _make_cycle(_allocate, _advance):

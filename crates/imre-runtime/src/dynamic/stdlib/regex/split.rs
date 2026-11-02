@@ -144,22 +144,72 @@ pub(super) fn nonempty(
     if let Some(found) = pattern.regex.asserted_search(input.clone(), caps, true)? {
         return Ok(found);
     }
-    let nfa = if let Some(nfa) = pattern.regex.guarded_nfa() {
-        nfa
+    Ok(search_nfa(retry_nfa(pattern)?, &[], input, caps, true))
+}
+
+fn retry_nfa(pattern: &Pattern) -> std::result::Result<&NFA, String> {
+    if let Some(nfa) = pattern.regex.guarded_nfa() {
+        return Ok(nfa);
+    }
+    pattern
+        .split_retry
+        .get_or_init(|| {
+            NFA::compiler()
+                .syntax(syntax(pattern.bytes, pattern.engine_flags()))
+                .configure(NFA::config().utf8(!pattern.bytes))
+                .build(&pattern.engine_source)
+                .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+/// Without a repeated capture, participating groups close in tree postorder.
+pub(super) fn single_visit_order(pattern: &Pattern) -> Option<Vec<usize>> {
+    use regex_syntax::hir::{Hir, HirKind};
+    fn visit(hir: &Hir, public: usize, order: &mut Vec<usize>) -> Option<()> {
+        if let HirKind::Repetition(rep) = hir.kind()
+            && rep.max.is_none_or(|max| max > 1)
+            && rep.sub.properties().explicit_captures_len() != 0
+        {
+            return None;
+        }
+        for child in hir.kind().subs() {
+            visit(child, public, order)?;
+        }
+        if let HirKind::Capture(group) = hir.kind()
+            && group.index as usize <= public
+        {
+            order.push(group.index as usize);
+        }
+        Some(())
+    }
+    let hir = regex_automata::util::syntax::parse_with(
+        &pattern.engine_source,
+        &syntax(pattern.bytes, pattern.engine_flags()),
+    )
+    .ok()?;
+    let mut order = Vec::new();
+    visit(&hir, pattern.group_count(), &mut order)?;
+    Some(order)
+}
+
+/// Recover the last public close on the priority-ordered path to the selected
+/// endpoint. Keep the entire search haystack so anchors and guards see endpos.
+pub(super) fn last_close(pattern: &Pattern, text: &[u8], caps: &Captures) -> Option<usize> {
+    let span = caps.get_group(0)?;
+    let input = Input::new(text)
+        .range(span.start..text.len())
+        .anchored(Anchored::Yes);
+    let (nfa, assertions) = if let Some(parts) = pattern.regex.asserted_nfa() {
+        parts
     } else {
-        pattern
-            .split_retry
-            .get_or_init(|| {
-                NFA::compiler()
-                    .syntax(syntax(pattern.bytes, pattern.engine_flags()))
-                    .configure(NFA::config().utf8(!pattern.bytes))
-                    .build(&pattern.engine_source)
-                    .map_err(|e| e.to_string())
-            })
-            .as_ref()
-            .map_err(Clone::clone)?
+        (retry_nfa(pattern).ok()?, &[][..])
     };
-    Ok(search_nfa(nfa, &[], input, caps, true))
+    let mut traced = pattern.regex.create_captures();
+    let last = walk_nfa(nfa, assertions, input, &mut traced, false, Some(span.end))?;
+    // Full matches can omit the synthetic final-newline group.
+    (last != 0 && group_spans(caps).eq(group_spans(&traced))).then_some(last)
 }
 
 /// Explore each byte's NFA frontier in priority order. Capture-free guards depend
@@ -171,9 +221,22 @@ pub(super) fn search_nfa(
     caps: &mut Captures,
     nonempty: bool,
 ) -> bool {
+    walk_nfa(nfa, assertions, input, caps, nonempty, None).is_some()
+}
+
+// Zero denotes a winning match without a public capture. The last group is
+// part of each frontier entry, so a losing alternative cannot publish it.
+fn walk_nfa(
+    nfa: &NFA,
+    assertions: &[AssertionSlot],
+    input: Input<'_>,
+    caps: &mut Captures,
+    nonempty: bool,
+    required_end: Option<usize>,
+) -> Option<usize> {
     caps.clear();
     if input.is_done() {
-        return false;
+        return None;
     }
     let start = input.start();
     let text = input.haystack();
@@ -182,19 +245,19 @@ pub(super) fn search_nfa(
         Anchored::No => nfa.start_unanchored(),
         Anchored::Pattern(pid) => match nfa.start_pattern(pid) {
             Some(state) => state,
-            None => return false,
+            None => return None,
         },
     };
     let groups = caps.group_info();
     let eol_start = groups
         .to_index(PatternID::ZERO, "imre.eol")
         .and_then(|group| groups.slot(PatternID::ZERO, group));
-    let mut stack = vec![(entry, Rc::new(vec![None; caps.slots().len()]))];
+    let mut stack = vec![(entry, Rc::new(vec![None; caps.slots().len()]), 0)];
     let mut following = Vec::new();
     let mut seen_at = vec![usize::MAX; nfa.states().len()];
     let mut best = None;
-    for at in start..=input.end() {
-        while let Some((state, mut slots)) = stack.pop() {
+    for at in start..=required_end.unwrap_or(input.end()) {
+        while let Some((state, mut slots, mut last)) = stack.pop() {
             if seen_at[state.as_usize()] == at {
                 continue;
             }
@@ -204,28 +267,33 @@ pub(super) fn search_nfa(
                 State::Sparse(trans) => trans.matches(text, at),
                 State::Dense(trans) => trans.matches(text, at),
                 State::Look { look, next } if nfa.look_matcher().matches(*look, text, at) => {
-                    stack.push((*next, slots));
+                    stack.push((*next, slots, last));
                     continue;
                 }
                 State::Union { alternates } => {
-                    stack.extend(alternates.iter().rev().map(|&s| (s, Rc::clone(&slots))));
+                    stack.extend(
+                        alternates
+                            .iter()
+                            .rev()
+                            .map(|&s| (s, Rc::clone(&slots), last)),
+                    );
                     continue;
                 }
                 State::BinaryUnion { alt1, alt2 } => {
-                    stack.push((*alt2, Rc::clone(&slots)));
-                    stack.push((*alt1, slots));
+                    stack.push((*alt2, Rc::clone(&slots), last));
+                    stack.push((*alt1, slots, last));
                     continue;
                 }
                 State::Capture { slot, next, .. } => {
                     let slot = match assertions.get(slot.as_usize()) {
                         Some(AssertionSlot::Guard(guard)) => {
                             if guard.matches(&input, at) {
-                                stack.push((*next, slots));
+                                stack.push((*next, slots, last));
                             }
                             continue;
                         }
                         Some(AssertionSlot::Ignore) => {
-                            stack.push((*next, slots));
+                            stack.push((*next, slots, last));
                             continue;
                         }
                         Some(AssertionSlot::Public(slot)) => *slot,
@@ -239,13 +307,18 @@ pub(super) fn search_nfa(
                     if nonempty && at == start && Some(slot) == eol_start {
                         continue;
                     }
+                    if slot > 1 && slot % 2 == 1 && eol_start.is_none_or(|eol| slot < eol) {
+                        last = slot / 2;
+                    }
                     Rc::make_mut(&mut slots)[slot] = NonMaxUsize::new(at);
-                    stack.push((*next, slots));
+                    stack.push((*next, slots, last));
                     continue;
                 }
-                State::Match { pattern_id } if !nonempty || at > start => {
+                State::Match { pattern_id }
+                    if (!nonempty || at > start) && required_end.is_none_or(|end| end == at) =>
+                {
                     // Only threads already in the next frontier outrank this match.
-                    best = Some((*pattern_id, slots));
+                    best = Some((*pattern_id, slots, last));
                     break;
                 }
                 _ => continue,
@@ -253,7 +326,7 @@ pub(super) fn search_nfa(
             if let Some(next) = consume
                 && at < input.end()
             {
-                following.push((next, slots));
+                following.push((next, slots, last));
             }
         }
         if following.is_empty() {
@@ -263,10 +336,10 @@ pub(super) fn search_nfa(
         std::mem::swap(&mut stack, &mut following);
         stack.reverse();
     }
-    if let Some((id, slots)) = best {
+    if let Some((id, slots, last)) = best {
         caps.slots_mut().copy_from_slice(&slots);
         caps.set_pattern(Some(id));
-        return true;
+        return Some(last);
     }
-    false
+    None
 }

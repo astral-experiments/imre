@@ -41,6 +41,16 @@ impl BuiltinDescriptor {
                 method: member.is_method(),
             });
         }
+        if let Some((owner, attr)) = symbol.rsplit_once('.')
+            && let Some(class) = typing::ParameterClass::lookup(owner)
+            && let Some(&name) = class.methods.iter().find(|&&name| name == attr)
+        {
+            return Some(Self {
+                owner: class.owner,
+                name,
+                method: !matches!(name, "__eq__" | "__ne__" | "__iter__"),
+            });
+        }
         if symbol == "typing.Union.__mro_entries__" {
             return Some(Self {
                 owner: "typing.Union",
@@ -86,9 +96,13 @@ impl BuiltinDescriptor {
                 Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS))
             }
             Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
-            Some(("int", attr)) => Some(("int", attr, &["__trunc__"][..])),
-            Some(("float", attr)) => Some(("float", attr, &["__trunc__", "as_integer_ratio"][..])),
+            Some(("int", attr)) => Some(("int", attr, builtins::real_methods("int"))),
+            Some(("float", "as_integer_ratio")) => {
+                Some(("float", "as_integer_ratio", &["as_integer_ratio"][..]))
+            }
+            Some(("float", attr)) => Some(("float", attr, builtins::real_methods("float"))),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
+            Some(("complex", attr)) => Some(("complex", attr, &["__complex__"][..])),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("memoryview", attr)) => Some(("memoryview", attr, builtins::MEMORYVIEW_METHODS)),
             Some(("BaseException", attr)) => {
@@ -145,11 +159,14 @@ impl BuiltinDescriptor {
                     || matches!(
                         name,
                         "__reversed__"
+                            | "__round__"
                             | "__trunc__"
                             | "__getinitargs__"
                             | "__reduce__"
                             | "__reduce_ex__"
                             | "__replace__"
+                            | "__bytes__"
+                            | "__complex__"
                             | "__fspath__"
                             | "__format__"
                             | "__enter__"
@@ -158,6 +175,7 @@ impl BuiltinDescriptor {
             });
         }
         let (owner, name) = match symbol {
+            "type.__init__" => ("type", "__init__"),
             "object.__format__" => ("object", "__format__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
@@ -177,6 +195,9 @@ impl BuiltinDescriptor {
             "str.title" => ("str", "title"),
             "str.swapcase" => ("str", "swapcase"),
             "str.islower" => ("str", "islower"),
+            "str.center" => ("str", "center"),
+            "str.ljust" => ("str", "ljust"),
+            "str.rjust" => ("str", "rjust"),
             "str.zfill" => ("str", "zfill"),
             "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
@@ -204,6 +225,7 @@ impl BuiltinDescriptor {
             "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
             "types.SimpleNamespace.__ne__" => (super::namespace::CLASS, "__ne__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
+            "tuple.count" => ("tuple", "count"),
             "tuple.index" => ("tuple", "index"),
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
             "_thread._local.__setattr__" => (thread_local::CLASS, "__setattr__"),
@@ -219,12 +241,16 @@ impl BuiltinDescriptor {
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"
+                    | "count"
                     | "index"
                     | "isascii"
                     | "isalpha"
                     | "isdigit"
                     | "islower"
                     | "istitle"
+                    | "center"
+                    | "ljust"
+                    | "rjust"
                     | "zfill"
                     | "title"
                     | "swapcase"
@@ -278,6 +304,9 @@ impl BuiltinDescriptor {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
+            owner if typing::ParameterClass::lookup(owner).is_some() => {
+                ctx.builtin_type_name(receiver) == Some(owner)
+            }
             "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),
             "object" => true,
             "type" => ctx.is_type_object(receiver),
@@ -419,8 +448,10 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__contains__" => ctx.text("($self, key, /)"),
             "__doc__" if self.name == "__neg__" => ctx.text("-self"),
             "__doc__" if self.name == "__pos__" => ctx.text("+self"),
+            "__doc__" if self.name == "__int__" => ctx.text("int(self)"),
+            "__doc__" if self.name == "__float__" => ctx.text("float(self)"),
             "__doc__" if self.name == "__abs__" => ctx.text("abs(self)"),
-            "__text_signature__" if matches!(self.name, "__neg__" | "__pos__" | "__abs__") => {
+            "__text_signature__" if matches!(self.name, "__neg__" | "__pos__" | "__abs__" | "__int__" | "__float__") => {
                 ctx.text("($self, /)")
             }
             "__doc__" if self.name == "__index__" => ctx.text(
@@ -467,12 +498,17 @@ impl BuiltinDescriptor {
                     ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
                     ("__reduce__", "__doc__") if stdlib::os::stat::layout(self.owner).is_some() => return Some(NONE),
                     ("__reduce__", _) if stdlib::os::stat::layout(self.owner).is_some() => "($self, /)",
+                    ("count", "__doc__") if self.owner == "tuple" => "Return number of occurrences of value.",
+                    ("count", _) if self.owner == "tuple" => "($self, value, /)",
                     ("count", "__doc__") if self.owner == "bytes" => {
                         "Return the number of non-overlapping occurrences of subsection 'sub' in bytes B[start:end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes."
                     }
                     ("find", "__doc__") if self.owner == "bytes" => {
                         "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nReturn -1 on failure."
                     }
+                    ("__bytes__", "__doc__") => "Convert this value to exact type bytes.",
+                    ("__complex__", "__doc__") => "Convert this value to exact type complex.",
+                    ("__bytes__" | "__complex__", _) => "($self, /)",
                     ("index", "__doc__") if self.owner == "bytes" => {
                         "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nRaise ValueError if the subsection is not found."
                     }
@@ -492,6 +528,16 @@ impl BuiltinDescriptor {
                     ("istitle", "__doc__") => {
                         "Return True if the string is a title-cased string, False otherwise.\n\nIn a title-cased string, upper- and title-case characters may only\nfollow uncased characters and lowercase characters only cased ones."
                     }
+                    ("center", "__doc__") => {
+                        "Return a centered string of length width.\n\nPadding is done using the specified fill character (default is a space)."
+                    }
+                    ("ljust", "__doc__") => {
+                        "Return a left-justified string of length width.\n\nPadding is done using the specified fill character (default is a space)."
+                    }
+                    ("rjust", "__doc__") => {
+                        "Return a right-justified string of length width.\n\nPadding is done using the specified fill character (default is a space)."
+                    }
+                    ("center" | "ljust" | "rjust", _) => "($self, width, fillchar=' ', /)",
                     ("zfill", "__doc__") => {
                         "Pad a numeric string with zeros on the left, to fill a field of the given width.\n\nThe string is never truncated."
                     }
@@ -513,6 +559,9 @@ impl BuiltinDescriptor {
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."
                     }
+                    ("__round__", "__doc__") if self.owner == "int" => "Rounding an Integral returns itself.\n\nRounding with an ndigits argument also returns an integer.",
+                    ("__round__", "__doc__") => "Return the Integral closest to x, rounding half toward even.\n\nWhen an argument is passed, work like built-in round(x, ndigits).",
+                    ("__round__", _) => "($self, ndigits=None, /)",
                     ("__trunc__", "__doc__") if self.owner == "int" => "Truncating an Integral returns itself.",
                     ("__trunc__", "__doc__") => "Return the Integral closest to x between 0 and x.",
                     ("__trunc__", _) => "($self, /)",
