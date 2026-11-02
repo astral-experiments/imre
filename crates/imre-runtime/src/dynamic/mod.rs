@@ -1997,6 +1997,13 @@ impl Context {
         source: Option<(PathBuf, importlib::SourceBody)>,
     ) -> Result<()> {
         match name {
+            #[cfg(target_os = "linux")]
+            "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
+            #[cfg(target_os = "linux")]
+            "_imre_signal" if source.is_none() => {
+                let factory = self.builtin("_imre_signal.make_signals");
+                self.bind(scope, "make_signals", factory);
+            }
             "_thread" => {
                 for name in ["allocate_lock", "allocate"] {
                     let factory = self.builtin(&format!("_thread.{name}"));

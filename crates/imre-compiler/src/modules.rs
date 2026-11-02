@@ -1096,6 +1096,23 @@ impl IntrinsicModule {
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
             (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
+            #[cfg(target_os = "linux")]
+            (Self::Signal, "sigpending") => Intrinsic::ObjectRuntimeExport("signal.sigpending"),
+            #[cfg(target_os = "linux")]
+            (Self::Signal, "Signals") => Intrinsic::ObjectRuntimeExport("signal.Signals"),
+            #[cfg(target_os = "linux")]
+            (Self::Signal, "NSIG") => Intrinsic::ObjectRuntimeExport("signal.NSIG"),
+            // Signal numbers are IntEnum instances when accessed through the boxed module.
+            #[cfg(target_os = "linux")]
+            (
+                Self::Signal,
+                "SIGHUP" | "SIGQUIT" | "SIGILL" | "SIGTRAP" | "SIGABRT" | "SIGIOT" | "SIGBUS"
+                | "SIGFPE" | "SIGKILL" | "SIGUSR1" | "SIGSEGV" | "SIGUSR2" | "SIGPIPE" | "SIGALRM"
+                | "SIGCHLD" | "SIGCLD" | "SIGCONT" | "SIGSTOP" | "SIGTSTP" | "SIGTTIN" | "SIGTTOU"
+                | "SIGURG" | "SIGXCPU" | "SIGXFSZ" | "SIGVTALRM" | "SIGPROF" | "SIGWINCH" | "SIGIO"
+                | "SIGPOLL" | "SIGPWR" | "SIGSYS" | "SIGSTKFLT" | "SIGEMT" | "SIGRTMIN"
+                | "SIGRTMAX",
+            ) => Intrinsic::ObjectRuntimeExport("signal.Signals"),
             // Native executables have no adaptive bytecode interpreter.
             (Self::Opcode, "ENABLE_SPECIALIZATION" | "ENABLE_SPECIALIZATION_FT") => {
                 Intrinsic::IntConstant(0)

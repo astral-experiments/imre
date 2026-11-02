@@ -46,6 +46,8 @@ pub(super) mod readiness;
 pub(super) mod regex;
 mod secrets;
 mod select;
+#[cfg(target_os = "linux")]
+pub(super) mod signal;
 mod socket;
 mod structure;
 mod traceback;
@@ -72,7 +74,9 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    matches!(name, "builtins" | "errno" | "genericpath") || has_lazy_attributes(name)
+    matches!(name, "builtins" | "errno" | "genericpath")
+        || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
+        || has_lazy_attributes(name)
 }
 
 /// These providers synthesize attributes on lookup. Their module dictionaries
@@ -792,6 +796,10 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    #[cfg(target_os = "linux")]
+    if matches!(name, "_signal.sigpending" | "_imre_signal.make_signals") {
+        return signal::call(ctx, name, args, kwargs);
+    }
     if super::lowlevel_threads::function_name(name).is_some() {
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
     }
