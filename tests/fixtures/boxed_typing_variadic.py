@@ -1,4 +1,4 @@
-from typing import Annotated, List, NoDefault, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
+from typing import Annotated, ForwardRef, List, NoDefault, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
 
 
 def current():
@@ -36,6 +36,19 @@ def current():
         assert variadic[int, str, bool] == Annotated[origin[int, str, bool, int], "metadata"]
         alias = variadic[t, *TypeVarTuple("Us")]
         assert alias[bool, float] == Annotated[origin[bool, float, bool], "metadata"]
+
+    spread = Unpack[tuple["Target", None]]
+    builtin = Annotated[tuple[*ts], 1]
+    named = Annotated[Tuple[*ts], 1]
+    assert builtin["Target", None].__origin__.__args__ == (ForwardRef("Target"), type(None))
+    assert builtin[spread].__origin__.__args__ == ("Target", None)
+    assert named[spread].__origin__.__args__ == (ForwardRef("Target"), type(None))
+    try:
+        builtin[Unpack[tuple[None, ...]], Unpack[tuple[int, ...]]]
+    except TypeError as exc:
+        assert str(exc) == "More than one unpacked arbitrary-length tuple argument"
+    else:
+        raise AssertionError("accepted two arbitrary-length tuple arguments")
 
     for bad in (lambda: isinstance(0, ts), lambda: isinstance(0, NoDefault),
                 lambda: Unpack[int, str], lambda: type(NoDefault)(bad=True)):

@@ -1257,11 +1257,16 @@ def TypeAlias(self, parameters):
     raise TypeError(f"{self} is not subscriptable")
 
 
-def _type_check(arg, message, is_argument=True, module=None, *, allow_special_forms=False, owner=None):
+def _type_convert(arg, module=None, *, allow_special_forms=False, owner=None):
     if arg is None:
-        arg = type(None)
-    elif isinstance(arg, str):
-        arg = _make_forward_ref(arg, module, owner, is_class=allow_special_forms)
+        return type(None)
+    if isinstance(arg, str):
+        return _make_forward_ref(arg, module, owner, is_class=allow_special_forms)
+    return arg
+
+
+def _type_check(arg, message, is_argument=True, module=None, *, allow_special_forms=False, owner=None):
+    arg = _type_convert(arg, module, allow_special_forms=allow_special_forms, owner=owner)
     protocol = getattr(_typing, "Protocol", None)
     if isinstance(arg, _SpecialForm) and arg in (LiteralString, NoReturn, Never, Self, TypeAlias):
         return arg
@@ -1620,16 +1625,18 @@ def _prepare_typevartuple(pack, alias, args):
     right = len(params) - index - 1
     if any(isinstance(p, _typing.TypeVarTuple) for p in params[index + 1:]):
         raise TypeError(f"More than one TypeVarTuple parameter in {alias}")
+    unbounded = False
     fill = None
     for i, arg in enumerate(args):
         unpacked = None if isinstance(arg, type) else getattr(arg, "__typing_unpacked_tuple_args__", None)
         if unpacked and len(unpacked) == 2 and unpacked[-1] is ...:
-            if fill is not None:
+            if unbounded:
                 raise TypeError("More than one unpacked arbitrary-length tuple argument")
+            unbounded = True
             fill = unpacked[0]
             left = min(left, i)
             right = min(right, len(args) - i - 1)
-    if fill is None and len(args) < left + right:
+    if not unbounded and len(args) < left + right:
         raise TypeError(f"Too few arguments for {alias}; actual {len(args)}, expected at least {len(params) - 1}")
     end = len(args) - right
     grouped = args[left:end]
@@ -1647,7 +1654,7 @@ def _specialize_generic_alias_uncached(alias, args):
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
-    expanded = _unpack_alias_args(args)
+    expanded = _unpack_alias_args(_type_convert(arg) for arg in args)
     for parameter in parameters:
         if isinstance(parameter, _typing.TypeVarTuple):
             expanded = _prepare_typevartuple(parameter, alias, expanded)
@@ -1658,8 +1665,7 @@ def _specialize_generic_alias_uncached(alias, args):
     replacements = {}
     for parameter, arg in zip(parameters, expanded):
         if isinstance(parameter, _typing.TypeVarTuple):
-            replacements[parameter] = tuple(_make_forward_ref(a) if isinstance(a, str)
-                                            else type(None) if a is None else a for a in arg)
+            replacements[parameter] = arg
             continue
         arg = _alias_type_arg(arg)
         if _typing.get_origin(arg) is Unpack:
