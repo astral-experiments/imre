@@ -89,6 +89,9 @@ REJECTED = {
     }, "no static binding"),
     "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
+    "unused_resource_function": ({
+        "main.py": "from importlib.resources import files\nx: int = 'wrong'\n",
+    }, "expected int"),
     "unused_traceback_import": ({
         "main.py": "import helper\n",
         "helper.py": "import traceback as tb\ndef bad() -> int:\n    return 'wrong'\n",
@@ -423,6 +426,11 @@ ACCEPTED = {
             "try:\n    SourceFileLoader('other', path + '.missing').get_code('other')\n"
             "except FileNotFoundError as exc:\n    print(exc.filename == path + '.missing')\n"
         ),
+    },
+    "filesystem_resources": {
+        "main.py": (FIXTURES.parent / "boxed_filesystem_resources.py").read_text(),
+        "data/__init__.py": "",
+        "data/nested/message.txt": "hello\n",
     },
     "source_loader_path_stats": {
         "main.py": (
