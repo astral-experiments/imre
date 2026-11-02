@@ -845,7 +845,12 @@ pub(crate) fn compile(
         "command":in_memory,"module_entry":module_entry,"paths":paths,
     });
     check_returns()?;
-    let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;
+    let llvm_ir = emit::emit(
+        &sources,
+        &config.to_string(),
+        keep_docstrings,
+        Path::new(bundled_root),
+    )?;
     Ok(Some(Compilation {
         llvm_ir,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),

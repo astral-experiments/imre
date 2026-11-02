@@ -1,4 +1,4 @@
-from collections import namedtuple
+from collections import Counter, namedtuple
 
 
 class BrokenBlock:
@@ -31,6 +31,10 @@ def layout_read_allocation():
 
 
 def current():
+    assert namedtuple.__module__ == "collections" and namedtuple.__name__ == "namedtuple"
+    assert type(namedtuple) is type(current)
+    assert ">>> Point =" in namedtuple.__doc__
+    assert ">>> c = Counter(" in Counter.__doc__ and ">>> Counter(" in Counter.most_common.__doc__
     Fields = namedtuple("Fields", "left right")
     getter = Fields.right
     assert getter.__get__((2, 3), tuple) == 3
