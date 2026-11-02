@@ -41,7 +41,38 @@ class GrowingFields(ast.AST):
         return None
 
 
+def check_comparison_nodes():
+    source = "(\n  é == b != c < d <= e > f >= g\n  is h is not i in j not in k\n)"
+    node = ast.parse(source, mode="eval").body
+    assert type(node) is ast.Compare and isinstance(node, ast.expr)
+    assert node._fields == ("left", "ops", "comparators")
+    assert (node.lineno, node.col_offset, node.end_lineno, node.end_col_offset) == (2, 2, 3, 29)
+    assert node.left.id == "é" and node.left.end_col_offset == 4
+    assert [item.id for item in node.comparators] == list("bcdefghijk")
+
+    kinds = [ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Is, ast.IsNot, ast.In, ast.NotIn]
+    assert [type(op) for op in node.ops] == kinds
+    again = ast.parse(source).body[0].value.ops
+    for i, op in enumerate(node.ops):
+        assert isinstance(op, ast.cmpop) and op is again[i]
+        assert op is not kinds[i]() and not hasattr(op, "lineno")
+
+    built = ast.Compare(node.left, ops=node.ops, comparators=node.comparators)
+    assert built.left is node.left and built.ops is node.ops and built.comparators is node.comparators
+    empty = ast.Compare(left=node.left)
+    empty.ops.append(ast.Eq())
+    assert empty.comparators == [] and ast.Compare(left=node.left).ops == []
+
+    try:
+        ast.literal_eval("(0 <\n(lambda: 3))")
+    except ValueError as error:
+        assert str(error).startswith("malformed node or string on line 1: Compare(")
+    else:
+        raise AssertionError("accepted a comparison as a literal")
+
+
 def current():
+    check_comparison_nodes()
     decorated_source = (
         "if ready:\n"
         "    @first\n"
