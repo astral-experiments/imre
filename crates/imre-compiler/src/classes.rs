@@ -246,6 +246,20 @@ impl Classes {
                             record.to_mut().arguments = None;
                         }
                     }
+                    // An inactive unittest skip returns the original function. Normalize only
+                    // calls whose arguments and namespace lookups cannot execute Python code.
+                    for (index, statement) in node.body.iter().enumerate() {
+                        if let ast::Stmt::FunctionDef(method) = statement
+                            && !method.decorator_list.is_empty()
+                            && method.decorator_list.iter().all(|decorator| {
+                                identity_skip_decorator(graph, module_id, decorator)
+                            })
+                            && let ast::Stmt::FunctionDef(normalized) =
+                                &mut record.to_mut().body[index]
+                        {
+                            normalized.decorator_list.clear();
+                        }
+                    }
                     source_nodes.push((definition, record));
                 }
             }
@@ -341,6 +355,38 @@ fn unittest_skip_decorator(
         condition: condition.clone(),
         reason: reason.clone(),
     }))
+}
+
+fn identity_skip_decorator(graph: &SourceGraph, module: usize, decorator: &ast::Decorator) -> bool {
+    let ast::Expr::Call(call) = &decorator.expression else {
+        return false;
+    };
+    let ast::Expr::Attribute(attr) = &*call.func else {
+        return false;
+    };
+    let Ok(Some(skip)) = unittest_skip_decorator(graph, module, decorator) else {
+        return false;
+    };
+    if !matches!(skip.reason, ast::Expr::StringLiteral(_))
+        || !graph
+            .session
+            .is_stdlib_module(module, &attr.value, "unittest")
+    {
+        return false;
+    }
+    let truth = match &skip.condition {
+        ast::Expr::BooleanLiteral(literal) => literal.value,
+        ast::Expr::Attribute(attr) if graph.session.is_stdlib_module(module, &attr.value, "os") => {
+            let Some(Binding::Intrinsic(Intrinsic::BoolConstant(value))) =
+                graph.resolve(module, &skip.condition)
+            else {
+                return false;
+            };
+            value
+        }
+        _ => return false,
+    };
+    truth == skip.unless
 }
 
 pub(crate) fn defines_pickle_reducer(node: &ast::StmtClassDef) -> bool {

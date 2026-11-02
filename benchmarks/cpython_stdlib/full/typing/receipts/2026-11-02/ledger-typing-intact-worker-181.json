@@ -1,0 +1,1422 @@
+{
+  "schema": "imre.named-paired-supplement.v1",
+  "upstream": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "denominator": 712,
+  "whole": false,
+  "historical_unidentified_floor": 107,
+  "baseline_immutable_ledger_size": 167,
+  "input_ledger": {
+    "filename": "ledger-typing-intact-worker-167.json",
+    "sha256": "e7d4f96c5c8cd7be18fd2bf2972e19177c4ca20f23ef068d3d8124f530354882",
+    "unique_keys": 167
+  },
+  "source_file_sha256": {
+    "typing.py": "5e7d4dc2812497e131b1f9f7d9b63014834740ef68da377ef2396c803da68e0d",
+    "test_typing.py": "28d17772f523800f02a5bf1e0cc012779d7df1f616fec7cc34d922dcba7ee1cc"
+  },
+  "stock_ordered_outcomes_sha256": "bd8cdc988342751fda7c6c3228c5fa9004d164922e0cce64472431cf8a0b35ce",
+  "historical_floor_in_union": false,
+  "coordinator_unkeyed_14": {
+    "contribution_counted": 0,
+    "overlap": "unknown; source keys unavailable"
+  },
+  "measurement_scope": "named selection of intact original methods; full-module discovery and historical unkeyed counts stay separate",
+  "groups": {
+    "abc": {
+      "tested_imre": "08536cf04f0e2f1578a5e21e46301f2652a6ce8d",
+      "tested_parent": "dc0c835c3fb9a2b5d67a1a29027b391800e921fe",
+      "public_squash": "4f1a2aff77c2f35356eba7cb6fbab3c501fafb43",
+      "pr": 4195,
+      "full_qualification_raw_sha256": "1ca913be3c99af07efdf6f4e3eb43d25baa60c9b1a90efe54427b36b2117b101",
+      "selection": "Fourteen original CollectionsAbcTests methods selected from intact test/test_typing.py, followed by independent alias controls.",
+      "measured_native_profiles": [
+        "ordinary-O0",
+        "ordinary-O3"
+      ],
+      "incidental_ordinal": 97,
+      "independent_native_error_ordinal": 50,
+      "runs": {
+        "stock": {
+          "process_exit": 0,
+          "starts": 14,
+          "status_counts": {
+            "pass": 14
+          },
+          "stdout_sha256": "67460bd31938f3c54aecb82f519d894bd22db734f1a25b166813ea9aee0f421a",
+          "stderr_sha256": "818b584c70d5453afddd1555e8c0eb479a5ed34c90ec0da975bb4352640451fc"
+        },
+        "ordinary-O0": {
+          "process_exit": 1,
+          "starts": 14,
+          "status_counts": {
+            "pass": 13,
+            "error": 1
+          },
+          "stdout_sha256": "6a015d3bfc936e50ce255b04d438e8bb8d5076a340e90d971f60ebb32fc6c776",
+          "stderr_sha256": "d32b758e50a3b9ab7a66e47be54f1729e0a1275d257451870efd724efbcc4499"
+        },
+        "ordinary-O3": {
+          "process_exit": 1,
+          "starts": 14,
+          "status_counts": {
+            "pass": 13,
+            "error": 1
+          },
+          "stdout_sha256": "6a015d3bfc936e50ce255b04d438e8bb8d5076a340e90d971f60ebb32fc6c776",
+          "stderr_sha256": "082889885035d050091544f5ae72e6f733f6a18be34dba94a98bca14ddfb27ca"
+        }
+      }
+    },
+    "bytestring": {
+      "tested_imre": "76e56136ef1aa6186c6d94e18241f7c4910e2fab",
+      "tested_parent": "989ea8d55df7793addf9e82a6351a621ef2c4b3a",
+      "public_squash": "31f658fc5bff1bf1fb96abc9e2ebc51e864ce945",
+      "pr": 4189,
+      "selection": "Unmodified original ordinal 54 (CollectionsAbcTests.test_bytestring) from intact test/test_typing.py after independent focused controls.",
+      "measured_native_profiles": [
+        "ordinary-O0",
+        "ordinary-O3"
+      ],
+      "runtime_source_tree": "8c4becdc1999f3d5789542f71e48b1af171d898a",
+      "raw_provenance_sha256": "2bd4e294e630533477b95b2c88bdd69dbdfb203a4d3e315ffeee1aca0a7302d2",
+      "runs": {
+        "stock": {
+          "process_exit": 0,
+          "starts": 1,
+          "status_counts": {
+            "pass": 1
+          },
+          "stdout_sha256": "c20260e53c7bd0376625f77e14ea006a49299120f0f81df2b75d0338bb5931fa",
+          "stderr_sha256": "5205bdc8929ab6dd66eb76cf91f8994b0cd8ac82211aa55ff5c2b356357f0ea5"
+        },
+        "ordinary-O0": {
+          "process_exit": 0,
+          "starts": 1,
+          "status_counts": {
+            "pass": 1
+          },
+          "stdout_sha256": "c20260e53c7bd0376625f77e14ea006a49299120f0f81df2b75d0338bb5931fa",
+          "stderr_sha256": "0b0e77c21e95ee48cedc59e41a1c7601043ba0830a85e53b8b98b56ccb6e0bc1"
+        },
+        "ordinary-O3": {
+          "process_exit": 0,
+          "starts": 1,
+          "status_counts": {
+            "pass": 1
+          },
+          "stdout_sha256": "c20260e53c7bd0376625f77e14ea006a49299120f0f81df2b75d0338bb5931fa",
+          "stderr_sha256": "24beb1618ec43c9cc760abc783e6c7b76b768891ab53711d416b352718fe6197"
+        }
+      }
+    }
+  },
+  "additional_pairs_after_167": 14,
+  "overlap_with_167": [],
+  "profile_pass_counts_for_additional": {
+    "stock": 14,
+    "ordinary-O0": 14,
+    "ordinary-O3": 14
+  },
+  "boxed_original_groups_measured": [],
+  "excluded_nonpositives": [
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_async_generator",
+      "occurrence": 1,
+      "stock_ordinal": 50,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7745,
+          7749
+        ],
+        "source_sha256": "2f4213f70f2b66347a285d806adf78db53272636df8d6f36e2d687645bb5cd32"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "error",
+          "skip_reason": null,
+          "original_group_process_exit": 1,
+          "detail": "async function"
+        },
+        "ordinary-O3": {
+          "status": "error",
+          "skip_reason": null,
+          "original_group_process_exit": 1,
+          "detail": "async function"
+        }
+      },
+      "classification": "excluded nonpositive"
+    }
+  ],
+  "additional_keys": [
+    [
+      "test.test_typing.CollectionsAbcTests.test_abstractset",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_async_iterable",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_bytestring",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_collection",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_collections_as_base",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_container",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_coroutine",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_hashable",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_mutablesequence",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_mutableset",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_async_generator_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_or_and_ror",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_sized",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_subclassing_async_generator",
+      1
+    ]
+  ],
+  "details": [
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_abstractset",
+      "occurrence": 1,
+      "stock_ordinal": 49,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7499,
+          7501
+        ],
+        "source_sha256": "7a7283a469f98031293ca410540dafc7ef18edd0ae303320c5d82b66eb309dff"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_async_iterable",
+      "occurrence": 1,
+      "stock_ordinal": 51,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7472,
+          7477
+        ],
+        "source_sha256": "aa388296bc013abc37036f8bca2c18bba68377989196cccafe682bec0fe39c16"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_bytestring",
+      "occurrence": 1,
+      "stock_ordinal": 54,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "bytestring",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7523,
+          7531
+        ],
+        "source_sha256": "da6599b2bfcd29284c0b68c221164036ecb92cdb296e5cbbe6a3427b4841a988"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_collection",
+      "occurrence": 1,
+      "stock_ordinal": 57,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7493,
+          7497
+        ],
+        "source_sha256": "81621fdfb95a101cd649e31bfe76caf2cc58bb12b18a666cf7a447c9d5af121e"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_collections_as_base",
+      "occurrence": 1,
+      "stock_ordinal": 58,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7887,
+          7903
+        ],
+        "source_sha256": "b26d94265aedde211db6d757324ff561e393b98c9f77ed7d1c5619b3e63e279a"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_container",
+      "occurrence": 1,
+      "stock_ordinal": 59,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7489,
+          7491
+        ],
+        "source_sha256": "8383eebc09501f794642327a27c233c27d5f5c5b3ae3b79056b87cfb71d0a07c"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_coroutine",
+      "occurrence": 1,
+      "stock_ordinal": 60,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7459,
+          7470
+        ],
+        "source_sha256": "678b45325d54e9b614007e278081ef8c335640d150de88289423d4039fd7a027"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_hashable",
+      "occurrence": 1,
+      "stock_ordinal": 75,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7431,
+          7433
+        ],
+        "source_sha256": "1af89dc2340f47f06b1fb53f970c44d78693dfc4b7181526e5e1d18a9d5d1fb5"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_mutablesequence",
+      "occurrence": 1,
+      "stock_ordinal": 82,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7519,
+          7521
+        ],
+        "source_sha256": "624c67f93eae53d3e3b2c84e74d39e4c5427fd1ec7a9136ece1b9b6757dc172c"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_mutableset",
+      "occurrence": 1,
+      "stock_ordinal": 83,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7503,
+          7505
+        ],
+        "source_sha256": "fe7f051ac1082471f12ae172581897009465db8fc084f294ac8c849b88b4659e"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_no_async_generator_instantiation",
+      "occurrence": 1,
+      "stock_ordinal": 84,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7751,
+          7757
+        ],
+        "source_sha256": "d39ea9964890e96912c7d2ab46892e57ada8255866f8e6db3a04d41bb7f64b15"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_or_and_ror",
+      "occurrence": 1,
+      "stock_ordinal": 91,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7905,
+          7907
+        ],
+        "source_sha256": "0db3702d0a3c8b905018f9f0c0b4ac1f28f53e56c8c1730a0dd61f37b36fbdad"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_sized",
+      "occurrence": 1,
+      "stock_ordinal": 97,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7485,
+          7487
+        ],
+        "source_sha256": "8d3b60f231352a0cd077ecdc8c656cd28010719449b32340a54b909a9a5094ea"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "incidental existing implementation; newly measured paired key"
+    },
+    {
+      "id": "test.test_typing.CollectionsAbcTests.test_subclassing_async_generator",
+      "occurrence": 1,
+      "stock_ordinal": 99,
+      "stock_status": "pass",
+      "stock_skip_reason": null,
+      "group": "abc",
+      "source": {
+        "path": "Lib/test/test_typing.py",
+        "lines": [
+          7828,
+          7849
+        ],
+        "source_sha256": "bb860700ba4b65e4260ffeaa662dd54ca9377fb56f67bdf465fb058bb4fc2e74"
+      },
+      "profiles": {
+        "stock": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 0
+        },
+        "ordinary-O0": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        },
+        "ordinary-O3": {
+          "status": "pass",
+          "skip_reason": null,
+          "original_group_process_exit": 1
+        }
+      },
+      "classification": "original method exercising changed behavior"
+    }
+  ],
+  "union_pairs": 181,
+  "keys": [
+    [
+      "test.test_typing.AnnotatedTests.test_annotated_cached_with_types",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_annotated_in_other_types",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_annotated_mro",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_attr_passthrough",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_check_instance",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_check_subclass",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_getattr_typevar",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_instantiate_forward",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_instantiate_type_var",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_cannot_subclass",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_deduplicate_from_union",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_dir",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_flatten",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_hash_eq",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_instantiate",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_instantiate_generic",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_instantiate_immutable",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_new",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_order_in_union",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_pickle",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_special_form_containment",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_special_forms_nesting",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_specialize",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_subst",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_too_few_type_args",
+      1
+    ],
+    [
+      "test.test_typing.AnnotatedTests.test_typevar_subst",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_abstractset",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_async_iterable",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_bytestring",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_chainmap_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_chainmap_subclass",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_collection",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_collections_as_base",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_container",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_coroutine",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_deque",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_deque_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_frozenset",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_frozenset_subclass_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_hashable",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_mutablesequence",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_mutableset",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_async_generator_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_frozenset_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_no_set_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_or_and_ror",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_ordereddict_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_ordereddict_subclass",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_set",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_set_subclass_instantiation",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_sized",
+      1
+    ],
+    [
+      "test.test_typing.CollectionsAbcTests.test_subclassing_async_generator",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_dir",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_invalid_uses",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_valid_uses",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_var_substitution",
+      1
+    ],
+    [
+      "test.test_typing.GetTypeHintsTests.test_get_type_hints_annotated",
+      1
+    ],
+    [
+      "test.test_typing.GetTypeHintsTests.test_get_type_hints_annotated_in_union",
+      1
+    ],
+    [
+      "test.test_typing.GetTypeHintsTests.test_get_type_hints_annotated_refs",
+      1
+    ],
+    [
+      "test.test_typing.GetTypeHintsTests.test_get_type_hints_annotated_with_none_default",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_args",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_cannot_init",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_dir",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_does_not_flatten_enum",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_enum",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_equal",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_flatten",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_hash",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_illegal_parameters_do_not_raise_runtime_errors",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_literals_inside_other_types",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_no_isinstance_or_issubclass",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_no_multiple_subscripts",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_no_subclassing",
+      1
+    ],
+    [
+      "test.test_typing.LiteralTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_annotation_type_check",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_annotation_usage",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_annotation_usage_with_default",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_annotation_usage_with_methods",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_copy_and_pickle",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_deferred_annotations",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_empty_namedtuple",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_future_annotations",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_generic",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_generic_pep695",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_multiple_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_namedtuple_errors",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_namedtuple_keyword_usage",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_namedtuple_special_keyword_names",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_non_generic_subscript",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_orig_bases",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_setname_called_on_values_in_class_dictionary",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_setname_raises_the_same_as_on_other_classes",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_strange_errors_when_accessing_set_name_itself",
+      1
+    ],
+    [
+      "test.test_typing.NamedTupleTests.test_super_explicitly_disallowed",
+      1
+    ],
+    [
+      "test.test_typing.RevealTypeTests.test_reveal_type",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_cannot_init",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_cannot_subclass",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_no_isinstance",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_cannot_init",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_cannot_subclass",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_no_isinstance",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_annotations",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_basics_functional_syntax",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_can_make_readonly_key_mutable",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_cannot_make_mutable_key_readonly",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_combine_qualifiers",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_deferred_evaluation",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_generic_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_get_type_hints",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_get_type_hints_generic",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_implicit_any_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_inheritance_pep563",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_is_typeddict",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_keys_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_keys_inheritance_with_same_name",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_multiple_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_multiple_inheritance_with_same_key",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_non_generic_subscript",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_optional",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_optional_keys",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_orig_bases",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_pep695_generic_typeddict",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_pickle",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_pickle_generic",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_py36_class_syntax_usage",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_readonly_inheritance",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_required_notrequired_keys",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_total",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_total_inherits_non_total",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_total_with_assigned_value",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_typeddict_create_errors",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_typeddict_errors",
+      1
+    ],
+    [
+      "test.test_typing.TypedDictTests.test_zero_fields_typeddicts",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_allow_non_types_in_or",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_base_class_kept",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_cannot_instantiate",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_cannot_subclass",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_dir",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_empty",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_etree",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_function_repr_union",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_no_eval_union",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_optional",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_optional_isinstance",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_optional_isinstance_type_error",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_optional_issubclass",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_optional_issubclass_type_error",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_single_class_disappears",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_any",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_compare_other",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_generalization",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_isinstance",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_isinstance_type_error",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_issubclass",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_issubclass_type_error",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_object",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_of_literals",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_of_unhashable",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_str_pattern",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_union_union",
+      1
+    ],
+    [
+      "test.test_typing.UnionTests.test_unordered",
+      1
+    ],
+    [
+      "typing.ParamSpec",
+      1
+    ],
+    [
+      "typing.ParamSpecArgs",
+      1
+    ],
+    [
+      "typing.ParamSpecKwargs",
+      1
+    ],
+    [
+      "typing.TypedDict",
+      1
+    ],
+    [
+      "typing._should_unflatten_callable_args",
+      1
+    ],
+    [
+      "typing.get_args",
+      1
+    ],
+    [
+      "typing.get_origin",
+      1
+    ],
+    [
+      "typing.get_protocol_members",
+      1
+    ],
+    [
+      "typing.is_protocol",
+      1
+    ],
+    [
+      "typing.is_typeddict",
+      1
+    ]
+  ]
+}
