@@ -249,6 +249,7 @@ impl BuiltinDescriptor {
             "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "mappingproxy.__hash__" => ("mappingproxy", "__hash__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
             "mappingproxy.__str__" => ("mappingproxy", "__str__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
@@ -506,10 +507,11 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__call__" => {
                 ctx.text("($self, /, *args, **kwargs)")
             }
+            "__doc__" if self.name == "__hash__" => ctx.text("Return hash(self)."),
             "__doc__" if self.name == "__repr__" => ctx.text("Return repr(self)."),
             "__doc__" if self.name == "__iter__" => ctx.text("Implement iter(self)."),
             "__doc__" if self.name == "__next__" => ctx.text("Implement next(self)."),
-            "__text_signature__" if matches!(self.name, "__iter__" | "__next__" | "__repr__") => {
+            "__text_signature__" if matches!(self.name, "__hash__" | "__iter__" | "__next__" | "__repr__") => {
                 ctx.text("($self, /)")
             }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),

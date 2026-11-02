@@ -1331,6 +1331,7 @@ pub(super) fn call(
             | "object.__repr__"
             | "object.__str__"
             | "object.__ne__"
+            | "mappingproxy.__hash__"
             | "mappingproxy.__repr__"
             | "mappingproxy.__str__"
             | "super.__repr__"
@@ -1373,6 +1374,10 @@ pub(super) fn call(
             )));
         }
         if owner == "mappingproxy" {
+            if method == "__hash__" {
+                let hash = ctx.dictionary_hash(receiver)?;
+                return Ok(ctx.int(hash));
+            }
             if method == "__str__" {
                 return call(ctx, "str", &[receiver], &[]);
             }
