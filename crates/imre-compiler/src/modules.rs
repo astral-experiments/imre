@@ -4598,8 +4598,8 @@ impl<'a> Loader<'a> {
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
-            // These modules initialize token tables from globals or compiler flags on Python instances.
-            self.needs_object_imports |= matches!(name, "codeop" | "token");
+            // token initializes its public tables from the live module globals.
+            self.needs_object_imports |= name == "token";
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;
@@ -4628,6 +4628,8 @@ impl<'a> Loader<'a> {
                 source,
             )?;
             self.modules[id].bundled = true;
+            // codeop sets compiler flags on Python instances.
+            self.needs_object_imports |= name == "codeop";
             self.scan(id)?;
             self.bind_child(name, id, parent)?;
             return Ok(id);
