@@ -582,8 +582,9 @@ pub(crate) fn compile(
         }
         let mut names = imports.names;
         if owner == "importlib" {
-            // Filesystem modules may import the loader ABCs after native compilation.
+            // Filesystem modules can import the loader protocols through either public module.
             names.push((0, "importlib.abc".to_owned()));
+            names.push((0, "importlib.util".to_owned()));
         }
         // A late import of native pickle also needs its bundled reader and dependencies.
         if imports.uses_import_builtin {
