@@ -899,6 +899,12 @@ pub(super) enum Value {
     ParamSpec(super::paramspec::ParamSpec),
     ParamSpecMarker(super::paramspec::Marker, Id),
     ConstEvaluator(Id),
+    /// A statement-defined alias retains its evaluator even after caching a successful value.
+    TypeAlias {
+        name: Id,
+        evaluator: Id,
+        cached: Option<Id>,
+    },
     TypeVar(super::typing::TypeVariable),
     TypeVarTuple {
         name: Id,
@@ -1192,6 +1198,7 @@ impl Value {
             Self::Coroutine(_) => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
             Self::NoDefault => "NoDefaultType",
+            Self::TypeAlias { .. } => "typing.TypeAliasType",
             Self::Class { .. } => "type",
             Self::DictView { kind, ordered, .. } => match (kind, ordered) {
                 (DictViewKind::Keys, false) => "dict_keys",
@@ -1499,6 +1506,14 @@ impl Value {
             } => visit.extend([*name, *module, *default]),
             Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
             Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
+            Self::TypeAlias {
+                name,
+                evaluator,
+                cached,
+            } => {
+                visit.extend([*name, *evaluator]);
+                visit.extend(*cached);
+            }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);

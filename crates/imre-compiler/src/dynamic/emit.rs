@@ -88,6 +88,10 @@ pub(crate) fn emit(
             statements::type_parameters::check_nonlocals(source, &body)
                 .map_err(|error| format!("{}:{error}", path.display()))?;
         }
+        if let Some((expr, reason)) = imre_ast::type_alias_error(&body) {
+            let error = crate::frontend::error(source, expr, &format!("SyntaxError: {reason}"));
+            return Err(format!("{}:{error}", path.display()));
+        }
         if let Some(param) = &private_names.duplicate_type_parameter {
             let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
             let error = crate::frontend::error(source, param, &reason);
@@ -144,6 +148,7 @@ enum Body<'a> {
     AnnotationValue(&'a ast::Expr),
     AnnotationThunk(String, ruff_text_size::TextRange),
     Expression(&'a ast::Expr),
+    TypeAlias(&'a ast::Expr),
     Generator(&'a [ast::Comprehension], &'a ast::Expr),
     Unsupported(&'a ast::Stmt, &'static str),
 }
@@ -316,8 +321,12 @@ impl Output {
                 let value = f.expr(expr);
                 f.end(&format!("ret i64 {value}"));
             }
-            Body::Expression(expr) => {
+            Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
+                if matches!(body, Body::TypeAlias(_)) {
+                    let format = f.lookup(".format");
+                    f.op("annotation_format", &[&format]);
+                }
                 let value = f.expr(expr);
                 f.end(&format!("ret i64 {value}"));
             }
