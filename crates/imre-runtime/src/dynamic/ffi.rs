@@ -1347,6 +1347,9 @@ impl Context {
         });
         let closure_supported = freevars.is_some();
         let freevars = freevars.unwrap_or_default();
+        let flags = metadata["code_flags"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok());
         self.alloc(Value::Code(value::CodeObject {
             body: value::Body::Native(entry),
             name,
@@ -1357,9 +1360,8 @@ impl Context {
             first_line: location.line,
             module_definition,
             coroutine: false,
-            flags: metadata["code_flags"]
-                .as_u64()
-                .and_then(|v| u32::try_from(v).ok()),
+            flags: flags.unwrap_or_default(),
+            flags_complete: flags.is_some(),
             nested: Vec::new(),
             freevars,
             closure_supported,

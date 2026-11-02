@@ -1899,26 +1899,21 @@ pub(super) fn call(
         }
         if let Value::Function { code, .. } = *ctx.heap.get(func) {
             let original = ctx.code_object(code);
-            if original.coroutine {
+            use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
+            if original.coroutine || original.flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {
                 return Ok(func);
             }
-            if let Some(flags) = original.flags {
-                use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
-                if flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {
-                    return Ok(func);
-                }
-                if flags & GENERATOR != 0 && !matches!(original.body, super::value::Body::Native(_))
-                {
-                    // Other functions and existing generators retain their original code.
-                    let mut marked = original.clone();
-                    marked.flags = Some(flags | ITERABLE_COROUTINE);
-                    let marked = ctx.alloc(Value::Code(marked));
-                    let Value::Function { code, .. } = ctx.heap.get_mut(func) else {
-                        unreachable!()
-                    };
-                    *code = marked;
-                    return Ok(func);
-                }
+            if original.flags & GENERATOR != 0 && !matches!(original.body, super::value::Body::Native(_))
+            {
+                // Other functions and existing generators retain their original code.
+                let mut marked = original.clone();
+                marked.flags |= ITERABLE_COROUTINE;
+                let marked = ctx.alloc(Value::Code(marked));
+                let Value::Function { code, .. } = ctx.heap.get_mut(func) else {
+                    unreachable!()
+                };
+                *code = marked;
+                return Ok(func);
             }
         }
         return Err(Error::new(

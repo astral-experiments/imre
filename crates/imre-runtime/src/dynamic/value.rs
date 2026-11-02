@@ -24,7 +24,9 @@ pub(super) struct CodeObject {
     pub module_definition: bool,
     pub coroutine: bool,
     /// CPython flags for boxed Python function definitions.
-    pub flags: Option<u32>,
+    pub flags: u32,
+    /// Runtime source retains execution flags even when its complete co_flags is unknown.
+    pub flags_complete: bool,
     pub nested: Vec<(usize, Id)>,
     pub freevars: Vec<String>,
     pub closure_supported: bool,
