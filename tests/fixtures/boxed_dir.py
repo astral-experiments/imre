@@ -120,10 +120,74 @@ def tuple_directories():
     assert dir(Published) == dir(Published()) == ['announced']
 
 
+def set_directories():
+    common = {"copy", "difference", "intersection", "isdisjoint", "issubset",
+              "issuperset", "symmetric_difference", "union"}
+    mutating = {"add", "clear", "difference_update", "discard", "intersection_update",
+                "pop", "remove", "symmetric_difference_update", "update"}
+    for owner, expected in ((set, common | mutating), (frozenset, common)):
+        instance = owner()
+        operators = {"__and__", "__or__", "__sub__", "__xor__", "__rand__", "__ror__",
+                     "__rsub__", "__rxor__", "__contains__", "__iter__", "__len__", "__class_getitem__"}
+        if owner is set:
+            operators.update(("__iand__", "__ior__", "__isub__", "__ixor__"))
+        assert dir(instance) == dir(owner) == sorted(set(dir(object)) | operators | expected)
+        assert type(owner.__contains__).__name__ == "method_descriptor"
+        for slot in (owner.__repr__, owner.__iter__, owner.__len__):
+            assert type(slot).__name__ == "wrapper_descriptor" and slot.__objclass__ is owner
+        assert owner.__len__(instance) == 0 and list(owner.__iter__(instance)) == []
+        assert instance.__class_getitem__.__self__ is owner
+        assert owner.__class_getitem__(int) == owner[int]
+        for name in expected:
+            descriptor = getattr(owner, name)
+            assert type(descriptor).__name__ == "method_descriptor"
+            assert descriptor.__objclass__ is owner
+            assert descriptor.__get__(instance).__self__ is instance
+
+    class Key:
+        armed = False
+        def __hash__(self):
+            if self.armed:
+                raise AssertionError("rehashing a resident set key")
+            return 123
+
+    class Frozen(frozenset):
+        def __iter__(self):
+            raise AssertionError("iterating a set operand")
+
+    class Cold(set):
+        pass
+
+    assert Cold.issuperset is set.issuperset
+    assert Cold.__class_getitem__.__self__ is Cold
+    assert Cold().__class_getitem__(int).__origin__ is Cold
+
+    key = Key()
+    target = set()
+    set.add(target, key)
+    rhs = Frozen([key])
+    key.armed = True
+    exact = frozenset.copy(rhs)
+    assert type(exact) is frozenset and frozenset.copy(rhs) is not exact
+    assert frozenset.copy(exact) is exact
+    assert set.issuperset(target, rhs) and frozenset.issuperset(rhs, target)
+    for descriptor, other, args in ((set.add, exact, (key,)),
+                                    (set.issuperset, exact, (target,)),
+                                    (frozenset.copy, target, ()),
+                                    (frozenset.issuperset, target, (rhs,))):
+        try:
+            descriptor(other, *args)
+        except TypeError as exc:
+            assert "doesn't apply to" in str(exc)
+        else:
+            raise AssertionError("accepted a receiver of the opposite set type")
+
+
 def current():
     weak_proxy_directory()
     import _io
     tuple_directories()
+    set_directories()
     operation = dir
     from collections.abc import Callable
     from types import GenericAlias

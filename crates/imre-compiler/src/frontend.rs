@@ -2632,6 +2632,12 @@ impl<'a> Checker<'a> {
             "difference_update" => "set.difference_update",
             "intersection_update" => "set.intersection_update",
             "symmetric_difference_update" => "set.symmetric_difference_update",
+            "add" if self.unshadowed_builtin(&attribute.value, "set") => "set.add",
+            "copy" => "set.copy",
+            "issuperset" => "set.issuperset",
+            "__iter__" => "set.__iter__",
+            "__len__" => "set.__len__",
+            "__class_getitem__" => "set.__class_getitem__",
             "clear" => "set.clear",
             "pop" => "set.pop",
             "remove" => "set.remove",
@@ -2645,16 +2651,21 @@ impl<'a> Checker<'a> {
         {
             return Some(name);
         }
-        if (operation || matches!(attribute.attr.as_str(), "isdisjoint" | "issubset" | "symmetric_difference" | "union"))
-            && (receiver == Some(Type::FrozenStrings)
-                || self.unshadowed_builtin(&attribute.value, "frozenset"))
+        if receiver == Some(Type::FrozenStrings)
+            || self.unshadowed_builtin(&attribute.value, "frozenset")
         {
             return Some(match attribute.attr.as_str() {
+                _ if operation => name,
+                "__class_getitem__" => "frozenset.__class_getitem__",
+                "__iter__" => "frozenset.__iter__",
+                "__len__" => "frozenset.__len__",
+                "copy" => "frozenset.copy",
                 "isdisjoint" => "frozenset.isdisjoint",
                 "issubset" => "frozenset.issubset",
-                "union" => "frozenset.union",
+                "issuperset" => "frozenset.issuperset",
                 "symmetric_difference" => "frozenset.symmetric_difference",
-                _ => name,
+                "union" => "frozenset.union",
+                _ => return None,
             });
         }
         None
