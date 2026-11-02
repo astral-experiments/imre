@@ -87,7 +87,12 @@ def current():
         raise AssertionError("member accepted unrelated receiver")
 
     from annotationlib import Format
-    from typing import NoDefault, ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
+    from typing import NoDefault, ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeAliasType, TypeVarTuple
+
+    for cls in (ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVar, TypeVarTuple, TypeAliasType):
+        assert cls.__base__ is object
+        assert cls.__bases__ == (object,) and cls.__bases__ is cls.__bases__
+        assert cls.__mro__ == (cls, object) and cls.__mro__ is cls.__mro__
 
     P = ParamSpec("P")
     parameters = (P, P.args, P.kwargs, TypeVarTuple("Ts"))
