@@ -598,7 +598,7 @@ impl Context {
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
-        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex"))
+        if matches!(self.heap.get(value), Value::Native(name) if matches!(name.as_str(), "dict.fromkeys" | "int.from_bytes" | "float.__getformat__" | "bytes.fromhex" | "bytearray.fromhex"))
         {
             return Ok(self.bind_native_classmethod(value, owner));
         }
@@ -2594,6 +2594,17 @@ impl Context {
                 }
             }
             Value::DefaultDict { factory, .. } if name == "default_factory" => return Ok(factory),
+            Value::Int(_) | Value::Bool(_) if name == "from_bytes" => {
+                let owner = self.exact_type(obj)?;
+                let method = self.builtin("int.from_bytes");
+                return Ok(self.bind_native_classmethod(method, owner));
+            }
+            Value::Native(ref class)
+                if name == "from_bytes" && matches!(class.as_str(), "int" | "bool") =>
+            {
+                let method = self.builtin("int.from_bytes");
+                return Ok(self.bind_native_classmethod(method, obj));
+            }
             Value::Float(_) if name == "__getformat__" => {
                 let owner = self.builtin("float");
                 let method = self.builtin("float.__getformat__");
