@@ -332,7 +332,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
-fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
+pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())

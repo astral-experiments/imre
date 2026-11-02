@@ -191,6 +191,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "inspect" => Some(("inspect.py", include_str!("../stdlib/inspect.py"))),
         "itertools" => Some(("itertools.py", include_str!("../stdlib/itertools.py"))),
+        "signal" if cfg!(unix) => Some(("signal.py", include_str!("../stdlib/signal.py"))),
         "typing" => Some(("typing.py", include_str!("../stdlib/typing.py"))),
         "logging" => Some((
             "logging/__init__.py",
@@ -344,6 +345,7 @@ pub(crate) enum IntrinsicModule {
     Secrets,
     Sysconfig,
     Signal,
+    SignalNative,
     Opcode,
     Unidiff,
     Pathlib,
@@ -784,6 +786,7 @@ impl IntrinsicModule {
             "secrets" => Some(Self::Secrets),
             "sysconfig" => Some(Self::Sysconfig),
             "signal" => Some(Self::Signal),
+            "_signal" if cfg!(unix) => Some(Self::SignalNative),
             "_opcode" => Some(Self::Opcode),
             "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
@@ -1109,6 +1112,18 @@ impl IntrinsicModule {
             (Self::Time, "time") => Intrinsic::WallTime,
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
             (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
+            (Self::SignalNative, "SIGINT") => Intrinsic::ObjectRuntimeExport("_signal.SIGINT"),
+            (Self::SignalNative, "SIGALRM") => Intrinsic::ObjectRuntimeExport("_signal.SIGALRM"),
+            (Self::SignalNative, "SIGTERM") => Intrinsic::ObjectRuntimeExport("_signal.SIGTERM"),
+            (Self::Signal | Self::SignalNative, "alarm") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("_signal.alarm")
+            }
+            (Self::Signal, "SIGALRM") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("signal.SIGALRM")
+            }
+            (Self::Signal, "Signals") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("signal.Signals")
+            }
             // Native executables have no adaptive bytecode interpreter.
             (Self::Opcode, "ENABLE_SPECIALIZATION" | "ENABLE_SPECIALIZATION_FT") => {
                 Intrinsic::IntConstant(0)
