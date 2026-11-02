@@ -717,15 +717,41 @@ class _TypedDictSymbol:
         raise TypeError("Cannot stringify annotation containing string formatting")
 
     def _binary(op, precedence, *, reverse=False, comparison=False):
+        # Powers bind to the right. Nested comparisons need parentheses on either side.
+        left_precedence = precedence + (comparison or op == "**")
+        right_precedence = precedence + (op != "**")
+
         def binary(self, other):
             left, right = (other, self) if reverse else (self, other)
             return self.__derived__(
-                (*self.__operand__(left, precedence + comparison), f" {op} ",
-                 *self.__operand__(right, precedence + 1)), precedence)
+                (*self.__operand__(left, left_precedence), f" {op} ",
+                 *self.__operand__(right, right_precedence)), precedence)
         return binary
 
+    __pow__ = _binary("**", 13)
+    __rpow__ = _binary("**", 13, reverse=True)
+    __mul__ = _binary("*", 11)
+    __rmul__ = _binary("*", 11, reverse=True)
+    __matmul__ = _binary("@", 11)
+    __rmatmul__ = _binary("@", 11, reverse=True)
+    __truediv__ = _binary("/", 11)
+    __rtruediv__ = _binary("/", 11, reverse=True)
+    __floordiv__ = _binary("//", 11)
+    __rfloordiv__ = _binary("//", 11, reverse=True)
+    __mod__ = _binary("%", 11)
+    __rmod__ = _binary("%", 11, reverse=True)
     __add__ = _binary("+", 10)
     __radd__ = _binary("+", 10, reverse=True)
+    __sub__ = _binary("-", 10)
+    __rsub__ = _binary("-", 10, reverse=True)
+    __lshift__ = _binary("<<", 9)
+    __rlshift__ = _binary("<<", 9, reverse=True)
+    __rshift__ = _binary(">>", 9)
+    __rrshift__ = _binary(">>", 9, reverse=True)
+    __and__ = _binary("&", 8)
+    __rand__ = _binary("&", 8, reverse=True)
+    __xor__ = _binary("^", 7)
+    __rxor__ = _binary("^", 7, reverse=True)
     __or__ = _binary("|", 6)
     __ror__ = _binary("|", 6, reverse=True)
     __eq__ = _binary("==", 5, comparison=True)
@@ -735,6 +761,16 @@ class _TypedDictSymbol:
     __gt__ = _binary(">", 5, comparison=True)
     __ge__ = _binary(">=", 5, comparison=True)
     del _binary
+
+    def _unary(op):
+        def unary(self):
+            return self.__derived__((op, *self.__operand__(self, 12)), 12)
+        return unary
+
+    __pos__ = _unary("+")
+    __neg__ = _unary("-")
+    __invert__ = _unary("~")
+    del _unary
 
 
 class _TypedDictNames(dict):
