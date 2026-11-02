@@ -5,7 +5,7 @@ use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::ops::Range;
 
 use super::super::exceptions::Result;
-use super::{Bytes, Error, close_file, errno_error};
+use super::{Bytes, Error, FileState, Kind, Stream, close_file, errno_error};
 
 pub(super) struct Random {
     file: File,
@@ -16,6 +16,51 @@ pub(super) struct Random {
     pos: usize,
     read_end: usize,
     dirty: Option<Range<usize>>,
+    truncating_name: Option<String>,
+}
+
+impl FileState {
+    /// Whether truncate is invoking the size object's index protocol on this stream.
+    pub(crate) fn random_truncating(&self) -> bool {
+        matches!(&self.stream, Some(Stream::Random(file)) if file.truncating_name.is_some())
+    }
+
+    /// A size object's index method can call back into the same buffered stream.
+    pub(crate) fn check_random_reentry(&self) -> Result<()> {
+        if let Some(Stream::Random(file)) = &self.stream
+            && let Some(name) = &file.truncating_name
+        {
+            return Err(Error::new(
+                Kind::RuntimeError,
+                format!("reentrant call inside <_io.BufferedRandom name={name}>"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Flush and rewind to the logical cursor before converting the optional Python size.
+    pub(crate) fn begin_random_truncate(&mut self, name: Option<String>) -> Result<()> {
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "truncate of closed file"));
+        };
+        file.flush().map_err(errno_error)?;
+        file.truncating_name = name;
+        Ok(())
+    }
+
+    /// Release the reentrancy guard even if size conversion failed. A resize preserves the cursor.
+    pub(crate) fn finish_random_truncate(&mut self, size: Option<i64>) -> Result<()> {
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "truncate of closed file"));
+        };
+        file.truncating_name = None;
+        if let Some(size) = size {
+            let size = u64::try_from(size)
+                .map_err(|_| errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?;
+            file.file.set_len(size).map_err(errno_error)?;
+        }
+        Ok(())
+    }
 }
 
 impl Random {
@@ -32,6 +77,7 @@ impl Random {
             pos: 0,
             read_end: 0,
             dirty: None,
+            truncating_name: None,
         })
     }
 

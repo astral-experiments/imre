@@ -25,6 +25,17 @@ def current():
     else:
         raise AssertionError("the backing file descriptor survived close")
 
+    with tempfile.SpooledTemporaryFile(4, dir=".") as stream:
+        stream.write(b"abcdef")
+        stream.seek(0)
+        assert stream.read(2) == b"ab"
+        assert stream.truncate() == stream.tell() == 2
+        stream.seek(0)
+        assert stream.read() == b"ab"
+        assert stream.truncate(5) == 5 and stream.tell() == 2
+        assert stream.read() == bytes(3)
+        assert os.fstat(stream.fileno()).st_size == 5
+
     with tempfile.SpooledTemporaryFile(1, dir="missing-spool-directory") as memory:
         try:
             memory.write(b"retry")

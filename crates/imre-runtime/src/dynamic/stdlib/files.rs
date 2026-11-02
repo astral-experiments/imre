@@ -542,7 +542,7 @@ pub(super) fn call(
     }
 }
 
-fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
+pub(super) fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
     let whence = match value {
         None => 0,
         Some(value) => ctx
