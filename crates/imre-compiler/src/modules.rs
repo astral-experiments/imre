@@ -1891,6 +1891,12 @@ impl IntrinsicModule {
             }
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
             (Self::Sys, "getsizeof") => Intrinsic::ObjectRuntimeExport("sys.getsizeof"),
+            (Self::Sys, "get_asyncgen_hooks") => {
+                Intrinsic::ObjectRuntimeExport("sys.get_asyncgen_hooks")
+            }
+            (Self::Sys, "set_asyncgen_hooks") => {
+                Intrinsic::ObjectRuntimeExport("sys.set_asyncgen_hooks")
+            }
             (Self::Sys, "is_finalizing") => Intrinsic::ObjectRuntimeExport("sys.is_finalizing"),
             (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
             (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,

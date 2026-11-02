@@ -2670,6 +2670,7 @@ for name in ("md4", "ripemd160"):
             "boxed_sys_getframe.py",
             "boxed_sys_getsizeof.py",
             "boxed_sys_audit.py",
+            "boxed_sys_asyncgen_hooks.py",
             "boxed_sys_audit_recursion.py",
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
