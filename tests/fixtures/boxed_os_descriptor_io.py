@@ -46,6 +46,13 @@ def check_sendfile():
 def current():
     if sys.platform == "linux":
         check_sendfile()
+    assert os.strerror is posix.strerror
+    try:
+        os.fstat(-1)
+    except OSError as error:
+        assert os.strerror(Index(error.errno)) == error.strerror
+    else:
+        raise AssertionError("fstat accepted a negative descriptor")
     assert os.read is posix.read and os.write is posix.write
     assert read is posix.read and write is posix.write
     if sys.platform == "linux" and sys.maxsize == 2**63 - 1:

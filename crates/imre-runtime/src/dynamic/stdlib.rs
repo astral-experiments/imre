@@ -670,7 +670,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
         ("posixpath", "dirname") => ctx.builtin("os.path.dirname"),
-        ("os" | "posix", "getcwd" | "getcwdb") if cfg!(unix) => {
+        ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
@@ -1537,6 +1537,25 @@ pub(super) fn call(
     #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
         return os::scheduler::get_policy(ctx, args, kwargs);
+    }
+    if name == "posix.strerror" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "posix.strerror() takes no keyword arguments",
+            ));
+        }
+        let [code] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.strerror() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let code = os::c_int(ctx, *code)?;
+        return Ok(ctx.text_codepoints(crate::sys::strerror(code)?));
     }
     if name == "posix.urandom" {
         return os::urandom(ctx, args, kwargs);
