@@ -434,8 +434,8 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     ctx.bind(scope, "__slots__", slots);
     let doc = ctx.text(format!("{typename}({})", names.join(", ")));
     ctx.bind(scope, "__doc__", doc);
-    let make = ctx.builtin("_collections._make");
-    let make = super::method_decorator::class_method(ctx, make)?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_make")?;
+    let make = ctx.call(factory, vec![name, fields], Vec::new())?;
     ctx.bind(scope, "_make", make);
     let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
     bind_new(ctx, scope, &typename, &names, defaults)?;
@@ -627,38 +627,6 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
         scalar,
         namespace: None,
         dictionary: None,
-        property: None,
-        weak_reference: None,
-        cycle: None,
-        member_values: None,
-        memory_stream: None,
-    }))
-}
-
-/// Build the descriptor's actual receiver class from the iterable's positional values.
-pub(super) fn make(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [Some(class), Some(iterable)] =
-        builtins::bind_method_arguments("_make", args, kwargs, ["cls", "iterable"], 2)?
-    else {
-        return Err(Error::new("TypeError", "_make() requires an iterable"));
-    };
-    let names = ctx
-        .namedtuple_fields(class)
-        .ok_or_else(|| Error::new("TypeError", "expected a named tuple class"))?;
-    let values = collect(ctx, iterable)?;
-    if names.len() != values.len() {
-        return Err(Error::new(
-            "TypeError",
-            format!("Expected {} arguments, got {}", names.len(), values.len()),
-        ));
-    }
-    let fields = names.iter().cloned().zip(values).collect();
-    Ok(ctx.alloc(Value::Instance {
-        class,
-        namespace: None,
-        fields,
-        dictionary: None,
-        scalar: None,
         property: None,
         weak_reference: None,
         cycle: None,
