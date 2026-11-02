@@ -2,6 +2,27 @@ from typing import TypedDict, is_typeddict
 
 
 def check_inheritance():
+    from annotationlib import ForwardRef as AnnotationRef
+    from operator import getitem
+    from typing import Annotated, ForwardRef, TypeVarTuple, get_args, get_origin
+
+    nested = Annotated[Annotated[str, "inner"], "outer"]
+    assert nested.__args__ == (str,) and nested.__metadata__ == ("inner", "outer")
+    assert get_origin(nested) is Annotated and get_args(nested) == (str, "inner", "outer")
+    assert ForwardRef is AnnotationRef
+    assert Annotated["Target", 1].__origin__ == ForwardRef("Target", is_class=True)
+    assert nested.copy_with((int,)) == Annotated[int, "inner", "outer"]
+    assert nested.__reduce__() == (getitem, (Annotated, (str, "inner", "outer")))
+    pack = TypeVarTuple("Ts")
+    packed = Annotated[pack, "unit"]
+    assert packed.__parameters__ == (pack,)
+    try:
+        packed[int]
+    except TypeError as exc:
+        assert str(exc) == "Substitution of bare TypeVarTuple is not supported"
+    else:
+        raise AssertionError("substituted a bare TypeVarTuple")
+
     class Left(TypedDict):
         left: bool
         shared: int
