@@ -151,6 +151,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             Intrinsic::ObjectRuntimeExport("posix.waitstatus_to_exitcode")
         }
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
+        "getgrouplist" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.getgrouplist")
+        }
         "getgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getgroups"),
         "cpu_count" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.cpu_count")

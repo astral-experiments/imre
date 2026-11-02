@@ -1758,6 +1758,10 @@ pub(super) fn call(
     if let Some(op @ ("posix_spawn" | "posix_spawnp")) = name.strip_prefix("posix.") {
         return posix_spawn::call(ctx, op, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if name == "posix.getgrouplist" {
+        return grp::getgrouplist(ctx, args, kwargs);
+    }
     if name == "posix.strerror" {
         if !kwargs.is_empty() {
             return Err(Error::new(

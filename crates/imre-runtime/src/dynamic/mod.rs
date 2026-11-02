@@ -2873,6 +2873,8 @@ impl Context {
                     let function = self.builtin(&format!("posix.{name}"));
                     self.bind(scope, name, function);
                 }
+                let getgrouplist = self.builtin("posix.getgrouplist");
+                self.bind(scope, "getgrouplist", getgrouplist);
                 for (attr, flag) in [
                     ("SPLICE_F_MOVE", libc::SPLICE_F_MOVE),
                     ("SPLICE_F_NONBLOCK", libc::SPLICE_F_NONBLOCK),
@@ -2972,6 +2974,11 @@ impl Context {
                     ] {
                         let value = self.lookup_attr(posix, attr)?;
                         self.bind(scope, attr, value);
+                    }
+                    match self.lookup_attr(posix, "getgrouplist") {
+                        Ok(value) => self.bind(scope, "getgrouplist", value),
+                        Err(error) if self.is_attribute_error(&error) => (),
+                        Err(error) => return Err(error),
                     }
                 }
                 #[cfg(unix)]
