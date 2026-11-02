@@ -6,21 +6,23 @@ from operator import index as _index
 from sys import maxsize as _maxsize
 
 
-def _make_chain(_advance, _set, _allocate):
+def _make_chain(_advance, _allocate):
     class chain:
         """Yield items from each iterable in order."""
 
-        __slots__ = ("_sources", "_active")
+        __slots__ = ()
+        __init__ = object.__init__
 
-        def __init__(self, *iterables):
-            _set(self, False, iter(iterables))
-            _set(self, True, None)
+        def __new__(cls, /, *iterables, **kwargs):
+            return _allocate(__class__, cls, iterables, **kwargs)
 
         @classmethod
         def from_iterable(cls, iterable, /):
-            return _allocate(__class__, cls, iter(iterable))
+            return _allocate(__class__, cls, iterable)
 
         def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a chain instance")
             return self
 
         def __next__(self):
@@ -31,7 +33,7 @@ def _make_chain(_advance, _set, _allocate):
     return chain
 
 
-chain = _make_chain(_itertools._chain_next, _itertools._chain_set, _itertools._chain_allocate)
+chain = _make_chain(_itertools._chain_next, _itertools._chain_allocate)
 
 
 def _make_cycle(_allocate, _advance):

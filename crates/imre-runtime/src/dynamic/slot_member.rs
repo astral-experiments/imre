@@ -581,7 +581,8 @@ impl Context {
                     .into_iter()
                     .any(|base| match self.heap.get(base) {
                         Value::Class { .. }
-                            if self.classes.get(super::namespace::CLASS) == Some(&base) =>
+                            if self.classes.get(super::namespace::CLASS) == Some(&base)
+                                || self.itertools_layout(base).is_some() =>
                         {
                             true
                         }
@@ -612,9 +613,10 @@ impl Context {
             let candidate = lineage
                 .into_iter()
                 .find(|&owner| match self.heap.get(owner) {
-                    // SimpleNamespace stores its dictionary in the object itself.
+                    // These types own native storage independently of Python member slots.
                     Value::Class { .. }
-                        if self.classes.get(super::namespace::CLASS) == Some(&owner) =>
+                        if self.classes.get(super::namespace::CLASS) == Some(&owner)
+                            || self.itertools_layout(owner).is_some() =>
                     {
                         true
                     }

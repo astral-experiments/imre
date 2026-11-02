@@ -1,14 +1,63 @@
 use super::{Context, Error, Id, NONE, Result, Value};
 
+pub(super) fn chain_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [base, class, iterable] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "invalid chain allocation arguments",
+        ));
+    };
+    if ctx.itertools_layout(*base) != Some("itertools.chain")
+        || ctx.allocation_base(*class) != Some(*base)
+    {
+        return Err(Error::new("TypeError", "expected a chain subclass"));
+    }
+    if !kwargs.is_empty() {
+        // Only a subtype with its own initialization slot can consume keywords.
+        let object_init = ctx.builtin("object.__init__");
+        if *class == *base
+            || ctx
+                .class_attr(*class, "__init__")
+                .is_none_or(|init| init == object_init)
+        {
+            return Err(Error::new(
+                "TypeError",
+                "chain() takes no keyword arguments",
+            ));
+        }
+    }
+    let source = ctx.iterator(*iterable)?;
+    ctx.heap.keep(source);
+    let cursors = ctx.alloc(Value::List(vec![source, NONE]));
+    Ok(instance_with_state(ctx, *base, *class, cursors))
+}
+
+fn chain_cursors(ctx: &mut Context, state: Id) -> Result<&mut [Id; 2]> {
+    if let Value::List(cursors) = ctx.heap.get_mut(state)
+        && let Ok(pair) = cursors.as_mut_slice().try_into()
+    {
+        return Ok(pair);
+    }
+    Err(Error::new("TypeError", "invalid chain state receiver"))
+}
+
 /// Advance the current child, obtaining another from the outer iterator only on exhaustion.
 pub(super) fn chain_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [base, receiver] = args else {
         return Err(Error::new("TypeError", "expected a chain instance"));
     };
-    if !matches!(ctx.heap.get(*receiver), Value::Instance { class, .. } if ctx.direct_subclass(*class, *base))
-    {
-        return Err(Error::new("TypeError", "expected a chain instance"));
+    let state = match ctx.heap.get(*receiver) {
+        Value::Instance {
+            member_values: Some(values),
+            ..
+        } if ctx.itertools_layout(*base) == Some("itertools.chain") => values.get(base).copied(),
+        _ => None,
     }
+    .ok_or_else(|| Error::new("TypeError", "expected a chain instance"))?;
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -20,31 +69,30 @@ pub(super) fn chain_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     let step = ctx.heap.temporary_mark();
     let mut limit = ctx.heap.streaming_collection_limit();
     let result = (|| loop {
-        let Value::Instance { fields, .. } = ctx.heap.get(*receiver) else {
-            return Err(Error::new("TypeError", "expected a chain instance"));
-        };
-        let (Some(&source), Some(&active)) = (fields.get("_sources"), fields.get("_active")) else {
-            return Err(Error::new("TypeError", "invalid chain state receiver"));
-        };
+        let [source, active] = *chain_cursors(ctx, state)?;
         if source == NONE {
             return Err(Error::new("StopIteration", ""));
         }
         let active = if active == NONE {
             ctx.heap.keep(source);
-            let child = ctx
-                .next_item(source)
-                .and_then(|item| item.ok_or_else(|| Error::new("StopIteration", "")))
-                .inspect_err(|_| set_chain_field(ctx, *receiver, "_sources", NONE))?;
+            let child = match ctx.next_item(source) {
+                Ok(Some(child)) => child,
+                result => {
+                    chain_cursors(ctx, state)?[0] = NONE;
+                    return Err(result
+                        .err()
+                        .unwrap_or_else(|| Error::new("StopIteration", "")));
+                }
+            };
             ctx.heap.keep(child);
             let active = match ctx.iterator(child) {
                 Ok(active) => active,
                 Err(error) => {
-                    set_chain_field(ctx, *receiver, "_active", NONE);
-                    set_chain_field(ctx, *receiver, "_sources", NONE);
+                    *chain_cursors(ctx, state)? = [NONE, NONE];
                     return Err(error);
                 }
             };
-            set_chain_field(ctx, *receiver, "_active", active);
+            chain_cursors(ctx, state)?[1] = active;
             active
         } else {
             active
@@ -54,23 +102,12 @@ pub(super) fn chain_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         if let Some(item) = ctx.next_item(active)? {
             return Ok(item);
         }
-        set_chain_field(ctx, *receiver, "_active", NONE);
+        chain_cursors(ctx, state)?[1] = NONE;
         ctx.heap.release_temporaries_since(step);
         ctx.collect_streaming_garbage(&mut limit);
     })();
     ctx.heap.release_temporaries_since(roots);
     result
-}
-
-fn set_chain_field(ctx: &mut Context, receiver: Id, key: &str, value: Id) {
-    let Value::Instance { fields, .. } = ctx.heap.get_mut(receiver) else {
-        unreachable!("live chain instance")
-    };
-    if let Some(slot) = fields.get_mut(key) {
-        *slot = value;
-    } else {
-        fields.insert(key.to_owned(), value);
-    }
 }
 
 const COUNT: &str = "itertools.count";

@@ -2842,7 +2842,6 @@ impl Context {
                     "_predicate_state",
                     "_chain_allocate",
                     "_chain_next",
-                    "_chain_set",
                 ] {
                     let value = self.builtin(&format!("{name}.{attr}"));
                     self.bind(scope, attr, value);
@@ -3415,6 +3414,7 @@ impl Context {
                     ("accumulate", "itertools.accumulate"),
                     ("pairwise", "itertools.pairwise"),
                     ("starmap", "itertools.starmap"),
+                    ("chain", "itertools.chain"),
                     ("takewhile", "itertools.takewhile"),
                     ("dropwhile", "itertools.dropwhile"),
                     ("compress", "itertools.compress"),

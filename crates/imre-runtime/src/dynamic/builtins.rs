@@ -1434,13 +1434,15 @@ pub(super) fn call(
         if args.len() != 1 || !kwargs.is_empty() {
             if let Some(&receiver) = args.first() {
                 let tuple = ctx.builtin("tuple");
-                if ctx.instance_of(receiver, tuple) {
+                let cursor = matches!(ctx.heap.get(receiver), Value::Instance { class, .. }
+                    if ctx.allocation_base(*class).is_some_and(|base| ctx.itertools_layout(base).is_some()));
+                if ctx.instance_of(receiver, tuple) || cursor {
                     let class = ctx.exact_type(receiver)?;
                     if ctx
                         .class_attr(class, "__init__")
                         .is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__"))
                     {
-                        // Tuple subtypes consume their constructor arguments in __new__.
+                        // These native allocators consume their constructor arguments in __new__.
                         return Ok(NONE);
                     }
                 }

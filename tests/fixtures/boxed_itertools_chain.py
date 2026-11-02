@@ -35,6 +35,66 @@ def current():
 
     assert list(PrivateState([1], [2])) == [1, 2]
 
+    assert chain.__init__ is object.__init__
+    direct = chain([1, 2])
+    assert chain.__init__(direct, [9]) is None and list(direct) == [1, 2]
+
+    class Initialized(chain):
+        def __init__(self, *sources, label):
+            super().__init__()
+            self._sources = label
+            self.first = next(self)
+
+    initialized = Initialized([1, 2], label="example")
+    assert initialized.first == 1 and list(initialized) == [2]
+    assert initialized.__getstate__() == {"_sources": "example", "first": 1}
+    try:
+        object.__init__(initialized, [9])
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("object.__init__ accepted arguments for an overriding initializer")
+
+    class Constructed(chain):
+        def __new__(cls, *sources, label):
+            item = super().__new__(cls, *sources)
+            item.label = label
+            return item
+
+    constructed = Constructed([3, 4], label="example")
+    assert constructed.label == "example" and list(constructed) == [3, 4]
+    class Guard(type):
+        def __getattribute__(cls, name):
+            if name == "__init__":
+                raise AssertionError("consulted the metaclass for the initializer")
+            return super().__getattribute__(name)
+
+    class Plain(chain, metaclass=Guard):
+        pass
+
+    for subtype in (chain, Constructed, Plain):
+        try:
+            chain.__new__(subtype, [1], label="unclaimed")
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("accepted keywords without a subclass initializer")
+
+    class Mixin:
+        pass
+
+    class Compatible(Mixin, chain):
+        pass
+
+    assert list(Compatible([1])) == [1]
+    try:
+        class Incompatible(chain, list):
+            pass
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted incompatible native layouts")
+
     class Constructor(chain):
         def __new__(cls, *args):
             raise AssertionError("__new__")
