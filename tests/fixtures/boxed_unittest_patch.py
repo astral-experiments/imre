@@ -42,4 +42,19 @@ assert sys.stdout is original_stdout
 assert decorated(23) == 23
 assert decorated(42) == 42
 assert sys.exit is original_exit
+
+
+def with_default(value=7):
+    return value
+
+
+with patch('__main__.with_default.__defaults__', (9,)):
+    assert with_default() == 9
+assert with_default() == 7
+
+import __main__
+with patch('__main__.open', with_default):
+    assert __main__.open() == 7
+assert not hasattr(__main__, 'open')
+
 print("patch restored")

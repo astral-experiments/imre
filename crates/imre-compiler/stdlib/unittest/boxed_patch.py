@@ -1,7 +1,9 @@
 """Attribute patching on live Python objects, including module namespaces."""
 
+import builtins
 from functools import wraps
 from importlib import import_module
+from types import ModuleType
 
 
 DEFAULT = object()
@@ -46,6 +48,8 @@ class _patch:
         except (AttributeError, KeyError):
             original = getattr(target, name, DEFAULT)
             local = False
+        if isinstance(target, ModuleType) and not name.startswith('_') and hasattr(builtins, name):
+            self.create = True
         if original is DEFAULT and not self.create:
             raise AttributeError(f"{target} does not have the attribute {name!r}")
         replacement = MagicMock(name=name) if self.new is DEFAULT else self.new
@@ -62,7 +66,12 @@ class _patch:
                 setattr(self.target, self.attribute, self.original)
             else:
                 delattr(self.target, self.attribute)
-                if self.original is not DEFAULT and not hasattr(self.target, self.attribute):
+                # Deleting function metadata can reset the slot to a readable default.
+                if self.original is not DEFAULT and (
+                    not hasattr(self.target, self.attribute)
+                    or self.attribute in ('__doc__', '__module__', '__defaults__',
+                                          '__annotations__', '__kwdefaults__')
+                ):
                     setattr(self.target, self.attribute, self.original)
             del self.target
             del self.original
