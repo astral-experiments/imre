@@ -97,6 +97,17 @@ pub(super) fn tuple_end(out: &mut Vec<u8>, protocol: u8, len: usize) {
     });
 }
 
+/// Replace the in-progress elements with a tuple that a recursive child memoized.
+pub(super) fn recursive_tuple(out: &mut Vec<u8>, protocol: u8, len: usize, index: u32) {
+    if protocol == 0 || (protocol >= 2 && len <= 3) {
+        // The text protocol also needs a POP for its MARK.
+        out.extend(std::iter::repeat_n(b'0', len + usize::from(protocol == 0)));
+    } else {
+        out.push(b'1'); // POP_MARK
+    }
+    memo_get(out, protocol, index);
+}
+
 pub(super) fn memo_put(out: &mut Vec<u8>, protocol: u8, id: u32) {
     if protocol >= 4 {
         out.push(0x94); // MEMOIZE
