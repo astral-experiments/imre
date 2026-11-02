@@ -3703,6 +3703,7 @@ impl SourceGraph {
         command: &crate::PythonCommand,
         options: &crate::CompileOptions,
         fs: FileSystem<'_>,
+        ordered_command_import: &mut bool,
     ) -> Result<Self, String> {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
         let mut loader = Loader::new(root.clone(), &options.extension_paths, fs)?;
@@ -3717,7 +3718,14 @@ impl SourceGraph {
             &command.source,
             crate::SourceKind::Command,
         )?;
-        loader.scan(entry)?;
+        if let Err(error) = loader.scan(entry) {
+            // Only a valid command blocked at its own late import may switch to
+            // the boxed importer, which executes statements in source order.
+            *ordered_command_import = loader.late_entry_import
+                && loader.modules[entry].parsed.has_no_syntax_errors()
+                && loader.session.has_valid_semantic_syntax(entry);
+            return Err(error);
+        }
         let reachable_only = loader.reachable_only;
         let mut graph = loader.finish(
             entry,
@@ -4193,6 +4201,7 @@ struct Loader<'a> {
     /// A from-import of a still-initializing module observes the value at that point.
     partial_value_imports: HashSet<DefinitionId>,
     ordered_imports: bool,
+    late_entry_import: bool,
     import_depth: usize,
     allow_imports: bool,
     skip_current_root: bool,
@@ -4237,6 +4246,7 @@ impl<'a> Loader<'a> {
             loading: HashSet::new(),
             partial_value_imports: HashSet::new(),
             ordered_imports: false,
+            late_entry_import: false,
             import_depth: 0,
             allow_imports: true,
             skip_current_root: false,
@@ -4626,6 +4636,7 @@ impl<'a> Loader<'a> {
                                     || nested_source && matches!(stmt, ast::Stmt::Expr(_))
                             });
                         if id == 0 || !simple && !ordered {
+                            self.late_entry_import = id == 0;
                             return Err(self.modules[id].error(
                                 statement,
                                 "imports must precede executable module statements",

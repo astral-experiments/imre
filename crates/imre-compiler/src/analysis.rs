@@ -351,6 +351,12 @@ impl Session {
         Ok(parsed)
     }
 
+    pub(crate) fn has_valid_semantic_syntax(&self, module: usize) -> bool {
+        ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]))
+            .semantic_syntax_errors()
+            .is_empty()
+    }
+
     /// Width proved before ty expands the display's field types.
     pub(crate) fn tuple_spread_width(&self, module: usize, start: TextSize) -> Option<usize> {
         self.tuple_spreads.get(module)?.get(&start).copied()

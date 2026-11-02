@@ -122,9 +122,15 @@ impl CompileOptions {
         path: &Path,
         module_root: Option<&Path>,
         filesystem: watch::FileSystem<'_>,
+        ordered_command_import: &mut bool,
     ) -> Result<modules::SourceGraph, String> {
         if let Some(command) = &self.command {
-            return modules::SourceGraph::command(command, self, filesystem);
+            return modules::SourceGraph::command(
+                command,
+                self,
+                filesystem,
+                ordered_command_import,
+            );
         }
         if let Some((flags, executable)) = &self.script_startup {
             return modules::SourceGraph::script(path, flags, executable, self, filesystem);
@@ -302,13 +308,15 @@ fn object_fallback<T>(
         .map(boxed)
         .ok_or_else(|| "could not compile the module entry".to_owned());
     }
-    let (error, graph) = match options.load_graph(path, module_root, filesystem) {
-        Ok(mut graph) => match lower(&mut graph) {
-            Ok(value) => return Ok(value),
-            Err(error) => (error, Some(graph)),
-        },
-        Err(error) => (error, None),
-    };
+    let mut ordered_command_import = false;
+    let (error, graph) =
+        match options.load_graph(path, module_root, filesystem, &mut ordered_command_import) {
+            Ok(mut graph) => match lower(&mut graph) {
+                Ok(value) => return Ok(value),
+                Err(error) => (error, Some(graph)),
+            },
+            Err(error) => (error, None),
+        };
     // Python invocations and explicit object imports enforce annotated calls in
     // the boxed runtime, where their TypeError can be caught by the program.
     let checked_file = options.python_startup().is_none() && !options.runtime_imports;
@@ -374,7 +382,7 @@ fn object_fallback<T>(
         module_root,
         options,
         runtime_imports,
-        operation,
+        operation.or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
         registered_imports,
         check_returns,
     )? {
