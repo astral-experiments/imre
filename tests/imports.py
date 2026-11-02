@@ -16,6 +16,23 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "optional_import_keeps_typed_call_check": ({
+        "main.py": (
+            "import http.client\n"
+            "try:\n    import ssl\nexcept ImportError:\n    ssl = None\n"
+            "from urllib.request import urlopen\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(urlopen('data:,hello').read(), typed('wrong'))\n"
+        ),
+    }, "invalid-argument-type"),
+    "optional_presence_keeps_later_call_check": ({
+        "main.py": (
+            "try:\n    import sys as available\nexcept ImportError:\n    available = None\n"
+            "import helper\nassert available is not None\n"
+            "getattr(helper, 'hidd' + 'en')()\n"
+        ),
+        "helper.py": HELPER,
+    }, "unknown function or unsupported builtin arguments"),
     "urlopen_keeps_typed_call_check": ({
         "main.py": (
             "from urllib.request import urlopen\n"
@@ -373,6 +390,16 @@ ACCEPTED = {
             "patcher = patch.object\nwith patcher(Owner, 'value', 2):\n    assert Owner.value == 2\n"
             "assert Owner.value == 1\n"
         ),
+    },
+    "optional_stdlib_entry_import": {
+        "main.py": (
+            "try:\n    import sys as available\nexcept ImportError:\n    available = None\n"
+            f"try:\n    import {'pwd' if os.name == 'nt' else 'winreg'} as missing\n"
+            "except ImportError:\n    missing = None\n"
+            "import after\nassert available is not None\nassert missing is None\n"
+            "print(available is after.sys, missing is None)\n"
+        ),
+        "after.py": "import sys\nprint('after')\n",
     },
     "optional_import_error_alternatives": {
         "main.py": "from pkg.adapter import chosen, available, recovered\nprint(chosen, available, recovered)\n",

@@ -294,8 +294,9 @@ fn object_fallback<T>(
             graph.session.diagnostic_copy()?.check_fallback_contracts(
                 skipped.as_deref(),
                 &overloads,
-                !graph.needs_object_runtime.get()
-                    && graph.object_builtin_errors.borrow().contains(&error),
+                !graph.modules[graph.entry].optional_imports.is_empty()
+                    || !graph.needs_object_runtime.get()
+                        && graph.object_builtin_errors.borrow().contains(&error),
                 graph
                     .modules
                     .iter()

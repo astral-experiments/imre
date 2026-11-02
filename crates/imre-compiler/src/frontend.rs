@@ -4555,6 +4555,15 @@ impl<'a> Checker<'a> {
             .map(|(_, kind)| *kind)
     }
 
+    fn checked_optional_name(&self, expression: &ast::Expr) -> bool {
+        expression.as_name_expr().is_some_and(|name| {
+            self.graph.modules[self.module]
+                .optional_imports
+                .values()
+                .any(|alias| alias == name.id.as_str())
+        })
+    }
+
     fn statement(
         &mut self,
         statement: &ast::Stmt,
@@ -4571,6 +4580,15 @@ impl<'a> Checker<'a> {
                     && !ast::helpers::any_over_body(later, |expr| matches!(
                         expr, ast::Expr::Name(name) if name.id == target.id
                     )))
+                }
+                // The complete assertion runs in the object program. A pure presence
+                // check has no result or binding needed by the following statements.
+                ast::Stmt::Assert(a) if self.module_scope && a.msg.is_none() => {
+                    matches!(&*a.test, ast::Expr::Compare(test)
+                        if matches!(test.ops.as_ref(), [ast::CmpOp::Is | ast::CmpOp::IsNot])
+                        && matches!(test.operands.as_ref(),
+                            [name, ast::Expr::NoneLiteral(_)] | [ast::Expr::NoneLiteral(_), name]
+                            if self.checked_optional_name(name)))
                 }
                 _ => false,
             };
@@ -5045,6 +5063,16 @@ impl<'a> Checker<'a> {
                 self.restore_state(successful);
                 self.apply_facts(&assert.test, true);
                 Some(result)
+            }
+            ast::Stmt::Try(_)
+                if self.graph.modules[self.module]
+                    .optional_imports
+                    .contains_key(&statement.range()) =>
+            {
+                let error =
+                    self.scoped_builtin_error("an optional standard-library import", statement);
+                self.defer_object_error(&error);
+                return Ok((Vec::new(), true));
             }
             ast::Stmt::Try(try_) if !try_.is_star => {
                 return self.try_statement(try_);
@@ -6406,9 +6434,11 @@ impl<'a> Checker<'a> {
         }
         let binding = self.resolve(expression);
         if binding == Some(Binding::ConditionalValue) {
-            return Err(
-                self.object_runtime_export("a value selected by a module guard", expression)
-            );
+            let operation = "a value selected by a module guard";
+            if self.checked_optional_name(expression) {
+                return Err(self.object_export_error(operation, expression));
+            }
+            return Err(self.object_runtime_export(operation, expression));
         }
         if let Some(Binding::Intrinsic(symbol)) = binding {
             if let Some((flags, executable)) = &self.graph.command_startup {
