@@ -314,8 +314,7 @@ impl Session {
         if let Some(error) = parsed.errors().first() {
             return Err(format!("{path}: {error}"));
         }
-        check_star_import_scopes(source, &parsed.syntax().body)
-            .map_err(|error| format!("{path}:{error}"))?;
+        check_scope_syntax(source, parsed.syntax()).map_err(|error| format!("{path}:{error}"))?;
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         // The parser has already checked Python indentation; file inputs additionally
         // enforce Imre's source-file policy. -c accepts legal tab-indented blocks.
@@ -1310,42 +1309,26 @@ impl<'a> Visitor<'a> for LoopTransfers {
     fn visit_expr(&mut self, _expr: &'a Expr) {}
 }
 
-/// Wildcard imports can only publish names in a module body, including its conditional suites.
-pub(crate) fn check_star_import_scopes(source: &str, body: &[Stmt]) -> Result<(), String> {
-    #[derive(Default)]
-    struct Scopes {
-        nested: bool,
-        invalid: Option<TextRange>,
-    }
-    impl<'a> Visitor<'a> for Scopes {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            if self.invalid.is_some() {
-                return;
-            }
-            if self.nested
-                && let Stmt::ImportFrom(import) = stmt
-                && let Some(alias) = import.names.iter().find(|alias| alias.name.as_str() == "*")
-            {
-                self.invalid = Some(alias.range());
-                return;
-            }
-            let outer = self.nested;
-            self.nested |= matches!(stmt, Stmt::ClassDef(_) | Stmt::FunctionDef(_));
-            walk_stmt(self, stmt);
-            self.nested = outer;
-        }
-        fn visit_expr(&mut self, _: &'a Expr) {}
-    }
-    let mut scopes = Scopes::default();
-    scopes.visit_body(body);
-    match scopes.invalid {
-        Some(range) => Err(crate::frontend::error(
+/// Check code-scope restrictions shared by typed and object compilation.
+pub(crate) fn check_scope_syntax(
+    source: &str,
+    module: &ruff_python_ast::ModModule,
+) -> Result<(), String> {
+    if let Some(range) = imre_ast::misplaced_star_import(&module.body) {
+        return Err(crate::frontend::error(
             source,
             &range,
             "SyntaxError: import * only allowed at module level",
-        )),
-        None => Ok(()),
+        ));
     }
+    if let Some((range, message)) = imre_ast::async_generators::syntax_error(module) {
+        return Err(crate::frontend::error(
+            source,
+            &range,
+            &format!("SyntaxError: {message}"),
+        ));
+    }
+    Ok(())
 }
 
 struct SuiteLimits<'t> {
