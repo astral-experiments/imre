@@ -1,7 +1,7 @@
 import _socket
-from _socket import getaddrinfo as raw_getaddrinfo
+from _socket import getaddrinfo as raw_getaddrinfo, getservbyport as raw_getservbyport
 import socket
-from socket import AddressFamily, SocketKind, getaddrinfo
+from socket import AddressFamily, SocketKind, getaddrinfo, getservbyname
 
 assert socket.gaierror is _socket.gaierror
 assert issubclass(socket.gaierror, OSError)
@@ -43,3 +43,19 @@ except socket.gaierror:
     raise AssertionError("herror matched its sibling gaierror")
 except OSError as exc:
     assert type(exc) is socket.herror and exc.errno == 1
+
+assert getservbyname is _socket.getservbyname
+assert raw_getservbyport is socket.getservbyport
+try:
+    dns_port = getservbyname("domain", "udp")
+except OSError:
+    pass  # Service database entries vary by host.
+else:
+    canonical = raw_getservbyport(dns_port, "udp")
+    assert getservbyname(canonical, "udp") == dns_port
+try:
+    socket.getservbyport(-1, None)
+except TypeError:
+    pass
+else:
+    raise AssertionError("the protocol must be parsed before checking port bounds")

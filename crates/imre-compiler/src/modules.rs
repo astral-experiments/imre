@@ -1693,6 +1693,8 @@ impl IntrinsicModule {
                 "socket" => "_socket.socket",
                 "socketpair" => "_socket.socketpair",
                 "close" => "_socket.close",
+                "getservbyname" => "_socket.getservbyname",
+                "getservbyport" => "_socket.getservbyport",
                 "gethostname" => "_socket.gethostname",
                 "gethostbyname" => "_socket.gethostbyname",
                 "gethostbyaddr" => "_socket.gethostbyaddr",
@@ -1751,6 +1753,12 @@ impl IntrinsicModule {
             }
             (Self::Socket, "socketpair") => Intrinsic::ObjectRuntimeExport("socket.socketpair"),
             (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
+            (Self::Socket, "getservbyname") => {
+                Intrinsic::ObjectRuntimeExport("socket.getservbyname")
+            }
+            (Self::Socket, "getservbyport") => {
+                Intrinsic::ObjectRuntimeExport("socket.getservbyport")
+            }
             (Self::Socket, "gethostname") => Intrinsic::ObjectRuntimeExport("socket.gethostname"),
             (Self::Socket, "gethostbyname") => {
                 Intrinsic::ObjectRuntimeExport("socket.gethostbyname")
