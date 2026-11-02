@@ -18,7 +18,7 @@ mod init_hooks;
 mod record_hash;
 pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
-pub(crate) use exception_forwarders::ForwardingInitializer;
+pub(crate) use exception_forwarders::{ForwardingInitializer, mangle_fields, private_field};
 pub(crate) use exceptions::explicit_message_initializer;
 pub(crate) use inheritance::{direct_base_init, super_init, super_method};
 
@@ -806,7 +806,7 @@ fn collect_class(
                 }
                 let mut method = method.clone();
                 if forwarder.is_some() {
-                    exception_forwarders::mangle_fields(node.name.as_str(), &mut method);
+                    mangle_fields(node.name.as_str(), &mut method, |_| true);
                 }
                 methods.push(method);
                 method_kinds.push(kind);
