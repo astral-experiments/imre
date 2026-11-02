@@ -444,7 +444,7 @@ def lengths(count: int, name: str) -> int:
     for j in range(count):
         total += len(names[j])
     return total
-print(lengths(Expr::integer(input()), "row"))
+print(lengths(int(input()), "row"))
 "#;
         let reads_list = |source: &str| {
             let llvm = compile(source, &CompileOptions::default()).unwrap();
