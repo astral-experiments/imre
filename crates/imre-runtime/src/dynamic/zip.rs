@@ -203,12 +203,14 @@ impl Context {
                 format!("descriptor '{name}' of '{owner}' object needs an argument"),
             ));
         };
-        if !matches!(
-            (owner, self.heap.get(cursor)),
-            ("map", Value::Map { .. })
-                | ("filter", Value::Filter { .. })
-                | ("enumerate", Value::Enumerate { .. })
-        ) {
+        let accepts = match self.heap.get(cursor) {
+            Value::Map { .. } => owner == "map",
+            Value::Filter { .. } => owner == "filter",
+            Value::Enumerate { .. } => owner == "enumerate",
+            Value::DictIterator(iter) => owner == iter.class_name(),
+            _ => false,
+        };
+        if !accepts {
             return Err(Error::new(
                 "TypeError",
                 format!(

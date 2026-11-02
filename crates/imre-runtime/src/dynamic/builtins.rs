@@ -213,7 +213,7 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
 
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
-    matches!(
+    DictIterator::class(name).is_some() || matches!(
         name,
         "iterator"
             | "generator"
@@ -225,9 +225,6 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "bytearray_iterator"
             | "range_iterator"
             | "longrange_iterator"
-            | "dict_keyiterator"
-            | "dict_valueiterator"
-            | "dict_itemiterator"
             | "callable_iterator"
             | "fieldnameiterator"
             | "formatteriterator"
@@ -380,6 +377,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Float(_) if attr == "as_integer_ratio" => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
+        Value::DictIterator(iter) if DictIterator::METHODS.contains(&attr) => iter.class_name(),
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {

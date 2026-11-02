@@ -43,6 +43,9 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(members) = stdlib::datetime::members(owner) => {
                 Some((members.owner, attr, members.methods))
             }
+            Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
+                Some((class, attr, DictIterator::METHODS))
+            }
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
@@ -154,6 +157,9 @@ impl BuiltinDescriptor {
             }
             owner if stdlib::datetime::members(owner).is_some() => {
                 ctx.instance_of(receiver, ctx.builtins[owner])
+            }
+            owner if DictIterator::class(owner).is_some() => {
+                matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "object" => true,
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
