@@ -3776,6 +3776,9 @@ impl Context {
             return self.bind_attribute(hook, NONE, class);
         }
         if name == "__init__" {
+            if matches!(self.heap.get(obj), Value::Native(owner) if owner == "type") {
+                return Ok(self.builtin("type.__init__"));
+            }
             let tuple = self.builtin("tuple");
             if self.direct_subclass(obj, tuple) {
                 return Ok(self.builtin("object.__init__"));
@@ -5490,7 +5493,8 @@ impl Context {
                         .is_some_and(|owner| !HashState::is_provider_class(owner))
                     || matches!(
                         name.as_str(),
-                        "BaseException.__init__"
+                        "type.__init__"
+                            | "BaseException.__init__"
                             | "BaseException.add_note"
                             | "ImportError.__init__"
                             | "OSError.__init__"
@@ -5922,10 +5926,22 @@ impl Context {
                     }
                     instance
                 } else if self.has_base(callable, "type") {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "direct metaclass construction is unsupported",
-                    ));
+                    let [name, bases, namespace] = args.as_slice() else {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "type.__new__() takes exactly 3 arguments ({} given)",
+                                args.len()
+                            ),
+                        ));
+                    };
+                    return self.type_from_namespace(
+                        Some(callable),
+                        *name,
+                        *bases,
+                        *namespace,
+                        &kwargs,
+                    );
                 } else if self.has_base(callable, "module") {
                     self.allocate_module(callable)
                 } else if let Some(kind) = string_base {
@@ -6471,9 +6487,8 @@ impl Context {
         if !is_abc
             && Some(winner) != typed_dict_meta
             && ((!self.is_abc_metaclass(winner) && self.class_attr(winner, "__new__").is_some())
-                || ["__prepare__", "__init__"]
-                    .iter()
-                    .any(|name| self.class_attr(winner, name).is_some())
+                || self.class_attr(winner, "__prepare__").is_some()
+                || (self.is_abc_metaclass(winner) && self.class_attr(winner, "__init__").is_some())
                 || self
                     .class_attr(winner, "mro")
                     .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
@@ -6613,8 +6628,9 @@ impl Context {
             self.bind(scope, "__static_attributes__", attrs);
         }
         if let Some(meta) = class_meta
-            && self.is_abc_metaclass(meta)
             && self.builtins.get("abc.ABCMeta") != Some(&meta)
+            && (self.is_abc_metaclass(meta)
+                || (Some(meta) != typed_dict_meta && self.class_attr(meta, "__init__").is_some()))
         {
             let namespace = self.active_class_namespace(scope);
             // A deferred class annotator owns these fields. Its scratch entries are placeholders.
@@ -6644,7 +6660,11 @@ impl Context {
             }
             let class_name = self.text(&name);
             let bases = self.alloc(Value::Tuple(bases));
-            let class = self.call_abc_new(meta, class_name, bases, namespace, keywords)?;
+            let class = if self.is_abc_metaclass(meta) {
+                self.call_abc_new(meta, class_name, bases, namespace, keywords)?
+            } else {
+                self.type_from_namespace(Some(meta), class_name, bases, namespace, &keywords)?
+            };
             if bindings.needs_class_cell && matches!(self.heap.get(class), Value::Class { .. }) {
                 match self.heap.get(cell) {
                     Value::Cell(Some(contents)) if *contents == class => {}

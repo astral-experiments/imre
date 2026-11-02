@@ -233,7 +233,7 @@ impl Context {
         self.type_from_namespace(Some(meta), name, bases, namespace, &keywords)
     }
 
-    /// Construct a class from a copied namespace, optionally using an ABC metaclass.
+    /// Construct a class from a copied namespace with its selected metaclass.
     pub(super) fn type_from_namespace(
         &mut self,
         explicit_meta: Option<Id>,
@@ -292,7 +292,7 @@ impl Context {
                 None,
                 false,
             )?;
-            let Some(winner) = winner.filter(|&meta| self.is_abc_metaclass(meta)) else {
+            let Some(winner) = winner else {
                 return Err(Error::new(
                     "NotImplementedError",
                     "type() with specialized metaclasses is unsupported",
@@ -307,13 +307,14 @@ impl Context {
                     "type() with specialized metaclasses is unsupported",
                 ));
             }
-            let abc = self.abc_meta();
             if explicit_meta != Some(winner)
+                && let Some(&abc) = self.builtins.get("abc.ABCMeta")
+                && self.direct_subclass(winner, abc)
                 && self.class_attr(winner, "__new__") != self.class_attr(abc, "__new__")
             {
                 let result =
                     self.call_abc_new(winner, name, base_tuple, namespace, kwargs.to_vec())?;
-                if explicit_meta.is_some() {
+                if explicit_meta.is_some_and(|meta| self.is_abc_metaclass(meta)) {
                     // The outer ABCMeta.__new__ also initializes a more derived __new__ result.
                     let Value::Class { scope, .. } = *self.heap.get(result) else {
                         self.lookup_attr(result, "__dict__")?;
@@ -339,6 +340,7 @@ impl Context {
         let layout = super::typing::ClassLayout::TypeNamespace;
         let bases = self.validate_class_bases(bases, layout)?;
         let layout_base = self.member_layout_base(&bases)?;
+        let original_namespace = namespace;
         let namespace = super::builtins::copy_dict(self, namespace, storage)?;
         let slots =
             self.declared_slot_names(self.dict_named_item(namespace, "__slots__"), layout_base)?;
@@ -376,7 +378,8 @@ impl Context {
             self.heap.keep(value);
         }
         // Inherited ABCMeta.__new__ calls type.__new__ from abc's defining globals.
-        let creator = metaclass.and(self.builtins.get("abc.ABCMeta").copied());
+        let abc = metaclass.filter(|&meta| self.is_abc_metaclass(meta));
+        let creator = abc.and(self.builtins.get("abc.ABCMeta").copied());
         let creator_scope = match creator.map(|meta| self.heap.get(meta)) {
             Some(Value::Class { scope, .. }) => *scope,
             _ => self.heap.current_scope(),
@@ -432,7 +435,7 @@ impl Context {
         if self.scope_name(scope, "__annotate_func__").is_some() {
             self.enable_class_annotation_provider(scope);
         }
-        if metaclass.is_some() {
+        if abc.is_some() {
             let original = self.scope_name(scope, "__orig_bases__");
             super::typing::class_parameters(self, scope, original, &bases)?;
         }
@@ -453,8 +456,18 @@ impl Context {
         };
         *class_meta = metaclass;
         self.finish_namespace_class(class, scope, cell, dict_cell, kwargs.to_vec())?;
-        if metaclass.is_some() {
+        if abc.is_some() {
             self.init_abstract_class(class, scope)?;
+        } else if let Some(meta) = metaclass
+            && let Some(init) = self.class_attr(meta, "__init__")
+        {
+            self.call_initializer(
+                init,
+                class,
+                meta,
+                vec![name, base_tuple, original_namespace],
+                kwargs.to_vec(),
+            )?;
         }
         Ok(class)
     }

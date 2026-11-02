@@ -33,6 +33,26 @@ def current():
     assert child().inherited() == "inherited"
     assert events == [("first", child), ("second", child), ("subclass", child, 7)]
 
+    calls = []
+    class InitializingMeta(type):
+        def __init__(cls, name, bases, body, **kw):
+            super().__init__(name, bases, body, **kw)
+            calls.append((cls, name, bases, body, kw))
+            cls.generated = name.lower()
+
+    supplied = {"marker": object()}
+    parent = InitializingMeta("Parent", (Base,), supplied, label=1)
+    class Child(parent, label=2):
+        saved_body = locals()
+
+    dynamic = type("Dynamic", (Child,), {}, label=3)
+    assert [event[0] for event in calls] == [parent, Child, dynamic]
+    assert calls[0][3] is supplied and calls[1][3] is Child.saved_body
+    assert [event[4]["label"] for event in calls] == [1, 2, 3]
+    assert calls[1][2] == (parent,) and type(dynamic) is InitializingMeta
+    assert dynamic.generated == "dynamic" and parent.marker is supplied["marker"]
+    assert "generated" not in supplied and "generated" not in Child.saved_body
+
     reader = make_reader()
     cell = reader.__closure__[0]
     rebound = type("Rebound", (), {"__classcell__": cell})
