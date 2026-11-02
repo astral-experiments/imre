@@ -71,7 +71,7 @@ impl Context {
     }
 
     pub(in crate::dynamic) fn float_enum_names(&self, class: Id) -> Option<Id> {
-        if self.has_base(class, "float") {
+        if self.enum_values(class).is_some() && self.has_base(class, "float") {
             self.class_attr(class, "_member_names_")
         } else {
             None

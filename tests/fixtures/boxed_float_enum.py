@@ -48,3 +48,10 @@ def current():
     assert (nan.name, Edge.value.name) == ("name", "value")
     assert nan != nan and nan in [nan]
     assert json.dumps(nan) == "NaN"
+
+    class Declines(float):
+        def __eq__(self, other):
+            return NotImplemented
+
+    declined = Declines("nan")
+    assert declined == declined and declined != declined

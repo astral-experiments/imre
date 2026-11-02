@@ -3775,7 +3775,7 @@ impl Context {
                     return Ok(truth(self.dictionary_equal(left, right)? == (op == "==")));
                 }
                 let equal = self.checked_equal_impl(a, b, false)?
-                    && !matches!(self.heap.get(self.scalar_value(a)), Value::Float(n) if n.is_nan())
+                    && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan())
                     && !matches!(self.heap.get(a), Value::Complex(z) if z.real.is_nan() || z.imag.is_nan());
                 return Ok(truth(equal == (op == "==")));
             }
@@ -4155,6 +4155,21 @@ impl Context {
                 return self
                     .repeat_sequence(obj, storage, other, RepeatMode::Wrapper)
                     .map(Some);
+            }
+
+            // A float subtype inherits float's comparison slots independently. In particular,
+            // float.__ne__ need not call an overridden __eq__, and NaN is unequal to itself.
+            if matches!(name, "__eq__" | "__ne__")
+                && let Value::Instance { scalar: Some(scalar), .. } = self.heap.get(obj)
+                && let Value::Float(number) = self.heap.get(*scalar)
+            {
+                let other = self.scalar_value(other);
+                let equal = match self.heap.get(other) {
+                    Value::Float(right) => number == right,
+                    Value::Int(_) | Value::Bool(_) => crate::floats::compare(&self.as_int(other)?, *number) == 0,
+                    _ => return Ok(None),
+                };
+                return Ok(Some(builtins::boolean(equal == (name == "__eq__"))));
             }
 
             if name == "__ne__"
