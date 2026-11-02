@@ -39,7 +39,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "functools" if matches!(function, "cmp_to_key" | "reduce") => {
             Some(("_functools", function))
         }
-        "codecs" if matches!(function, "encode" | "escape_decode") => Some(("_codecs", function)),
+        "codecs" if matches!(function, "encode" | "escape_decode" | "utf_16_ex_decode") => {
+            Some(("_codecs", function))
+        }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         #[cfg(target_os = "linux")]
         "_signal" if function == "sigpending" => Some((module, function)),
