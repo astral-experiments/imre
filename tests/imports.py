@@ -16,6 +16,15 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "generator_local_keeps_typed_call": ({
+        "helper.py": (
+            "def values():\n"
+            "    def pair(left, right): return left + right\n"
+            "    yield pair(2, 3)\n"
+            "def typed(n: int) -> int: return n\n"
+        ),
+        "main.py": "from helper import values, typed\nprint(next(values()))\ntyped('wrong')\n",
+    }, "invalid-argument-type"),
     "unittest_method_skip_preserves_typed_call": ({
         "main.py": (
             "import unittest\n"
@@ -380,6 +389,21 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "generator_local_argument_binding": {
+        "helper.py": (
+            "def values():\n"
+            "    def pair(left, right): return left + right\n"
+            "    yield pair(2, 3)\n"
+            "    yield pair(2, 3, 4)\n"
+        ),
+        "main.py": (
+            "from helper import values\n"
+            "gen = values()\n"
+            "print(next(gen))\n"
+            "try: next(gen)\n"
+            "except TypeError as error: print(error)\n"
+        ),
+    },
     "imported_method_mixin": {
         "helper.py": (
             "OFFSET = 7\n"
