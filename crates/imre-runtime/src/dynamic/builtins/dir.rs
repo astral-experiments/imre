@@ -55,6 +55,9 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             }
             ctx.builtin("object")
         }
+        Value::GenericAlias(alias) if alias.kind.is_typing_alias() => {
+            return typing_alias_dir(ctx, &alias.clone());
+        }
         Value::ParamSpec(_) => {
             names.extend(super::super::paramspec::names().map(str::to_owned));
             ctx.builtin("object")
@@ -259,6 +262,50 @@ fn merge_tuple_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()>
     })
 }
 
+/// Collect a native typing alias's implemented attributes and its origin's non-dunder names.
+pub(in crate::dynamic) fn typing_alias_dir(ctx: &mut Context, alias: &Alias) -> Result<Id> {
+    let fields = alias.instance_fields().map(|(name, _)| name);
+    let fields = fields
+        .into_iter()
+        .chain(["__class__", "__dir__", "__mro_entries__", "copy_with"]);
+    let origin_names = ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
+        call(ctx, &[alias.origin], &[])
+    })?;
+    let names = merge_origin_names(ctx, fields, origin_names)?;
+    ctx.heap.keep(names);
+    let class = ctx.builtin(alias.kind.class());
+    if let Some(&dictionary) = ctx.native_type_dicts.get(&class) {
+        if alias.kind == AliasKind::Generic {
+            crate::dynamic::typing::include_generic_alias_methods(ctx, class, dictionary)?;
+        }
+        for (key, _) in ctx
+            .dict_entries(dictionary)
+            .expect("native alias class dictionary")
+            .to_vec()
+        {
+            // An unnamed generic has no stored instance module; its class's module would be wrong.
+            if alias.kind == AliasKind::Generic
+                && alias.name.is_none()
+                && ctx.str_value(key)? == "__module__"
+            {
+                continue;
+            }
+            ctx.put_item(names, key, NONE)?;
+        }
+    }
+    if alias.kind == AliasKind::Callable {
+        // The native Callable alias owns its reducer and its public module name.
+        let reduce = ctx.text("__reduce__");
+        ctx.put_item(names, reduce, NONE)?;
+        if alias.name.is_some() {
+            let module = ctx.text("__module__");
+            ctx.put_item(names, module, NONE)?;
+        }
+    }
+    let items = ctx.items(names)?;
+    Ok(ctx.alloc(Value::List(items)))
+}
+
 /// Literal delegates non-dunder names to its origin, including custom Python directory hooks.
 fn literal_names(ctx: &mut Context, alias: Alias) -> Result<Id> {
     let (origin, nested) = literal_origin(ctx, alias.origin)?;
@@ -272,17 +319,25 @@ fn literal_names(ctx: &mut Context, alias: Alias) -> Result<Id> {
 }
 
 fn merge_literal_names(ctx: &mut Context, alias: &Alias, origin_names: Id) -> Result<Id> {
+    let fields = alias.instance_fields().map(|(name, _)| name);
+    let fields = fields.into_iter().chain([
+        "__class__",
+        "__format__",
+        "__getstate__",
+        "__init_subclass__",
+        "__mro_entries__",
+    ]);
+    merge_origin_names(ctx, fields, origin_names)
+}
+
+fn merge_origin_names(
+    ctx: &mut Context,
+    fields: impl IntoIterator<Item = &'static str>,
+    origin_names: Id,
+) -> Result<Id> {
     ctx.heap.keep(origin_names);
-    let fields = alias.literal_fields().map(|(name, _)| name);
     let entries = fields
         .into_iter()
-        .chain([
-            "__class__",
-            "__format__",
-            "__getstate__",
-            "__init_subclass__",
-            "__mro_entries__",
-        ])
         .map(|name| (ctx.text(name), NONE))
         .collect();
     let names = ctx.dict(entries);

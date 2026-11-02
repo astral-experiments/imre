@@ -180,8 +180,8 @@ impl Alias {
         }
     }
 
-    /// Instance fields stored by the boxed Literal alias.
-    pub(super) fn literal_fields(&self) -> [(&'static str, Id); 5] {
+    /// Instance fields shared by parameterized typing aliases.
+    pub(super) fn instance_fields(&self) -> [(&'static str, Id); 5] {
         [
             ("__args__", self.args),
             ("__origin__", self.origin),
@@ -385,12 +385,16 @@ fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Resul
         ctx.typing.alias_caches[index] = Some(cache);
         cache
     };
-    let result = ctx.call(cached, vec![origin, args], Vec::new());
+    let kwargs: Vec<_> = (kind == AliasKind::Callable)
+        .then(|| ("name".to_owned(), ctx.text("Callable")))
+        .into_iter()
+        .collect();
+    let result = ctx.call(cached, vec![origin, args], kwargs.clone());
     if let Err(error) = &result {
         let type_error = ctx.builtin("TypeError");
         if ctx.raised_error_matches(error, type_error) {
             let function = ctx.builtin(constructor);
-            return ctx.call(function, vec![origin, args], Vec::new());
+            return ctx.call(function, vec![origin, args], kwargs);
         }
     }
     result
@@ -1178,7 +1182,12 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         {
             generic_alias_method(ctx, name)?
         }
-        Value::GenericAlias(alias) if alias.kind == AliasKind::Generic && name == "copy_with" => {
+        Value::GenericAlias(alias)
+            if matches!(
+                alias.kind,
+                AliasKind::Generic | AliasKind::Callable | AliasKind::Unpack
+            ) && name == "copy_with" =>
+        {
             let callable = generic_alias_method(ctx, name)?;
             ctx.alloc(Value::Method {
                 callable,
@@ -1369,7 +1378,11 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             _ => return None,
         },
         Value::GenericAlias(a) if matches!(a.kind, AliasKind::Literal(_)) => {
-            if let Some((_, field)) = a.literal_fields().into_iter().find(|(key, _)| *key == name) {
+            if let Some((_, field)) = a
+                .instance_fields()
+                .into_iter()
+                .find(|(key, _)| *key == name)
+            {
                 field
             } else if forwards_to_origin(name) {
                 let origin = literal_origin(ctx, a.origin);
@@ -1379,6 +1392,20 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             }
         }
         Value::GenericAlias(a) => match name {
+            "__dir__"
+                if matches!(
+                    a.kind,
+                    AliasKind::Generic | AliasKind::Callable | AliasKind::Unpack
+                ) =>
+            {
+                let callable = ctx.builtin("typing._GenericAlias.__dir__");
+                ctx.alloc(Value::Method {
+                    callable,
+                    receiver: value,
+                    explicit: false,
+                })
+            }
+
             "__unpacked__" if a.is_builtin_alias() => {
                 if a.unpacked {
                     TRUE
@@ -1414,18 +1441,31 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "copy_with" if a.kind == AliasKind::Concatenate => {
                 helper_method(ctx, value, "_concatenate_copy_with")?
             }
-            "_name" if matches!(a.kind, AliasKind::Generic | AliasKind::Concatenate) => NONE,
-            "_inst"
-                if a.name.is_some()
-                    || matches!(a.kind, AliasKind::Generic | AliasKind::Concatenate) =>
+            name if a.kind.is_typing_alias()
+                && let Some((_, value)) = a
+                    .instance_fields()
+                    .into_iter()
+                    .find(|(field, _)| *field == name) =>
             {
-                if a.instantiable { TRUE } else { FALSE }
+                value
+            }
+            "__doc__" if a.kind.is_typing_alias() => {
+                let class = ctx.builtin(a.kind.class());
+                ctx.own_class_attr(class, "__doc__")?
             }
             attr if let Some((_, value)) = a.metadata().find(|(name, _)| *name == attr) => value,
-            attr if (a.kind == AliasKind::Concatenate || (a.kind != AliasKind::Generic && a.name.is_some()))
+            attr if (matches!(
+                a.kind,
+                AliasKind::Callable | AliasKind::Unpack | AliasKind::Concatenate
+            ) || (a.kind != AliasKind::Generic && a.name.is_some()))
                 && forwards_to_origin(attr) =>
             {
-                return Some(ctx.lookup_attr(a.origin, attr));
+                let origin = a.origin;
+                return Some(
+                    ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
+                        ctx.lookup_attr(origin, attr)
+                    }),
+                );
             }
             _ => return None,
         },
@@ -2042,6 +2082,16 @@ pub(super) fn call(
         ));
     }
     match (operation, args) {
+        ("_GenericAlias.__dir__", [receiver])
+            if let Value::GenericAlias(alias) = ctx.heap.get(*receiver)
+                && matches!(
+                    alias.kind,
+                    AliasKind::Generic | AliasKind::Callable | AliasKind::Unpack
+                ) =>
+        {
+            super::builtins::dir::typing_alias_dir(ctx, &alias.clone())
+        }
+
         (operation, [receiver])
             if let Some(field) = operation.strip_prefix("TypeAliasType.")
                 && matches!(
@@ -2165,7 +2215,7 @@ pub(super) fn call(
                 *args,
                 parameters,
                 None,
-                false,
+                true,
             ))
         }
         ("Any", _) => Err(Error::new("TypeError", "Any cannot be instantiated")),
