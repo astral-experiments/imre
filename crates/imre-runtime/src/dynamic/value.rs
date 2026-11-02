@@ -3949,6 +3949,48 @@ mod tests {
     }
 
     #[test]
+    fn regex_call_releases_only_plain_unobserved_operands() {
+        use super::super::{ffi, stdlib, weakref};
+
+        let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let bytes = ctx.alloc(Value::Bytes(b"a".into()));
+        let mutable = ctx.alloc(Value::ByteArray(b"a".into()));
+        let pattern = stdlib::call(&mut ctx, "re.compile", &[bytes], &[]).unwrap();
+        let method = ctx.lookup_attr(pattern, "match").unwrap();
+        let matched = ctx.call(method, vec![bytes], Vec::new()).unwrap();
+        let mutable_match = ctx.call(method, vec![mutable], Vec::new()).unwrap();
+        let owner = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap.register_finalizer(owner);
+
+        for (subject, result, observe_method, release) in [
+            (bytes, matched, false, true),
+            (mutable, mutable_match, false, false),
+            (bytes, matched, true, false),
+        ] {
+            assert!(matches!(ctx.heap.get(result), Value::RegexMatch(_)));
+            if observe_method {
+                ctx.heap
+                    .new_weak_reference(method, NONE, weakref::Kind::Reference, None)
+                    .unwrap();
+            }
+            let mark = ctx.heap.temporary_mark();
+            let args = ctx.alloc(Value::List(vec![subject]));
+            ctx.heap.keep(result);
+            assert_eq!(
+                ctx.heap.discard_scalar_call(mark, result, args, method),
+                release
+            );
+            let live = &ctx.heap.frames.last().unwrap().live[mark..];
+            if release {
+                assert_eq!(live, &[result]);
+            } else {
+                assert_eq!(live, &[args, result]);
+            }
+            ctx.heap.release_temporaries_since(mark);
+        }
+    }
+
+    #[test]
     fn releasing_a_cached_module_cannot_finalize_its_globals() {
         let mut heap = Heap::new();
         let owner = heap.alloc(Value::List(Vec::new()));
