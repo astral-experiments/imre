@@ -371,7 +371,11 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_inheritable"
             | "link"
             | "symlink"
-    ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
+    ) || (cfg!(unix)
+        && matches!(
+            name,
+            "_exit" | "kill" | "getppid" | "waitstatus_to_exitcode"
+        ))
         || (cfg!(target_os = "linux") && name == "sendfile")
 }
 
@@ -776,6 +780,16 @@ pub(super) fn descriptor(
         };
         native::close(c_int(ctx, fd)?)?;
         return Ok(NONE);
+    }
+    #[cfg(unix)]
+    if name == "_exit" {
+        let [Some(status)] = builtins::bind_builtin_arguments(name, args, kwargs, ["status"], 1)?
+        else {
+            unreachable!("status is required")
+        };
+        let status = c_int(ctx, status)?;
+        // SAFETY: _exit accepts any C int and terminates without running cleanup.
+        unsafe { libc::_exit(status) }
     }
     #[cfg(unix)]
     if name == "waitstatus_to_exitcode" {

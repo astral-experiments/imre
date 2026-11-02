@@ -5,7 +5,7 @@ import posixpath as path
 import stat as st
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import _create_environ, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import _create_environ, _exit, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
 from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, open, rmdir, stat
 
