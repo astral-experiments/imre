@@ -352,7 +352,11 @@ pub(crate) fn kill(pid: libc::pid_t, signal: libc::c_int) -> Result<()> {
 }
 
 /// Wait for a child independently of Popen and return its unmodified POSIX status.
-pub(crate) fn waitpid(pid: libc::pid_t, options: libc::c_int) -> Result<[i32; 2]> {
+pub(crate) fn waitpid<E: From<Error>>(
+    pid: libc::pid_t,
+    options: libc::c_int,
+    mut dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<[i32; 2], E> {
     let mut status = 0;
     loop {
         // SAFETY: waitpid writes to the given status slot and retains no pointer.
@@ -362,8 +366,9 @@ pub(crate) fn waitpid(pid: libc::pid_t, options: libc::c_int) -> Result<[i32; 2]
         }
         let error = io::Error::last_os_error();
         if error.kind() != io::ErrorKind::Interrupted {
-            return Err(errno_error(error));
+            return Err(errno_error(error).into());
         }
+        dispatch()?;
     }
 }
 
@@ -729,11 +734,12 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id() as libc::pid_t;
-        let early = waitpid(pid, libc::WNOHANG);
+        let dispatch = || Ok::<(), Error>(());
+        let early = waitpid(pid, libc::WNOHANG, dispatch);
         // Closing the only writer guarantees the shell can finish even if an assertion fails.
         drop(child.stdin.take());
-        let exited = waitpid(pid, 0);
-        let already_reaped = waitpid(pid, libc::WNOHANG).unwrap_err();
+        let exited = waitpid(pid, 0, dispatch);
+        let already_reaped = waitpid(pid, libc::WNOHANG, dispatch).unwrap_err();
 
         assert_eq!(early.map_err(|error| error.into_parts().0).unwrap(), [0, 0]);
         assert_eq!(exited.map_err(|error| error.into_parts().0).unwrap(), [pid, 37 << 8]);

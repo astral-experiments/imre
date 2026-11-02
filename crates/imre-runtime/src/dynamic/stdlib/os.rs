@@ -839,7 +839,7 @@ pub(super) fn descriptor(
         result
             .try_reserve_exact(2)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for value in native::waitpid(pid, options)? {
+        for value in native::waitpid(pid, options, || ctx.dispatch_signals())? {
             result.push(ctx.int(i64::from(value)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
