@@ -332,6 +332,43 @@ def _make_dropwhile(_allocate, _state):
 dropwhile = _make_dropwhile(_itertools._predicate_allocate, _itertools._predicate_state)
 
 
+def _make_pairwise(_allocate, _advance):
+    class pairwise:
+        """Return successive overlapping pairs from the input iterator."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.pairwise.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.pairwise.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.pairwise")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("pairwise() takes no keyword arguments")
+            if len(args) != 1:
+                raise TypeError(f"pairwise expected 1 argument, got {len(args)}")
+            return _allocate(__class__, cls, iter(args[0]))
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a pairwise instance")
+            return self
+
+        def __next__(self):
+            return _advance(__class__, self)
+
+    pairwise.__qualname__ = "pairwise"
+    return pairwise
+
+
+pairwise = _make_pairwise(_itertools._pairwise_allocate, _itertools._pairwise_next)
+
+
 def _make_compress(_allocate, _state):
     class compress:
         """Yield each data item whose corresponding selector is true."""
