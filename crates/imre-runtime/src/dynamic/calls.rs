@@ -3387,36 +3387,6 @@ impl Context {
                     }
                 }
             },
-            Value::File(ref handle)
-                if matches!(name, "raw" | "name" | "mode")
-                    && let super::stdlib::BinaryFile::Descriptor(fd) = handle.as_ref() =>
-            {
-                let raw = fd.raw;
-                return if name == "raw" {
-                    Ok(raw)
-                } else {
-                    self.lookup_attr(raw, name)
-                };
-            }
-            Value::File(ref handle)
-                if matches!(name, "name" | "mode")
-                    && let Some((path, mode)) = handle.path_metadata() =>
-            {
-                return Ok(if name == "name" {
-                    path
-                } else {
-                    self.text(mode)
-                });
-            }
-            Value::File(ref handle)
-                if name == "name"
-                    && let Some(fd) = handle.socket_reader_name() =>
-            {
-                return Ok(self.int(i64::from(fd)));
-            }
-            Value::File(ref handle) if name == "closed" => {
-                return Ok(if handle.closed() { TRUE } else { FALSE });
-            }
             Value::Native(ref class) if class == "socket.socket" && name == "__name__" => {
                 return Ok(self.text("socket"));
             }
@@ -3428,11 +3398,6 @@ impl Context {
             }
             Value::Socket(ref socket) if name == "type" => {
                 return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
-            }
-            Value::BufferedRandom(_, file_name) if name == "name" => return Ok(file_name),
-            Value::BufferedRandom(..) if name == "mode" => return Ok(self.text("rb+")),
-            Value::BufferedRandom(ref file, _) if name == "closed" => {
-                return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
             Value::TextFile(ref file)
                 if name == "buffer"
