@@ -12,6 +12,7 @@ mod assertions;
 mod flags;
 mod group_names;
 mod lookahead;
+mod named_escapes;
 mod progress;
 mod scanner;
 mod split;
@@ -552,23 +553,32 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
         Value::Bytes(bytes) => Cow::Owned(bytes.iter().copied().map(char::from).collect()),
         _ => Cow::Borrowed(ctx.str_value(source).ok()?),
     };
+    let bytes = matches!(ctx.heap.get(ctx.scalar_value(source)), Value::Bytes(_));
+    let normalized = match named_escapes::normalize(&text, bytes, flags) {
+        Ok(normalized) => normalized,
+        Err(error) => return Some(error),
+    };
+    let text = normalized
+        .as_ref()
+        .map_or(text.as_ref(), |names| names.text.as_str());
+    let position = |at| normalized.as_ref().map_or(at, |names| names.position(at));
     let parsed = ParserBuilder::new()
         .ignore_whitespace(flags & VERBOSE != 0)
         .build()
-        .parse(&text);
-    if let Some(error) = group_names::diagnostic(
-        &text,
-        matches!(ctx.heap.get(source), Value::Bytes(_)),
+        .parse(text);
+    if let Some((message, at)) = group_names::diagnostic(
+        text,
+        bytes,
         match ctx.heap.get(ctx.scalar_value(source)) {
             Value::SurrogateStr(points) => Some(points),
             _ => None,
         },
         &parsed,
     ) {
-        return Some(error);
+        return Some((message, position(at)));
     }
-    if let Some((msg, at)) = imre_regex::repeat_diagnostic(&text, flags & VERBOSE != 0) {
-        return Some((msg.to_owned(), text[..at].chars().count()));
+    if let Some((msg, at)) = imre_regex::repeat_diagnostic(text, flags & VERBOSE != 0) {
+        return Some((msg.to_owned(), position(text[..at].chars().count())));
     }
     let error = parsed.err()?;
     let message = match error.kind() {
@@ -581,7 +591,7 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
     };
     Some((
         message.into(),
-        text[..error.span().start.offset].chars().count(),
+        position(text[..error.span().start.offset].chars().count()),
     ))
 }
 
@@ -1051,6 +1061,11 @@ fn prepare(
         std::str::from_utf8(spelling)
             .expect("text pattern")
             .to_owned()
+    };
+    let source = match named_escapes::normalize(&source, bytes, flags) {
+        Ok(Some(names)) => names.text,
+        Ok(None) => source,
+        Err((message, _)) => return Err(message),
     };
     let ascii = bytes || flags & ASCII != 0;
     // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
