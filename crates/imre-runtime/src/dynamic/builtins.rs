@@ -213,7 +213,8 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
     }
 }
 
-pub(super) const MAPPING_PROXY_METHODS: &[&str] = &["keys", "values", "items", "get", "copy"];
+pub(super) const MAPPING_PROXY_METHODS: &[&str] =
+    &["keys", "values", "items", "get", "copy", "__reversed__"];
 
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
@@ -348,6 +349,7 @@ pub(super) fn is_enum_base(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__reversed__",
     "__or__",
     "__ror__",
     "__ior__",
@@ -1275,6 +1277,11 @@ pub(super) fn call(
                 )));
             }
         };
+        let mapping = if method == "__reversed__" {
+            ctx.mapping_proxy_target(mapping)
+        } else {
+            mapping
+        };
         let bound = ctx.lookup_attr(mapping, method)?;
         return ctx.call(bound, forwarded, Vec::new());
     }
@@ -2047,6 +2054,9 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             let object = args[0];
+            if matches!(ctx.heap.get(object), Value::MappingProxy(_)) {
+                return call(ctx, "mappingproxy.__reversed__", args, kwargs);
+            }
             if let Value::Range(range) = ctx.heap.get(object) {
                 return Ok(ctx.alloc(Value::RangeIterator(range.iter(true))));
             }

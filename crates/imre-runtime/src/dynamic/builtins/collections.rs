@@ -1017,6 +1017,7 @@ pub(super) fn method(
         name,
         "dict.pop"
             | "dict.popitem"
+            | "dict.__reversed__"
             | "set.difference"
             | "frozenset.difference"
             | "set.intersection"
@@ -1043,14 +1044,15 @@ pub(super) fn method(
     if !matches!(name, "dict.update" | "dict.__init__") {
         positional(name, kwargs)?;
     }
+    if matches!(name, "dict.popitem" | "dict.__reversed__") && !args.is_empty() {
+        return Err(type_error(format!(
+            "{name}() takes no arguments ({} given)",
+            args.len()
+        )));
+    }
     match name {
+        "dict.__reversed__" => Ok(ctx.dict_iterator(object, DictViewKind::Keys, false, true)),
         "dict.popitem" => {
-            if !args.is_empty() {
-                return Err(type_error(format!(
-                    "dict.popitem() takes no arguments ({} given)",
-                    args.len()
-                )));
-            }
             let Some(last) = ctx.stored_entries(receiver).len().checked_sub(1) else {
                 let message = ctx.text("popitem(): dictionary is empty");
                 return Err(ctx.lookup_error("KeyError", message));
