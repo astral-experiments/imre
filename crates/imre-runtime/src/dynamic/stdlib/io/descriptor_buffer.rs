@@ -786,7 +786,10 @@ impl BufferedFd {
                 unsafe { libc::lseek(fd, 0, libc::SEEK_CUR) } >= 0,
             )),
             "flush" => {
-                self.check_reentry(ctx)?;
+                // A reader forwards flush to the raw without entering the buffer lock.
+                if self.writing {
+                    self.check_reentry(ctx)?;
+                }
                 match buffer {
                     Buffer::Random(file) => file.flush().map_err(os_error)?,
                     Buffer::Writer(w) => w.flush().map_err(|err| buffer_error(ctx, err))?,

@@ -144,3 +144,14 @@ with WarningFile(__file__, "r") as retained, io.FileIO(__file__, "r") as replace
     assert retained.read(1) == b"i"
     reader.__del__()
     assert len(events) == 3
+
+
+with io.FileIO(__file__, "r") as raw:
+    def warn_from_raw(source):
+        source.flush()
+        events.append(source.raw is raw)
+    raw._dealloc_warn = warn_from_raw
+    reader = io.BufferedReader(raw)
+    events.clear()
+    reader.__del__()
+    assert raw.closed and events == [True]
