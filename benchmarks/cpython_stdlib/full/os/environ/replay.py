@@ -27,6 +27,14 @@ def git_blob(data):
     return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
 
 
+def link_or_copy(source, dest):
+    try:
+        os.link(source, dest)
+    except OSError:
+        shutil.copyfile(source, dest)
+    return dest
+
+
 def stage(work, cpython, layout, wrong):
     test = cpython / "Lib" / "test"
     for path, expected in PINS["test_blobs"].items():
@@ -35,9 +43,18 @@ def stage(work, cpython, layout, wrong):
     root = work / "stage"
     package = root / "test"
     package.mkdir(parents=True)
-    for source in test.iterdir():
-        if source.name not in ("__pycache__", "test_os.py"):
-            (package / source.name).symlink_to(source, target_is_directory=source.is_dir())
+    sources = (test / name for name in ("__init__.py", "mapping_tests.py", "support"))
+    if layout == "full":
+        sources = test.iterdir()
+    for source in sources:
+        if source.name in ("__pycache__", "test_os.py") or source.suffix == ".pyc":
+            continue
+        dest = package / source.name
+        if source.is_dir():
+            shutil.copytree(source, dest, copy_function=link_or_copy,
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"), symlinks=True)
+        else:
+            link_or_copy(source, dest)
     source = (test / "test_os.py").read_bytes()
     if layout == "retained-class":
         names = {
