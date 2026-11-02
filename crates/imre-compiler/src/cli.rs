@@ -122,6 +122,10 @@ impl BuildOptions {
                 flags,
                 executable,
             } => {
+                if path.is_dir() {
+                    options.compile.module_entry = Some("__main__".into());
+                    options.compile.path_entry = true;
+                }
                 options.source_path = Some(path);
                 options.compile.script_startup = Some((flags, executable));
             }

@@ -609,7 +609,11 @@ pub(crate) fn compile(
         .unwrap_or(root);
     let mut initial = Vec::new();
     let safe_path = startup.is_some_and(|(flags, _)| flags.safe_path);
-    if !safe_path {
+    if options.path_entry {
+        // CPython preserves the directory spelling, including symlinks, and searches
+        // an explicitly requested entry even when isolated startup omits the cwd.
+        initial.push(entry.clone());
+    } else if !safe_path {
         initial.push(root);
     }
     initial.extend(options.extension_paths.iter().map(|p| cwd.join(p)));
@@ -920,7 +924,7 @@ pub(crate) fn compile(
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
-        "command":in_memory,"module_entry":module_entry,"paths":paths,
+        "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
     check_returns()?;
     let llvm_ir = emit::emit(
