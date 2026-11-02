@@ -416,7 +416,70 @@ def make(events):
     assert events == ["outer", 1, 3]
 
 
+def named_bindings():
+    namespace = {}
+    exec("""def recipe(values):
+    source = iter(values)
+    while batch := next(source, None):
+        yield batch
+    yield batch
+
+def outer(value):
+    state = []
+    def update():
+        nonlocal cell
+        state.append((cell, (cell := value), cell))
+    def read():
+        return cell
+    (cell := [])
+    update()
+    return state, read
+
+def shadow():
+    if False:
+        (shadowed := 1)
+    return shadowed
+
+def use_global(value):
+    global global_target
+    return (global_target := value)
+
+def annotated(arg: (lambda: (shadowed, (shadowed := 4)))):
+    pass
+""", namespace)
+    marker = []
+    assert list(namespace["recipe"]([1, 2, marker])) == [1, 2, marker]
+    stored, read = namespace["outer"](marker)
+    assert stored[0][0] is not marker
+    assert stored[0][1] is stored[0][2] is read() is marker
+    namespace["shadowed"] = 9
+    for read_local in (namespace["shadow"], namespace["annotated"].__annotations__["arg"]):
+        try:
+            read_local()
+        except UnboundLocalError:
+            pass
+        else:
+            raise AssertionError("walrus target was not a local")
+    assert namespace["use_global"](marker) is namespace["global_target"] is marker
+    exec("x = lambda a=(from_default := 3): (inside := a)", namespace)
+    assert namespace["x"]() == namespace["from_default"] == 3
+    assert "inside" not in namespace
+    for text in (
+        "def f():\n    (x := 1)\n    global x",
+        "def f():\n    global x\n    if True: (x := 1)\n    global x",
+        "(i for i in (items := [1]))",
+        "(__debug__ := True)",
+    ):
+        try:
+            compile(text, "walrus.py", "exec")
+        except SyntaxError:
+            pass
+        else:
+            raise AssertionError(text)
+
+
 def current():
+    named_bindings()
     source_annotations()
     source_genexpr()
     source_match()
