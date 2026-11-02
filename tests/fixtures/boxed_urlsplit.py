@@ -16,6 +16,15 @@ def current():
         result_type = parse.ParseResultBytes if isinstance(url, bytes) else parse.ParseResult
         print(type(parsed) is result_type, isinstance(parsed, result_type), tuple(parsed), parsed.params)
         print(parsed.geturl(), parse.urlunparse(parsed))
+    class CustomSplit(str):
+        def lstrip(self, chars):
+            return self
+        def replace(self, old, new):
+            return self
+        def split(self, sep, maxsplit):
+            return ('changed?', 'override')
+    assert parse.urldefrag(CustomSplit('path#frag')).geturl() == 'changed?#override'
+
     class Redirect(str):
         def lstrip(self, chars):
             return 'ALT:path?#changed'

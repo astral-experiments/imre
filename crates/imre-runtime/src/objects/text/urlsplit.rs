@@ -62,7 +62,8 @@ fn clean(value: &str, scheme: bool) -> Result<Cow<'_, str>> {
     }
 }
 
-fn check_netloc(netloc: &str) -> Result<()> {
+/// Validate an authority shared by the typed and boxed URL parsers.
+pub(crate) fn check_netloc(netloc: &str) -> Result<()> {
     match (netloc.contains('['), netloc.contains(']')) {
         (true, false) | (false, true) => return Err(invalid("Invalid IPv6 URL")),
         (true, true) => {
@@ -182,13 +183,6 @@ fn split<'a>(mut url: &'a str, default_scheme: &'a str, fragments: bool) -> Resu
         query,
         fragment,
     })
-}
-
-/// Strip the fragment using the private split fields, retaining an empty authority or query.
-pub(crate) fn defrag_parts(url: &str) -> Result<(String, String)> {
-    let parts = split(url, "", true)?;
-    let base = unsplit(&parts.scheme, parts.netloc, parts.path, parts.query, None)?;
-    Ok((base, copy_text(parts.fragment.unwrap_or_default())?))
 }
 
 /// Borrow the five cleaned fields until the caller has copied them to its result.

@@ -65,6 +65,47 @@ DefragResultBytes._decoded_counterpart = DefragResult
 _WHATWG_C0_CONTROL_OR_SPACE = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f '
 
 
+_scheme_letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+_scheme_chars = _scheme_letters + '0123456789+-.'
+
+
+def _defrag_parts(url):
+    # An empty authority or query still has a delimiter. Keep it until the
+    # fields are reassembled, and honor string operations on subclasses.
+    scheme = netloc = query = None
+    fragment = ''
+    i = url.find(':')
+    if i > 0 and url[0] in _scheme_letters:
+        for c in url[:i]:
+            if c not in _scheme_chars:
+                break
+        else:
+            scheme, url = url[:i].lower(), url[i + 1:]
+    if url[:2] == '//':
+        end = len(url)
+        for c in '/?#':
+            pos = url.find(c, 2)
+            if pos >= 0:
+                end = min(end, pos)
+        netloc, url = url[2:end], url[end:]
+        _check_netloc(netloc)
+    if '#' in url:
+        url, fragment = url.split('#', 1)
+    if '?' in url:
+        url, query = url.split('?', 1)
+    if netloc is not None:
+        if url and url[:1] != '/':
+            url = '/' + url
+        url = '//' + netloc + url
+    elif url[:2] == '//':
+        url = '//' + url
+    if scheme:
+        url = scheme + ':' + url
+    if query is not None:
+        url = url + '?' + query
+    return url, fragment or ''
+
+
 def urldefrag(url):
     """Removes any existing fragment from URL.
 

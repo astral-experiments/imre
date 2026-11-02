@@ -33,7 +33,7 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
         ctx.bind(scope, name, registry);
     }
     for name in [
-        "_defrag_parts",
+        "_check_netloc",
         "urljoin",
         "urlparse",
         "urlunparse",
@@ -89,13 +89,10 @@ pub(super) fn call(
                 bind(name, args, kwargs, ["string", "encoding", "errors"])?;
             unquote(ctx, required(text, name, "string")?, encoding, errors)
         }
-        "_defrag_parts" => {
-            let [url] = bind(name, args, kwargs, ["url"])?;
-            let url = ctx.str_value(required(url, name, "url")?)?;
-            let (base, fragment) = urlsplit::defrag_parts(url)?;
-            let base = ctx.text(base);
-            let fragment = ctx.text(fragment);
-            Ok(ctx.alloc(Value::Tuple(vec![base, fragment])))
+        "_check_netloc" => {
+            let [netloc] = bind(name, args, kwargs, ["netloc"])?;
+            urlsplit::check_netloc(ctx.str_value(required(netloc, name, "netloc")?)?)?;
+            Ok(NONE)
         }
         "urlsplit" | "urlparse" => {
             let [url, scheme, fragments] =
