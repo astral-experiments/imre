@@ -1862,8 +1862,16 @@ pub(super) fn call(
             if matches!(ctx.heap.get(storage), Value::Array(_) | Value::ByteArray(_)) {
                 ctx.heap.note_buffer_view(storage);
             }
+            let anonymous = matches!(
+                ctx.heap.get(object),
+                Value::MemoryView {
+                    anonymous: true,
+                    ..
+                }
+            );
             Ok(ctx.alloc(Value::MemoryView {
                 owner: Some(owner),
+                anonymous,
                 hash: None,
             }))
         }

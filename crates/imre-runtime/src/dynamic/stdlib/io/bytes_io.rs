@@ -37,7 +37,7 @@ pub(in crate::dynamic) struct BytesIo {
     pub(in crate::dynamic) snapshot: Cell<Option<Id>>,
 }
 
-fn copy_bytes(data: &[u8]) -> Result<Vec<u8>> {
+pub(super) fn copy_bytes(data: &[u8]) -> Result<Vec<u8>> {
     let mut result = Vec::new();
     result
         .try_reserve_exact(data.len())
