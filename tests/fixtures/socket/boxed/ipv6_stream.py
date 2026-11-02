@@ -21,6 +21,8 @@ def check_stream():
             raise
         host, port, flow, scope = listener.getsockname()
         assert (host, flow, scope) == ("::1", 0, 0) and port > 0
+        rows = socket.getaddrinfo(host, port, socket.AF_INET6, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        assert rows == [(socket.AF_INET6, socket.SOCK_DGRAM, socket.IPPROTO_UDP, "", (host, port, 0, 0))]
         listener.listen(1)
         with socket.socket(socket.AF_INET6) as client:
             client.connect((host, port))

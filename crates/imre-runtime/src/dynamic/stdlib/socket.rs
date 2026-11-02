@@ -24,14 +24,15 @@ const CONSTANTS: &[(&str, i32)] = &[
 
 /// Seed the low-level module once so normal module assignment and deletion remain observable.
 pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) -> Result<()> {
-    // socket.py imports these kinds once, so deleting its copy must not fall back to a native value.
-    let kinds = [
+    // socket.py imports these names once, so deletion must not fall back to a native value.
+    let imported = [
+        ("IPPROTO_UDP", libc::IPPROTO_UDP),
         ("SOCK_DGRAM", libc::SOCK_DGRAM),
         ("SOCK_RAW", libc::SOCK_RAW),
         ("SOCK_RDM", libc::SOCK_RDM),
         ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
     ];
-    for (name, value) in CONSTANTS.iter().copied().chain(kinds) {
+    for (name, value) in CONSTANTS.iter().copied().chain(imported) {
         let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
     }
@@ -255,13 +256,13 @@ fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
         int_option(ctx, args, kwargs, 4, "proto", 0)?,
         int_option(ctx, args, kwargs, 5, "flags", 0)?,
     )?;
-    let family = ctx.int(i64::from(libc::AF_INET));
     let mut result = Vec::with_capacity(rows.len());
     for row in rows {
+        let family = ctx.int(i64::from(row.addr.family()));
         let ty = ctx.int(i64::from(row.ty));
         let protocol = ctx.int(i64::from(row.protocol));
         let name = ctx.text(row.canonical);
-        let addr = pack_ipv4(ctx, &row.addr);
+        let addr = pack_address(ctx, &row.addr)?;
         result.push(ctx.alloc(Value::Tuple(vec![family, ty, protocol, name, addr])));
     }
     Ok(ctx.alloc(Value::List(result)))

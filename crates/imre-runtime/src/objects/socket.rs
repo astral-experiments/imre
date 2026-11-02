@@ -282,14 +282,14 @@ fn resolve(host: &str) -> Result<Ipv4Addr> {
         return Ok(ip);
     }
     let rows = getaddrinfo(Some(host), None, libc::AF_INET, 0, 0, 0)?;
-    Ok(endpoint(&rows[0].addr).0)
+    Ok(endpoint(&rows[0].addr.ipv4()?).0)
 }
 
 pub(crate) struct AddressInfo {
     pub(crate) ty: i32,
     pub(crate) protocol: i32,
     pub(crate) canonical: String,
-    pub(crate) addr: libc::sockaddr_in,
+    pub(crate) addr: InternetAddress,
 }
 
 struct AddrInfoList(*mut libc::addrinfo);
@@ -378,10 +378,12 @@ pub(crate) fn getaddrinfo(
     let mut rows = Vec::new();
     // SAFETY: all nodes and canonical names remain live until the list guard is dropped.
     while let Some(entry) = unsafe { cursor.as_ref() } {
-        if entry.ai_family != libc::AF_INET {
+        // SAFETY: the list guard owns the address and libc supplies its readable length.
+        let addr = unsafe { InternetAddress::read(entry.ai_addr, entry.ai_addrlen)? };
+        if entry.ai_family != addr.family() {
             return Err(Error::new(
-                Kind::NotImplementedError,
-                "only IPv4 address results are supported",
+                Kind::OSError,
+                "resolver returned an inconsistent address family",
             ));
         }
         rows.try_reserve(1).map_err(|_| Error::memory_error())?;
@@ -397,8 +399,7 @@ pub(crate) fn getaddrinfo(
             ty: entry.ai_socktype,
             protocol: entry.ai_protocol,
             canonical,
-            // SAFETY: AF_INET specifies the layout of this node's initialized address.
-            addr: unsafe { *entry.ai_addr.cast::<libc::sockaddr_in>() },
+            addr,
         });
         cursor = entry.ai_next;
     }
@@ -536,6 +537,13 @@ pub(crate) enum InternetAddress {
 }
 
 impl InternetAddress {
+    pub(crate) fn family(&self) -> i32 {
+        match self {
+            Self::V4(_) => libc::AF_INET,
+            Self::V6(_) => libc::AF_INET6,
+        }
+    }
+
     fn ipv4(self) -> Result<libc::sockaddr_in> {
         match self {
             Self::V4(addr) => Ok(addr),

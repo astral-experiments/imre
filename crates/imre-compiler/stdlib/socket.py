@@ -1,7 +1,7 @@
 """Socket helpers using the runtime's native socket operations."""
 
 import _socket
-from _socket import SOCK_DGRAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET
+from _socket import IPPROTO_UDP, SOCK_DGRAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET
 from _socket import SOCK_STREAM, error, has_ipv6, socket
 
 if hasattr(_socket, "AF_INET6"):
