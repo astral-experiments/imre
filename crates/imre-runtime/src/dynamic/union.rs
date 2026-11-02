@@ -85,7 +85,7 @@ fn accepts(ctx: &Context, id: Id) -> bool {
         || ctx.builtin_type_name(id) == Some("type")
         || matches!(
             ctx.heap.get(id),
-            Value::GenericAlias(_) | Value::TypeVar(_) | Value::Union(_)
+            Value::GenericAlias(_) | Value::TypeVar(_) | Value::Union(_) | Value::TypeAlias(_)
         )
         || matches!(ctx.heap.get(id), Value::Native(n) if matches!(n.as_str(), "typing.Any" | "typing.Callable"))
 }

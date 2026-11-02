@@ -470,6 +470,7 @@ impl Context {
             Value::ParamSpec(_) => "ParamSpec",
             Value::ParamSpecMarker(kind, _) => kind.class().rsplit_once('.').unwrap().1,
             Value::ConstEvaluator(_) => "constevaluator",
+            Value::TypeAlias(_) => "typing.TypeAliasType",
             Value::TypeVar(_) => "TypeVar",
             Value::TypeVarTuple { .. } => "TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.type_name(),
@@ -887,6 +888,7 @@ pub(super) enum Value {
     ParamSpec(super::paramspec::ParamSpec),
     ParamSpecMarker(super::paramspec::Marker, Id),
     ConstEvaluator(Id),
+    TypeAlias(super::type_alias::TypeAlias),
     TypeVar(super::typing::TypeVariable),
     TypeVarTuple {
         name: Id,
@@ -1478,6 +1480,11 @@ impl Value {
             } => visit.extend([*name, *module, *default]),
             Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
             Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
+            Self::TypeAlias(alias) => {
+                visit.extend([alias.name, alias.params, alias.module]);
+                visit.extend(alias.evaluator);
+                visit.extend(alias.value);
+            }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);

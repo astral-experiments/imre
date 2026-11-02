@@ -2147,6 +2147,7 @@ def report(text):
             "boxed_function_closure_cells.py",
             "boxed_function_closure_edges.py",
             "boxed_function_annotation_closure.py",
+            "boxed_type_alias_type.py",
             "boxed_functiontype.py",
             "boxed_function_call.py",
             "boxed_any_generator.py",
