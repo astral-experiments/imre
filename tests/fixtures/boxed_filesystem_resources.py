@@ -1,5 +1,7 @@
 from io import BytesIO
 from importlib import resources
+from importlib.resources import contents, is_resource
+import warnings
 from importlib.resources.abc import ResourceReader, Traversable, TraversableResources, TraversalError
 import data
 
@@ -52,6 +54,13 @@ assert target.is_file() and target.read_bytes() == b'hello\n'
 # The source loader owns the location even if the module changes its metadata.
 data.__file__ = 'wrong/__init__.py'
 assert resources.read_text('data', 'nested/message.txt') == 'hello\n'
+assert is_resource(data, 'nested', 'message.txt')
+assert not is_resource('data', 'nested') and not is_resource('data', 'absent')
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter('always')
+    children = contents('data', 'nested')
+    assert len(caught) == 1 and caught[0].category is DeprecationWarning
+assert iter(children) is children and set(children) == {'message.txt'}
 assert resources.read_binary(data, 'nested', 'message.txt') == b'hello\n'
 assert resources.read_binary('data', 'nested/message.txt') == b'hello\n'
 with resources.path('data', 'nested', 'message.txt') as existing:
