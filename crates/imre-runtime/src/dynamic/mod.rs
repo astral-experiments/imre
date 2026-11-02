@@ -2765,10 +2765,17 @@ impl Context {
                 self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
+            "fcntl" if source.is_none() => {
+                let value = self.int(i64::from(libc::FD_CLOEXEC));
+                self.bind(scope, "FD_CLOEXEC", value);
+            }
+            #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
-                let tmpfile = self.int(i64::from(libc::O_TMPFILE));
-                self.bind(scope, "O_TMPFILE", tmpfile);
+                for (attr, flag) in [("O_PATH", libc::O_PATH), ("O_TMPFILE", libc::O_TMPFILE)] {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, attr, value);
+                }
                 #[cfg(any(target_env = "gnu", target_env = "musl"))]
                 for (attr, flag) in [
                     ("RTLD_LAZY", libc::RTLD_LAZY),
