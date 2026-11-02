@@ -146,14 +146,15 @@ results and import coverage recorded in this repository.
 
 CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Linux. They use the same pairing rule and have a separate total. A dash marks a pending native baseline.
 
-| Module | Paired passes | Upstream tests | Initial coverage target |
+| Module | Paired passes | Upstream tests | Coverage |
 | --- | ---: | ---: | --- |
 | `contextlib` | — | 149 | Context managers, exception propagation, and cleanup order |
 | `inspect` | — | 362 | Callable signatures, argument binding, and decorator unwrapping |
 | `ssl` | — | 195 | SSL contexts, certificates, and loopback TLS connections |
-| `types` | — | 141 | Bound methods, module objects, namespaces, and read-only mappings |
-| `warnings` | — | 187 | Filter selection, warning capture, and caller attribution |
+| `types` | 97 | 141 | The unchanged `test_types` and `test_dynamicclassattribute` suites contributed 86 and 11 paired passes on public revision `5296088f`. |
+| `warnings` | 0 | 187 | Stock passed 181 and skipped six. Both ordinary native builds stopped at the import of `warnings.deprecated` before test registration. |
 | `weakref` | — | 183 | Reference callbacks, weak containers, and finalizers |
+| **Measured total (2 of 6 families)** | **97** | **328** | |
 
 ## Design
 
