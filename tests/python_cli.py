@@ -1018,10 +1018,25 @@ def check_unittest_file_discovery(imre, root, run):
         (directory / "test_skipped.py").write_text(
             "import unittest\nraise unittest.SkipTest('unavailable module')\n"
         )
+        (directory / "test_process_exports.py").write_text(
+            "import subprocess as _process, unittest as _unittest\n"
+            "from subprocess import __all__ as _exports\n"
+            "from subprocess import *\n"
+            "_names = []\n"
+            "for _name in list(globals()):\n"
+            "    if not _name.startswith('_'):\n"
+            "        _names.append(_name)\n"
+            "class Exports(_unittest.TestCase):\n"
+            "    def test_star(self):\n"
+            "        self.assertEqual(_names, _exports)\n"
+            "        for name in _exports:\n"
+            "            self.assertIs(globals()[name], getattr(_process, name))\n"
+            "        self.assertEqual(check_output(['/bin/sh', '-c', 'printf captured']), b'captured')\n"
+        )
         for command in ((sys.executable, "-B", entry), (executable,)):
             result = run(*command, directory)
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, b"3 ['test_late.Late.test_body'] 0\n"
+                0, b"4 ['test_late.Late.test_body'] 0\n"
                 b"[('unittest.loader.ModuleSkipped.test_skipped', 'unavailable module')]\n", b"",
             ), result
 
@@ -1931,6 +1946,7 @@ def report(text):
             "boxed_sys_getframe.py",
             "boxed_sys_audit.py",
             "boxed_sys_audit_recursion.py",
+            "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
             "boxed_sys_hash_info.py",
             "boxed_sys_flags.py",
@@ -2042,6 +2058,7 @@ def report(text):
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
             "boxed_os_environb.py",
+            "boxed_os_python_fspath.py",
             "boxed_os_file_descriptors.py",
             "boxed_os_fdopen.py",
             "boxed_binary_bytes_paths.py",
@@ -2061,6 +2078,7 @@ def report(text):
             "boxed_socket_timeout.py",
             "boxed_urllib_data.py",
             "boxed_urllib_http_status.py",
+            "boxed_urllib_http.py",
             "boxed_http_transport.py",
             "boxed_message_parameters.py",
             "boxed_unicodedata.py",
@@ -2265,6 +2283,8 @@ def report(text):
             check_unittest_main_names(imre, root, run)
             check_unittest_file_discovery(imre, root, run)
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_exports.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

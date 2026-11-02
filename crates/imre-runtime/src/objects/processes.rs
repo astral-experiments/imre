@@ -493,6 +493,12 @@ impl Default for ChildAttributes {
     }
 }
 
+const DEFAULT_SHELL: &std::ffi::CStr = if cfg!(target_os = "android") {
+    c"/system/bin/sh"
+} else {
+    c"/bin/sh"
+};
+
 struct Launch {
     argv: CStrings,
     executable: Option<CString>,
@@ -1186,15 +1192,10 @@ unsafe fn prepare_command(
         let executable = argv::optional_path(config.executable, config.executable_kind)?;
         let mut argv = argv::copy(cmd)?;
         if config.shell {
-            let default = if cfg!(target_os = "android") {
-                c"/system/bin/sh"
-            } else {
-                c"/bin/sh"
-            };
             let shell = executable
                 .as_deref()
                 .filter(|p| !p.to_bytes().is_empty())
-                .unwrap_or(default);
+                .unwrap_or(DEFAULT_SHELL);
             argv.try_reserve(2).map_err(|_| Error::allocation())?;
             argv.splice(..0, [shell.to_owned(), c"-c".to_owned()]);
         }

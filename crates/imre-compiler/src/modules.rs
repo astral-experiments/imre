@@ -203,7 +203,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "_weakrefset" => Some(("_weakrefset.py", include_str!("../stdlib/_weakrefset.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
+        // CPython 3.14.5 Lib/code.py and Lib/codeop.py. See stdlib/docstrings/LICENSE.
+        "code" => Some(("code.py", include_str!("../stdlib/code.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
+        "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
         "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
         "collections" => {
@@ -433,7 +436,9 @@ pub(crate) enum IntrinsicModule {
     ImportlibMachinery,
     ImportlibBootstrapExternal,
     ImportlibMetadata,
+    ImportlibReaders,
     ImportlibResources,
+    ImportlibResourceReaders,
     ImportlibResourcesAbc,
     ImportlibUtil,
     Array,
@@ -987,7 +992,9 @@ impl IntrinsicModule {
                 Some(Self::ImportlibBootstrapExternal)
             }
             "importlib.metadata" => Some(Self::ImportlibMetadata),
+            "importlib.readers" => Some(Self::ImportlibReaders),
             "importlib.resources" => Some(Self::ImportlibResources),
+            "importlib.resources.readers" => Some(Self::ImportlibResourceReaders),
             "importlib.resources.abc" => Some(Self::ImportlibResourcesAbc),
             "importlib.util" => Some(Self::ImportlibUtil),
             "collections" => Some(Self::Collections),
@@ -1099,6 +1106,9 @@ impl IntrinsicModule {
         }
         if self == Self::ImportlibResources && name == "abc" {
             return Some(Binding::IntrinsicModule(Self::ImportlibResourcesAbc));
+        }
+        if self == Self::ImportlibResources && name == "readers" {
+            return Some(Binding::IntrinsicModule(Self::ImportlibResourceReaders));
         }
         if self == Self::Collections && name == "abc" {
             return Some(Binding::IntrinsicModule(Self::CollectionsAbc));
@@ -1264,6 +1274,12 @@ impl IntrinsicModule {
             }
             (Self::ImportlibResourcesAbc, "Traversable") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.Traversable")
+            }
+            (Self::ImportlibReaders | Self::ImportlibResourceReaders, "MultiplexedPath") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.readers.MultiplexedPath")
+            }
+            (Self::ImportlibReaders | Self::ImportlibResourceReaders, "NamespaceReader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.readers.NamespaceReader")
             }
             (Self::ImportlibResourcesAbc, "TraversalError") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.TraversalError")
@@ -1544,6 +1560,9 @@ impl IntrinsicModule {
             (Self::TomliW, "dump") => Intrinsic::TomliDump,
             (Self::Enum, "Enum") => Intrinsic::StandardEnum,
             (Self::Dataclasses, "is_dataclass") => Intrinsic::IsDataclass,
+            (Self::Subprocess, "__all__") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("subprocess.__all__")
+            }
             (Self::Subprocess, "PIPE") => Intrinsic::Pipe,
             (Self::Subprocess, "DEVNULL") => Intrinsic::Devnull,
             (Self::Subprocess, "check_output") => Intrinsic::CheckOutput,
@@ -2132,6 +2151,7 @@ impl IntrinsicModule {
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
             (Self::Zlib, "crc32") => Intrinsic::ObjectRuntimeExport("zlib.crc32"),
             (Self::ImreJson, "decode") => Intrinsic::JsonDecode,
+            (Self::JsonNative, "scanstring") => Intrinsic::ObjectRuntimeExport("_json.scanstring"),
             (Self::JsonNative, "encode_basestring") => {
                 Intrinsic::ObjectRuntimeExport("_json.encode_basestring")
             }
@@ -2243,6 +2263,7 @@ impl IntrinsicModule {
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
             (Self::Os, "fspath") => Intrinsic::FsPath,
+            (Self::Os, "_fspath") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os._fspath"),
             (Self::Os, "fsdecode") => Intrinsic::FsDecode,
             (Self::Os, "fsencode") => Intrinsic::FsEncode,
             (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
@@ -3360,6 +3381,7 @@ fn importlib_child(name: &str) -> Option<IntrinsicModule> {
         "machinery" => Some(IntrinsicModule::ImportlibMachinery),
         "_bootstrap_external" => Some(IntrinsicModule::ImportlibBootstrapExternal),
         "metadata" => Some(IntrinsicModule::ImportlibMetadata),
+        "readers" => Some(IntrinsicModule::ImportlibReaders),
         "resources" => Some(IntrinsicModule::ImportlibResources),
         "util" => Some(IntrinsicModule::ImportlibUtil),
         _ => None,
@@ -3373,6 +3395,7 @@ fn importlib_child_name(module: IntrinsicModule) -> Option<&'static str> {
         IntrinsicModule::ImportlibMachinery => Some("machinery"),
         IntrinsicModule::ImportlibBootstrapExternal => Some("_bootstrap_external"),
         IntrinsicModule::ImportlibMetadata => Some("metadata"),
+        IntrinsicModule::ImportlibReaders => Some("readers"),
         IntrinsicModule::ImportlibResources => Some("resources"),
         IntrinsicModule::ImportlibUtil => Some("util"),
         _ => None,
@@ -4295,6 +4318,8 @@ impl<'a> Loader<'a> {
                             IntrinsicModule::Marshal
                                 | IntrinsicModule::Pickle
                                 | IntrinsicModule::Struct
+                                | IntrinsicModule::ImportlibReaders
+                                | IntrinsicModule::ImportlibResourceReaders
                                 | IntrinsicModule::ImportlibResources
                         ) && matches!(
                             binding,
@@ -4709,6 +4734,8 @@ impl<'a> Loader<'a> {
                 source,
             )?;
             self.modules[id].bundled = true;
+            // codeop sets compiler flags on Python instances.
+            self.needs_object_imports |= name == "codeop";
             self.scan(id)?;
             self.bind_child(name, id, parent)?;
             return Ok(id);

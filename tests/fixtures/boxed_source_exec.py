@@ -223,6 +223,30 @@ def source_annotations():
     future = ns["F"].f
     assert future.__annotate__.__closure__ is None
     assert future.__annotations__ == {"n": "Missing", "obj": "'A'", "return": "tuple[int]"}
+    fallback = {"__annotations__": {}}
+    exec("""from __future__ import annotations
+def fields():
+    __annotations__ = {}
+    class Fields:
+        first: int
+        del __annotations__
+        second: Missing
+    return Fields, __annotations__
+""", fallback)
+    fields, outer = fallback["fields"]()
+    assert not outer and fallback["__annotations__"] == {"second": "Missing"}
+    assert fields.__annotate__ is None
+    exec("""class Declared:
+    try:
+        __annotations__
+    except NameError:
+        pass
+    else:
+        raise AssertionError("deferred fields exposed an annotation mapping during construction")
+    field: int
+class Empty(Declared): pass
+""", ns)
+    assert ns["Empty"].__annotate__ is None and ns["Empty"].__annotations__ == {}
     for expr in ("(tmp := int)", "(yield int)", "(await T)"):
         for source in ("def f(arg: " + expr + "): pass",
                        "def f(obj): obj.field: " + expr + " = 1",

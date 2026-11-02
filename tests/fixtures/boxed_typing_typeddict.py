@@ -200,11 +200,27 @@ def check_deferred_fields():
     assert ref.evaluate(locals={"Later": str}) is bytes
 
 
+def check_exec_fields():
+    parent_ns = {"TypedDict": TypedDict, "Alias": bytes}
+    exec("from __future__ import annotations\nclass Parent(TypedDict):\n    __key: Alias", parent_ns)
+    parent = parent_ns["Parent"]
+    child_ns = {"Parent": parent, "Alias": str}
+    exec("class Child(Parent):\n    value: Alias = 3", child_ns)
+    child = child_ns["Child"]
+
+    ref = parent.__annotations__["_Parent__key"]
+    assert ref.__owner__ is parent and ref.evaluate(globals=parent_ns) is bytes
+    assert child.value == 3 and child.__annotations__ == {"_Parent__key": ref, "value": str}
+    child_ns["Alias"] = int
+    assert child.__annotate__(1) == {"_Parent__key": ref, "value": int}
+
+
 def current():
     check_inheritance()
     check_required_keys()
     check_generic_bases()
     check_deferred_fields()
+    check_exec_fields()
 
     class Film(TypedDict):
         title: str

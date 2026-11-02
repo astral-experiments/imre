@@ -45,6 +45,10 @@ impl PreparedHandles {
 }
 
 impl BoxedPopen {
+    pub(crate) fn default_shell() -> &'static str {
+        DEFAULT_SHELL.to_str().expect("ASCII shell path")
+    }
+
     pub(crate) fn probes_executable() -> bool {
         launch_error::posix_spawn_capabilities().0
     }

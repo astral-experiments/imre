@@ -26,6 +26,9 @@ def current():
     with Popen(["ignored"], executable=changing, cwd=".") as child:
         print("changing executable", changing.calls, child.wait())
 
+    with Popen("exit 47", shell=True, executable="/bin/false") as child:
+        assert child.wait() == 1
+
     executable = Path("null/child")
     try:
         Popen(["/bin/true"], executable=executable, cwd="/dev")

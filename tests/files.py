@@ -17,6 +17,21 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "named_text_update_builtin": """
+        from pathlib import Path
+
+        def destination() -> Path:
+            print("destination")
+            return Path("typed-update.txt")
+
+        with open(destination(), "w+") as stream:
+            print(stream.write("contents"))
+            stream.seek(0)
+            print(stream.read())
+
+        with open(file="typed-update.txt", mode="+r", encoding="utf-8") as stream:
+            print(stream.read())
+    """,
     "script_search_path": """import sys
 print(sys.path[0])
 sys.path.insert(0, "extra")
@@ -911,7 +926,7 @@ def main() -> None:
                         "--opt-level",
                         level,
                         *flags,
-                        *(["--runtime-imports"] if name == "boxed_zipimport_resources" else []),
+                        *(["--runtime-imports"] if name in {"boxed_zipimport_resources", "named_text_update"} else []),
                     ],
                     temporary,
                 )

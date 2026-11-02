@@ -106,6 +106,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         pipesize,
         encoding,
         errors,
+        shell,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -123,13 +124,38 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let handles = (executable != NONE)
         .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
         .transpose()?;
-    let scalar = matches!(
+    let shell = ctx.truth(shell)?;
+    let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(args)),
-        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::DirEntry(_)
-    ) || ctx
-        .slot(args, "__fspath__")
-        .is_some_and(|slot| slot != NONE);
-    let items = if scalar { vec![args] } else { ctx.items(args)? };
+        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+    );
+    let path_like = !spelling
+        && (matches!(ctx.heap.get(args), Value::DirEntry(_))
+            || ctx
+                .slot(args, "__fspath__")
+                .is_some_and(|slot| slot != NONE));
+    if shell && path_like {
+        return Err(Error::new(
+            "TypeError",
+            "path-like args is not allowed when shell is true",
+        ));
+    }
+    let mut items = if spelling || path_like {
+        vec![args]
+    } else {
+        ctx.items(args)?
+    };
+    if shell {
+        // Preserve the shell's argv[0] until argv and executable are converted separately.
+        let shell_program = if executable != NONE && ctx.truth(executable)? {
+            executable
+        } else {
+            ctx.text(BoxedPopen::default_shell())
+        };
+        let option = ctx.text("-c");
+        items.try_reserve(2).map_err(|_| Error::new("MemoryError", ""))?;
+        items.splice(..0, [shell_program, option]);
+    }
     let (&program, arguments) = if executable == NONE {
         items
             .split_first()
