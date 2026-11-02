@@ -52,6 +52,8 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             &[
                 "__bool__",
                 "__neg__",
+                "__mul__",
+                "__rmul__",
                 "__repr__",
                 "__str__",
                 "total_seconds",
@@ -201,6 +203,104 @@ fn field_type_error(ctx: &Context, owner: &str, field: &str, receiver: Id) -> Er
     )
 }
 
+fn delta_component(ctx: &mut Context, value: Id) -> Result<i32> {
+    ctx.index_integer(value)?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+/// Integer subclasses can return arbitrary objects from multiplication. CPython splits
+/// that result with divmod and validates the normalized microsecond and second fields.
+fn split_delta_component(ctx: &mut Context, value: Id, unit: i32) -> Result<(Id, i32)> {
+    let divisor = ctx.int(i64::from(unit));
+    let result = ctx.divmod(value, divisor)?;
+    let tuple = ctx.tuple_items(result)?.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "divmod() returned non-tuple (type {})",
+                ctx.type_name(result)
+            ),
+        )
+    })?;
+    let [quotient, remainder] = tuple.as_slice() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("divmod() returned a tuple of size {}", tuple.len()),
+        ));
+    };
+    let remainder = delta_component(ctx, *remainder)?;
+    if !(0..unit).contains(&remainder) {
+        return Err(Error::new(
+            "TypeError",
+            "divmod() returned a value out of range",
+        ));
+    }
+    Ok((*quotient, remainder))
+}
+
+fn multiply_delta(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let name = method.rsplit('.').next().unwrap();
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("descriptor '{name}' of 'datetime.timedelta' object needs an argument"),
+        ));
+    };
+    let duration = calendar(ctx, receiver, "timedelta").ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{name}' requires a 'datetime.timedelta' object but received a '{}'",
+                ctx.type_name(receiver)
+            ),
+        )
+    })?;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("wrapper {name}() takes no keyword arguments"),
+        ));
+    }
+    let &[factor] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("expected 1 argument, got {}", args.len()),
+        ));
+    };
+    if !matches!(
+        ctx.heap.get(ctx.scalar_value(factor)),
+        Value::Int(_) | Value::Bool(_)
+    ) {
+        return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+    }
+    let us = ctx.alloc(Value::Int(crate::Int::new(
+        duration.delta_microseconds().into(),
+    )));
+    let product = ctx.binary("*", factor, us)?;
+    let micros = if let Value::Int(n) = ctx.heap.get(product) {
+        n.clone()
+    } else {
+        let (seconds, micros) = split_delta_component(ctx, product, 1_000_000)?;
+        let (days, seconds) = split_delta_component(ctx, seconds, 86_400)?;
+        let days = delta_component(ctx, days)?;
+        let total =
+            (i128::from(days) * 86_400 + i128::from(seconds)) * 1_000_000 + i128::from(micros);
+        crate::Int::new(total.into())
+    };
+    Ok(store(
+        ctx,
+        Calendar::from_delta_microseconds(&micros)?,
+        NONE,
+    ))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     method: &str,
@@ -220,6 +320,7 @@ pub(super) fn call(
     }
     match method {
         "time" => time(ctx, args, kwargs),
+        "timedelta.__mul__" | "timedelta.__rmul__" => multiply_delta(ctx, method, args, kwargs),
         "datetime.combine" => {
             let [day, clock, tz] = bind("combine", args, kwargs, ["date", "time", "tzinfo"])?;
             let day = required(day, "combine()", "date", 1)?;
