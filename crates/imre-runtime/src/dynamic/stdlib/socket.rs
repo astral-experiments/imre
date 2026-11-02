@@ -12,7 +12,6 @@ const CONSTANTS: &[(&str, i32)] = &[
     ("IPPROTO_TCP", libc::IPPROTO_TCP),
     ("IPPROTO_IPV6", libc::IPPROTO_IPV6),
     ("IPV6_V6ONLY", libc::IPV6_V6ONLY),
-    ("SO_REUSEADDR", libc::SO_REUSEADDR),
     ("SO_SNDBUF", libc::SO_SNDBUF),
     ("TCP_NODELAY", libc::TCP_NODELAY),
     ("SHUT_RD", libc::SHUT_RD),
@@ -25,6 +24,7 @@ const CONSTANTS: &[(&str, i32)] = &[
 const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     ("IPPROTO_UDP", libc::IPPROTO_UDP),
     ("SOL_SOCKET", libc::SOL_SOCKET),
+    ("SO_REUSEADDR", libc::SO_REUSEADDR),
     ("SO_REUSEPORT", libc::SO_REUSEPORT),
     ("SOCK_DGRAM", libc::SOCK_DGRAM),
     ("SOCK_RAW", libc::SOCK_RAW),
