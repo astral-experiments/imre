@@ -6,6 +6,7 @@ import sys
 from _imre_importlib import (
     cache_name as _cache_name,
     get_code as _registered_code,
+    index as _index,
     loader_fields as _loader_fields,
     path_stats as _path_stats,
     source_name as _source_name,
@@ -13,7 +14,7 @@ from _imre_importlib import (
     warn_loader_deprecation as _warn_loader_deprecation,
     warn_import as _warn_import,
 )
-from os import fspath as _fspath, sep
+from os import fsdecode as _fsdecode, fspath as _fspath, sep
 
 
 _MS_WINDOWS = sys.platform == "win32"
@@ -171,13 +172,10 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
         return _path_stats(path)
 
     def source_to_code(self, data, path, *, _optimize=-1):
-        from operator import index
-        from os import fsdecode
-
-        filename = fsdecode(path)
+        filename = _fsdecode(path)
         if "\0" in filename:
             raise ValueError("embedded null character")
-        level = index(_optimize)
+        level = _index(_optimize)
         if level < -2147483648 or level > 2147483647:
             raise OverflowError("Python int too large to convert to C int")
         if level < -1 or level > 2:

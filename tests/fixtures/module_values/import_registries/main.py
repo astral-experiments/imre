@@ -45,7 +45,13 @@ with tempfile.TemporaryDirectory() as directory:
         assert not calls
         direct = machinery.SourceFileLoader(name, filename)
         scope = {}
-        exec(direct.get_code(name), scope)
+        # The direct loader must work even when ordinary imports cannot find its helpers.
+        operator_module = sys.modules.pop('operator', None)
+        try:
+            exec(direct.get_code(name), scope)
+        finally:
+            if operator_module is not None:
+                sys.modules['operator'] = operator_module
         assert scope['answer'] == 42 and name not in sys.modules
 
         sys.meta_path.append(machinery.PathFinder)

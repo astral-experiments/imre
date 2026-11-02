@@ -2524,6 +2524,9 @@ impl Context {
                     self.zip_path_importers = self.dict(Vec::new());
                 }
                 self.bind(scope, "_zip_path_importers", self.zip_path_importers);
+                // Source loaders can compile directly even when ordinary module imports are disabled.
+                let index = self.builtin("operator.index");
+                self.bind(scope, "index", index);
                 let factory = self.builtin(thread_rlock::CLASS);
                 let lock = self.call(factory, vec![], vec![])?;
                 self.bind(scope, "_import_lock", lock);
