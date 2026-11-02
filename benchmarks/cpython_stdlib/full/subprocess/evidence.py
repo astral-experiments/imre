@@ -17,6 +17,8 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 # A completed method earns native operation credit only after inspecting what
 # its original assertions (or, in CONTROL, its retry loop) actually observe.
 OPERATIONS = {
+    "test.test_subprocess.ProcessTestCase.test_post_timeout_communicate_sends_input":
+        "retry communication after a zero timeout, check the child's exit status and the returned text",
     "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output":
         "time out during communication, retry on the same child, and check the captured stdout length",
     "test_call_kwargs": "call with a child environment; wait for its exit status",
