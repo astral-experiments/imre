@@ -376,8 +376,7 @@ class PrettyPrinter:
                      context, level)
         stream.write(')')
 
-    if hasattr(_types, "MappingProxyType"):
-        _dispatch[_types.MappingProxyType.__repr__] = _pprint_mappingproxy
+    _dispatch[getattr(_types.MappingProxyType, "__repr__", _types.MappingProxyType)] = _pprint_mappingproxy
 
     def _pprint_simplenamespace(self, object, stream, indent, allowance, context, level):
         if type(object) is _types.SimpleNamespace:
