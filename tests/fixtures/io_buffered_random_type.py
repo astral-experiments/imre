@@ -215,6 +215,7 @@ with BlockedRaw(b"abcdefgh") as raw:
     assert f.tell() == 6
     raw.blocked = False
     f.flush()
+    assert f.tell() == raw.tell() == 9
     assert raw.getvalue() == b"abcX01234"
     f.close()
 

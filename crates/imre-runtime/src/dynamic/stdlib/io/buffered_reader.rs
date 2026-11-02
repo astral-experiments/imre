@@ -493,7 +493,7 @@ impl Reader {
             self.write_back(ctx)?;
             let offset = if whence == 1 {
                 offset
-                    .checked_add(pos - self.raw_offset())
+                    .checked_add(self.logical_pos() - self.raw_offset())
                     .ok_or_else(|| Error::new("OverflowError", "seek offset out of range"))?
             } else {
                 offset

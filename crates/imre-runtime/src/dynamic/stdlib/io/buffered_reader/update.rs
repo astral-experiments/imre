@@ -66,6 +66,10 @@ impl Reader {
             update.dirty.set(Some((start, end)));
         }
         update.dirty.set(None);
+        // With no valid read window, completion of the last raw write defines the cursor.
+        if self.end.get() == 0 {
+            self.reset();
+        }
         Ok(())
     }
 
