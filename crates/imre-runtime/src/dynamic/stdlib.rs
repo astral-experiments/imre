@@ -1814,6 +1814,19 @@ pub(super) fn call(
         return os::scheduler::yield_cpu(args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    match name {
+        "posix.sched_getaffinity" => return os::scheduler::affinity::get(ctx, args, kwargs),
+        "posix.sched_setaffinity" => return os::scheduler::affinity::set(ctx, args, kwargs),
+        "posix.sched_rr_get_interval" => return os::scheduler::rr_interval(ctx, args, kwargs),
+        _ => {}
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("sched_getparam" | "sched_setparam" | "sched_setscheduler")) =
+        name.strip_prefix("posix.")
+    {
+        return os::scheduler::parameters::call(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
         return os::scheduler::get_policy(ctx, args, kwargs);
     }

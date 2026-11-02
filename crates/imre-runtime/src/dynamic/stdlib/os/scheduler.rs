@@ -1,29 +1,40 @@
-use super::{Context, Error, Id, NONE, Result, builtins, c_int};
+use super::{Context, Error, Id, NONE, Result, Value, builtins, c_int};
 
-pub(in crate::dynamic) const PRIORITY_AND_YIELD: [&str; 3] = [
+pub(in crate::dynamic::stdlib) mod affinity;
+pub(in crate::dynamic::stdlib) mod parameters;
+
+pub(in crate::dynamic) const SCHEDULER_EXPORTS: [&str; 9] = [
     "sched_get_priority_min",
     "sched_get_priority_max",
     "sched_yield",
+    "sched_getaffinity",
+    "sched_setaffinity",
+    "sched_rr_get_interval",
+    "sched_getparam",
+    "sched_setparam",
+    "sched_setscheduler",
+];
+
+pub(in crate::dynamic) const POLICIES: [(&str, libc::c_int); 8] = [
+    ("SCHED_OTHER", libc::SCHED_OTHER),
+    ("SCHED_NORMAL", libc::SCHED_NORMAL),
+    ("SCHED_FIFO", libc::SCHED_FIFO),
+    ("SCHED_RR", libc::SCHED_RR),
+    ("SCHED_BATCH", libc::SCHED_BATCH),
+    ("SCHED_IDLE", libc::SCHED_IDLE),
+    ("SCHED_DEADLINE", libc::SCHED_DEADLINE),
+    ("SCHED_RESET_ON_FORK", libc::SCHED_RESET_ON_FORK),
 ];
 
 /// Populate the Linux posix namespace so its dictionary exposes the host's policy constants.
 pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
-    for (name, policy) in [
-        ("SCHED_OTHER", libc::SCHED_OTHER),
-        ("SCHED_NORMAL", libc::SCHED_NORMAL),
-        ("SCHED_FIFO", libc::SCHED_FIFO),
-        ("SCHED_RR", libc::SCHED_RR),
-        ("SCHED_BATCH", libc::SCHED_BATCH),
-        ("SCHED_IDLE", libc::SCHED_IDLE),
-        ("SCHED_DEADLINE", libc::SCHED_DEADLINE),
-        ("SCHED_RESET_ON_FORK", libc::SCHED_RESET_ON_FORK),
-    ] {
+    for (name, policy) in POLICIES {
         let value = ctx.int(i64::from(policy));
         ctx.bind(scope, name, value);
     }
     let param = ctx.builtin(super::super::fixed_structseq::SCHED_PARAM);
     ctx.bind(scope, "sched_param", param);
-    for name in PRIORITY_AND_YIELD {
+    for name in SCHEDULER_EXPORTS {
         let function = ctx.builtin(&format!("posix.{name}"));
         ctx.bind(scope, name, function);
     }
@@ -113,4 +124,24 @@ pub(in crate::dynamic::stdlib) fn yield_cpu(args: &[Id], kwargs: &[(String, Id)]
         return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
     }
     Ok(NONE)
+}
+
+/// Return the kernel's round-robin interval in seconds for the selected process.
+pub(in crate::dynamic::stdlib) fn rr_interval(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let pid = builtins::one_positional_arg("posix.sched_rr_get_interval", args, kwargs)?;
+    let pid = c_int(ctx, pid)?;
+    let mut interval = std::mem::MaybeUninit::uninit();
+    // SAFETY: libc initializes the complete timespec on success.
+    if unsafe { libc::sched_rr_get_interval(pid, interval.as_mut_ptr()) } != 0 {
+        return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
+    }
+    // SAFETY: the query succeeded.
+    let interval = unsafe { interval.assume_init() };
+    Ok(ctx.alloc(Value::Float(
+        interval.tv_sec as f64 + 1e-9 * interval.tv_nsec as f64,
+    )))
 }

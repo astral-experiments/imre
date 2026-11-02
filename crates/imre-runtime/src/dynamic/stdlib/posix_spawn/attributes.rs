@@ -1,7 +1,7 @@
 use std::io;
 
-use crate::dynamic::stdlib::{fixed_structseq, os, os_error};
-use crate::dynamic::{Context, Error, Id, NONE, Result, Value};
+use crate::dynamic::stdlib::{os, os_error};
+use crate::dynamic::{Context, Error, Id, NONE, Result};
 use crate::objects::exceptions::Kind;
 
 /// Own initialized attributes at a stable address through configuration, spawn, and destruction.
@@ -56,20 +56,7 @@ impl Attributes {
                     "A scheduler tuple must have two elements",
                 ));
             };
-            let Value::NamedTuple {
-                class: Some(fixed_structseq::SCHED_PARAM),
-                values,
-                ..
-            } = ctx.heap.get(*param)
-            else {
-                return Err(Error::new("TypeError", "must have a sched_param object"));
-            };
-            let priority = values[0];
-            let priority = ctx.index_c_long(priority)?;
-            // SAFETY: Linux sched_param consists of integer fields; leave unused fields zero.
-            let mut param = unsafe { std::mem::zeroed::<libc::sched_param>() };
-            param.sched_priority = i32::try_from(priority)
-                .map_err(|_| Error::new("OverflowError", "sched_priority out of range"))?;
+            let param = os::scheduler::parameters::convert(ctx, *param)?;
             if *policy != NONE {
                 let policy = os::c_int(ctx, *policy)?;
                 // SAFETY: attr is initialized and libc validates policy.

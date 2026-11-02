@@ -140,6 +140,24 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "sched_yield" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_yield")
         }
+        "sched_getaffinity" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_getaffinity")
+        }
+        "sched_setaffinity" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_setaffinity")
+        }
+        "sched_rr_get_interval" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_rr_get_interval")
+        }
+        "sched_getparam" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_getparam")
+        }
+        "sched_setparam" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_setparam")
+        }
+        "sched_setscheduler" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sched_setscheduler")
+        }
         "sched_getscheduler" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_getscheduler")
         }

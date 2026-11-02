@@ -2544,6 +2544,36 @@ impl Context {
                     "__text_signature__" if symbol == "posix.sched_yield" => {
                         return Ok(self.text("($module, /)"));
                     }
+                    "__doc__" if symbol == "posix.sched_getaffinity" => {
+                        return Ok(self.text("Return the affinity of the process identified by pid (or the current process if zero).\n\nThe affinity is returned as a set of CPU identifiers."));
+                    }
+                    "__doc__" if symbol == "posix.sched_setaffinity" => {
+                        return Ok(self.text("Set the CPU affinity of the process identified by pid to mask.\n\nmask should be an iterable of integers identifying CPUs."));
+                    }
+                    "__doc__" if symbol == "posix.sched_rr_get_interval" => {
+                        return Ok(self.text("Return the round-robin quantum for the process identified by pid, in seconds.\n\nValue returned is a float."));
+                    }
+                    "__doc__" if symbol == "posix.sched_getparam" => {
+                        return Ok(self.text("Returns scheduling parameters for the process identified by pid.\n\nIf pid is 0, returns parameters for the calling process.\nReturn value is an instance of sched_param."));
+                    }
+                    "__doc__" if symbol == "posix.sched_setparam" => {
+                        return Ok(self.text("Set scheduling parameters for the process identified by pid.\n\nIf pid is 0, sets parameters for the calling process.\nparam should be an instance of sched_param."));
+                    }
+                    "__doc__" if symbol == "posix.sched_setscheduler" => {
+                        return Ok(self.text("Set the scheduling policy for the process identified by pid.\n\nIf pid is 0, the calling process is changed.\nparam is an instance of sched_param."));
+                    }
+                    "__text_signature__" if matches!(symbol.as_str(), "posix.sched_getaffinity" | "posix.sched_rr_get_interval" | "posix.sched_getparam") => {
+                        return Ok(self.text("($module, pid, /)"));
+                    }
+                    "__text_signature__" if symbol == "posix.sched_setaffinity" => {
+                        return Ok(self.text("($module, pid, mask, /)"));
+                    }
+                    "__text_signature__" if symbol == "posix.sched_setparam" => {
+                        return Ok(self.text("($module, pid, param, /)"));
+                    }
+                    "__text_signature__" if symbol == "posix.sched_setscheduler" => {
+                        return Ok(self.text("($module, pid, policy, param, /)"));
+                    }
                     "__doc__" if symbol == "posix.sched_getscheduler" => {
                         return Ok(self.text(concat!(
                             "Get the scheduling policy for the process identified by pid.\n\n",
