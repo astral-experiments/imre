@@ -1,6 +1,5 @@
 """Read the RFC 822 headers and description of an installed distribution."""
 import re
-import warnings
 from email.message import Message as EmailMessage, _valid_field_name
 from _imre_metadata import dedent
 
@@ -51,6 +50,7 @@ class Message(EmailMessage):
     def __getitem__(self, name):
         value = self.get(name)
         if value is None:
+            import warnings
             warnings.warn('Implicit None on return values is deprecated and will raise KeyErrors.',
                           DeprecationWarning, stacklevel=2)
         return value
