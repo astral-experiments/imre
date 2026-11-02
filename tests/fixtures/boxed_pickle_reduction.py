@@ -364,12 +364,15 @@ def check_global_names(protocol):
     finally:
         _operator.getitem = getitem
 
-    for fix_imports in (True, False):
-        data = pickle.dumps(super, protocol, fix_imports=fix_imports)
-        if protocol < 3:
-            module = b"__builtin__" if fix_imports else b"builtins"
-            assert b"c" + module + b"\nsuper\n" in data
-        assert pickle.loads(data, fix_imports=fix_imports) is super
+    for value, legacy_name in ((super, "super"), (len, "len"), (min, "min"), (chr, "unichr")):
+        for fix_imports in (True, False):
+            data = pickle.dumps(value, protocol, fix_imports=fix_imports)
+            if protocol <= 3:
+                legacy = protocol < 3 and fix_imports
+                module = "__builtin__" if legacy else "builtins"
+                name = legacy_name if legacy else value.__name__
+                assert ("c" + module + "\n" + name + "\n").encode() in data
+            assert pickle.loads(data, fix_imports=fix_imports) is value
 
     from itertools import chain, filterfalse
 
