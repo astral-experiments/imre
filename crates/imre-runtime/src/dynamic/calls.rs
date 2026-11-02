@@ -2415,6 +2415,17 @@ impl Context {
                 return Ok(self.bind_native_classmethod(method, obj));
             }
             Value::Native(ref class)
+                if class == "collections.defaultdict" && name == "__module__" =>
+            {
+                return Ok(self.text("collections"));
+            }
+            Value::Native(ref class)
+                if class == "collections.defaultdict"
+                    && matches!(name, "__name__" | "__qualname__") =>
+            {
+                return Ok(self.text("defaultdict"));
+            }
+            Value::Native(ref class)
                 if class == "collections.defaultdict"
                     && let Some(member) = self.own_class_attr(obj, name) =>
             {

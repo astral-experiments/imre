@@ -2,6 +2,7 @@
 
 import typing as _typing
 from _collections_abc import MutableMapping as _MutableMapping
+from collections import defaultdict as _defaultdict
 from functools import lru_cache
 from typing import Generic, TypeVar
 
@@ -447,6 +448,7 @@ Tuple.__doc__ = \
     """
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
 Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
+DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
 
