@@ -270,6 +270,39 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_timedelta_positive_and_absolute():
+    zero = timedelta()
+    assert +zero is zero and abs(zero) is zero
+    tiny = timedelta(microseconds=-1)
+    for value, magnitude in (
+        (tiny, timedelta(microseconds=1)),
+        (timedelta.min, timedelta(days=999999999)),
+        (timedelta.max, timedelta.max),
+    ):
+        positive, absolute = +value, abs(value)
+        assert positive == value and absolute == magnitude
+        assert positive is not value and absolute is not value
+
+    class Inherited(timedelta):
+        def __neg__(self):
+            raise AssertionError("abs called subclass __neg__")
+
+    class Override(Inherited):
+        def __pos__(self):
+            return "positive"
+
+        def __abs__(self):
+            return "absolute"
+
+    value = Inherited(microseconds=-1)
+    assert type(+value) is type(abs(value)) is timedelta
+    assert +value == tiny and abs(value) == timedelta(microseconds=1)
+    custom = Override(days=-1)
+    assert +custom == "positive" and abs(custom) == "absolute"
+    assert timedelta.__pos__(custom) == timedelta(days=-1)
+    assert timedelta.__abs__(custom) == timedelta(days=1)
+
+
 def test_calendar_format():
     class Day(date):
         def __str__(self):
@@ -397,6 +430,7 @@ def current():
     test_calendar_reduction()
     test_calendar_format()
     test_timedelta_negation()
+    test_timedelta_positive_and_absolute()
     test_subclass_construction()
     test_now()
     test_time_of_day()
