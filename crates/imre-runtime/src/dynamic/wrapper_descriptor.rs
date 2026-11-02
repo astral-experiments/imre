@@ -255,6 +255,8 @@ impl BuiltinDescriptor {
             "types.SimpleNamespace.__ne__" => (super::namespace::CLASS, "__ne__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
             "tuple.__len__" => ("tuple", "__len__"),
+            "array.array.__getitem__" => ("array.array", "__getitem__"),
+            "array.array.__setitem__" => ("array.array", "__setitem__"),
             "tuple.count" => ("tuple", "count"),
             "tuple.index" => ("tuple", "index"),
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
@@ -365,6 +367,7 @@ impl BuiltinDescriptor {
             stdlib::os::scandir::ITER => matches!(ctx.heap.get(receiver), Value::Scandir(_)),
             "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
             "memoryview" => matches!(ctx.heap.get(receiver), Value::MemoryView { .. }),
+            "array.array" => matches!(ctx.heap.get(receiver), Value::Array(_)),
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "member_descriptor" => ctx.exact_type(receiver)? == ctx.builtin("member_descriptor"),
             "method_descriptor" | "wrapper_descriptor" => {

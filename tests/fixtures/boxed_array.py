@@ -237,6 +237,11 @@ def current():
     assert item.lengths == [1, 2] and list(a) == [3, 8, 92]
     assert list(item.snapshot) == [3, 90]
 
+    indexed = array('l', [10, 20])
+    assert indexed.__getitem__(-1) == array.__getitem__(indexed, 1) == 20
+    assert array.__setitem__(indexed, -1, -7) is None
+    assert indexed.__setitem__(0, 8) is None and list(indexed) == [8, -7]
+
     assert list(array('i',[Number()])) == [17]
     assert list(array('f',[Distance()])) == [5.5]
     assert list(array('d',(float(i) for i in range(3)))) == [0.0,1.0,2.0]

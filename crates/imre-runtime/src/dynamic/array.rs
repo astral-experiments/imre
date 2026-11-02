@@ -530,7 +530,7 @@ fn from_file(ctx: &mut Context, receiver: Id, file: Id, count: Id) -> Result<Id>
 pub(super) fn has_method(name: &str) -> bool {
     matches!(
         name,
-        "tobytes" | "tolist" | "append" | "fromfile" | "byteswap"
+        "__getitem__" | "__setitem__" | "tobytes" | "tolist" | "append" | "fromfile" | "byteswap"
     )
 }
 
@@ -559,6 +559,9 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if matches!(name, "__getitem__" | "__setitem__") {
+        return ctx.buffer_item_method("array.array", name, args, kwargs);
+    }
     let Some((&receiver, args)) = args.split_first() else {
         return Err(Error::new("TypeError", "expected array receiver"));
     };
