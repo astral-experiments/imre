@@ -175,6 +175,11 @@ pub(super) fn construct(
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
                 bind(name, args, kwargs, ["source", "encoding", "errors"])?;
+            if let ("bytes", Some(source), None, None) = (name, value, encoding_id, errors)
+                && let Some(result) = call_bytes_method(ctx, source)?
+            {
+                return Ok(result);
+            }
             let bytes = match value.map(|id| ctx.heap.get(id)) {
                 Some(_) if value.is_some_and(|id| ctx.string_storage(id).is_some()) => {
                     if encoding_id.is_none() {
@@ -182,8 +187,11 @@ pub(super) fn construct(
                     }
                     encode_text(ctx, value.unwrap(), encoding_id, errors)?
                 }
-                _ if encoding_id.is_some() || errors.is_some() => {
+                _ if encoding_id.is_some() => {
                     return Err(type_error("encoding without a string argument"));
+                }
+                _ if errors.is_some() => {
+                    return Err(type_error("errors without a string argument"));
                 }
                 None => Vec::new(),
                 Some(Value::Bytes(_)) if name == "bytes" => return Ok(value.unwrap()),
@@ -359,6 +367,22 @@ pub(super) fn bytearray_method(
         data.extend_from_slice(&extra);
     }
     Ok(NONE)
+}
+
+/// Call the type's `__bytes__` hook and preserve the identity of its bytes result.
+pub(super) fn call_bytes_method(ctx: &mut Context, source: Id) -> Result<Option<Id>> {
+    let Some(method) = ctx.bound_slot(source, "__bytes__")? else {
+        return Ok(None);
+    };
+    let result = ctx.call(method, Vec::new(), Vec::new())?;
+    if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Bytes(_)) {
+        let name = ctx.type_name(result);
+        return Err(type_error(format!(
+            "__bytes__ returned non-bytes (type {})",
+            &name[..name.floor_char_boundary(200)]
+        )));
+    }
+    Ok(Some(result))
 }
 
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {

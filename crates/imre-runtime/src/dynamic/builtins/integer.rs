@@ -98,18 +98,10 @@ pub(super) fn from_bytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         ["bytes", "byteorder", "signed"],
         2,
     )?;
-    let mut source = source
+    let source = source
         .ok_or_else(|| type_error("from_bytes() missing required argument 'bytes' (pos 1)"))?;
     let (little, signed) = byte_options(ctx, "from_bytes", order, signed)?;
-    if let Some(method) = ctx.bound_slot(source, "__bytes__")? {
-        source = ctx.call(method, Vec::new(), Vec::new())?;
-        if !matches!(ctx.heap.get(ctx.scalar_value(source)), Value::Bytes(_)) {
-            return Err(type_error(format!(
-                "__bytes__ returned non-bytes (type {})",
-                ctx.type_name(source)
-            )));
-        }
-    }
+    let source = text::call_bytes_method(ctx, source)?.unwrap_or(source);
     let items;
     let bytes = match ctx.heap.get(ctx.scalar_value(source)) {
         Value::Bytes(data) | Value::ByteArray(data) => data.as_slice(),
