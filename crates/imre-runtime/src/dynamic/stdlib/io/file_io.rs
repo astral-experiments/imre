@@ -428,7 +428,7 @@ pub(in crate::dynamic) fn open(
         let buffer = if update {
             super::BufferedFd::update(raw, handle, capacity)
         } else {
-            Ok(super::BufferedFd::new(raw, handle, reading, capacity))
+            super::BufferedFd::new(raw, handle, reading, capacity)
         }
         .and_then(|buffer| allocate_buffer(ctx, buffer))
         .map_err(|error| close_on_error(ctx, raw, error))?;
@@ -625,8 +625,8 @@ impl Context {
         let _ = file.into_raw_fd();
         let handle = state(self, raw).expect("initialized FileIO");
         let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
-        let buffer = super::BufferedFd::new(raw, handle.clone(), false, capacity);
-        let result = allocate_buffer(self, buffer);
+        let result = super::BufferedFd::new(raw, handle.clone(), false, capacity)
+            .and_then(|buffer| allocate_buffer(self, buffer));
         if result.is_err() {
             handle.close()?;
         }
