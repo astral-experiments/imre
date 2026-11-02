@@ -6092,8 +6092,7 @@ impl Context {
         &mut self,
         bases: Id,
         body: Id,
-        explicit_metaclass: Option<Id>,
-        total: Option<Id>,
+        mut keywords: Vec<(String, Id)>,
         parameterized: bool,
     ) -> Result<Id> {
         let (original, mut bases) = super::typing::resolve_bases(self, bases)?;
@@ -6119,6 +6118,20 @@ impl Context {
         } else {
             self.enum_namespace(&bases)
         };
+        let explicit_metaclass = keywords
+            .iter()
+            .position(|(name, _)| name == "metaclass")
+            .map(|index| keywords.remove(index).1);
+        if enum_namespace.is_some()
+            && keywords
+                .iter()
+                .any(|(name, _)| matches!(name.as_str(), "boundary" | "_simple"))
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "boxed enum metaclass options are unsupported",
+            ));
+        }
         let class_meta = self.select_class_metaclass(
             &bases,
             explicit_metaclass,
@@ -6222,6 +6235,22 @@ impl Context {
             );
         }
         let typed_dict_fields = if let Some(meta) = typed_dict_meta {
+            let mut total = TRUE;
+            for (name, value) in keywords.drain(..) {
+                if name == "total" {
+                    total = value;
+                } else {
+                    let reason = if matches!(name.as_str(), "cls" | "name" | "bases" | "ns") {
+                        "got multiple values for argument"
+                    } else {
+                        "got an unexpected keyword argument"
+                    };
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("_TypedDictMeta.__new__() {reason} '{name}'"),
+                    ));
+                }
+            }
             let generic = self.classes.get("typing.Generic").copied();
             if bases.iter().any(|&base| {
                 self.heap.get(base).instance_class() != Some(meta) && generic != Some(base)
@@ -6238,7 +6267,7 @@ impl Context {
             bases.push(dict);
             let parents = self.alloc(Value::Tuple(parents));
             let (fields, annotate) = self.prepare_typeddict_namespace(scope, annotations)?;
-            Some((parents, fields, annotate, generic))
+            Some((parents, fields, annotate, generic, total))
         } else {
             None
         };
@@ -6324,13 +6353,7 @@ impl Context {
         }
         // Look up the inherited hook after __set_name__, before publishing the class.
         let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
-        let mut kwargs = Vec::new();
-        if typed_dict_meta.is_none()
-            && let Some(total) = total
-        {
-            kwargs.push(("total".to_owned(), total));
-        }
-        self.call(hook, Vec::new(), kwargs)?;
+        self.call(hook, Vec::new(), keywords)?;
         if module == "_collections_abc"
             && matches!(
                 name.as_str(),
@@ -6344,7 +6367,7 @@ impl Context {
         if self.is_protocol_declaration(class) {
             self.call_typing_helper("_freeze_protocol_members", vec![class, annotations])?;
         }
-        if let Some((parents, fields, annotate, generic)) = typed_dict_fields {
+        if let Some((parents, fields, annotate, generic, total)) = typed_dict_fields {
             if let Some(generic) = generic {
                 // Generic.__init_subclass__ reads the declared bases after __set_name__.
                 let raw = self
@@ -6359,7 +6382,7 @@ impl Context {
                 .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
             self.call(
                 configure,
-                vec![class, fields, total.unwrap_or(TRUE), annotate, parents],
+                vec![class, fields, total, annotate, parents],
                 Vec::new(),
             )?;
         }
