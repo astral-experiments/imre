@@ -18,7 +18,51 @@ class Key:
     value: str = field(compare=False, repr=False, default="unused")
 
 
+def slotted():
+    from types import FrameType
+
+    @dataclass(frozen=True, slots=True)
+    class FrameCallGraphEntry:
+        frame: FrameType
+
+    try:
+        raise ValueError
+    except ValueError as error:
+        frame = error.__traceback__.tb_frame
+    assert isinstance(frame, FrameType)
+    entry = FrameCallGraphEntry(frame)
+    assert entry.frame is frame
+    assert not hasattr(entry, "__dict__")
+    assert FrameCallGraphEntry.__slots__ == ("frame",)
+    for name in ("frame", "other"):
+        try:
+            setattr(entry, name, None)
+        except FrozenInstanceError:
+            pass
+        else:
+            raise AssertionError("frozen slot allowed an assignment")
+
+    @dataclass(slots=True)
+    class Defaults:
+        constant: int = field(init=False, default=42)
+
+    assert Defaults().constant == 42
+
+    class Wrapped:
+        def method(self):
+            pass
+
+    Wrapped.method.__wrapped__ = Wrapped.method
+    try:
+        dataclass(slots=True)(Wrapped)
+    except ValueError as error:
+        assert "wrapper loop" in str(error)
+    else:
+        raise AssertionError("accepted a wrapper cycle")
+
+
 def current():
+    slotted()
     class Clearing(dict):
         def __eq__(self, other):
             self.left.clear()

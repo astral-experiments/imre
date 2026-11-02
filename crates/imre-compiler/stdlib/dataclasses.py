@@ -238,7 +238,7 @@ def _missing(names, qualname, kind):
     raise TypeError(f'{qualname}() missing {len(names)} required {kind} argument{plural}: {joined}')
 
 
-def _initializer(cls, data, positional, qualname, frozen):
+def _initializer(cls, data, positional, qualname, params):
     required = [f for f in positional if f.default is MISSING and f.default_factory is MISSING]
     has_post_init = hasattr(cls, '__post_init__')
     def __init__(self, /, *args, **kwargs):
@@ -270,11 +270,11 @@ def _initializer(cls, data, positional, qualname, frozen):
                 value = values[f.name]
             elif f.default_factory is not MISSING:
                 value = f.default_factory()
-            elif f.init:
+            elif f.init or (params.slots and f.default is not MISSING):
                 value = f.default
             else:
                 continue
-            if frozen:
+            if params.frozen:
                 object.__setattr__(self, f.name, value)
             else:
                 setattr(self, f.name, value)
@@ -309,6 +309,84 @@ def _annotation_marker(cls, annotation):
     if classvar is not MISSING and (annotation is classvar or getattr(annotation, '__origin__', None) is classvar):
         return 'ClassVar'
     return None
+
+
+def _getstate(self):
+    return [getattr(self, f.name) for f in fields(self)]
+
+
+def _setstate(self, state):
+    for f, value in zip(fields(self), state):
+        object.__setattr__(self, f.name, value)
+
+
+def _rebind_class(method, old, new):
+    # A method using zero-argument super retains its class through a closure cell.
+    original = method
+    seen = {}
+    while not isinstance(method, type) and hasattr(method, '__wrapped__'):
+        if id(method) in seen:
+            raise ValueError(f'wrapper loop when unwrapping {original!r}')
+        seen[id(method)] = method
+        method = method.__wrapped__
+    code = getattr(method, '__code__', None)
+    if code is not None:
+        for index, name in enumerate(code.co_freevars):
+            if name == '__class__':
+                cell = method.__closure__[index]
+                try:
+                    bound = cell.cell_contents
+                except ValueError:
+                    return
+                if bound is old:
+                    cell.cell_contents = new
+
+
+def _add_slots(cls, params, own, annotations):
+    if '__slots__' in own:
+        raise TypeError(f'{cls.__name__} already specifies __slots__')
+    inherited = set()
+    for base in cls.__mro__[1:-1]:
+        slots = base.__dict__.get('__slots__')
+        if slots is None:
+            if getattr(base, '__weakrefoffset__', -1) != 0:
+                inherited.add('__weakref__')
+            if getattr(base, '__dictoffset__', -1) != 0:
+                inherited.add('__dict__')
+        elif isinstance(slots, str):
+            inherited.add(slots)
+        elif hasattr(slots, '__next__'):
+            raise TypeError(f"Slots of '{base.__name__}' cannot be determined")
+        else:
+            inherited.update(slots)
+    namespace = _members(cls)
+    namespace.pop('__dict__', None)
+    namespace.pop('__weakref__', None)
+    namespace['__qualname__'] = cls.__qualname__
+    namespace['__annotations__'] = annotations
+    slots = {}
+    for f in fields(cls):
+        namespace.pop(f.name, None)
+        if f.name not in inherited:
+            slots[f.name] = f.doc if f.name in annotations else None
+    if params.weakref_slot and '__weakref__' not in inherited:
+        slots['__weakref__'] = None
+    namespace['__slots__'] = slots if any(doc is not None for doc in slots.values()) else tuple(slots)
+    new = type(cls)(cls.__name__, cls.__bases__, namespace)
+    if params.frozen:
+        if '__getstate__' not in namespace:
+            new.__getstate__ = _getstate
+        if '__setstate__' not in namespace:
+            new.__setstate__ = _setstate
+    for name, method in own.items():
+        if name in annotations or name == '__annotate__':
+            continue
+        if isinstance(method, property):
+            for accessor in (method.fget, method.fset, method.fdel):
+                _rebind_class(accessor, cls, new)
+        else:
+            _rebind_class(method, cls, new)
+    return new
 
 
 def _decorate(cls, params):
@@ -371,7 +449,7 @@ def _decorate(cls, params):
                 last_default = f.name
             elif last_default is not None:
                 raise TypeError(f'non-default argument {f.name!r} follows default argument {last_default!r}')
-        install('__init__', _initializer(cls, data, positional, cls.__qualname__ + '.__init__', params.frozen))
+        install('__init__', _initializer(cls, data, positional, cls.__qualname__ + '.__init__', params))
     if params.match_args and '__match_args__' not in own:
         cls.__match_args__ = tuple(f.name for f in positional)
     if params.repr:
@@ -419,6 +497,8 @@ def _decorate(cls, params):
             super(cls, self).__delattr__(name)
         install('__setattr__', __setattr__)
         install('__delattr__', __delattr__)
+    if params.slots:
+        cls = _add_slots(cls, params, own, annotations)
     return cls
 
 
@@ -429,8 +509,8 @@ def dataclass(cls=None, /, *, init=True, repr=True, eq=True, order=False,
         raise ValueError('eq must be true if order is true')
     if weakref_slot and not slots:
         raise TypeError('weakref_slot is True but slots is False')
-    if order or slots:
-        raise NotImplementedError('boxed dataclass ordering and slots')
+    if order:
+        raise NotImplementedError('boxed dataclass ordering')
     params = _DataclassParams(init, repr, eq, order, unsafe_hash, frozen, match_args, kw_only, slots, weakref_slot)
     def wrap(cls):
         return _decorate(cls, params)
