@@ -1309,6 +1309,27 @@ def main():
         )
         compare("-Bm", "module_pkg.child", "-m", "tail")
         compare("-B", "-mmodule_pkg", "tail")
+        entry = root / "entry"
+        entry.mkdir()
+        (entry / "__main__.py").write_text(
+            "import sys, sibling\n"
+            "assert sys.modules['__main__'].__dict__ is globals()\n"
+            "assert __spec__.name == '__main__' and __loader__ is __spec__.loader\n"
+            "print(sys.argv, sys.path[0], __file__, __package__, sibling.marker)\n"
+        )
+        sibling = entry / "sibling.py"
+        sibling.write_text("marker = 'first'\n")
+        compare("entry", "tail")
+        (root / "alias").symlink_to(entry, target_is_directory=True)
+        compare("-I", "./alias/", "-h")
+        sibling.write_text("marker = 'second'\n")
+        compare("-I", "./alias/", "-h")
+        (root / "empty_entry").mkdir()
+        for exe in (sys.executable, imre):
+            missing = run(exe, "-I", "empty_entry")
+            message = f"can't find '__main__' module in '{root / 'empty_entry'}'"
+            assert missing.returncode == 1 and missing.stderr.decode().rstrip().endswith(message)
+
         # An ordinary module under the first root wins over a package in a later root.
         (root / "preferred.py").write_text("print('file wins')\n")
         (root / "preferred").mkdir()
