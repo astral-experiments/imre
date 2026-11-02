@@ -6,7 +6,9 @@ use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_expr};
 
 use crate::ir::Type;
-use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule};
+use crate::modules::{
+    Binding, DefinitionId, Intrinsic, IntrinsicModule, SourceGraph, SourceModule,
+};
 
 mod constants;
 mod dataclasses;
@@ -383,6 +385,25 @@ fn identity_skip_decorator(graph: &SourceGraph, module: usize, decorator: &ast::
                 return false;
             };
             value
+        }
+        ast::Expr::Call(probe)
+            if probe.func.as_name_expr().is_some_and(|name| name.id == "hasattr")
+                && graph.resolve(module, &probe.func).is_none()
+                && probe.arguments.keywords.is_empty()
+                && let [object @ ast::Expr::Name(_), ast::Expr::StringLiteral(name)] =
+                    probe.arguments.args.as_ref()
+                && graph
+                    .session
+                    .is_stdlib_function(module, &probe.func, "builtins", "hasattr")
+                && graph.session.is_stdlib_module(module, object, "os")
+                && graph.resolve(module, object)
+                    == Some(Binding::IntrinsicModule(IntrinsicModule::Os))
+                && matches!(
+                    IntrinsicModule::Os.symbol(name.value.to_str()),
+                    Some(Binding::Intrinsic(Intrinsic::Credential(_)))
+                ) =>
+        {
+            true
         }
         _ => return false,
     };
