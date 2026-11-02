@@ -277,50 +277,263 @@ class Filterer(object):
         return record
 
 
+# CPython 3.14.5 Lib/logging/__init__.py, logger hierarchy and enablement.
+class PlaceHolder(object):
+    """
+    PlaceHolder instances are used in the Manager logger hierarchy to take
+    the place of nodes for which no loggers have been defined. This class is
+    intended for internal use only and not as part of the public API.
+    """
+    def __init__(self, alogger):
+        """
+        Initialize with the specified logger being a child of this placeholder.
+        """
+        self.loggerMap = { alogger : None }
+
+    def append(self, alogger):
+        """
+        Add the specified logger as a child of this placeholder.
+        """
+        if alogger not in self.loggerMap:
+            self.loggerMap[alogger] = None
+
+#
+#   Determine which class to use when instantiating loggers.
+#
+
+def setLoggerClass(klass):
+    """
+    Set the class to be used when instantiating a logger. The class should
+    define __init__() such that only a name argument is required, and the
+    __init__() should call Logger.__init__()
+    """
+    if klass != Logger:
+        if not issubclass(klass, Logger):
+            raise TypeError("logger not derived from logging.Logger: "
+                            + klass.__name__)
+    global _loggerClass
+    _loggerClass = klass
+
+def getLoggerClass():
+    """
+    Return the class to be used when instantiating a logger.
+    """
+    return _loggerClass
+
+class Manager(object):
+    """
+    There is [under normal circumstances] just one Manager instance, which
+    holds the hierarchy of loggers.
+    """
+    def __init__(self, rootnode):
+        """
+        Initialize the manager with the root node of the logger hierarchy.
+        """
+        self.root = rootnode
+        self.disable = 0
+        self.emittedNoHandlerWarning = False
+        self.loggerDict = {}
+        self.loggerClass = None
+        self.logRecordFactory = None
+
+    @property
+    def disable(self):
+        return self._disable
+
+    @disable.setter
+    def disable(self, value):
+        self._disable = _checkLevel(value)
+
+    def getLogger(self, name):
+        """
+        Get a logger with the specified name (channel name), creating it
+        if it doesn't yet exist. This name is a dot-separated hierarchical
+        name, such as "a", "a.b", "a.b.c" or similar.
+
+        If a PlaceHolder existed for the specified name [i.e. the logger
+        didn't exist but a child of it did], replace it with the created
+        logger and fix up the parent/child references which pointed to the
+        placeholder to now point to the logger.
+        """
+        rv = None
+        if not isinstance(name, str):
+            raise TypeError('A logger name must be a string')
+        with _lock:
+            if name in self.loggerDict:
+                rv = self.loggerDict[name]
+                if isinstance(rv, PlaceHolder):
+                    ph = rv
+                    rv = (self.loggerClass or _loggerClass)(name)
+                    rv.manager = self
+                    self.loggerDict[name] = rv
+                    self._fixupChildren(ph, rv)
+                    self._fixupParents(rv)
+            else:
+                rv = (self.loggerClass or _loggerClass)(name)
+                rv.manager = self
+                self.loggerDict[name] = rv
+                self._fixupParents(rv)
+        return rv
+
+    def setLoggerClass(self, klass):
+        """
+        Set the class to be used when instantiating a logger with this Manager.
+        """
+        if klass != Logger:
+            if not issubclass(klass, Logger):
+                raise TypeError("logger not derived from logging.Logger: "
+                                + klass.__name__)
+        self.loggerClass = klass
+
+    def setLogRecordFactory(self, factory):
+        """
+        Set the factory to be used when instantiating a log record with this
+        Manager.
+        """
+        self.logRecordFactory = factory
+
+    def _fixupParents(self, alogger):
+        """
+        Ensure that there are either loggers or placeholders all the way
+        from the specified logger to the root of the logger hierarchy.
+        """
+        name = alogger.name
+        i = name.rfind(".")
+        rv = None
+        while (i > 0) and not rv:
+            substr = name[:i]
+            if substr not in self.loggerDict:
+                self.loggerDict[substr] = PlaceHolder(alogger)
+            else:
+                obj = self.loggerDict[substr]
+                if isinstance(obj, Logger):
+                    rv = obj
+                else:
+                    assert isinstance(obj, PlaceHolder)
+                    obj.append(alogger)
+            i = name.rfind(".", 0, i - 1)
+        if not rv:
+            rv = self.root
+        alogger.parent = rv
+
+    def _fixupChildren(self, ph, alogger):
+        """
+        Ensure that children of the placeholder ph are connected to the
+        specified logger.
+        """
+        name = alogger.name
+        namelen = len(name)
+        for c in ph.loggerMap.keys():
+            #The if means ... if not c.parent.name.startswith(nm)
+            if c.parent.name[:namelen] != name:
+                alogger.parent = c.parent
+                c.parent = alogger
+
+    def _clear_cache(self):
+        """
+        Clear the cache for all loggers in loggerDict
+        Called when level changes are made
+        """
+
+        with _lock:
+            for logger in self.loggerDict.values():
+                if isinstance(logger, Logger):
+                    logger._cache.clear()
+            self.root._cache.clear()
+
+#---------------------------------------------------------------------------
+#   Logger classes and functions
+#---------------------------------------------------------------------------
+
+
 class Logger(Filterer):
     def __init__(self, name, level=NOTSET):
+        """
+        Initialize the logger with a name and an optional level.
+        """
         Filterer.__init__(self)
-        self._native = _native.new(name, _handler_level(level))
+        self.name = name
+        self.level = _checkLevel(level)
+        self.parent = None
+        self.propagate = True
         self.handlers = []
-
-    @property
-    def name(self):
-        return _native.name(self._native)
-
-    @property
-    def level(self):
-        return _native.level(self._native)
-
-    @property
-    def parent(self):
-        return _native.parent(self._native)
-
-    @property
-    def propagate(self):
-        return _native.propagate(self._native)
-
-    @property
-    def disabled(self):
-        return _native.disabled(self._native)
-
-    def __setattr__(self, name, value):
-        if name == "propagate":
-            _native.set_propagate(self._native, value)
-        elif name == "disabled":
-            _native.set_disabled(self._native, value)
-        elif name == "level":
-            _native.set_level(self._native, value)
-        else:
-            object.__setattr__(self, name, value)
+        self.disabled = False
+        self._cache = {}
 
     def setLevel(self, level):
-        _native.set_level(self._native, _handler_level(level))
+        """
+        Set the logging level of this logger.  level must be an int or a str.
+        """
+        self.level = _checkLevel(level)
+        self.manager._clear_cache()
 
     def getEffectiveLevel(self):
-        return _native.effective(self._native)
+        """
+        Get the effective level for this logger.
+
+        Loop through this logger and its parents in the logger hierarchy,
+        looking for a non-zero logging level. Return the first one found.
+        """
+        logger = self
+        while logger:
+            if logger.level:
+                return logger.level
+            logger = logger.parent
+        return NOTSET
 
     def isEnabledFor(self, level):
-        return _native.enabled(self._native, level)
+        """
+        Is this logger enabled for level 'level'?
+        """
+        if self.disabled:
+            return False
+
+        try:
+            return self._cache[level]
+        except KeyError:
+            with _lock:
+                if self.manager.disable >= level:
+                    is_enabled = self._cache[level] = False
+                else:
+                    is_enabled = self._cache[level] = (
+                        level >= self.getEffectiveLevel()
+                    )
+            return is_enabled
+
+    def getChild(self, suffix):
+        """
+        Get a logger which is a descendant to this one.
+
+        This is a convenience method, such that
+
+        logging.getLogger('abc').getChild('def.ghi')
+
+        is the same as
+
+        logging.getLogger('abc.def.ghi')
+
+        It's useful, for example, when the parent logger is named using
+        __name__ rather than a literal string.
+        """
+        if self.root is not self:
+            suffix = '.'.join((self.name, suffix))
+        return self.manager.getLogger(suffix)
+
+    def getChildren(self):
+
+        def _hierlevel(logger):
+            if logger is logger.manager.root:
+                return 0
+            return 1 + logger.name.count('.')
+
+        d = self.manager.loggerDict
+        with _lock:
+            # exclude PlaceHolders - the last check is to ensure that lower-level
+            # descendants aren't returned - if there are placeholders, a logger's
+            # parent field might point to a grandparent or ancestor thereof.
+            return set(item for item in d.values()
+                       if isinstance(item, Logger) and item.parent is self and
+                       _hierlevel(item) == 1 + _hierlevel(item.parent))
 
     def addHandler(self, hdlr):
         if hdlr not in self.handlers:
@@ -695,11 +908,45 @@ class LoggerAdapter(object):
     __class_getitem__ = classmethod(GenericAlias)
 
 
+class RootLogger(Logger):
+    """
+    A root logger is not that different to any other logger, except that
+    it must have a logging level and there is only one instance of it in
+    the hierarchy.
+    """
+    def __init__(self, level):
+        """
+        Initialize the logger with the name "root".
+        """
+        Logger.__init__(self, "root", level)
+
+    def __reduce__(self):
+        return getLogger, ()
+
+
+_loggerClass = Logger
+root = RootLogger(WARNING)
+Logger.root = root
+Logger.manager = Manager(Logger.root)
+
+
 def getLogger(name=None):
-    return _native.get(name)
+    """
+    Return a logger with the specified name, creating it if necessary.
+
+    If no name is specified, return the root logger.
+    """
+    if not name or isinstance(name, str) and name == root.name:
+        return root
+    return Logger.manager.getLogger(name)
 
 
-root = getLogger()
+def disable(level=CRITICAL):
+    """
+    Disable all logging calls of severity 'level' and below.
+    """
+    root.manager.disable = level
+    root.manager._clear_cache()
 
 
 def basicConfig(**kwargs):
