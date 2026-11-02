@@ -23,6 +23,7 @@ class Sink:
 
 
 def current():
+    assert pickle.bytes_types == (bytes, bytearray)
     for protocol in range(6):
         sink = Sink()
         writer = Writer(sink, protocol=protocol)

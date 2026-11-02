@@ -10,6 +10,8 @@ import io
 import codecs
 import _compat_pickle
 
+bytes_types = (bytes, bytearray)
+
 _NoValue = object()
 
 class UnpicklingError(PickleError):
