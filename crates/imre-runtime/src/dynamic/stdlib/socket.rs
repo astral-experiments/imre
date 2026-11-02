@@ -830,8 +830,9 @@ pub(super) fn call(
         }
         "getsockname" | "getpeername" => {
             return match native::socket_name(&s, method == "getpeername")? {
-                Some(addr) => pack_address(ctx, &addr),
-                None => Ok(ctx.text("")),
+                native::SocketName::Internet(addr) => pack_address(ctx, &addr),
+                native::SocketName::UnnamedUnix => Ok(ctx.text("")),
+                native::SocketName::NoAddress => Ok(NONE),
             };
         }
         "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,

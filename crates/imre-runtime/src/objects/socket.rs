@@ -1045,8 +1045,13 @@ fn peer_call(
     Ok((ret, addr, len))
 }
 
-/// An unnamed Unix-domain endpoint has no Internet address to unpack.
-pub(crate) fn socket_name(s: &Object, peer: bool) -> Result<Option<InternetAddress>> {
+pub(crate) enum SocketName {
+    Internet(InternetAddress),
+    UnnamedUnix,
+    NoAddress,
+}
+
+pub(crate) fn socket_name(s: &Object, peer: bool) -> Result<SocketName> {
     let (_, addr, len) = peer_call(|a, n| {
         // SAFETY: peer_call supplies aligned address storage and its capacity for either syscall.
         unsafe {
@@ -1058,13 +1063,27 @@ pub(crate) fn socket_name(s: &Object, peer: bool) -> Result<Option<InternetAddre
         }
     })
     .map_err(errno_error)?;
-    if i32::from(addr.ss_family) == libc::AF_UNIX
-        && len as usize == std::mem::offset_of!(libc::sockaddr_un, sun_path)
-    {
-        return Ok(None);
+    if len == 0 {
+        return Ok(SocketName::NoAddress);
+    }
+    if i32::from(addr.ss_family) == libc::AF_UNIX {
+        let path_offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
+        if len as usize == path_offset {
+            return Ok(SocketName::UnnamedUnix);
+        }
+        // Darwin returns an empty NUL-terminated path. On Linux a leading NUL
+        // with any path bytes denotes an abstract address, not an unnamed one.
+        #[cfg(target_vendor = "apple")]
+        if len as usize > path_offset {
+            // SAFETY: the initialized storage includes at least the first Unix path byte.
+            let unix = unsafe { &*(&raw const addr).cast::<libc::sockaddr_un>() };
+            if unix.sun_path[0] == 0 {
+                return Ok(SocketName::UnnamedUnix);
+            }
+        }
     }
     // SAFETY: the kernel initialized addr, and read validates its family and length.
-    unsafe { InternetAddress::read((&raw const addr).cast(), len) }.map(Some)
+    unsafe { InternetAddress::read((&raw const addr).cast(), len) }.map(SocketName::Internet)
 }
 
 pub(crate) fn endpoint(addr: &libc::sockaddr_in) -> (Ipv4Addr, u16) {
@@ -1084,10 +1103,10 @@ pub unsafe extern "C" fn imre_socket_sockname(
     // SAFETY: the caller supplied the exact tuple layout.
     finish(
         socket_name(s, false)
-            .and_then(|name| {
-                name.ok_or_else(|| Error::new(Kind::TypeError, "expected IPv4 address"))
+            .and_then(|name| match name {
+                SocketName::Internet(addr) => addr.ipv4(),
+                _ => Err(Error::new(Kind::TypeError, "expected IPv4 address")),
             })
-            .and_then(InternetAddress::ipv4)
             .map(|addr| unsafe { addr_tuple(layout, addr) }),
         ptr::null_mut(),
     )
