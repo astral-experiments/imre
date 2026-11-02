@@ -4438,7 +4438,10 @@ impl Context {
                     };
                     let mode = if left
                         && inplace
-                        && matches!(self.heap.get(storage), Value::List(_) | Value::ByteArray(_) | Value::Deque(_))
+                        && matches!(
+                            self.heap.get(storage),
+                            Value::List(_) | Value::ByteArray(_) | Value::Deque(_)
+                        )
                         && !self.overrides_repeat(owner, "__imul__")
                     {
                         RepeatMode::InPlace
@@ -4701,8 +4704,9 @@ impl Context {
         if matches!(name, "__mul__" | "__rmul__" | "__imul__")
             && matches!(self.heap.get(self.scalar_value(obj)), Value::Deque(_))
             && !self.overrides_repeat(obj, name)
-            && (name == "__imul__" || (!self.overrides_repeat(obj, "__mul__")
-                && !self.overrides_repeat(obj, "__rmul__")))
+            && (name == "__imul__"
+                || (!self.overrides_repeat(obj, "__mul__")
+                    && !self.overrides_repeat(obj, "__rmul__")))
         {
             return Ok(None);
         }

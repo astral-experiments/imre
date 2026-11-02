@@ -18,12 +18,18 @@ fn initialize(ty: Type, receiver: Option<Expr>, bound: Expr) -> Expr {
 
 impl Checker<'_> {
     pub(super) fn boxed_deque_descriptor(&self, attr: &ast::ExprAttribute) -> bool {
-        matches!(attr.attr.as_str(), "__repr__" | "__mul__" | "__rmul__" | "__imul__")
-            && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::Deque))
+        matches!(
+            attr.attr.as_str(),
+            "__repr__" | "__mul__" | "__rmul__" | "__imul__"
+        ) && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::Deque))
     }
 
     /// Check each supplied expression before handing the invocation to the native descriptor.
-    pub(super) fn boxed_deque_call(&mut self, name: &str, call: &ast::ExprCall) -> Result<Expr, String> {
+    pub(super) fn boxed_deque_call(
+        &mut self,
+        name: &str,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
         for arg in &call.arguments.args {
             let value = match arg {
                 ast::Expr::Starred(starred) => starred.value.as_ref(),
@@ -48,7 +54,9 @@ impl Checker<'_> {
         let name = attribute.attr.as_str();
         let (builtin, parameters, returns) = match name {
             "__repr__" | "__mul__" | "__rmul__" | "__imul__" => {
-                return Err(self.scoped_builtin_error(&format!("collections.deque.{name}"), attribute));
+                return Err(
+                    self.scoped_builtin_error(&format!("collections.deque.{name}"), attribute)
+                );
             }
             "maxlen" => {
                 return Ok(Expr {

@@ -7732,7 +7732,8 @@ impl<'a> Checker<'a> {
             ast::Expr::Attribute(attribute) => {
                 if self.boxed_deque_descriptor(attribute) {
                     return Err(self.scoped_builtin_error(
-                        &format!("collections.deque.{}", attribute.attr.as_str()), attribute,
+                        &format!("collections.deque.{}", attribute.attr.as_str()),
+                        attribute,
                     ));
                 }
                 if attribute.attr.as_str() == "MISSING"

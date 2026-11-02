@@ -365,7 +365,11 @@ pub(super) fn copy(ctx: &mut Context, receiver: Id) -> Result<Id> {
     if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Deque(_)) {
         return Err(Error::new(
             "TypeError",
-            format!("{}() must return a deque, not {}", ctx.type_name(receiver), ctx.type_name(result)),
+            format!(
+                "{}() must return a deque, not {}",
+                ctx.type_name(receiver),
+                ctx.type_name(result)
+            ),
         ));
     }
     Ok(result)
@@ -373,9 +377,15 @@ pub(super) fn copy(ctx: &mut Context, receiver: Id) -> Result<Id> {
 
 /// A subtype's iterator can mutate its ring while the repetition takes its snapshot.
 pub(super) fn repeat(ctx: &mut Context, receiver: Id, count: isize, inplace: bool) -> Result<Id> {
-    let owner = if inplace { receiver } else { copy(ctx, receiver)? };
+    let owner = if inplace {
+        receiver
+    } else {
+        copy(ctx, receiver)?
+    };
     let storage = ctx.scalar_value(owner);
-    let Value::Deque(ring) = ctx.heap.get_mut(storage) else { unreachable!() };
+    let Value::Deque(ring) = ctx.heap.get_mut(storage) else {
+        unreachable!()
+    };
     let size = ring.items.len();
     if size == 0 || count == 1 {
         return Ok(owner);
@@ -402,7 +412,9 @@ pub(super) fn repeat(ctx: &mut Context, receiver: Id, count: isize, inplace: boo
         let total = count * size;
         let length = total.min(ring.maxlen.unwrap_or(total));
         if length > size {
-            ring.items.try_reserve(length - size).map_err(|_| memory())?;
+            ring.items
+                .try_reserve(length - size)
+                .map_err(|_| memory())?;
             ring.items.rotate_left((total - length) % size);
             for i in size..length {
                 ring.items.push_back(ring.items[i % size]);
@@ -415,13 +427,22 @@ pub(super) fn repeat(ctx: &mut Context, receiver: Id, count: isize, inplace: boo
     // PySequence_List observes __iter__ followed by __len__, even if the bound is full.
     let snapshot = ctx.alloc(Value::List(Vec::new()));
     builtins::list_extend(ctx, snapshot, owner)?;
-    let Value::List(items) = ctx.heap.get(snapshot) else { unreachable!() };
+    let Value::List(items) = ctx.heap.get(snapshot) else {
+        unreachable!()
+    };
     let chunk = items.len();
-    let Value::Deque(ring) = ctx.heap.get_mut(storage) else { unreachable!() };
-    let times = ring.maxlen.map_or(count, |bound| count.min(bound.div_ceil(size))).saturating_sub(1);
+    let Value::Deque(ring) = ctx.heap.get_mut(storage) else {
+        unreachable!()
+    };
+    let times = ring
+        .maxlen
+        .map_or(count, |bound| count.min(bound.div_ceil(size)))
+        .saturating_sub(1);
     if times != 0 && chunk != 0 {
         let extra = chunk.saturating_mul(times).min(
-            ring.maxlen.unwrap_or(usize::MAX).saturating_sub(ring.items.len())
+            ring.maxlen
+                .unwrap_or(usize::MAX)
+                .saturating_sub(ring.items.len()),
         );
         ring.items.try_reserve(extra).map_err(|_| memory())?;
         let roots = ctx.heap.temporary_mark();
@@ -880,7 +901,10 @@ pub(super) fn method(
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            if matches!(name, "__iadd__" | "__contains__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__") {
+            if matches!(
+                name,
+                "__iadd__" | "__contains__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__"
+            ) {
                 format!("wrapper {name}() takes no keyword arguments")
             } else {
                 format!("deque.{name}() takes no keyword arguments")
@@ -938,7 +962,10 @@ pub(super) fn method(
             return repeat(ctx, receiver, n, name == "__imul__");
         }
         ("__mul__" | "__rmul__" | "__imul__", _) => {
-            return Err(Error::new("TypeError", format!("expected 1 argument, got {}", rest.len())));
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            ));
         }
         ("__contains__", [item]) => return ctx.contains(*item, storage).map(builtins::boolean),
         ("__getitem__", [index]) => return IndexOp::Get.apply(ctx, storage, *index, true),
