@@ -1183,6 +1183,12 @@ fn reduce_builtin_method(ctx: &mut Context, method: Id) -> Result<Id> {
     else {
         return Ok(ctx.text(name));
     };
+    let name = ctx.text(name);
+    bound_method_reduction(ctx, receiver, name)
+}
+
+/// Rebuild a bound method by looking up its name on the restored receiver.
+fn bound_method_reduction(ctx: &mut Context, receiver: Id, name: Id) -> Result<Id> {
     let scope = ctx.heap.current_scope();
     let builtins = if scope != NONE
         && let Some(globals) = ctx.scope_data(ctx.root_scope(scope)).exec_globals
@@ -1198,7 +1204,6 @@ fn reduce_builtin_method(ctx: &mut Context, method: Id) -> Result<Id> {
             error
         }
     })?;
-    let name = ctx.text(name);
     let args = ctx.alloc(Value::Tuple(vec![receiver, name]));
     Ok(ctx.alloc(Value::Tuple(vec![getattr, args])))
 }
@@ -1243,6 +1248,14 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "method.__reduce__" {
+        let method = noargs_method_receiver(ctx, "method", "__reduce__", args, kwargs)?;
+        let Value::Method { callable, receiver, .. } = *ctx.heap.get(method) else {
+            unreachable!("validated Python method")
+        };
+        let name = ctx.lookup_attr(callable, "__name__")?;
+        return bound_method_reduction(ctx, receiver, name);
+    }
     if name == "builtin_function_or_method.__reduce__" {
         let method = noargs_method_receiver(
             ctx, "builtin_function_or_method", "__reduce__", args, kwargs,
