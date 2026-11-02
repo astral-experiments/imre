@@ -241,6 +241,26 @@ def _splitvalue(attr):
     return attr, (value if delim else None)
 
 
+def to_bytes(url):
+    warnings.warn("urllib.parse.to_bytes() is deprecated as of 3.8",
+                  DeprecationWarning, stacklevel=2)
+    return _to_bytes(url)
+
+
+def _to_bytes(url):
+    """to_bytes(u"URL") --> 'URL'."""
+    # Most URL schemes require ASCII. If that changes, the conversion
+    # can be relaxed.
+    # XXX get rid of to_bytes()
+    if isinstance(url, str):
+        try:
+            url = url.encode("ASCII").decode()
+        except UnicodeError:
+            raise UnicodeError("URL " + repr(url) +
+                               " contains non-ASCII characters")
+    return url
+
+
 def unwrap(url):
     """Transform a string like '<URL:scheme://host/path>' into 'scheme://host/path'.
 

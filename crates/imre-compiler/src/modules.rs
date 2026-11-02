@@ -1996,6 +1996,12 @@ impl IntrinsicModule {
             (Self::UrllibParse, "_splitvalue") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse._splitvalue")
             }
+            (Self::UrllibParse, "to_bytes") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.to_bytes")
+            }
+            (Self::UrllibParse, "_to_bytes") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse._to_bytes")
+            }
             (Self::UrllibParse, "unwrap") => Intrinsic::ObjectRuntimeExport("urllib.parse.unwrap"),
             (Self::UrllibParse, "urldefrag") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.urldefrag")
