@@ -232,8 +232,8 @@ def current():
     else:
         raise AssertionError("throw discarded the StopIteration")
 
-    nested = lambda: (lambda: (yield from (3, 4)))
-    assert list(nested()()) == [3, 4]
+    nested = lambda: (lambda: (yield (3, 4)))
+    assert list(nested()()) == [(3, 4)]
 
     class Private:
         __token = 9

@@ -303,8 +303,7 @@ impl Transformer for Mangler<'_> {
     fn visit_expr(&self, expr: &mut ast::Expr) {
         match expr {
             ast::Expr::Lambda(lambda)
-                if !self.owner.is_empty()
-                    && matches!(*lambda.body, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_)) =>
+                if !self.owner.is_empty() && matches!(*lambda.body, ast::Expr::Yield(_)) =>
             {
                 self.names
                     .borrow_mut()

@@ -129,7 +129,7 @@ impl Function<'_, '_> {
                 v.parameters.as_deref(),
                 None,
                 match v.body.as_ref() {
-                    ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => Body::YieldingLambda(&v.body),
+                    ast::Expr::Yield(_) => Body::YieldingLambda(&v.body),
                     body => Body::Expression(body),
                 },
             ),
