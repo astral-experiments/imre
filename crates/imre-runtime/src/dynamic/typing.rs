@@ -1414,16 +1414,22 @@ pub(super) fn call(
             | "ParamSpecArgs.__ne__"
             | "ParamSpecKwargs.__ne__",
             [left, right],
-        ) => super::paramspec::compare(
-            ctx,
-            if operation.ends_with("__eq__") {
-                "=="
-            } else {
-                "!="
-            },
-            *left,
-            *right,
-        ),
+        ) => {
+            let (owner, method) = operation.split_once('.').unwrap();
+            let owner = format!("typing.{owner}");
+            if !matches!(ctx.heap.get(*left), Value::ParamSpecMarker(kind, _) if kind.class() == owner)
+            {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "descriptor '{method}' requires a '{owner}' object but received a '{}'",
+                        ctx.type_name(*left)
+                    ),
+                ));
+            }
+            let op = if method == "__eq__" { "==" } else { "!=" };
+            super::paramspec::compare(ctx, op, *left, *right)
+        }
         ("TypeVarTuple.has_default", [pack])
             if let Value::TypeVarTuple { default, .. } = ctx.heap.get(*pack) =>
         {

@@ -1,6 +1,6 @@
 //! Native parameter specifications and their positional and keyword markers.
 
-use super::{Context, Error, Id, NONE, NOT_IMPLEMENTED, Result, Value, builtins, typing};
+use super::{Context, Error, Id, NONE, Result, Value, builtins, typing, value::NOT_IMPLEMENTED};
 
 #[derive(Clone, Copy)]
 pub(super) struct ParamSpec {
@@ -90,17 +90,10 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     let bound = match bound {
         None | Some(NONE) => ctx.builtin("NoneType"),
         Some(value) => {
-            let arg = if ctx.string_storage(value).is_some() {
-                let module = ctx.module("typing")?;
-                let forward_ref = ctx.lookup_attr(module, "_make_forward_ref")?;
-                ctx.call(forward_ref, vec![value], Vec::new())?
-            } else {
-                value
-            };
             let module = ctx.module("typing")?;
             let check = ctx.lookup_attr(module, "_type_check")?;
             let message = ctx.text("Bound must be a type.");
-            ctx.call(check, vec![arg, message], Vec::new())?
+            ctx.call(check, vec![value, message], Vec::new())?
         }
     };
     let default = default.unwrap_or_else(|| typing::no_default(ctx));
@@ -301,8 +294,7 @@ pub(super) fn eval(
             ),
         ));
     };
-    let format = ctx.as_int(*format)?;
-    if format != 4.into() {
+    if ctx.index_c_int(*format)? != 4 {
         return Ok(value);
     }
     let format_one = |ctx: &mut Context, value| {
