@@ -262,6 +262,7 @@ impl Context {
                         | "str"
                         | "property"
                         | "module"
+                        | super::thread_local::CLASS
                         | weakref::REFERENCE_TYPE
                 ) || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
@@ -2724,7 +2725,7 @@ impl Context {
             Value::Native(ref class) if class == super::thread_local::CLASS => match name {
                 "__module__" => return Ok(self.text("_thread")),
                 "__name__" | "__qualname__" => return Ok(self.text("_local")),
-                attr if super::thread_local::is_method(attr) => {
+                attr if attr == "__new__" || super::thread_local::is_method(attr) => {
                     return Ok(self.builtin(&format!("{class}.{attr}")));
                 }
                 _ => {}
@@ -3516,6 +3517,7 @@ impl Context {
                     return Ok(self.builtin("dict.__new__"));
                 }
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
+                Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 Value::Class { .. } | Value::Instance { .. } => {
                     let class = self.heap.get(base).instance_class().unwrap_or(base);
@@ -3935,6 +3937,18 @@ impl Context {
             }
         }
         layout
+    }
+
+    /// Slots and data descriptor methods operate on the object even with a thread-specific dictionary.
+    pub(super) fn local_data_attribute(&self, class: Id, name: &str, writing: bool) -> bool {
+        if self.instance_layout(class, name).active_slot {
+            return true;
+        }
+        self.class_attr(class, name).is_some_and(|member| {
+            self.native_data_descriptor(member)
+                || self.data_descriptor(member)
+                    && (writing || self.slot(member, "__get__").is_some())
+        })
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
@@ -4905,6 +4919,29 @@ impl Context {
         }))
     }
 
+    /// Invoke the initializer found on the type, including its descriptor binding.
+    pub(super) fn call_initializer(
+        &mut self,
+        init: Id,
+        instance: Id,
+        class: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<()> {
+        let init = self.bind_attribute(init, instance, class)?;
+        let result = self.call(init, args, kwargs)?;
+        if result != NONE {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "__init__() should return None, not '{}'",
+                    self.type_name(result)
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     /// Count a generated NamedTuple repr frame like a runtime-loaded Python call.
     pub(super) fn check_call_depth(&self, additional: usize) -> Result<()> {
         if self.call_depth.max(self.heap.python_depth()) + additional
@@ -5049,6 +5086,9 @@ impl Context {
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
+            Value::Native(name) if name == "_thread._local.__new__" => {
+                super::thread_local::allocate(self, &args, &kwargs)
+            }
             Value::Native(name) if name == "tuple.__new__" => {
                 if args.first().is_some_and(|&class| matches!(self.heap.get(class), Value::Native(name) if name == stdlib::flags::TYPE)) {
                     return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
@@ -5532,17 +5572,7 @@ impl Context {
                 };
                 let actual = self.exact_type(instance)?;
                 if let Some(init) = self.class_attr(actual, "__init__") {
-                    let init = self.bind_attribute(init, instance, actual)?;
-                    let result = self.call(init, args, kwargs)?;
-                    if result != NONE {
-                        return Err(Error::new(
-                            "TypeError",
-                            format!(
-                                "__init__() should return None, not '{}'",
-                                self.type_name(result)
-                            ),
-                        ));
-                    }
+                    self.call_initializer(init, instance, actual, args, kwargs)?;
                 } else if new.is_none()
                     && !native_tzinfo_new
                     && string_base.is_none()
