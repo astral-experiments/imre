@@ -1302,6 +1302,11 @@ pub(super) fn call(
             }
             let scalar = ctx.scalar_value(value);
             match ctx.heap.get(scalar) {
+                Value::Calendar {
+                    value: duration, ..
+                } if duration.class() == "timedelta" => {
+                    super::stdlib::call(ctx, "datetime.timedelta.__abs__", &[value], &[])
+                }
                 Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
                 Value::Complex(number) => {
                     let magnitude = number.real.hypot(number.imag);
