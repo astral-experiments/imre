@@ -345,9 +345,11 @@ impl Context {
         Ok(())
     }
 
-    /// Unlink the node once the backing entry has been removed successfully.
-    pub(in super::super) fn unlink_ordered_rank(&mut self, dict: Id, rank: usize) {
-        let key = self.stored_entries_mut(dict).unlink_ordered_rank(rank);
+    /// Detach the node before the backing lookup can run an equality callback.
+    pub(in super::super) fn unlink_ordered_node(&mut self, dict: Id, dense: usize, rank: usize) {
+        let key = self
+            .stored_entries_mut(dict)
+            .unlink_ordered_node(dense, rank);
         self.heap.weak_edge_removed(key);
     }
 
@@ -1027,18 +1029,27 @@ impl Context {
     ) -> Result<Id> {
         self.heap.keep(value);
         let (hash, index) = self.find_dictionary_key(dict, key, None)?;
-        let entries = self.stored_entries_mut(dict);
-        let dense = index.unwrap_or(entries.len());
-        let append = index.and_then(|i| entries.ordered_rank(i)).is_none();
-        if append {
-            entries.reserve_ordered_node()?;
-        }
         self.store_dictionary_value(dict, key, value, hash, index, true)?;
-        if append {
-            self.stored_entries_mut(dict)
-                .link_ordered_key(dense, key, hash);
+        // The backing value is visible to equality hooks during the separate node lookup.
+        if let Err(error) = self.add_ordered_node(dict, key, hash) {
+            for root in error.roots() {
+                self.heap.keep(root);
+            }
+            super::super::builtins::remove_dict_item_hashed(self, dict, key, Some(hash))?;
+            return Err(error);
         }
         Ok(value)
+    }
+
+    fn add_ordered_node(&mut self, dict: Id, key: Id, hash: i64) -> Result<()> {
+        let (_, dense) = self.find_dictionary_key(dict, key, Some(hash))?;
+        let dense = dense.ok_or_else(|| self.lookup_error("KeyError", key))?;
+        let entries = self.stored_entries_mut(dict);
+        if entries.ordered_rank(dense).is_none() {
+            entries.reserve_ordered_node()?;
+            entries.link_ordered_key(dense, key, hash);
+        }
+        Ok(())
     }
 
     fn store_dictionary_value(

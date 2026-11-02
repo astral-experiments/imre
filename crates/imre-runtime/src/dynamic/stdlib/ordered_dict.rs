@@ -23,8 +23,9 @@ pub(super) fn call(
             Ok(NONE)
         }
         ("delitem", [key]) => {
-            remove_key(ctx, storage, *key, None)?
+            let removed = remove_key(ctx, storage, *key, None)?
                 .ok_or_else(|| ctx.lookup_error("KeyError", *key))?;
+            ctx.finalize_removed_dict_value(removed);
             Ok(NONE)
         }
         ("clear", []) => {
@@ -113,31 +114,25 @@ fn pop_key(
     if found.and_then(|i| entries.ordered_rank(i)).is_none() {
         return default.ok_or_else(|| ctx.lookup_error("KeyError", key));
     }
-    // Finding the order node, unlinking it, and removing the mapping entry
-    // each resolve colliding keys. A callback may change the mapping.
-    if ctx
-        .find_dictionary_key(storage, key, Some(hash))?
-        .1
-        .is_none()
-    {
-        return Err(ctx.lookup_error("KeyError", key));
-    }
     remove_key(ctx, storage, key, Some(hash))?
         .or(default)
         .ok_or_else(|| ctx.lookup_error("KeyError", key))
 }
 
-/// Remove the table entry and the order node using the same resolved resident key.
-fn remove_key(ctx: &mut Context, storage: Id, key: Id, hash: Option<i64>) -> Result<Option<Id>> {
-    let Some(index) = ctx.find_dictionary_key(storage, key, hash)?.1 else {
-        return Ok(None);
+/// Resolve the node before deleting the backing entry: each lookup can call Python.
+fn remove_key(ctx: &mut Context, storage: Id, key: Id, cached: Option<i64>) -> Result<Option<Id>> {
+    let hash = if ctx.stored_entries(storage).ordered_nodes().is_empty() {
+        cached
+    } else {
+        let (hash, dense) = ctx.find_dictionary_key(storage, key, cached)?;
+        if let Some(dense) = dense
+            && let Some(rank) = ctx.stored_entries(storage).ordered_rank(dense)
+        {
+            ctx.unlink_ordered_node(storage, dense, rank);
+        }
+        Some(hash)
     };
-    let rank = ctx.stored_entries(storage).ordered_rank(index);
-    let (_, value) = super::super::builtins::remove_dict_entry(ctx, storage, index)?;
-    if let Some(rank) = rank {
-        ctx.unlink_ordered_rank(storage, rank);
-    }
-    Ok(Some(value))
+    super::super::builtins::remove_dict_item_hashed(ctx, storage, key, hash)
 }
 
 /// Stop if comparing two keys changes the order of either dictionary.

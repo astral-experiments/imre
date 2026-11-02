@@ -387,11 +387,7 @@ pub(in super::super) fn remove_dict_item_hashed(
     Ok(Some(remove_dict_entry(ctx, dict, index)?.1))
 }
 
-pub(in super::super) fn remove_dict_entry(
-    ctx: &mut Context,
-    dict: Id,
-    index: usize,
-) -> Result<(Id, Id)> {
+fn remove_dict_entry(ctx: &mut Context, dict: Id, index: usize) -> Result<(Id, Id)> {
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
         unreachable!("dictionary payload")
     };

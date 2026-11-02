@@ -132,6 +132,23 @@ def ordered_dictionary():
     assert list(mixed)[-1] is node and mixed.pop(resident) == 3
     assert list(mixed) == ["other"]
 
+    watched = OrderedDict()
+    phases = []
+    class ObservedKey:
+        def __hash__(self):
+            return 1
+        def __eq__(self, other):
+            phases.append((list(dict.values(watched)), len(list(watched))))
+            return True
+
+    original, alias = ObservedKey(), ObservedKey()
+    watched[original] = 1
+    watched[alias] = 2
+    assert phases == [([1], 1), ([2], 1)]
+    phases.clear()
+    del watched[alias]
+    assert phases == [([2], 1), ([2], 0)]
+
     class DoubleValues(OrderedDict):
         def __setitem__(self, key, value):
             super().__setitem__(key, 2 * value)

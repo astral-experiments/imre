@@ -21,7 +21,7 @@ pub(super) struct Entries {
     // Dense storage keeps one position per live key after a deletion.
     positions: Option<Vec<usize>>,
     index: Option<keys::Index>,
-    order: Option<Order>,
+    order: Option<allocator_api2::boxed::Box<Order>>,
     next: usize,
     usable: usize,
 }
@@ -168,10 +168,13 @@ impl Entries {
                 .try_reserve_exact(self.len())
                 .map_err(|_| crate::Error::memory_error())?;
             by_dense.resize(self.len(), None);
-            self.order = Some(Order {
-                by_dense,
-                ..Order::default()
-            });
+            self.order = Some(
+                allocator_api2::boxed::Box::try_new(Order {
+                    by_dense,
+                    ..Order::default()
+                })
+                .map_err(|_| crate::Error::memory_error())?,
+            );
         }
         self.order
             .as_mut()
@@ -188,8 +191,9 @@ impl Entries {
         order.revision = order.revision.wrapping_add(1);
     }
 
-    fn unlink_ordered_rank(&mut self, rank: usize) -> Id {
+    fn unlink_ordered_node(&mut self, dense: usize, rank: usize) -> Id {
         let order = self.order.as_mut().expect("live ordered node");
+        order.by_dense[dense] = None;
         let (key, _) = order.keys.remove(rank);
         for other in order.by_dense.iter_mut().flatten() {
             if *other > rank {
