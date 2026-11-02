@@ -86,6 +86,13 @@ REJECTED = {
     "frozen_inherited_class_data": 'from dataclasses import dataclass\nclass Base:\n    items = [1]\n@dataclass(frozen=True)\nclass Child(Base):\n    n: int\nChild(1).items = [2]\n',
     "sibling_guard_field": SUBCLASS_LAYOUT + "def f(x: Base) -> str:\n    if isinstance(x, (A, B)): return x.label\n    return 'other'\n",
     "reassigned_subclass_field": SUBCLASS_LAYOUT + "def f(x: Base, replacement: Base) -> str:\n    if isinstance(x, A):\n        x = replacement\n        return x.label\n    return 'other'\n",
+    "init_popped_pair_does_not_type_unrelated_fields": """class Values:
+    def make(self): return {"key": "value"}
+    def __init__(self):
+        self.data = self.make().copy()
+        key, value = self.data.popitem()
+        self.unrelated = {"a": 1, "b": (1, 2)}
+""",
     "init_hook_value_reads_uninitialized": """class Base:
     value: int
     def __init__(self) -> None:

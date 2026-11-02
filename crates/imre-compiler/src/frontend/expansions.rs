@@ -1064,6 +1064,44 @@ impl Checker<'_> {
         })
     }
 
+    /// Widen only the entries in a new, exact dictionary, leaving aliases of the source intact.
+    pub(super) fn fresh_mapping_copy(
+        &mut self,
+        source: Expr,
+        (key, value): (Type, Type),
+        at: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let ty = self.types.dict(key, value);
+        if source.ty == ty {
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::DictCopy, vec![source]),
+            });
+        }
+        let input = self.hidden(source.ty);
+        let result = self.hidden(ty);
+        let init = Expr {
+            ty,
+            kind: ExprKind::Dict {
+                key,
+                value,
+                entries: Vec::new(),
+            },
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body: vec![
+                    Statement::Assign(input, source),
+                    Statement::Assign(result, init),
+                    self.expand_mapping(result, self.local(input), (key, value), at)?,
+                ],
+                value: Box::new(self.local(result)),
+                clear: vec![result, input],
+            },
+        })
+    }
+
     /// Each ordinary key is evaluated before its value, and each expansion is
     /// exhausted before the next entry. Existing keys keep their first position.
     pub(super) fn expanded_dictionary(
