@@ -1,0 +1,6 @@
+test_append_bom (test.test_io.CTextIOWrapperTest.test_append_bom) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+OK

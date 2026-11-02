@@ -1,0 +1,6 @@
+discovery	667
+class	82
+select	445	1	1	test.test_io.CTextIOWrapperTest.test_append_bom
+start	test.test_io.CTextIOWrapperTest.test_append_bom	
+success	test.test_io.CTextIOWrapperTest.test_append_bom	
+stop	test.test_io.CTextIOWrapperTest.test_append_bom	

@@ -1,0 +1,336 @@
+discovery	667
+class	82
+select	445	1	1	test.test_io.CTextIOWrapperTest.test_append_bom
+select	446	2	1	test.test_io.CTextIOWrapperTest.test_basic_io
+select	447	3	1	test.test_io.CTextIOWrapperTest.test_bufio_write_through
+select	448	4	1	test.test_io.CTextIOWrapperTest.test_close_error_on_close
+select	449	5	1	test.test_io.CTextIOWrapperTest.test_constructor
+select	450	6	1	test.test_io.CTextIOWrapperTest.test_create_at_shutdown_with_encoding
+select	451	7	1	test.test_io.CTextIOWrapperTest.test_create_at_shutdown_without_encoding
+select	452	8	1	test.test_io.CTextIOWrapperTest.test_default_encoding
+select	453	9	1	test.test_io.CTextIOWrapperTest.test_del__CHUNK_SIZE_SystemError
+select	454	10	1	test.test_io.CTextIOWrapperTest.test_destructor
+select	455	11	1	test.test_io.CTextIOWrapperTest.test_detach
+select	456	12	1	test.test_io.CTextIOWrapperTest.test_encoded_writes
+select	457	13	1	test.test_io.CTextIOWrapperTest.test_encoding
+select	458	14	1	test.test_io.CTextIOWrapperTest.test_encoding_errors_reading
+select	459	15	1	test.test_io.CTextIOWrapperTest.test_encoding_errors_writing
+select	460	16	1	test.test_io.CTextIOWrapperTest.test_error_through_destructor
+select	461	17	1	test.test_io.CTextIOWrapperTest.test_errors_property
+select	462	18	1	test.test_io.CTextIOWrapperTest.test_flush_error_on_close
+select	463	19	1	test.test_io.CTextIOWrapperTest.test_garbage_collection
+select	464	20	1	test.test_io.CTextIOWrapperTest.test_illegal_decoder
+select	465	21	1	test.test_io.CTextIOWrapperTest.test_illegal_encoder
+select	466	22	1	test.test_io.CTextIOWrapperTest.test_initialization
+select	467	23	1	test.test_io.CTextIOWrapperTest.test_internal_buffer_size
+select	468	24	1	test.test_io.CTextIOWrapperTest.test_issue119506
+select	469	25	1	test.test_io.CTextIOWrapperTest.test_issue1395_1
+select	470	26	1	test.test_io.CTextIOWrapperTest.test_issue1395_2
+select	471	27	1	test.test_io.CTextIOWrapperTest.test_issue1395_3
+select	472	28	1	test.test_io.CTextIOWrapperTest.test_issue1395_4
+select	473	29	1	test.test_io.CTextIOWrapperTest.test_issue1395_5
+select	474	30	1	test.test_io.CTextIOWrapperTest.test_issue142594
+select	475	31	1	test.test_io.CTextIOWrapperTest.test_issue2282
+select	476	32	1	test.test_io.CTextIOWrapperTest.test_issue22849
+select	477	33	1	test.test_io.CTextIOWrapperTest.test_issue25862
+select	478	34	1	test.test_io.CTextIOWrapperTest.test_issue35928
+select	479	35	1	test.test_io.CTextIOWrapperTest.test_line_buffering
+select	480	36	1	test.test_io.CTextIOWrapperTest.test_multi_close
+select	481	37	1	test.test_io.CTextIOWrapperTest.test_multibyte_seek_and_tell
+select	482	38	1	test.test_io.CTextIOWrapperTest.test_newlines
+select	483	39	1	test.test_io.CTextIOWrapperTest.test_newlines_input
+select	484	40	1	test.test_io.CTextIOWrapperTest.test_newlines_output
+select	485	41	1	test.test_io.CTextIOWrapperTest.test_non_text_encoding_codecs_are_rejected
+select	486	42	1	test.test_io.CTextIOWrapperTest.test_nonnormalized_close_error_on_close
+select	487	43	1	test.test_io.CTextIOWrapperTest.test_override_destructor
+select	488	44	1	test.test_io.CTextIOWrapperTest.test_pickling_subclass
+select	489	45	1	test.test_io.CTextIOWrapperTest.test_rawio
+select	490	46	1	test.test_io.CTextIOWrapperTest.test_rawio_write_through
+select	491	47	1	test.test_io.CTextIOWrapperTest.test_read_by_chunk
+select	492	48	1	test.test_io.CTextIOWrapperTest.test_read_byteslike
+select	493	49	1	test.test_io.CTextIOWrapperTest.test_read_non_blocking
+select	494	50	1	test.test_io.CTextIOWrapperTest.test_read_nonbytes
+select	495	51	1	test.test_io.CTextIOWrapperTest.test_read_one_by_one
+select	496	52	1	test.test_io.CTextIOWrapperTest.test_readlines
+select	497	53	1	test.test_io.CTextIOWrapperTest.test_readonly_attributes
+select	498	54	1	test.test_io.CTextIOWrapperTest.test_reconfigure_defaults
+select	499	55	1	test.test_io.CTextIOWrapperTest.test_reconfigure_encoding_read
+select	500	56	1	test.test_io.CTextIOWrapperTest.test_reconfigure_errors
+select	501	57	1	test.test_io.CTextIOWrapperTest.test_reconfigure_line_buffering
+select	502	58	1	test.test_io.CTextIOWrapperTest.test_reconfigure_locale
+select	503	59	1	test.test_io.CTextIOWrapperTest.test_reconfigure_newline
+select	504	60	1	test.test_io.CTextIOWrapperTest.test_reconfigure_write
+select	505	61	1	test.test_io.CTextIOWrapperTest.test_reconfigure_write_fromascii
+select	506	62	1	test.test_io.CTextIOWrapperTest.test_reconfigure_write_non_seekable
+select	507	63	1	test.test_io.CTextIOWrapperTest.test_reconfigure_write_through
+select	508	64	1	test.test_io.CTextIOWrapperTest.test_recursive_repr
+select	509	65	1	test.test_io.CTextIOWrapperTest.test_repr
+select	510	66	1	test.test_io.CTextIOWrapperTest.test_rwpair_cleared_before_textio
+select	511	67	1	test.test_io.CTextIOWrapperTest.test_seek_and_tell
+select	512	68	1	test.test_io.CTextIOWrapperTest.test_seek_append_bom
+select	513	69	1	test.test_io.CTextIOWrapperTest.test_seek_bom
+select	514	70	1	test.test_io.CTextIOWrapperTest.test_seek_with_encoder_state
+select	515	71	1	test.test_io.CTextIOWrapperTest.test_seeking
+select	516	72	1	test.test_io.CTextIOWrapperTest.test_seeking_too
+select	517	73	1	test.test_io.CTextIOWrapperTest.test_subclass_repr
+select	518	74	1	test.test_io.CTextIOWrapperTest.test_tell_after_readline_with_cr
+select	519	75	1	test.test_io.CTextIOWrapperTest.test_telling
+select	520	76	1	test.test_io.CTextIOWrapperTest.test_threads_write
+select	521	77	1	test.test_io.CTextIOWrapperTest.test_uninitialized
+select	522	78	1	test.test_io.CTextIOWrapperTest.test_unreadable
+select	523	79	1	test.test_io.CTextIOWrapperTest.test_unseekable
+select	524	80	1	test.test_io.CTextIOWrapperTest.test_writelines
+select	525	81	1	test.test_io.CTextIOWrapperTest.test_writelines_error
+select	526	82	1	test.test_io.CTextIOWrapperTest.test_writelines_userlist
+start	test.test_io.CTextIOWrapperTest.test_append_bom	
+success	test.test_io.CTextIOWrapperTest.test_append_bom	
+stop	test.test_io.CTextIOWrapperTest.test_append_bom	
+start	test.test_io.CTextIOWrapperTest.test_basic_io	
+success	test.test_io.CTextIOWrapperTest.test_basic_io	
+stop	test.test_io.CTextIOWrapperTest.test_basic_io	
+start	test.test_io.CTextIOWrapperTest.test_bufio_write_through	
+success	test.test_io.CTextIOWrapperTest.test_bufio_write_through	
+stop	test.test_io.CTextIOWrapperTest.test_bufio_write_through	
+start	test.test_io.CTextIOWrapperTest.test_close_error_on_close	
+success	test.test_io.CTextIOWrapperTest.test_close_error_on_close	
+stop	test.test_io.CTextIOWrapperTest.test_close_error_on_close	
+start	test.test_io.CTextIOWrapperTest.test_constructor	
+success	test.test_io.CTextIOWrapperTest.test_constructor	
+stop	test.test_io.CTextIOWrapperTest.test_constructor	
+start	test.test_io.CTextIOWrapperTest.test_create_at_shutdown_with_encoding	
+success	test.test_io.CTextIOWrapperTest.test_create_at_shutdown_with_encoding	
+stop	test.test_io.CTextIOWrapperTest.test_create_at_shutdown_with_encoding	
+start	test.test_io.CTextIOWrapperTest.test_create_at_shutdown_without_encoding	
+success	test.test_io.CTextIOWrapperTest.test_create_at_shutdown_without_encoding	
+stop	test.test_io.CTextIOWrapperTest.test_create_at_shutdown_without_encoding	
+start	test.test_io.CTextIOWrapperTest.test_default_encoding	
+success	test.test_io.CTextIOWrapperTest.test_default_encoding	
+stop	test.test_io.CTextIOWrapperTest.test_default_encoding	
+start	test.test_io.CTextIOWrapperTest.test_del__CHUNK_SIZE_SystemError	
+success	test.test_io.CTextIOWrapperTest.test_del__CHUNK_SIZE_SystemError	
+stop	test.test_io.CTextIOWrapperTest.test_del__CHUNK_SIZE_SystemError	
+start	test.test_io.CTextIOWrapperTest.test_destructor	
+success	test.test_io.CTextIOWrapperTest.test_destructor	
+stop	test.test_io.CTextIOWrapperTest.test_destructor	
+start	test.test_io.CTextIOWrapperTest.test_detach	
+success	test.test_io.CTextIOWrapperTest.test_detach	
+stop	test.test_io.CTextIOWrapperTest.test_detach	
+start	test.test_io.CTextIOWrapperTest.test_encoded_writes	
+success	test.test_io.CTextIOWrapperTest.test_encoded_writes	
+stop	test.test_io.CTextIOWrapperTest.test_encoded_writes	
+start	test.test_io.CTextIOWrapperTest.test_encoding	
+success	test.test_io.CTextIOWrapperTest.test_encoding	
+stop	test.test_io.CTextIOWrapperTest.test_encoding	
+start	test.test_io.CTextIOWrapperTest.test_encoding_errors_reading	
+success	test.test_io.CTextIOWrapperTest.test_encoding_errors_reading	
+stop	test.test_io.CTextIOWrapperTest.test_encoding_errors_reading	
+start	test.test_io.CTextIOWrapperTest.test_encoding_errors_writing	
+success	test.test_io.CTextIOWrapperTest.test_encoding_errors_writing	
+stop	test.test_io.CTextIOWrapperTest.test_encoding_errors_writing	
+start	test.test_io.CTextIOWrapperTest.test_error_through_destructor	
+success	test.test_io.CTextIOWrapperTest.test_error_through_destructor	
+stop	test.test_io.CTextIOWrapperTest.test_error_through_destructor	
+start	test.test_io.CTextIOWrapperTest.test_errors_property	
+success	test.test_io.CTextIOWrapperTest.test_errors_property	
+stop	test.test_io.CTextIOWrapperTest.test_errors_property	
+start	test.test_io.CTextIOWrapperTest.test_flush_error_on_close	
+success	test.test_io.CTextIOWrapperTest.test_flush_error_on_close	
+stop	test.test_io.CTextIOWrapperTest.test_flush_error_on_close	
+start	test.test_io.CTextIOWrapperTest.test_garbage_collection	
+success	test.test_io.CTextIOWrapperTest.test_garbage_collection	
+stop	test.test_io.CTextIOWrapperTest.test_garbage_collection	
+start	test.test_io.CTextIOWrapperTest.test_illegal_decoder	
+success	test.test_io.CTextIOWrapperTest.test_illegal_decoder	
+stop	test.test_io.CTextIOWrapperTest.test_illegal_decoder	
+start	test.test_io.CTextIOWrapperTest.test_illegal_encoder	
+success	test.test_io.CTextIOWrapperTest.test_illegal_encoder	
+stop	test.test_io.CTextIOWrapperTest.test_illegal_encoder	
+start	test.test_io.CTextIOWrapperTest.test_initialization	
+success	test.test_io.CTextIOWrapperTest.test_initialization	
+stop	test.test_io.CTextIOWrapperTest.test_initialization	
+start	test.test_io.CTextIOWrapperTest.test_internal_buffer_size	
+success	test.test_io.CTextIOWrapperTest.test_internal_buffer_size	
+stop	test.test_io.CTextIOWrapperTest.test_internal_buffer_size	
+start	test.test_io.CTextIOWrapperTest.test_issue119506	
+success	test.test_io.CTextIOWrapperTest.test_issue119506	
+stop	test.test_io.CTextIOWrapperTest.test_issue119506	
+start	test.test_io.CTextIOWrapperTest.test_issue1395_1	
+success	test.test_io.CTextIOWrapperTest.test_issue1395_1	
+stop	test.test_io.CTextIOWrapperTest.test_issue1395_1	
+start	test.test_io.CTextIOWrapperTest.test_issue1395_2	
+success	test.test_io.CTextIOWrapperTest.test_issue1395_2	
+stop	test.test_io.CTextIOWrapperTest.test_issue1395_2	
+start	test.test_io.CTextIOWrapperTest.test_issue1395_3	
+success	test.test_io.CTextIOWrapperTest.test_issue1395_3	
+stop	test.test_io.CTextIOWrapperTest.test_issue1395_3	
+start	test.test_io.CTextIOWrapperTest.test_issue1395_4	
+success	test.test_io.CTextIOWrapperTest.test_issue1395_4	
+stop	test.test_io.CTextIOWrapperTest.test_issue1395_4	
+start	test.test_io.CTextIOWrapperTest.test_issue1395_5	
+success	test.test_io.CTextIOWrapperTest.test_issue1395_5	
+stop	test.test_io.CTextIOWrapperTest.test_issue1395_5	
+start	test.test_io.CTextIOWrapperTest.test_issue142594	
+success	test.test_io.CTextIOWrapperTest.test_issue142594	
+stop	test.test_io.CTextIOWrapperTest.test_issue142594	
+start	test.test_io.CTextIOWrapperTest.test_issue2282	
+success	test.test_io.CTextIOWrapperTest.test_issue2282	
+stop	test.test_io.CTextIOWrapperTest.test_issue2282	
+start	test.test_io.CTextIOWrapperTest.test_issue22849	
+success	test.test_io.CTextIOWrapperTest.test_issue22849	
+stop	test.test_io.CTextIOWrapperTest.test_issue22849	
+start	test.test_io.CTextIOWrapperTest.test_issue25862	
+success	test.test_io.CTextIOWrapperTest.test_issue25862	
+stop	test.test_io.CTextIOWrapperTest.test_issue25862	
+start	test.test_io.CTextIOWrapperTest.test_issue35928	
+success	test.test_io.CTextIOWrapperTest.test_issue35928	
+stop	test.test_io.CTextIOWrapperTest.test_issue35928	
+start	test.test_io.CTextIOWrapperTest.test_line_buffering	
+success	test.test_io.CTextIOWrapperTest.test_line_buffering	
+stop	test.test_io.CTextIOWrapperTest.test_line_buffering	
+start	test.test_io.CTextIOWrapperTest.test_multi_close	
+success	test.test_io.CTextIOWrapperTest.test_multi_close	
+stop	test.test_io.CTextIOWrapperTest.test_multi_close	
+start	test.test_io.CTextIOWrapperTest.test_multibyte_seek_and_tell	
+success	test.test_io.CTextIOWrapperTest.test_multibyte_seek_and_tell	
+stop	test.test_io.CTextIOWrapperTest.test_multibyte_seek_and_tell	
+start	test.test_io.CTextIOWrapperTest.test_newlines	
+success	test.test_io.CTextIOWrapperTest.test_newlines	
+stop	test.test_io.CTextIOWrapperTest.test_newlines	
+start	test.test_io.CTextIOWrapperTest.test_newlines_input	
+success	test.test_io.CTextIOWrapperTest.test_newlines_input	
+stop	test.test_io.CTextIOWrapperTest.test_newlines_input	
+start	test.test_io.CTextIOWrapperTest.test_newlines_output	
+success	test.test_io.CTextIOWrapperTest.test_newlines_output	
+stop	test.test_io.CTextIOWrapperTest.test_newlines_output	
+start	test.test_io.CTextIOWrapperTest.test_non_text_encoding_codecs_are_rejected	
+success	test.test_io.CTextIOWrapperTest.test_non_text_encoding_codecs_are_rejected	
+stop	test.test_io.CTextIOWrapperTest.test_non_text_encoding_codecs_are_rejected	
+start	test.test_io.CTextIOWrapperTest.test_nonnormalized_close_error_on_close	
+success	test.test_io.CTextIOWrapperTest.test_nonnormalized_close_error_on_close	
+stop	test.test_io.CTextIOWrapperTest.test_nonnormalized_close_error_on_close	
+start	test.test_io.CTextIOWrapperTest.test_override_destructor	
+success	test.test_io.CTextIOWrapperTest.test_override_destructor	
+stop	test.test_io.CTextIOWrapperTest.test_override_destructor	
+start	test.test_io.CTextIOWrapperTest.test_pickling_subclass	
+subtest	test.test_io.CTextIOWrapperTest.test_pickling_subclass	test.test_io.CTextIOWrapperTest.test_pickling_subclass (protocol=0)	ok
+subtest	test.test_io.CTextIOWrapperTest.test_pickling_subclass	test.test_io.CTextIOWrapperTest.test_pickling_subclass (protocol=1)	ok
+subtest	test.test_io.CTextIOWrapperTest.test_pickling_subclass	test.test_io.CTextIOWrapperTest.test_pickling_subclass (protocol=2)	ok
+subtest	test.test_io.CTextIOWrapperTest.test_pickling_subclass	test.test_io.CTextIOWrapperTest.test_pickling_subclass (protocol=3)	ok
+subtest	test.test_io.CTextIOWrapperTest.test_pickling_subclass	test.test_io.CTextIOWrapperTest.test_pickling_subclass (protocol=4)	ok
+subtest	test.test_io.CTextIOWrapperTest.test_pickling_subclass	test.test_io.CTextIOWrapperTest.test_pickling_subclass (protocol=5)	ok
+success	test.test_io.CTextIOWrapperTest.test_pickling_subclass	
+stop	test.test_io.CTextIOWrapperTest.test_pickling_subclass	
+start	test.test_io.CTextIOWrapperTest.test_rawio	
+success	test.test_io.CTextIOWrapperTest.test_rawio	
+stop	test.test_io.CTextIOWrapperTest.test_rawio	
+start	test.test_io.CTextIOWrapperTest.test_rawio_write_through	
+success	test.test_io.CTextIOWrapperTest.test_rawio_write_through	
+stop	test.test_io.CTextIOWrapperTest.test_rawio_write_through	
+start	test.test_io.CTextIOWrapperTest.test_read_by_chunk	
+success	test.test_io.CTextIOWrapperTest.test_read_by_chunk	
+stop	test.test_io.CTextIOWrapperTest.test_read_by_chunk	
+start	test.test_io.CTextIOWrapperTest.test_read_byteslike	
+success	test.test_io.CTextIOWrapperTest.test_read_byteslike	
+stop	test.test_io.CTextIOWrapperTest.test_read_byteslike	
+start	test.test_io.CTextIOWrapperTest.test_read_non_blocking	
+success	test.test_io.CTextIOWrapperTest.test_read_non_blocking	
+stop	test.test_io.CTextIOWrapperTest.test_read_non_blocking	
+start	test.test_io.CTextIOWrapperTest.test_read_nonbytes	
+success	test.test_io.CTextIOWrapperTest.test_read_nonbytes	
+stop	test.test_io.CTextIOWrapperTest.test_read_nonbytes	
+start	test.test_io.CTextIOWrapperTest.test_read_one_by_one	
+success	test.test_io.CTextIOWrapperTest.test_read_one_by_one	
+stop	test.test_io.CTextIOWrapperTest.test_read_one_by_one	
+start	test.test_io.CTextIOWrapperTest.test_readlines	
+success	test.test_io.CTextIOWrapperTest.test_readlines	
+stop	test.test_io.CTextIOWrapperTest.test_readlines	
+start	test.test_io.CTextIOWrapperTest.test_readonly_attributes	
+success	test.test_io.CTextIOWrapperTest.test_readonly_attributes	
+stop	test.test_io.CTextIOWrapperTest.test_readonly_attributes	
+start	test.test_io.CTextIOWrapperTest.test_reconfigure_defaults	
+success	test.test_io.CTextIOWrapperTest.test_reconfigure_defaults	
+stop	test.test_io.CTextIOWrapperTest.test_reconfigure_defaults	
+start	test.test_io.CTextIOWrapperTest.test_reconfigure_encoding_read	
+success	test.test_io.CTextIOWrapperTest.test_reconfigure_encoding_read	
+stop	test.test_io.CTextIOWrapperTest.test_reconfigure_encoding_read	
+start	test.test_io.CTextIOWrapperTest.test_reconfigure_errors	
+success	test.test_io.CTextIOWrapperTest.test_reconfigure_errors	
+stop	test.test_io.CTextIOWrapperTest.test_reconfigure_errors	
+start	test.test_io.CTextIOWrapperTest.test_reconfigure_line_buffering	
+success	test.test_io.CTextIOWrapperTest.test_reconfigure_line_buffering	
+stop	test.test_io.CTextIOWrapperTest.test_reconfigure_line_buffering	
+start	test.test_io.CTextIOWrapperTest.test_reconfigure_locale	
+success	test.test_io.CTextIOWrapperTest.test_reconfigure_locale	
+stop	test.test_io.CTextIOWrapperTest.test_reconfigure_locale	
+start	test.test_io.CTextIOWrapperTest.test_reconfigure_newline	
+success	test.test_io.CTextIOWrapperTest.test_reconfigure_newline	
+stop	test.test_io.CTextIOWrapperTest.test_reconfigure_newline	
+start	test.test_io.CTextIOWrapperTest.test_reconfigure_write	
+success	test.test_io.CTextIOWrapperTest.test_reconfigure_write	
+stop	test.test_io.CTextIOWrapperTest.test_reconfigure_write	
+start	test.test_io.CTextIOWrapperTest.test_reconfigure_write_fromascii	
+success	test.test_io.CTextIOWrapperTest.test_reconfigure_write_fromascii	
+stop	test.test_io.CTextIOWrapperTest.test_reconfigure_write_fromascii	
+start	test.test_io.CTextIOWrapperTest.test_reconfigure_write_non_seekable	
+success	test.test_io.CTextIOWrapperTest.test_reconfigure_write_non_seekable	
+stop	test.test_io.CTextIOWrapperTest.test_reconfigure_write_non_seekable	
+start	test.test_io.CTextIOWrapperTest.test_reconfigure_write_through	
+success	test.test_io.CTextIOWrapperTest.test_reconfigure_write_through	
+stop	test.test_io.CTextIOWrapperTest.test_reconfigure_write_through	
+start	test.test_io.CTextIOWrapperTest.test_recursive_repr	
+success	test.test_io.CTextIOWrapperTest.test_recursive_repr	
+stop	test.test_io.CTextIOWrapperTest.test_recursive_repr	
+start	test.test_io.CTextIOWrapperTest.test_repr	
+success	test.test_io.CTextIOWrapperTest.test_repr	
+stop	test.test_io.CTextIOWrapperTest.test_repr	
+start	test.test_io.CTextIOWrapperTest.test_rwpair_cleared_before_textio	
+success	test.test_io.CTextIOWrapperTest.test_rwpair_cleared_before_textio	
+stop	test.test_io.CTextIOWrapperTest.test_rwpair_cleared_before_textio	
+start	test.test_io.CTextIOWrapperTest.test_seek_and_tell	
+success	test.test_io.CTextIOWrapperTest.test_seek_and_tell	
+stop	test.test_io.CTextIOWrapperTest.test_seek_and_tell	
+start	test.test_io.CTextIOWrapperTest.test_seek_append_bom	
+success	test.test_io.CTextIOWrapperTest.test_seek_append_bom	
+stop	test.test_io.CTextIOWrapperTest.test_seek_append_bom	
+start	test.test_io.CTextIOWrapperTest.test_seek_bom	
+success	test.test_io.CTextIOWrapperTest.test_seek_bom	
+stop	test.test_io.CTextIOWrapperTest.test_seek_bom	
+start	test.test_io.CTextIOWrapperTest.test_seek_with_encoder_state	
+success	test.test_io.CTextIOWrapperTest.test_seek_with_encoder_state	
+stop	test.test_io.CTextIOWrapperTest.test_seek_with_encoder_state	
+start	test.test_io.CTextIOWrapperTest.test_seeking	
+success	test.test_io.CTextIOWrapperTest.test_seeking	
+stop	test.test_io.CTextIOWrapperTest.test_seeking	
+start	test.test_io.CTextIOWrapperTest.test_seeking_too	
+success	test.test_io.CTextIOWrapperTest.test_seeking_too	
+stop	test.test_io.CTextIOWrapperTest.test_seeking_too	
+start	test.test_io.CTextIOWrapperTest.test_subclass_repr	
+success	test.test_io.CTextIOWrapperTest.test_subclass_repr	
+stop	test.test_io.CTextIOWrapperTest.test_subclass_repr	
+start	test.test_io.CTextIOWrapperTest.test_tell_after_readline_with_cr	
+success	test.test_io.CTextIOWrapperTest.test_tell_after_readline_with_cr	
+stop	test.test_io.CTextIOWrapperTest.test_tell_after_readline_with_cr	
+start	test.test_io.CTextIOWrapperTest.test_telling	
+success	test.test_io.CTextIOWrapperTest.test_telling	
+stop	test.test_io.CTextIOWrapperTest.test_telling	
+start	test.test_io.CTextIOWrapperTest.test_threads_write	
+success	test.test_io.CTextIOWrapperTest.test_threads_write	
+stop	test.test_io.CTextIOWrapperTest.test_threads_write	
+start	test.test_io.CTextIOWrapperTest.test_uninitialized	
+success	test.test_io.CTextIOWrapperTest.test_uninitialized	
+stop	test.test_io.CTextIOWrapperTest.test_uninitialized	
+start	test.test_io.CTextIOWrapperTest.test_unreadable	
+success	test.test_io.CTextIOWrapperTest.test_unreadable	
+stop	test.test_io.CTextIOWrapperTest.test_unreadable	
+start	test.test_io.CTextIOWrapperTest.test_unseekable	
+success	test.test_io.CTextIOWrapperTest.test_unseekable	
+stop	test.test_io.CTextIOWrapperTest.test_unseekable	
+start	test.test_io.CTextIOWrapperTest.test_writelines	
+success	test.test_io.CTextIOWrapperTest.test_writelines	
+stop	test.test_io.CTextIOWrapperTest.test_writelines	
+start	test.test_io.CTextIOWrapperTest.test_writelines_error	
+success	test.test_io.CTextIOWrapperTest.test_writelines_error	
+stop	test.test_io.CTextIOWrapperTest.test_writelines_error	
+start	test.test_io.CTextIOWrapperTest.test_writelines_userlist	
+success	test.test_io.CTextIOWrapperTest.test_writelines_userlist	
+stop	test.test_io.CTextIOWrapperTest.test_writelines_userlist	

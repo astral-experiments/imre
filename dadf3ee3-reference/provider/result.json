@@ -1,0 +1,28 @@
+{
+  "revision": "cpython",
+  "lane": "ordinary",
+  "kind": "provider",
+  "selector": "--provider",
+  "visible_helper": "/tmp/imre3310/python/managed/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+  "argv": [
+    "/tmp/imre3310/python/managed/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-EB",
+    "/tmp/imre3310/textio/replay/stage/Lib/callback_class.py",
+    "--provider"
+  ],
+  "exit": 0,
+  "timeout": false,
+  "adopted": [],
+  "cwd": "/tmp/imre3310/textio/public-stock/raw/cpython/ordinary/provider/cwd",
+  "tmpdir": "/tmp/imre3310/textio/public-stock/raw/cpython/ordinary/provider/tmpdir",
+  "cwd_residue": [],
+  "tmpdir_residue": [],
+  "stdin_pipe": true,
+  "stdin_parent_held_through_wait": true,
+  "residue": [],
+  "elapsed_seconds": 0.215,
+  "stdout_bytes": 121,
+  "stdout_sha256": "7bfbef1849343b30314c2cc5b6e674412ca1903158951ba4fa7f8d8e2c7ea6bf",
+  "stderr_bytes": 0,
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
