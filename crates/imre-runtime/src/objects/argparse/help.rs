@@ -9,7 +9,7 @@ use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategory
 
 use super::super::python_whitespace;
 use super::exceptions::{Error, Kind as ExceptionKind};
-use super::{ArgumentGroup, Nargs, OptionSpec, Parser, Subcommands};
+use super::{ArgumentGroup, Metavar, Nargs, OptionSpec, Parser, Subcommands};
 
 /// Parse the positive decimal width accepted by shutil.get_terminal_size().
 fn positive_columns(value: &str) -> Option<usize> {
@@ -77,28 +77,47 @@ fn paint(enabled: bool, code: &str, text: &str) -> String {
     }
 }
 
+impl Metavar {
+    fn help_value(&self) -> String {
+        match self {
+            Self::Text(label) => label.clone(),
+            Self::Tuple { first, rest } => {
+                let mut text = String::from("(");
+                super::exceptions::push_string_repr(first, &mut text);
+                for label in rest {
+                    text.push_str(", ");
+                    super::exceptions::push_string_repr(label, &mut text);
+                }
+                if rest.is_empty() {
+                    text.push(',');
+                }
+                text.push(')');
+                text
+            }
+        }
+    }
+}
+
 impl OptionSpec {
     fn dest(&self) -> String {
         self.dest.clone()
     }
 
     fn label(&self, summary: bool, color: bool) -> String {
-        let mut metavar = if let Some(metavar) = &self.metavar {
-            metavar.clone()
-        } else if self.has_choices {
-            format!("{{{}}}", self.choices_text(",", false))
-        } else if self.positional() {
-            self.dest()
-        } else {
-            self.dest().to_uppercase()
+        let (mut metavar, rest): (_, &[String]) = match &self.metavar {
+            Some(Metavar::Text(label)) => (label.clone(), &[]),
+            Some(Metavar::Tuple { first, rest }) => (first.clone(), rest),
+            None if self.has_choices => (format!("{{{}}}", self.choices_text(",", false)), &[]),
+            None if self.positional() => (self.dest(), &[]),
+            None => (self.dest().to_uppercase(), &[]),
         };
         if self.positional() {
             if summary {
-                metavar = self.nargs.label(&metavar);
+                metavar = self.nargs.label(&metavar, rest);
             }
             return paint(color, if summary { "32" } else { "1;32" }, &metavar);
         }
-        metavar = self.nargs.label(&metavar);
+        metavar = self.nargs.label(&metavar, rest);
         let option_color = |flag: &str, bold: bool| match (flag.chars().count() > 2, bold) {
             (true, true) => "1;36",
             (true, false) => "36",
@@ -329,7 +348,7 @@ impl OptionSpec {
         }
         let mut text = ProgramPrefix::default();
         self.nargs
-            .write_label(&mut text, &metavar)
+            .write_label(&mut text, &metavar, &[])
             .map_err(|_| Error::allocation())?;
         Ok(Cow::Owned(text.0))
     }
@@ -811,7 +830,10 @@ fn expand(template: &str, prog: &str, option: Option<&OptionSpec>) -> String {
             let value = match (name, option) {
                 ("prog", _) => prog.to_owned(),
                 ("dest", Some(option)) => option.dest(),
-                ("metavar", Some(option)) => option.metavar.as_deref().unwrap_or("None").to_owned(),
+                ("metavar", Some(option)) => option
+                    .metavar
+                    .as_ref()
+                    .map_or_else(|| "None".to_owned(), Metavar::help_value),
                 ("type", Some(option)) => option.converter.as_deref().unwrap_or("None").to_owned(),
                 ("default", Some(option)) if option.path_default => {
                     super::super::paths::normalize(option.default.as_deref().unwrap()).to_string()
