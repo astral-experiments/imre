@@ -6,6 +6,7 @@ import _io
 import _locale
 import io
 import locale
+import os
 
 
 class Wrapper(io.TextIOWrapper):
@@ -84,6 +85,31 @@ def current():
         assert text.read() == "!"
         text.close()
         assert binary.closed
+
+    with open("wrapped-binary-data") as reader:
+        fd = reader.fileno()
+        assert io.TextIOWrapper.fileno(reader) == fd
+        assert os.read(fd, 3) == "雪".encode() and reader.read() == "!"
+    try:
+        reader.fileno()
+    except ValueError as error:
+        assert str(error) == "I/O operation on closed file"
+    else:
+        raise AssertionError("closed reader returned a descriptor")
+
+    class Buffer(io.BytesIO):
+        @property
+        def closed(self):
+            return True
+
+        def fileno(self):
+            return self
+
+    buffer = Buffer()
+    wrapper = io.TextIOWrapper(buffer)
+    assert wrapper.fileno() is buffer
+    wrapper.close()
+
     raw = io.BytesIO()
     text = io.TextIOWrapper(raw, encoding="ascii")
     text.writelines(["a\r\n", "b\n", "c"])

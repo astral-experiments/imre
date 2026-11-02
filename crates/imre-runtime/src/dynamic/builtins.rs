@@ -523,7 +523,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::TextFile(_)
             if matches!(
                 attr,
-                "read"
+                "fileno"
+                    | "read"
                     | "readline"
                     | "write"
                     | "flush"
