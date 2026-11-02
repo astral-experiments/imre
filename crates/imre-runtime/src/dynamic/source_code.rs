@@ -37,7 +37,7 @@ pub(super) struct Program {
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
     expression_functions: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
-    set_comprehension_targets: HashMap<ruff_text_size::TextRange, HashSet<String>>,
+    eager_comprehension_targets: HashMap<ruff_text_size::TextRange, HashSet<String>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -272,10 +272,16 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
             }
             return;
         }
-        if let ast::Expr::SetComp(comp) = expr {
+        if let ast::Expr::SetComp(ast::ExprSetComp {
+            elt, generators, ..
+        })
+        | ast::Expr::ListComp(ast::ExprListComp {
+            elt, generators, ..
+        }) = expr
+        {
             self.comprehensions.push(ComprehensionBindings::default());
             stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                for clause in &comp.generators {
+                for clause in generators {
                     let frame = self
                         .comprehensions
                         .last_mut()
@@ -303,7 +309,7 @@ impl<'a> ast::visitor::Visitor<'a> for NamedBindings {
                     self.visit_expr(&clause.target);
                     self.visit_comprehension(clause);
                 }
-                self.visit_expr(&comp.elt);
+                self.visit_expr(elt);
             });
             self.comprehensions.pop();
             return;
@@ -514,7 +520,7 @@ struct CompiledStrings<'a, 'ctx> {
     pending: Vec<ScopedExpression<'a>>,
     bound: Option<Rc<HashSet<String>>>,
     comprehension_reads: BTreeSet<String>,
-    set_comprehension_targets: &'ctx mut HashMap<ruff_text_size::TextRange, HashSet<String>>,
+    eager_comprehension_targets: &'ctx mut HashMap<ruff_text_size::TextRange, HashSet<String>>,
     reads: &'ctx mut BTreeSet<String>,
     directives: &'ctx HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
     exhausted: bool,
@@ -782,21 +788,26 @@ impl<'a> CompiledStrings<'a, '_> {
                     self.visit_expr(&genexpr.generators[0].iter);
                     continue;
                 }
-                ast::Expr::SetComp(comp) => {
-                    self.visit_expr(&comp.generators[0].iter);
+                ast::Expr::SetComp(ast::ExprSetComp {
+                    elt, generators, ..
+                })
+                | ast::Expr::ListComp(ast::ExprListComp {
+                    elt, generators, ..
+                }) => {
+                    self.visit_expr(&generators[0].iter);
                     let mut names = HashSet::new();
-                    for clause in &comp.generators {
+                    for clause in generators {
                         Program::collect_target_names(&clause.target, &mut names)?;
                     }
-                    if synchronous_comprehension(&comp.elt, &comp.generators, false) {
-                        self.set_comprehension_targets
-                            .insert(comp.range(), names.clone());
+                    if synchronous_comprehension(elt, generators, false) {
+                        self.eager_comprehension_targets
+                            .insert(expr.range(), names.clone());
                     }
                     if let Some(enclosing) = &self.bound {
                         names.extend(enclosing.iter().cloned());
                     }
                     self.bound = Some(Rc::new(names));
-                    for (index, clause) in comp.generators.iter().enumerate() {
+                    for (index, clause) in generators.iter().enumerate() {
                         self.visit_expr(&clause.target);
                         if index != 0 {
                             self.visit_expr(&clause.iter);
@@ -805,7 +816,7 @@ impl<'a> CompiledStrings<'a, '_> {
                             self.visit_expr(predicate);
                         }
                     }
-                    self.visit_expr(&comp.elt);
+                    self.visit_expr(elt);
                     continue;
                 }
                 ast::Expr::StringLiteral(literal) => {
@@ -1002,7 +1013,7 @@ impl Program {
             pending: Vec::new(),
             bound: None,
             comprehension_reads: BTreeSet::new(),
-            set_comprehension_targets: &mut self.set_comprehension_targets,
+            eager_comprehension_targets: &mut self.eager_comprehension_targets,
             exhausted: false,
         };
         for (_, op) in &mut self.instructions {
@@ -1439,7 +1450,7 @@ impl Program {
             template_expressions: Rc::default(),
             instructions: Vec::new(),
             expression_functions: HashMap::new(),
-            set_comprehension_targets: HashMap::new(),
+            eager_comprehension_targets: HashMap::new(),
         }
     }
 
@@ -4605,27 +4616,25 @@ impl Context {
         self.keep_source_result(mark, iterator)
     }
 
-    /// Run the clauses inline, hashing each element before advancing its innermost iterator.
-    fn source_set_comprehension(
+    /// Append each element to the result before advancing its innermost iterator.
+    fn source_eager_comprehension(
         &mut self,
         code: &Program,
         parent: Id,
-        comp: &ast::ExprSetComp,
+        element: &ast::Expr,
+        clauses: &[ast::Comprehension],
+        kind: &str,
         targets: &HashSet<String>,
     ) -> Result<Id> {
         let mark = self.heap.temporary_mark();
         let result = (|| -> Result<Id> {
-            let first =
-                self.source_comprehension_iterator(code, parent, &comp.generators[0].iter)?;
+            let first = self.source_comprehension_iterator(code, parent, &clauses[0].iter)?;
             let scope = self.comprehension_scope_with_targets(parent, targets.clone());
-            let set = self.alloc(Value::Set {
-                entries: Default::default(),
-                frozen: false,
-            });
+            let collection = self.op(kind, NONE, NONE, NONE)?;
             // Each mark preserves the iterator and persistent roots of all outer clauses.
             let mut levels = Vec::new();
             levels
-                .try_reserve_exact(comp.generators.len())
+                .try_reserve_exact(clauses.len())
                 .map_err(|_| crate::Error::memory_error())?;
             levels.push((first, self.heap.temporary_mark()));
             'advance: while let Some(&(iterator, step)) = levels.last() {
@@ -4635,25 +4644,25 @@ impl Context {
                     continue;
                 };
                 self.heap.keep(item);
-                let clause = &comp.generators[levels.len() - 1];
+                let clause = &clauses[levels.len() - 1];
                 self.bind_target(code, scope, &clause.target, item)?;
                 for test in &clause.ifs {
                     if !self.source_condition(code, scope, test)? {
                         continue 'advance;
                     }
                 }
-                if let Some(next) = comp.generators.get(levels.len()) {
+                if let Some(next) = clauses.get(levels.len()) {
                     let inner = self.source_comprehension_iterator(code, scope, &next.iter)?;
                     levels.push((inner, self.heap.temporary_mark()));
                 } else {
-                    let element = self.source_expr(code, scope, &comp.elt)?;
-                    builtins::set_add(self, set, element)?;
+                    let element = self.source_expr(code, scope, element)?;
+                    self.op("append", collection, element, NONE)?;
                 }
             }
-            Ok(set)
+            Ok(collection)
         })();
         match result {
-            Ok(set) => self.keep_source_result(mark, set),
+            Ok(collection) => self.keep_source_result(mark, collection),
             Err(error) => {
                 let collect = self.heap.discard_truth_operands(mark, self.modules);
                 for root in error.roots() {
@@ -4845,10 +4854,18 @@ impl Context {
                     .heap
                     .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))
             }
-            Expr::SetComp(comp)
-                if let Some(targets) = code.set_comprehension_targets.get(&comp.range()) =>
-            {
-                self.source_set_comprehension(code, scope, comp, targets)
+            ast::Expr::SetComp(ast::ExprSetComp {
+                elt, generators, ..
+            })
+            | ast::Expr::ListComp(ast::ExprListComp {
+                elt, generators, ..
+            }) if let Some(targets) = code.eager_comprehension_targets.get(&expr.range()) => {
+                let kind = if matches!(expr, Expr::ListComp(_)) {
+                    "list"
+                } else {
+                    "set"
+                };
+                self.source_eager_comprehension(code, scope, elt, generators, kind, targets)
             }
             Expr::Set(display) => {
                 let items = display
