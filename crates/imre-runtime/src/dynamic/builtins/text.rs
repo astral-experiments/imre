@@ -1067,6 +1067,8 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
         );
     let mut args = percent_args(ctx, rhs)?;
     let mut output = String::new();
+    // Flush scalar runs into this buffer only for fields containing a lone surrogate.
+    let mut codepoints = Vec::new();
     let mut positions = format.char_indices().enumerate();
     for (position, part) in parsed.iter() {
         match part {
@@ -1133,6 +1135,34 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                 let rendered: Cow<'_, str> = match spec.format_char {
                     's' => {
                         let text = super::call(ctx, "str", &[arg], &[])?;
+                        if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(text)) {
+                            let (width, precision) = layout.unwrap_or_default();
+                            let field =
+                                &points[..precision.unwrap_or(points.len()).min(points.len())];
+                            let padding = width.unsigned_abs().saturating_sub(field.len());
+                            codepoints
+                                .try_reserve(
+                                    output
+                                        .len()
+                                        .saturating_add(field.len())
+                                        .saturating_add(padding),
+                                )
+                                .map_err(|_| {
+                                    Error::new("MemoryError", "formatted string is too long")
+                                })?;
+                            codepoints.extend(output.chars().map(u32::from));
+                            output.clear();
+                            let left =
+                                width < 0 || spec.flags.contains(CConversionFlags::LEFT_ADJUST);
+                            if !left {
+                                codepoints.extend(std::iter::repeat_n(u32::from(' '), padding));
+                            }
+                            codepoints.extend_from_slice(field);
+                            if left {
+                                codepoints.extend(std::iter::repeat_n(u32::from(' '), padding));
+                            }
+                            continue;
+                        }
                         Cow::Borrowed(ctx.str_value(text)?)
                     }
                     'r' => ctx.checked_format(arg, true)?.into(),
@@ -1183,7 +1213,14 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
             "not all arguments converted during string formatting",
         ));
     }
-    Ok(ctx.text(output))
+    if codepoints.is_empty() {
+        return Ok(ctx.text(output));
+    }
+    codepoints
+        .try_reserve(output.len())
+        .map_err(|_| Error::new("MemoryError", "formatted string is too long"))?;
+    codepoints.extend(output.chars().map(u32::from));
+    Ok(ctx.text_codepoints(codepoints))
 }
 
 /// Convert the optional start and end in argument order, honoring the index protocol.
