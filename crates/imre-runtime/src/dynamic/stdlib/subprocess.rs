@@ -119,6 +119,10 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         // CPython opens text wrappers before the child can execute.
         io::text_options(ctx, encoding, errors, NONE)?;
     }
+    let pipesize = ctx.as_int(pipesize)?;
+    let handles = (executable != NONE)
+        .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
+        .transpose()?;
     let scalar = matches!(
         ctx.heap.get(ctx.scalar_value(args)),
         Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::DirEntry(_)
@@ -149,12 +153,13 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         false
     };
-    let early_close_fds = (executable != NONE)
-        .then(|| ctx.truth(close_fds))
-        .transpose()?;
-    let direct = early_close_fds.map(|close_fds| {
-        BoxedPopen::uses_posix_spawn(probed_directory, cwd != NONE, close_fds, &streams)
-    });
+    let close_fds_flag = handles.as_ref().map(|_| ctx.truth(close_fds)).transpose()?;
+    let direct = handles
+        .as_ref()
+        .zip(close_fds_flag)
+        .map(|(handles, close_fds)| {
+            handles.uses_posix_spawn(probed_directory, cwd != NONE, close_fds, &streams)
+        });
     // Fork snapshots environ before encoding the executable; posix_spawn packs it after argv.
     let mut child_env = if direct == Some(true) {
         None
@@ -197,7 +202,8 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         direct,
         search_path,
         streams,
-        match early_close_fds {
+        handles,
+        match close_fds_flag {
             Some(value) => value,
             None => ctx.truth(close_fds)?,
         },
@@ -205,7 +211,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         directory,
         child_env,
         ctx.as_int(bufsize)?,
-        ctx.as_int(pipesize)?,
+        pipesize,
         &mut || {
             let result = (|| -> Result<()> {
                 let warnings = ctx.module("warnings")?;

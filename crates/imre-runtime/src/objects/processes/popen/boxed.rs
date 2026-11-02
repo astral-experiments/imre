@@ -31,23 +31,36 @@ pub(crate) struct BoxedCommunication {
     pub(crate) wait_budget: Option<f64>,
 }
 
-impl BoxedPopen {
-    pub(crate) fn probes_executable() -> bool {
-        launch_error::posix_spawn_capabilities().0
-    }
-
-    /// Choose the boxed conversion order with the same criteria as a typed POSIX launch.
+impl PreparedHandles {
     pub(crate) fn uses_posix_spawn(
+        &self,
         directory: bool,
         cwd: bool,
         close_fds: bool,
         streams: &[(u32, Option<Int>); 3],
     ) -> bool {
         let modes = streams.each_ref().map(|(mode, _)| *mode);
+        launch_error::uses_posix_spawn(directory, cwd, modes, self.child_fds, close_fds)
+    }
+}
+
+impl BoxedPopen {
+    pub(crate) fn probes_executable() -> bool {
+        launch_error::posix_spawn_capabilities().0
+    }
+
+    /// Reserve the actual child and parent fds before any executable-path callbacks.
+    pub(crate) fn prepare_handles(
+        streams: &[(u32, Option<Int>); 3],
+        pipesize: &Int,
+    ) -> Result<PreparedHandles> {
+        let modes = streams.each_ref().map(|(mode, _)| *mode);
         let fds = streams
             .each_ref()
             .map(|(_, fd)| fd.as_ref().map_or(-1, |fd| redirect_number(fd).0));
-        launch_error::uses_posix_spawn(directory, cwd, modes, fds, close_fds)
+        // SAFETY: pipesize is the live Python int designated by kind 2.
+        let capacity = unsafe { super::pipe_size::capacity(pipesize.0, WordKind::new(2)) }?;
+        ChildPipes::open(&modes, fds, capacity).map_err(errno_error)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -57,6 +70,7 @@ impl BoxedPopen {
         direct: Option<bool>,
         search_path: Option<Vec<u8>>,
         streams: [(u32, Option<Int>); 3],
+        handles: Option<PreparedHandles>,
         close_fds: bool,
         restore_signals: bool,
         cwd: Option<Vec<u8>>,
@@ -105,12 +119,13 @@ impl BoxedPopen {
         }
         let mut site = None;
         let mut extras = LaunchExtras {
+            pipe_size: handles.is_none().then_some((pipesize.0, 2)),
+            prepared: handles,
             failure_site: Some(&mut site),
             direct,
             search_path,
             warn_line_buffering: Some(warn_line_buffering),
             environment: env,
-            pipe_size: Some((pipesize.0, 2)),
             ..Default::default()
         };
         for (i, ((mode, fd), shift)) in streams.iter().zip([12, 0, 4]).enumerate() {

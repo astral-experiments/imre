@@ -51,7 +51,9 @@ pub(super) fn uses_posix_spawn(
     if [stdin, stdout, stderr]
         .into_iter()
         .zip(fds)
-        .any(|(mode, fd)| matches!(mode, 3 | 4 | 8) || matches!(mode, 6 | 7) && fd != -1 && fd <= 2)
+        .any(|(mode, fd)| {
+            matches!(mode, 3 | 4 | 8) || matches!(mode, 1 | 2 | 6 | 7) && fd != -1 && fd <= 2
+        })
         || stdin == 5
         || stderr == 5 && stdout == 0
     {
