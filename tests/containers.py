@@ -28,6 +28,38 @@ ACCEPTED = {
     "set_iterable_constructor": "values: set[int] = set([1, 2])\nprint(type(values) is set, sorted(values))\n",
     "set_literal_expansion": "values = {1}\nexpanded = {*values}\nexpanded.add(2)\nprint(len(values))\nprint(1 in expanded)\nprint(2 in expanded)\n",
     "dict_literal_expansion": 'values = {"one": 1}\ncopy = {**values}\ncopy["one"] = 2\nprint(values["one"])\nprint(copy["one"])\n',
+    "dict_keys_list": """
+class Custom:
+    def keys(self) -> list[str]:
+        return ["custom"]
+
+def receiver(d: dict[str, list[int]], log: list[int]) -> dict[str, list[int]]:
+    log.append(1)
+    return d
+
+log = [0]
+d = {"b": [3], "a": [1]}
+keys = list(receiver(d, log).keys())
+values = list(d.values())
+del d["b"]
+d["c"] = [2]
+values[1].append(4)
+assert len(keys) == 2 and keys[0] == "b" and keys[1] == "a"
+assert len(log) == 2 and log[1] == 1
+assert len(values) == 2 and values[0][0] == 3
+assert len(d["a"]) == 2 and d["a"][1] == 4
+assert list(Custom().keys())[0] == "custom"
+print("views verified")
+""",
+    "dict_getitem_callback": """
+import unittest
+case = unittest.TestCase()
+d = {"a": 4}
+print(d.__getitem__("a"))
+case.assertRaises(KeyError, d.__getitem__, "absent")
+case.assertRaises(TypeError, d.__getitem__)
+case.assertRaises(TypeError, d.__getitem__, "a", "b")
+""",
     "dict_values_iteration": """
 rows = {"first": [1], "second": [2]}
 for row in rows.values():
