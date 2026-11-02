@@ -115,6 +115,14 @@ def check_object_reducer():
         def reduce_from_super(self):
             return super().__reduce_ex__(4)
 
+    class Mutable(set):
+        pass
+
+    class Frozen(frozenset):
+        pass
+
+    assert Mutable.__reduce__ is set.__reduce__
+    assert Frozen.__reduce__ is frozenset.__reduce__
     obj = Child()
     assert Child.__reduce_ex__ is object.__reduce_ex__
     assert obj.reduce_from_super() == (str, (37,))
