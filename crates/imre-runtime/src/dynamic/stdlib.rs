@@ -711,11 +711,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "getuid" | "geteuid" | "getgid" | "getgroups") => {
             ctx.builtin(&format!("posix.{name}"))
         }
-        #[cfg(target_os = "linux")]
-        ("os", attr @ ("pathconf" | "fpathconf" | "pathconf_names")) => {
-            let posix = ctx.module("posix")?;
-            return ctx.lookup_attr(posix, attr);
-        }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
         ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
         #[cfg(target_os = "linux")]

@@ -2918,6 +2918,14 @@ impl Context {
                         self.bind(scope, attr, value);
                     }
                 }
+                #[cfg(target_os = "linux")]
+                {
+                    let posix = self.module("posix")?;
+                    for attr in ["fpathconf", "pathconf", "pathconf_names"] {
+                        let value = self.lookup_attr(posix, attr)?;
+                        self.bind(scope, attr, value);
+                    }
+                }
                 #[cfg(unix)]
                 stdlib::os::install_capabilities(self, module, scope)?;
                 let path = self.module("posixpath")?;
