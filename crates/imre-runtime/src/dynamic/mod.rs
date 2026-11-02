@@ -2877,6 +2877,7 @@ impl Context {
                     "lockf",
                     "posix_fadvise",
                     "ptsname",
+                    "preadv",
                     "readv",
                     "splice",
                 ] {
@@ -2892,6 +2893,8 @@ impl Context {
                     self.bind(scope, attr, value);
                 }
                 for (attr, flag) in [
+                    ("RWF_HIPRI", libc::RWF_HIPRI),
+                    ("RWF_NOWAIT", libc::RWF_NOWAIT),
                     ("O_PATH", libc::O_PATH),
                     ("O_NOCTTY", libc::O_NOCTTY),
                     ("O_TMPFILE", libc::O_TMPFILE),
@@ -2967,7 +2970,10 @@ impl Context {
                     for attr in [
                         "get_terminal_size",
                         "ptsname",
+                        "preadv",
                         "readv",
+                        "RWF_HIPRI",
+                        "RWF_NOWAIT",
                         "O_NOCTTY",
                         "splice",
                         "SPLICE_F_MOVE",
