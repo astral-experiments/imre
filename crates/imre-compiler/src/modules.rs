@@ -1276,6 +1276,13 @@ impl IntrinsicModule {
             (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Types, "CodeType") => Intrinsic::NominalClass("code"),
             (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Thread, "allocate_lock") => {
+                Intrinsic::ObjectRuntimeExport("_thread.allocate_lock")
+            }
+            (Self::Thread, "allocate") => Intrinsic::ObjectRuntimeExport("_thread.allocate"),
+            (Self::Thread | Self::Threading, "TIMEOUT_MAX") => {
+                Intrinsic::ObjectRuntimeExport("_thread.TIMEOUT_MAX")
+            }
             (Self::Threading, "Lock") | (Self::Thread, "LockType") => {
                 Intrinsic::ObjectRuntimeExport("_thread.lock")
             }

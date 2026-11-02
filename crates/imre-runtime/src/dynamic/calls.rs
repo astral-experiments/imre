@@ -35,6 +35,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "functools" if matches!(function, "cmp_to_key" | "reduce") => {
             Some(("_functools", function))
         }
+        "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         "zlib" if function == "adler32" => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -1765,6 +1766,12 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "_thread.allocate" => {
+                        return Ok(self.text("An obsolete synonym of allocate_lock()."));
+                    }
+                    "__doc__" if symbol == "_thread.allocate_lock" => {
+                        return Ok(self.text("Create a new lock object. See help(type(threading.Lock())) for\ninformation about locks."));
+                    }
                     "__doc__" if symbol == "posix.urandom" => {
                         return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));
                     }
@@ -1794,7 +1801,12 @@ impl Context {
                     "__doc__" if symbol == "posix.getpid" => {
                         return Ok(self.text("Return the current process id."));
                     }
-                    "__text_signature__" if symbol == "posix.getpid" => {
+                    "__text_signature__"
+                        if matches!(
+                            symbol.as_str(),
+                            "posix.getpid" | "_thread.allocate" | "_thread.allocate_lock"
+                        ) =>
+                    {
                         return Ok(self.text("($module, /)"));
                     }
                     "__self__" => {

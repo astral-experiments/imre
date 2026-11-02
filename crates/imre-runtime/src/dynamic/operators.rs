@@ -724,7 +724,10 @@ impl Context {
             (Value::Method { .. }, Value::Method { .. }) => self
                 .method_equality_operands(a, b)
                 .is_some_and(|(x, y, same)| same && equal(x, y)),
-            (Value::Native(a), Value::Native(b)) => a == b,
+            (Value::Native(a), Value::Native(b)) => {
+                super::builtins::native_implementation(a)
+                    == super::builtins::native_implementation(b)
+            }
             (Value::GenericAlias(a), Value::GenericAlias(b)) => {
                 a.comparison_parts(b).is_some_and(|(x, y)| equal(x, y))
             }
