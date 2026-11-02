@@ -1584,6 +1584,16 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
     }
 }
 
+/// Move the executing frame to an implicit call site without releasing statement temporaries.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_set_statement_line(ctx: *mut Context, line: u32) {
+    // SAFETY: the generated caller owns the context and has entered a statement.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap.set_statement_line(line);
+    ctx.heap
+        .replace_expression(value::ExpressionPosition::Statement);
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
     ctx: *mut Context,
