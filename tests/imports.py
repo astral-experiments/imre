@@ -247,6 +247,13 @@ REJECTED = {
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
     "token_shadow": ({"main.py": "import token\n", "token.py": HELPER}, 'shadowing is unsupported: "token"'),
+    "email_address_parser_unknown_name": ({
+        "main.py": "from email._header_value_parser import missing_parser\n",
+    }, "unsupported sealed standard-library export"),
+    "unused_email_address_parser_keeps_types": ({
+        "main.py": "from email._header_value_parser import get_addr_spec\n"
+                   "def identity(n: int) -> int: return n\nidentity('wrong')\n",
+    }, "expected int, got str"),
     "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
     "opcode_unknown_operation": ({"main.py": "from _opcode import not_an_opcode_operation\n"}, "not_an_opcode_operation"),
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
@@ -565,6 +572,16 @@ ACCEPTED = {
         "stat.py": "invalid syntax in a shadow of frozen stat!\n",
         "stat/__init__.py": "invalid shadow package!\n",
         "stat/S_IRWXU.py": "invalid shadow member!\n",
+    },
+    "email_address_parsers": {
+        "main.py": (
+            "from email._header_value_parser import get_addr_spec, get_angle_addr as angle\n"
+            "import email._header_value_parser as parser\n"
+            "assert angle is parser.get_angle_addr\n"
+            "for parse, value in ((get_addr_spec, 'user@example.org SIZE=32'), (angle, '<>')):\n"
+            "    address, rest = parse(value)\n"
+            "    print(address.addr_spec, rest)\n"
+        ),
     },
     "zip_source_spec": {
         "main.py": (
@@ -976,7 +993,9 @@ def main() -> None:
                            *build_flags]
                 if args.sanitize:
                     command.append("--sanitize")
-                require_success(run(command, temporary, timeout=build_timeout))
+                # Optimizing CPython's bundled address parser takes longer than a typical import.
+                timeout = 300 if name == "email_address_parsers" and level > 0 else build_timeout
+                require_success(run(command, temporary, timeout=timeout))
                 result = run([str(executable)], temporary)
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
