@@ -198,6 +198,17 @@ impl Descriptor {
             .live_fd()
             .ok_or_else(|| io::Error::from_raw_os_error(libc::EBADF))
     }
+
+    fn seek_raw(&mut self, offset: i64, whence: i32) -> io::Result<u64> {
+        // SAFETY: lseek takes only integer arguments.
+        let n = unsafe { libc::lseek(self.fd()?, offset, whence) };
+        if n < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            self.raw_position = Some(n as u64);
+            Ok(n as u64)
+        }
+    }
 }
 
 fn count(n: isize) -> io::Result<usize> {
@@ -238,14 +249,7 @@ impl Seek for Descriptor {
             SeekFrom::Current(n) => (n, libc::SEEK_CUR),
             SeekFrom::End(n) => (n, libc::SEEK_END),
         };
-        // SAFETY: lseek takes only integer arguments.
-        let n = unsafe { libc::lseek(self.fd()?, offset, whence) };
-        if n < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            self.raw_position = Some(n as u64);
-            Ok(n as u64)
-        }
+        self.seek_raw(offset, whence)
     }
 }
 
@@ -365,15 +369,32 @@ impl Buffer {
         }
     }
 
-    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+    fn seek(&mut self, offset: i64, whence: i32) -> io::Result<u64> {
+        let position = match whence {
+            libc::SEEK_SET if offset >= 0 => Some(SeekFrom::Start(offset as u64)),
+            libc::SEEK_CUR => Some(SeekFrom::Current(offset)),
+            libc::SEEK_END => Some(SeekFrom::End(offset)),
+            _ => None,
+        };
         let reader = match self {
-            Self::Random(file) => return file.seek(position),
+            Self::Random(file) => {
+                return match position {
+                    Some(at) => file.seek(at),
+                    None => file.seek_raw(|raw| raw.seek_raw(offset, whence)),
+                };
+            }
             Self::Pipe(_) => return Err(io::Error::from_raw_os_error(libc::ESPIPE)),
             Self::Reader(r) => r,
             Self::Writer(w) => {
                 w.flush()?;
-                return w.inner.seek(position);
+                return w.inner.seek_raw(offset, whence);
             }
+        };
+        let Some(position) = position else {
+            let pos = reader.get_mut().seek_raw(offset, whence)?;
+            let buffered = reader.buffer().len();
+            reader.consume(buffered);
+            return Ok(pos);
         };
         let unread = reader.buffer().len() as i128;
         if unread > 0 && !matches!(position, SeekFrom::End(_)) {
@@ -485,16 +506,18 @@ impl BufferedFd {
 
     /// Check the live raw after any argument conversion which can invoke Python.
     fn check_raw(&self, ctx: &Context, receiver: Id, name: &str) -> Result<()> {
-        if matches!(ctx.heap.get(receiver), Value::File(_)) {
+        if name != "seek" && matches!(ctx.heap.get(receiver), Value::File(_)) {
             return Ok(());
         }
-        let (owner, methods): (_, &[&str]) = if self.reading {
+        let (owner, methods): (_, &[&str]) = if self.reading && self.writing && name == "seek" {
+            ("BufferedRandom", &["write", "seek", "tell"])
+        } else if self.reading {
             (
                 "BufferedReader",
                 match name {
                     "read" => &["read", "readall", "readinto"],
                     "read1" | "readline" | "readinto" => &["readinto"],
-                    "seek" => &["seek", "seekable", "tell"],
+                    "seek" => &["seek", "tell"],
                     "close" => &["flush", "close"],
                     _ => std::slice::from_ref(&name),
                 },
@@ -504,7 +527,7 @@ impl BufferedFd {
                 "BufferedWriter",
                 match name {
                     "flush" => &["write"],
-                    "seek" => &["write", "seek", "seekable", "tell"],
+                    "seek" => &["write", "seek"],
                     "close" => &["close", "flush"],
                     _ => std::slice::from_ref(&name),
                 },
@@ -651,52 +674,44 @@ impl BufferedFd {
         } else {
             None
         };
-        if name == "seek" && !self.reading {
-            let target = *args
-                .first()
-                .ok_or_else(|| Error::new("TypeError", "seek requires an offset"))?;
-            let whence =
-                files::buffered_whence(ctx, super::super::option(args, 1, kwargs, "whence")?)?;
+        if name == "seek" {
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{}.seek() takes no keyword arguments",
+                        ctx.type_name(receiver)
+                    ),
+                ));
+            }
+            super::argument_count(&ctx.type_name(receiver), name, args.len())?;
+            let target = args[0];
+            let whence = files::buffered_whence(ctx, args.get(1).copied())?;
             if self.closed() {
                 return Err(closed());
             }
-            // A failed seek on a pipe must leave pending bytes in the Python buffer.
-            if self.call(ctx, receiver, "seekable", &[], &[])? != TRUE {
+            let seekable = ctx.lookup_attr(self.raw, "seekable")?;
+            if ctx.call(seekable, vec![], Vec::new())? != TRUE {
                 return Err(Error::new(
                     "UnsupportedOperation",
                     "File or stream is not seekable.",
                 ));
             }
+            // Conversion can move or close this stream, or replace methods on its raw.
             let offset = files::buffered_offset(ctx, target)?;
-            self.check_raw(ctx, receiver, "seek")?;
-            let fd = self.handle.live_fd().ok_or_else(closed)?;
-            self.call(ctx, receiver, "flush", &[], &[])?;
-            let pos = crate::objects::os::seek(fd, offset, whence)?;
-            return Ok(ctx.int(pos));
-        }
-        let seek = if name == "seek" {
-            let offset = ctx
-                .index_integer(
-                    *args
-                        .first()
-                        .ok_or_else(|| Error::new("TypeError", "seek requires an offset"))?,
-                )?
-                .to_i64()
-                .ok_or_else(|| Error::new("OverflowError", "offset out of range"))?;
-            match super::super::option(args, 1, kwargs, "whence")?
-                .map(|v| ctx.index_integer(v))
-                .transpose()?
-                .map(|v| v.to_i64())
-                .unwrap_or(Some(0))
-            {
-                Some(0) if offset >= 0 => Some(SeekFrom::Start(offset as u64)),
-                Some(1) => Some(SeekFrom::Current(offset)),
-                Some(2) => Some(SeekFrom::End(offset)),
-                _ => return Err(Error::new("ValueError", "invalid seek")),
+            if self.closed() {
+                return Err(Error::new("ValueError", "I/O operation on closed file"));
             }
-        } else {
-            None
-        };
+            self.check_raw(ctx, receiver, name)?;
+            self.check_reentry(ctx)?;
+            let mut slot = self.buffer.borrow_mut();
+            let position = slot
+                .as_mut()
+                .ok_or_else(closed)?
+                .seek(offset, whence)
+                .map_err(|err| buffer_error(ctx, err))?;
+            return Ok(ctx.int(position as i64));
+        }
         self.check_raw(ctx, receiver, name)?;
         let fd = self.handle.live_fd().ok_or_else(closed)?;
         if name == "truncate" {
@@ -726,13 +741,6 @@ impl BufferedFd {
                 Ok(NONE)
             }
             "tell" => Ok(ctx.int(buffer.position().map_err(os_error)? as i64)),
-            "seek" => {
-                self.check_reentry(ctx)?;
-                let pos = buffer
-                    .seek(seek.expect("validated seek"))
-                    .map_err(|err| buffer_error(ctx, err))?;
-                Ok(ctx.int(pos as i64))
-            }
             "read" | "read1" | "readline" => {
                 if !self.reading {
                     return Err(Error::new("UnsupportedOperation", "read"));

@@ -48,6 +48,33 @@ try:
         stream.seek(0)
         assert stream.read() == b"aZcdef"
 
+    with open(path, "r+b") as stream:
+        events = []
+
+        class Offset:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                events.append(self.value)
+                return self.value
+
+        def seekable():
+            events.append("seekable")
+            return True
+
+        stream.raw.seekable = seekable
+        assert stream.seek(Offset(2), Offset(os.SEEK_SET)) == 2
+        assert events == [os.SEEK_SET, "seekable", 2]
+        events.clear()
+        try:
+            stream.seek(Offset(2), Offset(8))
+        except ValueError as error:
+            assert str(error) == "whence value 8 unsupported"
+        else:
+            raise AssertionError("invalid whence accepted")
+        assert events == [8]
+
     fd = os.open(path, os.O_RDWR)
     try:
         os.lseek(fd, 2, os.SEEK_SET)
