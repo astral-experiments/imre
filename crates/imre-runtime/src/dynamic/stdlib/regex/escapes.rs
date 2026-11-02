@@ -19,11 +19,12 @@ pub(super) fn normalize(
     text: &str,
     bytes: bool,
     flags: i64,
+    diagnose_headers: bool,
 ) -> std::result::Result<Option<Spelling>, (String, usize)> {
-    if !text
-        .as_bytes()
-        .windows(2)
-        .any(|pair| pair[0] == b'\\' && matches!(pair[1], b'N' | b'x' | b'u' | b'U' | b'0'..=b'9'))
+    if !(diagnose_headers && text.contains("(?"))
+        && !text.as_bytes().windows(2).any(|pair| {
+            pair[0] == b'\\' && matches!(pair[1], b'N' | b'x' | b'u' | b'U' | b'0'..=b'9')
+        })
     {
         return Ok(None);
     }
@@ -46,6 +47,13 @@ pub(super) fn normalize(
                 (format!("undefined character name {repr}"), at)
             }
         });
+    }
+    if diagnose_headers && let Some(open) = escapes.rejected_header {
+        let at = skip + open;
+        let byte = text.char_indices().nth(at).unwrap().0;
+        if let Some((message, offset)) = flags::header_error(&text[byte..], bytes) {
+            return Err((message, at + offset));
+        }
     }
     if escapes.named_scalars.is_empty() {
         return Ok(None);

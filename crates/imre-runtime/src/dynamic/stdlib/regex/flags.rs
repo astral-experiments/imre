@@ -117,6 +117,111 @@ fn inline_flags(
     (j, added, removed, removing, invalid)
 }
 
+/// Diagnose the header at an opener rejected by the Python grammar visitor.
+pub(super) fn header_error(header: &str, bytes: bool) -> Option<(String, usize)> {
+    let extension = header.strip_prefix("(?")?;
+    let dangling = || {
+        (
+            "bad escape (end of pattern)".into(),
+            header.chars().count() - 1,
+        )
+    };
+    if extension.starts_with('#') {
+        // skip_comment only rejects an unclosed comment or a trailing unquoted slash.
+        return Some(
+            if extension.bytes().rev().take_while(|&c| c == b'\\').count() % 2 == 1 {
+                dangling()
+            } else {
+                ("missing ), unterminated comment".into(), 0)
+            },
+        );
+    }
+
+    let flags = extension
+        .as_bytes()
+        .first()
+        .is_some_and(|&c| bit(c).is_some() || c == b'-');
+    let (prefix, tail, missing) = if flags {
+        let (end, added, removed, removing, invalid) = inline_flags(extension.as_bytes(), 0, bytes);
+        if let Some((message, pos)) = invalid {
+            return Some(if &extension[pos..] == "\\" {
+                dangling()
+            } else {
+                (message.into(), pos + 2)
+            });
+        }
+        let tail = &extension[end..];
+        if let Some(rest) = tail.strip_prefix(':') {
+            let error = if removing && removed == 0 {
+                "missing flag"
+            } else if added & removed != 0 {
+                "bad inline flags: flag turned on and off"
+            } else {
+                return None;
+            };
+            return Some(if rest == "\\" {
+                dangling()
+            } else {
+                (error.into(), end + 2)
+            });
+        }
+        if tail.starts_with(')') && !removing {
+            return None;
+        }
+        let missing = if !removing {
+            "missing -, : or )"
+        } else if removed == 0 {
+            "missing flag"
+        } else {
+            "missing :"
+        };
+        ("", tail, Some(missing))
+    } else if let Some(tail) = extension.strip_prefix('P') {
+        if tail.starts_with(['<', '=']) {
+            return None;
+        }
+        ("P", tail, None)
+    } else if let Some(tail) = extension.strip_prefix('<') {
+        if tail.starts_with(['!', '=']) {
+            return None;
+        }
+        ("<", tail, None)
+    } else {
+        if extension.starts_with([':', '=', '!', '>', '(']) {
+            return None;
+        }
+        ("", extension, None)
+    };
+
+    // The tokenizer both quotes one following character and fetches the next token.
+    let mut chars = tail.chars();
+    let next = chars.next();
+    if next == Some('\\') && chars.next().is_none() || chars.as_str() == "\\" {
+        return Some(dangling());
+    }
+    let token = &tail[..tail.len() - chars.as_str().len()];
+    if let Some(missing) = missing {
+        let message = if crate::objects::python_isalpha(token) {
+            "unknown flag"
+        } else {
+            missing
+        };
+        return Some((message.into(), header.len() - tail.len()));
+    }
+    if token.is_empty() {
+        return Some(("unexpected end of pattern".into(), 2 + prefix.len()));
+    }
+    let mut message = format!("unknown extension ?{prefix}");
+    for c in token.chars() {
+        if bytes && !c.is_ascii() {
+            write!(message, "\\x{:02x}", c as u32).unwrap();
+        } else {
+            message.push(c);
+        }
+    }
+    Some((message, 1))
+}
+
 // The warning visitor needs lexical layout, independent of the matcher’s flag support.
 pub(super) fn scoped_verbose(spec: &str, bytes: bool, verbose: bool) -> Option<bool> {
     let (end, added, removed, removing, invalid) = inline_flags(spec.as_bytes(), 0, bytes);
