@@ -362,15 +362,13 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
         && let Value::Native(symbol) = ctx.heap.get(callable)
         && matches!(ctx.heap.get(args), Value::Tuple(items) | Value::List(items) if items.is_empty())
         && matches!(ctx.heap.get(kwargs), Value::Dict(entries) if entries.is_empty())
+        && symbol == "_thread.lock.acquire"
+        && let Value::PrimitiveLock(lock) = ctx.heap.get(receiver)
     {
-        if symbol == "_thread.lock.acquire"
-            && let Value::PrimitiveLock(lock) = ctx.heap.get(receiver)
-        {
-            return Ok((
-                Operation::Acquire(Arc::clone(lock)),
-                vec![target, args, kwargs],
-            ));
-        }
+        return Ok((
+            Operation::Acquire(Arc::clone(lock)),
+            vec![target, args, kwargs],
+        ));
     }
     Err(Error::new(
         "NotImplementedError",
