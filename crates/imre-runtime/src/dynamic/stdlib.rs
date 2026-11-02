@@ -1750,10 +1750,11 @@ pub(super) fn call(
                 }
                 return Ok(NONE);
             }
-            ("import_module", [name], []) => {
+            ("import_module", [name] | [name, _], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
+                let source_globals = args.get(1).copied().unwrap_or(NONE);
                 return ctx
-                    .find_module(&name)?
+                    .find_module_from(&name, source_globals)?
                     .ok_or_else(|| Context::missing_module(&name));
             }
             ("find_spec", [fullname, original], []) => {

@@ -10,13 +10,31 @@ enum Origin {
     },
 }
 
+impl Origin {
+    fn core(source_globals: Id, line: u32) -> Self {
+        if source_globals == NONE {
+            Self::FrozenImport(line)
+        } else {
+            Self::Bootstrap {
+                globals: source_globals,
+                line,
+                frozen_external: false,
+            }
+        }
+    }
+}
+
 impl Context {
-    /// The frozen bootstrap's warning site participates in module- and line-specific filters.
-    pub(in crate::dynamic) fn warn_child_binding(&mut self, message: &str) -> Result<()> {
+    /// Report the warning in the bootstrap module performing this particular import.
+    pub(in crate::dynamic) fn warn_child_binding(
+        &mut self,
+        source_globals: Id,
+        message: &str,
+    ) -> Result<()> {
         self.emit_warning(
             crate::objects::exceptions::Kind::ImportWarning,
             message,
-            Origin::FrozenImport(1353),
+            Origin::core(source_globals, 1353),
             NONE,
         )
     }
@@ -25,9 +43,7 @@ impl Context {
         self.emit_warning(
             crate::objects::exceptions::Kind::DeprecationWarning,
             "the load_module() method is deprecated and slated for removal in Python 3.15; use exec_module() instead",
-            if source_globals == NONE { Origin::FrozenImport(533) } else {
-                Origin::Bootstrap { globals: source_globals, line: 533, frozen_external: false }
-            },
+            Origin::core(source_globals, 533),
             NONE,
         )
     }

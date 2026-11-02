@@ -2151,14 +2151,18 @@ impl Context {
     }
 
     /// Resolve registered and filesystem modules against the current import path.
-    fn find_module(&mut self, mut name: &str) -> Result<Option<Id>> {
+    fn find_module(&mut self, name: &str) -> Result<Option<Id>> {
+        self.find_module_from(name, NONE)
+    }
+
+    fn find_module_from(&mut self, mut name: &str, source_globals: Id) -> Result<Option<Id>> {
         let mut parents = Vec::new();
         let mut module = loop {
             if let Some(id) = self.cached_import(name)? {
                 break Some(id);
             }
             let Some((parent, child)) = name.rsplit_once('.') else {
-                break self.load_module(name, None)?;
+                break self.load_module(name, None, source_globals)?;
             };
             // Each unresolved parent consumes three importlib frames.
             self.check_call_depth(3 * (parents.len() + 1))?;
@@ -2170,13 +2174,18 @@ impl Context {
         };
         for (name, parent, child) in parents.into_iter().rev() {
             let id = module.ok_or_else(|| Self::missing_module(parent))?;
-            module = self.load_module(name, Some((id, child)))?;
+            module = self.load_module(name, Some((id, child)), source_globals)?;
         }
         Ok(module)
     }
 
     /// Run a module initializer after its parent has been resolved.
-    fn load_module(&mut self, name: &str, parent: Option<(Id, &str)>) -> Result<Option<Id>> {
+    fn load_module(
+        &mut self,
+        name: &str,
+        parent: Option<(Id, &str)>,
+        source_globals: Id,
+    ) -> Result<Option<Id>> {
         if parent.is_some() {
             let key = self.text(name);
             let child = self.public_module_get(key, None)?;
@@ -2338,11 +2347,14 @@ impl Context {
                 }
                 let exception = self.raised_instance(error);
                 self.with_import_exception(exception, |ctx| {
-                    ctx.warn_child_binding(&format!(
-                        "Cannot set an attribute on {} for child module {}",
-                        string_repr(parent_name),
-                        string_repr(child)
-                    ))
+                    ctx.warn_child_binding(
+                        source_globals,
+                        &format!(
+                            "Cannot set an attribute on {} for child module {}",
+                            string_repr(parent_name),
+                            string_repr(child)
+                        ),
+                    )
                 })?;
             }
         }
