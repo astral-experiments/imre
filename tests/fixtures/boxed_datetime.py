@@ -2,6 +2,42 @@ import json
 from datetime import UTC, date, datetime as dt, time, timedelta, timezone, tzinfo
 
 
+def test_date_isoformat():
+    class Zone(tzinfo):
+        def utcoffset(self, value):
+            raise AssertionError("date.isoformat queried tzinfo")
+
+    class Day(dt):
+        def isoformat(self):
+            return "override"
+
+        @property
+        def year(self):
+            raise AssertionError("date.isoformat queried a property")
+
+    d = date(2, 3, 2)
+    value = Day(2024, 2, 29, 23, tzinfo=Zone())
+    base = date.isoformat
+    assert d.isoformat() == "0002-03-02"
+    assert value.isoformat() == "override"
+    assert base(value) == "2024-02-29"
+    name = "a" * 99
+    foreign = type(name + "世", (), {})()
+    for args, kwargs, message in (
+        ((), {"self": d}, "unbound method date.isoformat() needs an argument"),
+        ((1, d), {"x": 1}, "descriptor 'isoformat' for 'datetime.date' objects doesn't apply to a 'int' object"),
+        ((foreign,), {}, f"descriptor 'isoformat' for 'datetime.date' objects doesn't apply to a '{name}' object"),
+        ((d, d), {"x": 1}, "date.isoformat() takes no keyword arguments"),
+        ((d, d), {}, "date.isoformat() takes no arguments (1 given)"),
+    ):
+        try:
+            base(*args, **kwargs)
+        except TypeError as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError("date.isoformat accepted invalid arguments")
+
+
 def test_module_exports():
     import _datetime
     import datetime
@@ -926,6 +962,7 @@ def test_calendar_strftime():
 
 
 def current():
+    test_date_isoformat()
     test_calendar_strftime()
     test_calendar_reduction()
     test_fixed_timezone_methods()

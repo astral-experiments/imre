@@ -8174,7 +8174,9 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
                     });
                 }
-                if calendar::boxed_member(receiver.ty, attribute.attr.as_str()) {
+                if calendar::boxed_member(receiver.ty, attribute.attr.as_str())
+                    || calendar::date_isoformat(receiver.ty, attribute.attr.as_str())
+                {
                     return Err(self.object_runtime_export("datetime instance member", attribute));
                 }
                 if let Type::Calendar(kind) = receiver.ty {
@@ -11086,6 +11088,7 @@ impl<'a> Checker<'a> {
             && let [receiver, attribute] | [receiver, attribute, _] = args.as_slice()
             && let ExprKind::Str(member) = &attribute.kind
             && (calendar::boxed_date_arithmetic(receiver.ty, member)
+                || calendar::date_isoformat(receiver.ty, member)
                 || (args.len() == 2 && calendar::boxed_comparison(receiver.ty, member)))
         {
             return Err(self.object_runtime_export("datetime instance member", call));
