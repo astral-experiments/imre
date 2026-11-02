@@ -505,20 +505,28 @@ impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
     #[cfg(test)]
     fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
-        Self::with_executable(argv, env.map(CStrings::from_environment).transpose()?, None)
+        Self::with_executable(
+            argv,
+            env.map(CStrings::from_environment).transpose()?,
+            None,
+            None,
+        )
     }
 
     fn with_executable(
         argv: Vec<CString>,
         env: Option<CStrings>,
         executable: Option<CString>,
+        search_path: Option<&[u8]>,
     ) -> Result<Self> {
         let program = executable.as_ref().unwrap_or_else(|| &argv[0]);
         let search = if program.as_bytes().contains(&b'/') {
             None
         } else {
             let inherited;
-            let path = if let Some(env) = &env {
+            let path = if search_path.is_some() {
+                search_path
+            } else if let Some(env) = &env {
                 env.strings
                     .iter()
                     .find_map(|entry| entry.to_bytes().strip_prefix(b"PATH="))
@@ -1100,7 +1108,7 @@ unsafe fn prepare_process(
     let (launch, cwd, _) = unsafe {
         let cmd = WordKind::new(5).acquire(args as usize);
         validate_command_shape(&cmd, &config)?;
-        prepare_command(&cmd, &config, None, || Ok(ChildAttributes::default()))?
+        prepare_command(&cmd, &config, None, None, || Ok(ChildAttributes::default()))?
     };
     Ok((launch, cwd))
 }
@@ -1146,6 +1154,7 @@ unsafe fn prepare_command(
     cmd: &OwnedWord,
     config: &popen::LaunchConfig,
     byte_env: Option<ByteEnvironment>,
+    search_path: Option<&[u8]>,
     child_attributes: impl FnOnce() -> Result<ChildAttributes>,
 ) -> Result<(Launch, Option<CString>, ChildAttributes)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
@@ -1197,7 +1206,7 @@ unsafe fn prepare_command(
             None => env.map(CStrings::from_environment).transpose()?,
         };
         Ok((
-            Launch::with_executable(argv, env, executable)?,
+            Launch::with_executable(argv, env, executable, search_path)?,
             cwd,
             attributes,
         ))

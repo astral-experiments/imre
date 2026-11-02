@@ -36,11 +36,26 @@ impl BoxedPopen {
         launch_error::posix_spawn_capabilities().0
     }
 
+    /// Choose the boxed conversion order with the same criteria as a typed POSIX launch.
+    pub(crate) fn uses_posix_spawn(
+        directory: bool,
+        cwd: bool,
+        close_fds: bool,
+        streams: &[(u32, Option<Int>); 3],
+    ) -> bool {
+        let modes = streams.each_ref().map(|(mode, _)| *mode);
+        let fds = streams
+            .each_ref()
+            .map(|(_, fd)| fd.as_ref().map_or(-1, |fd| redirect_number(fd).0));
+        launch_error::uses_posix_spawn(directory, cwd, modes, fds, close_fds)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn launch(
         argv: Vec<Vec<u8>>,
         executable: Option<Vec<u8>>,
-        probed_directory: Option<bool>,
+        direct: Option<bool>,
+        search_path: Option<Vec<u8>>,
         streams: [(u32, Option<Int>); 3],
         close_fds: bool,
         restore_signals: bool,
@@ -91,7 +106,8 @@ impl BoxedPopen {
         let mut site = None;
         let mut extras = LaunchExtras {
             failure_site: Some(&mut site),
-            probed_directory,
+            direct,
+            search_path,
             warn_line_buffering: Some(warn_line_buffering),
             environment: env,
             pipe_size: Some((pipesize.0, 2)),

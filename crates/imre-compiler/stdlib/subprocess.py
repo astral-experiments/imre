@@ -25,6 +25,30 @@ def _decode(data, stream):
     return data.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _exec_search_path(env):
+    """Read the POSIX search path independently of the child's saved environment."""
+    from os import environ, fsdecode, fsencode
+    if env is None:
+        env = environ
+    try:
+        path = env.get("PATH")
+    except TypeError:
+        path = None
+    try:
+        byte_path = env[b"PATH"]
+    except (KeyError, TypeError):
+        pass
+    else:
+        if path is not None:
+            raise ValueError("env cannot contain 'PATH' and b'PATH' keys")
+        path = byte_path
+    if path is None:
+        return b"/bin:/usr/bin"
+    if isinstance(path, bytes):
+        path = fsdecode(path)
+    return b":".join(fsencode(part) for part in path.split(":"))
+
+
 class Popen:
     _handle = None
 

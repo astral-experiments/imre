@@ -140,16 +140,27 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     // CPython's dirname probe can call __fspath__ before the actual executable conversion.
     let probed_directory = if executable != NONE && BoxedPopen::probes_executable() {
         let probe = posixpath::fspath(ctx, executable)?;
-        Some(match ctx.heap.get(ctx.scalar_value(probe)) {
+        match ctx.heap.get(ctx.scalar_value(probe)) {
             Value::Str(s) => s.contains('/'),
             Value::SurrogateStr(s) => s.contains(&u32::from('/')),
             Value::Bytes(s) => s.contains(&b'/'),
             _ => unreachable!("fspath returns str or bytes"),
-        })
+        }
     } else {
-        None
+        false
     };
-    let env = environment(ctx, env)?;
+    let early_close_fds = (executable != NONE)
+        .then(|| ctx.truth(close_fds))
+        .transpose()?;
+    let direct = early_close_fds.map(|close_fds| {
+        BoxedPopen::uses_posix_spawn(probed_directory, cwd != NONE, close_fds, &streams)
+    });
+    // Fork snapshots environ before encoding the executable; posix_spawn packs it after argv.
+    let mut child_env = if direct == Some(true) {
+        None
+    } else {
+        environment(ctx, env)?
+    };
     let mut argv = Vec::new();
     argv.try_reserve_exact(items.len())
         .map_err(|_| Error::new("MemoryError", ""))?;
@@ -158,6 +169,14 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     ctx.heap.reserve_temporaries(1)?;
     ctx.heap.keep(resolved_program);
     let program_bytes = os::c_path(ctx, resolved_program, "embedded null byte")?.into_bytes();
+    let search_path = if direct == Some(false) && !program_bytes.contains(&b'/') {
+        let subprocess = ctx.module("subprocess")?;
+        let lookup = ctx.lookup_attr(subprocess, "_exec_search_path")?;
+        let paths = ctx.call(lookup, vec![env], Vec::new())?;
+        Some(path(ctx, paths)?)
+    } else {
+        None
+    };
     let alternate = if executable == NONE {
         argv.push(program_bytes);
         None
@@ -167,17 +186,24 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     for arg in arguments {
         argv.push(path(ctx, *arg)?);
     }
+    if direct == Some(true) {
+        child_env = environment(ctx, env)?;
+    }
     let directory = (cwd != NONE).then(|| path(ctx, cwd)).transpose()?;
     let mut warning_error = None;
     let child = BoxedPopen::launch(
         argv,
         alternate,
-        probed_directory,
+        direct,
+        search_path,
         streams,
-        ctx.truth(close_fds)?,
+        match early_close_fds {
+            Some(value) => value,
+            None => ctx.truth(close_fds)?,
+        },
         ctx.truth(restore_signals)?,
         directory,
-        env,
+        child_env,
         ctx.as_int(bufsize)?,
         ctx.as_int(pipesize)?,
         &mut || {

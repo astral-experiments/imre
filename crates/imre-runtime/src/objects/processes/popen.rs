@@ -72,7 +72,8 @@ pub(super) struct Redirects<'a> {
     pub(super) oversized: bool,
     pub(super) prepared: Option<ChildPipes>,
     pub(super) environment: Option<ByteEnvironment>,
-    pub(super) probed_directory: Option<bool>,
+    pub(super) direct: Option<bool>,
+    pub(super) search_path: Option<Vec<u8>>,
     pub(super) failure_site: Option<&'a mut Option<(launch_error::Site, bool)>>,
 }
 
@@ -83,7 +84,8 @@ impl Default for Redirects<'_> {
             oversized: false,
             prepared: None,
             environment: None,
-            probed_directory: None,
+            direct: None,
+            search_path: None,
             failure_site: None,
         }
     }
@@ -226,7 +228,8 @@ struct LaunchExtras<'a> {
     pipe_size: Option<(usize, u32)>,
     environment: Option<ByteEnvironment>,
     failure_site: Option<&'a mut Option<(launch_error::Site, bool)>>,
-    probed_directory: Option<bool>,
+    direct: Option<bool>,
+    search_path: Option<Vec<u8>>,
     warn_line_buffering: Option<&'a mut dyn FnMut() -> Result<()>>,
 }
 
@@ -348,6 +351,17 @@ pub(super) fn error_after_handles(modes: &[u32], fork_error_pipe: bool, error: E
         .map_or(error, errno_error)
 }
 
+/// Preserve the fd's ordering against standard streams even when it exceeds C int bounds.
+fn redirect_number(fd: &Int) -> (i32, bool) {
+    if let Some(number) = fd.to_i64().and_then(|n| i32::try_from(n).ok()) {
+        (number, false)
+    } else if fd.big().sign() == num_bigint::Sign::Minus {
+        (i32::MIN, true)
+    } else {
+        (i32::MAX, true)
+    }
+}
+
 /// Create a native child with independently owned pipe ends and the original argv owner.
 ///
 /// # Safety
@@ -390,15 +404,9 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
             6 => {
                 // SAFETY: mode 6 denotes the caller's rooted integer descriptor.
                 let fd = unsafe { Int::borrow(extras.redirects[i]) };
-                c_int(&fd).unwrap_or_else(|| {
-                    oversized = true;
-                    // Preserve the launch-mode comparison to fd 2 without truncation.
-                    if fd.big().sign() == num_bigint::Sign::Minus {
-                        i32::MIN
-                    } else {
-                        i32::MAX
-                    }
-                })
+                let (number, overflow) = redirect_number(&fd);
+                oversized |= overflow;
+                number
             }
             // SAFETY: mode 7 denotes a rooted native file; only its fd escapes the borrow.
             7 => unsafe {
@@ -495,7 +503,8 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
         prepared: Some(prepared),
         environment: extras.environment,
         failure_site: extras.failure_site,
-        probed_directory: extras.probed_directory,
+        direct: extras.direct,
+        search_path: extras.search_path,
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
     let child =
