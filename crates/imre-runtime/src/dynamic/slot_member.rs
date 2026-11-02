@@ -59,12 +59,17 @@ impl Context {
         Ok(class)
     }
 
-    /// A layout adding real object-valued slots must have one most-derived storage base.
+    /// Calendar payloads and object-valued slots require one most-derived storage base.
     pub(super) fn check_member_slot_bases(&mut self, bases: &[Id], ancestors: &[Id]) -> Result<()> {
         if bases.len() < 2
-            || !ancestors.iter().any(|&base| {
-                matches!(self.heap.get(base), Value::Class {scope,..}
-            if self.scope_data(*scope).class_namespace.as_ref().is_some_and(|ns| ns.member_slots))
+            || !ancestors.iter().any(|&base| match self.heap.get(base) {
+                Value::Native(name) => super::stdlib::datetime::members(name).is_some(),
+                Value::Class { scope, .. } => self
+                    .scope_data(*scope)
+                    .class_namespace
+                    .as_ref()
+                    .is_some_and(|ns| ns.member_slots),
+                _ => false,
             })
         {
             return Ok(());
@@ -76,6 +81,12 @@ impl Context {
             let candidate = lineage
                 .into_iter()
                 .find(|&owner| match self.heap.get(owner) {
+                    // SimpleNamespace stores its dictionary in the object itself.
+                    Value::Class { .. }
+                        if self.classes.get(super::namespace::CLASS) == Some(&owner) =>
+                    {
+                        true
+                    }
                     Value::Class { scope, .. } => self
                         .scope_data(*scope)
                         .class_namespace
@@ -84,13 +95,15 @@ impl Context {
                         .is_some_and(|slots| {
                             slots.iter().any(|s| s != "__dict__" && s != "__weakref__")
                         }),
-                    Value::Native(_) => owner != object,
+                    Value::Native(name) => {
+                        !matches!(name.as_str(), "object" | "enum.Enum" | "datetime.tzinfo")
+                    }
                     _ => false,
                 })
                 .unwrap_or(object);
-            if self.subclass(candidate, solid) {
+            if self.direct_subclass(candidate, solid) {
                 solid = candidate;
-            } else if !self.subclass(solid, candidate) {
+            } else if !self.direct_subclass(solid, candidate) {
                 return Err(Error::new(
                     "TypeError",
                     "multiple bases have instance lay-out conflict",

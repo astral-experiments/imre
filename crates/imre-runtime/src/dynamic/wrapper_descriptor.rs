@@ -40,6 +40,9 @@ impl BuiltinDescriptor {
                     "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__call__",
                 ][..],
             )),
+            Some((owner, attr)) if let Some(members) = stdlib::datetime::members(owner) => {
+                Some((members.owner, attr, members.methods))
+            }
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, &["endswith"][..])),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
@@ -137,6 +140,9 @@ impl BuiltinDescriptor {
         let accepts = match self.owner {
             class if crate::objects::HashState::is_provider_class(class) => {
                 ctx.type_name(receiver) == class
+            }
+            owner if stdlib::datetime::members(owner).is_some() => {
+                ctx.instance_of(receiver, ctx.builtins[owner])
             }
             "object" => true,
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),

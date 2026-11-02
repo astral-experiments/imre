@@ -1642,6 +1642,7 @@ impl Context {
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
         if let Some(constants) = crate::objects::Calendar::class_constants(name) {
+            stdlib::datetime::install_members(self, name);
             for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
                 let id = stdlib::datetime::store(self, value, NONE);
                 self.builtins.insert(format!("{name}.{field}"), id);

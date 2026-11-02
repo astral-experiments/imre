@@ -99,7 +99,13 @@ impl Context {
         mut lookup: impl FnMut(Id) -> Option<T>,
     ) -> Option<T> {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
-            return lookup(class);
+            return lookup(class).or_else(|| {
+                if matches!(self.heap.get(class), Value::Native(name) if name == "datetime.datetime") {
+                    self.builtins.get("datetime.date").and_then(|&base| lookup(base))
+                } else {
+                    None
+                }
+            });
         };
         std::iter::once(class)
             .chain(ancestors.iter().copied())
@@ -161,10 +167,8 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (matches!(
-                    kind.as_str(),
-                    "datetime.date" | "datetime.datetime" | "datetime.time" | "datetime.timedelta"
-                ) && matches!(name, "min" | "max" | "resolution"))
+                ) || stdlib::datetime::members(kind)
+                    .is_some_and(|members| members.owns(name))
                     || (kind == "function" && name == "__call__")
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
@@ -825,6 +829,7 @@ impl Context {
             return matches!(
                 (child.as_str(), parent.as_str()),
                 ("bool", "int")
+                    | ("datetime.datetime", "datetime.date")
                     | ("typing._UnpackGenericAlias", "typing._GenericAlias")
                     | (HashState::XOF_CLASS, HashState::CLASS)
                     | (stdlib::os::stat::CLASS, "tuple")
@@ -870,6 +875,9 @@ impl Context {
     }
 
     pub(super) fn read_member(&mut self, owner: &str, field: &str, receiver: Id) -> Result<Id> {
+        if owner == "datetime.timedelta" {
+            return stdlib::datetime::read_field(self, owner, field, receiver);
+        }
         let ty = self.exact_type(receiver)?;
         if ty == self.builtin(owner) {
             self.lookup_attr(receiver, field)
@@ -962,6 +970,10 @@ impl Context {
                             | "operator.attrgetter"
                             | super::namedtuple::GETTER
                             | "operator.itemgetter"
+                            | "datetime.date"
+                            | "datetime.datetime"
+                            | "datetime.time"
+                            | "datetime.timedelta"
                             | "collections.defaultdict"
                             | "_contextvars.Context"
                             | "_contextvars.ContextVar"
@@ -1500,15 +1512,11 @@ impl Context {
         {
             return self.bind_attribute(member, obj, meta);
         }
-        if matches!(name, "min" | "max" | "resolution") {
-            let owner = match self.heap.get(obj) {
-                Value::Calendar { .. } => Some(self.exact_type(obj)?),
-                Value::Native(_) => Some(obj),
-                _ => None,
-            };
-            if let Some(value) = owner.and_then(|class| self.own_class_attr(class, name)) {
-                return Ok(value);
-            }
+        if let Value::Native(kind) = self.heap.get(obj)
+            && stdlib::datetime::members(kind).is_some()
+            && let Some(value) = self.class_attr(obj, name)
+        {
+            return Ok(value);
         }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
@@ -2139,8 +2147,16 @@ impl Context {
             Value::RegexPattern(ref pattern) if name == "pattern" => {
                 return Ok(pattern.source);
             }
-            Value::Calendar { ref value, tzinfo } => {
-                return stdlib::datetime::attribute(self, obj, &value.clone(), tzinfo, name);
+            Value::Calendar { ref value, .. } => {
+                let kind = value.class();
+                let class = self.exact_type(obj)?;
+                if let Some(member) = self.class_attr(class, name) {
+                    return self.bind_attribute(member, obj, class);
+                }
+                return Err(Error::new(
+                    "AttributeError",
+                    format!("'datetime.{kind}' object has no attribute '{name}'"),
+                ));
             }
             Value::Native(ref class) if class == stdlib::os::stat::CLASS => match name {
                 "__reduce__" => return Ok(self.builtin("os.stat_result.__reduce__")),
@@ -2168,7 +2184,9 @@ impl Context {
             }
             Value::GetSetDescriptor {
                 owner, name: field, ..
-            } if HashState::is_provider_class(owner) || owner == value::TEMPLATE_TYPE => match name
+            } if HashState::is_provider_class(owner)
+                || owner == value::TEMPLATE_TYPE
+                || stdlib::datetime::members(owner).is_some() => match name
             {
                 "__objclass__" => return Ok(self.builtin(owner)),
                 "__name__" => return Ok(self.text(field)),

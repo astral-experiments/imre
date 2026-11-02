@@ -23,6 +23,79 @@ const UNITS: [&str; 7] = [
     "weeks",
 ];
 
+pub(in crate::dynamic) struct Members {
+    pub(in crate::dynamic) owner: &'static str,
+    fields: &'static [&'static str],
+    pub(in crate::dynamic) methods: &'static [&'static str],
+}
+
+pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
+    let (owner, fields, methods): (_, &[_], &[_]) = match class {
+        "datetime.date" => (
+            "datetime.date",
+            &FIELDS[..3],
+            &["__repr__", "__str__", "toordinal", "weekday", "timetuple"],
+        ),
+        "datetime.datetime" => (
+            "datetime.datetime",
+            &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
+            &["__repr__", "__str__", "timetuple"],
+        ),
+        "datetime.time" => (
+            "datetime.time",
+            &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
+            &["__repr__", "__str__"],
+        ),
+        "datetime.timedelta" => (
+            "datetime.timedelta",
+            &["days", "seconds", "microseconds"],
+            &["__bool__", "__repr__", "__str__", "total_seconds"],
+        ),
+        _ => return None,
+    };
+    Some(Members {
+        owner,
+        fields,
+        methods,
+    })
+}
+
+impl Members {
+    pub(in crate::dynamic) fn owns(&self, name: &str) -> bool {
+        matches!(name, "__new__" | "min" | "max" | "resolution")
+            || self.fields.contains(&name)
+            || self.methods.contains(&name)
+    }
+}
+
+/// Install descriptors once, so inherited access goes through the ordinary class MRO.
+pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
+    let Some(members) = members(class) else {
+        return;
+    };
+    if class == "datetime.datetime" {
+        ctx.builtin("datetime.date");
+    }
+    ctx.builtin(&format!("{class}.__new__"));
+    for method in members.methods {
+        ctx.builtin(&format!("{class}.{method}"));
+    }
+    for &field in members.fields {
+        if class == "datetime.timedelta" {
+            ctx.readonly_member(members.owner, field);
+        } else {
+            let get = ctx.builtin(&format!("datetime._get.{class}.{field}"));
+            let descriptor = ctx.alloc(Value::GetSetDescriptor {
+                owner: members.owner,
+                name: field,
+                get,
+                set: None,
+            });
+            ctx.builtins.insert(format!("{class}.{field}"), descriptor);
+        }
+    }
+}
+
 pub(in crate::dynamic) fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
     ctx.alloc(Value::Calendar { value, tzinfo })
 }
@@ -37,8 +110,12 @@ pub(in crate::dynamic) fn utc(ctx: &mut Context) -> Id {
 }
 
 fn calendar(ctx: &Context, obj: Id, class: &str) -> Option<Calendar> {
-    match ctx.heap.get(obj) {
-        Value::Calendar { value, .. } if value.class() == class => Some(value.clone()),
+    match ctx.heap.get(ctx.scalar_value(obj)) {
+        Value::Calendar { value, .. }
+            if value.class() == class || (class == "date" && value.class() == "datetime") =>
+        {
+            Some(value.clone())
+        }
         _ => None,
     }
 }
@@ -76,54 +153,46 @@ fn required(value: Option<Id>, function: &str, name: &str, pos: usize) -> Result
     })
 }
 
-pub(in crate::dynamic) fn attribute(
+/// Read native field storage even when a Python subclass overrides the field name.
+pub(in crate::dynamic) fn read_field(
     ctx: &mut Context,
-    receiver: Id,
-    value: &Calendar,
-    tzinfo: Id,
+    owner: &str,
     name: &str,
+    receiver: Id,
 ) -> Result<Id> {
-    let class = value.class();
-    match (class, name) {
-        ("datetime" | "time", "tzinfo") => return Ok(tzinfo),
-        ("time", _) => {
-            if let Some(i) = FIELDS[3..].iter().position(|s| *s == name) {
-                return Ok(ctx.int(value.clock_parts()[i]));
-            }
-        }
-        ("date" | "datetime", "timetuple" | "toordinal" | "weekday")
-        | ("timedelta", "total_seconds") => {
-            let callable = ctx.builtin(&format!("datetime.{class}.{name}"));
-            return Ok(ctx.alloc(Value::Method {
-                callable,
-                receiver,
-                explicit: false,
-            }));
-        }
-        ("datetime" | "date", _) => {
-            let fields = if class == "date" {
-                &FIELDS[..3]
-            } else {
-                &FIELDS[..]
-            };
-            if let Some(i) = fields.iter().position(|s| *s == name) {
-                return Ok(ctx.int(value.fields()[i] as i64));
-            }
-        }
-        ("timedelta", "days" | "seconds" | "microseconds") => {
-            let (days, seconds, micros) = value.delta_parts();
-            return Ok(ctx.int(match name {
-                "days" => days,
-                "seconds" => seconds,
-                _ => micros,
-            } as i64));
-        }
-        _ => {}
+    let class = owner.strip_prefix("datetime.").unwrap();
+    let Value::Calendar { value, tzinfo } = ctx.heap.get(ctx.scalar_value(receiver)) else {
+        return Err(field_type_error(ctx, owner, name, receiver));
+    };
+    if value.class() != class && !(class == "date" && value.class() == "datetime") {
+        return Err(field_type_error(ctx, owner, name, receiver));
     }
-    Err(Error::new(
-        "AttributeError",
-        format!("'datetime.{class}' object has no attribute '{name}'"),
-    ))
+    if name == "tzinfo" {
+        return Ok(*tzinfo);
+    }
+    let part = match class {
+        "timedelta" => {
+            let (days, seconds, micros) = value.delta_parts();
+            match name {
+                "days" => days as i64,
+                "seconds" => seconds as i64,
+                _ => micros as i64,
+            }
+        }
+        "time" => value.clock_parts()[FIELDS[3..].iter().position(|&s| s == name).unwrap()],
+        _ => value.fields()[FIELDS.iter().position(|&s| s == name).unwrap()] as i64,
+    };
+    Ok(ctx.int(part))
+}
+
+fn field_type_error(ctx: &Context, owner: &str, field: &str, receiver: Id) -> Error {
+    Error::new(
+        "TypeError",
+        format!(
+            "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        ),
+    )
 }
 
 pub(super) fn call(
@@ -132,6 +201,17 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(kind @ ("date" | "datetime" | "time" | "timedelta")) =
+        method.strip_suffix(".__new__")
+    {
+        return new_subtype(ctx, kind, args, kwargs);
+    }
+    if let Some(field) = method.strip_prefix("_get.")
+        && let Some((owner, name)) = field.rsplit_once('.')
+        && let [receiver] = args
+    {
+        return read_field(ctx, owner, name, *receiver);
+    }
     match method {
         "time" => time(ctx, args, kwargs),
         "datetime.combine" => {
@@ -150,14 +230,14 @@ pub(super) fn call(
                     ),
                 )
             };
-            let day = match ctx.heap.get(day) {
+            let day = match ctx.heap.get(ctx.scalar_value(day)) {
                 Value::Calendar { value, .. } if matches!(value.class(), "date" | "datetime") => {
                     value.clone()
                 }
                 _ => return Err(invalid(ctx, day, 1, "date")),
             };
             let clock = required(clock, "combine()", "time", 2)?;
-            let (clock, clock_tz) = match ctx.heap.get(clock) {
+            let (clock, clock_tz) = match ctx.heap.get(ctx.scalar_value(clock)) {
                 Value::Calendar { value, tzinfo } if value.class() == "time" => {
                     (value.clone(), *tzinfo)
                 }
@@ -307,7 +387,16 @@ pub(super) fn call(
             };
             Ok(store(ctx, result, tz))
         }
-        "datetime.timetuple"
+        "date.__repr__"
+        | "datetime.__repr__"
+        | "time.__repr__"
+        | "timedelta.__repr__"
+        | "date.__str__"
+        | "datetime.__str__"
+        | "time.__str__"
+        | "timedelta.__str__"
+        | "timedelta.__bool__"
+        | "datetime.timetuple"
         | "date.timetuple"
         | "date.toordinal"
         | "datetime.toordinal"
@@ -327,11 +416,48 @@ pub(super) fn call(
             let value = calendar(ctx, args[0], class)
                 .ok_or_else(|| Error::new("TypeError", format!("expected datetime.{class}")))?;
             Ok(match operation {
+                "__bool__" => {
+                    if value.delta_parts() == (0, 0, 0) {
+                        FALSE
+                    } else {
+                        TRUE
+                    }
+                }
+                "__repr__" => {
+                    let receiver_class = ctx.exact_type(args[0])?;
+                    ctx.text(value.subtype_repr(ctx.class_name(receiver_class), class == "date"))
+                }
+                "__str__" => {
+                    if class != "timedelta" {
+                        match ctx.lookup_attr(args[0], "isoformat") {
+                            Ok(method) => {
+                                let args = if class == "datetime" {
+                                    vec![ctx.text(" ")]
+                                } else {
+                                    vec![]
+                                };
+                                return ctx.call(method, args, vec![]);
+                            }
+                            Err(error) if ctx.is_attribute_error(&error) => {}
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    ctx.text(if class == "date" {
+                        value.iso_text()
+                    } else {
+                        value.text()
+                    })
+                }
                 "total_seconds" => ctx.alloc(Value::Float(value.seconds())),
                 "toordinal" => ctx.int(value.ordinal()),
                 "weekday" => ctx.int((value.ordinal() - 1) % 7),
                 "timetuple" => {
-                    let values = value.timetuple().map(|n| ctx.int(n));
+                    let mut fields = value.timetuple();
+                    if class == "date" {
+                        // date.timetuple() ignores any clock stored on a datetime receiver.
+                        fields[3..6].fill(0);
+                    }
+                    let values = fields.map(|n| ctx.int(n));
                     super::time::struct_time(ctx, values.into(), NONE, NONE)
                 }
                 _ => unreachable!(),
@@ -406,4 +532,51 @@ fn time(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         Calendar::time(local, fields[4], zone(ctx, tz)?.as_ref())?,
         tz,
     ))
+}
+
+/// Allocate the native payload for the requested calendar subtype before its initializer runs.
+fn new_subtype(ctx: &mut Context, kind: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let owner = format!("datetime.{kind}");
+    let Some((&class, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("{owner}.__new__(): not enough arguments"),
+        ));
+    };
+    if !matches!(ctx.heap.get(class), Value::Class { .. })
+        && ctx.builtin_type_name(class) != Some("type")
+    {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{owner}.__new__(X): X is not a type object ({})",
+                ctx.type_name(class)
+            ),
+        ));
+    }
+    let base = ctx.builtin(&owner);
+    if !ctx.direct_subclass(class, base) {
+        let name = ctx.class_name(class);
+        return Err(Error::new(
+            "TypeError",
+            format!("{owner}.__new__({name}): {name} is not a subtype of {owner}"),
+        ));
+    }
+    if kind == "date" && ctx.has_base(class, "datetime.datetime") {
+        let name = ctx.class_name(class);
+        return Err(Error::new(
+            "TypeError",
+            format!("{owner}.__new__({name}) is not safe, use {name}.__new__()"),
+        ));
+    }
+    let value = call(ctx, kind, args, kwargs)?;
+    if class == base {
+        return Ok(value);
+    }
+    let object = ctx.instance(class, None);
+    let Value::Instance { scalar, .. } = ctx.heap.get_mut(object) else {
+        unreachable!()
+    };
+    *scalar = Some(value);
+    Ok(object)
 }

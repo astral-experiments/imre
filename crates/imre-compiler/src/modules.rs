@@ -776,6 +776,15 @@ pub(crate) enum Intrinsic {
 impl Intrinsic {
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
 
+    /// Subclasses of these immutable types keep their calendar value in the object runtime.
+    pub(crate) fn is_subclassable_calendar(self) -> bool {
+        use crate::ir::CalendarType::{Date, DateTime, Delta};
+        matches!(
+            self,
+            Self::Calendar(Date | DateTime | Delta) | Self::ClockTime
+        )
+    }
+
     /// Resolve the actual public export, including when the caller imported it under an alias.
     pub(crate) fn exported_by(self, module: &str, name: &str) -> bool {
         IntrinsicModule::named(module).and_then(|m| m.symbol(name))
