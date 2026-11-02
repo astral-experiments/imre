@@ -467,6 +467,9 @@ impl Context {
             Value::NamedTuple { .. } => "tuple",
             Value::DefaultDict { .. } => "defaultdict",
             Value::TupleGetter { .. } => "_tuplegetter",
+            Value::ParamSpec(_) => "ParamSpec",
+            Value::ParamSpecMarker(kind, _) => kind.class().rsplit_once('.').unwrap().1,
+            Value::ConstEvaluator(_) => "constevaluator",
             Value::TypeVar(_) => "TypeVar",
             Value::TypeVarTuple { .. } => "TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.type_name(),
@@ -875,6 +878,9 @@ pub(super) enum Value {
         ancestors: Vec<Id>,
         namedtuple_fields: Option<std::rc::Rc<[String]>>,
     },
+    ParamSpec(super::paramspec::ParamSpec),
+    ParamSpecMarker(super::paramspec::Marker, Id),
+    ConstEvaluator(Id),
     TypeVar(super::typing::TypeVariable),
     TypeVarTuple {
         name: Id,
@@ -1457,6 +1463,8 @@ impl Value {
                 module,
                 default,
             } => visit.extend([*name, *module, *default]),
+            Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
+            Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);

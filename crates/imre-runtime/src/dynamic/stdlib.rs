@@ -549,6 +549,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "typing",
             "TypeVar"
+            | "ParamSpec"
+            | "ParamSpecArgs"
+            | "ParamSpecKwargs"
             | "TypeVarTuple"
             | "_new_typeddict"
             | "_UnpackGenericAlias"
@@ -1832,7 +1835,11 @@ pub(super) fn call(
                 return Ok(FALSE);
             }
             ("native_iterator", [obj], []) => {
-                return Ok(if ctx.is_native_iterator(*obj) { TRUE } else { FALSE });
+                return Ok(if ctx.is_native_iterator(*obj) {
+                    TRUE
+                } else {
+                    FALSE
+                });
             }
             ("slot_bases", [class], []) => return ctx.dataclass_slot_bases(*class),
             ("slotted_type", [old, namespace], []) => {
