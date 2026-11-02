@@ -543,6 +543,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("resource", "RLIMIT_STACK") => ctx.int(i64::from(libc::RLIMIT_STACK)),
         #[cfg(target_os = "linux")]
         ("resource", "RLIM_INFINITY") => resource::limit(ctx, resource::INFINITY),
+        ("random", "randrange") => ctx.builtin("random.randrange"),
         ("secrets", "choice") => ctx.builtin("secrets.choice"),
         ("select", "select" | "poll") => ctx.builtin(&format!("select.{name}")),
         ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
@@ -1247,6 +1248,9 @@ pub(super) fn call(
             ));
         }
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
+    }
+    if name == "random.randrange" {
+        return random::randrange(ctx, args, kwargs);
     }
     if matches!(name, "random.choice" | "secrets.choice") {
         return random::choice(ctx, args, kwargs, name == "secrets.choice");
