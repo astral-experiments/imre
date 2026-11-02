@@ -4752,7 +4752,9 @@ impl Context {
 
     /// Count a generated NamedTuple repr frame like a runtime-loaded Python call.
     pub(super) fn check_call_depth(&self, additional: usize) -> Result<()> {
-        if self.call_depth + additional >= 1000 {
+        if self.call_depth.max(self.heap.python_depth()) + additional
+            >= crate::sys::recursion_limit() as usize
+        {
             return Err(Error::new(
                 "RecursionError",
                 "maximum recursion depth exceeded",

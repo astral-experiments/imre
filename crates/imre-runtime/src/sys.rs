@@ -1,6 +1,7 @@
 //! Process text streams and their native encoding and buffering.
 pub(crate) mod context_warnings;
 mod recursion;
+pub(crate) use recursion::{recursion_limit, set_recursion_limit};
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
 mod intern;
 use crate::StrOwner;
