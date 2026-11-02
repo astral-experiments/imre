@@ -157,6 +157,19 @@ def test_subclass_construction():
     assert repr(value) == "Grandchild(2000, 2, 1, 0, 42, fold=1)"
     assert date.__repr__(value) == "Grandchild(2000, 2, 1)"
     assert str(value) == "2000-02-01 00:42:00"
+
+    class BadFormat(Grandchild):
+        @property
+        def isoformat(self):
+            raise AttributeError("blocked format")
+
+    try:
+        str(BadFormat(2000, "leap"))
+    except AttributeError as error:
+        assert str(error) == "blocked format"
+    else:
+        raise AssertionError("calendar formatting ignored a descriptor error")
+
     assert repr(Clock(7, 8)) == "Clock(7, 8)"
     assert repr(Delta(0)) == "Delta(0)"
     assert not Delta() and Delta(seconds=1)

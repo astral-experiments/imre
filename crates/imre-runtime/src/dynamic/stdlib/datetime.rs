@@ -429,6 +429,14 @@ pub(super) fn call(
                 }
                 "__str__" => {
                     if class != "timedelta" {
+                        let overridden = match *ctx.heap.get(args[0]) {
+                            Value::Instance { class, .. } => {
+                                ["isoformat", "__getattribute__", "__getattr__"]
+                                    .iter()
+                                    .any(|name| ctx.class_attr(class, name).is_some())
+                            }
+                            _ => false,
+                        };
                         match ctx.lookup_attr(args[0], "isoformat") {
                             Ok(method) => {
                                 let args = if class == "datetime" {
@@ -438,7 +446,7 @@ pub(super) fn call(
                                 };
                                 return ctx.call(method, args, vec![]);
                             }
-                            Err(error) if ctx.is_attribute_error(&error) => {}
+                            Err(error) if !overridden && ctx.is_attribute_error(&error) => {}
                             Err(error) => return Err(error),
                         }
                     }
