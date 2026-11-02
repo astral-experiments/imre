@@ -335,9 +335,6 @@ mod utime;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
-    if cfg!(target_os = "linux") && name == "pipe2" {
-        return true;
-    }
     matches!(
         name,
         "access"

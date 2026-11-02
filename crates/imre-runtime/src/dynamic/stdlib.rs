@@ -683,7 +683,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         #[cfg(target_os = "linux")]
         ("os" | "posix", "statvfs_result") => ctx.builtin(os::stat::VFS_CLASS),
         #[cfg(target_os = "linux")]
-        ("os" | "posix", name @ ("statvfs" | "fstatvfs")) => ctx.builtin(&format!("posix.{name}")),
+        ("os" | "posix", name @ ("statvfs" | "fstatvfs" | "pipe2")) => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
         ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
             ctx.builtin(&format!("posix.{name}"))
@@ -1550,6 +1552,10 @@ pub(super) fn call(
     }
     if let Some(layout) = os::stat::layout(name) {
         return os::stat::construct(ctx, layout, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.pipe2" {
+        return os::descriptor(ctx, "pipe2", args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if let Some(op @ ("statvfs" | "fstatvfs")) = name.strip_prefix("posix.") {
