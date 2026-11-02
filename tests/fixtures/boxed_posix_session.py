@@ -9,6 +9,24 @@ class CurrentProcess:
         return 0
 
 
+class FirstTrue:
+    def __init__(self):
+        self.calls = 0
+
+    def __bool__(self):
+        self.calls += 1
+        return self.calls == 1
+
+
+class Program:
+    def __init__(self):
+        self.calls = 0
+
+    def __fspath__(self):
+        self.calls += 1
+        return "session-argv0" if self.calls == 3 else "/bin/sh"
+
+
 def current():
     assert os.getsid is posix.getsid
     parent_sid = os.getsid(CurrentProcess())
@@ -33,6 +51,20 @@ def current():
             assert error.errno == errno.ECHILD
         else:
             raise AssertionError("child still waitable")
+
+    # A failed spawn eligibility check and the subsequent fork can observe different
+    # values. Compare the resulting session and argv[0] with CPython on this host.
+    flag = FirstTrue()
+    program = Program()
+    with subprocess.Popen([program, "-c", 'read word; printf "%s" "$0"'],
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          close_fds=False, start_new_session=flag) as child:
+        try:
+            inherited = os.getsid(child.pid) == parent_sid
+        finally:
+            output, _ = child.communicate(b"ready\n")
+        assert child.returncode == 0
+    print(flag.calls, program.calls, inherited, output)
 
     for arg, kind in ((1 << 64, OverflowError), (1.5, TypeError)):
         try:

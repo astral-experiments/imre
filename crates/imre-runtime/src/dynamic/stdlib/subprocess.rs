@@ -1,5 +1,5 @@
 //! Bind binary subprocess operations to the same child and files as typed Popen.
-use super::{Context, Error, Id, NONE, Result, Value, builtins, io, os, posixpath};
+use super::{Context, Error, FALSE, Id, NONE, Result, Value, builtins, io, os, posixpath};
 use crate::objects::BoxedPopen;
 
 pub(super) fn function(name: &str) -> bool {
@@ -122,7 +122,8 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         io::text_options(ctx, encoding, errors, NONE)?;
     }
     let pipesize = ctx.as_int(pipesize)?;
-    let handles = (executable != NONE)
+    // A session argument can run Python during both spawn selection and fork conversion.
+    let handles = (executable != NONE || start_new_session != FALSE)
         .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
         .transpose()?;
     let shell = ctx.truth(shell)?;
@@ -162,16 +163,16 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         items.try_reserve(2).map_err(|_| Error::new("MemoryError", ""))?;
         items.splice(..0, [shell_program, option]);
     }
-    let (&program, arguments) = if executable == NONE {
-        items
-            .split_first()
+    let program = if executable == NONE {
+        *items
+            .first()
             .ok_or_else(|| Error::new("IndexError", "list index out of range"))?
     } else {
-        (&executable, items.as_slice())
+        executable
     };
     // CPython's dirname probe can call __fspath__ before the actual executable conversion.
-    let probed_directory = if executable != NONE && BoxedPopen::probes_executable() {
-        let probe = posixpath::fspath(ctx, executable)?;
+    let probed_directory = if handles.is_some() && BoxedPopen::probes_executable() {
+        let probe = posixpath::fspath(ctx, program)?;
         match ctx.heap.get(ctx.scalar_value(probe)) {
             Value::Str(s) => s.contains('/'),
             Value::SurrogateStr(s) => s.contains(&u32::from('/')),
@@ -211,11 +212,18 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         None
     };
-    let alternate = if executable == NONE {
-        argv.push(program_bytes);
-        None
+    let close_fds = match close_fds_flag {
+        Some(value) => value,
+        None => ctx.truth(close_fds)?,
+    };
+    let restore_signals = ctx.truth(restore_signals)?;
+    let new_session = direct != Some(true) && ctx.truth(start_new_session)?;
+    // On the prepared path, argv[0] is converted independently of the executable.
+    let (alternate, arguments) = if handles.is_some() {
+        (Some(program_bytes), items.as_slice())
     } else {
-        Some(program_bytes)
+        argv.push(program_bytes);
+        (None, &items[1..])
     };
     for arg in arguments {
         argv.push(path(ctx, *arg)?);
@@ -232,16 +240,13 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         search_path,
         streams,
         handles,
-        match close_fds_flag {
-            Some(value) => value,
-            None => ctx.truth(close_fds)?,
-        },
-        ctx.truth(restore_signals)?,
+        close_fds,
+        restore_signals,
         directory,
         child_env,
         ctx.as_int(bufsize)?,
         pipesize,
-        direct != Some(true) && ctx.truth(start_new_session)?,
+        new_session,
         &mut || {
             let result = (|| -> Result<()> {
                 let warnings = ctx.module("warnings")?;
