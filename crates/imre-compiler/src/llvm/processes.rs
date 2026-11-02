@@ -664,6 +664,17 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::Executable => self.call("imre_sys_executable", Type::Str, &[]),
+            ProcessOperation::EnvironIndex => {
+                self.call("imre_environ_index", Type::Str, &[&args[0].value])
+            }
+            ProcessOperation::EnvironDelete { bytes } => {
+                self.checked_line(format!(
+                    "call void @imre_environ_delete(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(bytes)
+                ));
+                none()
+            }
             ProcessOperation::EnvironSet { bytes } => {
                 let name = if bytes {
                     "imre_environ_set_bytes"
@@ -885,11 +896,13 @@ impl Emitter<'_, '_> {
                 none()
             }
             ProcessOperation::EnvironUpdate { bytes } => {
-                self.checked_line(format!(
-                    "call void @imre_environ_update(ptr {}, i32 {})",
-                    args[0].value.operand,
-                    u8::from(bytes)
-                ));
+                for source in args {
+                    self.checked_line(format!(
+                        "call void @imre_environ_update(ptr {}, i32 {})",
+                        source.value.operand,
+                        u8::from(bytes)
+                    ));
+                }
                 none()
             }
             ProcessOperation::CheckReturnCode => {

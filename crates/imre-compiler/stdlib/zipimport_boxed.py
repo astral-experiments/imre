@@ -1,5 +1,4 @@
-from _imre_zipimport import contains as _has_member, exists as _exists, index as _index, invalidate as _invalidate, read as _read_member
-from _imre_posixpath import isfile as _is_file
+from _imre_zipimport import contains as _has_member, exists as _exists, index as _index, invalidate as _invalidate, isfile as _is_file, read as _read_member
 
 
 def _current_index(path):

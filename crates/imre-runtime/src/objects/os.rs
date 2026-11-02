@@ -739,13 +739,19 @@ mod tests {
         // Closing the only writer guarantees the shell can finish even if an assertion fails.
         drop(child.stdin.take());
         let exited = waitpid(pid, 0, dispatch);
-        let already_reaped = waitpid(pid, libc::WNOHANG, dispatch).unwrap_err();
+        let already_reaped = waitpid(pid, libc::WNOHANG, dispatch);
+        // Reap through the owning handle if the runtime failed to do so.
+        let cleanup = child.wait();
 
         assert_eq!(early.map_err(|error| error.into_parts().0).unwrap(), [0, 0]);
         assert_eq!(
             exited.map_err(|error| error.into_parts().0).unwrap(),
             [pid, 37 << 8]
         );
-        assert_eq!(already_reaped.into_parts().0, "ChildProcessError");
+        assert_eq!(
+            already_reaped.unwrap_err().into_parts().0,
+            "ChildProcessError"
+        );
+        assert_eq!(cleanup.unwrap_err().raw_os_error(), Some(libc::ECHILD));
     }
 }

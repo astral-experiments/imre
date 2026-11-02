@@ -1,5 +1,6 @@
 import _codecs
 import codecs
+import copyreg
 import pickle
 
 
@@ -13,6 +14,26 @@ class WithProtocol:
 
     def __reduce__(self):
         raise AssertionError("called __reduce__ after __reduce_ex__")
+
+
+class InheritedProtocol(WithProtocol):
+    pass
+
+
+def registered_reducer(value):
+    return str, ("registered",)
+
+
+def check_registered_reducer(protocol):
+    copyreg.pickle(WithProtocol, registered_reducer)
+    try:
+        assert pickle.loads(pickle.dumps(WithProtocol(), protocol)) == "registered"
+        assert pickle.loads(pickle.dumps(InheritedProtocol(), protocol)) == ("rebuilt", protocol)
+    finally:
+        del copyreg.dispatch_table[WithProtocol]
+    assert pickle.loads(pickle.dumps(WithProtocol(), protocol)) == ("rebuilt", protocol)
+    for value in (Ellipsis, NotImplemented, type(None), type(Ellipsis), type(NotImplemented)):
+        assert pickle.loads(pickle.dumps(value, protocol)) is value
 
 
 class WithoutProtocol:
@@ -258,6 +279,30 @@ class Outer:
 
 
 def check_global_names(protocol):
+    import _operator
+    import operator
+    import types
+
+    getitem = operator.getitem
+    assert getitem is _operator.getitem is operator.__getitem__
+    assert type(getitem) is types.BuiltinFunctionType
+    assert (getitem.__module__, getitem.__name__, getitem.__qualname__) == (
+        "_operator", "getitem", "getitem")
+    assert getitem.__self__ is _operator
+    data = pickle.dumps(getitem, protocol)
+    assert pickle.loads(data) is getitem
+    _operator.getitem = operator.setitem
+    try:
+        assert pickle.loads(data) is operator.setitem
+        try:
+            pickle.dumps(getitem, protocol)
+        except pickle.PicklingError:
+            pass
+        else:
+            raise AssertionError("accepted a replaced global")
+    finally:
+        _operator.getitem = getitem
+
     from collections import OrderedDict, UserDict, UserList, UserString
     from datetime import date, datetime, timedelta
 
@@ -308,6 +353,7 @@ def produce():
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         check_global_names(protocol)
+        check_registered_reducer(protocol)
         check_reduction_state(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):

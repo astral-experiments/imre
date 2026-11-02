@@ -27,6 +27,11 @@ def current():
     for left, right in (("a", Word("b")), (Word("a"), "b"), (Word("a"), Word("b"))):
         result = left + right
         assert type(result) is str and result == "ab"
+    pattern = Word("%s:%r")
+    assert pattern.__mod__(("label", 1 << 70)) == "label:1180591620717411303424"
+    assert str.__mod__(Word("%(key)s"), {"key": "value"}) == "value"
+    assert str.__rmod__(Word("result"), "<%s>") == "<result>"
+    assert Word("result").__rmod__(3) is NotImplemented
     class Text(str):
         pass
     class Data(bytes):

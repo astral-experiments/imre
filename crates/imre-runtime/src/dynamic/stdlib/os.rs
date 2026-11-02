@@ -369,7 +369,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_inheritable"
             | "link"
             | "symlink"
-    ) || (cfg!(unix) && matches!(name, "kill" | "getppid"))
+    ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
         || (cfg!(target_os = "linux") && name == "sendfile")
 }
 
@@ -767,6 +767,33 @@ pub(super) fn descriptor(
         };
         native::close(c_int(ctx, fd)?)?;
         return Ok(NONE);
+    }
+    #[cfg(unix)]
+    if name == "waitstatus_to_exitcode" {
+        let [Some(status)] = builtins::bind_builtin_arguments(name, args, kwargs, ["status"], 1)?
+        else {
+            unreachable!("status is required")
+        };
+        let status = c_int(ctx, status)?;
+        let code = if libc::WIFEXITED(status) {
+            libc::WEXITSTATUS(status)
+        } else if libc::WIFSIGNALED(status) {
+            -libc::WTERMSIG(status)
+        } else if libc::WIFSTOPPED(status) {
+            return Err(Error::new(
+                "ValueError",
+                format!(
+                    "process stopped by delivery of signal {}",
+                    libc::WSTOPSIG(status)
+                ),
+            ));
+        } else {
+            return Err(Error::new(
+                "ValueError",
+                format!("invalid wait status: {status}"),
+            ));
+        };
+        return Ok(ctx.int(i64::from(code)));
     }
     if !kwargs.is_empty() {
         return Err(Error::new(

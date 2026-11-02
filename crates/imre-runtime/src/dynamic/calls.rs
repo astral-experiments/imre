@@ -39,6 +39,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
     let (module, function) = symbol.split_once('.')?;
     match module {
+        "operator" if stdlib::operator::Operation::named(function).is_some() => {
+            Some(("_operator", function))
+        }
         "_typing" if function == "_idfunc" => Some((module, function)),
         "encodings" if function == "search_function" => Some((module, function)),
         "posix"
@@ -1017,9 +1020,9 @@ impl Context {
 
     /// Consult ABC hooks and registrations without the public protocol argument guards.
     pub(super) fn abc_subclass_check(&mut self, child: Id, parent: Id) -> Result<bool> {
-        let protocol = self.is_protocol_declaration(parent);
+        let abc = self.is_bundled_abc(parent);
         let key = [parent, child];
-        if protocol && let Some(&result) = self.heap.protocol_subclass_cache.get(&key) {
+        if abc && let Some(&result) = self.heap.abc_subclass_cache.get(&key) {
             return Ok(result);
         }
         let result = if self.has_abc_subclass_hook(parent)
@@ -1027,14 +1030,18 @@ impl Context {
         {
             matched
         } else {
+            // A direct registry hit bypasses the positive cache in _abc.
+            if abc && self.heap.abc_registrations.contains(&[parent, child]) {
+                return Ok(true);
+            }
             self.subclass(child, parent)
         };
-        if protocol {
+        if abc {
             self.heap
-                .protocol_subclass_cache
+                .abc_subclass_cache
                 .try_reserve(1)
                 .map_err(|_| Error::new("MemoryError", ""))?;
-            self.heap.protocol_subclass_cache.insert(key, result);
+            self.heap.abc_subclass_cache.insert(key, result);
         }
         Ok(result)
     }
@@ -1546,23 +1553,13 @@ impl Context {
             }
         }
     }
-    pub(super) fn error_matches(&self, kind: &str, class: Id) -> bool {
-        self.error_kind_matches(kind, class, self.classes.get(kind).copied())
-    }
-
     pub(super) fn raised_error_matches(&self, error: &Error, class: Id) -> bool {
         match self.heap.get(class) {
             Value::Tuple(classes) => classes.iter().any(|&c| self.raised_error_matches(error, c)),
             _ if let Some(actual) = error.class() => self.subclass(actual, class),
             Value::Native(_) => {
                 let kind = error.kind.as_ref();
-                let builtin = self.builtins.get(kind).copied();
-                if self.classes.get(kind).copied() == builtin {
-                    self.error_matches(kind, class)
-                } else {
-                    // A user class with the same name cannot change a native error's ancestry.
-                    self.error_kind_matches(kind, class, builtin)
-                }
+                self.error_kind_matches(kind, class, self.builtins.get(kind).copied())
             }
             // Native operations on intrinsic file objects belong to the first I/O module.
             Value::Class { .. } if error.kind == "UnsupportedOperation" => self
@@ -1697,6 +1694,7 @@ impl Context {
         original: Option<Id>,
     ) -> Result<Id> {
         let obj = self.weak_proxy_target(obj)?;
+        let obj = super::typing::generic_attr_target(self, obj, name, false)?;
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self
                 .local_attribute(obj, super::thread_local::Name::from_lookup(name, original));
@@ -1854,10 +1852,10 @@ impl Context {
                 return Ok(self.builtin("object.__new__"));
             }
         }
-        if let Some(&scope) = self.enum_scopes.get(&obj) {
-            if let Some(value) = self.enum_base_attribute(obj, scope, name)? {
-                return Ok(value);
-            }
+        if let Some(&scope) = self.enum_scopes.get(&obj)
+            && let Some(value) = self.enum_base_attribute(obj, scope, name)?
+        {
+            return Ok(value);
         }
         if matches!(name, "numerator" | "denominator") {
             let receiver = match self.heap.get(obj) {
@@ -3091,7 +3089,6 @@ impl Context {
                         return Ok(self.builtin(parent));
                     }
                     "__bases__" | "__mro__" => return Ok(self.builtin_hierarchy_tuple(obj, name)),
-                    "utc" if !base => return Ok(stdlib::datetime::utc(self)),
                     _ => {}
                 }
             }
@@ -3139,7 +3136,14 @@ impl Context {
                 ) && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
                 return Ok(match name {
-                    "__self__" => self.builtin(&owner.to_owned()),
+                    "__self__" => match self.builtins.get(owner) {
+                        Some(&class) => class,
+                        None => {
+                            // Creating the owner mutates the heap that holds its name.
+                            let owner = owner.to_owned();
+                            self.builtin(&owner)
+                        }
+                    },
                     "__name__" => self.text("__new__"),
                     "__qualname__" => {
                         let class = owner.rsplit('.').next().unwrap_or(owner);
@@ -3226,6 +3230,10 @@ impl Context {
                     && let Some(buffer) = file.buffer =>
             {
                 return Ok(buffer);
+            }
+            Value::TextFile(_) if name == "write_through" => return Ok(FALSE),
+            Value::TextFile(ref file) if name == "line_buffering" => {
+                return Ok(if file.line_buffering { TRUE } else { FALSE });
             }
             Value::TextFile(ref file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
@@ -3548,7 +3556,10 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "bool"
-                    && matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
+                    && matches!(
+                        name,
+                        "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
@@ -3611,8 +3622,11 @@ impl Context {
                     || (name == "__repr__"
                         && matches!(class.as_str(), "bool" | "int" | "float"))
                     || (class == "int"
-                        && matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes"))
-                    || (class == "float" && name == "as_integer_ratio")
+                        && matches!(
+                            name,
+                            "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
+                        ))
+                    || (class == "float" && matches!(name, "__trunc__" | "as_integer_ratio"))
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
@@ -3764,8 +3778,11 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
-                if name == "_abc_caches_clear" && self.is_protocol_declaration(obj) {
-                    let callable = self.builtin("abc._abc_caches_clear");
+                if matches!(name, "_abc_caches_clear" | "_abc_registry_clear")
+                    && metaclass_member.is_none()
+                    && self.is_bundled_abc(obj)
+                {
+                    let callable = self.builtin(&format!("abc.{name}"));
                     return Ok(self.alloc(Value::Method {
                         callable,
                         receiver: obj,
@@ -3923,10 +3940,10 @@ impl Context {
                 Value::Function { .. } => return Ok(self.builtin("function.__new__")),
                 Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
-                Value::Instance { class, .. } => {
-                    if self.uses_object_new(self.allocation_base(*class)) {
-                        return Ok(self.builtin("object.__new__"));
-                    }
+                Value::Instance { class, .. }
+                    if self.uses_object_new(self.allocation_base(*class)) =>
+                {
+                    return Ok(self.builtin("object.__new__"));
                 }
                 _ => {}
             }
@@ -3987,6 +4004,18 @@ impl Context {
             )),
             _ => Ok(false),
         }
+    }
+
+    fn check_zone_constant_write(&self, obj: Id, name: &str) -> Result<()> {
+        if matches!(name, "utc" | "min" | "max")
+            && matches!(self.heap.get(obj), Value::Calendar { value, .. } if value.class() == "timezone")
+        {
+            return Err(Error::new(
+                "AttributeError",
+                format!("'datetime.timezone' object attribute '{name}' is read-only"),
+            ));
+        }
+        Ok(())
     }
 
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
@@ -4051,6 +4080,7 @@ impl Context {
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
         }
+        self.check_zone_constant_write(obj, name)?;
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
@@ -4222,7 +4252,7 @@ impl Context {
                 }
             }
             Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&obj) => {
-                return self.update_enum_base(scope, name, None);
+                self.update_enum_base(scope, name, None)
             }
             Value::Class { scope, .. } => {
                 if matches!(name, "__annotations__" | "__annotate__")
@@ -4603,6 +4633,7 @@ impl Context {
         value: Id,
     ) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
+        let obj = super::typing::generic_attr_target(self, obj, name, true)?;
         if matches!(self.heap.get(obj), Value::DirEntry(_)) && matches!(name, "name" | "path") {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }
@@ -4690,6 +4721,7 @@ impl Context {
                 "custom ABCMeta construction and subclass checks are unsupported",
             ));
         }
+        self.check_zone_constant_write(obj, name)?;
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
@@ -4707,6 +4739,7 @@ impl Context {
                     class.as_str(),
                     HashState::CLASS
                         | HashState::XOF_CLASS
+                        | "datetime.timezone"
                         | "typing.TypeVar"
                         | KEY_WRAPPER
                         | stdlib::flags::TYPE
@@ -5625,6 +5658,7 @@ impl Context {
                             | "float.__getformat__"
                             | "bool.__repr__"
                             | "float.__repr__"
+                            | "float.__trunc__"
                             | "float.as_integer_ratio"
                             | "getset_descriptor.__set__"
                             | "getset_descriptor.__delete__"
@@ -7014,7 +7048,6 @@ impl Context {
                 Vec::new(),
             )?;
         }
-        self.classes.insert(name, class);
         Ok(class)
     }
 }

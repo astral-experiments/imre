@@ -7,6 +7,7 @@ mod surrogate_utf8;
 mod utf16;
 mod wide_unicode;
 pub(super) use utf16::extended as utf16_extended;
+pub(super) use wide_unicode::utf32_chunk;
 
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEncoder, Utf16Order};
@@ -421,7 +422,7 @@ pub(super) fn lookup_transform(
     let name = ctx.text(key.clone());
     let (heap, roots) = ctx.heap_and_roots();
     let name = heap.intern(name, roots);
-    let native_only = wide_unicode::encoding(&key).is_some() || key == "raw_unicode_escape";
+    let native_only = FixedUnicode::encoding(&key).is_some() || key == "raw_unicode_escape";
     let default = native_only.then(|| ctx.builtin("encodings.search_function"));
     // A callback may change the live list. CPython snapshots only its length.
     for index in 0..count {
@@ -554,7 +555,7 @@ pub(in crate::dynamic) fn encode_text(
     }
     let errors = errors.to_owned();
     match encoder {
-        StrEncoder::Fixed(encoder) => encode_fixed(ctx, id, encoder, &errors, encoder.name()),
+        StrEncoder::Wide { format, signature } => encode_fixed(ctx, id, format, &errors, signature),
         StrEncoder::Registered(Codec::Utf8 { signature }) => {
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
@@ -585,13 +586,21 @@ pub(super) fn encode_fixed(
     id: Id,
     encoder: FixedUnicode,
     errors: &str,
-    name: &str,
+    signature: bool,
 ) -> Result<Vec<u8>> {
     if let Ok(text) = ctx.str_value(id) {
-        return Ok(StrEncoder::Fixed(encoder).encode_str(text, errors)?);
+        return Ok(StrEncoder::Wide {
+            format: encoder,
+            signature,
+        }
+        .encode_str(text, errors)?);
     }
     let points = ctx.string_codepoints(id)?;
     let mut bytes = Vec::new();
+    if signature {
+        encoder.append(&mut bytes, [0xfeff])?;
+    }
+    let name = encoder.codec_name(signature);
     for (i, &point) in points.iter().enumerate() {
         if char::from_u32(point).is_some() {
             encoder.append(&mut bytes, [point])?;

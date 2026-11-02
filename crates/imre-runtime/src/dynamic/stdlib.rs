@@ -44,7 +44,7 @@ mod math;
 mod metadata;
 pub(super) mod monitoring;
 pub(super) mod opcode;
-mod operator;
+pub(super) mod operator;
 mod ordered_dict;
 pub(super) mod os;
 pub(super) mod pickle;
@@ -117,6 +117,8 @@ pub(super) fn is_module(name: &str) -> bool {
             | "_datetime"
             | "_imre_itertools"
             | "_imre_ordered_dict"
+            | "operator"
+            | "_operator"
             | "_opcode"
             | "atexit"
             | "builtins"
@@ -174,7 +176,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "_imre_tokenize"
             | "_imre_pkgutil"
             | "fnmatch"
-            | "operator"
             | "platform"
             | "site"
             | "select"
@@ -189,7 +190,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "_imre_subprocess"
             | "_imre_dataclasses"
             | "gc"
-            | "_imre_mock"
             | "marshal"
             | "pickle"
             | "zlib"
@@ -442,8 +442,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         (
             "_imre_tempfile",
-            "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "default_directory"
-            | "check_text_options" | "open_named" | "finish_named" | "keep_named",
+            "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "check_text_options"
+            | "open_named" | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
@@ -453,9 +453,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_locale", "LC_NUMERIC") => ctx.int(libc::LC_NUMERIC.into()),
         ("_locale", "LC_TIME") => ctx.int(libc::LC_TIME.into()),
         ("_locale", "LC_MESSAGES") => ctx.int(libc::LC_MESSAGES.into()),
-        ("tempfile", "TemporaryFile") | ("_imre_tempfile", "open_file") => {
-            ctx.builtin("tempfile.TemporaryFile")
-        }
+        ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("gc", "enable" | "disable" | "isenabled") => ctx.builtin(&format!("gc.{name}")),
         ("unicodedata", "normalize" | "decomposition") => {
             ctx.builtin(&format!("unicodedata.{name}"))
@@ -487,13 +485,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "warn_loader_deprecation"
             | "warn_legacy_load",
         )
-        | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
             "_imre_dataclasses",
             "field_identifier"
             | "make_type"
             | "is_defaultdict"
-            | "load_global"
             | "loaded_module"
             | "members"
             | "metadata"
@@ -717,12 +713,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os", "name") => ctx.text("posix"),
         ("posixpath", "sep") => ctx.text("/"),
         ("posixpath", "altsep") => NONE,
-        ("operator", name)
-            if matches!(name, "attrgetter" | "itemgetter")
-                || operator::Operation::named(name).is_some() =>
-        {
-            ctx.builtin(&format!("operator.{name}"))
-        }
         ("contextvars" | "_contextvars", "ContextVar" | "Context" | "Token" | "copy_context") => {
             ctx.builtin(&format!("_contextvars.{name}"))
         }
@@ -756,17 +746,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_tokenize", "scan")
         | ("_imre_json", "loads" | "surrogate_text" | "encoder_state" | "encoder_call")
         | ("_imre_linecache", "source_lines")
-        | (
-            "_imre_metadata",
-            "filenames" | "dedent" | "exists" | "read_text" | "zip_names" | "zip_open" | "zip_read",
-        )
+        | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
             "_imre_posixpath",
-            "exists" | "extension_start" | "isdir" | "isfile" | "islink" | "relative_parts"
-            | "realpath_parts" | "realpath_parent" | "realpath_kind" | "realpath_readlink"
-            | "realpath_notdir" | "realpath_loop",
+            "extension_start" | "relative_parts" | "realpath_parts" | "realpath_parent"
+            | "realpath_kind" | "realpath_readlink" | "realpath_notdir" | "realpath_loop",
         )
-        | ("_imre_zipimport", "exists" | "index" | "read" | "contains" | "invalidate")
+        | ("_imre_zipimport", "exists" | "isfile" | "index" | "read" | "contains" | "invalidate")
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
@@ -1051,7 +1037,7 @@ pub(super) fn call(
         let seconds = os::c_int(ctx, seconds)?;
         // SAFETY: alarm takes a value only. POSIX interprets the C int as unsigned.
         let remaining = unsafe { libc::alarm(seconds as libc::c_uint) };
-        return Ok(ctx.int(i64::from(remaining as libc::c_long)));
+        return Ok(ctx.int(remaining as libc::c_long));
     }
     if name == "_io.text_encoding" {
         return io::text_encoding(ctx, args, kwargs);
@@ -1879,29 +1865,6 @@ pub(super) fn call(
             }
         }
     }
-    if matches!(
-        name,
-        "_imre_mock.mark_call_list" | "_imre_mock.is_call_list"
-    ) {
-        let ([list], []) = (args, kwargs) else {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name} expects one positional argument"),
-            ));
-        };
-        let list = ctx
-            .list_storage(*list)
-            .ok_or_else(|| Error::new("TypeError", "expected a list"))?;
-        if name == "_imre_mock.mark_call_list" {
-            ctx.heap.mock_call_lists.insert(list);
-            return Ok(TRUE);
-        }
-        return Ok(if ctx.heap.mock_call_lists.contains(&list) {
-            TRUE
-        } else {
-            FALSE
-        });
-    }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
             ("field_identifier", [_], []) => {
@@ -1927,15 +1890,6 @@ pub(super) fn call(
                 } else {
                     FALSE
                 });
-            }
-            ("load_global", [module, name], []) => {
-                let scope = match ctx.heap.get(*module) {
-                    Value::Module { scope, .. } => *scope,
-                    Value::None => ctx.scope("", None),
-                    _ => return Err(Error::new("TypeError", "expected module or None")),
-                };
-                let name = ctx.str_value(*name)?.to_owned();
-                return ctx.lookup(scope, &name);
             }
             ("loaded_module", [name], []) => {
                 return Ok(ctx.public_registered_module(*name)?.unwrap_or(NONE));

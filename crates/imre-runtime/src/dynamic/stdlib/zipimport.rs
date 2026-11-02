@@ -3,6 +3,7 @@
 use std::collections::hash_map::Entry;
 use std::path::Path;
 
+use super::super::builtins::boolean;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use crate::objects::ZipArchive;
 
@@ -14,11 +15,8 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match (name, args, kwargs) {
-        ("exists", [path], []) => Ok(if Path::new(ctx.str_value(*path)?).exists() {
-            TRUE
-        } else {
-            FALSE
-        }),
+        ("exists", [path], []) => Ok(boolean(Path::new(ctx.str_value(*path)?).exists())),
+        ("isfile", [path], []) => Ok(boolean(Path::new(ctx.str_value(*path)?).is_file())),
         ("invalidate", [path], []) => {
             let path = ctx.str_value(*path)?.to_owned();
             ctx.zip_directories.remove(&path);

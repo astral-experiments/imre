@@ -200,9 +200,7 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
         ));
     }
     ctx.heap.abc_registrations.push([owner, cls]);
-    ctx.heap
-        .protocol_subclass_cache
-        .retain(|_, matched| *matched);
+    ctx.heap.abc_subclass_cache.retain(|_, matched| *matched);
     ctx.heap.abc_cache_token = ctx.heap.abc_cache_token.wrapping_add(1);
     Ok(cls)
 }
@@ -243,13 +241,25 @@ pub(super) fn call(
         }
         return ctx.abc_check_methods(candidate, &names[..methods.len()]);
     }
-    if name == "_abc_caches_clear"
-        && let [owner] = args
-        && kwargs.is_empty()
-    {
-        ctx.heap
-            .protocol_subclass_cache
-            .retain(|pair, _| pair[0] != *owner);
+    if matches!(name, "_abc_registry_clear" | "_abc_caches_clear") {
+        let [Some(owner)] = super::builtins::bind_builtin_arguments(
+            &format!("ABCMeta.{name}"),
+            args,
+            kwargs,
+            ["cls"],
+            1,
+        )?
+        else {
+            unreachable!("ABCMeta clearing methods require a class")
+        };
+        check_impl(ctx, owner)?;
+        if name == "_abc_registry_clear" {
+            ctx.heap.abc_registrations.retain(|pair| pair[0] != owner);
+        } else {
+            ctx.heap
+                .abc_subclass_cache
+                .retain(|pair, _| pair[0] != owner);
+        }
         return Ok(NONE);
     }
     if name == "get_cache_token" {

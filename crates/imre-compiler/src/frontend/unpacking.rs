@@ -222,12 +222,8 @@ impl Checker<'_> {
         match target {
             ast::Expr::Name(_) => self.assign(target, value),
             ast::Expr::Subscript(subscript) => {
-                if let Some(Binding::Intrinsic(
-                    which @ (Intrinsic::Environ | Intrinsic::EnvironBytes),
-                )) = self.resolve(&subscript.value)
-                {
-                    let bytes = which == Intrinsic::EnvironBytes;
-                    let ty = if bytes { Type::Bytes } else { Type::Str };
+                if let Some(ty) = self.environ_item_type(&subscript.value) {
+                    let bytes = ty == Type::Bytes;
                     let value = self.coerce(value, ty, target)?;
                     let key = self.expr_expected(&subscript.slice, ty)?;
                     return Ok(Statement::Expr(builtin(

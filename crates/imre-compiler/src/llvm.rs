@@ -1923,6 +1923,9 @@ impl Emitter<'_, '_> {
                 command_flags.map_or(-1, |flags| i32::from(flags.context_aware_warnings))
             ));
             self.line("call void @imre_record_error_init()");
+            if command_flags.is_some_and(|flags| flags.unbuffered) {
+                self.line("call void @imre_stdio_unbuffered_init()");
+            }
             if let Some(utf8_mode) = command_flags.and_then(|flags| flags.utf8_mode) {
                 self.line(format!(
                     "call void @imre_stdio_command_init(i32 {}, i32 {})",
@@ -8775,6 +8778,8 @@ declare ptr @imre_environb_copy()
 declare void @imre_environ_clear()
 declare void @imre_environ_update(ptr, i32)
 declare ptr @imre_environ_get(ptr, ptr)
+declare ptr @imre_environ_index(ptr)
+declare void @imre_environ_delete(ptr, i32)
 declare void @imre_environ_set(ptr, ptr)
 declare void @imre_environ_set_bytes(ptr, ptr)
 declare ptr @imre_getcwd()
@@ -9180,6 +9185,7 @@ declare void @imre_integer_digits_init(i32)
 declare void @imre_context_warnings_init(i32)
 declare i64 @imre_sys_context_aware_warnings()
 declare void @imre_record_error_init()
+declare void @imre_stdio_unbuffered_init()
 declare void @imre_stdio_init()
 declare void @imre_stdio_isolated_init()
 declare void @imre_warning_options_init(i32, ptr)

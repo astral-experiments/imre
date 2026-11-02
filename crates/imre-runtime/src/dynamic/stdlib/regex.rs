@@ -196,7 +196,8 @@ impl Pattern {
                     .unwrap_or(&self.engine_source);
                 let full = format!(r"(?:{source})\z");
                 if let Matcher::Lookahead(matcher) = &self.regex {
-                    return lookahead::Lookahead::new(&full, matcher.groups.clone())
+                    return matcher
+                        .with_source(&full)
                         .map(|m| Matcher::Lookahead(Box::new(m)));
                 }
                 build_regex(&full, self.bytes, self.engine_flags(), &self.assertions)
@@ -540,6 +541,15 @@ fn repeated_literal_capture(pattern: &[u8], flags: i64, bytes: bool) -> Option<V
     Some([&pattern[..pattern.len() - rest.len()], literal, tail].concat())
 }
 
+fn locale_dependent(source: &str, flags: i64) -> bool {
+    flags & LOCALE != 0
+        && (flags & IGNORECASE != 0
+            || source
+                .as_bytes()
+                .windows(2)
+                .any(|pair| matches!(pair, br"\w" | br"\W" | br"\b" | br"\B")))
+}
+
 fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
     use imre_regex::Alphabet;
     if bytes {
@@ -632,13 +642,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         let matcher = build_regex(&source, bytes, flags, &[])?;
         Ok((source, matcher))
     };
-    let backtrack = |error| {
-        if bytes {
-            Err(error)
-        } else {
-            lookahead::compile(&source, flags, error)
-        }
-    };
+    let backtrack = |error| lookahead::compile(&source, flags, bytes, error);
     let global_verbose = source.starts_with("(?x)");
     let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
         let original = || {
@@ -691,13 +695,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
                     alphabet(bytes, ascii, flags),
                     flags & DOTALL != 0,
                 )?;
-                if flags & LOCALE != 0
-                    && (flags & IGNORECASE != 0
-                        || source
-                            .as_bytes()
-                            .windows(2)
-                            .any(|pair| matches!(pair, br"\w" | br"\W" | br"\b" | br"\B")))
-                {
+                if locale_dependent(&source, flags) {
                     return Err(original);
                 }
                 Some(groups)

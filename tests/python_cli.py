@@ -1458,6 +1458,19 @@ def main():
                 "os", "posix",
             )
 
+            compare(
+                "-Xwarn_default_encoding", "-c",
+                "from subprocess import *\n"
+                "import warnings\n"
+                "with warnings.catch_warnings(record=True) as caught:\n"
+                "    Popen(['/bin/true'], text=True).wait()\n"
+                "    run(['/bin/true'], text=True)\n"
+                "    check_output(['/bin/true'], text=True)\n"
+                "    run(['/bin/true'], encoding='ascii')\n"
+                "    run(['/bin/true'])\n"
+                "for w in caught: print(w.filename, w.lineno, w.category.__name__, str(w.message))",
+            )
+
         for mode in ("0", "1"):
             compare(
                 "-I", "-X", f"utf8={mode}", "-c",
@@ -1640,6 +1653,7 @@ def main():
         inspect_entry.write_text("import view_inspection\n")
         compare("-B", inspect_entry, native_args=("run", inspect_entry, "--runtime-imports", "--quiet"))
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
+        compare("-IB", "-c", "from operator import __getitem__; print(__getitem__((11,), 0))")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_tracebacks.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_print_traceback.py")
@@ -1663,6 +1677,23 @@ def main():
         )
         compare("-I", "-c", scoped_import, "match", extra={"IMREFLAGS": "--bogus"})
         compare("-I", "-c", scoped_import, "inverse", extra={"IMREFLAGS": "--bogus"})
+        stream_flags = (
+            "import sys\n"
+            "for f in (sys.stdin, sys.stdout, sys.stderr):\n"
+            "    print(f.write_through, f.line_buffering, type(f.buffer).__name__)"
+        )
+        for option, value in (("-uc", ""), ("-c", "1"), ("-c", "0"), ("-Ec", "1"), ("-Iuc", "0")):
+            extra = {"PYTHONUNBUFFERED": value}
+            expected = run(sys.executable, option, stream_flags, extra=extra, stdin=b"")
+            actual = run(imre, option, stream_flags, extra=extra, stdin=b"")
+            assert (actual.returncode, actual.stdout, actual.stderr) == (0, expected.stdout, b"")
+        mixed_writes = (
+            "import os, sys\n"
+            "sys.stdout.write('a'); os.write(1, b'b'); sys.stdout.buffer.write(b'\\xff')\n"
+            "sys.stderr.write('c'); os.write(2, b'd'); sys.stderr.buffer.write(b'\\xfe')"
+        )
+        mixed = run(imre, "-uc", mixed_writes)
+        assert (mixed.returncode, mixed.stdout, mixed.stderr) == (0, b"ab\xff", b"cd\xfe")
         compare("-IBc" + flags_code)
         compare("-c", flags_code, extra={"PYTHONDONTWRITEBYTECODE": "1"})
         compare(
@@ -2073,6 +2104,7 @@ def report(text):
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
         compare("-IB", fixtures / "boxed_pickle_writer.py")
+        compare("-IB", "-c", "import io, logging; print(repr(logging.StreamHandler(io.StringIO())))")
         compare("-IB", "-c", "import io; b = io.BytesIO(b'abc'); print(bytes(b.getbuffer()))")
         compare(
             "-IB", "-c",
@@ -2131,6 +2163,17 @@ def report(text):
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
         class_locals = fixtures / "boxed_class_locals.py"
         compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
+        generic = fixtures / "module_generic_function.py"
+        compare("-IB", generic, native_args=("run", generic, "--quiet"))
+        compare("-IB", generic, native_args=("run", generic, "--runtime-imports", "--quiet"))
+        reveal = fixtures / "typing_reveal_type.py"
+        for command in ((sys.executable, "-IB", reveal),
+                        (imre, "run", reveal, "--quiet"),
+                        (imre, "run", reveal, "--runtime-imports", "--quiet")):
+            result = run(*command)
+            assert (result.returncode, result.stdout, result.stderr) == (
+                0, b"", b"Runtime type is 'Marker'\nRuntime type is 'type'\n",
+            ), result
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
         compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":

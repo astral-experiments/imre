@@ -212,7 +212,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "unittest.mock" => Some((
             "unittest/mock.py",
-            include_str!("../stdlib/unittest/mock.py"),
+            concat!(
+                include_str!("../stdlib/unittest/mock.py"),
+                "\n",
+                include_str!("../stdlib/unittest/mock_calls.py"),
+            ),
         )),
         // CPython 3.14.5 Lib/weakref.py and Lib/_weakrefset.py.
         "weakref" => Some(("weakref.py", include_str!("../stdlib/weakref.py"))),
@@ -303,6 +307,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/logging/boxed_handler.py"),
                 "\n",
                 include_str!("../stdlib/logging/stream.py.inc"),
+                "\n",
+                include_str!("../stdlib/logging/boxed_stream.py.inc"),
                 "\n",
                 include_str!("../stdlib/logging/boxed.py"),
             ),
@@ -950,6 +956,7 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const SOCKETSERVER_CLASS: Self = Self::ScopedObjectExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
@@ -1960,6 +1967,7 @@ impl IntrinsicModule {
             (Self::Typing, "ClassVar") => Intrinsic::ClassVar,
             (Self::Typing, "Any") => Intrinsic::Any,
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
+            (Self::Typing, "reveal_type") => Intrinsic::ObjectRuntimeExport("typing.reveal_type"),
             (Self::Typing, "assert_type") => Intrinsic::ObjectRuntimeExport("typing.assert_type"),
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
@@ -2859,6 +2867,18 @@ impl SourceModule {
 
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
+        if self.is_bundled("socketserver")
+            && matches!(
+                name,
+                "DatagramRequestHandler"
+                    | "UDPServer"
+                    | "ThreadingMixIn"
+                    | "ThreadingTCPServer"
+                    | "ThreadingUDPServer"
+            )
+        {
+            return Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS));
+        }
         if self.is_bundled("unittest") {
             let export = match name {
                 "registerResult" => Some("unittest.registerResult"),
@@ -4807,6 +4827,9 @@ impl<'a> Loader<'a> {
                         && self.loading.contains(&def.module)
                     {
                         self.partial_value_imports.insert(def);
+                    }
+                    if binding == Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS) {
+                        self.checked_builtin_imports.push((id, alias.range()));
                     }
                     self.needs_object_imports |= binding == Binding::ConditionalValue;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);

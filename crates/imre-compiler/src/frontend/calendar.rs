@@ -100,6 +100,9 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
             receiver,
             Type::Calendar(C::Date | C::DateTime) | Type::ClockTime
         ),
+        "__mod__" | "__rmod__" | "__divmod__" | "__rdivmod__" => {
+            receiver == Type::Calendar(C::Delta)
+        }
         "fromisoformat" => receiver == Type::ClockTime,
         "ctime" | "isoweekday" => matches!(receiver, Type::Calendar(C::Date | C::DateTime)),
         _ => false,
@@ -328,8 +331,8 @@ impl Checker<'_> {
         a: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = a.attr.as_str();
-        if kind == C::Zone && fixed_zone_method(name) {
-            return Err(self.object_runtime_export("timezone method descriptor", a));
+        if kind == C::Zone && (fixed_zone_method(name) || matches!(name, "min" | "max" | "utc")) {
+            return Err(self.object_runtime_export("timezone member", a));
         }
         if kind == C::DateTime && name == "tzinfo" {
             let ty = self.types.optional(Type::Calendar(C::Zone));

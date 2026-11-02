@@ -28,8 +28,10 @@ pub(super) fn exec(
     let peer_fd = peer.as_raw_fd();
     // A fatal signal to the process group immediately after fork must not
     // kill the cleanup child. Only the execing thread restores its old mask.
-    // SAFETY: all three signal sets are initialized before they are read.
+    // SAFETY: an all-zero bit pattern is valid for sigset_t on Linux and macOS.
     let mut previous = unsafe { std::mem::zeroed() };
+    // SAFETY: sigemptyset initializes mask before sigaddset uses the signal constants.
+    // Both sets are live and distinct throughout pthread_sigmask.
     let blocked = unsafe {
         let mut mask = std::mem::zeroed();
         libc::sigemptyset(&mut mask);
@@ -79,6 +81,7 @@ pub(super) fn exec(
     };
     drop(peer);
     // Failed exec. Closing the socket above lets the helper finish before we return.
+    // SAFETY: pid is the child returned by fork, and waitpid accepts a null status pointer.
     while unsafe { libc::waitpid(pid, std::ptr::null_mut(), 0) } < 0
         && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
     {}
@@ -124,6 +127,8 @@ fn send_all(fd: RawFd, mut bytes: &[u8]) {
             continue;
         }
         if n <= 0 {
+            // SAFETY: only the post-fork cleanup child calls send_all. _exit terminates
+            // it without running destructors.
             unsafe { libc::_exit(1) };
         }
         bytes = &bytes[n as usize..];

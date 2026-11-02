@@ -625,6 +625,13 @@ fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> R
         next: usize,
         manual: bool,
     }
+    fn append_format_text(points: &mut Vec<u32>, text: &str) -> Result<()> {
+        points
+            .try_reserve(text.chars().count())
+            .map_err(|_| crate::Error::memory_error())?;
+        points.extend(text.chars().map(u32::from));
+        Ok(())
+    }
     fn render(
         ctx: &mut Context,
         s: &str,
@@ -636,6 +643,7 @@ fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> R
             FormatString::from_raw_str(s).map_err(|e| Error::new("ValueError", e.to_string()))?;
         let single = parsed.format_parts.len() == 1;
         let mut output = String::new();
+        let mut codepoints = Vec::new();
         for part in parsed.format_parts {
             let FormatPart::Field {
                 field_name,
@@ -734,9 +742,23 @@ fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> R
             if single {
                 return Ok(rendered);
             }
-            append_rendered_text(&mut output, ctx.str_value(rendered)?)?;
+            if let Value::SurrogateStr(field) = ctx.heap.get(ctx.scalar_value(rendered)) {
+                // Keep ordinary fields in UTF-8 until a field needs Python code points.
+                append_format_text(&mut codepoints, &output)?;
+                output.clear();
+                codepoints
+                    .try_reserve(field.len())
+                    .map_err(|_| crate::Error::memory_error())?;
+                codepoints.extend_from_slice(field);
+            } else {
+                append_rendered_text(&mut output, ctx.str_value(rendered)?)?;
+            }
         }
-        Ok(ctx.text(output))
+        if codepoints.is_empty() {
+            return Ok(ctx.text(output));
+        }
+        append_format_text(&mut codepoints, &output)?;
+        Ok(ctx.text_codepoints(codepoints))
     }
     render(ctx, source, fields, &mut Indices::default(), false)
 }
@@ -1427,26 +1449,45 @@ pub(super) fn method(
     if owner == "str" && name == "maketrans" {
         return maketrans::table(ctx, args, kwargs);
     }
-    if owner == "bytes" && name == "__mod__" {
-        let (receiver, args) = args.split_first().ok_or_else(|| {
-            type_error("descriptor '__mod__' of 'bytes' object needs an argument")
+    if matches!(
+        (owner, name),
+        ("str", "__mod__" | "__rmod__") | ("bytes", "__mod__")
+    ) {
+        let (&receiver, args) = args.split_first().ok_or_else(|| {
+            type_error(format!(
+                "descriptor '{name}' of '{owner}' object needs an argument"
+            ))
         })?;
-        let Value::Bytes(format) = ctx.heap.get(ctx.scalar_value(*receiver)) else {
+        if !ctx.builtin_slot_accepts(receiver, owner) {
             return Err(type_error(format!(
-                "descriptor '__mod__' requires a 'bytes' object but received a '{}'",
-                ctx.type_name(*receiver)
+                "descriptor '{name}' requires a '{owner}' object but received a '{}'",
+                ctx.type_name(receiver)
             )));
-        };
-        if !kwargs.is_empty() {
-            return Err(type_error("wrapper __mod__() takes no keyword arguments"));
         }
-        let [rhs] = args else {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "wrapper {name}() takes no keyword arguments"
+            )));
+        }
+        let &[other] = args else {
             return Err(type_error(format!(
                 "expected 1 argument, got {}",
                 args.len()
             )));
         };
-        return bytes_percent(ctx, &format.clone(), *rhs);
+        if let Value::Bytes(format) = ctx.heap.get(ctx.scalar_value(receiver)) {
+            return bytes_percent(ctx, &format.clone(), other);
+        }
+        let (format, value) = if name == "__rmod__" {
+            if ctx.string_storage(other).is_none() {
+                return Ok(NOT_IMPLEMENTED);
+            }
+            (other, receiver)
+        } else {
+            (receiver, other)
+        };
+        let format = ctx.str_value(format)?.to_owned();
+        return percent(ctx, &format, value);
     }
     let (&receiver, args) = args.split_first().ok_or_else(|| {
         if name == "__new__" {

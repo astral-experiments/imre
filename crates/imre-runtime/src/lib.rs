@@ -63,7 +63,7 @@ use std::cell::{Cell, RefCell, UnsafeCell};
 use std::io::{self, IsTerminal, Write};
 use std::mem::ManuallyDrop;
 use std::os::fd::AsFd;
-use std::sync::{LazyLock, Mutex, Once};
+use std::sync::{LazyLock, Mutex, Once, OnceLock};
 
 const MIN_SMALL: i64 = -(1_i64 << 62);
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
@@ -558,18 +558,32 @@ struct StdioSettings {
     stdout_line_buffered: bool,
 }
 
-static STDIO_SETTINGS: LazyLock<StdioSettings> = LazyLock::new(|| {
-    fn capacity(stream: impl AsFd) -> usize {
-        let block_size = rustix::fs::fstat(stream).map_or(0, |stat| stat.st_blksize.into());
-        text_output::binary_capacity(block_size)
-    }
-    let stdout = io::stdout();
-    StdioSettings {
-        stdout_capacity: capacity(&stdout),
-        stderr_capacity: capacity(io::stderr()),
-        stdout_line_buffered: stdout.is_terminal(),
-    }
-});
+static STDIO_SETTINGS: OnceLock<StdioSettings> = OnceLock::new();
+
+fn stdio_settings() -> &'static StdioSettings {
+    STDIO_SETTINGS.get_or_init(|| {
+        fn capacity(stream: impl AsFd) -> usize {
+            let block_size = rustix::fs::fstat(stream).map_or(0, |stat| stat.st_blksize.into());
+            text_output::binary_capacity(block_size)
+        }
+        let stdout = io::stdout();
+        StdioSettings {
+            stdout_capacity: capacity(&stdout),
+            stderr_capacity: capacity(io::stderr()),
+            stdout_line_buffered: stdout.is_terminal(),
+        }
+    })
+}
+
+/// Use raw output fds and write-through text streams from the first output operation.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_stdio_unbuffered_init() {
+    STDIO_SETTINGS.get_or_init(|| StdioSettings {
+        stdout_capacity: 0,
+        stderr_capacity: 0,
+        stdout_line_buffered: false,
+    });
+}
 
 /// Capture buffering from the startup descriptors before user code can replace them.
 #[unsafe(no_mangle)]
@@ -594,14 +608,23 @@ fn prepare_stdio(isolated: bool, utf8: Option<bool>) {
     initialize_io();
     signals::initialize_interrupt();
     sys::initialize_encoding(isolated, utf8);
-    LazyLock::force(&STDIO_SETTINGS);
+    stdio_settings();
 }
 
 impl<W: Write> Output<W> {
     /// Line buffering inspects the input characters before the codec maps them to bytes.
     fn write_encoded(&mut self, encoded: &[u8], original: &[u8]) -> io::Result<()> {
-        let flush_line = self.line_buffered && memchr::memchr2(b'\r', b'\n', original).is_some();
-        self.text.write(&mut self.raw, encoded, flush_line)
+        self.write_chunk(
+            encoded,
+            self.line_buffered && memchr::memchr2(b'\r', b'\n', original).is_some(),
+        )
+    }
+
+    fn write_chunk(&mut self, bytes: &[u8], flush_line: bool) -> io::Result<()> {
+        if self.raw.buffer.capacity() == 0 {
+            return self.raw.write_all(bytes);
+        }
+        self.text.write(&mut self.raw, bytes, flush_line)
     }
 
     fn with_stream(stream: W, capacity: usize, line_buffered: bool) -> Self {
@@ -740,8 +763,8 @@ static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
     initialize_io();
     Mutex::new(Output::with_stream(
         RawOutput::Stdout,
-        STDIO_SETTINGS.stdout_capacity,
-        STDIO_SETTINGS.stdout_line_buffered,
+        stdio_settings().stdout_capacity,
+        stdio_settings().stdout_line_buffered,
     ))
 });
 

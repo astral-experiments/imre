@@ -933,6 +933,25 @@ def assert_type(val, typ, /):
     return val
 
 
+def reveal_type[T](obj: T, /) -> T:
+    """Ask a static type checker to reveal the inferred type of an expression.
+
+    When a static type checker encounters a call to ``reveal_type()``,
+    it will emit the inferred type of the argument::
+
+        x: int = 1
+        reveal_type(x)
+
+    Running a static type checker (e.g., mypy) on this example
+    will produce output similar to 'Revealed type is "builtins.int"'.
+
+    At runtime, the function prints the runtime type of the
+    argument and returns the argument unchanged.
+    """
+    print(f"Runtime type is {type(obj).__name__!r}", file=_sys.stderr)
+    return obj
+
+
 _ASSERT_NEVER_REPR_MAX_LENGTH = 100
 
 
@@ -1640,6 +1659,24 @@ Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
+
+
+# Reconstruction callables and arguments used by CPython's typing alias reducers.
+def _reduce_generic_alias(alias):
+    from operator import getitem
+    origin = globals()[alias._name] if alias._name else alias.__origin__
+    args = tuple(alias.__args__)
+    if len(args) == 1 and not isinstance(args[0], tuple):
+        args, = args
+    return getitem, (origin, args)
+
+
+def _reduce_callable_alias(alias):
+    from operator import getitem
+    args = alias.__args__
+    if not (len(args) == 2 and (args[0] is ... or isinstance(args[0], (list, tuple, _typing.ParamSpec)))):
+        args = list(args[:-1]), args[-1]
+    return getitem, (Callable, args)
 
 
 def _substitute_alias_arguments(args, replacements):

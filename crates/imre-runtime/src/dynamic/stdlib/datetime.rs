@@ -167,6 +167,10 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__rtruediv__",
                 "__floordiv__",
                 "__rfloordiv__",
+                "__mod__",
+                "__rmod__",
+                "__divmod__",
+                "__rdivmod__",
                 "__reduce__",
                 "__repr__",
                 "__str__",
@@ -185,6 +189,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
 impl Members {
     pub(in crate::dynamic) fn owns(&self, name: &str) -> bool {
         matches!(name, "__new__" | "min" | "max" | "resolution")
+            || (self.owner == "datetime.timezone" && name == "utc")
             || self.fields.contains(&name)
             || self.methods.contains(&name)
     }
@@ -200,6 +205,11 @@ pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
     }
     if class == "datetime.timezone" {
         ctx.builtin(TZINFO);
+        utc(ctx);
+        for (name, max) in [("min", false), ("max", true)] {
+            let id = store(ctx, Calendar::zone_limit(max), NONE);
+            ctx.builtins.insert(format!("{class}.{name}"), id);
+        }
     } else {
         ctx.builtin(&format!("{class}.__new__"));
     }
@@ -255,7 +265,7 @@ fn calendar(ctx: &Context, obj: Id, class: &str) -> Option<Calendar> {
     }
 }
 
-fn type_name(ctx: &Context, value: Id) -> std::borrow::Cow<'_, str> {
+pub(in crate::dynamic) fn type_name(ctx: &Context, value: Id) -> std::borrow::Cow<'_, str> {
     if let Value::Calendar { value, .. } = ctx.heap.get(value) {
         return format!("datetime.{}", value.class()).into();
     }
@@ -660,6 +670,24 @@ fn delta_arithmetic(
         }?;
         return Ok(store(ctx, result, NONE));
     }
+    if matches!(name, "__mod__" | "__rmod__" | "__divmod__" | "__rdivmod__") {
+        let Some(other) = calendar(ctx, other, "timedelta") else {
+            return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+        };
+        let as_int = |value: &Calendar| crate::Int::new(value.delta_microseconds().into());
+        let (left, right) = if matches!(name, "__rmod__" | "__rdivmod__") {
+            (as_int(&other), as_int(&duration))
+        } else {
+            (as_int(&duration), as_int(&other))
+        };
+        let micros = crate::integer_binary(&left, &right, 4)?;
+        let remainder = store(ctx, Calendar::from_delta_microseconds(&micros)?, NONE);
+        if matches!(name, "__divmod__" | "__rdivmod__") {
+            let quotient = ctx.alloc(Value::Int(crate::integer_binary(&left, &right, 3)?));
+            return Ok(ctx.alloc(Value::Tuple(vec![quotient, remainder])));
+        }
+        return Ok(remainder);
+    }
     scale_delta(ctx, name, &duration, other)
 }
 
@@ -871,7 +899,11 @@ pub(super) fn call(
         | "timedelta.__truediv__"
         | "timedelta.__rtruediv__"
         | "timedelta.__floordiv__"
-        | "timedelta.__rfloordiv__" => delta_arithmetic(ctx, method, args, kwargs),
+        | "timedelta.__rfloordiv__"
+        | "timedelta.__mod__"
+        | "timedelta.__rmod__"
+        | "timedelta.__divmod__"
+        | "timedelta.__rdivmod__" => delta_arithmetic(ctx, method, args, kwargs),
         "datetime.combine" => {
             let (&class, args) = args
                 .split_first()

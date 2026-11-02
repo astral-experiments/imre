@@ -224,104 +224,104 @@ fn pack_address(ctx: &mut Context, addr: &native::InternetAddress) -> Result<Id>
     Ok(ctx.alloc(Value::Tuple(fields)))
 }
 
+fn pack_socket_name(ctx: &mut Context, name: native::SocketName) -> Result<Id> {
+    match name {
+        native::SocketName::Internet(addr) => pack_address(ctx, &addr),
+        native::SocketName::UnnamedUnix => Ok(ctx.text("")),
+        native::SocketName::NoAddress => Ok(NONE),
+    }
+}
+
 fn address(
     ctx: &mut Context,
     family: i32,
     pair: Id,
     name: &str,
 ) -> Result<native::InternetAddress> {
-    if family == libc::AF_INET6 {
-        let fields = ctx.tuple_items(pair)?.ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                format!(
-                    "{name}(): AF_INET6 address must be tuple, not {}",
-                    ctx.type_name(pair)
-                ),
-            )
-        })?;
-        if !(2..=4).contains(&fields.len()) {
-            return Err(Error::new(
-                "TypeError",
-                "AF_INET6 address must be a tuple (host, port[, flowinfo[, scopeid]])",
-            ));
-        }
-        // Convert in CPython's argument order; __index__ may run arbitrary code.
-        let host = match ctx.heap.get(ctx.scalar_value(fields[0])) {
-            Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(fields[0])?.to_vec(),
-            Value::Str(_) | Value::SurrogateStr(_) => {
-                let text = ctx.str_value(fields[0])?;
-                if !text.is_ascii() {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "IPv6 Unicode host names require IDNA encoding",
-                    ));
-                }
-                text.as_bytes().to_vec()
-            }
-            _ => {
+    let ipv6 = family == libc::AF_INET6;
+    let family_name = if ipv6 { "AF_INET6" } else { "AF_INET" };
+    let fields = ctx.tuple_items(pair)?.ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "{name}(): {family_name} address must be tuple, not {}",
+                ctx.type_name(pair)
+            ),
+        )
+    })?;
+    if ipv6 && !(2..=4).contains(&fields.len()) {
+        return Err(Error::new(
+            "TypeError",
+            "AF_INET6 address must be a tuple (host, port[, flowinfo[, scopeid]])",
+        ));
+    }
+    if !ipv6 && fields.len() != 2 {
+        return Err(Error::new(
+            "TypeError",
+            "AF_INET address must be a pair (host, port)",
+        ));
+    }
+    // Convert in CPython's argument order; __index__ may run arbitrary code.
+    let host = match ctx.heap.get(ctx.scalar_value(fields[0])) {
+        Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(fields[0])?.to_vec(),
+        Value::Str(_) | Value::SurrogateStr(_) => {
+            let text = ctx.str_value(fields[0])?;
+            if ipv6 && !text.is_ascii() {
                 return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "str, bytes or bytearray expected, not {}",
-                        ctx.type_name(fields[0])
-                    ),
+                    "NotImplementedError",
+                    "IPv6 Unicode host names require IDNA encoding",
                 ));
             }
-        };
-        if host.contains(&0) {
+            text.as_bytes().to_vec()
+        }
+        _ => {
             return Err(Error::new(
                 "TypeError",
-                "host name must not contain null character",
+                format!(
+                    "str, bytes or bytearray expected, not {}",
+                    ctx.type_name(fields[0])
+                ),
             ));
         }
-        let mut index = |id| {
-            ctx.index_integer(id).map_err(|error| {
-                if ctx.is_builtin_error(&error, "OverflowError") {
-                    Error::new("OverflowError", format!("{name}(): port must be 0-65535."))
-                } else {
-                    error
-                }
-            })
-        };
-        let port = index(fields[1])?
-            .to_i64()
-            .and_then(|n| i32::try_from(n).ok())
-            .ok_or_else(|| {
-                Error::new("OverflowError", format!("{name}(): port must be 0-65535."))
-            })?;
-        let mut unsigned = |id| index(id).map(unsigned_mask);
-        let flow = fields
-            .get(2)
-            .copied()
-            .map(&mut unsigned)
-            .transpose()?
-            .unwrap_or(0);
-        let scope = fields
-            .get(3)
-            .copied()
-            .map(unsigned)
-            .transpose()?
-            .unwrap_or(0);
-        return Ok(native::ipv6_address(&host, port, flow, scope, name)?);
+    };
+    if host.contains(&0) {
+        return Err(Error::new(
+            "TypeError",
+            "host name must not contain null character",
+        ));
     }
-    let Value::Tuple(fields) = ctx.heap.get(pair) else {
-        return Err(Error::new(
-            "TypeError",
-            "AF_INET address must be a pair (host, port)",
-        ));
+    let mut index = |id| {
+        ctx.index_integer(id).map_err(|error| {
+            if ctx.is_builtin_error(&error, "OverflowError") {
+                Error::new("OverflowError", format!("{name}(): port must be 0-65535."))
+            } else {
+                error
+            }
+        })
     };
-    let [host, port] = fields.as_slice() else {
-        return Err(Error::new(
-            "TypeError",
-            "AF_INET address must be a pair (host, port)",
-        ));
-    };
-    Ok(native::InternetAddress::V4(native::address(
-        ctx.str_value(*host)?,
-        ctx.as_integer(*port)?,
-        name,
-    )?))
+    let port = index(fields[1])?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", format!("{name}(): port must be 0-65535.")))?;
+    if !ipv6 {
+        return Ok(native::InternetAddress::V4(native::address(
+            &host, port, name,
+        )?));
+    }
+    let mut unsigned = |id| index(id).map(unsigned_mask);
+    let flow = fields
+        .get(2)
+        .copied()
+        .map(&mut unsigned)
+        .transpose()?
+        .unwrap_or(0);
+    let scope = fields
+        .get(3)
+        .copied()
+        .map(unsigned)
+        .transpose()?
+        .unwrap_or(0);
+    Ok(native::ipv6_address(&host, port, flow, scope, name)?)
 }
 
 fn unsigned_mask(value: crate::Int) -> u32 {
@@ -923,8 +923,8 @@ pub(super) fn call(
     }
     let max = match method {
         "bind" | "connect" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
-        "recv" | "send" | "sendall" => 2,
-        "setsockopt" | "__exit__" | "recv_into" => 3,
+        "recv" | "recvfrom" | "send" | "sendall" => 2,
+        "setsockopt" | "__exit__" | "recv_into" | "sendto" => 3,
         _ => 0,
     };
     check_args(method, args, kwargs, max, &[])?;
@@ -955,11 +955,7 @@ pub(super) fn call(
             return Ok(ctx.alloc(Value::Tuple(vec![child, peer])));
         }
         "getsockname" | "getpeername" => {
-            return match native::socket_name(&s, method == "getpeername")? {
-                native::SocketName::Internet(addr) => pack_address(ctx, &addr),
-                native::SocketName::UnnamedUnix => Ok(ctx.text("")),
-                native::SocketName::NoAddress => Ok(NONE),
-            };
+            return pack_socket_name(ctx, native::socket_name(&s, method == "getpeername")?);
         }
         "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,
         "gettimeout" => {
@@ -1021,6 +1017,55 @@ pub(super) fn call(
                 .get_mut(..n)
                 .ok_or_else(|| Error::new("ValueError", "buffer too small for requested bytes"))?;
             let count = native::recv_into(&s, target, flags)?;
+            return Ok(ctx.int(count as i64));
+        }
+        "recvfrom" => {
+            let n =
+                crate::signed_index(&ctx.index_integer(argument(args, 0)?)?).ok_or_else(|| {
+                    Error::new(
+                        "OverflowError",
+                        "Python int too large to convert to C ssize_t",
+                    )
+                })?;
+            let flags = args
+                .get(1)
+                .map(|&id| ctx.index_c_int(id))
+                .transpose()?
+                .unwrap_or(0);
+            let size = usize::try_from(n)
+                .map_err(|_| Error::new("ValueError", "negative buffersize in recvfrom"))?;
+            let (data, peer) = native::recv_from(&s, size, flags)?;
+            let data = ctx.alloc(Value::Bytes(data));
+            let peer = pack_socket_name(ctx, peer)?;
+            return Ok(ctx.alloc(Value::Tuple(vec![data, peer])));
+        }
+        "sendto" => {
+            let (data, flags, peer) = match *args {
+                [data, peer] => (data, None, peer),
+                [data, flags, peer] => (data, Some(flags), peer),
+                _ => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("sendto() takes 2 or 3 arguments ({} given)", args.len()),
+                    ));
+                }
+            };
+            ctx.check_buffer_exporter(data)?;
+            ctx.native_buffer_bytes(data)?;
+            let count = ctx.with_buffer_export(data, |ctx| {
+                let flags = flags
+                    .map(|id| ctx.index_c_int(id))
+                    .transpose()?
+                    .unwrap_or(0);
+                let addr = address(ctx, native::family(&s), peer, method)?;
+                super::audit::event(ctx, "socket.sendto", &[*receiver, peer])?;
+                Ok(native::send_to(
+                    &s,
+                    ctx.native_buffer_bytes(data)?,
+                    flags,
+                    &addr,
+                )?)
+            })?;
             return Ok(ctx.int(count as i64));
         }
         "recv" => {

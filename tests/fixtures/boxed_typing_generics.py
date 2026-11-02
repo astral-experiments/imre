@@ -25,6 +25,22 @@ class Accessor(t.Generic[T]):
     pass
 
 
+# Parameterizations share class attributes through their common origin.
+Accessor[int].marker = object()
+assert Accessor[str].marker is Accessor.marker
+try:
+    del Accessor[int].marker
+except AttributeError:
+    pass
+else:
+    raise AssertionError("the attribute belongs to the origin")
+assert Accessor[int].marker is Accessor.marker
+del Accessor.marker
+Accessor[int].copy_with = "origin attribute"
+assert Accessor.copy_with == "origin attribute"
+assert Accessor[int].copy_with((str,)) == Accessor[str]
+
+
 class DictMixin(dict[K, V]):
     pass
 

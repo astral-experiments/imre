@@ -1,4 +1,5 @@
-from typing import Tuple, TypeVar, get_args, get_origin
+from operator import getitem
+from typing import Callable, Tuple, TypeVar, get_args, get_origin
 
 
 def current():
@@ -12,6 +13,17 @@ def current():
     assert fixed.__origin__ is tuple and get_args(fixed) == (int, str)
     assert get_args(repeated) == (int, ...) and repeated != fixed
     assert get_args(Tuple[None]) == (type(None),)
+    for alias, origin, args in (
+        (empty, Tuple, ()),
+        (Tuple[int], Tuple, int),
+        (fixed, Tuple, (int, str)),
+        (Callable[[], int], Callable, ([], int)),
+        (Callable[[int, str], bytes], Callable, ([int, str], bytes)),
+        (Callable[..., bytes], Callable, (..., bytes)),
+    ):
+        reconstruct, operands = alias.__reduce__()
+        assert reconstruct is getitem and operands == (origin, args)
+        assert reconstruct(*operands) == alias
     t = TypeVar("T")
     assert Tuple[t, t][bytes] == Tuple[bytes, bytes]
     try:

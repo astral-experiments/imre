@@ -667,7 +667,7 @@ pub(super) struct ClassNamespace {
     /// Scratch field dictionary used while a class body is executing.
     pub annotation_scratch: Option<Id>,
     /// Executed deferred sites in source order, including repeated field names.
-    pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
+    pub annotation_sites: Option<std::collections::BTreeMap<u32, (Id, Id)>>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
@@ -732,6 +732,7 @@ pub(super) struct ExecGlobals {
 #[derive(Clone)]
 pub(super) struct BoxedTextFile {
     pub(super) file: crate::objects::TextFile,
+    pub(super) line_buffering: bool,
     pub(super) buffer: Option<Id>,
 }
 
@@ -934,7 +935,7 @@ pub(super) enum Value {
         class: Id,
         fields: indexmap::IndexMap<String, Id>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<Box<HashMap<Id, Id>>>,
+        member_values: Option<HashMap<Id, Id>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -2155,15 +2156,13 @@ pub(super) struct Heap {
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
     pub(super) abc_registrations: Vec<[Id; 2]>,
-    // Protocol subclass results use weak keys just like ABC registrations.
-    pub(super) protocol_subclass_cache: HashMap<[Id; 2], bool>,
+    // ABC subclass results use weak keys just like ABC registrations.
+    pub(super) abc_subclass_cache: HashMap<[Id; 2], bool>,
     // Collecting weak registration pairs must not roll back the invalidation counter.
     pub(super) abc_cache_token: u64,
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
-    // Call-history markers belong to list storage and expire when it is collected.
-    pub(super) mock_call_lists: HashSet<Id>,
     frames: Vec<Frame>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
@@ -2249,12 +2248,11 @@ impl Heap {
             linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
-            protocol_subclass_cache: HashMap::new(),
+            abc_subclass_cache: HashMap::new(),
             abc_cache_token: 0,
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),
-            mock_call_lists: HashSet::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
@@ -3792,12 +3790,10 @@ impl Heap {
         self.interned
             .retain(|_, entry| self.slots[entry.id as usize].marked());
         let callbacks = self.clear_weak_targets(None, None);
-        self.mock_call_lists
-            .retain(|&list| self.slots[list as usize].marked());
         self.abc_registrations.retain(|&[owner, member]| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
-        self.protocol_subclass_cache.retain(|&[owner, member], _| {
+        self.abc_subclass_cache.retain(|&[owner, member], _| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
         // Vacant slots supply their own free-list links. A sweep can therefore
@@ -3984,21 +3980,6 @@ mod tests {
         heap.collect(std::iter::empty());
         assert!(heap.slots[owner as usize].value.is_none());
         assert!(heap.slots[child as usize].value.is_none());
-    }
-
-    #[test]
-    fn collected_mock_call_list_does_not_mark_a_reused_list_slot() {
-        let mut heap = Heap::new();
-        let list = heap.alloc(Value::List(Vec::new()));
-        heap.mock_call_lists.insert(list);
-        heap.frames.last_mut().unwrap().live.clear();
-
-        heap.collect([list].into_iter());
-        assert!(heap.mock_call_lists.contains(&list));
-        heap.collect(std::iter::empty());
-        let ordinary = heap.alloc(Value::List(Vec::new()));
-        assert_eq!(ordinary, list);
-        assert!(!heap.mock_call_lists.contains(&ordinary));
     }
 
     #[test]
