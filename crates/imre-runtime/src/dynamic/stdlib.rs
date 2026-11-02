@@ -730,6 +730,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "inspect",
             "iscoroutinefunction"
             | "markcoroutinefunction"
+            | "_static_member"
             | "_signature_identifier"
             | "_signature_mapping"
             | "_signature_layout",
