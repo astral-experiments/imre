@@ -24,10 +24,14 @@ pub(super) fn is_raw_binary_mode(mode: &str) -> bool {
         && mode.iter().any(|c| matches!(c, b'r' | b'w' | b'x' | b'a'))
 }
 
-/// A text update mode has one access letter, one '+' and optionally one 't', in any order.
-pub(super) fn is_text_update_open(args: &ast::Arguments, mode: &str) -> bool {
+/// An update mode has one access letter, one '+' and optionally 'b' or 't', in any order.
+pub(super) fn is_update_open(args: &ast::Arguments, mode: &str) -> bool {
     let mode = mode.as_bytes();
-    let expected_len = if mode.contains(&b't') { 3 } else { 2 };
+    let expected_len = if mode.contains(&b't') || mode.contains(&b'b') {
+        3
+    } else {
+        2
+    };
     let parameters = [
         "file",
         "mode",
