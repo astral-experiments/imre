@@ -520,10 +520,17 @@ impl Pickler {
             let args = ctx.alloc(Value::Tuple(vec![singleton]));
             return self.save_reduce(ctx, obj, class, args, NONE, NONE);
         }
-        let table = ctx.builtins["_pickle.dispatch_table"];
-        let (_, index) = ctx.find_dictionary_key(table, class, None)?;
-        let reduction = if let Some(index) = index {
-            let reducer = ctx.stored_entries(table)[index].1;
+        // The accelerated pickler owns these exact types even when this runtime
+        // cannot yet encode their payloads. A registration cannot replace them.
+        let reducer = match ctx.heap.get(obj) {
+            Value::Set { .. } | Value::ByteArray(_) | Value::SurrogateStr(_) => None,
+            _ => {
+                let table = ctx.builtins["_pickle.dispatch_table"];
+                let (_, index) = ctx.find_dictionary_key(table, class, None)?;
+                index.map(|index| ctx.stored_entries(table)[index].1)
+            }
+        };
+        let reduction = if let Some(reducer) = reducer {
             ctx.call(reducer, vec![obj], Vec::new())?
         } else {
             match ctx.heap.get(obj) {
