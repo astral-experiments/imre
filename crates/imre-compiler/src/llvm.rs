@@ -1482,9 +1482,7 @@ impl Emitter<'_, '_> {
             }
             _ => false,
         };
-        same_local
-            && self.ranges.integer(left).is_some()
-            && expression_preserves_local(right, slot, self.locals.len())
+        same_local && self.ranges.integer(left).is_some() && expression_preserves_local(right, slot)
     }
 
     fn cleanup(&mut self, slots: &[usize]) {
@@ -8439,22 +8437,11 @@ fn read_only_integer(expression: &Expr) -> bool {
     }
 }
 
-/// Rejects every local replacement hidden inside an operand. Statement regions
-/// and expression scopes are each visited once, so nested scopes do not cause
-/// repeated recursive walks of their bodies.
-fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> bool {
-    let mut written = vec![false; locals];
-    crate::ir::walk_expression(expression, &mut |value| match &value.kind {
-        ExprKind::Scope { body, clear, .. } => {
-            crate::list_specialization::mark_writes(body, &mut written);
-            for &slot in clear {
-                written[slot] = true;
-            }
-        }
-        ExprKind::Bind(slot, _) => written[*slot] = true,
-        _ => {}
-    });
-    !written[slot]
+/// Whether evaluating an operand leaves the previously loaded local in place.
+fn expression_preserves_local(expression: &Expr, slot: usize) -> bool {
+    let mut preserved = true;
+    crate::ir::walk_expression_writes(expression, |written, _| preserved &= written != slot);
+    preserved
 }
 
 // Keep literals that fit in CompactString's three inline words on the raw append path.

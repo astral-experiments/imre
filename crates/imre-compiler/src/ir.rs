@@ -2593,6 +2593,74 @@ pub(crate) fn walk_expression<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Ex
     }
 }
 
+/// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.
+pub(crate) fn walk_writes(body: &[Statement], mut visit: impl FnMut(usize, Option<&Expr>)) {
+    statement_writes(body, &mut visit);
+    walk_expressions(body, &mut |value| scoped_writes(value, &mut visit));
+}
+
+/// Visits writes during operand evaluation, including assignments in eager scopes.
+pub(crate) fn walk_expression_writes(value: &Expr, mut visit: impl FnMut(usize, Option<&Expr>)) {
+    walk_expression(value, &mut |value| scoped_writes(value, &mut visit));
+}
+
+/// The expression walker handles nested operands. Each scope contributes its own suite and cleanup.
+fn scoped_writes(value: &Expr, visit: &mut impl FnMut(usize, Option<&Expr>)) {
+    match &value.kind {
+        ExprKind::Scope { body, clear, .. } => {
+            statement_writes(body, visit);
+            for &slot in clear {
+                visit(slot, None);
+            }
+        }
+        ExprKind::Bind(slot, _) => visit(*slot, None),
+        _ => {}
+    }
+}
+
+/// Visits writes in statement-owned suites. Expression scopes are separate roots.
+fn statement_writes(body: &[Statement], visit: &mut impl FnMut(usize, Option<&Expr>)) {
+    walk_block(body, &mut |statement| match statement {
+        Statement::Assign(slot, value) => visit(*slot, Some(value)),
+        Statement::Clear(slot) => visit(*slot, None),
+        Statement::Move(target, source) => {
+            visit(*target, None);
+            visit(*source, None);
+        }
+        Statement::Scope { clear, .. } => {
+            for &slot in clear {
+                visit(slot, None);
+            }
+        }
+        Statement::For {
+            target,
+            cursor,
+            stop,
+            step,
+            ..
+        } => {
+            for &slot in [target, cursor, stop, step] {
+                visit(slot, None);
+            }
+        }
+        Statement::Try { handlers, .. } => {
+            for handler in handlers {
+                if let Some(slot) = handler.name {
+                    visit(slot, None);
+                }
+            }
+        }
+        Statement::IterNext {
+            key, value, ready, ..
+        } => {
+            for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
+                visit(slot, None);
+            }
+        }
+        _ => {}
+    });
+}
+
 /// Visits one expression's operands. Scoped statements are handled by the caller.
 pub(crate) fn children<'a>(expression: &'a Expr, mut visit: impl FnMut(&'a Expr)) {
     match &expression.kind {
