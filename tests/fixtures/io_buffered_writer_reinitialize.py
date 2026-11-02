@@ -1,7 +1,8 @@
 import gc
 import sys
 import weakref
-from _io import BufferedWriter, BytesIO, FileIO
+from _io import BufferedWriter
+from io import BytesIO, FileIO, RawIOBase
 
 path = sys.argv[1]
 old = FileIO(path, "w+")
@@ -52,3 +53,24 @@ writer.close()
 assert old.closed
 with FileIO(path, "r") as result:
     assert result.read() == b"ab"
+
+# The outer initializer resets whichever buffer its position probe leaves installed.
+inner = BytesIO()
+
+
+class ReplaceOnTell(RawIOBase):
+    def writable(self):
+        return True
+
+    def tell(self):
+        writer.__init__(inner, 8)
+        writer.write(b"x")
+        return 0
+
+
+writer.__init__(ReplaceOnTell())
+assert writer.raw is inner
+writer.write(b"y")
+writer.flush()
+assert inner.getvalue() == b"y"
+writer.close()
