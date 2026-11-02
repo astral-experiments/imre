@@ -13,6 +13,7 @@ use std::ptr;
 pub(super) struct Socket {
     family: i32,
     kind: i32,
+    proto: i32,
     fd: RawFd,
     blocking: bool,
     readers: usize,
@@ -158,6 +159,10 @@ pub(crate) fn kind(s: &Object) -> i32 {
     state(s, |s| s.kind)
 }
 
+pub(crate) fn proto(s: &Object) -> i32 {
+    state(s, |s| s.proto)
+}
+
 pub(crate) fn fd(s: &Object) -> RawFd {
     state(s, |s| s.fd)
 }
@@ -223,7 +228,13 @@ fn setopt(fd: RawFd, level: i32, name: i32, value: i32) -> io::Result<()> {
     Ok(())
 }
 
-fn handle(raw: RawFd, blocking: bool, family: i32, kind: i32) -> Result<crate::ObjectOwner> {
+fn handle(
+    raw: RawFd,
+    blocking: bool,
+    family: i32,
+    kind: i32,
+    proto: i32,
+) -> Result<crate::ObjectOwner> {
     // SAFETY: the kernel transferred a new fd; every path now has an owner.
     let fd = unsafe { OwnedFd::from_raw_fd(raw) };
     #[cfg(not(target_os = "linux"))]
@@ -238,6 +249,7 @@ fn handle(raw: RawFd, blocking: bool, family: i32, kind: i32) -> Result<crate::O
         fd: fd.into_raw_fd(),
         family,
         kind,
+        proto,
         blocking,
         readers: 0,
         close_requested: false,
@@ -263,7 +275,32 @@ pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwne
     let ty = ty | libc::SOCK_CLOEXEC;
     // SAFETY: socket takes only scalars, and handle acquires the fresh descriptor.
     let raw = checked(unsafe { libc::socket(family, ty, proto) }).map_err(errno_error)?;
-    handle(raw, true, family, kind)
+    handle(raw, true, family, kind, proto)
+}
+
+pub(crate) fn socketpair(
+    family: i32,
+    kind: i32,
+    proto: i32,
+) -> Result<(crate::ObjectOwner, crate::ObjectOwner)> {
+    #[cfg(target_os = "linux")]
+    let (flags, blocking, kind) = (
+        kind | libc::SOCK_CLOEXEC,
+        kind & libc::SOCK_NONBLOCK == 0,
+        kind & !(libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK),
+    );
+    #[cfg(not(target_os = "linux"))]
+    let (flags, blocking) = (kind, true);
+
+    let mut pair = [-1; 2];
+    // SAFETY: on success socketpair initializes both entries and transfers both descriptors.
+    checked(unsafe { libc::socketpair(family, flags, proto, pair.as_mut_ptr()) })
+        .map_err(errno_error)?;
+    // SAFETY: the second descriptor needs an owner even if setting up the first endpoint fails.
+    let right = unsafe { OwnedFd::from_raw_fd(pair[1]) };
+    let left = handle(pair[0], blocking, family, kind, proto)?;
+    let right = handle(right.into_raw_fd(), blocking, family, kind, proto)?;
+    Ok((left, right))
 }
 
 #[unsafe(no_mangle)]
@@ -1008,12 +1045,45 @@ fn peer_call(
     Ok((ret, addr, len))
 }
 
-pub(crate) fn sockname(s: &Object) -> Result<InternetAddress> {
-    // SAFETY: peer_call provides aligned storage and its capacity to getsockname.
-    let (_, addr, len) =
-        peer_call(|a, n| unsafe { libc::getsockname(fd(s), a, n) }).map_err(errno_error)?;
+pub(crate) enum SocketName {
+    Internet(InternetAddress),
+    UnnamedUnix,
+    NoAddress,
+}
+
+pub(crate) fn socket_name(s: &Object, peer: bool) -> Result<SocketName> {
+    let (_, addr, len) = peer_call(|a, n| {
+        // SAFETY: peer_call supplies aligned address storage and its capacity for either syscall.
+        unsafe {
+            if peer {
+                libc::getpeername(fd(s), a, n)
+            } else {
+                libc::getsockname(fd(s), a, n)
+            }
+        }
+    })
+    .map_err(errno_error)?;
+    if len == 0 {
+        return Ok(SocketName::NoAddress);
+    }
+    if i32::from(addr.ss_family) == libc::AF_UNIX {
+        let path_offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
+        if len as usize == path_offset {
+            return Ok(SocketName::UnnamedUnix);
+        }
+        // Darwin returns an empty NUL-terminated path. On Linux a leading NUL
+        // with any path bytes denotes an abstract address, not an unnamed one.
+        #[cfg(target_vendor = "apple")]
+        if len as usize > path_offset {
+            // SAFETY: the initialized storage includes at least the first Unix path byte.
+            let unix = unsafe { &*(&raw const addr).cast::<libc::sockaddr_un>() };
+            if unix.sun_path[0] == 0 {
+                return Ok(SocketName::UnnamedUnix);
+            }
+        }
+    }
     // SAFETY: the kernel initialized addr, and read validates its family and length.
-    unsafe { InternetAddress::read((&raw const addr).cast(), len) }
+    unsafe { InternetAddress::read((&raw const addr).cast(), len) }.map(SocketName::Internet)
 }
 
 pub(crate) fn endpoint(addr: &libc::sockaddr_in) -> (Ipv4Addr, u16) {
@@ -1032,8 +1102,11 @@ pub unsafe extern "C" fn imre_socket_sockname(
 ) -> *mut usize {
     // SAFETY: the caller supplied the exact tuple layout.
     finish(
-        sockname(s)
-            .and_then(InternetAddress::ipv4)
+        socket_name(s, false)
+            .and_then(|name| match name {
+                SocketName::Internet(addr) => addr.ipv4(),
+                _ => Err(Error::new(Kind::TypeError, "expected IPv4 address")),
+            })
             .map(|addr| unsafe { addr_tuple(layout, addr) }),
         ptr::null_mut(),
     )
@@ -1057,7 +1130,7 @@ pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, InternetAddress)
         })
     })
     .map_err(errno_error)?;
-    let child = handle(child, true, family(s), kind(s))?;
+    let child = handle(child, true, family(s), kind(s), proto(s))?;
     // SAFETY: the kernel filled the supplied storage, and child owns its fd on errors.
     let addr = unsafe { InternetAddress::read((&raw const addr).cast(), len) }?;
     Ok((child, addr))
@@ -1266,7 +1339,7 @@ pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
         // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
         let copy =
             checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
-        let child = handle(copy, blocking, family, kind)?;
+        let child = handle(copy, blocking, family, kind, proto(s))?;
         // socket.dup reapplies its source's blocking mode to the shared open file.
         set_blocking(copy, blocking).map_err(errno_error)?;
         Ok(crate::ObjectOwner::into_raw(child))
@@ -1373,9 +1446,15 @@ mod tests {
         use std::os::unix::net::UnixDatagram;
 
         let (sender, socket) = UnixDatagram::pair().unwrap();
-        let receiver = super::handle(socket.into_raw_fd(), true, libc::AF_UNIX, libc::SOCK_DGRAM)
-            .ok()
-            .expect("socket handle");
+        let receiver = super::handle(
+            socket.into_raw_fd(),
+            true,
+            libc::AF_UNIX,
+            libc::SOCK_DGRAM,
+            0,
+        )
+        .ok()
+        .expect("socket handle");
         sender.send(b"larger packet").unwrap();
         let received = super::recv(&receiver, 3, libc::MSG_TRUNC)
             .ok()
@@ -1396,9 +1475,15 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (socket, _) = listener.accept().unwrap();
-        let receiver = super::handle(socket.into_raw_fd(), true, libc::AF_INET, libc::SOCK_STREAM)
-            .ok()
-            .expect("socket handle");
+        let receiver = super::handle(
+            socket.into_raw_fd(),
+            true,
+            libc::AF_INET,
+            libc::SOCK_STREAM,
+            0,
+        )
+        .ok()
+        .expect("socket handle");
         sender.write_all(&[0x5a; 258]).unwrap();
         let scratch = vec![0xa5; 257];
         std::hint::black_box(&scratch);

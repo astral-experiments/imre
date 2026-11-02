@@ -1423,8 +1423,12 @@ impl Context {
 
     /// Run deferred callbacks when a native loop reaches a collection point.
     pub(super) fn collect_garbage(&mut self) {
+        let automatic_gc = self
+            .heap
+            .automatic_gc
+            .load(std::sync::atomic::Ordering::Relaxed);
         if self.heap.has_ordinary_finalizers() {
-            if self.heap.cycles_due() {
+            if automatic_gc && self.heap.cycles_due() {
                 let _ = self.collect_full();
                 return;
             }
@@ -1442,7 +1446,7 @@ impl Context {
             }
         }
         let (heap, roots) = self.heap_and_roots();
-        if let Some(callbacks) = heap.collect_if_due(roots) {
+        if let Some(callbacks) = heap.collect_if_due(roots, automatic_gc) {
             self.run_weak_callbacks(callbacks);
         }
     }

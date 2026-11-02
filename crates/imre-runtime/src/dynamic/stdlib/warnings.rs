@@ -1,4 +1,4 @@
-use super::{Context, Error, NONE, Result};
+use super::{Context, Error, NONE, Result, Value};
 
 impl Context {
     pub(in crate::dynamic) fn encoding_warning(&mut self, level: i32) -> Result<()> {
@@ -31,6 +31,26 @@ impl Context {
         } else {
             ("<sys>".into(), 0, "sys".into())
         };
+        // The bundled Python warnings implementation owns filters installed through
+        // its public API, including context-local filters from catch_warnings.
+        let key = self.heap.code_name("_py_warnings");
+        if let Some(module) = self.registered_module(key)?
+            && let Value::Module { scope, .. } = *self.heap.get(module)
+        {
+            let globals = self.module_globals(scope)?;
+            if self
+                .dict_named_item(globals, "_wm")
+                .is_some_and(|wm| wm != NONE)
+                && let Some(warn) = self.dict_named_item(globals, "warn")
+            {
+                let message = self.text(message);
+                let category = self.builtin(category);
+                let level = self.int(i64::from(level));
+                return self
+                    .call(warn, vec![message, category, level], Vec::new())
+                    .map(|_| ());
+            }
+        }
         if !crate::objects::warnings::should_emit(
             crate::objects::warnings::category_number(category).expect("warning category"),
             kind,

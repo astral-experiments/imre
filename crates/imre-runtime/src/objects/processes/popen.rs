@@ -314,6 +314,13 @@ pub unsafe extern "C" fn imre_popen_config(config: *const LaunchConfig) -> *cons
     finish(result, std::ptr::null())
 }
 
+fn ambiguous_text_mode() -> Error {
+    Error::new(
+        Kind::SubprocessError,
+        "Cannot disambiguate when both text and universal_newlines are supplied but different. Pass one or the other.",
+    )
+}
+
 /// Check only on a validation failure: a successful launch creates its own handles.
 fn check_handles(
     modes: &[u32],
@@ -368,6 +375,9 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
         && unsafe { super::pass_fds::nonempty(word, kind) }
     {
         crate::objects::warnings::pass_fds_override()?;
+    }
+    if streams & (1 << 22) != 0 {
+        return Err(ambiguous_text_mode());
     }
     let c_int = |n: &Int| n.as_small().and_then(|n| i32::try_from(n).ok());
     let mut descriptors = [-1; 3];

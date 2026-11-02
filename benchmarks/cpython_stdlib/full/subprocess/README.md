@@ -94,10 +94,13 @@ under `native_body_host_fixtures` in its result) at both levels. It covered stdi
 stdout/stderr reads, merged output, EOF/closed state, and `communicate` with
 zero or one pipe. `ProcessTestCase.test_communicate_stdout` and
 `test_communicate_stderr` now have native-parent evidence as well as the older
-child-only observation. The native body of
-`test_post_timeout_communicate_sends_input` is attempted and reported under
-`blocked`: the compiler does not infer that its exception handler calling
-`self.fail()` cannot return. The original body is not rewritten.
+child-only observation.
+
+In `ProcessTestCase.test_post_timeout_communicate_sends_input`, the first
+`communicate()` timed out with 4,105 input bytes pending. At O0 and O3 the
+compiled original retried on the same child, sent all 4,105 bytes and closed
+stdin. The CPython child echoed the input plus a newline and exited zero.
+[Receipt](communicate-post-timeout-input-linux.json)
 
 To run the default-poll timeout original alone, add
 `--case test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output`
@@ -105,6 +108,13 @@ to the native-body command above. The compiled `unittest.TestCase` checks that
 the first `communicate()` raises `TimeoutExpired` and that a second call on the
 same child returns all 262,144 stdout bytes. Pinned CPython supplies the
 original fixtures and runs the literal child program.
+
+`--case test.test_subprocess.ProcessTestCase.test_communicate_timeout` runs the
+text-mode retry original. The native `unittest.TestCase` checks `TimeoutExpired`
+and compares the complete stdout and stderr on the second `communicate()`
+call. Pinned CPython runs the original fixtures and child. The
+[Linux receipt](communicate-timeout-text-linux.json) records the partial stderr
+and both complete streams at O0 and O3.
 
 The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
 a 200,000-byte exchange on all three pipes, recovery after a zero deadline,

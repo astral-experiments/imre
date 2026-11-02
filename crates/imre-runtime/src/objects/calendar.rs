@@ -768,6 +768,12 @@ pub unsafe extern "C" fn imre_calendar_datetime(
     let zone = (z != 0).then(|| unsafe { retain(z as *const Object) });
     rc_result(new_date([y, m, d, h, mi, s, u, f], zone))
 }
+/// Combine normalized microseconds and validate the resulting timedelta.
+fn shift_delta(left: i128, right: i128, subtract: bool) -> Result<crate::ObjectOwner, Error> {
+    let total = if subtract { left - right } else { left + right };
+    try_owner(Value::Delta(validate_delta(&BigInt::from(total))?))
+}
+
 /// # Safety
 /// The first argument is a rooted date, datetime or timedelta, and the second a rooted timedelta.
 #[unsafe(no_mangle)]
@@ -792,10 +798,7 @@ pub unsafe extern "C" fn imre_calendar_shift(
         Value::Date { local, zone, .. } => {
             date(if sub { local - n } else { local + n }, zone.clone())
         }
-        Value::Delta(left) => {
-            let total = if sub { left - n } else { left + n };
-            try_owner(Value::Delta(validate_delta(&BigInt::from(total))?))
-        }
+        Value::Delta(left) => shift_delta(*left, n, sub),
         _ => unreachable!(),
     }))
 }

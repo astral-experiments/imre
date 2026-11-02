@@ -10,6 +10,7 @@ mod class_annotations;
 mod complex;
 mod deque;
 mod dictionary;
+mod displayhook;
 mod enums;
 mod ffi;
 mod finalizers;
@@ -359,7 +360,7 @@ impl Context {
         let input = self.scalar_value(input);
         if !matches!(
             self.heap.get(input),
-            Value::ByteArray(_) | Value::MemoryView { .. }
+            Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. }
         ) {
             return convert(self);
         }
@@ -1708,7 +1709,13 @@ impl Context {
             self.builtin("BaseException.with_traceback");
         }
         let methods = match name {
-            "object" => &["__hash__", "__format__", "__init_subclass__"],
+            "object" => &[
+                "__hash__",
+                "__format__",
+                "__init_subclass__",
+                "__reduce__",
+                "__reduce_ex__",
+            ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
             "collections.defaultdict" => {
@@ -1725,15 +1732,15 @@ impl Context {
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__"],
-            "set" => &["__repr__", "issubset", "update"],
-            "frozenset" => &["__repr__", "issubset"],
+            "set" => &["__repr__", "__reduce__", "issubset", "update"],
+            "frozenset" => &["__repr__", "__reduce__", "issubset"],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
-            "int" => &["bit_length", "from_bytes", "to_bytes", "__format__"],
+            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__"],
             "float" => &["__format__", "__getformat__", "as_integer_ratio"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
@@ -1875,6 +1882,18 @@ impl Context {
         .with_import(Some(name), None, None)
     }
 
+    /// Read the interpreter's original sys dictionary even if its import-cache entry changed.
+    fn sys_binding(&mut self, name: &str) -> Result<Option<Id>> {
+        let sys = match self.threads.system_module {
+            Some(sys) => sys,
+            None => self.module("sys")?,
+        };
+        let Value::Module { scope, .. } = *self.heap.get(sys) else {
+            unreachable!()
+        };
+        Ok(self.scope_name(scope, name))
+    }
+
     fn registered_module(&mut self, name: Id) -> Result<Option<Id>> {
         let (_, index) = self.find_dictionary_key(self.modules, name, None)?;
         Ok(index.map(|i| self.stored_entries(self.modules)[i].1))
@@ -1939,7 +1958,7 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
         } else if stdlib::is_module(name) || self.is_frozen(name) {
-            if matches!(name, "email" | "importlib" | "urllib") {
+            if matches!(name, "email" | "importlib" | "json" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {
                 locations.push(stdlib::package_path(self, name)?);
@@ -2206,6 +2225,7 @@ impl Context {
                     "addaudithook",
                     "_getframe",
                     "_getframemodulename",
+                    "displayhook",
                     "unraisablehook",
                 ] {
                     let callable = self.builtin(&format!("sys.{name}"));
@@ -2215,7 +2235,9 @@ impl Context {
                         explicit: false,
                     });
                     self.bind(scope, name, function);
-                    if name == "unraisablehook" {
+                    if name == "displayhook" {
+                        self.bind(scope, "__displayhook__", function);
+                    } else if name == "unraisablehook" {
                         self.bind(scope, "__unraisablehook__", function);
                         if self.threads.system_module.is_none() {
                             self.threads.default_unraisable_hook = Some(function);

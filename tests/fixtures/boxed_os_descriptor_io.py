@@ -23,7 +23,29 @@ def expect_errno(operation, args, number):
         raise AssertionError("descriptor operation unexpectedly succeeded")
 
 
+def check_sendfile():
+    from os import sendfile
+
+    assert sendfile is os.sendfile and sendfile is posix.sendfile
+    with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as destination:
+        src = source.fileno()
+        dst = destination.fileno()
+        os.write(src, b"abcdef")
+        os.lseek(src, 4, os.SEEK_SET)
+        assert sendfile(out_fd=Index(dst), in_fd=Index(src), offset=Index(1), count=Index(2)) == 2
+        assert os.lseek(src, 0, os.SEEK_CUR) == 4
+        assert sendfile(dst, src, None, 0) == 0
+        assert sendfile(dst, src, None, 10) == 2
+        assert sendfile(dst, src, None, 1) == 0
+        assert os.lseek(src, 0, os.SEEK_CUR) == 6
+        os.lseek(dst, 0, os.SEEK_SET)
+        assert os.read(dst, 10) == b"bcef"
+        expect_errno(sendfile, (-1, src, None, 0), errno.EBADF)
+
+
 def current():
+    if sys.platform == "linux":
+        check_sendfile()
     assert os.read is posix.read and os.write is posix.write
     assert read is posix.read and write is posix.write
     if sys.platform == "linux" and sys.maxsize == 2**63 - 1:
