@@ -2919,20 +2919,6 @@ impl Context {
         }
         result
     }
-    /// Keep an upgraded proxy alive through a subscription that can call Python.
-    fn proxy_subscript<T>(
-        &mut self,
-        target: Id,
-        operation: impl FnOnce(&mut Self) -> Result<T>,
-    ) -> Result<T> {
-        self.heap.reserve_temporaries(1)?;
-        let mark = self.heap.temporary_mark();
-        self.heap.keep(target);
-        let result = operation(self);
-        self.heap.release_weak_target(mark, target);
-        result
-    }
-
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         if self.raw_read_window(obj).is_some() && !self.view_is_readonly(obj)? {
             return self.raw_view_get(obj, key);
@@ -2942,7 +2928,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.get_item(target, key));
+            return self.with_weak_target(target, |ctx| ctx.get_item(target, key));
         }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Get.apply(self, obj, key, false);
@@ -3175,7 +3161,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));
+            return self.with_weak_target(target, |ctx| ctx.put_item(target, key, val));
         }
         if matches!(self.heap.get(obj), Value::Array(_))
             && !matches!(self.heap.get(key), Value::Slice(_))
@@ -5340,7 +5326,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.delete_item(target, key));
+            return self.with_weak_target(target, |ctx| ctx.delete_item(target, key));
         }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Delete
