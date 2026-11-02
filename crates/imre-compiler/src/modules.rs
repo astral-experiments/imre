@@ -2629,6 +2629,7 @@ struct Loader<'a> {
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     needs_object_imports: bool,
+    wildcard_import: Option<String>,
     inputs: crate::SourceInputs,
     root: PathBuf,
     extension_roots: Vec<PathBuf>,
@@ -2676,6 +2677,7 @@ impl<'a> Loader<'a> {
             inputs: crate::SourceInputs::default(),
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
+            wildcard_import: None,
             root,
             modules: Vec::new(),
             by_name: HashMap::new(),
@@ -2856,7 +2858,7 @@ impl<'a> Loader<'a> {
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
             object_builtin_errors: Default::default(),
-            deferred_object_error: Default::default(),
+            deferred_object_error: self.wildcard_import.into(),
             return_errors: Default::default(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
@@ -3309,10 +3311,19 @@ impl<'a> Loader<'a> {
                 if import.is_lazy {
                     return Err("lazy imports are unsupported".into());
                 }
-                if import.names.iter().any(|alias| alias.name.as_str() == "*") {
-                    return Err("wildcard imports are unsupported".into());
-                }
                 let name = self.import_name(id, import)?;
+                if import.names.iter().any(|alias| alias.name.as_str() == "*") {
+                    // The module initializer chooses its exports. Still resolve the
+                    // dependency so checked files retain their ordinary diagnostics.
+                    if import.level != 0 || self.intrinsic_module(&name, None)?.is_none() {
+                        self.load_module(&name)?;
+                    }
+                    self.needs_object_imports = true;
+                    self.wildcard_import.get_or_insert_with(|| {
+                        self.modules[id].error(import, "wildcard imports require runtime binding")
+                    });
+                    return Ok(());
+                }
                 if import.level == 0 && name == "imre._logging" {
                     if !self.modules[id].is_bundled(LOGGING_CLASSES) {
                         return Err("the private logging implementation is not importable".into());

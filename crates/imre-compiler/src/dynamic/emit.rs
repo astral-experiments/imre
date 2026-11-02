@@ -49,6 +49,8 @@ pub(crate) fn emit(
     for (name, path, source) in modules {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("{}: {err}", path.display()))?;
+        crate::analysis::check_star_import_scopes(source, &parsed.syntax().body)
+            .map_err(|error| format!("{}:{error}", path.display()))?;
         let replacements = strings::literal_replacements(source, parsed.tokens());
         if output.keep_docstrings && !replacements.is_empty() {
             strings::check_docs(source, &parsed.syntax().body, &replacements)
