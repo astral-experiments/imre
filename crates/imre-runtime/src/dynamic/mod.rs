@@ -301,6 +301,36 @@ impl Context {
         })
     }
 
+    /// Acquiring a Python-defined buffer can replace the native storage or install a release callback.
+    fn check_buffer_exporter(&self, object: Id) -> Result<()> {
+        let Value::Instance { class, .. } = self.heap.get(object) else {
+            return Ok(());
+        };
+        let python_slot = |slot| {
+            self.find_in_mro(*class, |base| match self.heap.get(base) {
+                Value::Class { .. } => self.own_class_attr(base, slot).map(|_| true),
+                Value::Native(name)
+                    if matches!(name.as_str(), "array.array" | "bytearray")
+                        || (name == "bytes" && slot == "__buffer__") =>
+                {
+                    Some(false)
+                }
+                _ => None,
+            })
+        };
+        if match python_slot("__buffer__") {
+            Some(true) => true,
+            Some(false) => python_slot("__release_buffer__") == Some(true),
+            None => false,
+        } {
+            return Err(Error::new(
+                "NotImplementedError",
+                "Python-defined buffer hooks are unsupported",
+            ));
+        }
+        Ok(())
+    }
+
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
         let owner = match self.heap.get(id) {
             Value::MemoryView { owner, .. } => Self::memoryview_owner(*owner)?,
