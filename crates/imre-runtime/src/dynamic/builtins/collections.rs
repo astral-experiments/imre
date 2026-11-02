@@ -892,7 +892,13 @@ pub(super) fn method(
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
             None if matches!(
                 name,
-                "set.clear" | "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
+                "set.clear"
+                    | "set.discard"
+                    | "set.pop"
+                    | "set.remove"
+                    | "set.difference_update"
+                    | "set.symmetric_difference_update"
+                    | "set.update"
             ) || name.ends_with(".issubset")
                 || name.ends_with(".intersection")
                 || name.ends_with(".difference")
@@ -931,7 +937,13 @@ pub(super) fn method(
         })?
     } else if matches!(
         name,
-        "set.clear" | "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
+        "set.clear"
+            | "set.discard"
+            | "set.pop"
+            | "set.remove"
+            | "set.difference_update"
+            | "set.symmetric_difference_update"
+            | "set.update"
     ) {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
@@ -1038,6 +1050,7 @@ pub(super) fn method(
             | "set.pop"
             | "set.remove"
             | "set.difference_update"
+            | "set.symmetric_difference_update"
             | "set.update"
             | "frozenset.copy"
             | "set.copy"
@@ -1206,6 +1219,25 @@ pub(super) fn method(
         }
         "set.intersection" | "frozenset.intersection" => set_intersection(ctx, receiver, args),
         "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
+        "set.symmetric_difference_update" => {
+            let other = super::one_positional_arg(name, args, kwargs)?;
+            let storage = ctx.scalar_value(other);
+            let source = if matches!(ctx.heap.get(storage), Value::Set { .. }) {
+                storage
+            } else if matches!(ctx.heap.get(other), Value::Dict(_)) {
+                other
+            } else {
+                // Deduplicate the iterable completely before changing the receiver.
+                let unique = ctx.alloc(Value::Set {
+                    entries: Default::default(),
+                    frozen: false,
+                });
+                update_set(ctx, unique, other)?;
+                unique
+            };
+            ctx.set_binary("^", receiver, source, true)?;
+            Ok(NONE)
+        }
         "set.difference_update" => {
             for &source in args {
                 ctx.set_difference_update(receiver, source)?;

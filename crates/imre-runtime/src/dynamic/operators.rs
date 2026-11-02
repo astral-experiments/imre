@@ -3673,7 +3673,7 @@ impl Context {
             let entries = entries.try_clone()?;
             (self.alloc(Value::Set { entries, frozen }), left)
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, true, |ctx, key, hash| {
             let roots = ctx.heap.temporary_mark();
             ctx.heap.keep(key);
             let toggle = ctx
@@ -3710,13 +3710,16 @@ impl Context {
         Ok(result)
     }
 
-    /// Visit an operand with cached hashes when its keys already belong to a set.
+    /// Visit stored set keys, and optionally exact dictionary keys, with their cached hashes.
     fn visit_set_operand(
         &mut self,
         source: Id,
+        use_dict_hashes: bool,
         mut visit: impl FnMut(&mut Self, Id, Option<i64>) -> Result<()>,
     ) -> Result<()> {
-        let iterator = if matches!(self.heap.get(source), Value::Set { .. }) {
+        let iterator = if matches!(self.heap.get(source), Value::Set { .. })
+            || (use_dict_hashes && matches!(self.heap.get(source), Value::Dict(_)))
+        {
             None
         } else {
             let iterator = self.iterator(source)?;
@@ -3766,7 +3769,7 @@ impl Context {
         } else {
             source
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, false, |ctx, key, hash| {
             ctx.discard_difference_key(target, key, hash)
         })
     }
@@ -3783,7 +3786,7 @@ impl Context {
     }
 
     fn filter_difference(&mut self, result: Id, left: Id, right: Id) -> Result<()> {
-        self.visit_set_operand(left, |ctx, key, hash| {
+        self.visit_set_operand(left, false, |ctx, key, hash| {
             ctx.heap.keep(key);
             if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
                 ctx.set_dictionary_key(result, key, NONE, hash, false)?;
@@ -3945,7 +3948,7 @@ impl Context {
                 (view, other)
             }
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, false, |ctx, key, hash| {
             let present = if let Some(view) = ctx.set_view(container) {
                 ctx.view_member(view, key, hash)?
             } else {

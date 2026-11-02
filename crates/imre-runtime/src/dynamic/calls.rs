@@ -3841,7 +3841,13 @@ impl Context {
                 if class == "set"
                     && matches!(
                         name,
-                        "clear" | "discard" | "pop" | "remove" | "difference_update" | "update"
+                        "clear"
+                            | "discard"
+                            | "pop"
+                            | "remove"
+                            | "difference_update"
+                            | "symmetric_difference_update"
+                            | "update"
                     ) =>
             {
                 return Ok(self.builtin(&format!("set.{name}")));

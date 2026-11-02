@@ -2629,6 +2629,7 @@ impl<'a> Checker<'a> {
             "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
             "union" => "set.union",
             "difference_update" => "set.difference_update",
+            "symmetric_difference_update" => "set.symmetric_difference_update",
             "clear" => "set.clear",
             "pop" => "set.pop",
             "remove" => "set.remove",
