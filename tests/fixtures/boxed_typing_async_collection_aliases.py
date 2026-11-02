@@ -30,3 +30,15 @@ for alias, module_alias, origin in (
             assert str(error) == expected
         else:
             raise AssertionError("expected a single type parameter")
+
+
+class Ready(Awaitable[int]):
+    def __await__(self):
+        return iter(())
+
+
+ready = Ready()
+assert isinstance(ready, Awaitable)
+assert isinstance(ready, abc.Awaitable)
+assert list(ready.__await__()) == []
+assert not isinstance(42, Awaitable)
