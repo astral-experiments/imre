@@ -117,6 +117,15 @@ impl Calendar {
         make_delta(mask, words).map(Self)
     }
 
+    pub(crate) fn shift_duration(&self, other: &Self, subtract: bool) -> Result<Self, Error> {
+        shift_delta(
+            self.delta_microseconds(),
+            other.delta_microseconds(),
+            subtract,
+        )
+        .map(Self)
+    }
+
     pub(crate) fn negate_delta(&self) -> Result<Self, Error> {
         negate_delta(&self.0).map(Self)
     }
@@ -127,6 +136,12 @@ impl Calendar {
 
     pub(crate) fn zone(offset: &Self, name: Option<&str>) -> Result<Self, Error> {
         make_zone(offset.0.clone(), name.map(text::owned_string)).map(Self)
+    }
+
+    /// Format the stored fixed UTC offset for %z or %:z.
+    pub(crate) fn strftime_offset(&self, colon: bool) -> String {
+        let text = offset_text(offset(&self.0));
+        if colon { text } else { text.replace(':', "") }
     }
 
     pub(crate) fn is_utc(&self) -> bool {

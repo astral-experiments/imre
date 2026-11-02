@@ -15,8 +15,9 @@ impl Context {
     pub(super) fn drain_acyclic_finalizers(&mut self) -> Result<bool> {
         let mut finalized = false;
         while self.heap.has_ordinary_finalizers() {
+            let stdin = super::stdlib::io::rooted_input_chain(self);
             let (heap, roots) = self.heap_and_roots();
-            let Some(owner) = heap.acyclic_finalizer(roots)? else {
+            let Some(owner) = heap.acyclic_finalizer(roots, stdin.as_ref())? else {
                 break;
             };
             self.dispatch_finalizer(owner);
@@ -26,14 +27,12 @@ impl Context {
     }
 
     pub(super) fn dispatch_finalizer(&mut self, owner: Id) {
-        if let Value::Scandir(scan) = self.heap.get(owner) {
-            let scan = std::rc::Rc::clone(scan);
-            self.heap.take_finalizer(owner, true);
-            super::stdlib::os::scandir::finalize(self, &scan);
-            return;
-        }
+        let scan = match self.heap.get(owner) {
+            Value::Scandir(scan) => Some(std::rc::Rc::clone(scan)),
+            _ => None,
+        };
         let generator = matches!(self.heap.get(owner), Value::Generator { .. });
-        let found = generator || self.slot(owner, "__del__").is_some();
+        let found = scan.is_some() || generator || self.slot(owner, "__del__").is_some();
         self.heap.take_finalizer(owner, found);
         if !found {
             return;
@@ -48,7 +47,9 @@ impl Context {
                 self.heap.keep(root);
             }
         }
-        if generator {
+        if let Some(scan) = scan {
+            super::stdlib::os::scandir::finalize(self, owner, &scan);
+        } else if generator {
             if let Err(error) = self.generator_close(owner) {
                 eprintln!("Exception ignored while calling __del__: {error}");
             }

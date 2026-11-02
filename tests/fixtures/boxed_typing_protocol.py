@@ -1,7 +1,7 @@
 import typing
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sized
-from typing import Protocol, is_protocol
+from typing import Protocol, get_protocol_members, is_protocol
 
 
 class HasHTML(Protocol):
@@ -37,6 +37,27 @@ def current():
     print(HasHTML._is_protocol, Concrete._is_protocol, Concrete().__html__())
     print(WithInit("explicit initializer").value)
     print(Protocol.__abstractmethods__ == frozenset(), Abstract.__abstractmethods__ == {"operation"})
+    class Forward(Protocol):
+        item: NotInScope
+        def method(self): ...
+
+    assert get_protocol_members(Forward) == frozenset({'item', 'method'})
+    del Forward.method
+    class Inherited(Forward, Protocol):
+        other: int
+    assert get_protocol_members(Inherited) == {'item', 'other'}
+    assert get_protocol_members(Forward) == {'item', 'method'}
+
+    def broken(format):
+        raise RuntimeError('custom provider')
+    Forward.__annotate__ = broken
+    try:
+        class Broken(Forward, Protocol): pass
+    except RuntimeError as error:
+        assert str(error) == 'custom provider'
+    else:
+        raise AssertionError('suppressed a custom annotation provider error')
+
     parameter = typing.TypeVar("T")
     alias = Protocol[parameter]
     print(alias.__origin__ is Protocol, alias.__args__[0] is parameter)

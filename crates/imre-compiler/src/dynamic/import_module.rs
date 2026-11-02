@@ -4,6 +4,37 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "json" => Some((
+            "json/__init__.py",
+            concat!(
+                "r\"\"\"",
+                include_str!("../../stdlib/docstrings/json.txt"),
+                "\"\"\"\n",
+                include_str!("../../stdlib/json/boxed_init.py"),
+            ),
+        )),
+        "json.encoder" => Some((
+            "json/encoder.py",
+            include_str!("../../stdlib/json/encoder.py"),
+        )),
+        "json.decoder" => Some((
+            "json/decoder.py",
+            include_str!("../../stdlib/json/decoder.py"),
+        )),
+        "json.scanner" => Some((
+            "json/scanner.py",
+            include_str!("../../stdlib/json/scanner.py"),
+        )),
+        // A fresh _collections module exports the same accelerator type. Keep its
+        // Python wrappers around native storage in their own module namespace.
+        "_collections" => Some((
+            "_collections.py",
+            "from _imre_ordered_dict import OrderedDict\n",
+        )),
+        "_imre_ordered_dict" => Some((
+            "_imre_ordered_dict.py",
+            include_str!("../../stdlib/_imre_ordered_dict.py"),
+        )),
         "traceback" => Some((
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),
@@ -56,9 +87,18 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "bisect" => Some(("bisect.py", include_str!("../../stdlib/bisect.py"))),
+        "urllib.error" => Some((
+            "urllib/error.py",
+            include_str!("../../stdlib/urllib/error.py"),
+        )),
         "urllib.request" => Some((
             "urllib/request.py",
             include_str!("../../stdlib/urllib/request.py"),
+        )),
+        "urllib.response" => Some((
+            "urllib/response.py",
+            include_str!("../../stdlib/urllib/response.py"),
         )),
         "urllib.parse" => Some((
             "urllib/parse.py",
@@ -93,7 +133,21 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/tempfile/names.py"),
                 "\n",
                 include_str!("../../stdlib/tempfile/boxed_spool.py"),
+                "\n",
+                include_str!("../../stdlib/tempfile/directory.py"),
             ),
+        )),
+        "doctest" => Some((
+            "doctest.py",
+            concat!(
+                include_str!("../../stdlib/doctest.py"),
+                "\n",
+                include_str!("../../stdlib/doctest_boxed.py"),
+            ),
+        )),
+        "_imre_doctest" => Some((
+            "_imre_doctest.py",
+            include_str!("../../stdlib/_imre_doctest.py"),
         )),
         "unittest" => Some((
             "unittest/__init__.py",

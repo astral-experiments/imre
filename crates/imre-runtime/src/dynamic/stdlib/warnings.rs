@@ -1,4 +1,4 @@
-use super::{Context, Error, NONE, Result};
+use super::{Context, Error, Id, NONE, Result, Value};
 
 impl Context {
     pub(in crate::dynamic) fn encoding_warning(&mut self, level: i32) -> Result<()> {
@@ -14,6 +14,17 @@ impl Context {
         kind: crate::objects::exceptions::Kind,
         message: &str,
         level: i32,
+    ) -> Result<()> {
+        self.emit_builtin_warning_with_source(kind, message, level, NONE)
+    }
+
+    /// Preserve the source object in a captured resource warning.
+    pub(in crate::dynamic) fn emit_builtin_warning_with_source(
+        &mut self,
+        kind: crate::objects::exceptions::Kind,
+        message: &str,
+        level: i32,
+        source: Id,
     ) -> Result<()> {
         let category = kind.name();
         let (filename, line, module) = if let Some((loc, scope)) = self.heap.warning_frame(level) {
@@ -31,6 +42,28 @@ impl Context {
         } else {
             ("<sys>".into(), 0, "sys".into())
         };
+        // The bundled Python warnings implementation owns filters installed through
+        // its public API, including context-local filters from catch_warnings.
+        let key = self.heap.code_name("_py_warnings");
+        if let Some(module) = self.registered_module(key)?
+            && let Value::Module { scope, .. } = *self.heap.get(module)
+        {
+            let globals = self.module_globals(scope)?;
+            if self
+                .dict_named_item(globals, "_wm")
+                .is_some_and(|wm| wm != NONE)
+                && let Some(warn) = self.dict_named_item(globals, "warn")
+            {
+                let message = self.text(message);
+                let category = self.builtin(category);
+                let level = self.int(i64::from(level));
+                let mut args = vec![message, category, level];
+                if source != NONE {
+                    args.push(source);
+                }
+                return self.call(warn, args, Vec::new()).map(|_| ());
+            }
+        }
         if !crate::objects::warnings::should_emit(
             crate::objects::warnings::category_number(category).expect("warning category"),
             kind,

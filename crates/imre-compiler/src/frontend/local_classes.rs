@@ -65,6 +65,9 @@ impl Checker<'_> {
     /// Record method bindings without calling them. Eager defaults, decorators,
     /// arbitrary bases and executable class statements must not be silently elided.
     pub(super) fn define_local_class(&mut self, node: &ast::StmtClassDef) -> Result<(), String> {
+        if crate::classes::defines_pickle_reducer(node) {
+            return Err(self.object_runtime_export("pickle reducers", node));
+        }
         if node.type_params.is_some() {
             self.graph.needs_object_runtime.set(true);
             return Err(error(

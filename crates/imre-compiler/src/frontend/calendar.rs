@@ -85,13 +85,20 @@ pub(super) fn utc() -> Expr {
 }
 
 pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
-    matches!(
-        receiver,
-        Type::Calendar(C::Date | C::DateTime | C::Delta) | Type::ClockTime
-    ) && matches!(
-        name,
-        "min" | "max" | "resolution" | "__reduce__" | "__reduce_ex__"
-    )
+    match name {
+        "min" | "max" | "resolution" | "__reduce__" | "__reduce_ex__" => {
+            matches!(
+                receiver,
+                Type::Calendar(C::Date | C::DateTime | C::Delta) | Type::ClockTime
+            )
+        }
+        "strftime" | "__format__" => matches!(
+            receiver,
+            Type::Calendar(C::Date | C::DateTime) | Type::ClockTime
+        ),
+        "ctime" | "isoweekday" => matches!(receiver, Type::Calendar(C::Date | C::DateTime)),
+        _ => false,
+    }
 }
 
 impl Checker<'_> {

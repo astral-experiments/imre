@@ -25,6 +25,7 @@ mod namedtuple;
 mod namespace;
 mod namespace_init;
 mod namespace_repr;
+mod object_state;
 mod operators;
 mod os_error;
 mod property;
@@ -240,7 +241,8 @@ impl Context {
                 true
             }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
-            ("int", Value::Int(_) | Value::Bool(_))
+            ("bool", Value::Bool(_))
+            | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
@@ -360,7 +362,7 @@ impl Context {
         let input = self.scalar_value(input);
         if !matches!(
             self.heap.get(input),
-            Value::ByteArray(_) | Value::MemoryView { .. }
+            Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. }
         ) {
             return convert(self);
         }
@@ -1509,20 +1511,21 @@ impl Context {
         if let Some(order) = &mut data.class_body {
             order.retain(|member| member != name);
         }
-        let previous = data.names.shift_remove(name);
-        if previous.is_some()
-            && name != "__qualname__"
-            && let Some(dictionary) = data
-                .class_namespace
-                .as_ref()
-                .and_then(|class| class.dictionary)
+        let Some(previous) = data.names.shift_remove(name) else {
+            return Ok(false);
+        };
+        let dictionary = data
+            .class_namespace
+            .as_ref()
+            .and_then(|class| class.dictionary);
+        // Deleting the class dictionary entry can collect the removed value.
+        self.heap.weak_edge_removed(previous);
+        if name != "__qualname__"
+            && let Some(dictionary) = dictionary
         {
             self.delete_item(dictionary, key)?;
         }
-        if let Some(value) = previous {
-            self.heap.weak_edge_removed(value);
-        }
-        Ok(previous.is_some())
+        Ok(true)
     }
 
     /// Bind a parameter in a fresh function scope using checked name and table storage.
@@ -1709,7 +1712,14 @@ impl Context {
             self.builtin("BaseException.with_traceback");
         }
         let methods = match name {
-            "object" => &["__hash__", "__format__", "__init_subclass__"],
+            "object" => &[
+                "__hash__",
+                "__format__",
+                "__init_subclass__",
+                "__getstate__",
+                "__reduce__",
+                "__reduce_ex__",
+            ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
             "collections.defaultdict" => {
@@ -1726,16 +1736,17 @@ impl Context {
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__"],
-            "set" => &["__repr__", "issubset", "update"],
-            "frozenset" => &["__repr__", "issubset"],
+            "set" => &["__repr__", "__reduce__", "issubset", "update"],
+            "frozenset" => &["__repr__", "__reduce__", "issubset"],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
-            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__"],
-            "float" => &["__format__", "__getformat__", "as_integer_ratio"],
+            "bool" => &["__repr__"],
+            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"],
+            "float" => &["__format__", "__getformat__", "as_integer_ratio", "__repr__"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
@@ -1952,7 +1963,7 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
         } else if stdlib::is_module(name) || self.is_frozen(name) {
-            if matches!(name, "email" | "importlib" | "urllib") {
+            if matches!(name, "email" | "importlib" | "json" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {
                 locations.push(stdlib::package_path(self, name)?);
@@ -2056,6 +2067,7 @@ impl Context {
             scope,
             origin,
             initializing: source.is_some(),
+            locale_error: None,
             constructor: None,
         });
         let key = self.text(name);
@@ -2205,9 +2217,10 @@ impl Context {
                 self.bind(scope, "_bootstrap_external", external);
             }
             "io" => stdlib::io::install(self, scope),
+            "_locale" => stdlib::locale::install(self, module, scope)?,
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
-            "_io" => stdlib::io::install_native(self, scope),
+            "_io" => stdlib::io::install_native(self, scope, module),
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => {
                 stdlib::readiness::initialize(self, scope)?;
@@ -2256,6 +2269,10 @@ impl Context {
                 self.bind(scope, "__stdin__", stdin);
                 let jit = stdlib::jit_module(self)?;
                 self.bind(scope, "_jit", jit);
+                if self.threads.system_module == Some(module) {
+                    let monitoring = stdlib::monitoring::module(self)?;
+                    self.bind(scope, "monitoring", monitoring);
+                }
             }
             "re" => {
                 let pattern = self.builtin(value::REGEX_PATTERN_TYPE);

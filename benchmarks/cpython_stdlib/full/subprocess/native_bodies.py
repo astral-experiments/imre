@@ -1,6 +1,7 @@
 """Run unchanged native subprocess methods and assertions under CPython fixtures."""
 
 import argparse
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,7 @@ from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, native_method, run_in_fixtures, testcase_fixture
 
 # The subprocess operation, method body, and assertions all run in the binary.
-# sys.executable selects a real oracle child for upstream's literal -c programs.
+MEMORYVIEW_CASE = "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input"
 METHODS = {
     "ContextManagerTests": {
         "test_returncode": "int",
@@ -27,9 +28,11 @@ METHODS = {
         "test_stderr_pipe": "bytes",
         "test_stdout_stderr_pipe": "bytes",
         "test_communicate_stdin": "int",
+        "test_communicate_memoryview_input": None,
         "test_communicate_stdout": "bytes",
         "test_communicate_stderr": "bytes",
         "test_communicate_returns": "bytes",
+        "test_communicate_timeout": None,
         "test_communicate_timeout_large_output": None,
         "test_post_timeout_communicate_sends_input": "int",
     },
@@ -69,6 +72,18 @@ class NativeCase:
 
 
 
+def subprocess_method(tools, directory, source, cls, case_id, fixture):
+    if case_id != MEMORYVIEW_CASE:
+        return native_method(tools, directory, source, cls, case_id, fixture)
+    # This original registers cleanup callbacks on the native instance and sends a
+    # memoryview through runtime-loaded subprocess to the same toolchain's -c child.
+    flags = ["--opt-level", str(tools.level), "--runtime", str(tools.runtime.resolve()),
+             "--clang", str(tools.clang.resolve())]
+    child_env = {"IMRE_PYTHON": str(tools.imre.resolve()), "IMRE_ENCODED_FLAGS": "\x1f".join(flags)}
+    return native_method(replace(tools, runtime_imports=True), directory, source, cls, case_id,
+                         "import subprocess\nimport sys\n" + testcase_fixture(), cleanups=True, extra_env=child_env)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ("imre", "runtime", "clang", "result"):
@@ -96,7 +111,7 @@ def main():
                 directory.mkdir()
                 fixture = (PREAMBLE.replace("TYPE", scalar) if scalar is not None else
                            "import subprocess\nimport sys\n" + testcase_fixture())
-                executions[key] = native_method(tools, directory, source, cls, key, fixture)
+                executions[key] = subprocess_method(tools, directory, source, cls, key, fixture)
         with patch.dict(os.environ, IMRE_PYTHON=sys.executable):
             native, failures, skips = run_in_fixtures(load_suite(manifest["module"]), executions)
         if failures or skips or set(native) != set(executions):

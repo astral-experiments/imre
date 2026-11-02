@@ -11,8 +11,8 @@ from _imre_posixpath import (
     realpath_notdir as _realpath_notdir,
 )
 from genericpath import (
-    ALLOW_MISSING, _check_arg_types, commonprefix, exists, getatime, getctime, getmtime, getsize, isdir, isfile, islink,
-    lexists, samefile, sameopenfile, samestat,
+    ALLOW_MISSING, _check_arg_types, commonprefix, exists, getatime, getctime, getmtime, getsize, isdir, isfile,
+    isjunction, islink, lexists, samefile, sameopenfile, samestat,
 )
 
 

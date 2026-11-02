@@ -469,6 +469,43 @@ impl Context {
         self.equal_inner(a, b, usize::MAX, &mut false)
     }
 
+    pub(super) fn mapping_proxy(&mut self, mapping: Id) -> Result<Id> {
+        // Like mappingproxy_new, require mapping subscription and exclude lists and tuples.
+        let supported = match self.heap.get(self.scalar_value(mapping)) {
+            Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => false,
+            Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => false,
+            Value::Dict(_)
+            | Value::DefaultDict { .. }
+            | Value::MappingProxy(_)
+            | Value::Str(_)
+            | Value::SurrogateStr(_)
+            | Value::Bytes(_)
+            | Value::ByteArray(_)
+            | Value::Array(_)
+            | Value::Range(_)
+            | Value::MemoryView { .. }
+            | Value::Context(_)
+            | Value::RegexMatch(_)
+            | Value::GenericAlias(_)
+            | Value::Union(_) => true,
+            _ => {
+                self.dict_storage(mapping).is_some()
+                    || self.slot(mapping, "__getitem__").is_some()
+                    || self.enum_values(mapping).is_some()
+            }
+        };
+        if !supported {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "mappingproxy() argument must be a mapping, not {}",
+                    self.type_name(mapping)
+                ),
+            ));
+        }
+        Ok(self.alloc(Value::MappingProxy(mapping)))
+    }
+
     /// Return the wrapped object without recursing through nested read-only views.
     pub(super) fn mapping_proxy_target(&self, mut value: Id) -> Id {
         while let Value::MappingProxy(mapping) = *self.heap.get(value) {
@@ -2335,7 +2372,7 @@ impl Context {
                 let state = if lock.locked() { "locked" } else { "unlocked" };
                 format!("<{state} _thread.lock object at {id:#x}>")
             }
-            Value::Hash(state) => state.borrow().repr(id as usize).to_string(),
+            Value::Hash(state) => state.lock().repr(id as usize).to_string(),
             Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
             Value::PartialPlaceholder => "Placeholder".to_owned(),
@@ -4007,7 +4044,11 @@ impl Context {
         }
         let method = if matches!(
             name,
-            "__mul__"
+            "__add__"
+                | "__radd__"
+                | "__sub__"
+                | "__rsub__"
+                | "__mul__"
                 | "__rmul__"
                 | "__truediv__"
                 | "__rtruediv__"
@@ -4233,7 +4274,7 @@ impl Context {
         };
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "*" | "/" | "//") {
+                if matches!(op, "+" | "-" | "*" | "/" | "//") {
                     self.timedelta_slot_class(id)
                 } else {
                     None

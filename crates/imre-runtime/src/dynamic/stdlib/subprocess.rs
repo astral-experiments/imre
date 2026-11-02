@@ -102,6 +102,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         cwd,
         env,
         bufsize,
+        pipesize,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -147,6 +148,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         directory,
         env,
         ctx.as_int(bufsize)?,
+        ctx.as_int(pipesize)?,
         &mut || {
             let result = (|| -> Result<()> {
                 let warnings = ctx.module("warnings")?;
