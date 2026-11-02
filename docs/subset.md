@@ -142,9 +142,10 @@ are read-only; mutation, per-line objects, byte inputs, and metadata-only parsin
 are outside this surface.
 
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
-`for key, group` loop, the first statement must assign `list(group)` to a separate
-local. That list can be stored or mutated. The grouper name must be fresh and its
-only supported use is this immediate conversion.
+`for key, group` loop, the first statement can iterate over the group with
+`for member in group`, or assign `list(group)` to a separate local. The inner
+loop pulls members on demand. The materialized list can be stored or mutated.
+The grouper name must be fresh and can only be used by that first statement.
 
 ```python
 from itertools import groupby
