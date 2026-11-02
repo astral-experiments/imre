@@ -1748,6 +1748,9 @@ pub(super) fn call(
             _ => codecs::builtin_handler(ctx, function, args, kwargs),
         };
     }
+    if name == "_socket.getaddrinfo" {
+        return socket::getaddrinfo(ctx, args, kwargs);
+    }
     if name == "_socket.close" {
         return socket::close(ctx, args, kwargs);
     }

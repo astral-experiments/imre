@@ -293,7 +293,7 @@ fn resolve(host: &str) -> Result<Ipv4Addr> {
     if let Ok(ip) = host.parse() {
         return Ok(ip);
     }
-    let rows = getaddrinfo(Some(host), None, libc::AF_INET, 0, 0, 0)?;
+    let rows = getaddrinfo(Some(host.as_bytes()), None, libc::AF_INET, 0, 0, 0)?;
     Ok(endpoint(&rows[0].addr.ipv4()?).0)
 }
 
@@ -376,21 +376,14 @@ fn address_list(
 }
 
 pub(crate) fn getaddrinfo(
-    host: Option<&str>,
-    service: Option<&str>,
+    host: Option<&[u8]>,
+    service: Option<&[u8]>,
     family: i32,
     ty: i32,
     protocol: i32,
     flags: i32,
 ) -> Result<Vec<AddressInfo>> {
-    let list = address_list(
-        host.map(str::as_bytes),
-        service.map(str::as_bytes),
-        family,
-        ty,
-        protocol,
-        flags,
-    )?;
+    let list = address_list(host, service, family, ty, protocol, flags)?;
     let mut cursor = list.0;
     let mut rows = Vec::new();
     // SAFETY: all nodes and canonical names remain live until the list guard is dropped.
