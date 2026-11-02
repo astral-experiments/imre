@@ -920,6 +920,9 @@ def check_pickle_reductions(imre, root, run):
                 shared = ("\0\n\r\\\x1aéĀ🍏", 1 << 2048, -2147483649, True, None)
                 assert value[:6] == (shared, shared, ("rebuilt", protocol), ("rebuilt", protocol), "37", ())
                 assert value[0] is value[1] and value[2] is value[3]
+                payload = bytes(range(256))
+                assert value[7] == (b"", payload[:-1], payload, payload, ("rebuilt", protocol))
+                assert value[7][2] is value[7][3]
                 graph, small, wide, replaced, recursive = value[6]
                 assert graph["self"] is graph and graph["left"] is graph["right"]
                 assert graph["distinct"] == graph["left"] == {} and graph["distinct"] is not graph["left"]

@@ -94,6 +94,28 @@ pub(super) fn string(out: &mut Vec<u8>, protocol: u8, text: &str) -> Result<()> 
     Ok(())
 }
 
+pub(super) fn bytes(out: &mut Vec<u8>, protocol: u8, bytes: &[u8]) -> Result<()> {
+    let len = bytes.len();
+    if let Ok(short) = u8::try_from(len) {
+        out.extend([b'C', short]); // SHORT_BINBYTES
+    } else if let Ok(length) = u32::try_from(len) {
+        out.push(b'B'); // BINBYTES
+        out.extend(length.to_le_bytes());
+    } else if protocol >= 4 {
+        out.push(0x8e); // BINBYTES8
+        out.extend((len as u64).to_le_bytes());
+    } else {
+        return Err(Error::new(
+            "OverflowError",
+            "bytes object is too large to pickle with protocol 3",
+        ));
+    }
+    out.try_reserve(len)
+        .map_err(|_| crate::Error::allocation())?;
+    out.extend_from_slice(bytes);
+    Ok(())
+}
+
 pub(super) fn tuple_start(out: &mut Vec<u8>, protocol: u8, len: usize) {
     if protocol == 0 || (protocol == 1 && len > 0) || len > 3 {
         out.push(b'('); // MARK
