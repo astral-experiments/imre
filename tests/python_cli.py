@@ -1895,6 +1895,7 @@ def report(text):
             "boxed_itertools_permutations.py",
             "boxed_itertools_product.py",
             "boxed_itertools_groupby.py",
+            "boxed_itertools_filterfalse.py",
             "boxed_object_new.py",
             "boxed_module_type.py",
             "boxed_source_module_getattr.py",

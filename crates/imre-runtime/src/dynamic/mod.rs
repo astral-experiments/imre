@@ -2076,6 +2076,8 @@ impl Context {
                     "repeat",
                     "_cycle_allocate",
                     "_cycle_next",
+                    "_filterfalse_allocate",
+                    "_filterfalse_state",
                     "_chain_allocate",
                     "_chain_get",
                     "_chain_set",

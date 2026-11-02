@@ -1449,6 +1449,12 @@ pub(super) fn call(
     if name == "itertools._cycle_next" {
         return itertools::cycle_next(ctx, args, kwargs);
     }
+    if name == "itertools._filterfalse_allocate" {
+        return itertools::filterfalse_allocate(ctx, args, kwargs);
+    }
+    if name == "itertools._filterfalse_state" {
+        return itertools::filterfalse_state(ctx, args, kwargs);
+    }
     if name == "itertools._chain_allocate" {
         let [base, class, source] = args else {
             return Err(Error::new(

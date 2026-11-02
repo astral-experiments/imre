@@ -131,6 +131,43 @@ def _make_cycle(_allocate, _advance):
 cycle = _make_cycle(_itertools._cycle_allocate, _itertools._cycle_next)
 
 
+def _make_filterfalse(_allocate, _state):
+    class filterfalse:
+        """Yield items for which the predicate is false, testing items directly for None."""
+
+        __slots__ = ()
+
+        def __new__(cls, predicate, iterable, /, **kwargs):
+            if kwargs and getattr(cls, "__init__", None) is getattr(__class__, "__init__", None):
+                raise TypeError("filterfalse() takes no keyword arguments")
+            return _allocate(__class__, cls, bool if predicate is None else predicate, iterable)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            source, predicate = _state(__class__, self)
+            while True:
+                item = next(source)
+                if not predicate(item):
+                    return item
+
+        def __reduce__(self):
+            raise TypeError("cannot pickle 'filterfalse' object")
+
+        def __reduce_ex__(self, protocol, /):
+            if _index(protocol) < 2 or type(self).__reduce__ is not __class__.__reduce__:
+                return self.__reduce__()
+            name = "itertools.filterfalse" if type(self) is __class__ else type(self).__name__
+            raise TypeError(f"cannot pickle '{name}' object")
+
+    filterfalse.__qualname__ = "filterfalse"
+    return filterfalse
+
+
+filterfalse = _make_filterfalse(_itertools._filterfalse_allocate, _itertools._filterfalse_state)
+
+
 class _Combination:
     __slots__ = ("_pool", "_indices", "_stopped")
 
