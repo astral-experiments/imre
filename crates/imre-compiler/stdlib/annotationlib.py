@@ -10,6 +10,9 @@ __all__ = [
 ]
 
 
+_sentinel = object()
+
+
 class Format(enum.IntEnum):
     VALUE = 1
     VALUE_WITH_FAKE_GLOBALS = 2
@@ -321,6 +324,29 @@ class ForwardRef:
         if isinstance(cells, dict):
             return tuple(sorted((name, id(cell)) for name, cell in cells.items()))
         return id(cells)
+
+    def _evaluate(self, globalns, localns, type_params=_sentinel, *, recursive_guard):
+        import typing
+        import warnings
+
+        if type_params is _sentinel:
+            typing._deprecation_warning_for_no_type_params_passed(
+                "typing.ForwardRef._evaluate"
+            )
+            type_params = ()
+        warnings._deprecated(
+            "ForwardRef._evaluate",
+            "{name} is a private API and is retained for compatibility, but will be removed"
+            " in Python 3.16. Use ForwardRef.evaluate() or typing.evaluate_forward_ref() instead.",
+            remove=(3, 16),
+        )
+        return typing.evaluate_forward_ref(
+            self,
+            globals=globalns,
+            locals=localns,
+            type_params=type_params,
+            _recursive_guard=recursive_guard,
+        )
 
     def __eq__(self, other):
         if not isinstance(other, ForwardRef):
