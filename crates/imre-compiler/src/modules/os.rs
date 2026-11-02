@@ -149,6 +149,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "read" => Intrinsic::Fd(FdOperation::Read),
         "readinto" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readinto"),
         "pread" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.pread"),
+        "pwrite" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.pwrite"),
         "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),
