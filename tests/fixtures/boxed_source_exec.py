@@ -770,6 +770,48 @@ def exec_caller_namespaces():
     assert separate == {"result": 8}
 
 
+def source_set_displays():
+    events = []
+
+    def mark(value):
+        events.append(value)
+        return value
+
+    scope = {"mark": mark}
+    assert eval("{mark(1), *mark((1, 2)), *(), mark(3)}", scope) == {1, 2, 3}
+    assert events == [1, (1, 2), 3]
+
+    # A 30-element display evaluates the entire prefix. A 31-element display hashes as it goes.
+    for count, expected in ((28, [[]] + [1] * 28), (29, [[]])):
+        events.clear()
+        try:
+            eval("{mark([])," + "mark(1)," * count + "*mark(())}", scope)
+        except TypeError as error:
+            assert "unhashable type: 'list'" in str(error)
+        else:
+            raise AssertionError("accepted an unhashable set element")
+        assert events == expected, events
+
+    class Key:
+        def __init__(self, value):
+            self.value = value
+
+        def __hash__(self):
+            events.append(self.value)
+            return 1
+
+        def __eq__(self, other):
+            return True
+
+        def __del__(self):
+            events.append(-self.value)
+
+    scope["Key"] = Key
+    events.clear()
+    result = eval("{Key(1), Key(2), Key(3), *mark(())}", scope)
+    assert len(result) == 1 and events == [1, 2, -2, 3, -3, ()], events
+
+
 def starred_calls():
     events = []
 
@@ -967,6 +1009,7 @@ def caller_namespaces(argument):
 
 def current():
     starred_calls()
+    source_set_displays()
     caller_namespaces(3)
     source_eval()
     exec_caller_namespaces()

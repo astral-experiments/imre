@@ -5175,6 +5175,57 @@ impl Context {
         Ok(items)
     }
 
+    fn source_set_display(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        elements: &[ast::Expr],
+    ) -> Result<Id> {
+        // CPython's BUILD_SET batches leading operands only within its stack-use guideline.
+        let prefix_len = if elements.len() <= 30 {
+            elements
+                .iter()
+                .take_while(|item| !matches!(item, ast::Expr::Starred(_)))
+                .count()
+        } else {
+            0
+        };
+        let (prefix, rest) = elements.split_at(prefix_len);
+        let mark = self.heap.temporary_mark();
+        let mut keys = Vec::with_capacity(prefix_len);
+        for expr in prefix {
+            let operand = self.heap.temporary_mark();
+            let key = self.source_expr(code, scope, expr)?;
+            keys.push(self.keep_source_result(operand, key)?);
+        }
+        let result = self.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        // Pop keys in insertion order. A rejected duplicate may finalize before the next hash.
+        self.heap.release_temporaries_since(mark);
+        self.heap.keep(result);
+        for &key in keys.iter().rev() {
+            self.heap.keep(key);
+        }
+        for (index, key) in keys.into_iter().enumerate() {
+            builtins::set_add(self, result, key)?;
+            self.discard_truth(mark + prefix_len - index);
+        }
+        for expr in rest {
+            let operand = self.heap.temporary_mark();
+            if let ast::Expr::Starred(star) = expr {
+                let iterable = self.source_expr(code, scope, &star.value)?;
+                builtins::update_set(self, result, iterable)?;
+            } else {
+                let key = self.source_expr(code, scope, expr)?;
+                builtins::set_add(self, result, key)?;
+            }
+            self.discard_truth(operand);
+        }
+        Ok(result)
+    }
+
     fn extend_source_items(
         &mut self,
         args: &mut Vec<Id>,
@@ -5464,21 +5515,7 @@ impl Context {
                 };
                 self.source_eager_comprehension(code, scope, elt, generators, kind, targets)
             }
-            Expr::Set(display) => {
-                let items = display
-                    .elts
-                    .iter()
-                    .map(|item| eval(self, item))
-                    .collect::<Result<Vec<_>>>()?;
-                let result = self.alloc(Value::Set {
-                    entries: Default::default(),
-                    frozen: false,
-                });
-                for item in items {
-                    builtins::set_add(self, result, item)?;
-                }
-                Ok(result)
-            }
+            Expr::Set(display) => self.source_set_display(code, scope, &display.elts),
             Expr::Dict(v) => {
                 let result = self.dict(vec![]);
                 for item in &v.items {
