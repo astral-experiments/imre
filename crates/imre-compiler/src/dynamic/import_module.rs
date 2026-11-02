@@ -64,7 +64,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "pathlib/__init__.py",
             include_str!("../../stdlib/pathlib/__init__.py"),
         )),
-        "pathlib._os" => Some(("pathlib/_os.py", include_str!("../../stdlib/pathlib/_os.py"))),
+        "pathlib._os" => Some((
+            "pathlib/_os.py",
+            include_str!("../../stdlib/pathlib/_os.py"),
+        )),
         "glob" => Some(("glob.py", include_str!("../../stdlib/glob.py"))),
         "ntpath" => Some(("ntpath.py", include_str!("../../stdlib/ntpath.py"))),
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
