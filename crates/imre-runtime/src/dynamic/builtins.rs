@@ -1163,6 +1163,36 @@ pub(super) fn call(
             "module" => ctx.module_method(method, args, kwargs),
             "float" if method == "__getformat__" => float::getformat(ctx, args, kwargs),
             "float" if method == "as_integer_ratio" => float::as_integer_ratio(ctx, args, kwargs),
+            "getset_descriptor" if matches!(method, "__set__" | "__delete__") => {
+                if !kwargs.is_empty() {
+                    return Err(type_error(format!("wrapper {method}() takes no keyword arguments")));
+                }
+                let (required, message) = if method == "__set__" {
+                    (2, "__set__ expected 2 arguments")
+                } else {
+                    (1, "expected 1 argument")
+                };
+                let Some((&descriptor, values)) = args.split_first() else {
+                    return Err(type_error("expected an integer getset descriptor"));
+                };
+                if values.len() != required {
+                    return Err(type_error(format!("{message}, got {}", values.len())));
+                }
+                let Value::GetSetDescriptor { owner: "int", name: field, .. } = *ctx.heap.get(descriptor) else {
+                    return Err(type_error("expected an integer getset descriptor"));
+                };
+                if !ctx.builtin_slot_accepts(values[0], "int") {
+                    return Err(type_error(format!(
+                        "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
+                        ctx.type_name(values[0])
+                    )));
+                }
+                Err(Error::new(
+                    "AttributeError",
+                    format!("attribute '{field}' of 'int' objects is not writable"),
+                ))
+            }
+            "_int_getset" => integer::rational_field(ctx, method, args),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
             "int" if method == "from_bytes" => integer::from_bytes(ctx, args, kwargs),
             "int" if method == "to_bytes" => integer::to_bytes(ctx, args, kwargs),

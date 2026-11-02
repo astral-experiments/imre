@@ -1844,7 +1844,19 @@ impl Context {
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => &["__repr__"],
-            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"],
+            "int" => {
+                for field in ["numerator", "denominator"] {
+                    let get = self.builtin(&format!("_int_getset.{field}"));
+                    let descriptor = self.alloc(Value::GetSetDescriptor {
+                        owner: "int",
+                        name: field,
+                        get,
+                        set: None,
+                    });
+                    self.builtins.insert(format!("int.{field}"), descriptor);
+                }
+                &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__", "__repr__"]
+            }
             "float" => &["__format__", "__getformat__", "as_integer_ratio", "__repr__"],
             "bytes" => {
                 self.builtin("bytes.fromhex");

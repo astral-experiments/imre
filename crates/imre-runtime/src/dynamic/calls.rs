@@ -1680,6 +1680,18 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if matches!(name, "numerator" | "denominator") {
+            let receiver = match self.heap.get(obj) {
+                Value::Int(_) | Value::Bool(_) => Some(obj),
+                Value::Native(kind) if matches!(kind.as_str(), "int" | "bool") => Some(NONE),
+                _ => None,
+            };
+            if let Some(receiver) = receiver {
+                let owner = self.builtin("int");
+                let descriptor = self.own_class_attr(owner, name).unwrap();
+                return self.bind_attribute(descriptor, receiver, owner);
+            }
+        }
         if self.heap.get(obj).native_io_class_name() == Some("_io.BufferedReader") {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name)
@@ -2449,20 +2461,25 @@ impl Context {
             }
             Value::GetSetDescriptor {
                 owner, name: field, ..
-            } if HashState::is_provider_class(owner)
+            } if owner == "int"
+                || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
             {
                 match name {
                     "__objclass__" => return Ok(self.builtin(owner)),
                     "__name__" => return Ok(self.text(field)),
+                    "__doc__" if owner == "int" => {
+                        return Ok(self.text(format!("the {field} of a rational number in lowest terms")));
+                    }
                     "__qualname__" => {
                         return Ok(
-                            self.text(format!("{}.{field}", owner.rsplit_once('.').unwrap().1))
+                            self.text(format!("{}.{field}", owner.rsplit('.').next().unwrap()))
                         );
                     }
-                    "__get__" => {
-                        let get = self.builtin("getset_descriptor.__get__");
+                    "__get__" | "__set__" | "__delete__" if name == "__get__" || owner == "int" => {
+                        let symbol = format!("getset_descriptor.{name}");
+                        let get = self.builtin(&symbol);
                         return Ok(self.alloc(Value::Method {
                             callable: get,
                             receiver: obj,
@@ -3886,6 +3903,12 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        if matches!(name, "numerator" | "denominator")
+            && matches!(self.heap.get(obj), Value::Int(_) | Value::Bool(_))
+        {
+            let owner = self.builtin("int");
+            return self.own_class_attr(owner, name);
+        }
         if let Value::NamedTuple {
             class: Some(owner), ..
         } = *self.heap.get(obj)
@@ -5016,6 +5039,8 @@ impl Context {
                             | "bool.__repr__"
                             | "float.__repr__"
                             | "float.as_integer_ratio"
+                            | "getset_descriptor.__set__"
+                            | "getset_descriptor.__delete__"
                     )
                     || !name.contains('.')
                     || matches!(
@@ -5033,6 +5058,7 @@ impl Context {
                                 | "mappingproxy"
                                 | "set"
                                 | "int"
+                                | "_int_getset"
                                 | "frozenset"
                                 | "tuple"
                                 | "bytes"

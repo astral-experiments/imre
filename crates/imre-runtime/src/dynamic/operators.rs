@@ -2594,7 +2594,8 @@ impl Context {
                 format!("{variance}{}", self.display(var.name))
             }
             Value::GetSetDescriptor { owner, name, .. }
-                if crate::objects::HashState::is_provider_class(owner)
+                if *owner == "int"
+                    || crate::objects::HashState::is_provider_class(owner)
                     || *owner == super::value::TEMPLATE_TYPE
                     || stdlib::datetime::members(owner).is_some() =>
             {
