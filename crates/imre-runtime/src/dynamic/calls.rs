@@ -2520,6 +2520,9 @@ impl Context {
             Value::RegexPattern(ref pattern) if name == "groups" => {
                 return Ok(self.int(pattern.group_count() as i64));
             }
+            Value::RegexPattern(ref pattern) if name == "groupindex" => {
+                return pattern.clone().group_index(self);
+            }
             Value::RegexPattern(ref pattern) if name == "pattern" => {
                 return Ok(pattern.source);
             }
