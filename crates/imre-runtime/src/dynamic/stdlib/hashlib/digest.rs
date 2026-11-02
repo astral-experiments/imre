@@ -154,17 +154,10 @@ pub(in crate::dynamic) fn construct(
             return Err(Error::new("ValueError", "embedded null character"));
         }
         let canonical = HashState::provider(name)
-            .map_err(Error::from)
-            .and_then(|provider| {
-                if NAMES.contains(&provider.name) {
-                    Ok(provider.name)
-                } else {
-                    Err(Error::new(
-                        "ValueError",
-                        format!("unsupported hash type {name}"),
-                    ))
-                }
-            });
+            .ok()
+            .map(|provider| provider.name)
+            .filter(|name| NAMES.contains(name))
+            .ok_or(id);
         (canonical, data, flag, string)
     } else {
         let name = NAMES
@@ -187,8 +180,17 @@ pub(in crate::dynamic) fn construct(
         .transpose()?
         .unwrap_or_default();
     let provider = openssl::required()?;
-    let name = name?;
-    let digest = provider.digest_with_security(name, used)?;
+    let lookup = match name {
+        Ok(name) => name,
+        Err(id) => ctx.str_value(id)?,
+    };
+    let digest = provider.digest_with_security(lookup, used)?;
+    let name = name.map_err(|_| {
+        Error::new(
+            super::UNSUPPORTED_DIGEST,
+            format!("unsupported hash type {lookup}"),
+        )
+    })?;
     let mut hash = openssl::Stream::new(name, &digest)?;
     if !data.is_empty() {
         hash.update(data)?;

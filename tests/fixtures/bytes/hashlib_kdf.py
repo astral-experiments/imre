@@ -17,10 +17,22 @@ def current():
     assert type(key) is bytes and key == bytes.fromhex("92967dbecf561331d08f7e43e4bcd97f")
     try:
         pbkdf2_hmac("missing-digest", b"pass", b"salt", 1)
-    except ValueError:
-        pass
+    except ValueError as error:
+        assert type(error) is _hashlib.UnsupportedDigestmodError
+        assert "unsupported" in str(error)
     else:
         raise AssertionError("PBKDF2 accepted an unknown digest")
+    for name, expected in [
+        ("sha256\0suffix", ValueError),
+        ("\ud800", UnicodeEncodeError),
+        (None, TypeError),
+    ]:
+        try:
+            pbkdf2_hmac(name, b"pass", b"salt", 1)
+        except Exception as error:
+            assert type(error) is expected
+        else:
+            raise AssertionError("invalid digest name accepted")
 
     if hasattr(_hashlib, "scrypt"):
         from hashlib import scrypt

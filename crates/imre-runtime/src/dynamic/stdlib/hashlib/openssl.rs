@@ -153,7 +153,11 @@ impl Provider {
             (self.clear)();
             (self.fetch)(ptr::null_mut(), native_name.as_ptr(), properties)
         })
-        .ok_or_else(|| self.error(&format!("unsupported hash type {name}")))?;
+        .ok_or_else(|| {
+            let mut error = self.error(&format!("unsupported hash type {name}"));
+            error.kind = super::UNSUPPORTED_DIGEST.into();
+            error
+        })?;
         Ok(Digest { provider: self, md })
     }
 

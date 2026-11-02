@@ -7,8 +7,25 @@ pub(crate) mod digest;
 mod kdf;
 pub(crate) mod openssl;
 
+const UNSUPPORTED_DIGEST: &str = "_hashlib.UnsupportedDigestmodError";
+
 pub(in crate::dynamic) fn install_openssl(ctx: &mut Context, scope: Id) -> Result<()> {
     let provider = openssl::required()?;
+    let class = if let Some(&class) = ctx.builtins.get(UNSUPPORTED_DIGEST) {
+        class
+    } else {
+        let fields = ctx.scope("_hashlib", None);
+        let module = ctx.text("_hashlib");
+        ctx.bind(fields, "__module__", module);
+        let name = ctx.text("UnsupportedDigestmodError");
+        ctx.bind(fields, "__qualname__", name);
+        ctx.bind(fields, "__doc__", NONE);
+        let base = ctx.builtin("ValueError");
+        let class = ctx.allocate_class("UnsupportedDigestmodError".into(), fields, vec![base])?;
+        ctx.builtins.insert(UNSUPPORTED_DIGEST.into(), class);
+        class
+    };
+    ctx.bind(scope, "UnsupportedDigestmodError", class);
     for name in ["HASH", "new", "get_fips_mode", "pbkdf2_hmac", "scrypt"] {
         if name != "scrypt" || provider.has_scrypt() {
             let function = ctx.builtin(&format!("_hashlib.{name}"));
@@ -58,6 +75,12 @@ pub(super) fn call_openssl(
         }
         _ => digest::construct(ctx, name, args, kwargs),
     }
+    .map_err(|mut error| {
+        if error.kind == UNSUPPORTED_DIGEST && error.class == NONE {
+            error.class = ctx.builtins[UNSUPPORTED_DIGEST];
+        }
+        error
+    })
 }
 
 /// Borrows the bytes of a boxed hash input, including mutable buffers.
