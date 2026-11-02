@@ -44,6 +44,8 @@ The previous Imre build and `8596d21f` compiled the same Python source from revi
 
 With the standard builds, the median within-round Imre/Rust routing time ratio was **0.866 (0.851–0.878)**. Parentheses give the 95% paired bootstrap interval. With ThinLTO enabled for both runtimes the ratio was 0.837 (0.825–0.846). After the full CLI suite, a separate 24-round run measured 114.15 ms for Imre and 134.03 ms for Rust, a ratio of 0.868 (0.848–0.877). All builds used the system allocator.
 
+After merging the benchmark changes with `main`, Imre at `cb3dd64e` loaded the graph and found the four routes in **111.41 ms**, compared with **131.73 ms** for the same Rust executable. The original Imre binary from `8596d21f` also ran in each of the 24 paired rounds. The median Imre/Rust ratio was 0.842 (0.834–0.864, 95% paired bootstrap interval). [Integration run, including all samples and activity windows](../results/road-routing-integration.json)
+
 Imre reads short lines from the validated UTF-8 buffer and keeps their bytes in local slots when every use can consume them there. Longer lines keep an owning string. The numeric-field cache recognizes short ASCII decimals and defers other fields to Python’s conversion at the original subscript. The compiler also borrows fixed-size integer-list buffers and allocates private rows in batches. Median peak process memory across six separate runs was 14.2 MiB for Imre, 16.1 MiB for the previous build and 41.6 MiB for Rust.
 
 Each of the other CLI workloads ran in 12 alternating pairs. Ratios below 1 indicate a shorter elapsed time on `8596d21f`.

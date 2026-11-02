@@ -20,9 +20,9 @@ caches. Imre and CPython run the same Python. The catalog also shows uv’s
 original CPython implementation. The source search prints every matching line
 number, wheel verification checks every member listed in RECORD, and the route
 timing includes loading the graph. Each implementation must reproduce the
-reference output. In 40 paired rounds, the unchanged Python program loaded the
-New York graph and found four routes in 113 ms on Imre at `8596d21f`, down from
-157 ms in the preceding build. Rust took 130 ms.
+reference output. In a separate 24-round check, the unchanged Python program
+loaded the New York graph and found four routes in 111 ms on Imre at `cb3dd64e`.
+Rust took 132 ms.
 [Workloads, raw samples and reproduction steps](benchmarks/applications/README.md)
 
 <p align="center">

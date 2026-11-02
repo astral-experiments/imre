@@ -1,0 +1,715 @@
+{
+  "description": "Quiet-machine replay of the New York graph workload after integrating the original benchmark patch with main. Each binary loads the same graph. The routes case also runs all four Dijkstra queries. All attempts are retained in execution order. The measured binary is the original PR build, and candidate is the integrated compiler.",
+  "measured_revision": "8596d21f8ca68e167c87f0009f676655f89d6548",
+  "summary_method": "Median elapsed milliseconds from the first accepted batch. The interval is the percentile bootstrap over 20,000 resamples of the 24 within-round candidate/Rust ratios, using seed 91763.",
+  "sources_sha256": {
+    "examples/road_routing.py": "be6c3d8d1ef4aea4b596e6fc7770c1bd8923b2368cd3997843675796ab03489a",
+    "examples/route_planner.py": "e8cb19bd745d8ebacfc7b43c967b3657aef7506df804e7c643da4be4ad23a163",
+    "benchmarks/applications/roads.rs": "ef6f9cb064db2b9436bafb3242741ec0061d84bae77463b93667f65029f03232",
+    "benchmarks/applications/Cargo.lock": "6260717254f6488f8ddca1367909af8df4694300e7fcbb1b16e56a0e95ec5060"
+  },
+  "summary": {
+    "load": {
+      "median_ms": {
+        "measured": 63.343,
+        "candidate": 62.2414,
+        "rust": 86.5315
+      },
+      "median_paired_candidate_rust_ratio": 0.7237088481168006,
+      "paired_bootstrap_95pct": [
+        0.7153038149899854,
+        0.7349648537269994
+      ]
+    },
+    "routes": {
+      "median_ms": {
+        "measured": 114.1423,
+        "candidate": 111.4118,
+        "rust": 131.7323
+      },
+      "median_paired_candidate_rust_ratio": 0.8419956037416506,
+      "paired_bootstrap_95pct": [
+        0.8343715460937764,
+        0.8636190614022701
+      ]
+    }
+  },
+  "host": "charlie-ohm-perf-1022",
+  "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39",
+  "cpu": 13,
+  "date": "2026-11-02T15:43:29.345413+00:00",
+  "graph": "37f5b3eff82330850466956b6c036a8ab8551512bdc7509edca1d4c6cf943fa3",
+  "queries": [
+    "1,12637",
+    "120000,230000",
+    "264346,4321",
+    "63789,130000"
+  ],
+  "maximum_peer_busy_pct": 2,
+  "kernel": "7.0.0-38-generic",
+  "revision": "cb3dd64e8865b013d38ac98461f55caa131236b3",
+  "programs": {
+    "measured": {
+      "command": "road-perf/deploy/road3-production/roads",
+      "sha256": "6f69fe05c7e69148b227b1a13bbbf93c59f91bed17318060aae40ed663c3a2c8"
+    },
+    "candidate": {
+      "command": "publish-4252/roads-cb3dd64e",
+      "sha256": "2c2bed80cd67ef4908d7dc2cdc8d46838830e991d9f5efcf8d1370f0104d5941"
+    },
+    "rust": {
+      "command": "build/target/release/road-routing",
+      "sha256": "eb3053652f0be3dbebf2b660707bb5561667bf54ca707cc6771f7175b4ea0d76"
+    }
+  },
+  "cases": {
+    "load": [
+      {
+        "before": {
+          "selected": {
+            "busy_pct": 1.67,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 6.52,
+            "steal_pct": 0.0
+          }
+        },
+        "warmups_ns": {
+          "measured": 238103124,
+          "candidate": 92840264,
+          "rust": 195267314
+        },
+        "expected_sha256": "6bd6c1ed761d2703a969c8033ea59b81967bf2a2afaa1adbc5e33f742ca055f5",
+        "samples_ns": [
+          {
+            "candidate": 105094521,
+            "rust": 107814910,
+            "measured": 66567639
+          },
+          {
+            "rust": 89744235,
+            "measured": 64876278,
+            "candidate": 62547391
+          },
+          {
+            "measured": 63268683,
+            "candidate": 61724927,
+            "rust": 86492817
+          },
+          {
+            "rust": 86163114,
+            "measured": 63955353,
+            "candidate": 62730641
+          },
+          {
+            "measured": 63038454,
+            "candidate": 61806871,
+            "rust": 85352504
+          },
+          {
+            "candidate": 62999914,
+            "rust": 85918117,
+            "measured": 64585046
+          },
+          {
+            "rust": 86431082,
+            "measured": 63615059,
+            "candidate": 61015115
+          },
+          {
+            "measured": 62068998,
+            "candidate": 61151389,
+            "rust": 85915874
+          },
+          {
+            "candidate": 63542213,
+            "rust": 85587521,
+            "measured": 63133091
+          },
+          {
+            "candidate": 62689042,
+            "rust": 85806179,
+            "measured": 63548985
+          },
+          {
+            "rust": 85713794,
+            "measured": 63503821,
+            "candidate": 61796832
+          },
+          {
+            "measured": 66438508,
+            "candidate": 62327700,
+            "rust": 87148591
+          },
+          {
+            "candidate": 62649771,
+            "rust": 88500078,
+            "measured": 64310835
+          },
+          {
+            "rust": 88249371,
+            "measured": 67021044,
+            "candidate": 65098302
+          },
+          {
+            "measured": 64892348,
+            "candidate": 156662687,
+            "rust": 206591882
+          },
+          {
+            "rust": 91567661,
+            "measured": 68438745,
+            "candidate": 67438983
+          },
+          {
+            "measured": 64377961,
+            "candidate": 62710885,
+            "rust": 88216308
+          },
+          {
+            "candidate": 63060165,
+            "rust": 86365350,
+            "measured": 64095765
+          },
+          {
+            "rust": 85787986,
+            "candidate": 63045138,
+            "measured": 62977461
+          },
+          {
+            "candidate": 62143928,
+            "measured": 62549504,
+            "rust": 87624786
+          },
+          {
+            "measured": 63742758,
+            "rust": 86057307,
+            "candidate": 61862003
+          },
+          {
+            "rust": 84818600,
+            "candidate": 64665266,
+            "measured": 64115422
+          },
+          {
+            "candidate": 61560682,
+            "measured": 62746742,
+            "rust": 85347794
+          },
+          {
+            "measured": 63860446,
+            "rust": 91838556,
+            "candidate": 63562591
+          }
+        ],
+        "during": {
+          "selected": {
+            "busy_pct": 100.0,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 6.41,
+            "steal_pct": 0.0
+          }
+        },
+        "after": {
+          "selected": {
+            "busy_pct": 1.33,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 5.07,
+            "steal_pct": 0.0
+          }
+        },
+        "accepted": false
+      },
+      {
+        "before": {
+          "selected": {
+            "busy_pct": 2.68,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 2.29,
+            "steal_pct": 0.0
+          }
+        },
+        "warmups_ns": {
+          "measured": 110745919,
+          "candidate": 64611185,
+          "rust": 119208275
+        },
+        "expected_sha256": "6bd6c1ed761d2703a969c8033ea59b81967bf2a2afaa1adbc5e33f742ca055f5",
+        "samples_ns": [
+          {
+            "candidate": 105328607,
+            "rust": 126694880,
+            "measured": 67841393
+          },
+          {
+            "rust": 93296253,
+            "measured": 64703681,
+            "candidate": 64934015
+          },
+          {
+            "measured": 63461012,
+            "candidate": 62954808,
+            "rust": 90984145
+          },
+          {
+            "rust": 92477466,
+            "measured": 63955222,
+            "candidate": 63623054
+          },
+          {
+            "measured": 72458853,
+            "candidate": 77824615,
+            "rust": 87646987
+          },
+          {
+            "candidate": 64942486,
+            "rust": 246839729,
+            "measured": 112588741
+          },
+          {
+            "rust": 117802355,
+            "measured": 64562293,
+            "candidate": 64574736
+          },
+          {
+            "measured": 65812913,
+            "candidate": 63079311,
+            "rust": 87355414
+          },
+          {
+            "candidate": 64848828,
+            "rust": 87138310,
+            "measured": 63783471
+          },
+          {
+            "candidate": 62775855,
+            "rust": 87167525,
+            "measured": 62752430
+          },
+          {
+            "rust": 86586843,
+            "measured": 64401294,
+            "candidate": 62551949
+          },
+          {
+            "measured": 63197121,
+            "candidate": 62617170,
+            "rust": 89324888
+          },
+          {
+            "candidate": 64986924,
+            "rust": 88103258,
+            "measured": 64114950
+          },
+          {
+            "rust": 90180578,
+            "measured": 64391456,
+            "candidate": 64083310
+          },
+          {
+            "measured": 62602734,
+            "candidate": 63582436,
+            "rust": 87782680
+          },
+          {
+            "rust": 88623682,
+            "measured": 63122330,
+            "candidate": 62820218
+          },
+          {
+            "measured": 67268215,
+            "candidate": 62308755,
+            "rust": 91882057
+          },
+          {
+            "candidate": 83040614,
+            "rust": 86183201,
+            "measured": 62674076
+          },
+          {
+            "rust": 86437333,
+            "candidate": 63071977,
+            "measured": 63389629
+          },
+          {
+            "candidate": 62916477,
+            "measured": 63977995,
+            "rust": 88764571
+          },
+          {
+            "measured": 151179443,
+            "rust": 233526086,
+            "candidate": 63957066
+          },
+          {
+            "rust": 86462963,
+            "candidate": 76239193,
+            "measured": 69199903
+          },
+          {
+            "candidate": 64649507,
+            "measured": 63440343,
+            "rust": 86722717
+          },
+          {
+            "measured": 66578960,
+            "rust": 90440327,
+            "candidate": 62893183
+          }
+        ],
+        "during": {
+          "selected": {
+            "busy_pct": 100.0,
+            "steal_pct": 0.17
+          },
+          "other_cpus": {
+            "busy_pct": 6.1,
+            "steal_pct": 0.0
+          }
+        },
+        "after": {
+          "selected": {
+            "busy_pct": 4.33,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 5.68,
+            "steal_pct": 0.0
+          }
+        },
+        "accepted": false
+      },
+      {
+        "before": {
+          "selected": {
+            "busy_pct": 1.99,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 0.25,
+            "steal_pct": 0.0
+          }
+        },
+        "warmups_ns": {
+          "measured": 63585464,
+          "candidate": 61597881,
+          "rust": 85946720
+        },
+        "expected_sha256": "6bd6c1ed761d2703a969c8033ea59b81967bf2a2afaa1adbc5e33f742ca055f5",
+        "samples_ns": [
+          {
+            "candidate": 88188617,
+            "rust": 97963296,
+            "measured": 63990699
+          },
+          {
+            "rust": 85939497,
+            "measured": 64020864,
+            "candidate": 63845568
+          },
+          {
+            "measured": 63828327,
+            "candidate": 63139343,
+            "rust": 87039025
+          },
+          {
+            "rust": 86765206,
+            "measured": 63762393,
+            "candidate": 61623669
+          },
+          {
+            "measured": 63477463,
+            "candidate": 63121008,
+            "rust": 85218655
+          },
+          {
+            "candidate": 62161311,
+            "rust": 329355537,
+            "measured": 102478457
+          },
+          {
+            "rust": 88749142,
+            "measured": 66194835,
+            "candidate": 67023568
+          },
+          {
+            "measured": 63006495,
+            "candidate": 61928196,
+            "rust": 85772707
+          },
+          {
+            "candidate": 62872996,
+            "rust": 85249913,
+            "measured": 63384569
+          },
+          {
+            "candidate": 62642537,
+            "rust": 86020177,
+            "measured": 64467558
+          },
+          {
+            "rust": 97987040,
+            "measured": 63301383,
+            "candidate": 62321420
+          },
+          {
+            "measured": 62394114,
+            "candidate": 61794147,
+            "rust": 86145180
+          },
+          {
+            "candidate": 61933917,
+            "rust": 84997572,
+            "measured": 62903223
+          },
+          {
+            "rust": 86022752,
+            "measured": 63181420,
+            "candidate": 62044815
+          },
+          {
+            "measured": 61621584,
+            "candidate": 60985521,
+            "rust": 85388871
+          },
+          {
+            "rust": 92792807,
+            "measured": 62619824,
+            "candidate": 61719356
+          },
+          {
+            "measured": 62799811,
+            "candidate": 61860800,
+            "rust": 85012681
+          },
+          {
+            "candidate": 61996735,
+            "rust": 86671892,
+            "measured": 63272821
+          },
+          {
+            "rust": 86560814,
+            "candidate": 63619156,
+            "measured": 63425577
+          },
+          {
+            "candidate": 63576477,
+            "measured": 62913182,
+            "rust": 85990953
+          },
+          {
+            "measured": 62894997,
+            "rust": 87603808,
+            "candidate": 63062309
+          },
+          {
+            "rust": 86730120,
+            "candidate": 63797810,
+            "measured": 62475385
+          },
+          {
+            "candidate": 61355158,
+            "measured": 67825453,
+            "rust": 86930213
+          },
+          {
+            "measured": 64815616,
+            "rust": 86502127,
+            "candidate": 61460866
+          }
+        ],
+        "during": {
+          "selected": {
+            "busy_pct": 100.0,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 0.58,
+            "steal_pct": 0.0
+          }
+        },
+        "after": {
+          "selected": {
+            "busy_pct": 0.0,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 0.1,
+            "steal_pct": 0.0
+          }
+        },
+        "accepted": true
+      }
+    ],
+    "routes": [
+      {
+        "before": {
+          "selected": {
+            "busy_pct": 0.0,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 0.25,
+            "steal_pct": 0.0
+          }
+        },
+        "warmups_ns": {
+          "measured": 294435525,
+          "candidate": 113100514,
+          "rust": 251409943
+        },
+        "expected_sha256": "61730c3f11848b5937b271a5e9aaf57bee3f190c3ce46a139569fdf8fe0286a1",
+        "samples_ns": [
+          {
+            "candidate": 112633776,
+            "rust": 134866594,
+            "measured": 118187592
+          },
+          {
+            "rust": 134881150,
+            "measured": 115980782,
+            "candidate": 114150482
+          },
+          {
+            "measured": 114462702,
+            "candidate": 112318279,
+            "rust": 275428907
+          },
+          {
+            "rust": 260076127,
+            "measured": 119979721,
+            "candidate": 109036244
+          },
+          {
+            "measured": 115249969,
+            "candidate": 108497419,
+            "rust": 130986825
+          },
+          {
+            "candidate": 111091422,
+            "rust": 130160075,
+            "measured": 113890188
+          },
+          {
+            "rust": 132302237,
+            "measured": 112978427,
+            "candidate": 111568251
+          },
+          {
+            "measured": 112599693,
+            "candidate": 110766618,
+            "rust": 127349280
+          },
+          {
+            "candidate": 110590469,
+            "rust": 129592148,
+            "measured": 112458910
+          },
+          {
+            "candidate": 109560300,
+            "rust": 133266212,
+            "measured": 112882750
+          },
+          {
+            "rust": 127420943,
+            "measured": 113853499,
+            "candidate": 116321244
+          },
+          {
+            "measured": 112536476,
+            "candidate": 108234208,
+            "rust": 356042583
+          },
+          {
+            "candidate": 167747929,
+            "rust": 177369283,
+            "measured": 118631438
+          },
+          {
+            "rust": 129708615,
+            "measured": 113211753,
+            "candidate": 109047074
+          },
+          {
+            "measured": 113845033,
+            "candidate": 109281320,
+            "rust": 130579008
+          },
+          {
+            "rust": 128480396,
+            "measured": 120148140,
+            "candidate": 113884706
+          },
+          {
+            "measured": 114653978,
+            "candidate": 245110743,
+            "rust": 314800433
+          },
+          {
+            "candidate": 119962287,
+            "rust": 136749081,
+            "measured": 123600125
+          },
+          {
+            "rust": 133809004,
+            "candidate": 112457799,
+            "measured": 123220137
+          },
+          {
+            "candidate": 121540758,
+            "measured": 114878828,
+            "rust": 129199897
+          },
+          {
+            "measured": 113454815,
+            "rust": 131162353,
+            "candidate": 109817959
+          },
+          {
+            "rust": 128751512,
+            "candidate": 111656335,
+            "measured": 114394336
+          },
+          {
+            "candidate": 111255438,
+            "measured": 113397489,
+            "rust": 128824667
+          },
+          {
+            "measured": 112816317,
+            "rust": 133693218,
+            "candidate": 109595997
+          }
+        ],
+        "during": {
+          "selected": {
+            "busy_pct": 100.0,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 0.87,
+            "steal_pct": 0.0
+          }
+        },
+        "after": {
+          "selected": {
+            "busy_pct": 0.66,
+            "steal_pct": 0.0
+          },
+          "other_cpus": {
+            "busy_pct": 0.45,
+            "steal_pct": 0.0
+          }
+        },
+        "accepted": true
+      }
+    ]
+  }
+}
