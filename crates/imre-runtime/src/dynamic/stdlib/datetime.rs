@@ -34,7 +34,14 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
         "datetime.date" => (
             "datetime.date",
             &FIELDS[..3],
-            &["__repr__", "__str__", "toordinal", "weekday", "timetuple"],
+            &[
+                "__format__",
+                "__repr__",
+                "__str__",
+                "toordinal",
+                "weekday",
+                "timetuple",
+            ],
         ),
         "datetime.datetime" => (
             "datetime.datetime",
@@ -44,7 +51,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
         "datetime.time" => (
             "datetime.time",
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
-            &["__repr__", "__str__"],
+            &["__format__", "__repr__", "__str__"],
         ),
         "datetime.timedelta" => (
             "datetime.timedelta",
@@ -392,6 +399,42 @@ pub(super) fn call(
                 Calendar::datetime(fields, zone(ctx, tz)?.as_ref())?
             };
             Ok(store(ctx, result, tz))
+        }
+        "date.__format__" | "time.__format__" => {
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "__format__() takes no keyword arguments",
+                ));
+            }
+            let [receiver, spec] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__format__() takes exactly 1 argument ({} given)",
+                        args.len().saturating_sub(1)
+                    ),
+                ));
+            };
+            let storage = ctx.string_storage(*spec).ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "__format__() argument 1 must be str, not {}",
+                        if *spec == NONE {
+                            "None"
+                        } else {
+                            ctx.type_name(*spec)
+                        }
+                    ),
+                )
+            })?;
+            if ctx.truth(storage)? {
+                let strftime = ctx.lookup_attr(*receiver, "strftime")?;
+                return ctx.call(strftime, vec![*spec], vec![]);
+            }
+            let string = ctx.builtin("str");
+            ctx.call(string, vec![*receiver], vec![])
         }
         "date.__repr__"
         | "datetime.__repr__"
