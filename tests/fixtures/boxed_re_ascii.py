@@ -95,6 +95,16 @@ def current():
     print(re.search(grouped, "αβ").group("letter"))
     names = re.match(rb"(?P<z>a)(b)?(?P<a>x)?$", b"a")
     default = []
+    assert list(names.re.groupindex.items()) == [("z", 1), ("a", 3)]
+    try:
+        names.re.groupindex["a"] = 2
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("groupindex allowed assignment")
+    unnamed = re.compile(r"(x)$")
+    unnamed.groupindex["extra"] = 1
+    assert unnamed.groupindex == {}
     values = names.groupdict(default=default)
     assert list(values) == ["z", "a"]
     assert values["z"] == b"a" and values["a"] is default
