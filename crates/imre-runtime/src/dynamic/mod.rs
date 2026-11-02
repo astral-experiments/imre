@@ -920,7 +920,7 @@ impl Context {
         self.raised_error_matches(error, stop)
     }
 
-    fn reverse_sequence_len(&mut self, source: Id) -> Result<usize> {
+    fn sequence_len(&mut self, source: Id) -> Result<usize> {
         let size = builtins::call(self, "len", &[source], &[])?;
         self.as_int(size)?
             .to_i64()
@@ -2850,7 +2850,14 @@ impl Context {
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
-                for name in ["get_terminal_size", "lockf", "posix_fadvise", "ptsname", "splice"] {
+                for name in [
+                    "get_terminal_size",
+                    "lockf",
+                    "posix_fadvise",
+                    "ptsname",
+                    "readv",
+                    "splice",
+                ] {
                     let function = self.builtin(&format!("posix.{name}"));
                     self.bind(scope, name, function);
                 }
@@ -2938,6 +2945,7 @@ impl Context {
                     for attr in [
                         "get_terminal_size",
                         "ptsname",
+                        "readv",
                         "O_NOCTTY",
                         "splice",
                         "SPLICE_F_MOVE",

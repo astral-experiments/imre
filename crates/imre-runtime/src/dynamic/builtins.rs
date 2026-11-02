@@ -2090,7 +2090,7 @@ pub(super) fn call(
                             | Value::Tuple(_)
                     ))
             {
-                let remaining = ctx.reverse_sequence_len(object)?;
+                let remaining = ctx.sequence_len(object)?;
                 return Ok(ctx.alloc(Value::ReverseSequence {
                     source: Some(object),
                     remaining,

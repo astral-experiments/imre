@@ -303,7 +303,7 @@ impl Context {
         }
         if let Value::ReverseSequence { source, remaining } = *self.heap.get(value) {
             let hint = match source {
-                Some(seq) if remaining != 0 && remaining <= self.reverse_sequence_len(seq)? => {
+                Some(seq) if remaining != 0 && remaining <= self.sequence_len(seq)? => {
                     remaining
                 }
                 _ => 0,

@@ -79,6 +79,37 @@ def check_copy_file_range():
             raise AssertionError("negative count was accepted")
 
 
+def check_readv():
+    from os import readv
+
+    assert readv is os.readv is posix.readv
+    with tempfile.TemporaryFile() as source:
+        fd = source.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        first, last = bytearray(b".."), bytearray(b"....")
+        assert readv(fd, [first, last]) == 5
+        assert (first, last) == (b"bc", b"def.")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 6
+        assert readv(fd, [last]) == 0
+        assert readv(fd, []) == 0
+        os.lseek(fd, 0, os.SEEK_SET)
+        storage = bytearray(b"......")
+        view = memoryview(storage)
+        assert readv(fd, (view[:3], view[1:4])) == 6
+        assert storage == b"adef.."
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            readv(fd, [first, b"readonly"])
+        except BufferError:
+            pass
+        else:
+            raise AssertionError("readv accepted a read-only buffer")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 0
+        first.append(0)
+    expect_errno(readv, (fd, [first]), errno.EBADF)
+
+
 def check_splice():
     from os import splice
 
@@ -112,6 +143,7 @@ def current():
         check_copy_file_range()
         check_sendfile()
         check_splice()
+        check_readv()
     assert os.strerror is posix.strerror
     try:
         os.fstat(-1)
