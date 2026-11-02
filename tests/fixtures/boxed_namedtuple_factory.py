@@ -31,6 +31,22 @@ def layout_read_allocation():
 
 
 def current():
+    from annotationlib import Format
+    from typing import NamedTuple
+
+    Typed = NamedTuple("Typed", [("x", int), ("tag", None)])
+    assert Typed.__module__ == __name__
+    assert Typed.__orig_bases__ == (NamedTuple,)
+    assert Typed.__annotations__ is Typed.__new__.__annotations__
+    assert Typed.__annotate__(Format.STRING) == {"x": "int", "tag": "NoneType"}
+    assert Typed(tag=None, x=3) == (3, None)
+
+    class Declared(NamedTuple):
+        label: str
+
+    assert Declared.__orig_bases__ == (NamedTuple,)
+    assert Declared("kept").label == "kept"
+
     assert namedtuple.__module__ == "collections" and namedtuple.__name__ == "namedtuple"
     assert type(namedtuple) is type(current)
     assert ">>> Point =" in namedtuple.__doc__
