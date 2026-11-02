@@ -265,6 +265,52 @@ class product:
         return result
 
 
+class _AccumulateState:
+    __slots__ = ("source", "func", "total", "started", "pending")
+
+    def __init__(self, iterable, func, initial):
+        self.source = iter(iterable)
+        self.func = func
+        self.total = initial
+        self.pending = initial is not None
+        self.started = self.pending
+
+    def advance(self):
+        if self.pending:
+            self.pending = False
+            return self.total
+        item = next(self.source)
+        if self.started:
+            item = self.total + item if self.func is None else self.func(self.total, item)
+        self.total = item
+        self.started = True
+        return item
+
+
+class accumulate:
+    """Return series of accumulated sums (or other binary function results)."""
+
+    __slots__ = ()
+
+    def __new__(cls, /, iterable, func=None, *, initial=None):
+        if not issubclass(cls, __class__):
+            raise TypeError("expected an accumulate subclass")
+        state = _AccumulateState(iterable, func, initial)
+        self = object.__new__(cls)
+        _accumulate_state.__set__(self, state)
+        return self
+
+    def __init__(self, *args, **kwargs):
+        if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+            object.__init__(self, *args, **kwargs)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return _accumulate_state.__get__(self).advance()
+
+
 class batched:
     """Batch data into tuples of length n. The last batch may be shorter than n.
 
