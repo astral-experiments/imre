@@ -1038,9 +1038,15 @@ pub(super) fn call(
         }
         if method == "__ne__" {
             let [other] = rest else {
-                return Err(type_error(format!("expected 1 argument, got {}", rest.len())));
+                return Err(type_error(format!(
+                    "expected 1 argument, got {}",
+                    rest.len()
+                )));
             };
-            return ctx.object_ne(receiver, *other);
+            return ctx.with_slot_depth(
+                "maximum recursion depth exceeded while calling a Python object",
+                |ctx| ctx.object_ne(receiver, *other),
+            );
         }
         if !rest.is_empty() {
             return Err(type_error(format!(

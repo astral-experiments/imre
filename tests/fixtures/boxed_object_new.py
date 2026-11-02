@@ -146,3 +146,13 @@ def check_inherited_inequality():
     assert object.__ne__(p, Plain()) is NotImplemented
     assert (1 != 1.0) is False
     assert (1 != 2.0) is True
+
+    class Recursive:
+        __eq__ = object.__ne__
+
+    try:
+        object.__ne__(Recursive(), Recursive())
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("unguarded recursive inequality slot")

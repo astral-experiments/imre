@@ -4572,11 +4572,18 @@ impl Context {
             };
         }
         if self.allocation_base(class) == self.builtins.get("object").copied() {
-            return Ok(if object == other { FALSE } else { value::NOT_IMPLEMENTED });
+            return Ok(if object == other {
+                FALSE
+            } else {
+                value::NOT_IMPLEMENTED
+            });
         }
         Err(Error::new(
             "NotImplementedError",
-            format!("object.__ne__(): the equality slot of '{}' is unsupported", self.type_name(object)),
+            format!(
+                "object.__ne__(): the equality slot of '{}' is unsupported",
+                self.type_name(object)
+            ),
         ))
     }
 
