@@ -13,13 +13,14 @@ use super::{
 pub(super) enum SourceBody {
     Compiled(Code),
     Filesystem,
+    Namespace,
     Zip(Id),
 }
 
 impl SourceBody {
     fn loader(self) -> Id {
         match self {
-            Self::Compiled(_) | Self::Filesystem => NONE,
+            Self::Compiled(_) | Self::Filesystem | Self::Namespace => NONE,
             Self::Zip(loader) => loader,
         }
     }
@@ -366,10 +367,7 @@ impl Context {
             let entry = choices.iter().find(|m| m.path == stem).map(|m| m.code);
             if entry.is_some() || (disk && stem.is_dir()) {
                 locations.push(stem.clone());
-                namespace.get_or_insert((
-                    stem,
-                    entry.map_or(SourceBody::Filesystem, SourceBody::Compiled),
-                ));
+                namespace.get_or_insert((stem, SourceBody::Namespace));
                 continue;
             }
             // A path below an archive is virtual. Preserve its spelling because the
@@ -384,7 +382,7 @@ impl Context {
             {
                 if loader == NONE {
                     locations.push(origin.clone());
-                    namespace.get_or_insert((origin, SourceBody::Zip(NONE)));
+                    namespace.get_or_insert((origin, SourceBody::Namespace));
                 } else {
                     locations.clear();
                     if origin.ends_with("__init__.py") {
@@ -466,6 +464,32 @@ impl Context {
             self.lookup_attr(importlib, "_file_spec")?
         };
         self.call(make, vec![name, origin, locations, loader], vec![])
+    }
+
+    fn location_list(&mut self, locations: &[PathBuf]) -> Id {
+        let values = locations
+            .iter()
+            .map(|p| self.text(p.to_string_lossy()))
+            .collect();
+        self.alloc(Value::List(values))
+    }
+
+    /// Recheck the search roots supplied by _NamespacePath, ignoring already loaded modules.
+    pub(super) fn namespace_locations(&mut self, name: &str, search: Id) -> Result<Id> {
+        let child = name.rsplit('.').next().unwrap_or(name);
+        let mut locations = Vec::new();
+        let source = self.source_on_path(name, child, search, child == name, &mut locations)?;
+        if matches!(source, Some((_, SourceBody::Namespace))) {
+            Ok(self.location_list(&locations))
+        } else {
+            Ok(NONE)
+        }
+    }
+
+    pub(super) fn namespace_spec(&mut self, name: Id, locations: Id, module: Id) -> Result<Id> {
+        let importlib = self.module("importlib")?;
+        let make = self.lookup_attr(importlib, "_namespace_spec")?;
+        self.call(make, vec![name, locations, module], vec![])
     }
 
     pub(super) fn initialize_source(
@@ -574,25 +598,16 @@ impl Context {
         else {
             return Ok(NONE);
         };
-        if locations.contains(&path) {
-            if for_resource {
-                return Ok(NONE);
-            }
-            return Err(Error::new(
-                "NotImplementedError",
-                "find_spec for namespace packages",
-            ));
-        }
         let name = self.text(fullname);
+        if matches!(body, SourceBody::Namespace) {
+            let paths = self.location_list(&locations);
+            return self.namespace_spec(name, paths, NONE);
+        }
         let origin = self.text(path.to_string_lossy());
         let locations = if locations.is_empty() {
             NONE
         } else {
-            let values = locations
-                .iter()
-                .map(|p| self.text(p.to_string_lossy()))
-                .collect();
-            self.alloc(Value::List(values))
+            self.location_list(&locations)
         };
         self.file_spec(name, origin, locations, body.loader())
     }

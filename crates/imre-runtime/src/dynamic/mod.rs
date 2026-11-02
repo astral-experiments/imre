@@ -2720,10 +2720,11 @@ impl Context {
         }
         if let Some((path, body)) = source {
             let result = match body {
-                importlib::SourceBody::Zip(NONE) => Err(Error::new(
-                    "NotImplementedError",
-                    "ZIP namespace packages are unsupported",
-                )),
+                importlib::SourceBody::Namespace if self.sources.contains_key("importlib") => {
+                    self.lookup_attr(module, "__path__")
+                        .and_then(|locations| self.namespace_spec(name_id, locations, module))
+                }
+                importlib::SourceBody::Namespace => Ok(NONE),
                 importlib::SourceBody::Zip(loader) => self.initialize_source(
                     module,
                     scope,

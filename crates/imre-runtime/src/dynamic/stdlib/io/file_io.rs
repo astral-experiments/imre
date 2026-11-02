@@ -116,7 +116,7 @@ pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
     }
 }
 
-fn mode(raw: &str) -> Result<(u32, &'static str)> {
+pub(in crate::dynamic::stdlib) fn mode(raw: &str) -> Result<(u32, &'static str)> {
     const INVALID: &str =
         "Must have exactly one of create/read/write/append mode and at most one plus";
     let mut selected = None;
@@ -143,7 +143,7 @@ fn mode(raw: &str) -> Result<(u32, &'static str)> {
     Ok((flags, if update { both } else { single }))
 }
 
-fn validate_open_mode(mode: &str) -> Result<()> {
+pub(in crate::dynamic::stdlib) fn validate_open_mode(mode: &str) -> Result<()> {
     let binary = mode.contains('b');
     if mode
         .chars()
@@ -166,7 +166,32 @@ fn validate_open_mode(mode: &str) -> Result<()> {
     Ok(())
 }
 
-fn check_open_string(ctx: &mut Context, value: Id, name: &str, expected: &str) -> Result<()> {
+pub(in crate::dynamic::stdlib) fn check_binary_options(
+    encoding: Option<Id>,
+    errors: Option<Id>,
+    newline: Option<Id>,
+) -> Result<()> {
+    for (name, value, article) in [
+        ("encoding", encoding, "an"),
+        ("errors", errors, "an"),
+        ("newline", newline, "a"),
+    ] {
+        if value.is_some() {
+            return Err(Error::new(
+                "ValueError",
+                format!("binary mode doesn't take {article} {name} argument"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(in crate::dynamic::stdlib) fn check_open_string(
+    ctx: &mut Context,
+    value: Id,
+    name: &str,
+    expected: &str,
+) -> Result<()> {
     let storage = ctx.string_storage(value).ok_or_else(|| {
         Error::new(
             "TypeError",
@@ -273,45 +298,35 @@ pub(in crate::dynamic) fn open(
     validate_open_mode(mode_text)?;
     let binary = mode_text.contains('b');
     if binary {
-        for (name, value, article) in [
-            ("encoding", encoding, "an"),
-            ("errors", errors, "an"),
-            ("newline", newline, "a"),
-        ] {
-            if value.is_some() {
-                return Err(Error::new(
-                    "ValueError",
-                    format!("binary mode doesn't take {article} {name} argument"),
-                ));
-            }
-        }
+        check_binary_options(encoding, errors, newline)?;
     }
     if buffering == 0 {
         let raw_mode = mode_text.replace('t', "");
         return open_raw(ctx, raw_arg, raw_mode, binary, owns);
     }
-    let text_output = !binary && !mode_text.contains('+') && mode_text.contains(['w', 'a', 'x']);
+    let update = mode_text.contains('+');
+    let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
     let text_input_with_newline =
         buffering < 0 && newline.is_some() && matches!(mode_text, "r" | "rt" | "tr");
-    let text_update = !binary && mode_text.contains('+');
     let binary_bytes_path = binary
         && buffering < 0
-        && !mode_text.contains('+')
+        && !update
         && !numeric
         && matches!(ctx.heap.get(ctx.scalar_value(raw_arg)), Value::Bytes(_));
+    if binary && update && buffering == 1 {
+        ctx.emit_builtin_warning(
+            crate::objects::exceptions::Kind::RuntimeWarning,
+            "line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used",
+            1,
+        )?;
+    }
     let fd = descriptor_from_argument(ctx, raw_arg);
-    let named_text_update = text_update && fd.is_none();
-    if fd.is_some()
-        || text_output
-        || text_input_with_newline
-        || binary_bytes_path
-        || named_text_update
-    {
+    if fd.is_some() || text_output || text_input_with_newline || binary_bytes_path || update {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
         let mode_text = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
-        if fd.is_some() && mode_text.contains('+') {
+        if fd.is_some() && update && !binary {
             return Err(Error::new(
                 "NotImplementedError",
                 "buffered update descriptors are unsupported",
@@ -319,7 +334,7 @@ pub(in crate::dynamic) fn open(
         }
         let reading = mode_text.contains('r');
         let raw_mode = mode_text.replace('t', "");
-        if buffering > 0 && !named_text_update {
+        if buffering > 0 && !update {
             return Err(Error::new(
                 "ValueError",
                 "explicit buffer sizes are unsupported",
@@ -338,7 +353,7 @@ pub(in crate::dynamic) fn open(
             None,
         )?;
         let handle = state(ctx, raw).expect("initialized FileIO");
-        let buffer = if named_text_update {
+        let buffer = if update {
             let capacity = if buffering > 1 {
                 buffering as usize
             } else {
@@ -514,8 +529,8 @@ fn buffered_descriptor(
 }
 
 impl Context {
-    /// Wrap mkstemp's read/write descriptor in a write-only buffered Python stream.
-    pub(in crate::dynamic) fn named_temporary_writer(
+    /// Expose a secure temporary file's read/write descriptor through a write-only buffer.
+    pub(in crate::dynamic) fn temporary_writer(
         &mut self,
         file: std::fs::File,
         name: Id,

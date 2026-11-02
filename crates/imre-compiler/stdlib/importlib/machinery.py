@@ -1,5 +1,5 @@
 from ._bootstrap import ModuleSpec
-from ._bootstrap_external import BYTECODE_SUFFIXES, EXTENSION_SUFFIXES, SOURCE_SUFFIXES, SourceFileLoader
+from ._bootstrap_external import BYTECODE_SUFFIXES, EXTENSION_SUFFIXES, SOURCE_SUFFIXES, NamespaceLoader, SourceFileLoader
 
 
 def all_suffixes():

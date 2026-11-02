@@ -37,6 +37,7 @@ def _invalidate_default_path_caches():
             del _zip_path_importers[path]
         elif hasattr(finder, "invalidate_caches"):
             finder.invalidate_caches()
+    _NamespacePath._epoch += 1
 
 
 def _bless_my_loader(module_globals):

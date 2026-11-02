@@ -1,3 +1,4 @@
+import gc
 import io
 import os
 import subprocess
@@ -117,6 +118,42 @@ def current():
         assert child.stdin.write(b"x") == 1
         assert child.communicate() == (None, None)
         assert child.stdin.closed
+
+    # Dropping the only public writer must let cat see EOF.
+    with subprocess.Popen(["/bin/cat"], stdin=pipe, stdout=pipe) as child:
+        child.stdin = None
+        gc.collect()
+        try:
+            assert child.communicate(timeout=5) == (b"", None)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            raise
+        assert child.returncode == 0
+
+    # communicate sends input to the replacement and leaves the original open.
+    with subprocess.Popen(["/bin/true"], stdin=pipe, stdout=pipe) as child:
+        original = child.stdin
+        read_fd, write_fd = os.pipe()
+        try:
+            with os.fdopen(write_fd, "wb") as writer:
+                child.stdin = writer
+                data = bytearray(b"redirecteX")
+                try:
+                    child.communicate(data, timeout=0)
+                except subprocess.TimeoutExpired:
+                    pass
+                else:
+                    raise AssertionError("zero timeout completed the pipe write")
+                data[-1] = ord("d")
+                assert child.communicate(timeout=5) == (b"", None)
+                assert writer.closed and not original.closed
+                os.set_blocking(read_fd, False)
+                assert os.read(read_fd, 64) == b"redirected"
+                assert os.read(read_fd, 1) == b""
+                assert child.returncode == 0
+        finally:
+            original.close()
+            os.close(read_fd)
 
     # Exercise the run_python_until_end pattern, including cleanup after wait.
     with subprocess.Popen(["/bin/sh", "-c", "cat; printf err >&2; exit 7"],

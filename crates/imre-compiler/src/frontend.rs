@@ -10958,15 +10958,16 @@ impl<'a> Checker<'a> {
         if !gzip
             && self.unshadowed_builtin(&call.func, "open")
             && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
-            && paths::is_text_update_open(args, mode.value.to_str())
+            && paths::is_update_open(args, mode.value.to_str())
             && let Some(path) = args.find_argument_value("file", 0)
         {
             let value = self.expr(path)?;
             if matches!(
                 value.ty,
                 Type::Str | Type::Bytes | Type::Path | Type::PurePath(_)
-            ) {
-                return Err(self.scoped_builtin_error("named text update open", call));
+            ) || (mode.value.to_str().contains('b') && value.ty == Type::Int)
+            {
+                return Err(self.scoped_builtin_error("buffered update open", call));
             }
             checked_path = Some(value);
         }

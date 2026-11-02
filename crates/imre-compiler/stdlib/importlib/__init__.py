@@ -3,6 +3,7 @@
 
 import _imp
 import sys
+from _imre_importlib import namespace_locations as _namespace_locations
 
 try:
     import _frozen_importlib as _bootstrap
@@ -47,6 +48,23 @@ def _file_spec(name, origin, locations, loader=None):
     spec = _ModuleSpec(name, loader, origin=origin)
     spec.submodule_search_locations = locations
     spec.has_location = True
+    return spec
+
+
+def _find_namespace_portions(name, path):
+    locations = _namespace_locations(name, path)
+    if locations is not None:
+        spec = _ModuleSpec(name, None)
+        spec.submodule_search_locations = locations
+        return spec
+
+
+def _namespace_spec(name, locations, module):
+    spec = _ModuleSpec(name, None)
+    spec.submodule_search_locations = _bootstrap_external._NamespacePath(name, locations, _find_namespace_portions)
+    if module is not None:
+        _bootstrap._init_module_attrs(spec, module, override=True)
+        spec._initializing = False
     return spec
 
 
