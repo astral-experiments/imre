@@ -401,7 +401,7 @@ fn path_or_fd(
     name: &str,
     path: Id,
     allow_fd: bool,
-    warn_bool_fd: fn(&Context, Id) -> Result<()>,
+    warn_bool_fd: fn(&mut Context, Id) -> Result<()>,
 ) -> Result<(PathArg, Id)> {
     let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(path)),
