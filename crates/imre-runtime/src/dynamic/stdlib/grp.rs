@@ -93,6 +93,59 @@ fn python_gid(gid: libc::gid_t) -> i64 {
     }
 }
 
+/// Look up a user's groups without changing the credentials of the calling process.
+#[cfg(target_os = "linux")]
+pub(super) fn getgrouplist(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "posix.getgrouplist() takes no keyword arguments",
+        ));
+    }
+    let &[user, base] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("getgrouplist expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let text = ctx.scalar_value(user);
+    if !matches!(ctx.heap.get(text), Value::Str(_) | Value::SurrogateStr(_)) {
+        return Err(Error::new(
+            "TypeError",
+            format!("getgrouplist() argument 1 must be str, not {}", ctx.type_name(user)),
+        ));
+    }
+    let user = CString::new(ctx.encode_utf8_codepoints(text, false, "strict")?)
+        .map_err(|_| Error::new("ValueError", "embedded null character"))?;
+    let base = os::owner_id(ctx, base, true)? as libc::gid_t;
+    let mut capacity: libc::c_int = 65;
+    let mut groups = Vec::new();
+    loop {
+        groups
+            .try_reserve_exact(capacity as usize - groups.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        groups.resize(capacity as usize, 0);
+        let mut count = capacity;
+        // SAFETY: user is NUL-terminated and groups owns capacity writable gid_t slots.
+        let result =
+            unsafe { libc::getgrouplist(user.as_ptr(), base, groups.as_mut_ptr(), &mut count) };
+        if result >= 0 {
+            groups.truncate(count as usize);
+            let values = groups.into_iter().map(|gid| ctx.int(python_gid(gid))).collect();
+            return Ok(ctx.alloc(Value::List(values)));
+        }
+        // The group database can grow between calls. Some NSS backends leave
+        // the size unchanged on failure, so always make progress on a retry.
+        capacity = if count > capacity {
+            count
+        } else {
+            capacity
+                .checked_mul(2)
+                .ok_or_else(|| Error::new("MemoryError", ""))?
+        };
+    }
+}
+
 fn entries() -> Vec<Entry> {
     // setgrent/getgrent/endgrent share one cursor across all runtime contexts.
     static CURSOR: Mutex<()> = Mutex::new(());
