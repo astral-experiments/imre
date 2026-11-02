@@ -2610,6 +2610,9 @@ impl IntrinsicModule {
             (Self::Itertools, "count") => Intrinsic::Count,
             (Self::Itertools, "takewhile") => Intrinsic::ObjectRuntimeExport("itertools.takewhile"),
             (Self::Itertools, "dropwhile") => Intrinsic::ObjectRuntimeExport("itertools.dropwhile"),
+            (Self::Itertools, "zip_longest") => {
+                Intrinsic::ObjectRuntimeExport("itertools.zip_longest")
+            }
             (Self::Itertools, "filterfalse") => {
                 Intrinsic::ObjectRuntimeExport("itertools.filterfalse")
             }

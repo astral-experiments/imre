@@ -1827,7 +1827,13 @@ pub(super) fn call(
         return itertools::predicate_allocate(ctx, args, kwargs);
     }
     if name == "_imre_itertools._predicate_state" {
-        return itertools::predicate_state(ctx, args, kwargs);
+        return itertools::iterator_state(ctx, args, kwargs, "predicate iterator");
+    }
+    if name == "_imre_itertools._zip_longest_allocate" {
+        return itertools::zip_longest_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._zip_longest_state" {
+        return itertools::iterator_state(ctx, args, kwargs, "zip_longest");
     }
     if name == "_imre_itertools._chain_allocate" {
         let [base, class, source] = args else {
