@@ -3764,6 +3764,9 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
+                if name == "__init__" && self.has_base(obj, "type") {
+                    return Ok(self.builtin("type.__init__"));
+                }
                 if matches!(name, "_abc_caches_clear" | "_abc_registry_clear")
                     && metaclass_member.is_none()
                     && self.is_bundled_abc(obj)
@@ -3886,6 +3889,9 @@ impl Context {
             return self.bind_attribute(hook, NONE, class);
         }
         if name == "__init__" {
+            if matches!(self.heap.get(obj), Value::Native(owner) if owner == "type") {
+                return Ok(self.builtin("type.__init__"));
+            }
             let tuple = self.builtin("tuple");
             if self.direct_subclass(obj, tuple) {
                 return Ok(self.builtin("object.__init__"));
@@ -5394,6 +5400,23 @@ impl Context {
         }))
     }
 
+    /// Initialize a class returned by __new__ when it is an instance of the called metaclass.
+    pub(super) fn finish_type_call(
+        &mut self,
+        caller: Id,
+        result: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<Id> {
+        let actual = self.exact_type(result)?;
+        if self.direct_subclass(actual, caller)
+            && let Some(init) = self.class_attr(actual, "__init__")
+        {
+            self.call_initializer(init, result, actual, args, kwargs)?;
+        }
+        Ok(result)
+    }
+
     /// Invoke the initializer found on the type, including its descriptor binding.
     pub(super) fn call_initializer(
         &mut self,
@@ -5608,7 +5631,8 @@ impl Context {
                         .is_some_and(|owner| !HashState::is_provider_class(owner))
                     || matches!(
                         name.as_str(),
-                        "BaseException.__init__"
+                        "type.__init__"
+                            | "BaseException.__init__"
                             | "BaseException.add_note"
                             | "ImportError.__init__"
                             | "OSError.__init__"
@@ -6003,10 +6027,14 @@ impl Context {
                     constructor
                 }
                 .or_else(|| {
-                    [("int", "int.__new__"), ("tuple", "tuple.__new__")]
-                        .into_iter()
-                        .find(|(base, _)| self.has_base(callable, base))
-                        .map(|(_, new)| self.builtin(new))
+                    [
+                        ("int", "int.__new__"),
+                        ("tuple", "tuple.__new__"),
+                        ("type", "type.__new__"),
+                    ]
+                    .into_iter()
+                    .find(|(base, _)| self.has_base(callable, base))
+                    .map(|(_, new)| self.builtin(new))
                 });
                 let scalar_base = ["str", "bytes", "complex"]
                     .into_iter()
@@ -6022,15 +6050,13 @@ impl Context {
                         .chain(args.iter().copied())
                         .collect();
                     let instance = self.call(allocate, positional, kwargs.clone())?;
+                    if self.has_base(callable, "type") {
+                        return self.finish_type_call(callable, instance, args, kwargs);
+                    }
                     if !self.instance_of(instance, callable) {
                         return Ok(instance);
                     }
                     instance
-                } else if self.has_base(callable, "type") {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "direct metaclass construction is unsupported",
-                    ));
                 } else if self.has_base(callable, "module") {
                     self.allocate_module(callable)
                 } else if let Some(kind) = scalar_base {
@@ -6573,9 +6599,8 @@ impl Context {
         // Metaclasses can define __new__ while inheriting namespace preparation and MRO.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && (["__prepare__", "__init__"]
-                .iter()
-                .any(|name| self.class_attr(winner, name).is_some())
+            && (self.class_attr(winner, "__prepare__").is_some()
+                || (self.is_abc_metaclass(winner) && self.class_attr(winner, "__init__").is_some())
                 || self
                     .class_attr(winner, "mro")
                     .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
@@ -6717,7 +6742,8 @@ impl Context {
         if let Some(meta) = class_meta
             && Some(meta) != typed_dict_meta
             && self.builtins.get("abc.ABCMeta") != Some(&meta)
-            && self.class_attr(meta, "__new__").is_some()
+            && (self.class_attr(meta, "__new__").is_some()
+                || self.class_attr(meta, "__init__").is_some())
         {
             let namespace = self.active_class_namespace(scope);
             // A deferred class annotator owns these fields. Its scratch entries are placeholders.
@@ -6747,7 +6773,7 @@ impl Context {
             }
             let class_name = self.text(&name);
             let bases = self.alloc(Value::Tuple(bases));
-            let class = self.call_metaclass_new(meta, class_name, bases, namespace, keywords)?;
+            let class = self.call(meta, vec![class_name, bases, namespace], keywords)?;
             if bindings.needs_class_cell && matches!(self.heap.get(class), Value::Class { .. }) {
                 match self.heap.get(cell) {
                     Value::Cell(Some(contents)) if *contents == class => {}

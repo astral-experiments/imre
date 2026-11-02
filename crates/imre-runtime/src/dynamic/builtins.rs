@@ -1316,6 +1316,26 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "type" if method == "__init__" => {
+                let Some((&class, args)) = args.split_first() else {
+                    return Err(type_error(
+                        "descriptor '__init__' of 'type' object needs an argument",
+                    ));
+                };
+                if !ctx.is_type_object(class) {
+                    return Err(type_error(format!(
+                        "descriptor '__init__' requires a 'type' object but received a '{}'",
+                        ctx.type_name(class)
+                    )));
+                }
+                match args.len() {
+                    1 if !kwargs.is_empty() => {
+                        Err(type_error("type.__init__() takes no keyword arguments"))
+                    }
+                    1 | 3 => Ok(NONE),
+                    _ => Err(type_error("type.__init__() takes 1 or 3 arguments")),
+                }
+            }
             "coroutine" | "coroutine_wrapper" => {
                 positional(name, kwargs)?;
                 let (min, max) = match method {
@@ -1650,7 +1670,10 @@ pub(super) fn call(
             [object] if kwargs.is_empty() => ctx.exact_type(*object),
             [_] => Err(type_error("type() takes no keyword arguments")),
             [name, bases, namespace] => {
-                ctx.type_from_namespace(None, *name, *bases, *namespace, kwargs, false)
+                let class =
+                    ctx.type_from_namespace(None, *name, *bases, *namespace, kwargs, false)?;
+                let caller = ctx.builtin("type");
+                ctx.finish_type_call(caller, class, args.to_vec(), kwargs.to_vec())
             }
             _ => Err(type_error("type() takes 1 or 3 arguments")),
         },
