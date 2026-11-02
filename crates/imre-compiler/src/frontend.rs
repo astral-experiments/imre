@@ -1332,6 +1332,9 @@ fn signature(
             )
         })
         .map(|context| classes.instance(context.class));
+    if method.is_none() && crate::dynamic::function_type_params(function).is_some() {
+        graph.needs_object_runtime.set(true);
+    }
     if !function.decorator_list.is_empty() || function.type_params.is_some() {
         if function.decorator_list.iter().any(|decorator| {
             decorator.expression.as_call_expr().is_some_and(|call| {
