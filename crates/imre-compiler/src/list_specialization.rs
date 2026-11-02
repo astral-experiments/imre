@@ -7,9 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::ir::{
-    Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions,
-};
+use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, contains_loop};
 
 /// Versions leaf range and canonical list loops after tuple scalarization.
 /// Unknown calls and mutations retain the original arbitrary-precision path.
@@ -18,174 +16,122 @@ pub(crate) fn specialize(module: &mut Module) {
         if function.expression_rebound().into_iter().any(|value| value) {
             continue;
         }
-        rewrite_block(&mut function.body, &mut function.locals);
+        crate::ir::rewrite_statements(&mut function.body, &mut |statement| {
+            rewrite_loop(statement, &mut function.locals);
+        });
     }
 }
 
-/// Rewrites children before considering a loop, without revisiting new versions.
-fn rewrite_block(body: &mut [Statement], locals: &mut Vec<Type>) {
-    for statement in body {
-        crate::ir::statement_children_mut(statement, |child| match child {
-            crate::ir::ChildMut::Expression(value) => rewrite_expression(value, locals),
-            crate::ir::ChildMut::Suite(body) => rewrite_block(body, locals),
-        });
-        let (arguments, body, orelse, while_source) = match statement {
-            Statement::For {
-                args, body, orelse, ..
-            } => (range_arguments(args), body, orelse, None),
-            Statement::While(test, body, orelse) => {
-                let Some((args, source)) = while_arguments(test) else {
-                    continue;
-                };
-                (Some(args), body, orelse, Some(source))
-            }
-            _ => continue,
-        };
-        // The guard also rejects scans whose cost cannot be amortized by the
-        // captured range. Only cheap, nonfallible operands may be read twice.
-        let Some([start, mut stop, step]) = arguments else {
-            continue;
-        };
-        if contains_loop(orelse) {
-            continue;
+fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
+    let (arguments, body, orelse, while_source) = match statement {
+        Statement::For {
+            args, body, orelse, ..
+        } => (range_arguments(args), body, orelse, None),
+        Statement::While(test, body, orelse) => {
+            let Some((args, source)) = while_arguments(test) else {
+                return;
+            };
+            (Some(args), body, orelse, Some(source))
         }
-        let mut written = vec![false; locals.len()];
-        crate::ir::walk_writes(body, |slot, _| written[slot] = true);
-        if while_source.is_some_and(|source| written[source]) {
-            continue;
-        }
-        let mut aliases = locals
-            .iter()
-            .enumerate()
-            .map(|(slot, ty)| (*ty == Type::ListInt && !written[slot]).then_some(slot))
-            .collect::<Vec<_>>();
-        let mut fast = statement.clone();
-        let body = match &mut fast {
-            Statement::For { body, .. } | Statement::While(_, body, _) => body,
-            _ => unreachable!(),
-        };
-        let mut plan = Plan {
-            locals,
-            inputs: BTreeSet::new(),
-            outputs: BTreeSet::new(),
-            reads: 0,
-            appends: 0,
-            nontrivial_arithmetic: false,
-        };
-        if !plan.block(body, &mut aliases)
-            || (plan.reads < 2
-                && !(while_source.is_some() && plan.reads == 1 && plan.nontrivial_arithmetic))
-            || while_source.is_some_and(|source| !plan.inputs.contains(&source))
-        {
-            continue;
-        }
-        if plan.inputs.iter().any(|slot| plan.outputs.contains(slot)) {
-            continue;
-        }
-        let mut guards = Vec::new();
-        for &input in &plan.inputs {
-            for &output in &plan.outputs {
-                guards.push(builtin(
-                    Builtin::ListDistinct,
-                    vec![list_local(input), list_local(output)],
-                ));
-            }
+        _ => return,
+    };
+    // The guard also rejects scans whose cost cannot be amortized by the
+    // captured range. Only cheap, nonfallible operands may be read twice.
+    let Some([start, mut stop, step]) = arguments else {
+        return;
+    };
+    if contains_loop(orelse) {
+        return;
+    }
+    let mut written = vec![false; locals.len()];
+    crate::ir::walk_writes(body, |slot, _| written[slot] = true);
+    if while_source.is_some_and(|source| written[source]) {
+        return;
+    }
+    let mut aliases = locals
+        .iter()
+        .enumerate()
+        .map(|(slot, ty)| (*ty == Type::ListInt && !written[slot]).then_some(slot))
+        .collect::<Vec<_>>();
+    let mut fast = statement.clone();
+    let body = match &mut fast {
+        Statement::For { body, .. } | Statement::While(_, body, _) => body,
+        _ => unreachable!(),
+    };
+    let mut plan = Plan {
+        locals,
+        inputs: BTreeSet::new(),
+        outputs: BTreeSet::new(),
+        reads: 0,
+        appends: 0,
+        nontrivial_arithmetic: false,
+    };
+    if !plan.block(body, &mut aliases)
+        || (plan.reads < 2
+            && !(while_source.is_some() && plan.reads == 1 && plan.nontrivial_arithmetic))
+        || while_source.is_some_and(|source| !plan.inputs.contains(&source))
+    {
+        return;
+    }
+    if plan.inputs.iter().any(|slot| plan.outputs.contains(slot)) {
+        return;
+    }
+    let mut guards = Vec::new();
+    for &input in &plan.inputs {
+        for &output in &plan.outputs {
             guards.push(builtin(
-                Builtin::ListAllI32,
-                vec![list_local(input), start.clone(), stop.clone(), step.clone()],
+                Builtin::ListDistinct,
+                vec![list_local(input), list_local(output)],
             ));
         }
-        let Plan {
-            outputs, appends, ..
-        } = plan;
-        let mut fast_body = Vec::new();
-        // Every append target passed ListDistinct against the condition's source.
-        // Only this arm can reuse its length across the loop backedge.
-        if !outputs.is_empty()
-            && let Statement::While(test, _, _) = &mut fast
-            && let ExprKind::Compare(operands, _) = &mut test.kind
-        {
-            let slot = locals.len();
-            locals.push(Type::Int);
-            fast_body.push(Statement::Assign(slot, stop));
-            stop = Expr::local(slot, Type::Int);
-            operands[1] = stop.clone();
-        }
-        if outputs.len() == 1 {
-            // Hints beyond the runtime's slot budget cannot reserve more space.
-            let appends = appends.min(32_768) as i64;
-            fast_body.push(Statement::Expr(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(
-                    Builtin::ListReserveRange,
-                    vec![
-                        list_local(*outputs.first().unwrap()),
-                        start,
-                        stop,
-                        step,
-                        Expr::integer(appends),
-                    ],
-                ),
-            }));
-        }
-        fast_body.push(fast);
-        let fallback = std::mem::replace(statement, Statement::Break);
-        *statement = Statement::If(
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Boolean(true, guards),
-            },
-            fast_body,
-            vec![fallback],
-        );
+        guards.push(builtin(
+            Builtin::ListAllI32,
+            vec![list_local(input), start.clone(), stop.clone(), step.clone()],
+        ));
     }
-}
-
-/// Visits each eager expression once, descending into its own statement scopes.
-/// Newly generated loop versions are not revisited by this child-first walk.
-fn rewrite_expression(expression: &mut Expr, locals: &mut Vec<Type>) {
-    if let ExprKind::Scope { body, value, .. } = &mut expression.kind {
-        rewrite_block(body, locals);
-        rewrite_expression(value, locals);
-    } else {
-        crate::ir::children_mut(expression, |value| rewrite_expression(value, locals));
+    let Plan {
+        outputs, appends, ..
+    } = plan;
+    let mut fast_body = Vec::new();
+    // Every append target passed ListDistinct against the condition's source.
+    // Only this arm can reuse its length across the loop backedge.
+    if !outputs.is_empty()
+        && let Statement::While(test, _, _) = &mut fast
+        && let ExprKind::Compare(operands, _) = &mut test.kind
+    {
+        let slot = locals.len();
+        locals.push(Type::Int);
+        fast_body.push(Statement::Assign(slot, stop));
+        stop = Expr::local(slot, Type::Int);
+        operands[1] = stop.clone();
     }
-}
-
-/// An else suite is cloned with the loop, so nested loops there would multiply
-/// versions even though they are outside the input-stability proof's body.
-pub(crate) fn contains_loop(body: &[Statement]) -> bool {
-    let mut found = statements_contain_loop(body);
-    walk_expressions(body, &mut |value| {
-        if let ExprKind::Scope { body, .. } = &value.kind {
-            found |= statements_contain_loop(body);
-        }
-    });
-    found
-}
-
-/// Checks each statement region without entering expression scopes. The shared
-/// expression walk visits those scopes once, including their nested expressions.
-fn statements_contain_loop(body: &[Statement]) -> bool {
-    body.iter().any(|statement| match statement {
-        Statement::For { .. } | Statement::While(..) => true,
-        Statement::Scope { body, .. } => statements_contain_loop(body),
-        Statement::If(_, yes, no) => statements_contain_loop(yes) || statements_contain_loop(no),
-        Statement::Try {
-            body,
-            handlers,
-            orelse,
-            finalbody,
-        } => {
-            statements_contain_loop(body)
-                || handlers
-                    .iter()
-                    .any(|handler| statements_contain_loop(&handler.body))
-                || statements_contain_loop(orelse)
-                || statements_contain_loop(finalbody)
-        }
-        _ => false,
-    })
+    if outputs.len() == 1 {
+        // Hints beyond the runtime's slot budget cannot reserve more space.
+        let appends = appends.min(32_768) as i64;
+        fast_body.push(Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(
+                Builtin::ListReserveRange,
+                vec![
+                    list_local(*outputs.first().unwrap()),
+                    start,
+                    stop,
+                    step,
+                    Expr::integer(appends),
+                ],
+            ),
+        }));
+    }
+    fast_body.push(fast);
+    let fallback = std::mem::replace(statement, Statement::Break);
+    *statement = Statement::If(
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Boolean(true, guards),
+        },
+        fast_body,
+        vec![fallback],
+    );
 }
 
 struct Plan<'a> {
@@ -516,6 +462,7 @@ fn builtin(operation: Builtin, args: Vec<Expr>) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::walk_expressions;
 
     fn optimized(source: &str) -> Module {
         let mut module =

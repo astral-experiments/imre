@@ -315,6 +315,9 @@ impl Context {
                 .map_err(|_| size_overflow())?;
             return Ok(self.int(length));
         }
+        if let Value::DequeIterator { remaining, .. } = *self.heap.get(value) {
+            return Ok(self.int(remaining as i64));
+        }
         if let Value::RangeIterator(iter) = self.heap.get(value) {
             let n = iter.remaining.to_i64().ok_or_else(size_overflow)?;
             return Ok(self.int(n));

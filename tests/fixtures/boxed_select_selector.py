@@ -1,6 +1,19 @@
 from selectors import EVENT_READ, EVENT_WRITE, PollSelector, SelectSelector
 import selectors
+from collections.abc import Mapping
 import os
+
+
+class Descriptor(int):
+    pass
+
+
+class Missing:
+    def fileno(self):
+        return 999999
+
+    def __repr__(self):
+        raise LookupError("custom repr")
 
 
 def current():
@@ -12,13 +25,34 @@ def current():
             assert type(selector) is factory
             assert isinstance(selector, factory)
             assert not isinstance(selector, other)
+            mapping = selector.get_map()
+            assert mapping is selector.get_map() and isinstance(mapping, Mapping)
+            assert not mapping
             with open("selector-ready.bin", "w+b", 0) as stream:
                 key = selector.register(stream, EVENT_READ)
+                assert mapping.get(stream) is mapping[Descriptor(stream.fileno())] is key
+                missing = Missing()
+                assert mapping.get(missing) is None
+                try:
+                    mapping[missing]
+                except LookupError as exc:
+                    assert exc.args == ("custom repr",)
+                else:
+                    raise AssertionError("missing key bypassed repr")
+                assert list(mapping) == [stream.fileno()]
+                assert list(mapping.values()) == [key]
                 ready = selector.select(0)
                 assert len(ready) == 1 and ready[0][0] is key and ready[0][1] == EVENT_READ
                 both = selector.modify(stream, EVENT_READ | EVENT_WRITE)
                 ready = selector.select(0)
                 assert len(ready) == 1 and ready[0][0] is both and ready[0][1] == 3
+                assert mapping[stream] is both
+                try:
+                    del mapping[stream]
+                except TypeError:
+                    pass
+                else:
+                    raise AssertionError("selector mapping allowed deletion")
                 fd = stream.fileno()
             if factory is SelectSelector:
                 try:
@@ -30,7 +64,27 @@ def current():
             else:
                 ready = selector.select(0)
                 assert len(ready) == 1 and ready[0][0] is both and ready[0][1] == 3
+            assert mapping[stream] is both
             assert selector.unregister(fd) is both
+            selector.register(fd, EVENT_READ)
+            iterator = iter(mapping)
+        assert selector.get_map() is None and not mapping
+        try:
+            next(iterator)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("descriptor iterator ignored close")
+        assert mapping.get(fd) is None
+        try:
+            selector.get_key(fd)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("closed selector returned a key")
+        new_key = selector.register(fd, EVENT_READ)
+        assert mapping[fd] is new_key and selector.get_map() is None
+        selector.unregister(fd)
     r, w = os.pipe()
     try:
         with SelectSelector() as selector:

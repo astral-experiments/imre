@@ -1,6 +1,7 @@
 """Load Python modules from registered code or filesystem source."""
 
 import _imp
+import marshal
 import sys
 
 from _imre_importlib import (
@@ -29,6 +30,7 @@ path_sep_tuple = tuple(path_separators)
 
 SOURCE_SUFFIXES = [".py", ".pyw"] if _MS_WINDOWS else [".py"]
 BYTECODE_SUFFIXES = [".pyc"]
+MAGIC_NUMBER = _imp.pyc_magic_number_token.to_bytes(4, 'little')
 EXTENSION_SUFFIXES = _imp.extension_suffixes()
 
 
@@ -192,10 +194,11 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
         return self.source_to_code(source, path)
 
 
-def _file_loader_defaults(location):
+def _file_loader_defaults(location=None):
     """Choose a default loader when a FileFinder factory returns None."""
-    if location.endswith(tuple(_imp.extension_suffixes())):
+    if location is not None and location.endswith(tuple(_imp.extension_suffixes())):
         raise NotImplementedError("default extension file loaders are unsupported")
-    yield SourceFileLoader, SOURCE_SUFFIXES
-    if location.endswith(tuple(BYTECODE_SUFFIXES)):
-        raise NotImplementedError("default bytecode file loaders are unsupported")
+    return (SourceFileLoader, SOURCE_SUFFIXES), (SourcelessFileLoader, BYTECODE_SUFFIXES)
+
+
+_code_type = type(_file_loader_defaults.__code__)

@@ -16,6 +16,7 @@ from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
 from annotationlib import ForwardRef, _make_forward_ref
+from annotationlib import annotations_to_string as _annotation_strings, type_repr as _annotation_type_repr
 from functools import lru_cache
 from _typing import _idfunc
 from typing import Any, Callable, Generic, Protocol, TypeVar, Union
@@ -484,30 +485,6 @@ def _typeddict_qualifiers(tp):
         else:
             break
     return qualifiers
-
-
-def _annotation_type_repr(value):
-    # Equivalent to annotationlib.type_repr for the supported runtime values.
-    from types import BuiltinFunctionType, FunctionType
-
-    if value is None:
-        return "None"
-    if value is type(None):
-        return "NoneType"
-    if isinstance(value, (type, FunctionType, BuiltinFunctionType)):
-        return (value.__qualname__ if value.__module__ == "builtins" else
-                f"{value.__module__}.{value.__qualname__}")
-    if value is ...:
-        return "..."
-    from string.templatelib import Template
-    if isinstance(value, Template):
-        raise NotImplementedError("template annotation strings require AST unparsing")
-    return repr(value)
-
-
-def _annotation_strings(annotations):
-    return {name: value if isinstance(value, str) else _annotation_type_repr(value)
-            for name, value in annotations.items()}
 
 
 class _TypedDictSymbol:
@@ -1495,6 +1472,15 @@ def _type_check(arg, message, is_argument=True, module=None, *, allow_special_fo
     return arg
 
 
+def _make_callable_alias(constructor, origin, params):
+    args, result = params
+    result = _type_check(result, "Callable[args, result]: result must be a type.")
+    if not isinstance(args, tuple):
+        args = (args,)
+    flat = tuple(_type_convert(arg) for arg in args) + (result,)
+    return constructor(origin, flat, name="Callable")
+
+
 def _typeddict_qualifier_alias(form, parameters):
     item = _type_check(parameters, f"{form._name} accepts only a single type.")
     if isinstance(item, str):
@@ -1759,6 +1745,15 @@ def _should_unflatten_callable_args(typ, args):
     )
 
 
+def _typevar_subst(self, arg):
+    from types import GenericAlias
+    arg = _type_check(arg, "Parameters to generic types must be types.")
+    if ((isinstance(arg, _typing._GenericAlias) and arg.__origin__ is Unpack)
+            or (isinstance(arg, GenericAlias) and getattr(arg, "__unpacked__", False))):
+        raise TypeError(f"{arg} is not valid as type argument")
+    return arg
+
+
 def _paramspec_subst(self, arg):
     if isinstance(arg, (list, tuple)):
         arg = tuple(_type_check(a, "Expected a type.") for a in arg)
@@ -1917,7 +1912,13 @@ class _SpecialGenericAlias(_NotIterable):
             return self._getitem(params)
 
     def copy_with(self, params):
-        return _typing._GenericAlias(self.__origin__, params, name=self._name, inst=self._inst)
+        if isinstance(self, _SpecialGenericAlias):
+            cls = _typing._GenericAlias
+        else:
+            cls = type(self)
+            if cls is _typing._UnpackGenericAlias:
+                return cls(self.__origin__, params)
+        return cls(self.__origin__, params, name=self._name, inst=self._inst)
 
     def __instancecheck__(self, value):
         return self.__subclasscheck__(type(value))
@@ -2136,6 +2137,44 @@ def _prepare_typevartuple(pack, alias, args):
         grouped = _unpack_alias_args((pack.__default__,))
     return (args[:left] + (fill,) * (index - left) + (tuple(grouped),)
             + (fill,) * (len(params) - right - left - index - 1) + args[end:])
+
+
+def _variadic_class_getitem_uncached(cls, args, constructor):
+    if not isinstance(args, tuple):
+        args = (args,)
+    args = tuple(_type_convert(arg) for arg in args)
+    parameters = cls.__parameters__
+    for index, param in enumerate(parameters):
+        prepare = getattr(param, "__typing_prepare_subst__", None)
+        if prepare is not None:
+            args = prepare(cls, args)
+        elif isinstance(param, _typing.TypeVarTuple):
+            args = _prepare_typevartuple(param, cls, args)
+        elif isinstance(param, _typing.TypeVar) and index >= len(args):
+            if index == len(args) and param.has_default():
+                args += (param.__default__,)
+            else:
+                raise TypeError(f"Too few arguments for {cls}; actual {len(args)}, expected at least {index + 1}")
+
+    actual, expected = len(args), len(parameters)
+    if actual > expected:
+        raise TypeError(f"Too many arguments for {cls}; actual {actual}, expected {expected}")
+    if actual < expected and not parameters[actual].has_default():
+        required = expected - sum(p.has_default() for p in parameters)
+        raise TypeError(f"Too few arguments for {cls}; actual {actual}, expected at least {required}")
+    flattened = tuple(item for param, arg in zip(parameters, args)
+                      for item in (arg if isinstance(param, _typing.TypeVarTuple) else (arg,)))
+    return constructor(cls, flattened)
+
+
+_cached_variadic_class_getitem = lru_cache(_variadic_class_getitem_uncached)
+
+
+def _variadic_class_getitem(cls, args, constructor):
+    try:
+        return _cached_variadic_class_getitem(cls, args, constructor)
+    except TypeError:
+        return _variadic_class_getitem_uncached(cls, args, constructor)
 
 
 def _specialize_generic_alias_uncached(alias, args):

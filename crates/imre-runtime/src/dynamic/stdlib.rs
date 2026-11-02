@@ -68,7 +68,7 @@ mod zipimport;
 mod zlib;
 
 /// Format a type for CPython diagnostics, including a non-default module and its qualname.
-fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
+pub(super) fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
     let name = match ctx.own_class_attr(class, "__qualname__") {
         Some(name) => name,
         None => ctx.text(ctx.class_name(class).to_owned()),
@@ -454,6 +454,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("unicodedata", "normalize" | "decomposition") => {
             ctx.builtin(&format!("unicodedata.{name}"))
         }
+        ("_imp", "pyc_magic_number_token") => ctx.int(i64::from(imre_ast::PYC_MAGIC_NUMBER_TOKEN)),
         (
             "_imp",
             "is_frozen"
@@ -567,6 +568,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_eval_type_expression"
             | "_protocol_mro"
             | "_protocol_member"
+            | "_check_annotation_syntax"
             | "_validate_forward_ref"
             | "_finish_field_ref"
             | "Any"
@@ -583,8 +585,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         (
             "time",
-            "get_clock_info" | "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep"
-            | "gmtime" | "localtime" | "mktime" | "strftime" | "ctime" | "struct_time" | "tzset",
+            "get_clock_info" | "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter"
+            | "sleep" | "gmtime" | "localtime" | "mktime" | "strftime" | "ctime" | "struct_time"
+            | "tzset",
         ) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
@@ -603,6 +606,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("resource", "getrlimit" | "setrlimit") => ctx.builtin(&format!("resource.{name}")),
         #[cfg(target_os = "linux")]
         ("resource", "RLIMIT_CORE") => ctx.int(i64::from(libc::RLIMIT_CORE)),
+        #[cfg(target_os = "linux")]
+        ("resource", "RLIMIT_NOFILE") => ctx.int(i64::from(libc::RLIMIT_NOFILE)),
         #[cfg(target_os = "linux")]
         ("resource", "RLIMIT_STACK") => ctx.int(i64::from(libc::RLIMIT_STACK)),
         #[cfg(target_os = "linux")]
@@ -680,6 +685,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
+        #[cfg(unix)]
+        ("os" | "posix", "getuid" | "getgid" | "getgroups") => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
         ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
         #[cfg(target_os = "linux")]
@@ -705,7 +714,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posix", "_create_environ" | "putenv" | "unsetenv") => {
             ctx.builtin(&format!("posix.{name}"))
         }
-        ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
+        ("os" | "posix", "abort" | "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os", "name") => ctx.text("posix"),
@@ -733,7 +742,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_path_names"
             | "get_scheme_names"
             | "get_platform"
-            | "get_config_var"
             | "get_default_scheme"
             | "get_preferred_scheme",
         )
@@ -742,7 +750,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
-        | ("_imre_json", "scan_once" | "surrogate_text" | "encoder_state" | "encoder_call")
+        | (
+            "_imre_json",
+            "scan_once"
+            | "is_constants_lookup"
+            | "surrogate_text"
+            | "encoder_state"
+            | "encoder_call",
+        )
         | ("_imre_linecache", "source_lines")
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
@@ -906,6 +921,46 @@ fn urlsafe_input(ctx: &mut Context, text: Id) -> Result<(Id, bool)> {
     Ok((data, false))
 }
 
+/// PyArg_ParseTupleAndKeywords checks the total count first, then converts each
+/// required argument before looking for the next. Defer missing-argument errors
+/// until each field is read so user conversions retain their exception precedence.
+fn required_args<'a>(
+    function: &'a str,
+    args: &'a [Id],
+    kwargs: &'a [(String, Id)],
+    fields: &'a [&str],
+) -> Result<impl Fn(usize) -> Result<Id> + 'a> {
+    let count = args.len() + kwargs.len();
+    let maximum = fields.len();
+    if count > maximum {
+        let kind = if args.is_empty() { "keyword " } else { "" };
+        return Err(Error::new(
+            "TypeError",
+            format!("{function}() takes at most {maximum} {kind}arguments ({count} given)"),
+        ));
+    }
+    Ok(move |i| {
+        let field = fields[i];
+        args.get(i)
+            .copied()
+            .or_else(|| {
+                kwargs
+                    .iter()
+                    .find(|(name, _)| name == field)
+                    .map(|(_, value)| *value)
+            })
+            .ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "{function}() missing required argument '{field}' (pos {})",
+                        i + 1
+                    ),
+                )
+            })
+    })
+}
+
 pub(super) fn index_c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
@@ -960,7 +1015,10 @@ pub(super) fn call(
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
     }
     #[cfg(unix)]
-    if matches!(name, "_signal.sigpending" | "_imre_signal.make_signals") {
+    if matches!(
+        name,
+        "_signal.sigpending" | "_imre_signal.make_signals" | "_thread.interrupt_main"
+    ) {
         return signal::call(ctx, name, args, kwargs);
     }
     if name == "_thread.get_ident"
@@ -1101,11 +1159,15 @@ pub(super) fn call(
             ));
         }
     }
-    if name == "collections.defaultdict.__repr__" {
+    if let Some(method @ ("__repr__" | "__or__" | "__ror__")) =
+        name.strip_prefix("collections.defaultdict.")
+    {
         let Some((&object, args)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
-                "descriptor '__repr__' of 'collections.defaultdict' object needs an argument",
+                format!(
+                    "descriptor '{method}' of 'collections.defaultdict' object needs an argument"
+                ),
             ));
         };
         let Some(storage) = ctx
@@ -1115,7 +1177,7 @@ pub(super) fn call(
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "descriptor '__repr__' requires a 'collections.defaultdict' object but received a '{}'",
+                    "descriptor '{method}' requires a 'collections.defaultdict' object but received a '{}'",
                     ctx.type_name(object)
                 ),
             ));
@@ -1123,8 +1185,22 @@ pub(super) fn call(
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "wrapper __repr__() takes no keyword arguments",
+                format!("wrapper {method}() takes no keyword arguments"),
             ));
+        }
+        if method != "__repr__" {
+            let [other] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("expected 1 argument, got {}", args.len()),
+                ));
+            };
+            let (left, right) = if method == "__ror__" {
+                (*other, object)
+            } else {
+                (object, *other)
+            };
+            return super::defaultdict::union(ctx, left, right);
         }
         if !args.is_empty() {
             return Err(Error::new(
@@ -1214,20 +1290,22 @@ pub(super) fn call(
     if name == "sys.getsizeof" {
         return system_size::getsizeof(ctx, &args[1..], kwargs);
     }
-    if name == "sys.getrecursionlimit" {
+    if matches!(name, "sys.getrecursionlimit" | "sys.is_finalizing") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "sys.getrecursionlimit() takes no keyword arguments",
+                format!("{name}() takes no keyword arguments"),
             ));
         }
         if !args[1..].is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!(
-                    "sys.getrecursionlimit() takes no arguments ({} given)",
-                    args.len() - 1
-                ),
+                format!("{name}() takes no arguments ({} given)", args.len() - 1),
+            ));
+        }
+        if name == "sys.is_finalizing" {
+            return Ok(builtins::boolean(
+                ctx.finalizing.load(std::sync::atomic::Ordering::Acquire),
             ));
         }
         return Ok(ctx.int(i64::from(crate::sys::recursion_limit())));
@@ -1318,7 +1396,11 @@ pub(super) fn call(
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
+            | "posix.abort"
             | "posix.getpid"
+            | "posix.getuid"
+            | "posix.getgid"
+            | "posix.getgroups"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
             | "sys._jit.is_active"
@@ -1356,7 +1438,19 @@ pub(super) fn call(
                 ctx.heap.code_name(crate::sys::filesystem_errors().as_str())
             }
             "_locale.getencoding" => ctx.text(crate::sys::file_encoding(Some("locale"))),
+            // SAFETY: C abort takes no arguments and terminates the calling process.
+            #[cfg(unix)]
+            "posix.abort" => unsafe { libc::abort() },
             "posix.getpid" => ctx.int(i64::from(std::process::id())),
+            "posix.getuid" => ctx.alloc(Value::Int(crate::objects::os::getuid())),
+            "posix.getgid" => ctx.alloc(Value::Int(crate::objects::os::getgid())),
+            "posix.getgroups" => {
+                let groups = crate::objects::os::getgroups()?
+                    .into_iter()
+                    .map(|group| ctx.alloc(Value::Int(group)))
+                    .collect();
+                ctx.alloc(Value::List(groups))
+            }
             "sys.getdefaultencoding" => ctx.default_encoding,
             "sys.get_int_max_str_digits" => {
                 ctx.int(i64::from(crate::integer_text::decimal_digit_limit()))
@@ -1574,8 +1668,16 @@ pub(super) fn call(
         return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    if name == "posix.sysconf" {
+        return os::sysconf::call(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
         return os::scheduler::get_policy(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("eventfd" | "eventfd_read" | "eventfd_write")) = name.strip_prefix("posix.") {
+        return os::eventfd::call(ctx, op, args, kwargs);
     }
     if name == "posix.strerror" {
         if !kwargs.is_empty() {
@@ -1598,6 +1700,10 @@ pub(super) fn call(
     }
     if name == "posix.urandom" {
         return os::urandom(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.memfd_create" {
+        return os::memfd_create(ctx, args, kwargs);
     }
     if name == "posix.listdir" {
         return os::listdir(ctx, args, kwargs);
@@ -1701,6 +1807,15 @@ pub(super) fn call(
             return Ok(NONE);
         }
         return Err(Error::new("TypeError", "invalid chain state arguments"));
+    }
+    if let Some(class) = super::deque::iterator_class(name) {
+        return super::deque::construct_iterator(ctx, class, args);
+    }
+    if let Some((class, method)) = name.rsplit_once('.')
+        && super::deque::iterator_class(class).is_some()
+        && super::deque::ITERATOR_METHODS.contains(&method)
+    {
+        return super::deque::iterator_method(ctx, class, method, args, kwargs);
     }
     if name == super::deque::CLASS {
         return super::deque::construct(ctx, args, kwargs);
@@ -1959,6 +2074,9 @@ pub(super) fn call(
     }
     if let Some(operation) = name.strip_prefix("typing.") {
         return super::typing::call(ctx, operation, args, kwargs);
+    }
+    if name == "collections.abc._CallableGenericAlias" {
+        return super::typing::abc_callable_alias(ctx, args, kwargs);
     }
     if name == "types.GenericAlias" {
         if !kwargs.is_empty() {
@@ -2265,6 +2383,7 @@ pub(super) fn call(
         "_imre_json.encoder_state" => return json::encoder_state(ctx, args, kwargs),
         "_imre_json.encoder_call" => return json::encoder_call(ctx, args, kwargs),
         "_imre_json.surrogate_text" => (1, &[]),
+        "_imre_json.is_constants_lookup" => (2, &[]),
         "_imre_json.scan_once" => (3, &[]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.HMAC.update" => (2, &[]),
@@ -2298,7 +2417,6 @@ pub(super) fn call(
         "traceback.format_exception" => return traceback::format(ctx, args, kwargs),
         "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
-        | "sysconfig.get_config_var"
         | "sysconfig.get_preferred_scheme"
         | "os.confstr"
         | "os.path.dirname"
@@ -2437,14 +2555,6 @@ pub(super) fn call(
                 ],
             )
         }
-        "sysconfig.get_config_var" => {
-            let value = layout(ctx)?.config_var(ctx.str_value(argument(args, 0)?)?);
-            match value {
-                serde_json::Value::String(s) => ctx.text(s),
-                serde_json::Value::Number(n) => ctx.int(n.as_i64().unwrap()),
-                _ => NONE,
-            }
-        }
         "sysconfig.get_path_names" => tuple_text(ctx, system::PATH_NAMES),
         "sysconfig.get_scheme_names" => tuple_text(ctx, system::SCHEME_NAMES),
         "sysconfig.get_default_scheme" => ctx.text("posix_prefix"),
@@ -2521,6 +2631,11 @@ pub(super) fn call(
                 NONE
             }
         }
+        "_imre_json.is_constants_lookup" => builtins::boolean(json::is_constants_lookup(
+            ctx,
+            argument(args, 0)?,
+            argument(args, 1)?,
+        )),
         "_imre_json.scan_once" => json::scan_once(
             ctx,
             argument(args, 0)?,

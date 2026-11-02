@@ -90,12 +90,20 @@ def current():
     assert items == [1, 2, 1, 2, 9]
 
     class Values(list):
+        def __getitem__(self, key):
+            return "override"
+
         def append(self, item):
             return "override"
 
     values = Values()
     assert list.append(values, 3) is None
     assert values == [3] and values.append(4) == "override"
+    assert values[0] == "override" and list.__getitem__(values, -1) == 3
+    get = list.__getitem__.__get__(values, Values)
+    assert type(list.__getitem__).__name__ == "method_descriptor"
+    sliced = get(slice(None))
+    assert type(sliced) is list and sliced == [3]
     add = list.append.__get__(values, Values)
     take = list.pop.__get__(values, Values)
     assert add(7) is None and take() == 7

@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod eventfd;
 pub(in crate::dynamic) mod scandir;
 pub(in crate::dynamic) mod stat;
 #[cfg(target_os = "linux")]
@@ -20,7 +22,7 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "access", "chmod", "link", "lstat", "mkdir", "mkfifo", "open", "readlink",
+                "access", "chmod", "chown", "link", "lstat", "mkdir", "mkfifo", "open", "readlink",
                 "rename", "rmdir", "stat", "symlink", "unlink", "utime",
             ][..],
         ),
@@ -29,11 +31,13 @@ pub(in crate::dynamic) fn install_capabilities(
             &[
                 "chdir",
                 "chmod",
+                "chown",
                 "listdir",
                 "scandir",
                 "stat",
                 #[cfg(target_os = "linux")]
                 "statvfs",
+                "truncate",
                 "utime",
             ][..],
         ),
@@ -43,6 +47,7 @@ pub(in crate::dynamic) fn install_capabilities(
                 "access",
                 #[cfg(target_os = "macos")]
                 "chmod",
+                "chown",
                 "link",
                 "stat",
                 "utime",
@@ -97,14 +102,45 @@ fn environment_argument(ctx: &mut Context, value: Id) -> Result<CString> {
     c_path(ctx, path, "embedded null byte")
 }
 
+/// Encode a filesystem spelling without imposing a C string's NUL restriction.
+pub(super) fn encoded_path(ctx: &mut Context, path: Id) -> Result<Vec<u8>> {
+    match ctx.heap.get(ctx.scalar_value(path)) {
+        Value::Bytes(bytes) => Ok(bytes.to_vec()),
+        Value::Str(_) | Value::SurrogateStr(_) => ctx.encode_os_path(path),
+        _ => unreachable!("fspath returns str or bytes"),
+    }
+}
+
 /// Terminate the validated filesystem spelling before evaluating any later Python argument.
 pub(super) fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CString> {
-    let encoded = match ctx.heap.get(ctx.scalar_value(path)) {
-        Value::Bytes(bytes) => CString::new(bytes.as_slice()),
-        Value::Str(_) | Value::SurrogateStr(_) => CString::new(ctx.encode_os_path(path)?),
-        _ => unreachable!("fspath returns str or bytes"),
+    CString::new(encoded_path(ctx, path)?).map_err(|_| Error::new("ValueError", nul_error))
+}
+
+/// Create an anonymous Linux file using CPython's filesystem-name and unsigned-mask converters.
+#[cfg(target_os = "linux")]
+pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    use num_traits::ToPrimitive;
+    use rustix::fs::MemfdFlags;
+    use std::os::fd::IntoRawFd;
+
+    let [Some(name), flags] =
+        builtins::bind_builtin_arguments("memfd_create", args, kwargs, ["name", "flags"], 1)?
+    else {
+        unreachable!("memfd_create requires a name")
     };
-    encoded.map_err(|_| Error::new("ValueError", nul_error))
+    let path = posixpath::fspath(ctx, name)?;
+    let name = c_path(ctx, path, "embedded null byte")?;
+    let flags = if let Some(flags) = flags {
+        let flags = ctx.index_integer(flags)?;
+        (&*flags.big() & num_bigint::BigInt::from(u32::MAX))
+            .to_u32()
+            .expect("flags masked to 32 bits")
+    } else {
+        libc::MFD_CLOEXEC
+    };
+    let fd = rustix::fs::memfd_create(name.as_c_str(), MemfdFlags::from_bits_retain(flags))
+        .map_err(|e| super::os_error(e.into()))?;
+    Ok(ctx.int(i64::from(fd.into_raw_fd())))
 }
 
 /// Read cryptographically secure bytes from the operating system.
@@ -326,15 +362,25 @@ pub(super) fn change_environment(
 }
 
 mod chmod;
+mod chown;
 mod links;
 mod mkfifo;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod scheduler;
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod sysconf;
+mod truncate;
 mod unlink;
 mod utime;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
+    if name == "_exit" {
+        return cfg!(unix);
+    }
+    if name == "pread" {
+        return cfg!(unix);
+    }
     matches!(
         name,
         "access"
@@ -352,6 +398,9 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "mkfifo"
             | "chmod"
             | "fchmod"
+            | "chown"
+            | "fchown"
+            | "lchown"
             | "chdir"
             | "umask"
             | "utime"
@@ -359,6 +408,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "dup2"
             | "isatty"
             | "lseek"
+            | "truncate"
             | "ftruncate"
             | "pipe"
             | "read"
@@ -372,7 +422,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "link"
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
-        || (cfg!(target_os = "linux") && name == "sendfile")
+        || (cfg!(target_os = "linux") && matches!(name, "posix_fallocate" | "sendfile"))
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -688,6 +738,9 @@ pub(super) fn descriptor(
     if name == "symlink" {
         return links::symlink(ctx, args, kwargs);
     }
+    if matches!(name, "chown" | "fchown" | "lchown") {
+        return chown::call(ctx, name, args, kwargs);
+    }
     if name == "link" {
         return links::link(ctx, args, kwargs);
     }
@@ -702,6 +755,9 @@ pub(super) fn descriptor(
     }
     if name == "chdir" {
         return chdir(ctx, args, kwargs);
+    }
+    if name == "truncate" {
+        return truncate::call(ctx, args, kwargs);
     }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
@@ -778,6 +834,16 @@ pub(super) fn descriptor(
         return Ok(NONE);
     }
     #[cfg(unix)]
+    if name == "_exit" {
+        let [Some(status)] = builtins::bind_builtin_arguments(name, args, kwargs, ["status"], 1)?
+        else {
+            unreachable!("status is required")
+        };
+        let status = c_int(ctx, status)?;
+        // SAFETY: _exit accepts any C int and terminates without running cleanup.
+        unsafe { libc::_exit(status) }
+    }
+    #[cfg(unix)]
     if name == "waitstatus_to_exitcode" {
         let [Some(status)] = builtins::bind_builtin_arguments(name, args, kwargs, ["status"], 1)?
         else {
@@ -809,6 +875,26 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix_fallocate" {
+        let [fd, offset, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("posix_fallocate expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let offset = file_offset(ctx, *offset)?;
+        let length = file_offset(ctx, *length)?;
+        loop {
+            // SAFETY: posix_fallocate borrows the fd and takes signed offsets by value.
+            match unsafe { libc::posix_fallocate(fd, offset, length) } {
+                0 => return Ok(NONE),
+                libc::EINTR => ctx.dispatch_signals()?,
+                code => return Err(super::os_error(std::io::Error::from_raw_os_error(code))),
+            }
+        }
     }
     if name == "getppid" {
         if !args.is_empty() {
@@ -885,6 +971,19 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
+    if name == "pread" {
+        let [fd, length, offset] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("pread expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let length = ssize_t(ctx, *length)?;
+        let offset = file_offset(ctx, *offset)?;
+        let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
+        return Ok(ctx.alloc(Value::Bytes(bytes)));
+    }
     if matches!(name, "read" | "write") {
         let [fd, data] = args else {
             return Err(Error::new(
@@ -895,7 +994,7 @@ pub(super) fn descriptor(
         let fd = c_int(ctx, *fd)?;
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
-            let bytes = native::read(fd, length, || ctx.dispatch_signals())?;
+            let bytes = native::read(fd, length, None, || ctx.dispatch_signals())?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
         } else {
             // Keep the exporter alive and its size fixed while a handler runs.
@@ -935,16 +1034,7 @@ pub(super) fn descriptor(
         };
         let fd = c_int(ctx, *fd)?;
         let length = file_offset(ctx, *length)?;
-        let audit_fd = ctx.int(i64::from(fd));
-        let audit_length = ctx.int(length);
-        super::audit::event(ctx, "os.truncate", &[audit_fd, audit_length])?;
-        loop {
-            match native::truncate(fd, length) {
-                Ok(()) => return Ok(NONE),
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(super::os_error(error)),
-            }
-        }
+        return truncate::by_fd(ctx, fd, length);
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

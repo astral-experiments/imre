@@ -125,6 +125,7 @@ pub(crate) struct Context {
     // The fatal handler borrows its descriptor while Python retains the destination.
     fault_file: Option<Id>,
     exit_callbacks: Vec<Id>,
+    finalizing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
@@ -699,7 +700,7 @@ impl Context {
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::MappingProxy(_) => return self.iterator(self.mapping_proxy_target(id)),
             Value::Deque(ref ring) => {
-                let cursor = deque::iterator(id, ring, false);
+                let cursor = deque::iterator(id, ring, false, 0);
                 return Ok(self.alloc(cursor));
             }
             Value::GenericAlias(ref alias) if alias.is_builtin_alias() => {
@@ -1130,7 +1131,7 @@ impl Context {
                 reverse,
             } => {
                 let (deque, state, mut remaining, reverse) = (*deque, *state, *remaining, *reverse);
-                let Value::Deque(ring) = self.heap.get(deque) else {
+                let Value::Deque(ring) = self.heap.get(self.scalar_value(deque)) else {
                     unreachable!()
                 };
                 let item = ring
@@ -2080,6 +2081,9 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if name == deque::CLASS {
+            deque::install(self);
+        }
         if let Some(owner) = stdlib::itertools::cursor_type(name) {
             stdlib::itertools::install_namespace(self, value, owner);
         }
@@ -2189,6 +2193,7 @@ impl Context {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
+            deque::ITERATOR | deque::REVERSE_ITERATOR => deque::ITERATOR_METHODS,
             thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             stdlib::fixed_structseq::SCHED_PARAM => &["__new__", "__reduce__", "__replace__"],
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
@@ -2698,9 +2703,20 @@ impl Context {
         source_globals: Id,
         source: Option<(PathBuf, importlib::SourceBody, Option<Id>)>,
     ) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        if source.is_none() && matches!(name, "os" | "posix") {
+            stdlib::os::eventfd::initialize(self, scope);
+        }
         if name == "_thread" && source.is_none() {
             let rlock = self.builtin(thread_rlock::CLASS);
             self.bind(scope, "RLock", rlock);
+        }
+        #[cfg(target_os = "linux")]
+        if source.is_none() && matches!(name, "os" | "posix") {
+            let memfd = self.builtin("posix.memfd_create");
+            self.bind(scope, "memfd_create", memfd);
+            let close_on_exec = self.int(i64::from(libc::MFD_CLOEXEC));
+            self.bind(scope, "MFD_CLOEXEC", close_on_exec);
         }
         if matches!(name, "io" | "_io") {
             let error = self.builtin("BlockingIOError");
@@ -2780,6 +2796,7 @@ impl Context {
             #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
+                stdlib::os::sysconf::initialize(self, module, scope);
                 for (attr, flag) in [("O_PATH", libc::O_PATH), ("O_TMPFILE", libc::O_TMPFILE)] {
                     let value = self.int(i64::from(flag));
                     self.bind(scope, attr, value);
@@ -3034,6 +3051,7 @@ impl Context {
                     "addaudithook",
                     "getsizeof",
                     "getrecursionlimit",
+                    "is_finalizing",
                     "setrecursionlimit",
                     "_getframe",
                     "_getframemodulename",
@@ -3094,6 +3112,16 @@ impl Context {
                 let register = self.lookup_attr(sequence, "register")?;
                 self.call(register, vec![array], Vec::new())?;
             }
+            "_collections" => {
+                for (field, class) in [
+                    ("deque", deque::CLASS),
+                    ("_deque_iterator", deque::ITERATOR),
+                    ("_deque_reverse_iterator", deque::REVERSE_ITERATOR),
+                ] {
+                    let value = self.builtin(class);
+                    self.bind(scope, field, value);
+                }
+            }
             "collections" => {
                 let deque = self.builtin(deque::CLASS);
                 self.bind(scope, "deque", deque);
@@ -3107,6 +3135,11 @@ impl Context {
             _ => {}
         }
         if name == "_thread" && source.is_none() {
+            #[cfg(unix)]
+            {
+                let interrupt = self.builtin("_thread.interrupt_main");
+                self.bind(scope, "interrupt_main", interrupt);
+            }
             for function in ["start_new_thread", "_count", "get_ident"] {
                 let value = self.builtin(&format!("_thread.{function}"));
                 self.bind(scope, function, value);
@@ -3187,6 +3220,15 @@ impl Context {
                 && let Some(class) = self.scope_name(scope, "PatternError")
             {
                 self.classes.insert("re.PatternError".into(), class);
+            }
+            if name == "typing"
+                && self.typing.callable_factory.is_none()
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("typing.py"))
+            {
+                // A retained Callable still uses its defining module after sys.modules changes.
+                self.typing.callable_factory = self.scope_name(scope, "_make_callable_alias");
             }
             if name == "threading"
                 && self.config["bundled_root"]

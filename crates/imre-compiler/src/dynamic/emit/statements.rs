@@ -8,7 +8,7 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_text_size::{Ranged, TextSize};
 use serde_json::json;
 
-use super::{Body, Cleanup, Function, LoopTarget};
+use super::{Body, Cleanup, DefinitionName, Function, LoopTarget};
 
 #[derive(Default)]
 struct ClosureNames {
@@ -221,7 +221,12 @@ impl Function<'_, '_> {
     pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
         for stmt in suite {
             if self.terminated {
-                break;
+                if self.module_annotation_sites.is_none() {
+                    break;
+                }
+                // Unreachable statements still contribute to a module provider's site order.
+                let dead = self.name("b");
+                self.label(&dead);
             }
             self.checkpoint(stmt);
             self.simple_call = match stmt {
@@ -264,8 +269,7 @@ impl Function<'_, '_> {
                     };
                     let evaluator = self.define(
                         v.start(),
-                        name.id.as_str(),
-                        false,
+                        DefinitionName::Plain(name.id.as_str()),
                         None,
                         None,
                         None,
@@ -313,9 +317,21 @@ impl Function<'_, '_> {
                     if let Some(value) = &v.value {
                         let value = self.expr(value);
                         self.assign(&v.target, &value);
+                    } else if self.source.string_annotations {
+                        match &*v.target {
+                            ast::Expr::Attribute(attr) => {
+                                self.discard_annotation_operand(&attr.value);
+                            }
+                            ast::Expr::Subscript(subscript) => {
+                                self.discard_annotation_operand(&subscript.value);
+                                self.discard_annotation_slice(&subscript.slice);
+                            }
+                            _ => {}
+                        }
                     }
                     if let ast::Expr::Name(name) = &*v.target
-                        && (self.class_locals.is_none() || v.simple)
+                        && v.simple
+                        && (self.module || self.class_locals.is_some())
                     {
                         let key = self.code_name(name.id.as_str());
                         if self.class_locals.is_some() && !self.source.string_annotations {
@@ -340,13 +356,14 @@ impl Function<'_, '_> {
                             let thunk = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
                             let offset = v.start().to_u32();
                             self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
+                        } else if let Some(sites) = &mut self.module_annotation_sites {
+                            let index = sites.len();
+                            sites.push((name.id.to_string(), (*v.annotation).clone()));
+                            let index = self.integer(index);
+                            self.op("mark_module_annotation", &[&self.scope.clone(), &index]);
                         } else {
                             let value =
-                                if self.class_locals.is_some() && self.source.string_annotations {
-                                    self.text(&crate::frontend::annotation_spelling(&v.annotation))
-                                } else {
-                                    "0".into()
-                                };
+                                self.text(&crate::frontend::annotation_spelling(&v.annotation));
                             self.op("annotate", &[&self.scope.clone(), &key, &value]);
                         }
                     }
@@ -376,8 +393,7 @@ impl Function<'_, '_> {
                     };
                     let function = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
-                        self.source.private_names.definition(&v.name),
-                        self.declared_globals.contains(v.name.as_str()),
+                        DefinitionName::Binding(&v.name),
                         Some(&v.parameters),
                         v.returns.as_deref(),
                         crate::dynamic::function_type_params(v).filter(|_| self.prefix.is_empty()),
@@ -420,8 +436,7 @@ impl Function<'_, '_> {
                     }
                     let init = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
-                        self.source.private_names.definition(&v.name),
-                        self.declared_globals.contains(v.name.as_str()),
+                        DefinitionName::Binding(&v.name),
                         None,
                         None,
                         None,
@@ -635,13 +650,19 @@ impl Function<'_, '_> {
     pub(super) fn define(
         &mut self,
         start: TextSize,
-        name: &str,
-        global: bool,
+        name: DefinitionName<'_>,
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
         type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> String {
+        let (name, global) = match name {
+            DefinitionName::Binding(identifier) => (
+                self.source.private_names.definition(identifier),
+                self.declared_globals.contains(identifier.as_str()),
+            ),
+            DefinitionName::Plain(name) => (name, false),
+        };
         let qualname = if global {
             name.to_owned()
         } else {
@@ -664,7 +685,13 @@ impl Function<'_, '_> {
             _ => None,
         };
         let flags = match (&body, params) {
-            (Body::Namespace(_) | Body::Annotations(..) | Body::ClassAnnotations(..), _) => None,
+            (
+                Body::Namespace(_)
+                | Body::Annotations(..)
+                | Body::ModuleAnnotations(..)
+                | Body::ClassAnnotations(..),
+                _,
+            ) => None,
             _ => {
                 use imre_ast::code_flags::*;
                 let mut flags = OPTIMIZED | NEWLOCALS;
@@ -959,10 +986,41 @@ impl Function<'_, '_> {
         self.label(&good);
     }
 
+    /// Publish a module's provider before its first statement. Every simple
+    /// annotation, including an unconditional one, becomes visible only after
+    /// execution reaches its assignment.
+    pub(super) fn setup_deferred_module_annotations(&mut self, sites: &[(String, ast::Expr)]) {
+        if !sites.is_empty() {
+            let entries = sites
+                .iter()
+                .map(|(name, expr)| (name.as_str(), expr))
+                .collect();
+            let signature = self.text(
+                &json!({
+                    "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
+                })
+                .to_string(),
+            );
+            let code = self.output.definition(
+                self.source,
+                String::new(),
+                Body::ModuleAnnotations(entries),
+                self.source.module_start,
+                false,
+            );
+            let name = self.text("__annotate__");
+            let defaults = self.op("dict", &[]);
+            let provider = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
+            self.bind("__annotate__", &provider);
+        }
+        self.op("setup_module_annotations", &[&self.scope.clone()]);
+    }
+
     pub(super) fn annotations(
         &mut self,
         entries: &[(&str, &ast::Expr)],
         class: Option<ClassBindings>,
+        module: bool,
     ) {
         self.check_annotation_format();
         let values = self.op("dict", &[]);
@@ -970,14 +1028,35 @@ impl Function<'_, '_> {
         self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
         self.annotation_lookup = true;
         self.class_locals = class;
-        for &(name, expression) in entries {
+        for (index, &(name, expression)) in entries.iter().enumerate() {
+            let after = module.then(|| {
+                let active = self.lookup("__conditional_annotations__");
+                let index = self.integer(index);
+                let present = self.op("in", &[&index, &active]);
+                let condition = self.truth(&present);
+                let yes = self.name("b");
+                let after = self.name("b");
+                self.branch(&condition, &yes, &after);
+                self.label(&yes);
+                after
+            });
             let key = self.code_name(name);
             let value = if self.source.string_annotations {
                 self.text(&crate::frontend::annotation_spelling(expression))
+            } else if let ast::Expr::Starred(starred) = expression {
+                let value = self.expr(&starred.value);
+                let count = self.integer(1);
+                let items = self.op("unpack", &[&value, &count, "0"]);
+                let index = self.integer(0);
+                self.op("get", &[&items, &index])
             } else {
                 self.expr(expression)
             };
             self.op("put", &[&values, &key, &value]);
+            if let Some(after) = after {
+                self.jump(&after);
+                self.label(&after);
+            }
         }
         self.end(&format!("ret i64 {values}"));
     }
@@ -987,6 +1066,30 @@ impl Function<'_, '_> {
             value = self.invoke(decorator, &[&value]);
         }
         self.bind(name.as_str(), &value);
+    }
+
+    fn discard_annotation_operand(&mut self, expr: &ast::Expr) {
+        let mark = self.temporary_mark();
+        self.expr(expr);
+        self.discard_truth(&mark);
+    }
+
+    // Without an assignment, CPython evaluates each subscript operand but
+    // neither constructs an extended slice nor invokes __getitem__.
+    fn discard_annotation_slice(&mut self, slice: &ast::Expr) {
+        match slice {
+            ast::Expr::Slice(s) => {
+                for bound in [&s.lower, &s.upper, &s.step].into_iter().flatten() {
+                    self.discard_annotation_operand(bound);
+                }
+            }
+            ast::Expr::Tuple(t) => {
+                for item in &t.elts {
+                    self.discard_annotation_slice(item);
+                }
+            }
+            expr => self.discard_annotation_operand(expr),
+        }
     }
 
     fn place(&mut self, target: &ast::Expr) -> Option<Place> {
@@ -1216,7 +1319,7 @@ impl Function<'_, '_> {
         }
         self.exits.pop();
         self.error = outer;
-        if !self.terminated {
+        if !self.terminated || self.module_annotation_sites.is_some() {
             self.statements(&stmt.finalbody);
             self.jump(&done);
         }
@@ -1405,6 +1508,7 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
         }
         Body::Namespace(_)
         | Body::Annotations(..)
+        | Body::ModuleAnnotations(..)
         | Body::ClassAnnotations(..)
         | Body::AnnotationThunk(..)
         | Body::AnnotationValue(_)

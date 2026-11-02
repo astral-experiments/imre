@@ -183,6 +183,18 @@ def test_time_strptime():
         raise AssertionError("invalid hour")
 
 
+def test_datetime_strptime():
+    class Stamp(dt):
+        pass
+
+    stamp = Stamp.strptime("2004-12-01 -00:02:01.000003", "%Y-%m-%d %z")
+    assert type(stamp) is Stamp
+    assert stamp.isoformat() == "2004-12-01T00:00:00-00:02:01.000003"
+    named = dt.strptime("+1234 UTC", "%z %Z")
+    assert named.utcoffset() == timedelta(hours=12, minutes=34)
+    assert named.tzname() == "UTC"
+
+
 def test_time_of_day():
     midnight = time()
     assert type(midnight) is time and isinstance(midnight, time)
@@ -408,6 +420,22 @@ def test_subclass_construction():
         raise AssertionError("date allocated an incompatible datetime layout")
 
 
+def test_datetime_fromisoformat():
+    class Stamp(dt):
+        pass
+
+    class Fields(dt):
+        def __new__(cls, *fields):
+            return fields
+
+    bound = Stamp(2000, 1, 1).fromisoformat
+    value = bound("2020-W53-7\ud80024:00:00-00:00:30.000005")
+    assert type(value) is Stamp and value.date() == date(2021, 1, 4)
+    assert value.utcoffset() == -timedelta(seconds=30, microseconds=5)
+    assert dt.fromisoformat("20200103T125530Z").tzinfo is UTC
+    assert Fields.fromisoformat("9999-12-31T24:00") == (10000, 1, 1, 0, 0, 0, 0, None)
+
+
 def test_timedelta_negation():
     class Delta(timedelta):
         @property
@@ -451,6 +479,54 @@ def test_fromordinal():
     assert type(value) is Stamp and value == dt(2003, 4, 14)
     assert date.fromordinal(True) == date(1, 1, 1)
     assert Parts.fromordinal(2**31 - 1) == (5879611, 7, 11)
+
+
+def test_fromisocalendar():
+    class Parts(date):
+        def __new__(cls, *fields):
+            return fields
+
+    class Stamp(dt):
+        pass
+
+    assert Parts.fromisocalendar(9999, 52, 6) == (10000, 1, 1)
+    stamp = Stamp(2000, 1, 1).fromisocalendar(2019, 1, 1)
+    assert type(stamp) is Stamp and stamp == dt(2018, 12, 31)
+
+    for iso, message in (
+        ((2021, 53, 1), "Invalid week: 53"),
+        ((9999, 52, 6), "year must be in 1..9999, not 10000"),
+        ((2**31, 1, 1), "ISO calendar component out of range"),
+    ):
+        try:
+            date.fromisocalendar(*iso)
+        except ValueError as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError(f"accepted invalid ISO calendar date {iso}")
+
+    calls = []
+    error = LookupError("week conversion")
+
+    class Index:
+        def __init__(self, value):
+            self.value = value
+
+        def __index__(self):
+            calls.append(self.value)
+            if self.value is error:
+                raise error
+            return self.value
+
+    assert date.fromisocalendar(day=Index(7), week=Index(53), year=Index(2020)) == date(2021, 1, 3)
+    assert calls == [2020, 53, 7]
+    calls.clear()
+    try:
+        date.fromisocalendar(Index(0), Index(error), Index(1))
+    except LookupError as exc:
+        assert exc is error and calls == [0, error]
+    else:
+        raise AssertionError("lost __index__ exception")
 
 
 def test_date_clock_constructors():
@@ -843,15 +919,18 @@ def current():
     test_astimezone_subtype()
     test_tzinfo_reduction()
     test_calendar_format()
+    test_datetime_fromisoformat()
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
     test_timedelta_remainder()
     test_fromordinal()
+    test_fromisocalendar()
     test_date_clock_constructors()
     test_subclass_construction()
     test_now()
     test_time_fromisoformat()
     test_time_strptime()
+    test_datetime_strptime()
     test_time_of_day()
     test_http_date()
     test_module_exports()

@@ -1331,7 +1331,7 @@ impl Emitter<'_, '_> {
             .iter()
             .flatten()
             .any(|v| v.receiver.ty == Type::ListInt && v.data.is_some())
-            || crate::list_specialization::contains_loop(body)
+            || crate::ir::contains_loop(body)
         {
             return None;
         }
@@ -6323,6 +6323,9 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::ObjectTextProject => {
+                self.call("imre_object_exact_text", returns, &[&args[0].value])
+            }
             Builtin::ObjectStreamProject => {
                 let result = Value {
                     ty: returns,
@@ -8778,6 +8781,7 @@ declare void @imre_environ_delete(ptr, i32)
 declare void @imre_environ_set(ptr, ptr)
 declare void @imre_environ_set_bytes(ptr, ptr)
 declare ptr @imre_getcwd()
+declare ptr @imre_getcwdb()
 declare i64 @imre_os_transfer_fd(i64)
 declare ptr @imre_os_read(i64, i64)
 declare i64 @imre_os_write(i64, ptr)
@@ -9152,6 +9156,7 @@ declare zeroext i1 @imre_contextvars_was_missing(ptr)
 declare ptr @imre_contextvars_enter(ptr)
 declare void @imre_contextvars_leave(ptr, ptr)
 declare i64 @imre_contextvars_len(ptr)
+declare ptr @imre_object_exact_text(ptr)
 declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)
 declare ptr @imre_exception_tuple_view(ptr)

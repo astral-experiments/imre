@@ -390,6 +390,28 @@ fn raw_unicode_compatible(source: &str, ascii: bool, boundaries: &[usize]) -> bo
     true
 }
 
+// Python treats the first character after '[' or '[^' as a set member. A second
+// hyphen can then introduce a range. Leave later ambiguous operators alone.
+fn literal_operator_start(mut input: std::iter::Peekable<std::str::Chars<'_>>) -> bool {
+    let Some(first @ ('-' | '&' | '|' | '~')) = input.next() else {
+        return false;
+    };
+    if input.peek() != Some(&first) {
+        return false;
+    }
+    while let Some(c) = input.next() {
+        match c {
+            ']' => return true,
+            '\\' => {
+                input.next();
+            }
+            '-' | '&' | '|' | '~' if input.peek() == Some(&c) => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
 // Python uses str.isalnum() plus "_" for \w and includes four additional
 // ASCII separators in Unicode whitespace. The nested classes also work
 // when these escapes occur inside a bracketed class in the input.
@@ -455,6 +477,8 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, 
                 // A closing bracket in the first position is a literal member.
                 if chars.next_if_eq(&']').is_some() {
                     result.push(']');
+                } else if literal_operator_start(chars.clone()) {
+                    result.push('\\');
                 }
                 continue;
             }
@@ -1313,11 +1337,18 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
             "cannot use a bytes pattern on a string-like object",
         )),
         _ => ctx.str_value(id).map(str::as_bytes).map_err(|_| {
+            let name = match ctx.heap.get(id) {
+                Value::Native(_) => ctx
+                    .builtin_type_name(id)
+                    .and_then(|name| name.rsplit('.').next())
+                    .unwrap_or_else(|| ctx.type_name(id)),
+                _ => ctx.type_name(id),
+            };
             Error::new(
                 "TypeError",
                 format!(
                     "expected string or bytes-like object, got '{}'",
-                    ctx.type_name(id)
+                    &name[..name.floor_char_boundary(200)]
                 ),
             )
         }),
@@ -1450,8 +1481,16 @@ pub(super) fn search(
     let (start, end) = (byte(start), byte(end));
     if method == "findall" {
         // Keep the prefix for anchors and word boundaries before pos.
-        let text = text[..end].to_vec();
-        return findall(ctx, pattern, &text, start);
+        let text = &text[..end];
+        let mut captures = pattern.regex.create_captures();
+        return match split::next_span(pattern, text, start, None, &mut captures) {
+            Ok(Some(first)) => {
+                let text = text.to_vec();
+                findall(ctx, pattern, &text, first, &mut captures)
+            }
+            Ok(None) => Ok(ctx.alloc(Value::List(Vec::new()))),
+            Err(message) => Err(pattern.match_error(ctx, message)),
+        };
     }
     if matches!(method, "scanner" | "finditer") {
         let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
@@ -1546,16 +1585,17 @@ pub(super) fn match_method(ctx: &mut Context, name: &str, args: &[Id]) -> Result
     })
 }
 
-/// Collect captures starting at a byte offset in the bounded subject.
-fn findall(ctx: &mut Context, pattern: &Pattern, text: &[u8], start: usize) -> Result<Id> {
+/// Collect the first match and the remaining captures from the bounded subject snapshot.
+fn findall(
+    ctx: &mut Context,
+    pattern: &Pattern,
+    text: &[u8],
+    mut span: Span,
+    captures: &mut Captures,
+) -> Result<Id> {
     let mut found = Vec::new();
-    let mut captures = pattern.regex.create_captures();
-    let mut previous = None;
-    while let Some(span) = split::next_span(pattern, text, start, previous, &mut captures)
-        .map_err(|message| pattern.match_error(ctx, message))?
-    {
-        previous = Some(span);
-        let fields: Vec<_> = group_spans(&captures)
+    loop {
+        let fields: Vec<_> = group_spans(captures)
             .map(|span| span.map(|s| &text[s.range()]))
             .collect();
         let value = match fields.as_slice() {
@@ -1571,6 +1611,12 @@ fn findall(ctx: &mut Context, pattern: &Pattern, text: &[u8], start: usize) -> R
             [] => unreachable!("every regex has an overall match"),
         };
         found.push(ctx.alloc(value));
+        let Some(next) = split::next_span(pattern, text, span.end, Some(span), captures)
+            .map_err(|message| pattern.match_error(ctx, message))?
+        else {
+            break;
+        };
+        span = next;
     }
     Ok(ctx.alloc(Value::List(found)))
 }

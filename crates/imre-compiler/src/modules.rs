@@ -957,7 +957,9 @@ pub(crate) enum Intrinsic {
     EnvironBytes,
     BoolConstant(bool),
     GetEnv,
-    GetCwd,
+    GetCwd {
+        bytes: bool,
+    },
     Chdir,
     Strerror,
     StatResult,
@@ -1248,6 +1250,9 @@ impl IntrinsicModule {
             (Self::Imp, "extension_suffixes") => {
                 Intrinsic::ObjectRuntimeExport("_imp.extension_suffixes")
             }
+            (Self::Imp, "pyc_magic_number_token") => {
+                Intrinsic::ObjectRuntimeExport("_imp.pyc_magic_number_token")
+            }
             (Self::Imp, "is_frozen") => Intrinsic::ObjectRuntimeExport("_imp.is_frozen"),
             (Self::Imp, "_override_frozen_modules_for_tests") => {
                 Intrinsic::ObjectRuntimeExport("_imp._override_frozen_modules_for_tests")
@@ -1379,6 +1384,9 @@ impl IntrinsicModule {
                 Intrinsic::NominalClass("collections.abc.MutableMapping")
             }
             (Self::AnnotationLib, "ForwardRef") => Intrinsic::ForwardRef,
+            (Self::AnnotationLib, "annotations_to_string") => {
+                Intrinsic::ObjectRuntimeExport("annotationlib.annotations_to_string")
+            }
             (Self::AnnotationLib, "get_annotations") => Intrinsic::GetAnnotations,
             (Self::AnnotationLib, "type_repr") => Intrinsic::AnnotationTypeRepr,
             (Self::AnnotationFormat, "VALUE") => Intrinsic::AnnotationFormat(1),
@@ -1532,6 +1540,12 @@ impl IntrinsicModule {
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
             }
+            (Self::ImportlibMachinery | Self::ImportlibBootstrapExternal, "SourcelessFileLoader") => {
+                Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourcelessFileLoader")
+            }
+            (Self::ImportlibUtil, "MAGIC_NUMBER") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.MAGIC_NUMBER")
+            }
             (Self::ImportlibUtil, "module_from_spec") => {
                 Intrinsic::ObjectRuntimeExport("importlib.util.module_from_spec")
             }
@@ -1557,6 +1571,7 @@ impl IntrinsicModule {
             (Self::Time, "ctime") => Intrinsic::ObjectRuntimeExport("time.ctime"),
             (Self::Time, "time_ns") => Intrinsic::ObjectRuntimeExport("time.time_ns"),
             (Self::Time, "monotonic") => Intrinsic::ObjectRuntimeExport("time.monotonic"),
+            (Self::Time, "monotonic_ns") => Intrinsic::ObjectRuntimeExport("time.monotonic_ns"),
             (Self::Time, "perf_counter") => Intrinsic::ObjectRuntimeExport("time.perf_counter"),
             (Self::Time, "struct_time") => Intrinsic::StructTime,
             (Self::Time, "mktime") => Intrinsic::Mktime,
@@ -1821,6 +1836,7 @@ impl IntrinsicModule {
             }
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
             (Self::Sys, "getsizeof") => Intrinsic::ObjectRuntimeExport("sys.getsizeof"),
+            (Self::Sys, "is_finalizing") => Intrinsic::ObjectRuntimeExport("sys.is_finalizing"),
             (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
             (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
@@ -1898,6 +1914,8 @@ impl IntrinsicModule {
             (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
             (Self::Builtins, "hex") => Intrinsic::BuiltinsHex,
+            (Self::Builtins, "oct") => Intrinsic::ScopedObjectExport("builtins.oct"),
+            (Self::Builtins, "exec") => Intrinsic::ScopedObjectExport("builtins.exec"),
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "orig_argv") => Intrinsic::OrigArgv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
@@ -2137,6 +2155,10 @@ impl IntrinsicModule {
             (Self::Thread, "allocate") => Intrinsic::ObjectRuntimeExport("_thread.allocate"),
             (Self::Thread | Self::Threading, "TIMEOUT_MAX") => {
                 Intrinsic::ObjectRuntimeExport("_thread.TIMEOUT_MAX")
+            }
+            #[cfg(unix)]
+            (Self::Thread, "interrupt_main") => {
+                Intrinsic::ObjectRuntimeExport("_thread.interrupt_main")
             }
             (Self::Thread, "_count") => Intrinsic::ObjectRuntimeExport("_thread._count"),
             (Self::Thread, "start_new_thread") => {
@@ -2499,6 +2521,12 @@ impl IntrinsicModule {
             }
             (Self::Collections | Self::CollectionsNative, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections | Self::CollectionsNative, "deque") => Intrinsic::Deque,
+            (Self::Collections | Self::CollectionsNative, "_deque_iterator") => {
+                Intrinsic::ObjectRuntimeExport("collections._deque_iterator")
+            }
+            (Self::CollectionsNative, "_deque_reverse_iterator") => {
+                Intrinsic::ObjectRuntimeExport("_collections._deque_reverse_iterator")
+            }
             (Self::Collections, "ChainMap") => Intrinsic::ChainMap,
             (Self::Collections | Self::CollectionsNative, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,
@@ -2607,6 +2635,9 @@ impl IntrinsicModule {
             (Self::Resource, "RLIMIT_CORE") => {
                 Intrinsic::ObjectRuntimeExport("resource.RLIMIT_CORE")
             }
+            (Self::Resource, "RLIMIT_NOFILE") => {
+                Intrinsic::ObjectRuntimeExport("resource.RLIMIT_NOFILE")
+            }
             (Self::Resource, "RLIMIT_STACK") => {
                 Intrinsic::ObjectRuntimeExport("resource.RLIMIT_STACK")
             }
@@ -2684,7 +2715,8 @@ impl IntrinsicModule {
             (Self::Os, "environb") if cfg!(unix) => Intrinsic::EnvironBytes,
             (Self::Os, "supports_bytes_environ") => Intrinsic::BoolConstant(cfg!(unix)),
             (Self::Os, "getenv") => Intrinsic::GetEnv,
-            (Self::Os, "getcwd") => Intrinsic::GetCwd,
+            (Self::Os, "getcwd") => Intrinsic::GetCwd { bytes: false },
+            (Self::Os, "getcwdb") if cfg!(unix) => Intrinsic::GetCwd { bytes: true },
             (Self::Os, "fspath") => Intrinsic::FsPath,
             (Self::Os, "_fspath") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os._fspath"),
             (Self::Os, "fsdecode") => Intrinsic::FsDecode,
@@ -3044,6 +3076,7 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
+    pub(crate) check_decorated_method_calls: std::cell::Cell<bool>,
     pub(crate) class_body_error: std::cell::RefCell<Option<String>>,
     pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
     pub(crate) deferred_object_error: std::cell::RefCell<Option<String>>,
@@ -3622,9 +3655,17 @@ impl SourceGraph {
         let entry = fs
             .canonicalize(path)
             .map_err(|err| format!("{}: {err}", path.display()))?;
-        let source = fs
-            .read_to_string(&entry)
-            .map_err(|err| format!("{}: {err}", path.display()))?;
+        let bytes = if crate::named_bytecode(path) {
+            std::fs::File::open(&entry).and_then(crate::read_bytecode_prefix)
+        } else {
+            fs.read(&entry)
+        }
+        .map_err(|err| format!("{}: {err}", path.display()))?;
+        if let Some(error) = crate::bytecode_script_error(path, &bytes) {
+            return Err(error.into());
+        }
+        let source = String::from_utf8(bytes)
+            .map_err(|_| format!("{}: stream did not contain valid UTF-8", path.display()))?;
         let root = entry
             .parent()
             .ok_or("script has no parent directory")?
@@ -4281,6 +4322,7 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
+            check_decorated_method_calls: Default::default(),
             class_body_error: Default::default(),
             object_builtin_errors: Default::default(),
             deferred_object_error: self.wildcard_import.into(),

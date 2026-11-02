@@ -52,6 +52,20 @@ impl BoxedPopen {
         launch_error::posix_spawn_capabilities().0
     }
 
+    pub(crate) fn spawn_closes_fds() -> bool {
+        launch_error::posix_spawn_capabilities().1
+    }
+
+    /// Distinct Python objects can convert to the same descriptor after set deduplication.
+    pub(crate) fn push_pass_fd(fds: &mut Vec<RawFd>, number: &Int) -> Result<()> {
+        let previous = fds.last().copied();
+        super::pass_fds::push(fds, number)?;
+        if previous == fds.last().copied() {
+            return Err(Error::new(Kind::ValueError, "bad value(s) in fds_to_keep"));
+        }
+        Ok(())
+    }
+
     /// Reserve the actual child and parent fds before any executable-path callbacks.
     pub(crate) fn prepare_handles(
         streams: &[(u32, Option<Int>); 3],
@@ -81,7 +95,8 @@ impl BoxedPopen {
         bufsize: Int,
         pipesize: Int,
         start_new_session: bool,
-        warn_line_buffering: &mut dyn FnMut() -> Result<()>,
+        umask: i32,
+        keep: Vec<RawFd>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -129,10 +144,13 @@ impl BoxedPopen {
             failure_site: Some(&mut site),
             direct,
             search_path,
-            warn_line_buffering: Some(warn_line_buffering),
             environment: env,
-            // A new session uses the ordinary child-settings path with no group or umask change.
-            child: start_new_session.then_some((0, Int::small(-1).unwrap().0, true)),
+            boxed_child: Some(ChildAttributes {
+                new_session: start_new_session,
+                mask: (umask >= 0).then_some(umask as libc::mode_t),
+                keep,
+                ..Default::default()
+            }),
             ..Default::default()
         };
         for (i, ((mode, fd), shift)) in streams.iter().zip([12, 0, 4]).enumerate() {

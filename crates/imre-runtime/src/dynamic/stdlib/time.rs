@@ -165,6 +165,7 @@ pub(super) fn call(
         "time_ns" => "time.time_ns",
         "sleep" => "time.sleep",
         "monotonic" => "time.monotonic",
+        "monotonic_ns" => "time.monotonic_ns",
         "perf_counter" => "time.perf_counter",
         "mktime" => "time.mktime",
         "tzset" => "time.tzset",
@@ -187,17 +188,20 @@ pub(super) fn call(
                     ),
                 ));
             };
-            let name = ctx.string_storage(*name).ok_or_else(|| {
+            let Some(name) = ctx.string_storage(*name) else {
                 let kind = if *name == NONE {
                     "None"
                 } else {
                     ctx.type_name(*name)
                 };
-                Error::new(
-                    "TypeError",
-                    format!("get_clock_info() argument 1 must be str, not {kind}"),
-                )
-            })?;
+                // PyArg formats at most 50 bytes of tp_name, then decodes the full diagnostic.
+                let mut message = b"get_clock_info() argument 1 must be str, not ".to_vec();
+                message.extend_from_slice(&kind.as_bytes()[..kind.len().min(50)]);
+                let text = crate::objects::Codec::Utf8 { signature: false }
+                    .decode(&message, None)
+                    .map_err(|error| ctx.decode_error(error))?;
+                return Err(Error::new("TypeError", text));
+            };
             // PyArg_ParseTuple's "s" rejects unencodable Unicode and embedded NULs.
             let name = codecs::encode_text(ctx, name, None, None)?;
             if name.contains(&0) {
@@ -270,6 +274,9 @@ pub(super) fn call(
             })?;
             Ok(ctx.int(nanos))
         }
+        "monotonic_ns" if args.is_empty() => {
+            Ok(ctx.int(crate::objects::time::monotonic_time_ns()?))
+        }
         "monotonic" | "perf_counter" if args.is_empty() => {
             let stamp =
                 crate::objects::time::monotonic_time().map_err(crate::objects::errno_error)?;
@@ -288,10 +295,12 @@ pub(super) fn call(
             install_timezone(ctx, scope)?;
             Ok(NONE)
         }
-        "time" | "time_ns" | "monotonic" | "perf_counter" | "tzset" => Err(Error::new(
-            "TypeError",
-            format!("{function}() takes no arguments ({} given)", args.len()),
-        )),
+        "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter" | "tzset" => {
+            Err(Error::new(
+                "TypeError",
+                format!("{function}() takes no arguments ({} given)", args.len()),
+            ))
+        }
         "mktime" => match args {
             [value] => {
                 let stamp = tuple_time(ctx, *value, name)?.timestamp()?;

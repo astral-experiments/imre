@@ -144,8 +144,16 @@ impl Context {
                 return Ok(NONE);
             }
             "__annotations__" => {
+                let initializing = match self.scope_name(scope, "__spec__") {
+                    Some(spec) => match self.lookup_attr(spec, "_initializing") {
+                        Ok(flag) => self.truth(flag)?,
+                        Err(error) if self.is_attribute_error(&error) => false,
+                        Err(error) => return Err(error),
+                    },
+                    None => false,
+                };
                 let value = match self.scope_name(scope, "__annotate__") {
-                    Some(annotate) if annotate != NONE => {
+                    Some(annotate) if self.callable(annotate) => {
                         let format = self.int(1);
                         let value = self.call(annotate, vec![format], Vec::new())?;
                         if self.dict_storage(value).is_none() {
@@ -161,7 +169,9 @@ impl Context {
                     }
                     _ => self.dict(Vec::new()),
                 };
-                self.bind(scope, name, value);
+                if !initializing {
+                    self.bind(scope, name, value);
+                }
                 return Ok(value);
             }
             _ => {}

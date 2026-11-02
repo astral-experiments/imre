@@ -1,9 +1,15 @@
-from types import GenericAlias
-from typing import Annotated, ForwardRef, List, NoDefault, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
+import sys
+from collections.abc import Callable as ABCCallable
+from types import GenericAlias, ModuleType
+from typing import Annotated, Callable, ForwardRef, List, NoDefault, ParamSpec, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
+from weakref import ref
 
 
 def current():
     ts = TypeVarTuple("Ts")
+    assert ref(ts)() is ts
+    temporary = ref(TypeVarTuple("Temporary"))
+    assert temporary() is None
     assert ts is not TypeVarTuple("Ts")
     assert type(ts) is TypeVarTuple
     assert ts.__module__ == __name__
@@ -21,11 +27,52 @@ def current():
 
     unpacked, = ts
     assert unpacked is Unpack[ts]
+
+    def vararg_annotation(items):
+        def variadic(*args: *items):
+            pass
+        return variadic.__annotations__["args"]
+
+    assert vararg_annotation(ts) is unpacked
+    try:
+        vararg_annotation((int, str))
+    except ValueError as exc:
+        assert str(exc) == "too many values to unpack (expected 1, got 2)"
+    else:
+        raise AssertionError("accepted two items in a starred annotation")
+
     assert get_origin(unpacked) is Unpack
     assert get_args(unpacked) == unpacked.__parameters__ == (ts,)
     assert repr(unpacked) == "typing.Unpack[Ts]"
     assert unpacked[int, str] == (int, str)
     assert Unpack[tuple[int, str]].__typing_unpacked_tuple_args__ == (int, str)
+
+    p = ParamSpec("P")
+    assert Callable[[None, *ts], None].__args__ == (type(None), unpacked, type(None))
+    assert Callable[p, None].__args__ == (p, type(None))
+    assert Callable[..., None].__args__ == (..., type(None))
+    assert Callable[[list[None]], None].__args__[0] == list[None]
+    assert ABCCallable[[None], None].__args__ == (None, None)
+    assert Callable[..., None] == Callable[..., type(None)]
+    assert Callable[..., None] is not Callable[..., type(None)]
+    assert Callable[[None], None] is Callable[(None,), None]
+
+    previous = sys.modules["typing"]
+    sys.modules["typing"] = ModuleType("replacement")
+    try:
+        assert Callable[p, None].__args__ == (p, type(None))
+        assert Callable[[bytes], None].__args__ == (bytes, type(None))
+        unhashable = {}
+        assert Callable[[unhashable], None].__args__[0] is unhashable
+    finally:
+        sys.modules["typing"] = previous
+
+    class Parameters(list):
+        def __iter__(self):
+            return iter((None, int))
+
+    assert Callable[Parameters([bytes]), None] is Callable[[None, int], None]
+    assert Callable[["Input"], "Output"].__args__ == (ForwardRef("Input"), ForwardRef("Output"))
 
     alias = tuple[*ts]
     it = iter(alias)
@@ -48,6 +95,35 @@ def current():
     assert tuple[spelled][str].__args__ == (next(iter(list[str])),)
     assert starred[int, str] == next(iter(tuple[int, str]))
     assert starred["Target", None].__args__ == ("Target", None)
+
+    from typing import Generic
+    class Pack(Generic[*ts]): pass
+    u = TypeVar("U")
+    class Mixed(Generic[t, *ts, u]): pass
+    class Fixed(Generic[t, u]): pass
+    defaulted = TypeVarTuple("Defaulted", default=Unpack[tuple[str, int]])
+    class Defaulted(Generic[*defaulted]): pass
+    other = TypeVarTuple("Other")
+    class TwoPacks(Generic[*ts, *other]): pass
+
+    assert Pack[()].__args__ == ()
+    assert Pack[int] is Pack[int]
+    assert Pack[int] == Pack[(int,)] and Pack[int] is not Pack[(int,)]
+    assert Pack[None] == Pack[type(None)] and Pack[None] is not Pack[type(None)]
+    value = []
+    assert Pack[value].__args__[0] is value and Pack[value] is not Pack[value]
+    assert Mixed[int, str].__args__ == (int, str)
+    assert Mixed[int, bytes, float, str].__args__ == (int, bytes, float, str)
+    assert Mixed[*tuple[int, ...]].__args__ == (int, *tuple[int, ...], int)
+    assert Defaulted[()].__args__ == (str, int) and Defaulted[bool].__args__ == (bool,)
+    for invalid in (lambda: Mixed[int], lambda: Fixed[int], lambda: Fixed[int, str, bytes],
+                    lambda: TwoPacks[int], lambda: Mixed[*tuple[int, ...], *tuple[str, ...]]):
+        try:
+            invalid()
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invalid generic specialization succeeded")
 
     marker = List[Annotated[t, ts]]
     assert marker.__parameters__ == (t,)

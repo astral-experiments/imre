@@ -140,7 +140,7 @@ fn excess_positional_error(
     )
 }
 
-fn missing_arguments_error(name: &str, kind: &str, missing: &[&str]) -> Error {
+pub(super) fn missing_arguments_error(name: &str, kind: &str, missing: &[&str]) -> Error {
     let count = missing.len();
     let unit = if count == 1 { "argument" } else { "arguments" };
     let names = match missing {
@@ -354,10 +354,12 @@ impl Context {
                         | "module"
                         | super::thread_local::CLASS
                         | weakref::REFERENCE_TYPE
-                ) || stdlib::datetime::members(kind)
+                ) || (kind == super::deque::CLASS && super::deque::owns(name))
+                    || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
+                    || (super::deque::iterator_class(kind).is_some() && super::deque::ITERATOR_METHODS.contains(&name))
                     || (kind == "function" && name == "__call__")
                     || (kind == "set" && name == "update")
                     || (matches!(name, "__repr__" | "__reduce__" | "difference" | "intersection" | "issubset" | "union")
@@ -886,6 +888,7 @@ impl Context {
                             | "bytes.count"
                             | "bytes.decode"
                             | "bytes.find"
+                            | "bytes.index"
                             | "bytes.rfind"
                             | "bytes.rsplit"
                             | "bytes.rstrip"
@@ -907,6 +910,7 @@ impl Context {
                         || name.starts_with("property.")
                         || (name.starts_with("dict.") && name != "dict.__new__")
                         || name.starts_with("abc.")
+                        || name.starts_with("selectors._SelectorMapping.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
@@ -974,7 +978,11 @@ impl Context {
             }
             (_, Some(field)) => Ok(field),
             (Some(member), None) => self.bind_attribute(member, object, class),
-            (None, None) if matches!(name, "__getattribute__" | "__delattr__") => {
+            (None, None)
+                if matches!(name, "__getattribute__" | "__delattr__")
+                    || (name == "__str__"
+                        && self.allocation_base(class) == Some(self.builtin("object"))) =>
+            {
                 let method = self.builtin(&format!("object.{name}"));
                 self.bind_attribute(method, object, class)
             }
@@ -996,6 +1004,24 @@ impl Context {
         }
         if matches!(self.heap.get(parent), Value::Native(name) if name == "typing.Callable") {
             let origin = super::mapping_abc::class(self, "Callable")?;
+            // Unsubscripted typing aliases use their origins as the candidate class.
+            let typing_instance = |name| {
+                self.module_value("typing", name)
+                    .is_some_and(|class| self.instance_of(child, class))
+            };
+            let child = match self.heap.get(child) {
+                _ if child == parent => origin,
+                Value::GenericAlias(alias) if !alias.is_builtin_alias() => {
+                    return Err(alias.kind.class_check_error("issubclass"));
+                }
+                Value::Instance { .. } if typing_instance("_SpecialGenericAlias") => {
+                    self.lookup_attr(child, "__origin__")?
+                }
+                Value::Instance { .. } if typing_instance("_AnnotatedAlias") => {
+                    return Err(super::typing::AliasKind::Generic.class_check_error("issubclass"));
+                }
+                _ => child,
+            };
             return self.python_subclass_check(child, origin);
         }
         if let Value::GenericAlias(alias) = self.heap.get(parent) {
@@ -1097,6 +1123,7 @@ impl Context {
     pub(super) fn native_base(class: &str) -> Option<&'static str> {
         Some(match class {
             "bool" => "int",
+            "collections.abc._CallableGenericAlias" => "types.GenericAlias",
             "datetime.datetime" => "datetime.date",
             "datetime.timezone" => stdlib::datetime::TZINFO,
             stdlib::flags::TYPE | stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS => "tuple",
@@ -1521,6 +1548,7 @@ impl Context {
             | (value::TEMPLATE_ITER_TYPE, Value::TemplateIter { .. })
             | (value::INTERPOLATION_TYPE, Value::Interpolation { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
+            ("types.GenericAlias", Value::GenericAlias(alias)) => alias.is_builtin_alias(),
             ("typing._GenericAlias", Value::GenericAlias(alias))
                 if matches!(
                     alias.kind,
@@ -2464,6 +2492,9 @@ impl Context {
                         };
                         return Ok(self.text(doc));
                     }
+                    "__doc__" if symbol == "posix.abort" => {
+                        return Ok(self.text("Abort the interpreter immediately.\n\nThis function 'dumps core' or otherwise fails in the hardest way possible\non the hosting operating system.  This function never returns."));
+                    }
                     "__doc__" if symbol == "posix.kill" => {
                         return Ok(self.text("Kill a process with a signal."));
                     }
@@ -2479,7 +2510,8 @@ impl Context {
                     "__text_signature__"
                         if matches!(
                             symbol.as_str(),
-                            "posix.getpid"
+                            "posix.abort"
+                                | "posix.getpid"
                                 | "posix.getppid"
                                 | "gc.enable"
                                 | "gc.disable"
@@ -2671,6 +2703,12 @@ impl Context {
                     if let Value::Native(method) = self.heap.get(callable) {
                         let module_bound = matches!(self.heap.get(receiver), Value::Module { .. });
                         let value = match name {
+                            "__doc__" if method == "posix.sysconf" => {
+                                Some("Return an integer-valued system configuration variable.")
+                            }
+                            "__text_signature__" if method == "posix.sysconf" => {
+                                Some("($module, name, /)")
+                            }
                             "__qualname__" if module_bound => method.rsplit('.').next(),
                             "__module__" if module_bound => {
                                 method.rsplit_once('.').map(|(module, _)| module)
@@ -2828,7 +2866,7 @@ impl Context {
                 owner,
                 name: field,
                 ..
-            } if matches!(owner, "int" | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
+            } if matches!(owner, "int" | super::deque::CLASS | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
                 || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
@@ -2841,6 +2879,7 @@ impl Context {
                         return Ok(self.builtin(owner));
                     }
                     "__name__" => return Ok(self.text(field)),
+                    "__doc__" if owner == super::deque::CLASS => return Ok(self.text("maximum size of a deque or None if unbounded")),
                     "__doc__" if owner == "int" => {
                         return Ok(
                             self.text(format!("the {field} of a rational number in lowest terms"))
@@ -2948,6 +2987,9 @@ impl Context {
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(short.to_owned()));
                     }
+                    "__reduce_ex__" if class == super::deque::CLASS => {
+                        return Ok(self.builtin("object.__reduce_ex__"));
+                    }
                     "__dict__" if class == super::deque::CLASS => {
                         return super::deque::class_dictionary(self, obj);
                     }
@@ -2969,7 +3011,12 @@ impl Context {
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
-                    _ if class == super::deque::CLASS && super::deque::member(name).is_some() => {
+                    _ if super::deque::iterator_class(&class).is_some()
+                        && let Some(member) = self.class_attr(obj, name) =>
+                    {
+                        return Ok(member);
+                    }
+                    _ if class == super::deque::CLASS && super::deque::owns(name) => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
                     _ => {}
@@ -3027,6 +3074,12 @@ impl Context {
             },
             Value::DirEntry(ref entry) if name == "name" => return Ok(entry.name),
             Value::DirEntry(ref entry) if name == "path" => return Ok(entry.path),
+            Value::DequeIterator { .. } => {
+                let class = self.exact_type(obj)?;
+                if let Some(member) = self.class_attr(class, name) {
+                    return self.bind_attribute(member, obj, class);
+                }
+            }
             Value::DirEntry(_) if matches!(name, "__new__" | "__reduce__" | "__reduce_ex__") => {
                 let method = self.builtin(&format!("object.{name}"));
                 let class = self.builtin(stdlib::os::scandir::ENTRY);
@@ -3625,7 +3678,10 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "set"
-                    && matches!(name, "discard" | "remove" | "difference_update" | "update") =>
+                    && matches!(
+                        name,
+                        "discard" | "pop" | "remove" | "difference_update" | "update"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("set.{name}")));
             }
@@ -5268,6 +5324,7 @@ impl Context {
                         stdlib::io::NEWLINE_DECODER
                             | "BufferedRWPair"
                             | "BufferedReader"
+                            | "BufferedWriter"
                             | "IOBase"
                             | "BufferedIOBase"
                     )

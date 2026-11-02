@@ -16,6 +16,23 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "unittest_method_skip_preserves_typed_call": ({
+        "main.py": (
+            "import unittest\n"
+            "class Case(unittest.TestCase):\n"
+            "    @unittest.skipUnless(False, 'feature required')\n"
+            "    def test_body(self): pass\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
+    "second_base_has_storage": ({
+        "main.py": (
+            "class Left:\n    def __init__(self, x: int): self.left = x\n"
+            "class Right:\n    def __init__(self, y: int): self.right = y\n"
+            "class Both(Left, Right): pass\n"
+        ),
+    }, "multiple independent base classes"),
     "optional_import_keeps_typed_call_check": ({
         "main.py": (
             "import http.client\n"
@@ -321,6 +338,28 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "imported_method_mixin": {
+        "helper.py": (
+            "OFFSET = 7\n"
+            "class Methods(object):\n"
+            "    def common(self) -> int: return 99\n"
+            "    def extra(self) -> int: return OFFSET\n"
+        ),
+        "main.py": (
+            "from helper import Methods\n"
+            "OFFSET = 200\n"
+            "class Storage:\n"
+            "    def __init__(self, value: int): self.value = value\n"
+            "    def common(self) -> int: return self.value\n"
+            "class Child(Storage, Methods): pass\n"
+            "class Override(Child):\n"
+            "    def extra(self) -> int: return 12\n"
+            "def via(m: Methods) -> int: return m.common() + m.extra()\n"
+            "print(via(Child(4)))\n"
+            "print(via(Override(4)))\n"
+            "print(issubclass(Override, Methods))\n"
+        ),
+    },
     "nested_operator_compare_digest": {
         "main.py": "from consumer import equal\nprint(equal(b'ab', b'ab'), equal(b'ab', b'ac'))\n",
         "consumer.py": "from _operator import _compare_digest as equal\n",

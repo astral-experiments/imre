@@ -14,6 +14,53 @@ impl Checker<'_> {
         .then_some(owner)
     }
 
+    /// Bind the operands in source order. Only exact text and bytes values have
+    /// the builtin repr and class identity used by this assertion helper.
+    pub(super) fn unittest_text_instance(
+        &mut self,
+        call: &ast::ExprCall,
+        class: usize,
+        receiver: &Expr,
+    ) -> Result<Option<Expr>, String> {
+        let name = "assertIsInstance";
+        let record = &self.classes.declarations.definitions[class];
+        if self.classes.methods[class].contains_key(name)
+            || record.static_bindings.contains_key(name)
+            || record.fields.iter().any(|field| field.name == name)
+        {
+            return Ok(None);
+        }
+        let method = "_assertTextBytesInstance";
+        let Some(owner) = self.bundled_case_method_owner(class, method) else {
+            return Ok(None);
+        };
+        let signature = self.classes.methods[owner][method].clone();
+        let params = &signature.params[1..];
+        let receiver = self.coerce(receiver.clone(), Type::Class(owner), call)?;
+        let args = self
+            .arguments_with(call, params, Some(receiver), |checker, index, arg| {
+                let value = checker.expr(arg)?;
+                let supported = match index {
+                    0 => matches!(value.ty, Type::Str | Type::StrLiteral(_) | Type::Bytes),
+                    1 => {
+                        checker.unshadowed_builtin(arg, "str")
+                            || checker.unshadowed_builtin(arg, "bytes")
+                    }
+                    _ => true,
+                };
+                if !supported {
+                    return Err(checker.object_runtime_export("assertIsInstance", call));
+                }
+                checker.coerce(value, params[index].ty, arg)
+            })
+            .map_err(|_| self.object_runtime_export("assertIsInstance", call))?;
+        self.calls.insert(signature.id);
+        Ok(Some(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(signature.id, args),
+        }))
+    }
+
     /// Resolve a membership assertion from its container. The ordinary argument
     /// binder still evaluates the receiver, member, container, and message in
     /// source order, including when they are supplied by keyword.
@@ -120,6 +167,21 @@ impl Checker<'_> {
         if !self.unittest_case(class) || self.classes.methods[class].contains_key(name) {
             return Ok(None);
         }
+        let record = &self.classes.declarations.definitions[class];
+        let shadowed = |member: &str| {
+            record.static_bindings.contains_key(member)
+                || record.fields.iter().any(|field| field.name == member)
+        };
+        if shadowed(name) {
+            return Ok(None);
+        }
+        if name == "assertEqual"
+            && ["_getAssertEqualityFunc", "_type_equality_funcs"]
+                .iter()
+                .any(|member| shadowed(member) || self.classes.methods[class].contains_key(*member))
+        {
+            return Err(self.object_runtime_export("custom unittest equality dispatch", call));
+        }
         let (a, b) = if name == "assertListEqual" {
             ("list1", "list2")
         } else {
@@ -159,6 +221,33 @@ impl Checker<'_> {
                 .map(|arg| self.expr(arg))
                 .transpose()?
                 .is_some_and(|arg| arg.ty == optional_text);
+        if name == "assertEqual" && matches!(ty, Type::Str | Type::StrLiteral(_)) {
+            if shadowed("assertMultiLineEqual") {
+                return Err(self.object_runtime_export("custom unittest text comparator", call));
+            }
+            if self
+                .bundled_case_method_owner(class, "assertMultiLineEqual")
+                .is_none()
+            {
+                // Bind assertEqual's arguments before looking up the user's comparator.
+                // A mixed-type pair can select a different equality function altogether.
+                let right_type = right
+                    .map(|arg| self.expr(arg))
+                    .transpose()?
+                    .map(|arg| arg.ty);
+                if !matches!(right_type, Some(Type::Str | Type::StrLiteral(_))) {
+                    return Err(self.object_runtime_export("custom unittest text comparator", call));
+                }
+                let base = self
+                    .bundled_case_method_owner(class, "_assertOptionalTextEqual")
+                    .ok_or_else(|| {
+                        self.object_runtime_export("custom unittest text comparator", call)
+                    })?;
+                let method = self.classes.methods[base]["_assertOptionalTextEqual"].clone();
+                let receiver = self.coerce(receiver.clone(), Type::Class(base), call)?;
+                return self.source_call(call, &method, Some(receiver), 1).map(Some);
+            }
+        }
         let mut owner = class;
         let method =
             if matches!(ty, Type::List(_) | Type::ListInt) {

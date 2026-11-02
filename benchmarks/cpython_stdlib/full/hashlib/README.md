@@ -123,3 +123,11 @@ The intact PBKDF2 test exercised SHA-1, SHA-256 and SHA-512. A native call trace
 The empty-cache, ordinary O0 run of all 82 registrations went from 63 passed, 18 skipped and one error on the baseline to 66 passed, 15 skipped and one error on the candidate. All 63 prior passes held. The additional pass outside this class was `test_hash_disallow_instantiation`. Both runs errored in `test_threaded_hashing`.
 
 The keyed ledger records the original unittest IDs, suite ordinals and verdicts, with mutated inputs and optional-provider runs in separate profiles. The terminal ledger records the raw runner summaries and exit codes. [Keyed outcomes](kdf-linux.tsv) · [Terminal counts](kdf-terminals-linux.tsv)
+
+## Ordinary stock replay at `7f886453`
+
+The Linux runner loaded the original 82 registrations from CPython 3.14.5 at `5607950ef232dad16d75c0cf53101d9649d89115` with the ordinary stock resources, an empty vector cache and no big-memory allowance. CPython passed 69 and skipped 13. At `7f8864530b30bd98d14661da8e15d94a5fc9ed50`, ordinary Imre O0 and O3 each passed 67, skipped 14 and errored in `test_threaded_hashing` at `thread.start()`. All 82 outcomes and first exceptions matched the previous public replay at `00b76b9e6fccde1a07d6da9ddf265c5d6a8590b4`. [Ordered stock ledger](stock-7f886453.tsv)
+
+Both implementations skipped rows 3, 73 and 74 at the CPU resource check, rows 5, 7, 39, 41, 43, 45, 50 and 51 at the URL resource check, and rows 20 and 21 at the 4 GiB memory check. Imre also skipped the CPython-specific row 57.
+
+Row 63, `test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation` (occurrence 1), passed on CPython and in both native runs. The original checked the real `_hashlib.HASH` type on all three. CPython also exposed `HASHXOF` and ran its optional checks. Substituting constructible `dict` for `HASH` made the original assertion fail on CPython and native O0. Joining full IDs and occurrences to the earlier 77 paired rows yields 78 distinct matches across profiles. Row 63 was already a stock pass on the previous public revision.

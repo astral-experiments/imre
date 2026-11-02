@@ -93,6 +93,14 @@ def check_handlers():
         try:
             faulthandler.enable()
             assert signal.getsignal(signal.SIGABRT) is first
+            # Simulated delivery uses the Python handler even while a native handler owns sigaction.
+            from _thread import interrupt_main
+            interrupt_main(signal.SIGABRT)
+            assert seen.pop() == (signal.SIGABRT, "check_handlers")
+            # map invokes the builtin twice within one call from Python.
+            list(map(interrupt_main, (signal.SIGABRT, signal.SIGABRT)))
+            assert seen == [(signal.SIGABRT, "check_handlers")]
+            seen.clear()
             assert signal.signal(signal.SIGABRT, second) is first
             faulthandler.disable()
             assert signal.getsignal(signal.SIGABRT) is second

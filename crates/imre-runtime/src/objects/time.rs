@@ -14,6 +14,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
+#[cfg(target_os = "linux")]
+mod linux_clock;
+
 /// A signal delivered to the sleeping thread interrupts the native wait. A
 /// returning handler resumes against the same deadline, including callback time.
 pub(crate) fn sleep_ns<E: From<Error>>(
@@ -135,26 +138,56 @@ pub(crate) fn clock_info(name: &[u8]) -> Result<(&'static str, bool, f64), Error
         ),
         _ => return Err(Error::new(Kind::ValueError, "unknown clock")),
     };
+    #[cfg(target_os = "linux")]
+    let (implementation, resolution) = linux_clock::probe(clock, implementation)?;
+    #[cfg(not(target_os = "linux"))]
+    let resolution = clock_resolution(clock).map_err(super::errno_error)?;
+    Ok((implementation, clock != libc::CLOCK_REALTIME, resolution))
+}
+
+fn clock_resolution(clock: libc::clockid_t) -> io::Result<f64> {
     let mut resolution = std::mem::MaybeUninit::<libc::timespec>::uninit();
     // SAFETY: clock_getres initializes the timespec on success.
     if unsafe { libc::clock_getres(clock, resolution.as_mut_ptr()) } != 0 {
-        return Err(super::errno_error(io::Error::last_os_error()));
+        return Err(io::Error::last_os_error());
     }
     // SAFETY: the successful clock_getres call initialized both fields.
     let resolution = unsafe { resolution.assume_init() };
-    let seconds = resolution.tv_sec as f64 + resolution.tv_nsec as f64 * 1e-9;
-    Ok((implementation, clock != libc::CLOCK_REALTIME, seconds))
+    Ok(resolution.tv_sec as f64 + resolution.tv_nsec as f64 * 1e-9)
 }
 
-/// Read the process-independent clock used by CPython's monotonic and performance counters.
-pub(crate) fn monotonic_time() -> std::io::Result<std::time::Duration> {
+fn timestamp_ns(seconds: impl Into<i64>, nanos: impl Into<i64>) -> Result<i64, Error> {
+    seconds
+        .into()
+        .checked_mul(1_000_000_000)
+        .and_then(|whole| whole.checked_add(nanos.into()))
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "timestamp too large to convert to C PyTime_t",
+            )
+        })
+}
+
+fn monotonic_stamp() -> io::Result<libc::timespec> {
     let mut stamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
     // SAFETY: clock_gettime initializes the supplied timespec on success.
     if unsafe { libc::clock_gettime(MONOTONIC_CLOCK.0, stamp.as_mut_ptr()) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
     // SAFETY: the successful call initialized both fields.
-    let stamp = unsafe { stamp.assume_init() };
+    Ok(unsafe { stamp.assume_init() })
+}
+
+/// Sample the monotonic clock directly in signed nanoseconds, preserving its full precision.
+pub(crate) fn monotonic_time_ns() -> Result<i64, Error> {
+    let stamp = monotonic_stamp().map_err(super::errno_error)?;
+    timestamp_ns(stamp.tv_sec, stamp.tv_nsec)
+}
+
+/// Read the process-independent clock used by CPython's monotonic and performance counters.
+pub(crate) fn monotonic_time() -> std::io::Result<std::time::Duration> {
+    let stamp = monotonic_stamp()?;
     Ok(std::time::Duration::new(
         stamp.tv_sec as u64,
         stamp.tv_nsec as u32,

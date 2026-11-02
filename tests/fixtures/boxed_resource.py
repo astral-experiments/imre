@@ -41,6 +41,22 @@ def current():
             raise AssertionError("invalid resource call succeeded")
 
 
+def nofile_limits_child():
+    import os
+    from resource import RLIMIT_NOFILE
+
+    assert RLIMIT_NOFILE == resource.RLIMIT_NOFILE
+    saved = getrlimit(RLIMIT_NOFILE)
+    soft = 64 if saved[0] == RLIM_INFINITY else max(0, saved[0] - 1)
+    try:
+        setrlimit(RLIMIT_NOFILE, (soft, saved[1]))
+        assert getrlimit(RLIMIT_NOFILE) == (soft, saved[1])
+        assert os.sysconf("SC_OPEN_MAX") == soft
+    finally:
+        setrlimit(RLIMIT_NOFILE, saved)
+    assert getrlimit(RLIMIT_NOFILE) == saved
+
+
 def core_limits_child():
     def check(expected):
         assert getrlimit(RLIMIT_CORE) == expected

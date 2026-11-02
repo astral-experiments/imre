@@ -126,6 +126,12 @@ impl Calendar {
         shift(&self.0, duration.delta_microseconds(), subtract).map(Self)
     }
 
+    /// Subtract two dates by their stored ordinals, independently of Python field overrides.
+    pub(crate) fn date_difference(&self, other: &Self) -> Result<Self, Error> {
+        let days = self.ordinal() - other.ordinal();
+        try_owner(Value::Delta(i128::from(days) * DAY)).map(Self)
+    }
+
     /// Subtract two datetimes backed by naive or fixed-offset wall times.
     pub(crate) fn datetime_difference(&self, other: &Self) -> Result<Self, Error> {
         let parts = |dt: &Self| {
@@ -358,6 +364,29 @@ impl Calendar {
         ]
     }
 
+    pub(crate) fn iso_week_ordinal(year: i32, week: i32, day: i32) -> Result<i32, Error> {
+        check(year, "year", 1, 9999)?;
+        // ISO week one contains January 4. Ordinal 1 is a Monday.
+        let week_one = |year| {
+            let jan4 = days_before_year(year) + 4;
+            jan4 - (jan4 - 1) % 7
+        };
+        let first = week_one(year);
+        if !(1..=(week_one(year + 1) - first) / 7).contains(&week) {
+            return Err(Error::new(
+                Kind::ValueError,
+                format!("Invalid week: {week}"),
+            ));
+        }
+        if !(1..=7).contains(&day) {
+            return Err(Error::new(
+                Kind::ValueError,
+                format!("Invalid weekday: {day} (range is [1, 7])"),
+            ));
+        }
+        Ok(first + (week - 1) * 7 + day - 1)
+    }
+
     pub(crate) fn ordinal_fields(ordinal: i32) -> Result<[i32; 3], Error> {
         if ordinal < 1 {
             return Err(Error::new(Kind::ValueError, "ordinal must be >= 1"));
@@ -368,6 +397,55 @@ impl Calendar {
         let cycles = days / 146_097;
         let (year, month, day) = ymd(i128::from(days % 146_097 + 1));
         Ok([year + 400 * cycles, month, day])
+    }
+
+    /// Convert an ISO week date, including a final week that extends into year 10000.
+    pub(crate) fn iso_week_date(year: i32, week: i32, weekday: i32) -> Option<[i32; 3]> {
+        if !(1..=9999).contains(&year) || !(1..=53).contains(&week) || !(1..=7).contains(&weekday)
+        {
+            return None;
+        }
+        let week_one = |y| {
+            let jan_four = days_before_year(y) + 4;
+            jan_four - (jan_four - 1) % 7
+        };
+        let monday = week_one(year) + (week - 1) * 7;
+        if monday >= week_one(year + 1) {
+            return None;
+        }
+        Self::ordinal_fields(monday + weekday - 1).ok()
+    }
+
+    /// Normalize ISO 24:00 before the receiving class validates the civil fields.
+    pub(crate) fn iso_midnight(date: &mut [i32; 3], clock: &mut [i32; 4]) -> Result<(), Error> {
+        let [year, month, day] = date;
+        if clock[0] == 24 && *month <= 12 {
+            // CPython's days-in-month table has a zero sentinel for month zero.
+            let last = if *month == 0 {
+                0
+            } else {
+                month_days(*year, *month)
+            };
+            if *day <= last {
+                if clock[1..] != [0, 0, 0] {
+                    return Err(Error::new(
+                        Kind::ValueError,
+                        "minute, second, and microsecond must be 0 when hour is 24",
+                    ));
+                }
+                clock[0] = 0;
+                *day += 1;
+                if *day > last {
+                    *day = 1;
+                    *month += 1;
+                    if *month > 12 {
+                        *month = 1;
+                        *year += 1;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn ordinal(&self) -> i64 {

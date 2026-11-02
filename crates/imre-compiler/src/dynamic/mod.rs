@@ -497,9 +497,18 @@ pub(crate) fn compile(
     } else if let Some(command) = command {
         command.to_owned()
     } else {
+        // A direct .pyc operand already received its bytecode diagnostic from the script loader.
+        if options.script_startup.is_some() && crate::named_bytecode(path) {
+            return Ok(None);
+        }
         let Ok(source) = std::fs::read_to_string(path) else {
             return Ok(None);
         };
+        if options.script_startup.is_some()
+            && crate::bytecode_script_error(path, source.as_bytes()).is_some()
+        {
+            return Ok(None);
+        }
         source
     };
     // An ordinary entry can import a package that uses the object runtime without
@@ -657,7 +666,7 @@ pub(crate) fn compile(
     let mut entry_sources: HashMap<String, Option<PathBuf>> = HashMap::new();
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
-    let mut late_pprint = false;
+    let mut uses_import_builtin = false;
     let mut bundled_only = false;
     loop {
         let (owner, package, imports) = if let Some(next) = work.pop_front() {
@@ -666,8 +675,12 @@ pub(crate) fn compile(
             // Collect late imports and their bundled dependencies after the explicit
             // file graph, without parsing unrelated modules in project directories.
             let mut imports = Imports::default();
-            if late_pprint && !seen.contains("pprint") {
+            if uses_import_builtin && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
+            }
+            // Preserve sysconfig's getters when a runtime-computed import selects the module.
+            if (uses_import_builtin || seen.contains("importlib")) && !seen.contains("sysconfig") {
+                imports.names.push((0, "sysconfig".to_owned()));
             }
             // The native time.strptime classmethod imports its Python parser on first use.
             if seen.contains("_datetime") && !seen.contains("_strptime") {
@@ -711,7 +724,7 @@ pub(crate) fn compile(
         }
         // A late import of native pickle also needs its bundled reader and dependencies.
         if imports.uses_import_builtin {
-            late_pprint = true;
+            uses_import_builtin = true;
             names.push((0, "pickle".to_owned()));
         }
         // Importing array registers its type with MutableSequence. A runtime

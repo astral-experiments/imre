@@ -7,15 +7,13 @@ use num_traits::ToPrimitive;
 
 /// The argument converter first tries a signed long. CPython distinguishes
 /// truncation there from a value too large for an unsigned long.
-fn convert(word: usize, group: bool) -> Result<usize> {
+pub(crate) fn credential_id(value: &Int, group: bool) -> Result<u64> {
     let label = if group { "gid" } else { "uid" };
     let max = if group {
         libc::gid_t::MAX as u64
     } else {
         libc::uid_t::MAX as u64
     };
-    // SAFETY: the caller owns the checked Python integer until conversion finishes.
-    let value = unsafe { Int::borrow(word) };
     let signed = value.as_small().or_else(|| value.big().to_i64());
     let under = || Error::new(Kind::OverflowError, format!("{label} is less than minimum"));
     let over = || {
@@ -40,30 +38,38 @@ fn convert(word: usize, group: bool) -> Result<usize> {
         }
         n.to_u64().filter(|n| *n < max).ok_or_else(over)?
     };
-    Ok(Int::from_usize(raw as usize).into_raw())
+    Ok(raw)
 }
 
 /// Convert the integer index before any later credential argument is converted.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_credential_id(word: usize, group: i32) -> usize {
-    finish(convert(word, group != 0), 0)
+    // SAFETY: the caller owns the checked Python integer until conversion finishes.
+    let value = unsafe { Int::borrow(word) };
+    finish(
+        credential_id(&value, group != 0).map(|raw| Int::from_usize(raw as usize).into_raw()),
+        0,
+    )
 }
 
-fn result_id(raw: u64, max: u64) -> usize {
+fn result_id(raw: u64, max: u64) -> Int {
     if raw == max {
         Int::small(-1).unwrap()
     } else {
         Int::from_usize(raw as usize)
     }
-    .into_raw()
 }
 
 macro_rules! getter {
     ($name:ident, $sys:ident, $id:ty) => {
-        #[unsafe(no_mangle)]
-        pub extern "C" fn $name() -> usize {
+        pub(crate) fn $sys() -> Int {
             // SAFETY: POSIX identity getters take no arguments and cannot fail.
             result_id(unsafe { libc::$sys() } as u64, <$id>::MAX as u64)
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $name() -> usize {
+            $sys().into_raw()
         }
     };
 }
@@ -71,6 +77,27 @@ getter!(imre_os_getuid, getuid, libc::uid_t);
 getter!(imre_os_geteuid, geteuid, libc::uid_t);
 getter!(imre_os_getgid, getgid, libc::gid_t);
 getter!(imre_os_getegid, getegid, libc::gid_t);
+
+/// Read the supplementary groups of the current process, preserving the kernel's order.
+pub(crate) fn getgroups() -> Result<Vec<Int>> {
+    // SAFETY: a zero-sized query accepts a null buffer.
+    let count = checked(unsafe { libc::getgroups(0, std::ptr::null_mut()) })?;
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    let mut groups = Vec::new();
+    groups
+        .try_reserve_exact(count as usize)
+        .map_err(|_| Error::memory_error())?;
+    groups.resize(count as usize, 0);
+    // SAFETY: the kernel can fill at most count gid_t entries in the live buffer.
+    let filled = checked(unsafe { libc::getgroups(count, groups.as_mut_ptr()) })?;
+    Ok(groups
+        .into_iter()
+        .take(filled as usize)
+        .map(|gid| result_id(gid as u64, libc::gid_t::MAX as u64))
+        .collect())
+}
 
 macro_rules! setter {
     ($name:ident, $sys:ident, $id:ty, $($arg:ident),+) => {
@@ -106,7 +133,8 @@ mod saved {
                     finish(
                         checked(libc::$sys(&mut real, &mut effective, &mut saved)).map(|_| {
                             for (i, id) in [real, effective, saved].into_iter().enumerate() {
-                                out.add(i).write(result_id(id as u64, <$id>::MAX as u64));
+                                out.add(i)
+                                    .write(result_id(id as u64, <$id>::MAX as u64).into_raw());
                             }
                         }),
                         (),

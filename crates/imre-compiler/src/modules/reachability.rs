@@ -289,6 +289,11 @@ impl<'a> Visitor<'a> for References<'_> {
             ) {
                 self.found.attributes.insert(format!("_bound_{name}"));
             }
+            if name == "assertIsInstance" {
+                self.found
+                    .attributes
+                    .insert("_assertTextBytesInstance".into());
+            }
             if matches!(name.as_str(), "assertRaises" | "assertRaisesRegex") {
                 self.found
                     .attributes
@@ -335,7 +340,16 @@ impl<'a> Visitor<'a> for References<'_> {
             }
             if matches!(name.as_str(), "assertEqual" | "assertListEqual") {
                 if name == "assertEqual" {
-                    self.found.attributes.insert("assertDictEqual".into());
+                    self.found.attributes.extend(
+                        [
+                            "assertDictEqual",
+                            "_getAssertEqualityFunc",
+                            "_type_equality_funcs",
+                            "_assertOptionalTextEqual",
+                        ]
+                        .into_iter()
+                        .map(str::to_owned),
+                    );
                 }
                 self.found.attributes.extend(
                     [

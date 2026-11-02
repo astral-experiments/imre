@@ -1055,6 +1055,46 @@ fn percent_layout(
     Ok((width, precision))
 }
 
+/// Convert a Unicode `%c` argument without invoking string-subclass overrides.
+fn percent_char(ctx: &mut Context, arg: Id) -> Result<Id> {
+    if let Some(storage) = ctx.string_storage(arg) {
+        let len = match ctx.heap.get(storage) {
+            Value::Str(s) => s.chars().count(),
+            Value::SurrogateStr(s) => s.len(),
+            _ => unreachable!("string storage"),
+        };
+        return if len == 1 {
+            Ok(storage)
+        } else {
+            Err(type_error(format!(
+                "%c requires an int or a unicode character, not a string of length {len}"
+            )))
+        };
+    }
+    match ctx.index_integer(arg) {
+        Ok(n) => {
+            let point = n
+                .to_i64()
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|&p| p <= 0x10ffff)
+                .ok_or_else(|| Error::new("OverflowError", "%c arg not in range(0x110000)"))?;
+            Ok(ctx.text_codepoints(vec![point]))
+        }
+        Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+            let name = if let Some(class) = ctx.heap.get(arg).instance_class() {
+                let name = super::super::stdlib::qualified_type(ctx, class)?;
+                ctx.str_value(name)?
+            } else {
+                ctx.type_name(arg)
+            };
+            Err(type_error(format!(
+                "%c requires an int or a unicode character, not {name}"
+            )))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Old-style interpolation accepts a single operand, a positional tuple or a mapping.
 pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Result<Id> {
     let parsed = format
@@ -1067,6 +1107,8 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
         );
     let mut args = percent_args(ctx, rhs)?;
     let mut output = String::new();
+    // Flush scalar runs into this buffer only for fields containing a lone surrogate.
+    let mut codepoints = Vec::new();
     let mut positions = format.char_indices().enumerate();
     for (position, part) in parsed.iter() {
         match part {
@@ -1131,21 +1173,51 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     continue;
                 }
                 let rendered: Cow<'_, str> = match spec.format_char {
-                    's' => {
-                        let text = super::call(ctx, "str", &[arg], &[])?;
+                    's' | 'c' => {
+                        let text = if spec.format_char == 'c' {
+                            percent_char(ctx, arg)?
+                        } else {
+                            super::call(ctx, "str", &[arg], &[])?
+                        };
+                        if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(text)) {
+                            let (mut width, mut precision) = layout.unwrap_or_default();
+                            if spec.format_char == 'c' {
+                                precision = None;
+                                // A negated minimum Py_ssize_t gives no padding in CPython.
+                                if width == isize::MIN {
+                                    width = 0;
+                                }
+                            }
+                            let field =
+                                &points[..precision.unwrap_or(points.len()).min(points.len())];
+                            let padding = width.unsigned_abs().saturating_sub(field.len());
+                            codepoints
+                                .try_reserve(
+                                    output
+                                        .len()
+                                        .saturating_add(field.len())
+                                        .saturating_add(padding),
+                                )
+                                .map_err(|_| {
+                                    Error::new("MemoryError", "formatted string is too long")
+                                })?;
+                            codepoints.extend(output.chars().map(u32::from));
+                            output.clear();
+                            let left =
+                                width < 0 || spec.flags.contains(CConversionFlags::LEFT_ADJUST);
+                            if !left {
+                                codepoints.extend(std::iter::repeat_n(u32::from(' '), padding));
+                            }
+                            codepoints.extend_from_slice(field);
+                            if left {
+                                codepoints.extend(std::iter::repeat_n(u32::from(' '), padding));
+                            }
+                            continue;
+                        }
                         Cow::Borrowed(ctx.str_value(text)?)
                     }
                     'r' => ctx.checked_format(arg, true)?.into(),
                     'a' => ascii(&ctx.checked_format(arg, true)?).into(),
-                    'c' => match ctx.heap.get(arg) {
-                        Value::Str(s) if s.chars().count() == 1 => Cow::Borrowed(s),
-                        _ => u32::try_from(ctx.as_integer(arg)?)
-                            .ok()
-                            .and_then(char::from_u32)
-                            .ok_or_else(|| Error::new("OverflowError", "%c arg not in range"))?
-                            .to_string()
-                            .into(),
-                    },
                     _ => {
                         return Err(Error::new(
                             "ValueError",
@@ -1183,7 +1255,14 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
             "not all arguments converted during string formatting",
         ));
     }
-    Ok(ctx.text(output))
+    if codepoints.is_empty() {
+        return Ok(ctx.text(output));
+    }
+    codepoints
+        .try_reserve(output.len())
+        .map_err(|_| Error::new("MemoryError", "formatted string is too long"))?;
+    codepoints.extend(output.chars().map(u32::from));
+    Ok(ctx.text_codepoints(codepoints))
 }
 
 /// Convert the optional start and end in argument order, honoring the index protocol.
@@ -1273,6 +1352,59 @@ fn split_codepoints(
             rest = right;
         }
         limit -= 1;
+    }
+}
+
+/// Strip matching Python code points while keeping scalar strings in UTF-8.
+fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) -> Result<Id> {
+    let chars = chars
+        .map(|id| {
+            ctx.string_storage(id)
+                .map(|storage| ctx.heap.get(storage))
+                .ok_or_else(|| type_error(format!("{name} arg must be None or str")))
+        })
+        .transpose()?;
+    let remove = |point| match chars {
+        None => char::from_u32(point).is_some_and(python_whitespace),
+        Some(Value::Str(set)) => char::from_u32(point).is_some_and(|ch| set.contains(ch)),
+        Some(Value::SurrogateStr(set)) => set.contains(&point),
+        _ => unreachable!("validated str cutset"),
+    };
+    let storage = ctx
+        .string_storage(receiver)
+        .expect("validated str receiver");
+    match ctx.heap.get(storage) {
+        Value::Str(source) => {
+            let matches = |ch: char| remove(u32::from(ch));
+            let part = match name {
+                "lstrip" => source.trim_start_matches(matches),
+                "rstrip" => source.trim_end_matches(matches),
+                _ => source.trim_matches(matches),
+            };
+            if part.len() == source.len() {
+                if receiver == storage || source.is_empty() {
+                    return Ok(storage);
+                }
+                // An unchanged nonempty str subclass produces a fresh exact str.
+                return ctx.heap.fresh_string(Value::Str(part.to_owned()));
+            }
+            Ok(ctx.text(part.to_owned()))
+        }
+        Value::SurrogateStr(points) => {
+            let mut start = 0;
+            let mut end = points.len();
+            while name != "rstrip" && start < end && remove(points[start]) {
+                start += 1;
+            }
+            while name != "lstrip" && start < end && remove(points[end - 1]) {
+                end -= 1;
+            }
+            if receiver == storage && start == 0 && end == points.len() {
+                return Ok(storage);
+            }
+            Ok(ctx.text_codepoints(points[start..end].to_vec()))
+        }
+        _ => unreachable!("validated str receiver"),
     }
 }
 
@@ -1700,7 +1832,7 @@ pub(super) fn method(
     if matches!(
         (owner, name),
         ("str", "find" | "rfind" | "index" | "rindex" | "count")
-            | ("bytes", "count" | "find" | "rfind")
+            | ("bytes", "count" | "find" | "index" | "rfind")
             | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
         if !kwargs.is_empty() {
@@ -1809,12 +1941,15 @@ pub(super) fn method(
                 return Ok(ctx.int(count as i64));
             }
             let offset = window.and_then(|v| {
-                if name == "find" {
-                    memchr::memmem::find(v, needle)
-                } else {
+                if name == "rfind" {
                     memchr::memmem::rfind(v, needle)
+                } else {
+                    memchr::memmem::find(v, needle)
                 }
             });
+            if name == "index" && offset.is_none() {
+                return Err(Error::new("ValueError", "subsection not found"));
+            }
             return Ok(ctx.int(offset.map_or(-1, |at| (start + at) as i64)));
         }
         if name == "count" {
@@ -1860,7 +1995,9 @@ pub(super) fn method(
         }
         return Ok(ctx.alloc(Value::Int(found)));
     }
-    if matches!(owner, "bytes" | "bytearray") && matches!(name, "strip" | "lstrip" | "rstrip") {
+    if matches!(owner, "str" | "bytes" | "bytearray")
+        && matches!(name, "strip" | "lstrip" | "rstrip")
+    {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "{}.{name}() takes no keyword arguments",
@@ -1873,10 +2010,11 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        let chars = args
-            .first()
-            .copied()
-            .filter(|&id| id != NONE)
+        let chars = args.first().copied().filter(|&id| id != NONE);
+        if owner == "str" {
+            return strip_string(ctx, receiver, name, chars);
+        }
+        let chars = chars
             .map(|id| match ctx.heap.get(ctx.scalar_value(id)) {
                 Value::Array(array) => Ok(array.as_bytes()),
                 _ => ctx.bytes_like(id),
@@ -1968,6 +2106,7 @@ pub(super) fn method(
         "isascii" => Some(str::is_ascii),
         "isalpha" => Some(crate::objects::python_isalpha),
         "isdigit" => Some(crate::objects::python_isdigit),
+        "isidentifier" => Some(crate::objects::python_isidentifier),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
         "istitle" => Some(|text| crate::objects::python_istitle(text.chars())),
@@ -2002,7 +2141,7 @@ pub(super) fn method(
         return ctx.heap.fresh_string(mapped);
     }
     if let Some(predicate) = predicate {
-        if matches!(name, "isascii" | "isalpha" | "isdigit")
+        if matches!(name, "isascii" | "isalpha" | "isdigit" | "isidentifier")
             && matches!(
                 ctx.heap.get(ctx.scalar_value(receiver)),
                 Value::SurrogateStr(_)
@@ -2310,22 +2449,6 @@ pub(super) fn method(
             let mut values = Vec::new();
             split_lines(&source, keep, |field| values.push(ctx.text(field)));
             Ok(ctx.alloc(Value::List(values)))
-        }
-        "strip" | "lstrip" | "rstrip" => {
-            positional(name, kwargs)?;
-            arity(name, args, 0, 1)?;
-            let chars = args
-                .first()
-                .filter(|&&x| x != NONE)
-                .map(|&x| ctx.str_value(x))
-                .transpose()?;
-            let matches = |c: char| chars.map_or_else(|| python_whitespace(c), |s| s.contains(c));
-            let trimmed = match name {
-                "strip" => source.trim_matches(matches),
-                "rstrip" => source.trim_end_matches(matches),
-                _ => source.trim_start_matches(matches),
-            };
-            Ok(ctx.text(trimmed))
         }
         "capitalize" | "lower" | "upper" => {
             positional(name, kwargs)?;

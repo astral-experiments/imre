@@ -181,7 +181,7 @@ pub(in crate::dynamic) fn compare(
     }))
 }
 
-/// Direct clock descriptors return NotImplemented for an unrelated operand.
+/// Direct comparison descriptors return NotImplemented for an unrelated operand.
 pub(super) fn rich_method(
     ctx: &mut Context,
     kind: &str,
@@ -204,6 +204,34 @@ pub(super) fn rich_method(
             ),
         )
     })?;
+    if kind == "date" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("wrapper {name}() takes no keyword arguments"),
+            ));
+        }
+        let &[b] = rest else {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            ));
+        };
+        // A date descriptor accepts a datetime receiver, but declines a datetime on the right.
+        let Some(right) = calendar(ctx, b, "date").filter(|right| right.class() == "date") else {
+            return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+        };
+        let order = left.ordinal().cmp(&right.ordinal());
+        return Ok(crate::dynamic::builtins::boolean(match name {
+            "__eq__" => order.is_eq(),
+            "__ne__" => order.is_ne(),
+            "__lt__" => order.is_lt(),
+            "__le__" => order.is_le(),
+            "__gt__" => order.is_gt(),
+            "__ge__" => order.is_ge(),
+            _ => unreachable!(),
+        }));
+    }
     let b = crate::dynamic::builtins::one_positional_arg(name, rest, kwargs)?;
     let Some(right) = calendar(ctx, b, kind) else {
         return Ok(crate::dynamic::value::NOT_IMPLEMENTED);

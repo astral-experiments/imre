@@ -271,6 +271,17 @@ class TestCase(_SuiteMember):
             standard = _inequality_message(repr(first), repr(second))
             raise self.failureException(self._formatMessage(msg, standard))
 
+    def _assertTextBytesInstance(self, obj: str | bytes, cls: type, msg: str | None = None) -> None:
+        if isinstance(obj, str):
+            if cls is str:
+                return
+            shown = repr(obj)
+        else:
+            if cls is bytes:
+                return
+            shown = repr(obj)
+        self.fail(self._formatMessage(msg, shown + " is not an instance of " + repr(cls)))
+
     def _assertClassEqual(self, first: type, second: type, msg: str | None = None) -> None:
         if first != second:
             standard = _inequality_message(repr(first), repr(second))
@@ -284,7 +295,7 @@ class TestCase(_SuiteMember):
         elif second is None:
             difference = _inequality_message(repr(first), "None")
         else:
-            self.assertMultiLineEqual(first, second, msg)
+            self.assertMultiLineEqual(first, second, msg=msg)
             return
         raise self.failureException(self._formatMessage(msg, difference))
 
@@ -355,7 +366,7 @@ class TestCase(_SuiteMember):
                                msg: str | None = None) -> None:
         if isinstance(first, str):
             if isinstance(second, str):
-                self.assertMultiLineEqual(first, second, msg)
+                self.assertMultiLineEqual(first, second, msg=msg)
                 return
         elif isinstance(second, list):
             self.assertListEqual(first, second, msg)
@@ -697,7 +708,7 @@ class TestResult:
             if self.failfast:
                 self.stop()
 
-    def _recordException(self, case: TestCase, exc: Exception, detail: str) -> None:
+    def _recordException(self, case: TestCase, exc: BaseException, detail: str) -> None:
         if isinstance(exc, case.failureException):
             self.failures.append((case, detail))
             self._mark("F", "FAIL")

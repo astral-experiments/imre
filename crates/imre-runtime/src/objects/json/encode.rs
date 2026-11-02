@@ -487,6 +487,11 @@ impl Encoder<'_> {
         key: impl Fn(&mut Self, K) -> Result<(), Error>,
     ) -> Result<(), Error> {
         self.begin('{', depth)?;
+        let mut entries = entries.peekable();
+        if self.stream.is_some() && entries.peek().is_some() {
+            // iterencode writes the opening brace before sorting or converting any keys.
+            self.emit()?;
+        }
         let nonempty = self.ordered(
             entries,
             |a, b| cmp(&a.0, &b.0),

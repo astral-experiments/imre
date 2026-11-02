@@ -183,22 +183,13 @@ impl Registry {
 thread_local! { static LOGGERS: RefCell<Registry> = RefCell::new(Registry::new()); }
 
 /// Format the time captured by a LogRecord.
-fn format_timestamp(format: Option<&str>, local: &libc::tm, now: std::time::Duration) -> String {
-    let custom = format.filter(|value| !value.is_empty());
-    let pattern: Vec<u32> = custom
-        .unwrap_or("%Y-%m-%d %H:%M:%S")
-        .chars()
-        .map(u32::from)
-        .collect();
+fn format_timestamp(pattern: &str, local: &libc::tm) -> String {
+    let pattern = pattern.chars().map(u32::from).collect::<Vec<_>>();
     let points = crate::sys::with_process_locale(|| super::time::format_clock(&pattern, local));
-    let mut text: String = points
+    points
         .into_iter()
         .map(|point| char::from_u32(point).unwrap_or(char::REPLACEMENT_CHARACTER))
-        .collect();
-    if custom.is_none() {
-        text.push_str(&format!(",{:03}", now.subsec_millis()));
-    }
-    text
+        .collect()
 }
 
 unsafe fn state(handle: *const Object) -> Rc<Logger> {

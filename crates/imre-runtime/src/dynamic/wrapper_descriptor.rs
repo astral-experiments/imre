@@ -85,6 +85,9 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(members) = stdlib::datetime::members(owner) => {
                 Some((members.owner, attr, members.methods))
             }
+            Some((owner, attr)) if let Some(class) = deque::iterator_class(owner) => {
+                Some((class, attr, deque::ITERATOR_METHODS))
+            }
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
@@ -158,6 +161,8 @@ impl BuiltinDescriptor {
                 owner,
                 name,
                 method: !name.starts_with("__")
+                    || (deque::iterator_class(owner).is_some() && name == "__length_hint__")
+                    || (owner == "list" && name == "__getitem__")
                     || (owner == defaultdict::CLASS && matches!(name, "__copy__" | "__missing__"))
                     || matches!(
                         name,
@@ -203,6 +208,7 @@ impl BuiltinDescriptor {
             "str.isascii" => ("str", "isascii"),
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
+            "str.isidentifier" => ("str", "isidentifier"),
             "str.title" => ("str", "title"),
             "str.swapcase" => ("str", "swapcase"),
             "str.islower" => ("str", "islower"),
@@ -223,6 +229,8 @@ impl BuiltinDescriptor {
             "str.__str__" => ("str", "__str__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
+            "dict.__or__" => ("dict", "__or__"),
+            "dict.__ror__" => ("dict", "__ror__"),
             "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
@@ -258,6 +266,7 @@ impl BuiltinDescriptor {
                     | "isascii"
                     | "isalpha"
                     | "isdigit"
+                    | "isidentifier"
                     | "islower"
                     | "istitle"
                     | "center"
@@ -351,7 +360,8 @@ impl BuiltinDescriptor {
             }
             "dict" => ctx.dict_storage(receiver).is_some(),
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
-            deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
+            deque::ITERATOR | deque::REVERSE_ITERATOR => ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner),
+            deque::CLASS => matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             _ => ctx.builtin_slot_accepts(receiver, self.owner),
         };
@@ -484,7 +494,9 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__floordiv__" => ctx.text("Return self//value."),
             "__doc__" if self.name == "__rfloordiv__" => ctx.text("Return value//self."),
             "__doc__" if self.name == "__ior__" => ctx.text("Return self|=value."),
-            "__text_signature__" if self.name == "__ior__" => ctx.text("($self, value, /)"),
+            "__doc__" if self.owner == "dict" && self.name == "__or__" => ctx.text("Return self|value."),
+            "__doc__" if self.owner == "dict" && self.name == "__ror__" => ctx.text("Return value|self."),
+            "__text_signature__" if self.name == "__ior__" || (self.owner == "dict" && matches!(self.name, "__or__" | "__ror__")) => ctx.text("($self, value, /)"),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
             "__text_signature__" if matches!(self.name, "__add__" | "__radd__" | "__sub__" | "__rsub__" | "__iadd__" | "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__mod__" | "__rmod__" | "__floordiv__" | "__rfloordiv__") => {
                 ctx.text("($self, value, /)")
@@ -524,7 +536,10 @@ impl BuiltinDescriptor {
                     ("__bytes__", "__doc__") => "Convert this value to exact type bytes.",
                     ("__complex__", "__doc__") => "Convert this value to exact type complex.",
                     ("__bytes__" | "__complex__", _) => "($self, /)",
-                    ("count" | "find", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
+                    ("index", "__doc__") if self.owner == "bytes" => {
+                        "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nRaise ValueError if the subsection is not found."
+                    }
+                    ("count" | "find" | "index", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
                     }
@@ -533,6 +548,9 @@ impl BuiltinDescriptor {
                     }
                     ("isdigit", "__doc__") => {
                         "Return True if the string is a digit string, False otherwise.\n\nA string is a digit string if all characters in the string are digits and there\nis at least one character in the string."
+                    }
+                    ("isidentifier", "__doc__") => {
+                        "Return True if the string is a valid Python identifier, False otherwise.\n\nCall keyword.iskeyword(s) to test whether string s is a reserved identifier,\nsuch as \"def\" or \"class\"."
                     }
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
@@ -561,12 +579,14 @@ impl BuiltinDescriptor {
                         "Convert uppercase characters to lowercase and lowercase characters to uppercase."
                     }
                     (
-                        "isascii" | "isalpha" | "isdigit" | "islower" | "istitle" | "title"
+                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "istitle" | "title"
                         | "swapcase",
                         _,
                     ) => "($self, /)",
                     ("mro", "__doc__") => "Return a type's method resolution order.",
                     ("mro", _) => "($self, /)",
+                    ("__getitem__", "__doc__") if self.owner == "list" => "Return self[index].",
+                    ("__getitem__", _) if self.owner == "list" => "($self, index, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

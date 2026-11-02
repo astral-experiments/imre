@@ -152,6 +152,29 @@ impl Output {
             .any(|t| t.kind() == ast::token::TokenKind::TStringStart);
         let template_expressions =
             imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
+        // CPython starts the module provider at the first statement, excluding its decorators.
+        let module_start = parsed
+            .syntax()
+            .body
+            .first()
+            .map(|stmt| {
+                let last = match stmt {
+                    ast::Stmt::FunctionDef(stmt) => stmt.decorator_list.last(),
+                    ast::Stmt::ClassDef(stmt) => stmt.decorator_list.last(),
+                    _ => None,
+                };
+                last.and_then(|decorator| {
+                    parsed.tokens().after(decorator.end()).iter().find(|token| {
+                        use ast::token::TokenKind;
+                        matches!(
+                            token.kind(),
+                            TokenKind::Async | TokenKind::Def | TokenKind::Class
+                        )
+                    })
+                })
+                .map_or_else(|| stmt.start(), Ranged::start)
+            })
+            .unwrap_or_default();
         let mut body = parsed.into_syntax().body;
         let method_imports = imre_ast::module_imports(&body);
         let private_names = imre_ast::lower(&mut body);
@@ -169,6 +192,7 @@ impl Output {
             return Err(format!("{}:{error}", path.display()));
         }
         let location = SourceMap {
+            module_start,
             docs,
             unit,
             has_templates,
@@ -196,11 +220,17 @@ impl Output {
     }
 }
 
+enum DefinitionName<'a> {
+    Binding(&'a ast::Identifier),
+    Plain(&'a str),
+}
+
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
     /// A suspended suite and whether it was declared with async def.
     GeneratorFunction((&'a [ast::Stmt], bool)),
+    ModuleAnnotations(Vec<(&'a str, &'a ast::Expr)>),
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
         Vec<(&'a str, &'a ast::Expr)>,
@@ -216,6 +246,7 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    module_start: ruff_text_size::TextSize,
     docs: Option<crate::modules::doctest::SealedDocs>,
     unit: usize,
     has_templates: bool,
@@ -333,7 +364,9 @@ impl Output {
             output: self,
             source,
             class_sites: None,
+            module_annotation_sites: None,
             in_function,
+            module,
             declared_globals: Default::default(),
             annotation_lookup: false,
             class_locals: match &body {
@@ -358,6 +391,16 @@ impl Output {
         };
         match body {
             Body::Namespace(stmts) => {
+                if module && imre_ast::annotations::has_variable_annotation(stmts) {
+                    if source.string_annotations {
+                        f.op("setup_module_string_annotations", &[&f.scope.clone()]);
+                    } else {
+                        // Lower the provider after collecting the body, but run its setup first.
+                        f.module_annotation_sites = Some(Vec::new());
+                        f.jump("annotations_init");
+                        f.label("module_body");
+                    }
+                }
                 if f.output.keep_docstrings
                     && let Some(doc) = f.source.docstring(f.prefix.trim_end_matches('.'), stmts)
                 {
@@ -370,6 +413,12 @@ impl Output {
                 } else {
                     f.statements(stmts);
                 }
+                if let Some(sites) = f.module_annotation_sites.take() {
+                    f.end("ret i64 0");
+                    f.label("annotations_init");
+                    f.setup_deferred_module_annotations(&sites);
+                    f.jump("module_body");
+                }
             }
             Body::Statements(stmts) => {
                 f.declare_globals(stmts);
@@ -377,7 +426,8 @@ impl Output {
             }
             Body::GeneratorFunction(_) | Body::YieldingLambda(_) => {}
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
-            Body::Annotations(entries, class) => f.annotations(&entries, class),
+            Body::Annotations(entries, class) => f.annotations(&entries, class, false),
+            Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
             Body::Unsupported(stmt, reason) => {
                 f.checkpoint(stmt);
                 f.unsupported(reason);
@@ -436,6 +486,8 @@ struct Function<'a, 'p> {
     prefix: String,
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
+    module: bool,
+    module_annotation_sites: Option<Vec<(String, ast::Expr)>>,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,

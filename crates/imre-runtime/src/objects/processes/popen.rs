@@ -243,12 +243,12 @@ struct LaunchExtras<'a> {
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
     keep: Option<(usize, u32)>,
+    boxed_child: Option<ChildAttributes>,
     pipe_size: Option<(usize, u32)>,
     environment: Option<ByteEnvironment>,
     failure_site: Option<&'a mut Option<(launch_error::Site, bool)>>,
     direct: Option<bool>,
     search_path: Option<Vec<u8>>,
-    warn_line_buffering: Option<&'a mut dyn FnMut() -> Result<()>>,
 }
 
 impl LaunchConfig {
@@ -389,7 +389,7 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
     cleanup();
     // SAFETY: settings describe the rooted command, path and integer representations.
     let args = unsafe { WordKind::new(config.arg_kind).acquire(config.args as usize) };
-    let streams = config.streams | (u32::from(!config.close_fds) << 17);
+    let mut streams = config.streams | (u32::from(!config.close_fds) << 17);
     let modes = [12, 0, 4].map(|shift| (streams >> shift) & 15);
     if modes[1] == 5 {
         return Err(Error::new(
@@ -410,6 +410,7 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
         && unsafe { super::pass_fds::nonempty(word, kind) }
     {
         crate::objects::warnings::pass_fds_override()?;
+        streams &= !(1 << 17);
     }
     if streams & (1 << 22) != 0 {
         return Err(ambiguous_text_mode());
@@ -479,6 +480,9 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
             !unsafe { super::pass_fds::nonempty(word, kind) }
         });
     let child = |direct| {
+        if let Some(attributes) = extras.boxed_child {
+            return Ok(attributes);
+        }
         let Some((group, mask, new_session)) = child_args else {
             return Ok(ChildAttributes::default());
         };
@@ -512,12 +516,6 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
     let mut pipes: Pipes = [None, None, None];
     for (i, parent) in parents.into_iter().enumerate() {
         if let Some(fd) = parent {
-            if !text
-                && bufsize == 1
-                && let Some(warn) = &mut extras.warn_line_buffering
-            {
-                warn()?;
-            }
             pipes[i] = Some(FileState::pipe(fd.into(), i != 0, text, bufsize)?);
         }
     }

@@ -63,13 +63,22 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         return Some(Intrinsic::IntConstant(i64::from(flag)));
     }
     Some(match name {
+        "abort" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.abort"),
         "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
+        #[cfg(target_os = "linux")]
+        "MFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::MFD_CLOEXEC)),
+        "memfd_create" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.memfd_create")
+        }
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "umask" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.umask"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
         "chdir" if cfg!(unix) => Intrinsic::Chdir,
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
         "fchmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fchmod"),
+        "chown" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chown"),
+        "fchown" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fchown"),
+        "lchown" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.lchown"),
         "mkdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkdir"),
         "mkfifo" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkfifo"),
         "sched_param" if cfg!(target_os = "linux") => {
@@ -78,8 +87,12 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "sched_getscheduler" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_getscheduler")
         }
+        "posix_fallocate" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.posix_fallocate")
+        }
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
+        "_exit" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix._exit"),
         "getppid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getppid"),
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
         "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),
@@ -88,6 +101,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             Intrinsic::ObjectRuntimeExport("posix.waitstatus_to_exitcode")
         }
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
+        "getgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getgroups"),
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
         "scandir" if cfg!(any(target_os = "linux", target_os = "macos")) => {
             Intrinsic::ObjectRuntimeExport("posix.scandir")
@@ -95,8 +109,26 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "DirEntry" if cfg!(any(target_os = "linux", target_os = "macos")) => {
             Intrinsic::ObjectRuntimeExport("posix.DirEntry")
         }
+        #[cfg(target_os = "linux")]
+        "EFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::EFD_CLOEXEC)),
+        #[cfg(target_os = "linux")]
+        "EFD_NONBLOCK" => Intrinsic::IntConstant(i64::from(libc::EFD_NONBLOCK)),
+        #[cfg(target_os = "linux")]
+        "EFD_SEMAPHORE" => Intrinsic::IntConstant(i64::from(libc::EFD_SEMAPHORE)),
+        "eventfd" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.eventfd"),
+        "eventfd_read" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.eventfd_read")
+        }
+        "eventfd_write" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.eventfd_write")
+        }
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
+        "fstat" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.fstat"),
+        "sysconf" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sysconf"),
+        "sysconf_names" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.sysconf_names")
+        }
         "statvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.statvfs"),
         "fstatvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.fstatvfs"),
         "statvfs_result" if cfg!(target_os = "linux") => {
@@ -106,6 +138,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "close" => Intrinsic::Fd(FdOperation::Close),
         "closerange" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.closerange"),
         "read" => Intrinsic::Fd(FdOperation::Read),
+        "pread" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.pread"),
         "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),
@@ -115,6 +148,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "symlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.symlink"),
         "remove" => Intrinsic::Fd(FdOperation::Remove),
         "lseek" => Intrinsic::Fd(FdOperation::Seek),
+        "truncate" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.truncate"),
         "ftruncate" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.ftruncate"),
         "O_RDONLY" => Intrinsic::DescriptorConstant("o_rdonly"),
         "O_WRONLY" => Intrinsic::DescriptorConstant("o_wronly"),

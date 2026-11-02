@@ -749,7 +749,8 @@ impl Emitter<'_, '_> {
                     tuple
                 }
             }
-            ProcessOperation::GetCwd => self.call("imre_getcwd", Type::Str, &[]),
+            ProcessOperation::GetCwd { bytes: false } => self.call("imre_getcwd", Type::Str, &[]),
+            ProcessOperation::GetCwd { bytes: true } => self.call("imre_getcwdb", Type::Bytes, &[]),
             ProcessOperation::RmTree => {
                 let [path, ignore, _, _, fd] = args else {
                     unreachable!()

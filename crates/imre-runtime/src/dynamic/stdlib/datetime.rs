@@ -8,6 +8,7 @@ use crate::objects::{Calendar, CalendarNumber};
 
 pub(in crate::dynamic) mod comparison;
 mod fromutc;
+mod iso_datetime;
 mod iso_time;
 mod reduction;
 pub(in crate::dynamic) mod render;
@@ -51,10 +52,13 @@ pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
             | "datetime.datetime.fromtimestamp"
             | "datetime.datetime.utcnow"
             | "datetime.datetime.utcfromtimestamp"
+            | "datetime.datetime.fromisoformat"
             | "datetime.datetime.combine"
+            | "datetime.datetime.strptime"
             | "datetime.date.today"
             | "datetime.date.fromtimestamp"
             | "datetime.date.fromordinal"
+            | "datetime.date.fromisocalendar"
     )
 }
 
@@ -86,10 +90,20 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             "datetime.date",
             &FIELDS[..3],
             &[
+                "__eq__",
+                "__ne__",
+                "__lt__",
+                "__le__",
+                "__gt__",
+                "__ge__",
                 "__format__",
                 "__reduce__",
                 "__repr__",
                 "__str__",
+                "__add__",
+                "__radd__",
+                "__sub__",
+                "__rsub__",
                 "ctime",
                 "isoweekday",
                 "toordinal",
@@ -97,6 +111,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "timetuple",
                 "strftime",
                 "fromordinal",
+                "fromisocalendar",
                 "fromtimestamp",
                 "today",
             ],
@@ -109,6 +124,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__radd__",
                 "__sub__",
                 "__rsub__",
+                "fromisoformat",
                 "astimezone",
                 "combine",
                 "now",
@@ -138,6 +154,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "timestamp",
                 "timetuple",
                 "utctimetuple",
+                "strptime",
             ],
         ),
         "datetime.time" => (
@@ -542,21 +559,24 @@ fn nearest_quotient(ctx: &Context, numerator: Id, denominator: Id) -> Result<cra
     )))
 }
 
-fn datetime_arithmetic(
+fn date_arithmetic(
     ctx: &mut Context,
-    name: &str,
+    method: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let (owner, name) = method.split_once('.').unwrap();
     let Some((&receiver, args)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            format!("descriptor '{name}' of 'datetime.datetime' object needs an argument"),
+            format!("descriptor '{name}' of 'datetime.{owner}' object needs an argument"),
         ));
     };
     let scalar = ctx.scalar_value(receiver);
     let (value, tzinfo) = match ctx.heap.get(scalar) {
-        Value::Calendar { value, tzinfo, .. } if value.class() == "datetime" => {
+        Value::Calendar { value, tzinfo, .. }
+            if value.class() == owner || (owner == "date" && value.class() == "datetime") =>
+        {
             (value.clone(), *tzinfo)
         }
         _ => {
@@ -567,7 +587,7 @@ fn datetime_arithmetic(
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "descriptor '{name}' requires a 'datetime.datetime' object but received a '{kind}'"
+                    "descriptor '{name}' requires a 'datetime.{owner}' object but received a '{kind}'"
                 ),
             ));
         }
@@ -584,24 +604,28 @@ fn datetime_arithmetic(
             format!("expected 1 argument, got {}", args.len()),
         ));
     };
+    // A datetime is a valid receiver for an explicit date descriptor, but date arithmetic
+    // declines it so that the datetime operand can handle its own semantics.
+    if value.class() != owner {
+        return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+    }
     if matches!(name, "__sub__" | "__rsub__")
-        && let Some(other_value) = calendar(ctx, other, "datetime")
+        && let Some(other_value) = calendar(ctx, other, owner)
+        && other_value.class() == owner
     {
-        let (a, b) = if name == "__sub__" {
-            (receiver, other)
+        let (left, right, a, b) = if name == "__sub__" {
+            (&value, &other_value, receiver, other)
         } else {
-            (other, receiver)
+            (&other_value, &value, other, receiver)
         };
-        if let Some(delta) = comparison::subtract(ctx, a, b)? {
-            return Ok(store(ctx, delta, NONE));
-        }
-        let other = other_value;
-        let result = if name == "__sub__" {
-            value.datetime_difference(&other)?
+        let delta = if owner == "date" {
+            left.date_difference(right)?
+        } else if let Some(delta) = comparison::subtract(ctx, a, b)? {
+            delta
         } else {
-            other.datetime_difference(&value)?
+            left.datetime_difference(right)?
         };
-        return Ok(store(ctx, result, NONE));
+        return Ok(store(ctx, delta, NONE));
     }
     let Some(delta) = calendar(ctx, other, "timedelta") else {
         return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
@@ -613,14 +637,16 @@ fn datetime_arithmetic(
     if receiver == scalar {
         return Ok(store(ctx, shifted, tzinfo));
     }
-    // CPython calls the subclass's constructor with all seven fields and the original tzinfo.
     let class = ctx.exact_type(receiver)?;
     let fields = shifted.fields();
-    let mut args: Vec<_> = fields[..7]
+    let count = if owner == "date" { 3 } else { 7 };
+    let mut args: Vec<_> = fields[..count]
         .iter()
         .map(|&part| ctx.int(part as i64))
         .collect();
-    args.push(tzinfo);
+    if owner == "datetime" {
+        args.push(tzinfo);
+    }
     ctx.call(class, args, Vec::new())
 }
 
@@ -780,7 +806,7 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if let Some((
-        kind @ ("datetime" | "time"),
+        kind @ ("date" | "datetime" | "time"),
         operation @ ("__eq__" | "__ne__" | "__lt__" | "__le__" | "__gt__" | "__ge__"),
     )) = method.split_once('.')
     {
@@ -854,6 +880,7 @@ pub(super) fn call(
             Ok(result)
         }
         "tzinfo.fromutc" | "timezone.fromutc" => fromutc::method(ctx, method, args, kwargs),
+        "datetime.fromisoformat" => iso_datetime::fromisoformat(ctx, args, kwargs),
         "datetime.astimezone" => fromutc::astimezone(ctx, args, kwargs),
         "timezone.utcoffset" | "timezone.dst" | "timezone.tzname" => {
             fixed_zone_method(ctx, method, args, kwargs)
@@ -884,16 +911,19 @@ pub(super) fn call(
                 format!("a tzinfo subclass must implement {name}()"),
             ))
         }
-        "datetime.__add__" | "datetime.__radd__" | "datetime.__sub__" | "datetime.__rsub__" => {
-            datetime_arithmetic(ctx, &method["datetime.".len()..], args, kwargs)
+        "date.__add__" | "date.__radd__" | "date.__sub__" | "date.__rsub__"
+        | "datetime.__add__" | "datetime.__radd__" | "datetime.__sub__" | "datetime.__rsub__" => {
+            date_arithmetic(ctx, method, args, kwargs)
         }
         "date.today" | "date.fromtimestamp" => fromutc::date_constructor(ctx, method, args, kwargs),
+        "date.fromisocalendar" => date_fromisocalendar(ctx, args, kwargs),
         "date.fromordinal" => date_fromordinal(ctx, args, kwargs),
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
         "time.fromisoformat" => time_fromisoformat(ctx, args, kwargs),
         "time.strptime" => time_strptime(ctx, args, kwargs),
+        "datetime.strptime" => datetime_strptime(ctx, args, kwargs),
         "datetime.date"
         | "datetime.time"
         | "datetime.timetz"
@@ -1357,13 +1387,40 @@ fn date_fromordinal(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             ),
         ));
     };
-    let fields = Calendar::ordinal_fields(ctx.index_c_int(ordinal)?)?;
+    let ordinal = ctx.index_c_int(ordinal)?;
+    date_from_ordinal(ctx, class, ordinal)
+}
+
+fn date_fromisocalendar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, args) = calendar_class_args(ctx, "datetime.date", "fromisocalendar", args)?;
+    let argument = required_args("fromisocalendar", args, kwargs, &["year", "week", "day"])?;
+    let mut component = |i| {
+        ctx.index_c_int(argument(i)?).map_err(|err| {
+            let overflow = ctx.builtin("OverflowError");
+            if ctx.raised_error_matches(&err, overflow) {
+                Error::new("ValueError", "ISO calendar component out of range")
+            } else {
+                err
+            }
+        })
+    };
+    let ordinal = Calendar::iso_week_ordinal(component(0)?, component(1)?, component(2)?)?;
+    date_from_ordinal(ctx, class, ordinal)
+}
+
+fn date_from_ordinal(ctx: &mut Context, class: Id, ordinal: i32) -> Result<Id> {
+    let fields = Calendar::ordinal_fields(ordinal)?;
     let args = fields.into_iter().map(|n| ctx.int(i64::from(n))).collect();
     ctx.call(class, args, vec![])
 }
 
-fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (class, args) = calendar_class_args(ctx, "datetime.time", "strptime", args)?;
+fn strptime_args(
+    ctx: &mut Context,
+    owner: &'static str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Id, Id, Id)> {
+    let (class, args) = calendar_class_args(ctx, owner, "strptime", args)?;
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -1393,6 +1450,40 @@ fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Res
         }
     }
 
+    Ok((class, text, format))
+}
+
+fn datetime_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, text, format) = strptime_args(ctx, "datetime.datetime", args, kwargs)?;
+    let module_mark = ctx.heap.temporary_mark();
+    let module = ctx.import_with_builtins("_strptime")?;
+    let parser_mark = ctx.heap.temporary_mark();
+    let result = ctx
+        .lookup_attr(module, "_strptime_datetime_datetime")
+        .and_then(|parser| {
+            ctx.heap.keep(parser);
+            ctx.call(parser, vec![class, text, format], vec![])
+        });
+    // Release the callable before its module, preserving the result or exception across finalizers.
+    for mark in [parser_mark, module_mark] {
+        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+        match &result {
+            Ok(value) => ctx.heap.keep(*value),
+            Err(error) => {
+                for value in error.roots() {
+                    ctx.heap.keep(value);
+                }
+            }
+        }
+        if collect {
+            ctx.collect_unreachable();
+        }
+    }
+    result
+}
+
+fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, text, format) = strptime_args(ctx, "datetime.time", args, kwargs)?;
     let module = ctx.module("_strptime")?;
     let parser = ctx.lookup_attr(module, "_strptime_datetime_time")?;
     ctx.call(parser, vec![class, text, format], vec![])
@@ -1430,15 +1521,19 @@ fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         }
         hour = 0;
     }
-    let zone = match offset {
+    let zone = iso_zone(ctx, offset)?;
+    time_for_class(ctx, class, [hour, minute, second, micros, 0], zone)
+}
+
+fn iso_zone(ctx: &mut Context, offset: Option<i64>) -> Result<Id> {
+    Ok(match offset {
         None => NONE,
         Some(0) => utc(ctx),
         Some(us) => {
-            let offset = Calendar::from_delta_microseconds(&crate::Int::from(us))?;
-            store(ctx, Calendar::zone(&offset, None)?, NONE)
+            let delta = Calendar::from_delta_microseconds(&crate::Int::from(us))?;
+            store(ctx, Calendar::zone(&delta, None)?, NONE)
         }
-    };
-    time_for_class(ctx, class, [hour, minute, second, micros, 0], zone)
+    })
 }
 
 /// Read native civil fields even when the receiver overrides their descriptors.
@@ -1488,7 +1583,8 @@ fn clock_method(
                     value
                 } else {
                     // Subtract through the native slot, including Python subtype construction.
-                    let shifted = datetime_arithmetic(ctx, "__sub__", &[receiver, offset], &[])?;
+                    let shifted =
+                        date_arithmetic(ctx, "datetime.__sub__", &[receiver, offset], &[])?;
                     ctx.finish_call_operands(mark, shifted);
                     calendar(ctx, shifted, "datetime").ok_or_else(|| {
                         Error::new(

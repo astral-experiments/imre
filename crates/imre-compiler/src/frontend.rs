@@ -2629,6 +2629,7 @@ impl<'a> Checker<'a> {
             "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
             "union" => "set.union",
             "difference_update" => "set.difference_update",
+            "pop" => "set.pop",
             "remove" => "set.remove",
             "update" => "set.update",
             "issubset" => "set.issubset",
@@ -6010,6 +6011,12 @@ impl<'a> Checker<'a> {
             return Err(self.object_runtime_export("timedelta remainder", binary));
         }
         if let (Type::Calendar(first), Type::Calendar(second)) = (left.ty, right.ty) {
+            if binary.op == ast::Operator::Sub
+                && first == ir::CalendarType::Date
+                && second == ir::CalendarType::Date
+            {
+                return Err(self.object_runtime_export("date difference", binary));
+            }
             return calendar::binary(first, second, left, right, binary, self.source);
         }
         if binary.op == ast::Operator::Mod
@@ -6219,6 +6226,12 @@ impl<'a> Checker<'a> {
         self.scoped_builtin_error(name, node)
     }
 
+    fn boxed_builtin_callable(&self, expression: &ast::Expr) -> Option<&'static str> {
+        ["exec", "hex", "oct"]
+            .into_iter()
+            .find(|name| self.unshadowed_builtin(expression, name))
+    }
+
     /// Select the object provider only when this precise diagnostic reaches the driver.
     fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
         let error = self.object_export_error(name, node);
@@ -6266,8 +6279,8 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        if self.unshadowed_builtin(expression, "hex") {
-            return Err(self.scoped_builtin_error("hex", expression));
+        if let Some(name) = self.boxed_builtin_callable(expression) {
+            return Err(self.scoped_builtin_error(name, expression));
         }
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
@@ -6922,6 +6935,23 @@ impl<'a> Checker<'a> {
                 return self.boolean_value(boolean, None);
             }
             ast::Expr::Compare(compare) => {
+                if let Some((value, positive)) = self.exact_object_text(compare) {
+                    let test = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(
+                            Builtin::IsInstance(vec![ir::InstanceType::ExactText]),
+                            vec![self.expr(value)?],
+                        ),
+                    };
+                    return Ok(if positive {
+                        test
+                    } else {
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(test)),
+                        }
+                    });
+                }
                 if let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref()
                     && let [left, right] = compare.operands.as_ref()
                     && let (Some(left), Some(right)) =
@@ -8470,8 +8500,8 @@ impl<'a> Checker<'a> {
             return Ok(method);
         }
 
-        if self.unshadowed_builtin(&call.func, "hex") {
-            return Err(self.scoped_builtin_error("hex", call));
+        if let Some(name) = self.boxed_builtin_callable(&call.func) {
+            return Err(self.scoped_builtin_error(name, call));
         }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
@@ -9352,11 +9382,12 @@ impl<'a> Checker<'a> {
                 self.defer_object_error(&error);
                 return Ok(Expr::none());
             }
-            Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
+            Some(Binding::Intrinsic(Intrinsic::GetCwd { bytes })) => {
                 self.arguments(call, &[], None)?;
+                let op = ir::ProcessOperation::GetCwd { bytes };
                 return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
+                    ty: if bytes { Type::Bytes } else { Type::Str },
+                    kind: ExprKind::Builtin(Builtin::Process(op), vec![]),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
@@ -11031,6 +11062,14 @@ impl<'a> Checker<'a> {
             self.reject_builtin_keywords(call)?;
             let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
             return Ok(self.implementation_hasattr(receiver.clone(), key));
+        }
+        if self.unshadowed_builtin(&call.func, "getattr")
+            && let [receiver, attribute] | [receiver, attribute, _] = args.as_slice()
+            && let ExprKind::Str(member) = &attribute.kind
+            && (calendar::boxed_date_arithmetic(receiver.ty, member)
+                || (args.len() == 2 && calendar::boxed_comparison(receiver.ty, member)))
+        {
+            return Err(self.object_runtime_export("datetime instance member", call));
         }
         if matches!(name.id.as_str(), "getattr" | "hasattr" | "vars")
             && args.first().is_some_and(|arg| arg.ty == Type::NativeModule)
