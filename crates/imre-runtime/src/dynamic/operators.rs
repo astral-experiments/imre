@@ -3935,8 +3935,33 @@ impl Context {
         self.checked_equal(actual, expected)
     }
 
-    /// View equality iterates the view and probes the other operand, including its Python hooks.
-    fn equal_view(&mut self, view: Id, other: Id) -> Result<bool> {
+    /// Probe a view from a live native set cursor. Hashing an element can resize the iterated set.
+    fn set_contained_in_view(&mut self, set: Id, view: (Id, DictViewKind)) -> Result<bool> {
+        let size = self.stored_entries(set).len();
+        let step = self.heap.temporary_mark();
+        let mut position = 0;
+        loop {
+            if self.stored_entries(set).len() != size {
+                return Err(Error::new(
+                    "RuntimeError",
+                    "Set changed size during iteration",
+                ));
+            }
+            let Some((at, item, _, _)) = self.dictionary_pair(set, position) else {
+                return Ok(true);
+            };
+            self.heap.keep(item);
+            let found = self.view_member(view, item, None)?;
+            self.discard_truth(step);
+            if !found {
+                return Ok(false);
+            }
+            position = at + 1;
+        }
+    }
+
+    /// Compare a key or item view using the subset operand's iterator and the superset's membership.
+    fn compare_view(&mut self, slot: &str, view: Id, other: Id) -> Result<bool> {
         let roots = self.heap.temporary_mark();
         // A comparison callback can remove either view from its enclosing container.
         self.heap.keep(view);
@@ -3953,27 +3978,40 @@ impl Context {
                 self.stored_entries(self.scalar_value(other)).len()
             };
             self.discard_truth(length_roots);
-            if size != other_size {
-                return Ok(false);
+            let (subset, superset) = match slot {
+                "__eq__" | "__ne__" if size == other_size => (view, other),
+                "__lt__" if size < other_size => (view, other),
+                "__le__" if size <= other_size => (view, other),
+                "__gt__" if size > other_size => (other, view),
+                "__ge__" if size >= other_size => (other, view),
+                _ => return Ok(slot == "__ne__"),
+            };
+            let target = self.set_view(superset);
+            let storage = self.scalar_value(subset);
+            if let Some(target) = target
+                && matches!(self.heap.get(storage), Value::Set { .. })
+                && !self.overrides_set_slot(subset, "__iter__")
+            {
+                return self.set_contained_in_view(storage, target);
             }
-            let it = self.iterator(view)?;
+            let it = self.iterator(subset)?;
             self.heap.keep(it);
             let step = self.heap.temporary_mark();
             while let Some(item) = self.next_item(it)? {
                 self.heap.keep(item);
                 let found = if let Some(target) = target {
                     self.view_member(target, item, None)?
-                } else if self.overrides_set_slot(other, "__contains__") {
-                    self.contains(item, other)?
+                } else if self.overrides_set_slot(superset, "__contains__") {
+                    self.contains(item, superset)?
                 } else {
-                    builtins::set_member(self, other, item, true)?
+                    builtins::set_member(self, superset, item, true)?
                 };
                 self.discard_truth(step);
                 if !found {
-                    return Ok(false);
+                    return Ok(slot == "__ne__");
                 }
             }
-            Ok(true)
+            Ok(slot != "__ne__")
         })();
         let collect = self.heap.discard_truth_operands(roots, self.modules);
         if let Err(error) = &result {
@@ -4918,19 +4956,19 @@ impl Context {
         let Some((left, right, inplace)) = binary_slots(op) else {
             return Ok(None);
         };
-        if matches!(op, "==" | "!=") {
+        if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=") {
             let set = |id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. });
             let operands = if self.set_view(a).is_some() && self.set_view(b).is_some() {
                 let left_type = self.exact_type(a)?;
                 let right_type = self.exact_type(b)?;
                 // A right-hand OrderedDict view inherits the ordinary view's reflected slot.
                 if left_type != right_type && self.direct_subclass(right_type, left_type) {
-                    Some((b, a))
+                    Some((b, a, right))
                 } else {
-                    Some((a, b))
+                    Some((a, b, left))
                 }
             } else if self.set_view(a).is_some() && set(b) {
-                Some((a, b))
+                Some((a, b, left))
             } else if self.set_view(b).is_some() && set(a) {
                 // A set subclass can handle the comparison before the view's reflected slot.
                 if self.overrides_set_slot(a, left)
@@ -4938,16 +4976,16 @@ impl Context {
                 {
                     return Ok(Some(result));
                 }
-                Some((b, a))
+                Some((b, a, right))
             } else {
                 None
             };
-            if let Some((view, other)) = operands {
-                let equal = self
+            if let Some((view, other, slot)) = operands {
+                let result = self
                     .with_slot_depth("maximum recursion depth exceeded in comparison", |ctx| {
-                        ctx.equal_view(view, other)
+                        ctx.compare_view(slot, view, other)
                     })?;
-                return Ok(Some(builtins::boolean(equal == (op == "=="))));
+                return Ok(Some(builtins::boolean(result)));
             }
         }
         let class = |id| {
