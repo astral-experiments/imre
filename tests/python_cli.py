@@ -855,6 +855,52 @@ def check_class_metadata_allocation(imre, run, flags):
 
 
 
+def check_python_process_identity(imre, root, env):
+    import select
+    import signal
+
+    source = (
+        "import os, sys\n"
+        "assert sys.argv[-1] == 'tail' and sys.orig_argv[1] == '-B'\n"
+        "try: os.waitpid(-1, os.WNOHANG)\n"
+        "except ChildProcessError: pass\n"
+        "else: raise AssertionError('launcher left a child')\n"
+        "os.write(1, (str(os.getpid()) + '\\n').encode())\n"
+        "os.read(0, 1)\n"
+    )
+    script = root / "process_identity.py"
+    script.write_text(source)
+    for args, sig, disposition in (
+        (["-c", source], signal.SIGTERM, signal.SIG_IGN),
+        ([script], signal.SIGKILL, signal.SIG_DFL),
+        (["-c", source], signal.SIGINT, signal.SIG_DFL),
+    ):
+        def before_exec():
+            signal.signal(signal.SIGCHLD, disposition)
+
+        with subprocess.Popen(
+            [imre, "-B", *args, "tail"], env=env, cwd=root, start_new_session=True,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=before_exec,
+        ) as child:
+            try:
+                assert select.select([child.stdout], [], [], 120)[0], "payload did not report its PID"
+                got = child.stdout.readline()
+                assert got == f"{child.pid}\n".encode(), (got, child.poll())
+                if sys.platform.startswith("linux"):
+                    # The compiler temporarily needs waitable children for its linker.
+                    lines = Path(f"/proc/{child.pid}/status").read_text().splitlines()
+                    ignored = int(next(line.split()[1] for line in lines if line.startswith("SigIgn:")), 16)
+                    assert bool(ignored & (1 << (signal.SIGCHLD - 1))) == (disposition == signal.SIG_IGN)
+                child.send_signal(sig)
+                assert child.wait(timeout=10) == -sig
+            finally:
+                # Also release a payload left behind by a regressed wrapper.
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+
 def check_faulthandler(imre, root, env):
     import resource
     import select
@@ -1149,6 +1195,7 @@ def main():
 
         if sys.platform == "darwin" or sys.platform.startswith("linux"):
             check_faulthandler(imre, root, env)
+            check_python_process_identity(imre, root, env)
         if sys.platform.startswith("linux"):
             check_pending_signals(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
