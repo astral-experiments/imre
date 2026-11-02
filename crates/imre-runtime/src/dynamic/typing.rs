@@ -1555,16 +1555,22 @@ fn typevar(
             "Bivariant types are not supported.",
         ));
     }
-    if constraints.len() == 1 {
-        return Err(Error::new(
-            "TypeError",
-            "A single constraint is not allowed",
-        ));
-    }
     if infer_variance && (covariant || contravariant) {
         return Err(Error::new(
             "ValueError",
             "Variance cannot be specified with infer_variance.",
+        ));
+    }
+    if bound != NONE {
+        let module = ctx.module("typing")?;
+        let check = ctx.lookup_attr(module, "_type_check")?;
+        let message = ctx.text("Bound must be a type.");
+        bound = ctx.call(check, vec![bound, message], Vec::new())?;
+    }
+    if constraints.len() == 1 {
+        return Err(Error::new(
+            "TypeError",
+            "A single constraint is not allowed",
         ));
     }
     if !constraints.is_empty() && bound != NONE {
