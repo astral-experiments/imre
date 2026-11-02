@@ -3065,6 +3065,9 @@ impl Context {
     /// Convert a scalar subscript before looking up a mutable sequence's current length.
     fn mutation_index(&mut self, key: Id, kind: &str) -> Result<i64> {
         let index = self.index_value(key)?.ok_or_else(|| {
+            if kind == "array" {
+                return Error::new("TypeError", "array indices must be integers");
+            }
             Error::new(
                 "TypeError",
                 format!(
@@ -3111,6 +3114,12 @@ impl Context {
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));
+        }
+        if matches!(self.heap.get(obj), Value::Array(_))
+            && !matches!(self.heap.get(key), Value::Slice(_))
+        {
+            let index = self.mutation_index(key, "array")?;
+            return super::array::set_item(self, obj, index, val);
         }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Set(val)

@@ -277,6 +277,27 @@ fn array_mut(ctx: &mut Context, receiver: Id) -> &mut Array {
     array
 }
 
+/// Replace the selected element even if converting the value grows or copies the array.
+pub(super) fn set_item(ctx: &mut Context, receiver: Id, index: i64, item: Id) -> Result<()> {
+    let out_of_range = || Error::new("IndexError", "array assignment index out of range");
+    let array = array_mut(ctx, receiver);
+    let len = array.len() as i64;
+    let index = if index < 0 { index + len } else { index };
+    if !(0..len).contains(&index) {
+        return Err(out_of_range());
+    }
+    let format = array.format;
+    let width = format.width();
+    let start = index as usize * width;
+    let value = format.encode(ctx, item)?;
+    let array = array_mut(ctx, receiver);
+    if index as usize >= array.len() {
+        return Err(out_of_range());
+    }
+    array.as_bytes_mut()?[start..start + width].copy_from_slice(&value[..width]);
+    Ok(())
+}
+
 /// CPython validates the item, resizes at the original append offset, and converts
 /// again to store it. Both conversions can run Python that changes or copies the array.
 fn append_item(ctx: &mut Context, receiver: Id, item: Id) -> Result<()> {

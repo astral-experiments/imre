@@ -59,6 +59,22 @@ def current():
         assert array("w", a).tobytes() == a.tobytes()
         assert len(seen) == 1 and seen[0].category is DeprecationWarning
 
+    offsets = array("i", [10, 20])
+    copies = []
+
+    class Offset:
+        def __index__(self):
+            offsets.append(30)
+            copies.append(array("i", offsets))
+            return -7
+
+    offsets[-1] = Offset()
+    assert offsets.tolist() == [10, -7, 30] and copies[0].tolist() == [10, 20, 30]
+    view = memoryview(offsets)
+    offsets[0] += 2
+    assert view[0] == 12
+    view.release()
+
     for code in ("b", "B", "i", "f", "d"):
         owner = array(code, [65, 66])
         view = memoryview(owner)
