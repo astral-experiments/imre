@@ -1,6 +1,13 @@
 from _imre_json import encoder_call as _encoder_call, encoder_state as _encoder_state
 
 
+
+def _readonly_encoder_option(index):
+    def refuse(*args):
+        raise AttributeError("readonly attribute")
+    return property(lambda encoder: encoder._state[index], refuse, refuse)
+
+
 class Encoder:
     """Encoder(markers, default, encoder, indent, key_separator, item_separator, sort_keys, skipkeys, allow_nan)"""
 
@@ -12,17 +19,21 @@ class Encoder:
         object.__setattr__(self, "_state", state)
         return self
 
+    def __init__(self, /, *args, **kwargs):
+        # The native type only initializes state in __new__.
+        pass
+
     def __init_subclass__(cls, **kwargs):
         raise TypeError("type '_json.Encoder' is not an acceptable base type")
 
-    markers = property(lambda self: self._state[0])
-    default = property(lambda self: self._state[1])
-    encoder = property(lambda self: self._state[2])
-    indent = property(lambda self: self._state[3])
-    key_separator = property(lambda self: self._state[4])
-    item_separator = property(lambda self: self._state[5])
-    sort_keys = property(lambda self: self._state[6])
-    skipkeys = property(lambda self: self._state[7])
+    markers = _readonly_encoder_option(0)
+    default = _readonly_encoder_option(1)
+    encoder = _readonly_encoder_option(2)
+    indent = _readonly_encoder_option(3)
+    key_separator = _readonly_encoder_option(4)
+    item_separator = _readonly_encoder_option(5)
+    sort_keys = _readonly_encoder_option(6)
+    skipkeys = _readonly_encoder_option(7)
 
     def __setattr__(self, name, value):
         self.__delattr__(name)
