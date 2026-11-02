@@ -2416,6 +2416,7 @@ impl Context {
                 stdlib::import_socket_constants(self, scope)?
             }
             "_opcode" => {
+                stdlib::opcode::install(self, module, scope);
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
                 self.bind(scope, "ENABLE_SPECIALIZATION", disabled);
