@@ -14,6 +14,19 @@ use crate::objects::{
 };
 use crate::{Str, StrOwner};
 
+/// Recognize an exact dict's bound getter without inspecting an arbitrary parse_constant hook.
+pub(super) fn is_constants_lookup(ctx: &Context, constants: Id, hook: Id) -> bool {
+    let Value::Method {
+        receiver, callable, ..
+    } = ctx.heap.get(hook)
+    else {
+        return false;
+    };
+    *receiver == constants
+        && matches!(ctx.heap.get(constants), Value::Dict(_))
+        && matches!(ctx.heap.get(*callable), Value::Native(name) if name == "dict.__getitem__")
+}
+
 /// Scan one value at a Python character offset and return its value and end offset.
 pub(super) fn scan_once(ctx: &mut Context, constant: Id, input: Id, idx: Id) -> Result<Id> {
     let index = ctx.index_integer(idx)?.to_i64().ok_or_else(|| {

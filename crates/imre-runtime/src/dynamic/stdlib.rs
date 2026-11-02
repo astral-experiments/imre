@@ -743,7 +743,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
-        | ("_imre_json", "scan_once" | "surrogate_text" | "encoder_state" | "encoder_call")
+        | (
+            "_imre_json",
+            "scan_once"
+            | "is_constants_lookup"
+            | "surrogate_text"
+            | "encoder_state"
+            | "encoder_call",
+        )
         | ("_imre_linecache", "source_lines")
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
@@ -2268,6 +2275,7 @@ pub(super) fn call(
         "_imre_json.encoder_state" => return json::encoder_state(ctx, args, kwargs),
         "_imre_json.encoder_call" => return json::encoder_call(ctx, args, kwargs),
         "_imre_json.surrogate_text" => (1, &[]),
+        "_imre_json.is_constants_lookup" => (2, &[]),
         "_imre_json.scan_once" => (3, &[]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
@@ -2525,6 +2533,11 @@ pub(super) fn call(
                 NONE
             }
         }
+        "_imre_json.is_constants_lookup" => builtins::boolean(json::is_constants_lookup(
+            ctx,
+            argument(args, 0)?,
+            argument(args, 1)?,
+        )),
         "_imre_json.scan_once" => json::scan_once(
             ctx,
             argument(args, 0)?,
