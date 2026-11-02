@@ -228,6 +228,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "dup2" => Intrinsic::Fd(FdOperation::Dup2),
         "ptsname" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::PtsName),
         "O_NOCTTY" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_noctty"),
+        "get_terminal_size" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.get_terminal_size")
+        }
         "openpty" => Intrinsic::Fd(FdOperation::OpenPty),
         "pipe" => Intrinsic::Fd(FdOperation::Pipe),
         "pipe2" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::Pipe2),
