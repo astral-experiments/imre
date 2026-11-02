@@ -2175,6 +2175,7 @@ def report(text):
             "boxed_module_dir.py",
             "boxed_unittest_assert_almost_equal.py",
             "boxed_unittest_assert_count_equal.py",
+            "boxed_unittest_assert_set_equal.py",
             "boxed_unittest_membership.py",
             "boxed_unittest_endswith.py",
             "boxed_unittest_sequence_equal.py",
