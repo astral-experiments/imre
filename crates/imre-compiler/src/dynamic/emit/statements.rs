@@ -35,23 +35,18 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::FunctionDef(f) => {
                 self.locals.insert(f.name.to_string());
                 self.incomplete = true;
+                // Loading a name or a literal cannot introduce a binding in the
+                // defining frame. Keep the conservative fallback for other expressions.
                 for decorator in &f.decorator_list {
                     self.visit_decorator(decorator);
+                    self.locals_incomplete |= !decorator.expression.is_name_expr();
                 }
                 for param in f.parameters.iter_non_variadic_params() {
                     if let Some(default) = &param.default {
                         self.visit_expr(default);
+                        self.locals_incomplete |=
+                            !default.is_literal_expr() && !default.is_name_expr();
                     }
-                }
-                if !f.decorator_list.is_empty()
-                    || f.parameters
-                        .posonlyargs
-                        .iter()
-                        .chain(&f.parameters.args)
-                        .chain(&f.parameters.kwonlyargs)
-                        .any(|arg| arg.default.is_some())
-                {
-                    self.locals_incomplete = true;
                 }
             }
             ast::Stmt::ClassDef(c) => {
