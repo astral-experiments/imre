@@ -353,11 +353,11 @@ pub(super) const LIST_METHODS: &[&str] = &[
 ];
 
 const FROZENSET_OPERATORS: &[&str] = &[
-    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__",
+    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__", "__xor__", "__rxor__",
 ];
 const SET_OPERATORS: &[&str] = &[
-    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__", "__iand__", "__ior__",
-    "__isub__",
+    "__and__", "__rand__", "__or__", "__ror__", "__sub__", "__rsub__", "__xor__", "__rxor__",
+    "__iand__", "__ior__", "__isub__", "__ixor__",
 ];
 
 pub(super) fn set_operators(owner: &str) -> &'static [&'static str] {
@@ -373,6 +373,7 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
         "__and__" | "__rand__" | "__iand__" => "&",
         "__or__" | "__ror__" | "__ior__" => "|",
         "__sub__" | "__rsub__" | "__isub__" => "-",
+        "__xor__" | "__rxor__" | "__ixor__" => "^",
         _ => return None,
     })
 }
