@@ -365,6 +365,7 @@ impl Context {
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (super::deque::iterator_class(kind).is_some() && super::deque::ITERATOR_METHODS.contains(&name))
                     || (kind == "function" && name == "__call__")
+                    || (kind == "builtin_function_or_method" && name == "__reduce__")
                     || (kind == "set" && name == "update")
                     || (matches!(name, "__repr__" | "__reduce__" | "difference" | "intersection" | "issubset" | "union")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
@@ -1396,7 +1397,7 @@ impl Context {
                 {
                     "type"
                 } else if builtins::is_builtin(name)
-                    || builtins::constructor_owner(name).is_some()
+                    || builtins::native_method_owner(name).is_some()
                     || matches!(
                         name.as_str(),
                         "binascii.a2b_base64"
@@ -2139,6 +2140,17 @@ impl Context {
             return Ok(value);
         }
         match *self.heap.get(obj) {
+            Value::Method { .. } | Value::Native(_)
+                if matches!(name, "__reduce__" | "__reduce_ex__")
+                    && (self.builtin_type_name(obj) == Some("builtin_function_or_method")
+                        || matches!(self.heap.get(obj), Value::Native(class) if class == "builtin_function_or_method")) =>
+            {
+                let class = self.builtin("builtin_function_or_method");
+                if let Some(member) = self.class_attr(class, name) {
+                    let receiver = if obj == class { NONE } else { obj };
+                    return self.bind_attribute(member, receiver, class);
+                }
+            }
             Value::Complex(z) if matches!(name, "real" | "imag") => {
                 return Ok(self.alloc(Value::Float(if name == "real" { z.real } else { z.imag })));
             }
@@ -5798,7 +5810,8 @@ impl Context {
                         .is_some_and(|owner| !HashState::is_provider_class(owner))
                     || matches!(
                         name.as_str(),
-                        "type.__init__"
+                        "builtin_function_or_method.__reduce__"
+                            | "type.__init__"
                             | "BaseException.__init__"
                             | "BaseException.add_note"
                             | "ImportError.__init__"
