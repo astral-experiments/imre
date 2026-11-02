@@ -1957,6 +1957,7 @@ impl IntrinsicModule {
             (Self::Typing, "Generator") => Intrinsic::ObjectRuntimeExport("typing.Generator"),
             (Self::Typing, "Reversible") => Intrinsic::ObjectRuntimeExport("typing.Reversible"),
             (Self::Typing, "Sized") => Intrinsic::ObjectRuntimeExport("typing.Sized"),
+            (Self::Typing, "ByteString") => Intrinsic::ObjectRuntimeExport("typing.ByteString"),
             (Self::Typing, "ContextManager") => {
                 Intrinsic::ObjectRuntimeExport("typing.ContextManager")
             }
