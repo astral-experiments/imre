@@ -2798,14 +2798,27 @@ impl Context {
             {
                 format!("<built-in function {leaf}>")
             }
-            Value::HashMethod { name, .. } => format!("<method '{name}' of '_md5.md5' objects>"),
+            Value::HeapTypeMethod { name, owner } => {
+                let class = self.heap.get(*owner).heap_type().unwrap();
+                let kind = if *name == "__repr__" {
+                    "slot wrapper"
+                } else {
+                    "method"
+                };
+                format!("<{kind} '{name}' of '{class}' objects>")
+            }
             Value::Method {
                 callable, receiver, ..
-            } if let Value::HashMethod { name, .. } = self.heap.get(*callable) => {
+            } if let Value::HeapTypeMethod { name, owner } = self.heap.get(*callable) => {
+                let class = self.heap.get(*owner).heap_type().unwrap();
                 if matches!(self.heap.get(*receiver), Value::Module { .. }) {
                     format!("<built-in function {name}>")
+                } else if *name == "__new__" {
+                    format!("<built-in method __new__ of type object at {receiver:#x}>")
+                } else if *name == "__repr__" {
+                    format!("<method-wrapper '__repr__' of {class} object at {receiver:#x}>")
                 } else {
-                    format!("<built-in method {name} of _md5.md5 object at {receiver:#x}>")
+                    format!("<built-in method {name} of {class} object at {receiver:#x}>")
                 }
             }
             Value::Native(name)
@@ -3553,7 +3566,7 @@ impl Context {
                 let repeated = repeat_values(items, n)?;
                 self.alloc(Value::List(repeated))
             }
-            Value::Tuple(items) if items.is_empty() || n == 1 => storage,
+            Value::Tuple(items) if items.is_empty() || (n == 1 && owner == storage) => storage,
             Value::Tuple(items) => {
                 let repeated = repeat_values(items, n)?;
                 self.alloc(Value::Tuple(repeated))
@@ -4108,6 +4121,33 @@ impl Context {
         Ok(self.alloc(Value::List(items)))
     }
 
+    /// Concatenate tuple storage without consulting a subclass's iterator or item hooks.
+    fn concat_tuple(&mut self, a: Id, b: Id) -> Result<Id> {
+        let items = |value| match self.tuple_backing(value) {
+            Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                Ok(Some(Cow::Borrowed(items.as_slice())))
+            }
+            _ => self.tuple_items(value).map(|items| items.map(Cow::Owned)),
+        };
+        let Some(right) = items(b)? else {
+            let name = self.type_name(b);
+            let name = &name[..name.floor_char_boundary(200)];
+            return Err(Error::new(
+                "TypeError",
+                format!("can only concatenate tuple (not \"{name}\") to tuple"),
+            ));
+        };
+        let left = items(a)?.expect("tuple receiver");
+        if left.is_empty() && matches!(self.heap.get(b), Value::Tuple(_)) {
+            return Ok(b);
+        }
+        if right.is_empty() && matches!(self.heap.get(a), Value::Tuple(_)) {
+            return Ok(a);
+        }
+        let values = concat_ids(&left, &right)?;
+        Ok(self.alloc(Value::Tuple(values)))
+    }
+
     /// Join the boundary strings and preserve the existing interpolation objects.
     fn concat_template(&mut self, left: Id, right: Id) -> Result<Id> {
         let Value::Template {
@@ -4371,6 +4411,20 @@ impl Context {
                 };
                 return Err(Error::new("TypeError", message));
             }
+            "+" if self.builtin_slot_accepts(a, "tuple") => {
+                if self.overrides_add(a, "tuple.__add__") {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for +{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
+                return self.concat_tuple(a, b);
+            }
             "+" | "-"
                 if matches!(self.heap.get(a), Value::Complex(_))
                     || matches!(self.heap.get(b), Value::Complex(_)) =>
@@ -4436,16 +4490,6 @@ impl Context {
                         "TypeError",
                         format!("can't concat {} to bytearray", self.type_name(b)),
                     ));
-                }
-                (Value::Tuple(x), Value::Tuple(y)) => {
-                    if x.is_empty() {
-                        return Ok(b);
-                    }
-                    if y.is_empty() {
-                        return Ok(a);
-                    }
-                    let items = concat_ids(x, y)?;
-                    return Ok(self.alloc(Value::Tuple(items)));
                 }
                 _ => {}
             },
@@ -4717,6 +4761,18 @@ impl Context {
     fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
         if let Value::KeyWrapper { comparator, object } = *self.heap.get(obj) {
             return stdlib::functools::key_comparison(self, name, comparator, object, other);
+        }
+        // Defining only __radd__ also installs a forward numeric slot. In that case
+        // the inherited tuple concatenation runs before an unrelated reflected slot.
+        if name == "__add__"
+            && self.builtin_slot_accepts(obj, "tuple")
+            && !self.overrides_add(obj, "tuple.__add__")
+        {
+            return if self.slot(obj, "__radd__").is_some() {
+                self.concat_tuple(obj, other).map(Some)
+            } else {
+                Ok(None)
+            };
         }
         // Native deque repetition is a sequence fallback, after numeric hooks. A subtype
         // defining either multiply hook installs a numeric slot for both directions.

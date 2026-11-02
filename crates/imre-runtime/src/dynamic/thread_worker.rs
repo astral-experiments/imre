@@ -457,7 +457,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
     {
         let (symbol, storage) = match ctx.heap.get(callable) {
             Value::Native(symbol) => (symbol.as_str(), receiver),
-            Value::HashMethod {
+            Value::HeapTypeMethod {
                 owner,
                 name: "update",
             } if ctx.heap.get(receiver).instance_class() == Some(*owner) => {

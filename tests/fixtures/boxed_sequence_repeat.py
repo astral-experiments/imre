@@ -17,6 +17,16 @@ def current():
     assert items is original and items == [marker] * 6
     assert len(calls) == 3
 
+    class Pair(tuple):
+        pass
+
+    pair = Pair((1, 2))
+    for result in (pair * 1, 1 * pair, pair * 0, pair * 2, Pair(()) * 1):
+        assert type(result) is tuple
+    assert pair * 1 == (1, 2) and pair * 1 is not pair * 1
+    assert 1 * pair is not 1 * pair
+    assert pair * 0 == () and pair * 2 == (1, 2, 1, 2)
+
     class Reflected:
         def __rmul__(self, other):
             return marker

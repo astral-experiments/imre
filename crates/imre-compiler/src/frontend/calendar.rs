@@ -129,7 +129,7 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
             matches!(receiver, Type::Calendar(C::DateTime) | Type::ClockTime)
         }
         "fromtimestamp" => receiver == Type::Calendar(C::Date),
-        "ctime" | "fromisocalendar" | "fromordinal" | "isoweekday" | "today" => {
+        "ctime" | "fromisocalendar" | "fromordinal" | "isocalendar" | "isoweekday" | "today" => {
             matches!(receiver, Type::Calendar(C::Date | C::DateTime))
         }
         _ => boxed_comparison(receiver, name) || boxed_date_arithmetic(receiver, name),

@@ -769,7 +769,7 @@ impl Context {
                 | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
                 | Value::IoOpen { .. }
-                | Value::HashMethod { .. }
+                | Value::HeapTypeMethod { .. }
                 | Value::Method { .. }
         ) || matches!(self.heap.get(value),Value::Weak(wr) if wr.kind != weakref::Kind::Proxy)
             || self.slot(value, "__call__").is_some()
@@ -806,6 +806,30 @@ impl Context {
             receiver: owner,
             explicit: false,
         })
+    }
+
+    /// Validate a descriptor against its own generation of a native heap type.
+    pub(super) fn check_heap_method_receiver(
+        &self,
+        owner: Id,
+        name: &str,
+        receiver: Id,
+    ) -> Result<()> {
+        let declaring = self
+            .heap
+            .get(owner)
+            .heap_type()
+            .expect("native heap type method");
+        if self.heap.get(receiver).instance_class() == Some(owner) {
+            return Ok(());
+        }
+        let actual = self.type_name(receiver);
+        Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{name}' for '{declaring}' objects doesn't apply to a '{actual}' object"
+            ),
+        ))
     }
 
     pub(super) fn bind_attribute(&mut self, value: Id, receiver: Id, owner: Id) -> Result<Id> {
@@ -858,8 +882,8 @@ impl Context {
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::IoMethod { .. } => true,
-                Value::HashMethod { owner, name } => {
-                    stdlib::hashlib::md5::check_receiver(self, *owner, name, receiver)?;
+                Value::HeapTypeMethod { owner, name } => {
+                    self.check_heap_method_receiver(*owner, name, receiver)?;
                     true
                 }
                 Value::Native(name) => {
@@ -1263,10 +1287,13 @@ impl Context {
                     name: "__init__" | "__repr__" | "__iter__" | "__next__" | "__del__",
                     ..
                 } => "method-wrapper",
+                Value::HeapTypeMethod {
+                    name: "__repr__", ..
+                } => "method-wrapper",
                 Value::Native(_)
                 | Value::IoOpen { .. }
                 | Value::IoMethod { .. }
-                | Value::HashMethod { .. } => "builtin_function_or_method",
+                | Value::HeapTypeMethod { .. } => "builtin_function_or_method",
                 _ => return None,
             },
             Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
@@ -2685,11 +2712,23 @@ impl Context {
                 explicit,
             } => match name {
                 "__self__" => return Ok(receiver),
-                _ if let Value::HashMethod {
+                _ if let Value::HeapTypeMethod {
                     owner,
                     name: method,
                 } = *self.heap.get(callable) =>
                 {
+                    if self.heap.get(owner).heap_type()
+                        == Some(stdlib::datetime::isocalendar::CLASS)
+                    {
+                        if let Some(value) =
+                            stdlib::datetime::isocalendar::method_metadata(self, method, name)
+                        {
+                            return Ok(value);
+                        }
+                        if name == "__module__" && matches!(method, "__new__" | "__reduce__") {
+                            return Ok(NONE);
+                        }
+                    }
                     match name {
                         "__name__" => return Ok(self.text(method)),
                         "__qualname__" if method == "md5" => return Ok(self.text(method)),
@@ -2838,17 +2877,28 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::HashMethod {
+            Value::HeapTypeMethod {
                 owner,
                 name: member,
             } => match name {
+                _ if self.heap.get(owner).heap_type()
+                    == Some(stdlib::datetime::isocalendar::CLASS)
+                    && let Some(value) =
+                        stdlib::datetime::isocalendar::method_metadata(self, member, name) =>
+                {
+                    return Ok(value);
+                }
                 "__name__" => return Ok(self.text(member)),
                 "__objclass__" => return Ok(owner),
                 "__qualname__" => {
                     return Ok(self.text(format!("{}.{member}", self.class_name(owner))));
                 }
                 "__get__" => {
-                    let callable = self.builtin("method_descriptor.__get__");
+                    let callable = self.builtin(if member == "__repr__" {
+                        "wrapper_descriptor.__get__"
+                    } else {
+                        "method_descriptor.__get__"
+                    });
                     return Ok(self.alloc(Value::Method {
                         callable,
                         receiver: obj,
@@ -2862,19 +2912,27 @@ impl Context {
                 owner,
                 name: field,
                 ..
-            } if matches!(owner, "int" | super::deque::CLASS | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
-                || HashState::is_provider_class(owner)
+            } if matches!(
+                owner,
+                "int"
+                    | super::deque::CLASS
+                    | "typing.Union"
+                    | "typing.TypeAliasType"
+                    | stdlib::hashlib::md5::CLASS
+                    | stdlib::datetime::isocalendar::CLASS
+            ) || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
             {
                 match name {
                     "__objclass__" => {
-                        if let Value::HashMethod { owner, .. } = *self.heap.get(get) {
+                        if let Value::HeapTypeMethod { owner, .. } = *self.heap.get(get) {
                             return Ok(owner);
                         }
                         return Ok(self.builtin(owner));
                     }
                     "__name__" => return Ok(self.text(field)),
+                    "__doc__" if owner == stdlib::datetime::isocalendar::CLASS => return Ok(NONE),
                     "__doc__" if owner == super::deque::CLASS => return Ok(self.text("maximum size of a deque or None if unbounded")),
                     "__doc__" if owner == "int" => {
                         return Ok(
@@ -2890,7 +2948,11 @@ impl Context {
                         if name == "__get__"
                             || matches!(
                                 owner,
-                                "int" | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS
+                                "int"
+                                    | "typing.Union"
+                                    | "typing.TypeAliasType"
+                                    | stdlib::hashlib::md5::CLASS
+                                    | stdlib::datetime::isocalendar::CLASS
                             )
                             || HashState::is_provider_class(owner) =>
                     {
@@ -4169,7 +4231,7 @@ impl Context {
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
-        if let Some(class) = self.heap.get(obj).hash_type() {
+        if let Some(class) = self.heap.get(obj).heap_type() {
             return Err(Error::new(
                 "TypeError",
                 format!("cannot set '{name}' attribute of immutable type '{class}'"),
@@ -4406,6 +4468,9 @@ impl Context {
                     } = *self.heap.get(obj)
                 {
                     return self.update_dictionary_field(obj, storage, name, None);
+                }
+                if self.heap.get(class).heap_type().is_some() {
+                    self.check_instance_field(obj, name)?;
                 }
                 if (layout.declared_slot && !layout.active_slot)
                     || self.has_namedtuple_field(class, name)
@@ -4808,7 +4873,7 @@ impl Context {
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
-        if let Some(class) = self.heap.get(obj).hash_type() {
+        if let Some(class) = self.heap.get(obj).heap_type() {
             return Err(Error::new(
                 "TypeError",
                 format!("cannot set '{name}' attribute of immutable type '{class}'"),
@@ -5352,6 +5417,12 @@ impl Context {
                 ),
             ));
         }
+        if self.heap.get(class).heap_type() == Some(stdlib::datetime::isocalendar::CLASS) {
+            return Err(Error::new(
+                "TypeError",
+                "object.__new__(datetime.IsoCalendarDate) is not safe, use datetime.IsoCalendarDate.__new__()",
+            ));
+        }
         if let Some(name) = self.heap.get(class).hash_type() {
             return Err(Error::new(
                 "TypeError",
@@ -5442,6 +5513,9 @@ impl Context {
     /// Describe a receiver rejected by a builtin allocator.
     pub(super) fn invalid_new_subtype(&self, kind: &str, class: Id) -> Error {
         let message = match self.heap.get(class) {
+            heap_type if let Some(name) = heap_type.heap_type() => {
+                format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
+            }
             Value::Class { name, .. } => {
                 format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
             }
@@ -5578,7 +5652,7 @@ impl Context {
                 namedtuple_fields,
                 metaclass,
                 io_kind,
-                hash_type,
+                heap_type,
             } => {
                 let mut copied_name = String::new();
                 copied_name
@@ -5593,7 +5667,7 @@ impl Context {
                 Value::Class {
                     metaclass: *metaclass,
                     io_kind: *io_kind,
-                    hash_type: *hash_type,
+                    heap_type: *heap_type,
                     name: copied_name,
                     scope: *scope,
                     ancestors: copied_ancestors,
@@ -5796,8 +5870,12 @@ impl Context {
             }
             Value::CodecEncoder(codec) => stdlib::codecs::entry_encode(self, codec, &args, &kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
-            Value::HashMethod { owner, name } => {
-                stdlib::hashlib::md5::call(self, owner, name, &args, &kwargs)
+            Value::HeapTypeMethod { owner, name } => {
+                if self.heap.get(owner).heap_type() == Some(stdlib::datetime::isocalendar::CLASS) {
+                    stdlib::datetime::isocalendar::call(self, owner, name, &args, &kwargs)
+                } else {
+                    stdlib::hashlib::md5::call(self, owner, name, &args, &kwargs)
+                }
             }
             Value::IoOpen {
                 reader,

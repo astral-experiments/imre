@@ -590,6 +590,12 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
             "tuple.__new__(posix.sched_param) is not safe, use posix.sched_param.__new__()",
         ));
     }
+    if ctx.heap.get(class).heap_type() == Some(super::stdlib::datetime::isocalendar::CLASS) {
+        return Err(Error::new(
+            "TypeError",
+            "tuple.__new__(datetime.IsoCalendarDate) is not safe, use datetime.IsoCalendarDate.__new__()",
+        ));
+    }
     let names = ctx.namedtuple_fields(class);
     if names.is_none() && !ctx.subclass(class, tuple) {
         return Err(ctx.invalid_new_subtype("tuple", class));

@@ -561,6 +561,36 @@ def test_fromordinal():
     assert Parts.fromordinal(2**31 - 1) == (5879611, 7, 11)
 
 
+def test_isocalendar():
+    import _datetime
+    import datetime
+
+    class Stamp(dt):
+        def toordinal(self):
+            raise AssertionError("isocalendar called Python toordinal")
+
+        @property
+        def year(self):
+            raise AssertionError("isocalendar read Python year")
+
+    result = date.isocalendar(Stamp(2005, 1, 2, 23, tzinfo=UTC))
+    cls = type(result)
+    assert cls.__bases__ == (tuple,) and cls.__name__ == "IsoCalendarDate"
+    assert not hasattr(datetime, cls.__name__) and not hasattr(_datetime, cls.__name__)
+    assert result == (2004, 53, 7) == (result.year, result.week, result.weekday)
+    assert cls(weekday=-1, week=0, year=25) == (25, 0, -1)
+    assert repr(result) == "datetime.IsoCalendarDate(year=2004, week=53, weekday=7)"
+    assert result.__reduce__() == (tuple, ((2004, 53, 7),))
+    assert type(result[:]) is tuple and result + (8,) == (2004, 53, 7, 8)
+    for field in ("year", "week", "weekday"):
+        try:
+            setattr(result, field, 1)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError(field)
+
+
 def test_fromisocalendar():
     class Parts(date):
         def __new__(cls, *fields):
@@ -1006,6 +1036,7 @@ def current():
     test_timedelta_positive_and_absolute()
     test_timedelta_remainder()
     test_fromordinal()
+    test_isocalendar()
     test_fromisocalendar()
     test_date_clock_constructors()
     test_subclass_construction()

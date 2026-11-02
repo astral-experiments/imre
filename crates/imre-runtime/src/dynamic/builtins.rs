@@ -1510,8 +1510,9 @@ pub(super) fn call(
                 else {
                     return Err(type_error("expected a getset descriptor"));
                 };
-                let accepts = if let Value::HashMethod { owner: class, .. } = *ctx.heap.get(get) {
-                    super::stdlib::hashlib::md5::check_receiver(ctx, class, field, values[0])?;
+                let accepts = if let Value::HeapTypeMethod { owner: class, .. } = *ctx.heap.get(get)
+                {
+                    ctx.check_heap_method_receiver(class, field, values[0])?;
                     true
                 } else if owner == "int" {
                     ctx.builtin_slot_accepts(values[0], owner)
