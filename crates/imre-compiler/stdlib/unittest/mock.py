@@ -108,23 +108,28 @@ class _Call:
         self._kwargs = kwargs
         self._text = _call_text(args, kwargs)
 
-    def _format(self, name: str) -> str:
-        if name == "call":
-            return self._text
-        return name + self._text[4:]
-
     @staticmethod
     def _represent(value: _Call | None) -> str:
         if value is None:
             return "None"
-        return value._format("call")
+        return _format_recorded_call(value, "call")
 
     @staticmethod
     def _represent_list(values: list[_Call]) -> str:
         parts: list[str] = []
         for value in values:
-            parts.append(value._format("call"))
+            parts.append(_format_recorded_call(value, "call"))
         return _format_list(parts, is_call_list(values))
+
+
+def _format_recorded_call(value: _Call, name: str) -> str:
+    if name == "call":
+        return value._text
+    return name + value._text[4:]
+
+
+def _new_call(args: list[_Arg], kwargs: dict[str, _Arg]) -> _Call:
+    return _Call(args, kwargs)
 
 
 def _new_call_list() -> list[_Call]:
@@ -239,14 +244,14 @@ class Mock:
         return self._at(node._result)
 
     def _record(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> Mock:
-        received = _Call(args, kwargs)
+        received = _new_call(args, kwargs)
         self._node.called = True
-        self._node.call_count += 1
         self._node.call_args = received
         self._node.call_args_list.append(received)
-        self._node._history.append(received._format("call"))
+        self._node.call_count = len(self._node.call_args_list)
+        self._node._history.append(_format_recorded_call(received, "call"))
         for ancestor in self._node._ancestors:
-            ancestor.calls.append(received._format(ancestor.prefix))
+            ancestor.calls.append(_format_recorded_call(received, ancestor.prefix))
         effect = self._node.side_effect
         if effect is not None:
             raise effect
@@ -279,19 +284,19 @@ class Mock:
             raise AssertionError(f"Expected '{self._name()}' to have been called once. Called {self._node.call_count} times." + self._calls_repr())
 
     def _assert_called_with(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
-        expected = _Call(args, kwargs)
+        expected = _new_call(args, kwargs)
         observed = self._node.call_args
         if observed is not None and observed == expected:
             return
-        actual = "not called." if observed is None else observed._format(self._name())
-        raise AssertionError("expected call not found.\nExpected: " + expected._format(self._name()) + "\n  Actual: " + actual)
+        actual = "not called." if observed is None else _format_recorded_call(observed, self._name())
+        raise AssertionError("expected call not found.\nExpected: " + _format_recorded_call(expected, self._name()) + "\n  Actual: " + actual)
 
     def _assert_any_call(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
-        expected = _Call(args, kwargs)
+        expected = _new_call(args, kwargs)
         for actual in self._node.call_args_list:
             if expected == actual:
                 return
-        raise AssertionError(expected._format(self._name()) + " call not found")
+        raise AssertionError(_format_recorded_call(expected, self._name()) + " call not found")
 
     def _assert_called_once_with(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
         if self._node.call_count != 1:
