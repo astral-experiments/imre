@@ -1,7 +1,19 @@
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 
 def check():
+    ignore_lookup = suppress(LookupError)
+    with ignore_lookup as entered:
+        assert entered is None
+        raise KeyError('suppressed')
+    try:
+        with ignore_lookup:
+            raise ValueError('propagated')
+    except ValueError as error:
+        assert error.args == ('propagated',)
+    else:
+        raise AssertionError('suppressed an unrelated exception')
+
     events = []
 
     @contextmanager
