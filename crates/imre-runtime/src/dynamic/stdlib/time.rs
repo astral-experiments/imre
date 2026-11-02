@@ -2,7 +2,7 @@
 use super::*;
 use crate::dynamic::builtins::bind;
 use crate::objects::Calendar;
-use crate::objects::time::{ClockParts, LocalTime, wall_time};
+use crate::objects::time::{ClockParts, LocalTime, wall_time, wall_time_ns};
 
 const FIELDS: [&str; 9] = [
     "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday", "tm_isdst",
@@ -61,29 +61,10 @@ fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<
 }
 
 fn civil(ctx: &mut Context, stamp: Id, utc: bool) -> Result<ClockParts> {
-    match ctx.heap.get(stamp) {
+    match ctx.heap.get(ctx.scalar_value(stamp)) {
         Value::None => Ok(ClockParts::from_float(wall_time(), utc)?),
         Value::Float(n) => Ok(ClockParts::from_float(*n, utc)?),
-        Value::Int(_) | Value::Bool(_) => Ok(ClockParts::from_int(&ctx.as_int(stamp)?, utc)?),
-        _ => {
-            let index = ctx.bound_slot(stamp, "__index__")?.ok_or_else(|| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "'{}' object cannot be interpreted as an integer",
-                        ctx.type_name(stamp)
-                    ),
-                )
-            })?;
-            let value = ctx.call(index, Vec::new(), Vec::new())?;
-            let n = ctx.as_int(value).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    format!("__index__ returned non-int (type {})", ctx.type_name(value)),
-                )
-            })?;
-            Ok(ClockParts::from_int(&n, utc)?)
-        }
+        _ => Ok(ClockParts::from_int(&ctx.index_integer(stamp)?, utc)?),
     }
 }
 
@@ -148,6 +129,7 @@ pub(super) fn call(
     }
     let function = match name {
         "time" => "time.time",
+        "time_ns" => "time.time_ns",
         "monotonic" => "time.monotonic",
         "perf_counter" => "time.perf_counter",
         "mktime" => "time.mktime",
@@ -161,12 +143,21 @@ pub(super) fn call(
     }
     match name {
         "time" if args.is_empty() => Ok(ctx.alloc(Value::Float(wall_time()))),
+        "time_ns" if args.is_empty() => {
+            let nanos = i64::try_from(wall_time_ns()).map_err(|_| {
+                Error::new(
+                    "OverflowError",
+                    "timestamp too large to convert to C PyTime_t",
+                )
+            })?;
+            Ok(ctx.int(nanos))
+        }
         "monotonic" | "perf_counter" if args.is_empty() => {
             let stamp =
                 crate::objects::time::monotonic_time().map_err(crate::objects::errno_error)?;
             Ok(ctx.alloc(Value::Float(stamp.as_secs_f64())))
         }
-        "time" | "monotonic" | "perf_counter" => Err(Error::new(
+        "time" | "time_ns" | "monotonic" | "perf_counter" => Err(Error::new(
             "TypeError",
             format!("{function}() takes no arguments ({} given)", args.len()),
         )),
@@ -218,7 +209,7 @@ pub(super) fn call(
             let points = clock.strftime(&ctx.string_codepoints(format)?)?;
             Ok(ctx.text_codepoints(points))
         }
-        "gmtime" | "localtime" => {
+        "gmtime" | "localtime" | "ctime" => {
             if args.len() > 1 {
                 return Err(Error::new(
                     "TypeError",
@@ -229,6 +220,22 @@ pub(super) fn call(
                 ));
             }
             let parts = civil(ctx, args.first().copied().unwrap_or(NONE), name == "gmtime")?;
+            if name == "ctime" {
+                // CPython uses fixed English abbreviations regardless of LC_TIME.
+                const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+                const MONTHS: [&str; 12] = [
+                    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+                    "Dec",
+                ];
+                let [year, month, day, hour, minute, second, weekday, ..] = parts.fields;
+                let weekday = DAYS[weekday as usize];
+                let month = MONTHS[(month - 1) as usize];
+                // _asctime formats the calendar year as a C int.
+                let year = year as libc::c_int;
+                return Ok(ctx.text(format!(
+                    "{weekday} {month} {day:2} {hour:02}:{minute:02}:{second:02} {year}"
+                )));
+            }
             let fields = parts.fields.map(|n| ctx.int(n));
             let zone = parts.zone.map_or(NONE, |s| ctx.text(s.as_str()));
             let offset = ctx.int(parts.offset);

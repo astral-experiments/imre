@@ -101,6 +101,61 @@ pub(in crate::dynamic::stdlib) fn construct(
     Ok(wrap(ctx, values, extras))
 }
 
+/// Rebuild the struct sequence from its visible tuple and all stored named-only fields.
+pub(in crate::dynamic::stdlib) fn reduce(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "unbound method stat_result.__reduce__() needs an argument",
+        ));
+    };
+    let Value::NamedTuple {
+        class: Some(CLASS),
+        values,
+        extras,
+        ..
+    } = ctx.heap.get(receiver)
+    else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '__reduce__' for '{CLASS}' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            ),
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "stat_result.__reduce__() takes no keyword arguments",
+        ));
+    }
+    if !rest.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "stat_result.__reduce__() takes no arguments ({} given)",
+                rest.len()
+            ),
+        ));
+    }
+
+    let extras = extras.clone();
+    let sequence = ctx.alloc(Value::Tuple(values.clone()));
+    let fields = extras
+        .into_iter()
+        .map(|(name, value)| (ctx.text(name), value))
+        .collect();
+    let fields = ctx.dict(fields);
+    let args = ctx.alloc(Value::Tuple(vec![sequence, fields]));
+    let class = ctx.builtin(CLASS);
+    Ok(ctx.alloc(Value::Tuple(vec![class, args])))
+}
+
 fn integer(ctx: &mut Context, value: impl Into<num_bigint::BigInt>) -> Id {
     ctx.alloc(Value::Int(crate::Int::new(value.into())))
 }

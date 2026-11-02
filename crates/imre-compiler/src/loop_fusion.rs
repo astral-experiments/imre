@@ -6,7 +6,6 @@ mod records;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::borrows::statements;
 use crate::ir::{
     self, Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type,
 };
@@ -210,7 +209,7 @@ fn private_lists(
         ExprKind::Scope { clear, .. } => hidden |= clear.iter().any(&protected),
         _ => {}
     });
-    statements(&function.body, &mut |s| match s {
+    ir::walk_statements(&function.body, &mut |s| match s {
         Statement::Assign(slot, _) if consumer_reads.contains_key(slot) => {
             *writes.entry(*slot).or_insert(0) += 1
         }

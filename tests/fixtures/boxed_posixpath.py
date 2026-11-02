@@ -53,6 +53,15 @@ def current():
     ):
         result = normpath(path=Path(value))
         assert result == expected and type(result) is type(expected)
+    assert os.path.splitroot is posixpath.splitroot is posix._path_splitroot_ex
+    for path, expected in (
+        (Text("relative"), ("", "", "relative")),
+        (Text("///a"), ("", "/", "//a")),
+        (Raw(b"//\xff"), (b"", b"//", b"\xff")),
+        ("/\udcff\x00", ("", "/", "\udcff\x00")),
+    ):
+        parts = os.path.splitroot(p=Path(path))
+        assert parts == expected and all(type(item) is type(expected[0]) for item in parts)
     assert os.path.commonprefix is posixpath.commonprefix is genericpath.commonprefix
     for paths, expected in (
         ([], ""), (["café", "cafés"], "café"), ([Path(b"/a"), Path(b"/b")], b"/"),
@@ -126,6 +135,11 @@ def current():
         os.putenv(key, "native only")
         assert os.getenv(key, missing) == ""
         assert posix.environ[key.encode()] == b""
+        snapshot = os.environ.copy()
+        assert type(snapshot) is dict
+        assert snapshot[key] == ""
+        snapshot[key] = "copy only"
+        assert os.environ[key] == ""
         try:
             os.getenv(key.encode())
         except TypeError as error:

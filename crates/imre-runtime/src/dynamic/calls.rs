@@ -39,9 +39,11 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             Some(("_functools", function))
         }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
+        #[cfg(target_os = "linux")]
+        "_signal" if function == "sigpending" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
-        "zlib" if function == "adler32" => Some((module, function)),
+        "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
                 || crate::objects::HashState::algorithms().any(|name| name == function) =>
@@ -159,8 +161,13 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (matches!(name, "__repr__" | "issubset")
-                    && matches!(kind.as_str(), "set" | "frozenset")) =>
+                ) || (matches!(
+                    kind.as_str(),
+                    "datetime.date" | "datetime.datetime" | "datetime.time" | "datetime.timedelta"
+                ) && matches!(name, "min" | "max" | "resolution"))
+                    || (kind == "function" && name == "__call__")
+                    || (matches!(name, "__repr__" | "issubset")
+                        && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -919,6 +926,7 @@ impl Context {
                 if HashState::is_provider_class(name)
                     || builtins::is_builtin_type(name)
                     || builtins::is_iterator_type(name)
+                    || name == stdlib::fixed_structseq::UNRAISABLE_ARGS
                     || matches!(
                         name.as_str(),
                         "NoneType"
@@ -967,6 +975,7 @@ impl Context {
                             | stdlib::os::scandir::ITER
                             | super::thread_rlock::CLASS
                             | super::thread_lock::CLASS
+                            | value::REGEX_PATTERN_TYPE
                             | value::TEMPLATE_TYPE
                             | value::TEMPLATE_ITER_TYPE
                             | value::INTERPOLATION_TYPE
@@ -1027,6 +1036,7 @@ impl Context {
                 class:
                     Some(
                         class @ ("time.struct_time"
+                        | stdlib::fixed_structseq::UNRAISABLE_ARGS
                         | stdlib::fixed_structseq::HASH_INFO
                         | stdlib::fixed_structseq::TERMINAL_SIZE
                         | stdlib::flags::TYPE
@@ -1196,6 +1206,7 @@ impl Context {
                     class:
                         Some(
                             class @ ("time.struct_time"
+                            | stdlib::fixed_structseq::UNRAISABLE_ARGS
                             | stdlib::fixed_structseq::HASH_INFO
                             | stdlib::fixed_structseq::TERMINAL_SIZE
                             | stdlib::flags::TYPE),
@@ -1487,6 +1498,16 @@ impl Context {
         {
             return self.bind_attribute(member, obj, meta);
         }
+        if matches!(name, "min" | "max" | "resolution") {
+            let owner = match self.heap.get(obj) {
+                Value::Calendar { .. } => Some(self.exact_type(obj)?),
+                Value::Native(_) => Some(obj),
+                _ => None,
+            };
+            if let Some(value) = owner.and_then(|class| self.own_class_attr(class, name)) {
+                return Ok(value);
+            }
+        }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
                 "__args__" => return Ok(union.args),
@@ -1719,6 +1740,13 @@ impl Context {
                     }));
                 }
             }
+            Value::ClassMethod(callable) if name == "__isabstractmethod__" => {
+                return Ok(if self.is_abstract_method(callable)? {
+                    TRUE
+                } else {
+                    FALSE
+                });
+            }
             Value::ClassMethod(callable) if matches!(name, "__func__" | "__wrapped__") => {
                 return Ok(callable);
             }
@@ -1813,6 +1841,9 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "_signal.sigpending" => {
+                        return Ok(self.text("Examine pending signals.\n\nReturns a set of signal numbers that are pending for delivery to\nthe calling thread."));
+                    }
                     "__doc__" if symbol == "_thread.allocate" => {
                         return Ok(self.text("An obsolete synonym of allocate_lock()."));
                     }
@@ -1878,6 +1909,7 @@ impl Context {
                         if matches!(
                             symbol.as_str(),
                             "posix.getpid"
+                                | "_signal.sigpending"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
                                 | "_thread._count"
@@ -1977,6 +2009,11 @@ impl Context {
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
                 }
+                if name == "__call__" {
+                    let class = self.builtin("function");
+                    let descriptor = self.builtin("function.__call__");
+                    return self.bind_attribute(descriptor, obj, class);
+                }
             }
             Value::Method {
                 callable, receiver, ..
@@ -2032,6 +2069,9 @@ impl Context {
                             "__text_signature__" if method == "sys._getframe" => {
                                 Some("($module, depth=0, /)")
                             }
+                            "__text_signature__" if method == "sys._getframemodulename" => {
+                                Some("($module, /, depth=0)")
+                            }
                             "__text_signature__" if method == "sys.audit" => {
                                 Some("($module, event, /, *args)")
                             }
@@ -2070,6 +2110,14 @@ impl Context {
                     }
                 }
             },
+            Value::RegexScanner { pattern, .. } if name == "pattern" => return Ok(pattern),
+            Value::RegexMatch(ref m) if name == "re" => return Ok(m.pattern),
+            Value::RegexMatch(ref m) if name == "string" => return Ok(m.subject),
+            Value::RegexMatch(ref m) if name == "lastindex" => {
+                if let Some(branch) = m.lexicon_branch(self) {
+                    return Ok(self.int(branch as i64));
+                }
+            }
             Value::RegexPattern(ref pattern) if name == "flags" => {
                 return Ok(self.int(pattern.flags));
             }
@@ -2083,6 +2131,7 @@ impl Context {
                 return stdlib::datetime::attribute(self, obj, &value.clone(), tzinfo, name);
             }
             Value::Native(ref class) if class == stdlib::os::stat::CLASS => match name {
+                "__reduce__" => return Ok(self.builtin("os.stat_result.__reduce__")),
                 field if let Some(id) = stdlib::os::stat::member(self, field) => return Ok(id),
                 "__module__" => return Ok(self.text("os")),
                 "__name__" | "__qualname__" => return Ok(self.text("stat_result")),
@@ -2100,7 +2149,8 @@ impl Context {
                 _ => {}
             },
             Value::Native(ref class)
-                if class == "datetime.datetime" && matches!(name, "fromtimestamp" | "combine") =>
+                if class == "datetime.datetime"
+                    && matches!(name, "now" | "fromtimestamp" | "combine") =>
             {
                 return Ok(self.builtin(&format!("datetime.datetime.{name}")));
             }
@@ -2172,6 +2222,7 @@ impl Context {
                 if matches!(
                     class.as_str(),
                     "array.array"
+                        | value::REGEX_PATTERN_TYPE
                         | "_contextvars.Context"
                         | "_contextvars.ContextVar"
                         | "_contextvars.Token"
@@ -2204,7 +2255,11 @@ impl Context {
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
                         return Ok(NONE);
                     }
-                    "__new__" if class == KEY_WRAPPER => return Ok(self.builtin("object.__new__")),
+                    "__new__"
+                        if matches!(class.as_str(), KEY_WRAPPER | value::REGEX_PATTERN_TYPE) =>
+                    {
+                        return Ok(self.builtin("object.__new__"));
+                    }
                     _ if class == KEY_WRAPPER
                         && BuiltinDescriptor::lookup(&format!("{class}.{name}")).is_some() =>
                     {
@@ -2376,6 +2431,16 @@ impl Context {
                 };
             }
             Value::File(ref handle)
+                if matches!(name, "name" | "mode")
+                    && let Some((path, mode)) = handle.path_metadata() =>
+            {
+                return Ok(if name == "name" {
+                    path
+                } else {
+                    self.text(mode)
+                });
+            }
+            Value::File(ref handle)
                 if name == "name"
                     && let Some(fd) = handle.socket_reader_name() =>
             {
@@ -2390,8 +2455,12 @@ impl Context {
             Value::Socket(ref socket) if name == "family" => {
                 return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
             }
-            Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
-            Value::BufferedRandom(ref file) if name == "closed" => {
+            Value::Socket(ref socket) if name == "type" => {
+                return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
+            }
+            Value::BufferedRandom(_, file_name) if name == "name" => return Ok(file_name),
+            Value::BufferedRandom(..) if name == "mode" => return Ok(self.text("rb+")),
+            Value::BufferedRandom(ref file, _) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
             Value::TextFile(ref file) if name == "closed" => {
@@ -2691,6 +2760,7 @@ impl Context {
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
+                    || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(class.as_str(), "set" | "frozenset"))
@@ -2787,6 +2857,11 @@ impl Context {
                 if name == "__dict__" {
                     return Ok(self.class_dictionary(scope));
                 }
+                if matches!(name, "__annotations__" | "__annotate__")
+                    && self.has_class_annotation_provider(scope)
+                {
+                    return self.class_annotation_attr(obj, scope, name);
+                }
                 if name == "__annotations__"
                     && let Some(thunks) = self
                         .scope_data(scope)
@@ -2828,7 +2903,8 @@ impl Context {
                     return self.bind_attribute(value, NONE, obj);
                 }
                 if name == "register"
-                    && (super::mapping_abc::is_abc_class(self, obj) || self.is_bundled_abc(obj))
+                    && self.heap.get(obj).instance_class().is_none()
+                    && (self.is_bundled_abc(obj) || super::mapping_abc::is_abc_class(self, obj))
                 {
                     let callable = self.builtin("abc.register");
                     return Ok(self.alloc(Value::Method {
@@ -2869,6 +2945,7 @@ impl Context {
                 }
                 if let Some(
                     owner @ ("time.struct_time"
+                    | stdlib::fixed_structseq::UNRAISABLE_ARGS
                     | stdlib::fixed_structseq::HASH_INFO
                     | stdlib::fixed_structseq::TERMINAL_SIZE
                     | stdlib::flags::TYPE),
@@ -3192,6 +3269,11 @@ impl Context {
                 }
             }
             Value::Class { scope, .. } => {
+                if matches!(name, "__annotations__" | "__annotate__")
+                    && self.has_class_annotation_provider(scope)
+                {
+                    return self.update_class_annotation_attr(scope, name, None);
+                }
                 let error = match name {
                     "__name__" | "__qualname__" | "__bases__" | "__type_params__"
                     | "__module__" | "__doc__" => Error::new(
@@ -3560,6 +3642,23 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        if self.builtins.get("abc.ABCMeta") == Some(&obj)
+            && matches!(
+                name,
+                "__new__"
+                    | "__init__"
+                    | "__prepare__"
+                    | "mro"
+                    | "__bases__"
+                    | "__instancecheck__"
+                    | "__subclasscheck__"
+            )
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "custom ABCMeta construction and subclass checks are unsupported",
+            ));
+        }
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
@@ -3567,7 +3666,11 @@ impl Context {
                 || HashState::is_provider_class(class)
                 || matches!(
                     class.as_str(),
-                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER | stdlib::flags::TYPE
+                    HashState::CLASS
+                        | HashState::XOF_CLASS
+                        | KEY_WRAPPER
+                        | stdlib::flags::TYPE
+                        | value::REGEX_PATTERN_TYPE
                 ))
         {
             return Err(Error::new(
@@ -3897,6 +4000,11 @@ impl Context {
                     ));
                 }
                 let scope = *scope;
+                if matches!(name, "__annotations__" | "__annotate__")
+                    && self.has_class_annotation_provider(scope)
+                {
+                    return self.update_class_annotation_attr(scope, name, Some(value));
+                }
                 if name == "__annotations__"
                     && let Value::Scope(data) = self.heap.get_mut(scope)
                     && let Some(namespace) = &mut data.class_namespace
@@ -3931,6 +4039,7 @@ impl Context {
             dictionary,
             property,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
             fields: Default::default(),
             scalar: None,
@@ -3942,6 +4051,14 @@ impl Context {
     fn allocation_base(&self, class: Id) -> Option<Id> {
         self.find_in_mro(class, |base| match self.heap.get(base) {
             Value::Native(_) => Some(base),
+            // Generic and Protocol are bootstrapped with a class namespace, but
+            // inherit object.__new__ and do not supply native instance storage.
+            Value::Class { .. }
+                if self.classes.get("typing.Generic") == Some(&base)
+                    || self.classes.get("typing.Protocol") == Some(&base) =>
+            {
+                None
+            }
             Value::Class { scope, .. } if self.scope_data(*scope).class_cell.is_none() => {
                 Some(base)
             }
@@ -3970,10 +4087,12 @@ impl Context {
             ));
         }
         let object = self.builtin("object");
-        if matches!(self.heap.get(class), Value::Native(name) if name == KEY_WRAPPER) {
+        if let Value::Native(name) = self.heap.get(class)
+            && matches!(name.as_str(), KEY_WRAPPER | value::REGEX_PATTERN_TYPE)
+        {
             return Err(Error::new(
                 "TypeError",
-                format!("cannot create '{KEY_WRAPPER}' instances"),
+                format!("cannot create '{name}' instances"),
             ));
         }
         let base = self.allocation_base(class).unwrap_or(class);
@@ -4047,6 +4166,7 @@ impl Context {
             dictionary: None,
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }
@@ -4093,6 +4213,7 @@ impl Context {
             scalar: Some(text),
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }
@@ -4189,6 +4310,27 @@ impl Context {
                 }
                 Ok(result)
             }
+            Value::Native(name) if name == "function.__call__" => {
+                let mut arguments = args.into_iter();
+                let function = arguments.next().ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        "descriptor '__call__' of 'function' object needs an argument",
+                    )
+                })?;
+                if !matches!(self.heap.get(function), Value::Function { .. }) {
+                    let actual = self
+                        .builtin_type_name(function)
+                        .unwrap_or_else(|| self.type_name(function));
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "descriptor '__call__' requires a 'function' object but received a '{actual}'"
+                        ),
+                    ));
+                }
+                self.call(function, arguments.collect(), kwargs)
+            }
             Value::Native(name) if name == "classmethod.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "classmethod", &args, &kwargs)
             }
@@ -4264,7 +4406,10 @@ impl Context {
             Value::Native(name)
                 if matches!(
                     name.as_str(),
-                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER
+                    HashState::CLASS
+                        | HashState::XOF_CLASS
+                        | KEY_WRAPPER
+                        | value::REGEX_PATTERN_TYPE
                 ) =>
             {
                 Err(Error::new(
@@ -4494,6 +4639,12 @@ impl Context {
                 ancestors,
                 ..
             } => {
+                if self.builtins.get("abc.ABCMeta") == Some(&callable) {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "direct ABCMeta construction is unsupported",
+                    ));
+                }
                 if let Some(call) = self.bound_slot(callable, "__call__")? {
                     return self.call(call, args, kwargs);
                 }
@@ -4918,35 +5069,76 @@ impl Context {
         &mut self,
         bases: Id,
         body: Id,
+        explicit_metaclass: Option<Id>,
         total: Option<Id>,
         parameterized: bool,
     ) -> Result<Id> {
         let (original, mut bases) = super::typing::resolve_bases(self, bases)?;
-        let mut typed_dict_meta = None;
-        if let Some(meta) = self.module_value("typing", "_TypedDictMeta")
-            && bases
-                .iter()
-                .any(|&base| self.heap.get(base).instance_class() == Some(meta))
+        if self
+            .builtins
+            .get("abc.ABCMeta")
+            .is_some_and(|meta| bases.contains(meta))
         {
-            let root = self.module_value("typing", "_TypedDict");
-            if bases.iter().any(|&base| {
-                self.heap.get(base).instance_class() != Some(meta)
-                    && self.classes.get("typing.Generic") != Some(&base)
-            }) {
-                return Err(Error::new(
-                    "TypeError",
-                    "cannot inherit from both a TypedDict type and a non-TypedDict base class",
-                ));
-            }
-            if parameterized || bases.len() != 1 || Some(bases[0]) != root {
+            return Err(Error::new(
+                "NotImplementedError",
+                "subclassing ABCMeta is unsupported",
+            ));
+        }
+        let typed_dict_meta = self
+            .module_value("typing", "_TypedDictMeta")
+            .filter(|meta| {
+                bases
+                    .iter()
+                    .any(|&base| self.heap.get(base).instance_class() == Some(*meta))
+            });
+        let enum_namespace = if typed_dict_meta.is_some() {
+            None
+        } else {
+            self.enum_namespace(&bases)
+        };
+        let abc_meta = if explicit_metaclass.is_some()
+            || bases.iter().any(|&base| self.is_bundled_abc(base))
+        {
+            let meta = self.abc_meta();
+            if explicit_metaclass.is_some_and(|candidate| candidate != meta) {
                 return Err(Error::new(
                     "NotImplementedError",
-                    "inherited and generic TypedDict declarations are unsupported",
+                    "only the ABCMeta metaclass is supported",
                 ));
             }
-            bases = vec![self.builtin("dict")];
-            typed_dict_meta = Some(meta);
-        }
+            let type_class = self.builtin("type");
+            for &base in &bases {
+                let parent_meta = self.exact_type(base)?;
+                if enum_namespace.is_some() || (parent_meta != type_class && parent_meta != meta) {
+                    return Err(Error::new(
+                        "TypeError",
+                        "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases",
+                    ));
+                }
+            }
+            if self
+                .classes
+                .get("typing.Protocol")
+                .is_some_and(|&protocol| {
+                    bases
+                        .iter()
+                        .any(|&base| self.direct_subclass(base, protocol))
+                })
+            {
+                if explicit_metaclass.is_some() {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "the Protocol metaclass is unsupported with ABCMeta",
+                    ));
+                }
+                // Keep the existing Protocol layout when it wins over an inherited ABCMeta.
+                None
+            } else {
+                Some(meta)
+            }
+        } else {
+            None
+        };
         let Value::Function {
             scope: parent,
             code,
@@ -4966,7 +5158,6 @@ impl Context {
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
-        let enum_namespace = self.enum_namespace(&bases);
         let enum_kind = enum_namespace.as_ref().map(|state| state.kind);
         let cell = self.alloc(Value::ClassCell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
@@ -5021,6 +5212,30 @@ impl Context {
                 if declaration { TRUE } else { FALSE },
             );
         }
+        let typed_dict_fields = if let Some(meta) = typed_dict_meta {
+            let generic = self.classes.get("typing.Generic").copied();
+            if bases.iter().any(|&base| {
+                self.heap.get(base).instance_class() != Some(meta) && generic != Some(base)
+            }) {
+                return Err(Error::new(
+                    "TypeError",
+                    "cannot inherit from both a TypedDict type and a non-TypedDict base class",
+                ));
+            }
+            if parameterized || generic.is_some_and(|generic| bases.contains(&generic)) {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "generic TypedDict declarations are unsupported",
+                ));
+            }
+            let dict = self.builtin("dict");
+            let parents = std::mem::replace(&mut bases, vec![dict]);
+            let parents = self.alloc(Value::Tuple(parents));
+            let (fields, thunks) = self.prepare_typeddict_namespace(scope, annotations)?;
+            Some((parents, fields, thunks))
+        } else {
+            None
+        };
         super::typing::class_parameters(self, scope, original, &bases)?;
         // type.__new__ implicitly wraps only plain functions stored under this name.
         if let Some(function) = self.scope_name(scope, "__init_subclass__")
@@ -5033,7 +5248,7 @@ impl Context {
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
             unreachable!()
         };
-        *metaclass = typed_dict_meta;
+        *metaclass = abc_meta.or(typed_dict_meta);
         self.install_weakref_descriptor(class, scope);
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
@@ -5097,25 +5312,14 @@ impl Context {
             self.classes
                 .insert(format!("collections.abc.{name}"), class);
         }
-        self.init_abstract_class(class, &name, scope)?;
-        if typed_dict_meta.is_some() {
-            // The class tracks unevaluated fields in its own namespace. Reading
-            // __annotations__ here would cache their values before user code can rebind names.
-            let fields = self
-                .own_class_attr(class, "__annotations__")
-                .ok_or_else(|| Error::new("TypeError", "missing TypedDict annotations"))?;
-            let thunks = self
-                .scope_data(scope)
-                .class_namespace
-                .as_ref()
-                .and_then(|ns| ns.annotation_thunks)
-                .unwrap_or(NONE);
+        self.init_abstract_class(class, scope)?;
+        if let Some((parents, fields, thunks)) = typed_dict_fields {
             let configure = self
                 .module_value("typing", "_configure_typeddict")
                 .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
             self.call(
                 configure,
-                vec![class, fields, total.unwrap_or(TRUE), TRUE, thunks],
+                vec![class, fields, total.unwrap_or(TRUE), thunks, parents],
                 Vec::new(),
             )?;
         }

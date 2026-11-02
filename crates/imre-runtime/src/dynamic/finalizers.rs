@@ -48,18 +48,31 @@ impl Context {
                 self.heap.keep(root);
             }
         }
-        let result = if generator {
-            self.generator_close(owner).map(|_| ())
-        } else {
-            self.bound_slot(owner, "__del__").and_then(|method| {
-                if let Some(method) = method {
-                    self.call(method, Vec::new(), Vec::new())?;
+        if generator {
+            if let Err(error) = self.generator_close(owner) {
+                eprintln!("Exception ignored while calling __del__: {error}");
+            }
+        } else if let Some(slot) = self.slot(owner, "__del__") {
+            self.heap.keep(slot);
+            // CPython calls method descriptors unbound, including ordinary
+            // functions. Only custom descriptors resolve __get__ before the call.
+            let unbound = matches!(self.heap.get(slot), Value::Function { .. })
+                || matches!(self.heap.get(slot), Value::Native(name)
+                    if super::wrapper_descriptor::BuiltinDescriptor::lookup(name).is_some());
+            let target = if unbound {
+                Some((slot, vec![owner]))
+            } else {
+                self.bound_slot(owner, "__del__")
+                    .ok()
+                    .flatten()
+                    .map(|method| (method, Vec::new()))
+            };
+            if let Some((method, args)) = target {
+                self.heap.keep(method);
+                if let Err(error) = self.call(method, args, Vec::new()) {
+                    super::unraisable::deallocator(self, error, method);
                 }
-                Ok(())
-            })
-        };
-        if let Err(error) = result {
-            eprintln!("Exception ignored while calling __del__: {error}");
+            }
         }
         self.pending = pending;
         self.heap.release_temporaries_since(mark);

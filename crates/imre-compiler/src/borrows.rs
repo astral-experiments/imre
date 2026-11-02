@@ -107,46 +107,6 @@ fn summaries(
     (preserves, initializes)
 }
 
-/// Visits statement nodes once, including statements nested inside expressions.
-pub(crate) fn statements(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
-    fn block(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
-        for statement in body {
-            visit(statement);
-            match statement {
-                Statement::Scope { body, .. } => block(body, visit),
-                Statement::If(_, yes, no) => {
-                    block(yes, visit);
-                    block(no, visit);
-                }
-                Statement::While(_, body, orelse) | Statement::For { body, orelse, .. } => {
-                    block(body, visit);
-                    block(orelse, visit);
-                }
-                Statement::Try {
-                    body,
-                    handlers,
-                    orelse,
-                    finalbody,
-                } => {
-                    block(body, visit);
-                    for handler in handlers {
-                        block(&handler.body, visit);
-                    }
-                    block(orelse, visit);
-                    block(finalbody, visit);
-                }
-                _ => {}
-            }
-        }
-    }
-    block(body, visit);
-    ir::walk_expressions(body, &mut |expression| {
-        if let ExprKind::Scope { body, .. } = &expression.kind {
-            block(body, visit);
-        }
-    });
-}
-
 /// Records every local writer, including cleanup and hidden iterator outputs.
 pub(crate) fn written(function: &Function) -> Vec<bool> {
     written_except(function, |_| false)
@@ -154,7 +114,7 @@ pub(crate) fn written(function: &Function) -> Vec<bool> {
 
 fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec<bool> {
     let mut written = function.expression_rebound();
-    statements(&function.body, &mut |statement| match statement {
+    ir::walk_statements(&function.body, &mut |statement| match statement {
         Statement::Assign(slot, value) => written[*slot] |= !permitted(value),
         Statement::Clear(slot) => written[*slot] = true,
         Statement::Move(target, source) => {
@@ -223,7 +183,7 @@ fn preserves_edges(
         .copied()
         .filter(|&slot| fresh && !written[slot]);
     let mut safe = true;
-    statements(&function.body, &mut |statement| {
+    ir::walk_statements(&function.body, &mut |statement| {
         safe &= match statement {
             Statement::SetItem(..) | Statement::AugmentItem(..) => false,
             Statement::AugmentField(value, _, _, _) => {
@@ -316,7 +276,7 @@ fn local_roots(function: &Function, types: &Types, functions: &[Function]) -> Fu
                 && types.payload(ty) != Some(Type::Float)
         })
         .collect::<Vec<_>>();
-    statements(&function.body, &mut |statement| match statement {
+    ir::walk_statements(&function.body, &mut |statement| match statement {
         Statement::Assign(slot, value) => {
             if let Some(source) = projection_root(value, types, functions) {
                 dependencies[*slot].push(source);
@@ -434,7 +394,7 @@ fn length_roots(function: &Function, facts: &FunctionBorrows, types: &Types) -> 
     for (slot, eligible) in eligible.iter_mut().enumerate() {
         *eligible &= matches!(function.locals[slot], Type::ListInt | Type::List(_));
     }
-    statements(&function.body, &mut |statement| match statement {
+    ir::walk_statements(&function.body, &mut |statement| match statement {
         Statement::Assign(slot, value) => {
             if let ExprKind::Local(source) = value.kind {
                 dependencies[*slot].push(source);

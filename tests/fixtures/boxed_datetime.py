@@ -2,6 +2,29 @@ import json
 from datetime import UTC, date, datetime as dt, time, timedelta, timezone
 
 
+def test_class_constants():
+    for cls, smallest, largest, step in (
+        (date, date(1, 1, 1), date(9999, 12, 31), timedelta(days=1)),
+        (dt, dt(1, 1, 1), dt(9999, 12, 31, 23, 59, 59, 999999), timedelta(microseconds=1)),
+        (time, time(), time(23, 59, 59, 999999), timedelta(microseconds=1)),
+        (timedelta, timedelta(days=-999999999), timedelta(days=999999999, seconds=86399, microseconds=999999), timedelta(microseconds=1)),
+    ):
+        assert type(cls.min) is cls and type(cls.max) is cls
+        assert (cls.min, cls.max, cls.resolution) == (smallest, largest, step)
+        assert smallest.min is cls.min and largest.max is cls.max
+        assert smallest.resolution is cls.resolution
+    assert dt.resolution is not time.resolution
+    assert time.resolution is not timedelta.resolution
+
+    class Child(time):
+        min = "override"
+    obj = Child()
+    assert obj.min == Child.min == "override"
+    assert obj.max is Child.max is time.max
+    obj.resolution = "instance override"
+    assert obj.resolution != Child.resolution and Child.resolution is time.resolution
+
+
 def test_http_date():
     assert UTC is timezone.utc
     assert timezone(timedelta(0)) is UTC
@@ -83,9 +106,34 @@ def test_time_of_day():
     print(str(midnight), repr(clock), str(clock), str(combined))
 
 
+def test_now():
+    from time import time as timestamp
+
+    now = dt.now
+    east = timezone(timedelta(hours=5, minutes=30))
+    for args, kwargs, zone in (((), {}, None), ((None,), {}, None),
+                               ((UTC,), {}, UTC), ((), {"tz": east}, east)):
+        before = int(timestamp())
+        stamp = now(*args, **kwargs)
+        after = int(timestamp())
+        assert type(stamp) is dt and stamp.tzinfo is zone
+        assert 0 <= stamp.microsecond < 1000000
+        assert any(stamp.timetuple() == dt.fromtimestamp(sec, zone).timetuple()
+                   for sec in range(before, after + 1))
+    for args, kwargs in (((1,), {}), ((None, None), {}), ((), {"foo": 1}), ((None,), {"tz": None})):
+        try:
+            now(*args, **kwargs)
+        except TypeError as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("invalid now() arguments accepted")
+
+
 def current():
+    test_now()
     test_time_of_day()
     test_http_date()
+    test_class_constants()
     test_cookie_timestamp()
     for timestamp in (None, "0", 1 << 100):
         try:

@@ -1108,7 +1108,10 @@ pub(crate) fn lower_with_caller_cache(
     }
     Ok((
         ir::Module {
-            command_flags: graph.command_startup.as_ref().map(|(flags, _)| flags.clone()),
+            command_flags: graph
+                .command_startup
+                .as_ref()
+                .map(|(flags, _)| flags.clone()),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,
@@ -1766,6 +1769,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) => return Ok(Type::JsonDecoder),
+        Some(Binding::Intrinsic(Intrinsic::JsonEncoderClass)) => return Ok(Type::JsonEncoder),
         Some(Binding::Intrinsic(Intrinsic::Socket)) => return Ok(Type::Socket),
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
@@ -6115,7 +6119,7 @@ impl<'a> Checker<'a> {
             ));
         }
         if let ast::Expr::Attribute(attr) = expression
-            && let Some(value) = self.calendar_class_attribute(attr)
+            && let Some(value) = self.calendar_class_attribute(attr)?
         {
             return Ok(value);
         }
@@ -6251,6 +6255,9 @@ impl<'a> Checker<'a> {
             match symbol {
                 Intrinsic::TracebackFormatter(name) => {
                     return Err(self.object_export_error(name, expression));
+                }
+                Intrinsic::CachedProperty => {
+                    return Err(self.object_runtime_export("functools.cached_property", expression));
                 }
                 Intrinsic::ObjectRuntimeExport(name) => {
                     return Err(self.object_runtime_export(name, expression));
@@ -7195,6 +7202,7 @@ impl<'a> Checker<'a> {
                         | Type::ProcessSelectorClass
                         | Type::Hash
                         | Type::JsonDecoder
+                        | Type::JsonEncoder
                         | Type::ZipFile
                         | Type::ZipInfo
                         | Type::CsvReader
@@ -7692,8 +7700,11 @@ impl<'a> Checker<'a> {
                     }
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
-                if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
-                    && matches!(attribute.attr.as_str(), "isascii" | "islower")
+                if matches!(
+                    receiver.ty,
+                    Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
+                ) && ir::StrDescriptor::named(attribute.attr.as_str())
+                    .is_some_and(ir::StrDescriptor::is_predicate)
                 {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),
@@ -7864,6 +7875,18 @@ impl<'a> Checker<'a> {
                         ty: self.types.dict(Type::Str, Type::Str),
                         kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
                     });
+                }
+                if matches!(attribute.attr.as_str(), "min" | "max" | "resolution")
+                    && matches!(
+                        receiver.ty,
+                        Type::Calendar(
+                            ir::CalendarType::Date
+                                | ir::CalendarType::DateTime
+                                | ir::CalendarType::Delta
+                        ) | Type::ClockTime
+                    )
+                {
+                    return Err(self.object_runtime_export("datetime class constants", attribute));
                 }
                 if let Type::Calendar(kind) = receiver.ty {
                     return self.calendar_attribute(kind, receiver, attribute);
@@ -8571,7 +8594,9 @@ impl<'a> Checker<'a> {
                 Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                     return self.credential_call(call, name);
                 }
-                Some(Binding::Intrinsic(Intrinsic::Fd(op @ ir::FdOperation::Pipe2))) => {
+                Some(Binding::Intrinsic(Intrinsic::Fd(
+                    op @ (ir::FdOperation::Pipe2 | ir::FdOperation::Read | ir::FdOperation::Write),
+                ))) => {
                     return self.fd_call(call, op);
                 }
                 _ => {}
@@ -8892,6 +8917,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CountElements)) => return self.count_elements(call),
             Some(Binding::Intrinsic(Intrinsic::TracebackFormatter(name))) => {
                 return Err(self.object_export_error(name, call));
+            }
+            Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
+                return Err(self.object_runtime_export("functools.cached_property", call));
             }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
@@ -9258,6 +9286,21 @@ impl<'a> Checker<'a> {
         ) {
             return self.json_decode(call);
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonEncoderClass)) {
+            let flag = |name, default| {
+                ParameterKind::KeywordOnly.parameter(name, Type::Bool, Some(Expr::boolean(default)))
+            };
+            let args = self.arguments(
+                call,
+                &[
+                    flag("ensure_ascii", true),
+                    flag("allow_nan", true),
+                    flag("sort_keys", false),
+                ],
+                None,
+            )?;
+            return Ok(self.ordered_builtin(Builtin::JsonEncoderNew, Type::JsonEncoder, args));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) {
             self.reject_builtin_keywords(call)?;
             if !call.arguments.args.is_empty() {
@@ -9592,6 +9635,9 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Hash {
                 return self.hash_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::JsonEncoder && attribute.attr.as_str() == "encode" {
+                return self.json_encoder_method(receiver, call);
+            }
             if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                 let args =
                     self.arguments(call, &[parameter("s", Type::Str, None)], Some(receiver))?;
@@ -9629,7 +9675,14 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 attribute.attr.as_str(),
-                "splitlines" | "isalnum" | "isascii" | "isspace" | "islower" | "isupper"
+                "splitlines"
+                    | "isalnum"
+                    | "isascii"
+                    | "isalpha"
+                    | "isdigit"
+                    | "isspace"
+                    | "islower"
+                    | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
                 return self.splitlines_or_predicate(

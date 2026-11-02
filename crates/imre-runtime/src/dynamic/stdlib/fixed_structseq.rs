@@ -5,6 +5,7 @@ use crate::python_hash;
 
 pub(in crate::dynamic) const HASH_INFO: &str = "sys.hash_info";
 pub(in crate::dynamic) const TERMINAL_SIZE: &str = "os.terminal_size";
+pub(in crate::dynamic) const UNRAISABLE_ARGS: &str = "UnraisableHookArgs";
 const HASH_FIELDS: [&str; 9] = [
     "width",
     "modulus",
@@ -20,6 +21,7 @@ const HASH_FIELDS: [&str; 9] = [
 pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
     match name {
         HASH_INFO => Some(HASH_INFO),
+        UNRAISABLE_ARGS => Some(UNRAISABLE_ARGS),
         TERMINAL_SIZE => Some(TERMINAL_SIZE),
         _ => None,
     }
@@ -28,6 +30,13 @@ pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
 pub(in crate::dynamic) fn fields(class: &str) -> &'static [&'static str] {
     match class {
         HASH_INFO => &HASH_FIELDS,
+        UNRAISABLE_ARGS => &[
+            "exc_type",
+            "exc_value",
+            "exc_traceback",
+            "err_msg",
+            "object",
+        ],
         TERMINAL_SIZE => &["columns", "lines"],
         _ => unreachable!("unknown fixed struct sequence"),
     }
@@ -39,7 +48,7 @@ pub(in crate::dynamic) fn member(ctx: &mut Context, class: &str, name: &str) -> 
     Some(ctx.readonly_member(owner, field))
 }
 
-fn record(ctx: &mut Context, class: &'static str, values: Vec<Id>) -> Id {
+pub(in crate::dynamic) fn record(ctx: &mut Context, class: &'static str, values: Vec<Id>) -> Id {
     ctx.alloc(Value::NamedTuple {
         class: Some(class),
         names: fields(class)
@@ -134,10 +143,13 @@ pub(in crate::dynamic) fn type_attribute(
     name: &str,
     on_type: bool,
 ) -> Option<Id> {
-    let (module, qualname) = class.split_once('.').expect("qualified struct sequence");
+    let (module, qualname) = class.split_once('.').unwrap_or(("builtins", class));
     Some(match name {
         "__name__" | "__qualname__" if on_type => ctx.text(qualname),
         "__module__" => ctx.text(module),
+        "__doc__" if class == UNRAISABLE_ARGS => {
+            ctx.text("UnraisableHookArgs\n\nType used to pass arguments to sys.unraisablehook.")
+        }
         "__doc__" if class == TERMINAL_SIZE => {
             ctx.text("A tuple of (columns, lines) for holding terminal window size")
         }

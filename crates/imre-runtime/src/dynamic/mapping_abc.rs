@@ -62,7 +62,7 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     }
     let result = ctx.allocate_class(name.to_owned(), scope, bases)?;
     ctx.classes.insert(key, result);
-    ctx.init_abstract_class(result, name, scope)?;
+    ctx.init_abstract_class(result, scope)?;
     Ok(result)
 }
 
@@ -107,19 +107,23 @@ pub(super) fn registered_subclass(ctx: &Context, cls: Id, parent: Id) -> bool {
 }
 
 fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let owner = args[0];
-    let mut cls = args.get(1).copied();
+    let mut owner = args.first().copied();
+    let mut subclass = args.get(1).copied();
     for (name, value) in kwargs {
-        if name != "subclass" {
+        let slot = match name.as_str() {
+            "cls" => &mut owner,
+            "subclass" => &mut subclass,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("ABCMeta.register() got an unexpected keyword argument '{name}'"),
+                ));
+            }
+        };
+        if slot.replace(*value).is_some() {
             return Err(Error::new(
                 "TypeError",
-                format!("ABCMeta.register() got an unexpected keyword argument '{name}'"),
-            ));
-        }
-        if cls.replace(*value).is_some() {
-            return Err(Error::new(
-                "TypeError",
-                "ABCMeta.register() got multiple values for argument 'subclass'",
+                format!("ABCMeta.register() got multiple values for argument '{name}'"),
             ));
         }
     }
@@ -132,13 +136,18 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
             ),
         ));
     }
-    let cls = cls.ok_or_else(|| {
-        Error::new(
+    let (Some(owner), Some(cls)) = (owner, subclass) else {
+        let missing = match (owner, subclass) {
+            (None, None) => "2 required positional arguments: 'cls' and 'subclass'",
+            (None, Some(_)) => "1 required positional argument: 'cls'",
+            _ => "1 required positional argument: 'subclass'",
+        };
+        return Err(Error::new(
             "TypeError",
-            "ABCMeta.register() missing 1 required positional argument: 'subclass'",
-        )
-    })?;
-    if ctx.builtin_type_name(cls) != Some("type") {
+            format!("ABCMeta.register() missing {missing}"),
+        ));
+    };
+    if !matches!(ctx.builtin_type_name(cls), Some("type" | "typing._AnyMeta")) {
         return Err(Error::new("TypeError", "Can only register classes"));
     }
     if ctx.python_subclass_check(cls, owner)? {
@@ -148,6 +157,18 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
         return Err(Error::new(
             "RuntimeError",
             "Refusing to create an inheritance cycle",
+        ));
+    }
+    // Check for an existing subclass and cycles before looking up the ABC registry.
+    if !ctx.is_bundled_abc(owner) && !is_abc_class(ctx, owner) {
+        if ctx.class_attr(owner, "_abc_impl").is_some() {
+            return Err(Error::new("TypeError", "_abc_impl is set to a wrong type"));
+        }
+        let name = ctx.lookup_attr(owner, "__name__")?;
+        let name = ctx.str_value(name)?;
+        return Err(Error::new(
+            "AttributeError",
+            format!("type object '{name}' has no attribute '_abc_impl'"),
         ));
     }
     ctx.heap.abc_registrations.push([owner, cls]);

@@ -49,6 +49,36 @@ impl Calendar {
         })
     }
 
+    /// Build each type's own min, max and resolution, in CPython's class-dictionary order.
+    pub(crate) fn class_constants(class: &str) -> Option<[Self; 3]> {
+        let (min, max, resolution) = match class {
+            "datetime.date" => (Value::DateOnly(1), Value::DateOnly(MAX_ORD), DAY),
+            "datetime.datetime" => {
+                let datetime = |local| Value::Date {
+                    local,
+                    zone: None,
+                    fold: 0,
+                };
+                (datetime(0), datetime(MAX_ORD * DAY - 1), 1)
+            }
+            "datetime.time" => {
+                let time = |local| Value::Time {
+                    local,
+                    zone: None,
+                    fold: 0,
+                };
+                (time(0), time(DAY - 1), 1)
+            }
+            "datetime.timedelta" => (
+                Value::Delta(-999_999_999 * DAY),
+                Value::Delta(1_000_000_000 * DAY - 1),
+                1,
+            ),
+            _ => return None,
+        };
+        Some([min, max, Value::Delta(resolution)].map(|value| Self(owner(value))))
+    }
+
     pub(crate) fn utc() -> Self {
         Self(utc())
     }
@@ -142,6 +172,19 @@ impl Calendar {
         zone: Option<&Self>,
     ) -> Result<Self, Error> {
         let (seconds, micros) = timestamp.timeval()?;
+        Self::from_timeval(seconds, micros, zone)
+    }
+
+    pub(crate) fn now(zone: Option<&Self>) -> Result<Self, Error> {
+        let micros = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(delta) => delta.as_micros() as i128,
+            Err(e) => (-(e.duration().as_nanos() as i128)).div_euclid(1000),
+        };
+        let seconds = i64::try_from(micros.div_euclid(1_000_000)).map_err(|_| timed::overflow())?;
+        Self::from_timeval(seconds, micros.rem_euclid(1_000_000) as i32, zone)
+    }
+
+    fn from_timeval(seconds: i64, micros: i32, zone: Option<&Self>) -> Result<Self, Error> {
         let tm = timed::civil(seconds, zone.is_some())?;
         let year = tm.tm_year.checked_add(1900).ok_or_else(timed::overflow)?;
         let fields = [
@@ -239,4 +282,13 @@ impl Calendar {
         .expect("writing to a string succeeds");
         s
     }
+}
+
+/// # Safety
+/// A nonzero word holds a rooted fixed timezone for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_calendar_now(z: usize) -> *const Object {
+    // SAFETY: a present zone stays rooted until the calendar owns it.
+    let zone = (z != 0).then(|| Calendar(unsafe { retain(z as *const Object) }));
+    rc_result(Calendar::now(zone.as_ref()).map(|datetime| datetime.0))
 }

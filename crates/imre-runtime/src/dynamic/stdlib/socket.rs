@@ -22,22 +22,39 @@ const CONSTANTS: &[(&str, i32)] = &[
     ("SOMAXCONN", libc::SOMAXCONN),
 ];
 
+// socket.py imports these constants once, so deletion must not fall back to a native value.
+const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
+    ("IPPROTO_UDP", libc::IPPROTO_UDP),
+    ("SOCK_DGRAM", libc::SOCK_DGRAM),
+    ("SOCK_RAW", libc::SOCK_RAW),
+    ("SOCK_RDM", libc::SOCK_RDM),
+    ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
+];
+
 /// Seed the low-level module once so normal module assignment and deletion remain observable.
 pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) -> Result<()> {
-    // socket.py imports these kinds once, so deleting its copy must not fall back to a native value.
-    let kinds = [
-        ("SOCK_DGRAM", libc::SOCK_DGRAM),
-        ("SOCK_RAW", libc::SOCK_RAW),
-        ("SOCK_RDM", libc::SOCK_RDM),
-        ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
-    ];
-    for (name, value) in CONSTANTS.iter().copied().chain(kinds) {
+    for &(name, value) in CONSTANTS.iter().chain(IMPORTED_CONSTANTS) {
         let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
     }
+    let socket_type = attribute(ctx, "socket")?;
+    ctx.bind(scope, "SocketType", socket_type);
     for name in ["has_ipv6", "socket", "close", "error"] {
         let value = attribute(ctx, name)?;
         ctx.bind(scope, name, value);
+    }
+    Ok(())
+}
+
+/// An ordinary importlib-only executable can load socket without its bundled Python source.
+pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) -> Result<()> {
+    let low = ctx.module("_socket")?;
+    for &(name, _) in IMPORTED_CONSTANTS {
+        match ctx.lookup_attr(low, name) {
+            Ok(value) => ctx.bind(scope, name, value),
+            Err(error) if ctx.is_attribute_error(&error) => {}
+            Err(error) => return Err(error),
+        }
     }
     Ok(())
 }
@@ -256,13 +273,13 @@ fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
         int_option(ctx, args, kwargs, 4, "proto", 0)?,
         int_option(ctx, args, kwargs, 5, "flags", 0)?,
     )?;
-    let family = ctx.int(i64::from(libc::AF_INET));
     let mut result = Vec::with_capacity(rows.len());
     for row in rows {
+        let family = ctx.int(i64::from(row.addr.family()));
         let ty = ctx.int(i64::from(row.ty));
         let protocol = ctx.int(i64::from(row.protocol));
         let name = ctx.text(row.canonical);
-        let addr = pack_ipv4(ctx, &row.addr);
+        let addr = pack_address(ctx, &row.addr)?;
         result.push(ctx.alloc(Value::Tuple(vec![family, ty, protocol, name, addr])));
     }
     Ok(ctx.alloc(Value::List(result)))
@@ -394,7 +411,7 @@ pub(super) fn call(
             ));
         }
         let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
-        return Ok(ctx.alloc(super::BinaryFile::reader(reader).into_value()?));
+        return Ok(ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?));
     }
     let max = match method {
         "bind" | "connect" | "listen" | "setblocking" | "shutdown" => 1,
