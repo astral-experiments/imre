@@ -2183,6 +2183,7 @@ impl IntrinsicModule {
             (Self::Types, "TracebackType") => Intrinsic::NominalClass("traceback"),
             (Self::Types, "FrameType") => Intrinsic::NominalClass("frame"),
             (Self::Types, "CodeType") => Intrinsic::NominalClass("code"),
+            (Self::Types, "CellType") => Intrinsic::ObjectRuntimeExport("types.CellType"),
             (Self::Codecs, "getincrementaldecoder") => {
                 Intrinsic::ObjectRuntimeExport("codecs.getincrementaldecoder")
             }
