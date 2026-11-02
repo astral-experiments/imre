@@ -1,4 +1,7 @@
 //! Calendar values used by HTTP response dates and timed cookie signatures.
+use num_bigint::{BigInt, Sign};
+use num_traits::Euclid;
+
 use super::*;
 use crate::dynamic::builtins::bind;
 use crate::objects::{Calendar, CalendarNumber};
@@ -61,6 +64,8 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__neg__",
                 "__mul__",
                 "__rmul__",
+                "__truediv__",
+                "__rtruediv__",
                 "__repr__",
                 "__str__",
                 "total_seconds",
@@ -247,7 +252,43 @@ fn split_delta_component(ctx: &mut Context, value: Id, unit: i32) -> Result<(Id,
     Ok((*quotient, remainder))
 }
 
-fn multiply_delta(
+fn multiply_delta_integer(ctx: &mut Context, factor: Id, us: Id) -> Result<crate::Int> {
+    let product = ctx.binary("*", factor, us)?;
+    if let Value::Int(n) = ctx.heap.get(product) {
+        Ok(n.clone())
+    } else {
+        let (seconds, micros) = split_delta_component(ctx, product, 1_000_000)?;
+        let (days, seconds) = split_delta_component(ctx, seconds, 86_400)?;
+        let days = delta_component(ctx, days)?;
+        let total =
+            (i128::from(days) * 86_400 + i128::from(seconds)) * 1_000_000 + i128::from(micros);
+        Ok(crate::Int::new(total.into()))
+    }
+}
+
+/// Divide integer payloads exactly and resolve half-microsecond ties toward the even result.
+fn nearest_quotient(ctx: &Context, numerator: Id, denominator: Id) -> Result<crate::Int> {
+    let as_integer = |id| {
+        ctx.as_int(id)
+            .map_err(|_| Error::new("TypeError", "non-integer arguments in division"))
+    };
+    let (a, b) = (as_integer(numerator)?, as_integer(denominator)?);
+    let (a, b) = (a.big(), b.big());
+    if b.sign() == Sign::NoSign {
+        return Err(Error::new("ZeroDivisionError", "division by zero"));
+    }
+    let (mut quotient, remainder) = a.magnitude().div_rem_euclid(b.magnitude());
+    let twice = remainder << 1;
+    if &twice > b.magnitude() || (&twice == b.magnitude() && quotient.bit(0)) {
+        quotient += 1u8;
+    }
+    Ok(crate::Int::new(BigInt::from_biguint(
+        a.sign() * b.sign(),
+        quotient,
+    )))
+}
+
+fn scale_delta(
     ctx: &mut Context,
     method: &str,
     args: &[Id],
@@ -281,25 +322,48 @@ fn multiply_delta(
             format!("expected 1 argument, got {}", args.len()),
         ));
     };
-    if !matches!(
-        ctx.heap.get(ctx.scalar_value(factor)),
-        Value::Int(_) | Value::Bool(_)
-    ) {
-        return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
-    }
     let us = ctx.alloc(Value::Int(crate::Int::new(
         duration.delta_microseconds().into(),
     )));
-    let product = ctx.binary("*", factor, us)?;
-    let micros = if let Value::Int(n) = ctx.heap.get(product) {
-        n.clone()
-    } else {
-        let (seconds, micros) = split_delta_component(ctx, product, 1_000_000)?;
-        let (days, seconds) = split_delta_component(ctx, seconds, 86_400)?;
-        let days = delta_component(ctx, days)?;
-        let total =
-            (i128::from(days) * 86_400 + i128::from(seconds)) * 1_000_000 + i128::from(micros);
-        crate::Int::new(total.into())
+    let division = matches!(name, "__truediv__" | "__rtruediv__");
+    if division && let Some(other) = calendar(ctx, factor, "timedelta") {
+        let other = ctx.alloc(Value::Int(crate::Int::new(
+            other.delta_microseconds().into(),
+        )));
+        return if name == "__rtruediv__" {
+            ctx.binary("/", other, us)
+        } else {
+            ctx.binary("/", us, other)
+        };
+    }
+    let micros = match ctx.heap.get(ctx.scalar_value(factor)) {
+        _ if name == "__rtruediv__" => return Ok(crate::dynamic::value::NOT_IMPLEMENTED),
+        Value::Int(_) | Value::Bool(_) if division => nearest_quotient(ctx, us, factor)?,
+        Value::Int(_) | Value::Bool(_) => multiply_delta_integer(ctx, factor, us)?,
+        Value::Float(_) => {
+            let ratio = ctx.lookup_attr(factor, "as_integer_ratio")?;
+            let pair = ctx.call(ratio, Vec::new(), Vec::new())?;
+            let tuple = ctx.tuple_items(pair)?.ok_or_else(|| {
+                Error::new("TypeError", format!(
+                    "unexpected return type from as_integer_ratio(): expected tuple, not '{:.200}'",
+                    ctx.type_name(pair)
+                ))
+            })?;
+            let &[numerator, denominator] = tuple.as_slice() else {
+                return Err(Error::new(
+                    "ValueError",
+                    "as_integer_ratio() must return a 2-tuple",
+                ));
+            };
+            let (scale, divisor) = if division {
+                (denominator, numerator)
+            } else {
+                (numerator, denominator)
+            };
+            let scaled = ctx.binary("*", us, scale)?;
+            nearest_quotient(ctx, scaled, divisor)?
+        }
+        _ => return Ok(crate::dynamic::value::NOT_IMPLEMENTED),
     };
     Ok(store(
         ctx,
@@ -327,7 +391,10 @@ pub(super) fn call(
     }
     match method {
         "time" => time(ctx, args, kwargs),
-        "timedelta.__mul__" | "timedelta.__rmul__" => multiply_delta(ctx, method, args, kwargs),
+        "timedelta.__mul__"
+        | "timedelta.__rmul__"
+        | "timedelta.__truediv__"
+        | "timedelta.__rtruediv__" => scale_delta(ctx, method, args, kwargs),
         "datetime.combine" => {
             let [day, clock, tz] = bind("combine", args, kwargs, ["date", "time", "tzinfo"])?;
             let day = required(day, "combine()", "date", 1)?;
