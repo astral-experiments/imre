@@ -1173,6 +1173,58 @@ pub(super) fn call(
 }
 
 impl Context {
+    /// Validate the resolved bases of an explicit Protocol declaration as in CPython 3.14.
+    pub(super) fn validate_protocol_bases(&mut self, bases: &[Id]) -> Result<()> {
+        let generic = self.classes["typing.Generic"];
+        let object = self.builtin("object");
+        for &base in bases {
+            if base == object || base == generic {
+                continue;
+            }
+            let module = self
+                .own_class_attr(base, "__module__")
+                .and_then(|module| self.str_value(module).ok());
+            if matches!(
+                (module, self.class_name(base)),
+                (
+                    Some("collections.abc"),
+                    "Callable"
+                        | "Awaitable"
+                        | "Iterable"
+                        | "Iterator"
+                        | "AsyncIterable"
+                        | "AsyncIterator"
+                        | "Hashable"
+                        | "Sized"
+                        | "Container"
+                        | "Collection"
+                        | "Reversible"
+                        | "Buffer"
+                ) | (
+                    Some("contextlib"),
+                    "AbstractContextManager" | "AbstractAsyncContextManager"
+                ) | (Some("io"), "Reader" | "Writer")
+                    | (Some("os"), "PathLike")
+            ) {
+                continue;
+            }
+            if self.subclass(base, generic)
+                && let Some(marked) = self.class_attr(base, "_is_protocol")
+                && self.truth(marked)?
+            {
+                continue;
+            }
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "Protocols can only inherit from other protocols, got {}",
+                    self.checked_format(base, true)?
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     /// Distinguish a declared protocol from Protocol itself and its concrete descendants.
     pub(super) fn is_protocol_declaration(&self, class: Id) -> bool {
         self.classes

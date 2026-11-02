@@ -4634,14 +4634,14 @@ impl Context {
         if let Some(&protocol) = self.classes.get("typing.Protocol")
             && bases.iter().any(|&base| self.subclass(base, protocol))
         {
+            let declaration = bases.contains(&protocol);
+            if declaration {
+                self.validate_protocol_bases(&bases)?;
+            }
             self.bind(
                 scope,
                 "_is_protocol",
-                if bases.contains(&protocol) {
-                    TRUE
-                } else {
-                    FALSE
-                },
+                if declaration { TRUE } else { FALSE },
             );
         }
         super::typing::class_parameters(self, scope, original, &bases)?;
