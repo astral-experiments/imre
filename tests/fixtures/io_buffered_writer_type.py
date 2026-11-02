@@ -120,6 +120,42 @@ try:
         with io.FileIO(path, "r") as source:
             assert source.read() == b"bare"
     with io.FileIO(path, "w") as raw:
+        writer = NativeWriter(raw, 8)
+        assert writer.write(b"data") == 4 and raw.tell() == 0
+        assert writer.detach() is raw and raw.tell() == 4
+        assert writer.raw is None and not raw.closed
+        for operation in (writer.detach, writer.flush, writer.close):
+            try:
+                operation()
+            except ValueError as error:
+                assert str(error) == "raw stream has been detached"
+            else:
+                raise AssertionError("used a detached writer")
+        writer.__init__(raw, 8)
+        assert writer.write(b"!") == 1
+        writer.close()
+    with io.FileIO(path, "r") as source:
+        assert source.read() == b"data!"
+
+    class HookedWriter(NativeWriter):
+        def flush(self):
+            if self.replacement is None:
+                raise OSError("flush failed")
+            self.__init__(self.replacement, 8)
+
+    with io.FileIO(path, "w") as original:
+        writer = HookedWriter(original, 8)
+        writer.write(b"old")
+        writer.replacement = None
+        raises(OSError, writer.detach)
+        assert writer.raw is original and original.tell() == 0
+        with io.FileIO(path, "w") as replacement:
+            writer.replacement = replacement
+            assert writer.detach() is replacement and writer.raw is None
+            gc.collect()
+            assert not original.closed and not replacement.closed
+            assert os.stat(path).st_size == 0
+    with io.FileIO(path, "w") as raw:
         raises(ValueError, NativeWriter, raw, 0)
     with io.open(path, "wb") as stream:
         assert type(stream) is NativeWriter
