@@ -370,6 +370,55 @@ impl Calendar {
         Ok([year + 400 * cycles, month, day])
     }
 
+    /// Convert an ISO week date, including a final week that extends into year 10000.
+    pub(crate) fn iso_week_date(year: i32, week: i32, weekday: i32) -> Option<[i32; 3]> {
+        if !(1..=9999).contains(&year) || !(1..=53).contains(&week) || !(1..=7).contains(&weekday)
+        {
+            return None;
+        }
+        let week_one = |y| {
+            let jan_four = days_before_year(y) + 4;
+            jan_four - (jan_four - 1) % 7
+        };
+        let monday = week_one(year) + (week - 1) * 7;
+        if monday >= week_one(year + 1) {
+            return None;
+        }
+        Self::ordinal_fields(monday + weekday - 1).ok()
+    }
+
+    /// Normalize ISO 24:00 before the receiving class validates the civil fields.
+    pub(crate) fn iso_midnight(date: &mut [i32; 3], clock: &mut [i32; 4]) -> Result<(), Error> {
+        let [year, month, day] = date;
+        if clock[0] == 24 && *month <= 12 {
+            // CPython's days-in-month table has a zero sentinel for month zero.
+            let last = if *month == 0 {
+                0
+            } else {
+                month_days(*year, *month)
+            };
+            if *day <= last {
+                if clock[1..] != [0, 0, 0] {
+                    return Err(Error::new(
+                        Kind::ValueError,
+                        "minute, second, and microsecond must be 0 when hour is 24",
+                    ));
+                }
+                clock[0] = 0;
+                *day += 1;
+                if *day > last {
+                    *day = 1;
+                    *month += 1;
+                    if *month > 12 {
+                        *month = 1;
+                        *year += 1;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn ordinal(&self) -> i64 {
         with(&self.0, |v| match v {
             Value::DateOnly(ord) => *ord as i64,
