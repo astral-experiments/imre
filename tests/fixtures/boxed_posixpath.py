@@ -109,6 +109,14 @@ def current():
     assert os.path.realpath(os.fsencode(__file__), strict=os.path.ALLOW_MISSING) == os.fsencode(os.path.realpath(__file__))
     assert module_file in os.listdir(Path(module_dir))
     assert os.fsencode(module_file) in os.listdir(Path(os.fsencode(module_dir)))
+    assert os.path.join(b"root", b"sub", b"") == b"root/sub/"
+    assert os.path.join(b"root", b"before", b"/other", b"child") == b"/other/child"
+    try:
+        os.path.join(b"root", "text")
+    except TypeError as error:
+        assert str(error) == "Can't mix strings and bytes in path components"
+    else:
+        raise AssertionError("join accepted mixed bytes and text")
     assert os.path.join(Path("root"), "dirA") == "root/dirA"
     assert os.path.join("root", Path("/other"), Path("child")) == "/other/child"
     assert os.path.isabs(Path(b"/test"))
