@@ -10,9 +10,33 @@ from _imre_posixpath import (
     realpath_notdir as _realpath_notdir,
 )
 from genericpath import (
-    ALLOW_MISSING, commonprefix, exists, getatime, getctime, getmtime, getsize, isdir, isfile, islink,
+    ALLOW_MISSING, _check_arg_types, commonprefix, exists, getatime, getctime, getmtime, getsize, isdir, isfile, islink,
     lexists, samefile, sameopenfile, samestat,
 )
+
+
+# From CPython 3.14.5 Lib/posixpath.py. See stdlib/docstrings/LICENSE.
+def join(a, *p):
+    """Join two or more pathname components, inserting '/' as needed.
+    If any component is an absolute path, all previous path components
+    will be discarded.  An empty last part will result in a path that
+    ends with a separator."""
+    a = os.fspath(a)
+    sep = b"/" if isinstance(a, bytes) else "/"
+    path = a
+    try:
+        for b in p:
+            b = os.fspath(b)
+            if b.startswith(sep) or not path:
+                path = b
+            elif path.endswith(sep):
+                path += b
+            else:
+                path += sep + b
+    except (TypeError, AttributeError, BytesWarning):
+        _check_arg_types('join', a, *p)
+        raise
+    return path
 
 
 def split(p):
