@@ -1,3 +1,4 @@
+pub(super) mod class_annotations;
 mod class_metadata;
 pub(super) mod type_parameters;
 mod worker;
@@ -266,12 +267,18 @@ impl Function<'_, '_> {
                         let key = self.code_name(name.id.as_str());
                         if self.class_locals.is_some() && !self.source.string_annotations {
                             // Class annotations may refer to a name bound after the class body.
+                            let value = self.output.code(
+                                self.source,
+                                String::new(),
+                                Body::AnnotationValue(&v.annotation),
+                            );
                             let code = self.output.definition(
                                 self.source,
                                 String::new(),
-                                Body::Expression(&v.annotation),
+                                Body::AnnotationThunk(value.clone(), v.annotation.range()),
                                 v.annotation.start(),
                             );
+                            self.remember_annotation(v, name.id.as_str(), &value);
                             let name = self.text("__annotate__");
                             let sig = self.text("{}");
                             let defaults = self.op("dict", &[]);
@@ -586,7 +593,7 @@ impl Function<'_, '_> {
             _ => None,
         };
         let flags = match (&body, params) {
-            (Body::Namespace(_) | Body::Annotations(_), _) => None,
+            (Body::Namespace(_) | Body::Annotations(_) | Body::ClassAnnotations(..), _) => None,
             _ => {
                 use imre_ast::code_flags::*;
                 let mut flags = OPTIMIZED | NEWLOCALS;
@@ -774,7 +781,7 @@ impl Function<'_, '_> {
         function
     }
 
-    pub(super) fn annotations(&mut self, entries: &[(&str, &ast::Expr)]) {
+    fn check_annotation_format(&mut self) {
         // CPython's compiled annotation callable accepts VALUE and VALUE_WITH_FAKE_GLOBALS.
         let format = self.lookup("format");
         let two = self.integer(2);
@@ -787,6 +794,10 @@ impl Function<'_, '_> {
         let error = self.lookup("NotImplementedError");
         self.raise(&error, None, false);
         self.label(&good);
+    }
+
+    pub(super) fn annotations(&mut self, entries: &[(&str, &ast::Expr)]) {
+        self.check_annotation_format();
         let values = self.op("dict", &[]);
         for &(name, expression) in entries {
             let key = self.code_name(name);
@@ -1219,7 +1230,12 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
             }
             captures.visit_expr(element);
         }
-        Body::Namespace(_) | Body::Annotations(_) | Body::Unsupported(..) => {}
+        Body::Namespace(_)
+        | Body::Annotations(_)
+        | Body::ClassAnnotations(..)
+        | Body::AnnotationThunk(..)
+        | Body::AnnotationValue(_)
+        | Body::Unsupported(..) => {}
     }
     captures.0
 }

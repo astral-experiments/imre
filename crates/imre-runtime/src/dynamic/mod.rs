@@ -1591,10 +1591,10 @@ impl Context {
         }
     }
     /// Describe a missing binding in the scope that owns it.
-    fn missing_binding(&self, origin: Id, scope: Id, name: &str) -> Error {
+    fn missing_binding(&mut self, origin: Id, scope: Id, name: &str) -> Error {
         let frame = self.scope_data(scope);
         let declared = frame.class_body.is_none() && frame.closure.declared.contains(name);
-        if declared && origin == scope {
+        let mut error = if declared && origin == scope {
             Error::new(
                 "UnboundLocalError",
                 format!(
@@ -1610,7 +1610,11 @@ impl Context {
             )
         } else {
             Error::new("NameError", format!("name '{name}' is not defined"))
+        };
+        if error.kind == "NameError" {
+            error.tracing().name_error_name = Some(self.heap.code_name(name));
         }
+        error
     }
 
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
