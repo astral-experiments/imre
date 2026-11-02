@@ -43,6 +43,7 @@ mod metadata;
 pub(super) mod monitoring;
 mod operator;
 mod ordered_dict;
+pub(super) mod opcode;
 pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
@@ -106,13 +107,13 @@ pub(super) fn is_module(name: &str) -> bool {
         name,
         "_datetime"
             | "_imre_ordered_dict"
+            | "_opcode"
             | "atexit"
             | "builtins"
             | "errno"
             | "genericpath"
             | "itertools"
-    )
-        || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
+    ) || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }
 
@@ -144,7 +145,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "locale"
             | "_locale"
             | "traceback"
-            | "_opcode"
             | "sysconfig"
             | "ast"
             | "os"
@@ -1027,6 +1027,9 @@ pub(super) fn call(
     }
     if name == "io.open_code" {
         return io::open_code(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_opcode.") {
+        return opcode::call(ctx, method, &args[1..], kwargs);
     }
     if let Some(method) = name.strip_prefix("types.SimpleNamespace.") {
         return super::namespace::method(ctx, method, args, kwargs);

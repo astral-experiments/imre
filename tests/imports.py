@@ -251,6 +251,18 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "opcode_named_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "from _opcode import stack_effect\ndef effect():\n    return stack_effect(31)\n",
+    },
+    "opcode_qualified_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "import _opcode\ndef effect():\n    return _opcode.stack_effect(31)\n",
+    },
+    "opcode_star_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "from _opcode import *\ndef effect():\n    return stack_effect(31)\n",
+    },
     "atexit_in_dependency": {
         "main.py": "from cleanup import prepare\nprepare()\n",
         "cleanup.py": (
@@ -870,18 +882,24 @@ def main() -> None:
                 checks += 1
 
         # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
-        source = root / "opcode_flags.py"
         for level in args.opt_levels:
-            executable = temporary / f"opcode-flags-{level}"
-            command = [compiler, "build", str(source), "-o", str(executable), "--runtime", runtime,
-                       "--clang", args.clang, "--opt-level", str(level), *build_flags]
-            if args.sanitize:
-                command.append("--sanitize")
-            require_success(run(command, temporary))
-            result = run([str(executable)], temporary)
-            require_success(result)
-            assert result.stdout == "0\n0\nno bytecode specialization\n", result
-            checks += 1
+            for fixture, route, output in [
+                ("opcode_flags", [], "0\n0\nno bytecode specialization\n"),
+                ("opcode_stack_effect", [], "-1\n"),
+                ("opcode_operations", [], "opcode operations OK\n"),
+                ("opcode_operations", ["--runtime-imports"], "opcode operations OK\n"),
+            ]:
+                executable = temporary / f"{fixture}-{level}"
+                command = [compiler, "build", str(root / f"{fixture}.py"), "-o", str(executable),
+                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                           *build_flags, *route]
+                if args.sanitize:
+                    command.append("--sanitize")
+                require_success(run(command, temporary))
+                result = run([str(executable)], temporary)
+                require_success(result)
+                assert result.stdout == output, result
+                checks += 1
 
         # A failing guard must run before the next import initializes its child.
         guarded = temporary / "wrong_name"
