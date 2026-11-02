@@ -5,6 +5,7 @@ mod abstract_class;
 mod array;
 mod builtins;
 mod calls;
+mod class_annotations;
 mod complex;
 mod deque;
 mod dictionary;
