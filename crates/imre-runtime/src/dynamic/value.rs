@@ -2125,18 +2125,6 @@ impl Heap {
         self.frames.last().unwrap().live.len()
     }
 
-    /// Compiled calls root their fresh argument list before evaluating its operands.
-    pub(super) fn argument_mark(&self, arguments: Id) -> Option<usize> {
-        if !self.tracks_finalizers() {
-            return None;
-        }
-        self.frames
-            .last()?
-            .live
-            .iter()
-            .position(|&id| id == arguments)
-    }
-
     /// A scalar and a container of scalars cannot hold an output file.
     pub(super) fn could_own_finalizer(&self, id: Id, skip_bound: bool) -> bool {
         let scalar = |id| {
