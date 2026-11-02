@@ -119,7 +119,12 @@ impl Checker<'_> {
         Ok(())
     }
 
-    fn validate_unittest_case(&self, call: &ast::ExprCall, id: usize) -> Result<(), String> {
+    fn validate_unittest_case(
+        &self,
+        call: &ast::ExprCall,
+        id: usize,
+        require_inherited_init: bool,
+    ) -> Result<(), String> {
         self.check_unittest_class_fixtures(call, id)?;
         let class = &self.classes.declarations.definitions[id];
         let base = class
@@ -179,9 +184,11 @@ impl Checker<'_> {
                     "native unittest does not yet support custom result hooks or decorated tests",
                 ));
             }
-            if ancestor.node.body.iter().any(
-                |stmt| matches!(stmt, ast::Stmt::FunctionDef(f) if f.name.as_str() == "__init__"),
-            ) {
+            if require_inherited_init
+                && ancestor.node.body.iter().any(
+                    |stmt| matches!(stmt, ast::Stmt::FunctionDef(f) if f.name.as_str() == "__init__"),
+                )
+            {
                 return Err(error(
                     self.source,
                     call,
@@ -189,7 +196,8 @@ impl Checker<'_> {
                 ));
             }
         }
-        if let Some(init) = class.initializer
+        if require_inherited_init
+            && let Some(init) = class.initializer
             && class.method_origins[init] != base
         {
             return Err(error(
@@ -442,7 +450,7 @@ impl Checker<'_> {
         }
         let methods = self.unittest_method_names(id);
         if !methods.is_empty() {
-            self.validate_unittest_case(call, id)?;
+            self.validate_unittest_case(call, id, true)?;
         }
         for name in methods {
             let contains = Expr {
@@ -553,7 +561,7 @@ impl Checker<'_> {
                 // loader. Do not silently execute one with unsupported hooks.
                 if !methods.is_empty()
                     && !checker.graph.modules[class.definition.module].is_bundled("unittest")
-                    && let Err(reason) = checker.validate_unittest_case(call, id)
+                    && let Err(reason) = checker.validate_unittest_case(call, id, false)
                 {
                     return checker.record_slot(
                         class_id,
