@@ -651,8 +651,27 @@ def starred_calls():
         raise AssertionError("starred iterator failure was lost")
 
 
+def caller_namespaces(argument):
+    snapshot = locals()
+    assert snapshot == {"argument": argument}
+    snapshot["argument"] = None
+    assert vars()["argument"] is argument
+
+    class Namespace:
+        mapping = locals()
+        mapping["name"] = "in class"
+        assert vars() is mapping
+        assert eval("name") == "in class"
+
+    Namespace.mapping["name"] = "later"
+    assert Namespace.name == "in class"
+    mapping = {}
+    assert eval("locals()", {}, mapping) is mapping
+
+
 def current():
     starred_calls()
+    caller_namespaces(3)
     source_eval()
     method_argument_lifetime()
     named_bindings()

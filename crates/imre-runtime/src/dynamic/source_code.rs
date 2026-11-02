@@ -2663,7 +2663,7 @@ impl Context {
         let globals = globals.filter(|&g| g != NONE);
         let locals = match locals.filter(|&l| l != NONE) {
             Some(locals) => Some(locals),
-            None if globals.is_none() => self.eval_frame_locals(scope)?,
+            None if globals.is_none() => Some(self.frame_locals(scope)?),
             None => None,
         };
         let globals = match globals {
@@ -2673,14 +2673,17 @@ impl Context {
         self.run_in_namespace(source, globals, locals, None, "eval")
     }
 
-    /// Function locals are a fresh snapshot; exec mappings retain their own lookup semantics.
-    fn eval_frame_locals(&mut self, scope: Id) -> Result<Option<Id>> {
+    /// Resolve the caller's namespace, copying bindings only for optimized frames.
+    pub(super) fn frame_locals(&mut self, scope: Id) -> Result<Id> {
         let frame = self.scope_data(scope);
-        if frame.exec_locals.is_some() || frame.parent.is_none() {
-            return Ok(frame.exec_locals);
+        if let Some(locals) = frame.exec_locals {
+            return Ok(locals);
+        }
+        if frame.parent.is_none() {
+            return self.module_globals(scope);
         }
         if frame.class_body.is_some() {
-            return Err(unsupported("eval with implicit class locals"));
+            return Ok(self.active_class_namespace(scope));
         }
         let mut names = BTreeSet::new();
         let mut local = scope;
@@ -2712,7 +2715,7 @@ impl Context {
                 Err(error) => return Err(error),
             }
         }
-        Ok(Some(self.dict(bindings)))
+        Ok(self.dict(bindings))
     }
 
     pub(super) fn exec_source(

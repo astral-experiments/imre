@@ -5906,7 +5906,7 @@ impl Context {
         self.execute(code, scope, FrameOwner::Function(body))?;
         let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
-        let annotation_body = self.finish_annotation_body(scope)?;
+        let exposed_body = self.finish_class_namespace(scope)?;
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
@@ -6003,7 +6003,7 @@ impl Context {
                 .entry("__doc__".to_owned())
                 .or_insert(NONE);
         }
-        if let Some((cell, body)) = annotation_body {
+        if let Some((body, cell)) = exposed_body {
             // type.__new__ replaces the body namespace with the finished type's dictionary.
             let dict = self.class_namespace_dict(scope, false);
             let extras = self
@@ -6016,7 +6016,9 @@ impl Context {
             for (key, value) in extras {
                 self.put_item(dict, key, value)?;
             }
-            self.heap.replace_cell(cell, Some(dict));
+            if let Some(cell) = cell {
+                self.heap.replace_cell(cell, Some(dict));
+            }
         }
         self.initialize_class_members(class, scope)?;
         if let Some(kind) = enum_kind {
