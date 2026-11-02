@@ -100,7 +100,7 @@ impl Drop for FileState {
 impl FileState {
     /// Opens a buffered binary writer with the same ownership and errors as typed files.
     pub(crate) fn binary_writer(path: &str, mode: u32, capacity: Option<usize>) -> Result<Self> {
-        open_state_with_encoding(
+        open_state_with_capacity(
             &super::text::try_owned_string(path)?,
             mode,
             true,
@@ -619,7 +619,6 @@ pub unsafe extern "C" fn imre_text_open(
         false,
         false,
         Some((encoding.map_or("UTF-8", |name| name), "strict")),
-        None,
     );
     finish(
         state.map(|file| crate::ObjectOwner::into_raw(file.into_object())),
@@ -732,11 +731,21 @@ pub(super) fn open(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Resu
 
 fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
     let encoding = (!binary).then_some((if gzip { "utf-8" } else { "UTF-8" }, "strict"));
-    open_state_with_encoding(path, mode, binary, gzip, encoding, None)
+    open_state_with_encoding(path, mode, binary, gzip, encoding)
 }
 
 /// The wrapper owns its encoding and errors spellings, including after close.
 fn open_state_with_encoding(
+    path: &StrOwner,
+    mode: u32,
+    binary: bool,
+    gzip: bool,
+    encoding: Option<(&str, &str)>,
+) -> Result<FileState> {
+    open_state_with_capacity(path, mode, binary, gzip, encoding, None)
+}
+
+fn open_state_with_capacity(
     path: &StrOwner,
     mode: u32,
     binary: bool,
