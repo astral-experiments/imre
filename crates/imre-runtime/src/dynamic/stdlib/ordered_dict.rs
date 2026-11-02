@@ -123,11 +123,9 @@ fn keys_equal(ctx: &mut Context, left: Id, right: Id) -> Result<bool> {
         (entries.len(), entries.order_state())
     };
     let original = (state(ctx, left), state(ctx, right));
-    let len = ctx.stored_entries(left).len();
-    if len != ctx.stored_entries(right).len() {
-        return Ok(false);
-    }
-    for index in 0..len {
+    let ((left_len, _), (right_len, _)) = original;
+    // Mapping equality may have changed a length. Compare the common prefix before testing the ends.
+    for index in 0..left_len.min(right_len) {
         let first = ctx.stored_entries(left);
         let second = ctx.stored_entries(right);
         let a = first[first.ordered_dense(index)].0;
@@ -143,5 +141,5 @@ fn keys_equal(ctx: &mut Context, left: Id, right: Id) -> Result<bool> {
             return Ok(false);
         }
     }
-    Ok(true)
+    Ok(left_len == right_len)
 }

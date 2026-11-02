@@ -19,6 +19,27 @@ def ordered_dictionary():
     source = OrderedDict(b=[2], a=[1])
     assert source != OrderedDict(a=[1], b=[2])
     assert source == {"a": [1], "b": [2]}
+
+    # Mapping equality removes the first key. The ordered comparison still visits the remaining prefix.
+    callbacks = []
+    tail = object()
+
+    class PrefixKey:
+        def __hash__(self):
+            return 19
+
+        def __eq__(self, other):
+            callbacks.append((self is right_key, other is left_key, other is tail))
+            if len(callbacks) == 1:
+                del left[left_key]
+            return True
+
+    left_key, right_key = PrefixKey(), PrefixKey()
+    left = OrderedDict([(left_key, 1), (tail, 2)])
+    right = OrderedDict([(right_key, 1), (tail, 2)])
+    assert left != right
+    assert callbacks == [(True, True, False), (True, False, True)]
+
     dense = OrderedDict([(2, "two"), (0, "zero"), (1, "one")])
     assert list(reversed(dense)) == [1, 0, 2]
     items = reversed(dense.items())
