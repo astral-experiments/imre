@@ -43,6 +43,8 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
         "close" => Intrinsic::Fd(FdOperation::Close),
+        "read" => Intrinsic::Fd(FdOperation::Read),
+        "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),
         "remove" => Intrinsic::Fd(FdOperation::Remove),

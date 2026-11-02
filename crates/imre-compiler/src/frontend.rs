@@ -8635,7 +8635,9 @@ impl<'a> Checker<'a> {
                 Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                     return self.credential_call(call, name);
                 }
-                Some(Binding::Intrinsic(Intrinsic::Fd(op @ ir::FdOperation::Pipe2))) => {
+                Some(Binding::Intrinsic(Intrinsic::Fd(
+                    op @ (ir::FdOperation::Pipe2 | ir::FdOperation::Read | ir::FdOperation::Write),
+                ))) => {
                     return self.fd_call(call, op);
                 }
                 _ => {}

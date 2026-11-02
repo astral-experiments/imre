@@ -2099,6 +2099,9 @@ pub(crate) enum Readiness {
 /// POSIX descriptor calls use the target's C int and file descriptor flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
+    TransferFd,
+    Read,
+    Write,
     Open,
     Unlink,
     Remove,

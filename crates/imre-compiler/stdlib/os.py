@@ -3,7 +3,7 @@ import abc
 import posixpath as path
 from _collections_abc import _check_methods
 from _collections_abc import MutableMapping as _MutableMapping
-from posix import environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, unsetenv
+from posix import environ as _environ, fspath, getcwd, getcwdb, listdir, mkdir, putenv, read, unsetenv, write
 from types import GenericAlias
 
 
