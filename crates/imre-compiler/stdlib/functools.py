@@ -1,5 +1,6 @@
 """Decorator implementations from CPython 3.14.5 Lib/functools.py (PSF-2.0)."""
 
+from _thread import RLock
 from functools import Placeholder, WRAPPER_ASSIGNMENTS, WRAPPER_UPDATES, _CacheInfo, partial, reduce, update_wrapper
 from types import GenericAlias
 

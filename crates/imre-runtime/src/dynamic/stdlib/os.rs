@@ -18,16 +18,21 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "unlink",
+                "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "symlink", "unlink",
+                "utime",
             ][..],
         ),
-        ("supports_fd", &["chmod", "listdir", "scandir", "stat"][..]),
+        (
+            "supports_fd",
+            &["chmod", "listdir", "scandir", "stat", "utime"][..],
+        ),
         (
             "supports_follow_symlinks",
             &[
                 #[cfg(target_os = "macos")]
                 "chmod",
                 "stat",
+                "utime",
             ][..],
         ),
         ("supports_effective_ids", &[][..]),
@@ -316,7 +321,9 @@ pub(super) fn change_environment(
 }
 
 mod chmod;
+mod symlink;
 mod unlink;
+mod utime;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
@@ -330,16 +337,20 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "rmdir"
             | "mkdir"
             | "chmod"
+            | "utime"
             | "dup"
             | "dup2"
             | "isatty"
             | "lseek"
             | "pipe"
+            | "read"
+            | "write"
             | "close"
             | "get_blocking"
             | "set_blocking"
             | "get_inheritable"
             | "set_inheritable"
+            | "symlink"
     )
 }
 
@@ -537,11 +548,17 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "symlink" {
+        return symlink::call(ctx, args, kwargs);
+    }
     if name == "scandir" {
         return scandir::open(ctx, args, kwargs);
     }
     if matches!(name, "remove" | "unlink" | "rmdir") {
         return unlink::call(ctx, name, args, kwargs);
+    }
+    if name == "utime" {
+        return utime::call(ctx, args, kwargs);
     }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
@@ -604,6 +621,33 @@ pub(super) fn descriptor(
             result.push(ctx.int(i64::from(fd)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
+    }
+    if matches!(name, "read" | "write") {
+        let [fd, data] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        return if name == "read" {
+            let length = crate::signed_index(&ctx.index_integer(*data)?).ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+            Ok(ctx.alloc(Value::Bytes(native::read(fd, length)?)))
+        } else {
+            // The synchronous syscall borrows the buffer after fd conversion.
+            // It cannot reenter Python, so mutable storage cannot resize underneath it.
+            let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
+                Value::Array(array) => array.as_bytes(),
+                _ => ctx.bytes_like(*data)?,
+            };
+            let count = native::write(fd, bytes)?;
+            Ok(ctx.int(count as i64))
+        };
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

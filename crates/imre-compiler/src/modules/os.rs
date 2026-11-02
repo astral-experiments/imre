@@ -32,6 +32,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     }
     Some(match name {
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
+        "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
         "mkdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkdir"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
@@ -46,8 +47,11 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "stat_result" => Intrinsic::StatResult,
         "terminal_size" => Intrinsic::ObjectRuntimeExport("os.terminal_size"),
         "close" => Intrinsic::Fd(FdOperation::Close),
+        "read" => Intrinsic::Fd(FdOperation::Read),
+        "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),
+        "symlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.symlink"),
         "remove" => Intrinsic::Fd(FdOperation::Remove),
         "lseek" => Intrinsic::Fd(FdOperation::Seek),
         "O_RDONLY" => Intrinsic::DescriptorConstant("o_rdonly"),

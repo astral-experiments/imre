@@ -475,6 +475,11 @@ ACCEPTED = {
         "data/__init__.py": "",
         "data/nested/message.txt": "hello\n",
     },
+    "materialize_resources": {
+        "main.py": (FIXTURES.parent / "boxed_resources_as_file.py").read_text(),
+        "data/__init__.py": "",
+        "data/message.txt": "hello\n",
+    },
     "source_loader_path_stats": {
         "main.py": (
             "import os\nfrom importlib.machinery import SourceFileLoader\n"

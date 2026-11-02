@@ -245,27 +245,27 @@ pub(in crate::dynamic) fn open(
         let raw_mode = mode_text.replace('t', "");
         return open_raw(ctx, raw_arg, raw_mode, binary, owns);
     }
+    let text_output = !binary && !mode_text.contains('+') && mode_text.contains(['w', 'a', 'x']);
     // FileIO falls back to __fspath__ only when conversion to a C descriptor fails.
-    if let Some(fd) = ctx
+    let fd = ctx
         .index_value(raw_arg)
         .ok()
         .flatten()
         .and_then(|n| n.to_i64())
-        .and_then(|n| RawFd::try_from(n).ok())
-    {
-        if fd < 0 {
+        .and_then(|n| RawFd::try_from(n).ok());
+    if fd.is_some() || text_output {
+        if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
-        let mode = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
-        if mode.contains('+') {
+        let mode_text = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
+        if mode_text.contains('+') {
             return Err(Error::new(
                 "NotImplementedError",
                 "buffered update descriptors are unsupported",
             ));
         }
-        let binary = mode.contains('b');
-        let reading = mode.contains('r');
-        let raw_mode = mode.replace('t', "");
+        let reading = mode_text.contains('r');
+        let raw_mode = mode_text.replace('t', "");
         if buffering > 0 {
             return Err(Error::new(
                 "ValueError",
@@ -274,15 +274,7 @@ pub(in crate::dynamic) fn open(
         }
         ctx.module("io")?;
         let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
-        initialize_file(
-            ctx,
-            raw,
-            raw_arg,
-            self::mode(&raw_mode),
-            owns,
-            Some(fd),
-            None,
-        )?;
+        initialize_file(ctx, raw, raw_arg, self::mode(&raw_mode), owns, fd, None)?;
         let handle = state(ctx, raw).expect("initialized FileIO");
         let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
         let buffer =
@@ -293,16 +285,24 @@ pub(in crate::dynamic) fn open(
             return Ok(buffer);
         }
         let wrapper = ctx.builtins["_io.TextIOWrapper"];
-        let result = ctx.call(
-            wrapper,
-            vec![
-                buffer,
-                encoding.unwrap_or(NONE),
-                errors.unwrap_or(NONE),
-                newline.unwrap_or(NONE),
-            ],
-            Vec::new(),
-        );
+        let result = ctx
+            .call(
+                wrapper,
+                vec![
+                    buffer,
+                    encoding.unwrap_or(NONE),
+                    errors.unwrap_or(NONE),
+                    newline.unwrap_or(NONE),
+                ],
+                Vec::new(),
+            )
+            .and_then(|stream| {
+                let mode = mode
+                    .map(|id| ctx.scalar_value(id))
+                    .unwrap_or_else(|| ctx.text("r"));
+                ctx.set_attr(stream, "mode", mode)?;
+                Ok(stream)
+            });
         if result.is_err() {
             let _ = state(ctx, raw).expect("initialized FileIO").close();
         }
@@ -348,17 +348,14 @@ pub(in crate::dynamic) fn open(
             "text files require UTF-8 encoding",
         ));
     }
-    let text_mode = match mode {
-        "r" | "rt" | "tr" => Some(0),
-        "w" | "wt" | "tw" => Some(1),
-        _ => None,
-    };
     let writing = mode.contains(['w', 'a', 'x']);
-    let file = match text_mode {
-        Some(mode) => crate::objects::TextFile::open(path, mode)
+    let file = match mode {
+        "r" | "rt" | "tr" => crate::objects::TextFile::open(path, 0)
             .map(Value::TextFile)
             .map_err(Error::from),
-        None => files::BinaryFile::open(path, mode).and_then(files::BinaryFile::into_value),
+        _ => {
+            files::BinaryFile::open(path, filename, mode).and_then(files::BinaryFile::into_value)
+        }
     };
     match file {
         Ok(file) if writing => ctx.heap.alloc_file_writer(file),

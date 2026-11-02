@@ -50,7 +50,10 @@ impl References<'_> {
                     _ => false,
                 };
             }
-            Some(Binding::Intrinsic(Intrinsic::Adler32)) => Some(2),
+            Some(Binding::Intrinsic(
+                Intrinsic::Adler32
+                | Intrinsic::Fd(crate::ir::FdOperation::Read | crate::ir::FdOperation::Write),
+            )) => Some(2),
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 Some(super::credential_arity(name))
             }
@@ -73,6 +76,16 @@ impl References<'_> {
             return false;
         };
         let keyword = match attr.attr.as_str() {
+            "zfill" => {
+                let unbound = attr
+                    .value
+                    .as_name_expr()
+                    .is_some_and(|name| name.id == "str")
+                    && self.graph.resolve(self.module, &attr.value).is_none();
+                return call.arguments.keywords.is_empty()
+                    && call.arguments.args.len() == 1 + usize::from(unbound)
+                    && !literal(call.arguments.args.last().unwrap());
+            }
             "expandtabs" => "tabsize",
             "digest" | "hexdigest" => {
                 // An unknown hash receiver can be an XOF. Direct fixed-output

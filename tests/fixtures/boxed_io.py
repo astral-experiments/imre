@@ -63,7 +63,70 @@ class ClosingWriterSize:
         return 0
 
 
+class BaseWriteCases:
+    class Override(io.RawIOBase):
+        def write(self, data):
+            return len(data)
+
+    class Shadow(Override):
+        write = None
+
+    class Mixed(io.BufferedIOBase, io.TextIOWrapper):
+        pass
+
+
+def check_base_writes():
+    from _collections_abc import _check_methods
+
+    print(_check_methods(io.IOBase, "write") is NotImplemented,
+          _check_methods(io.RawIOBase, "write") is True,
+          _check_methods(io.BufferedIOBase, "write") is True,
+          _check_methods(BaseWriteCases.Shadow, "write") is NotImplemented)
+    raw = BaseWriteCases.Override()
+    buffer = io.BytesIO()
+    print(raw.write(b"abcd"), buffer.write(b"abc"))
+    for method, receiver in ((io.RawIOBase.write, raw),
+                             (io.RawIOBase.readinto, raw),
+                             (io.BufferedIOBase.write, buffer)):
+        for args, kwargs in (((), {}), ((None,), {}), ((1, 2), {}),
+                             ((), {"data": 1}), ((1,), {"data": 2})):
+            try:
+                method(receiver, *args, **kwargs)
+            except (NotImplementedError, io.UnsupportedOperation, TypeError) as error:
+                print(type(error).__name__, error.args)
+            else:
+                raise AssertionError("base operation returned a value")
+        for args in ((), (1, b"data")):
+            try:
+                method(*args)
+            except TypeError as error:
+                print(error.args)
+            else:
+                raise AssertionError("base operation accepted an invalid receiver")
+    print(buffer.getvalue())
+    binary = io.BytesIO()
+    mixed = BaseWriteCases.Mixed(binary, encoding="utf-8", write_through=True)
+    try:
+        io.BufferedIOBase.write(mixed, "x")
+    except io.UnsupportedOperation as error:
+        print(error.args, binary.getvalue())
+    else:
+        raise AssertionError("base write dispatched to the text wrapper")
+    print(io.TextIOWrapper.write(mixed, "abc"), binary.getvalue())
+
+    for stream in (io.RawIOBase(), io.BufferedIOBase()):
+        stream.close()
+        try:
+            stream.write(b"x")
+        except (NotImplementedError, io.UnsupportedOperation) as error:
+            print(type(error).__name__, error.args)
+        else:
+            raise AssertionError("closed base operation returned a value")
+
+
+
 def exercise(path):
+    check_base_writes()
     events = []
 
     class Byte:
@@ -105,12 +168,14 @@ def exercise(path):
 
     target_path = path + ".output"
     with open(target_path, "wb") as output:
+        assert output.name is target_path and output.mode == "wb"
         alias = output
         print(output.write(b"\x00\xff"), alias.closed)
         with open(target_path, "rb") as reader:
             print(reader.read())
         alias.flush()
         with open(target_path, "rb") as reader:
+            assert reader.name is target_path and reader.mode == "rb"
             print(reader.read())
     with open(target_path, "ab") as output:
         print(output.write(bytearray(b"x")))
@@ -124,6 +189,7 @@ def exercise(path):
                 print(error.args)
             else:
                 raise AssertionError("flush accepted extra arguments")
+    assert alias.name is target_path and alias.mode == "wb"
     try:
         open(target_path, "xb")
     except FileExistsError:

@@ -68,8 +68,12 @@ class ForwardRef:
 
 
 def _get_value_annotations(obj):
-    if isinstance(obj, type) and '__annotations__' not in getattr(obj, '__dict__', {}):
-        annotations = None
+    annotations = None
+    if isinstance(obj, type):
+        namespace = getattr(obj, '__dict__', {})
+        if ('__annotations__' in namespace or '__annotations_cache__' in namespace
+                or '__annotate_func__' in namespace):
+            annotations = getattr(obj, '__annotations__', None)
     else:
         annotations = getattr(obj, '__annotations__', None)
     if annotations is None:

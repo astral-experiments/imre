@@ -1108,7 +1108,10 @@ pub(crate) fn lower_with_caller_cache(
     }
     Ok((
         ir::Module {
-            command_flags: graph.command_startup.as_ref().map(|(flags, _)| flags.clone()),
+            command_flags: graph
+                .command_startup
+                .as_ref()
+                .map(|(flags, _)| flags.clone()),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,
@@ -1766,6 +1769,7 @@ fn annotation_with_aliases(
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) => return Ok(Type::JsonDecoder),
+        Some(Binding::Intrinsic(Intrinsic::JsonEncoderClass)) => return Ok(Type::JsonEncoder),
         Some(Binding::Intrinsic(Intrinsic::Socket)) => return Ok(Type::Socket),
         Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return Ok(Type::ZipFile),
         Some(Binding::Intrinsic(Intrinsic::ZipInfo)) => return Ok(Type::ZipInfo),
@@ -1905,7 +1909,9 @@ fn annotation_with_aliases(
         ast::Expr::Subscript(subscript)
             if matches!(
                 graph.resolve_type(module, &subscript.value),
-                Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+                Some(Binding::Intrinsic(
+                    Intrinsic::Mapping | Intrinsic::TYPING_MAPPING
+                ))
             ) =>
         {
             if let ast::Expr::Tuple(types) = &*subscript.slice
@@ -6115,7 +6121,7 @@ impl<'a> Checker<'a> {
             ));
         }
         if let ast::Expr::Attribute(attr) = expression
-            && let Some(value) = self.calendar_class_attribute(attr)
+            && let Some(value) = self.calendar_class_attribute(attr)?
         {
             return Ok(value);
         }
@@ -7198,6 +7204,7 @@ impl<'a> Checker<'a> {
                         | Type::ProcessSelectorClass
                         | Type::Hash
                         | Type::JsonDecoder
+                        | Type::JsonEncoder
                         | Type::ZipFile
                         | Type::ZipInfo
                         | Type::CsvReader
@@ -7698,9 +7705,9 @@ impl<'a> Checker<'a> {
                 if matches!(
                     receiver.ty,
                     Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
-                ) && ir::StrDescriptor::named(attribute.attr.as_str())
-                    .is_some_and(ir::StrDescriptor::is_predicate)
-                {
+                ) && ir::StrDescriptor::named(attribute.attr.as_str()).is_some_and(|method| {
+                    method.is_predicate() || method == ir::StrDescriptor::ZFill
+                }) {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),
                         attribute,
@@ -7870,6 +7877,18 @@ impl<'a> Checker<'a> {
                         ty: self.types.dict(Type::Str, Type::Str),
                         kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
                     });
+                }
+                if matches!(attribute.attr.as_str(), "min" | "max" | "resolution")
+                    && matches!(
+                        receiver.ty,
+                        Type::Calendar(
+                            ir::CalendarType::Date
+                                | ir::CalendarType::DateTime
+                                | ir::CalendarType::Delta
+                        ) | Type::ClockTime
+                    )
+                {
+                    return Err(self.object_runtime_export("datetime class constants", attribute));
                 }
                 if let Type::Calendar(kind) = receiver.ty {
                     return self.calendar_attribute(kind, receiver, attribute);
@@ -8577,7 +8596,9 @@ impl<'a> Checker<'a> {
                 Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                     return self.credential_call(call, name);
                 }
-                Some(Binding::Intrinsic(Intrinsic::Fd(op @ ir::FdOperation::Pipe2))) => {
+                Some(Binding::Intrinsic(Intrinsic::Fd(
+                    op @ (ir::FdOperation::Pipe2 | ir::FdOperation::Read | ir::FdOperation::Write),
+                ))) => {
                     return self.fd_call(call, op);
                 }
                 _ => {}
@@ -9275,6 +9296,21 @@ impl<'a> Checker<'a> {
         ) {
             return self.json_decode(call);
         }
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonEncoderClass)) {
+            let flag = |name, default| {
+                ParameterKind::KeywordOnly.parameter(name, Type::Bool, Some(Expr::boolean(default)))
+            };
+            let args = self.arguments(
+                call,
+                &[
+                    flag("ensure_ascii", true),
+                    flag("allow_nan", true),
+                    flag("sort_keys", false),
+                ],
+                None,
+            )?;
+            return Ok(self.ordered_builtin(Builtin::JsonEncoderNew, Type::JsonEncoder, args));
+        }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonDecoderClass)) {
             self.reject_builtin_keywords(call)?;
             if !call.arguments.args.is_empty() {
@@ -9542,6 +9578,15 @@ impl<'a> Checker<'a> {
             {
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
+            if attribute.attr.as_str() == "zfill"
+                && matches!(
+                    receiver.ty,
+                    Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
+                )
+            {
+                let copy = matches!(receiver.ty, Type::StrEnum(_));
+                return self.zfill(Self::string_value(receiver), call, copy);
+            }
             let receiver = Self::enum_text(receiver);
             if matches!(receiver.ty, Type::Document(_)) {
                 return self.document_method(call, attribute, receiver);
@@ -9609,6 +9654,9 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Hash {
                 return self.hash_method(receiver, attribute, call);
             }
+            if receiver.ty == Type::JsonEncoder && attribute.attr.as_str() == "encode" {
+                return self.json_encoder_method(receiver, call);
+            }
             if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                 let args =
                     self.arguments(call, &[parameter("s", Type::Str, None)], Some(receiver))?;
@@ -9653,6 +9701,7 @@ impl<'a> Checker<'a> {
                     | "isdigit"
                     | "isspace"
                     | "islower"
+                    | "istitle"
                     | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
@@ -10960,6 +11009,14 @@ mod tests {
         assert_eq!(super::recursive_call_root(&graph), None);
         graph.last_mut().unwrap().insert(0);
         assert_eq!(super::recursive_call_root(&graph), Some(0));
+    }
+
+    #[test]
+    fn typing_mapping_alias_checks_without_boxed_lowering() {
+        crate::check(include_str!(
+            "../../../tests/fixtures/classes/mapping_alias.py"
+        ))
+        .unwrap();
     }
 
     #[test]

@@ -991,7 +991,7 @@ impl Checker<'_> {
         Ok(self.evaluated_receiver(receiver, value))
     }
 
-    /// Route live unittest state to the object runtime when a typed class lacks the member.
+    /// Route inherited unittest operations to the object runtime when a typed class lacks the member.
     pub(super) fn missing_class_member(
         &self,
         class: usize,
@@ -1010,6 +1010,11 @@ impl Checker<'_> {
                 | "assertNotIsSubclass"
                 | "assertNotHasAttr"
         ) && self.unittest_case(class)
+        {
+            return self.object_runtime_export(name, node);
+        }
+        if matches!(name, "loadTestsFromName" | "loadTestsFromNames")
+            && self.unittest_subclass(class, "TestLoader")
         {
             return self.object_runtime_export(name, node);
         }

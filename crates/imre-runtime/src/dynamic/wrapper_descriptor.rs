@@ -49,6 +49,9 @@ impl BuiltinDescriptor {
             Some(("frozenset", attr)) => Some(("frozenset", attr, &["issubset"][..])),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
+            Some((stdlib::os::stat::CLASS, attr)) => {
+                Some((stdlib::os::stat::CLASS, attr, &["__reduce__"][..]))
+            }
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
             _ => None,
         };
@@ -73,6 +76,8 @@ impl BuiltinDescriptor {
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
             "str.islower" => ("str", "islower"),
+            "str.zfill" => ("str", "zfill"),
+            "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__repr__" => ("object", "__repr__"),
@@ -102,7 +107,7 @@ impl BuiltinDescriptor {
             name,
             method: matches!(
                 name,
-                "__format__" | "isascii" | "isalpha" | "isdigit" | "islower"
+                "__format__" | "isascii" | "isalpha" | "isdigit" | "islower" | "istitle" | "zfill"
             ),
         })
     }
@@ -142,6 +147,13 @@ impl BuiltinDescriptor {
             }
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
             "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
+            stdlib::os::stat::CLASS => matches!(
+                ctx.heap.get(receiver),
+                Value::NamedTuple {
+                    class: Some(stdlib::os::stat::CLASS),
+                    ..
+                }
+            ),
             stdlib::os::scandir::ENTRY => matches!(ctx.heap.get(receiver), Value::DirEntry(_)),
             stdlib::os::scandir::ITER => matches!(ctx.heap.get(receiver), Value::Scandir(_)),
             "range" => matches!(ctx.heap.get(receiver), Value::Range(_)),
@@ -186,6 +198,7 @@ impl BuiltinDescriptor {
                     && let Some(receiver) = receiver
                 {
                     match ctx.heap.get(receiver) {
+                        Value::NamedTuple { class: Some(stdlib::os::stat::CLASS), .. } => "stat_result",
                         Value::Instance { class, .. } => ctx
                             .class_attr(*class, "__qualname__")
                             .and_then(|name| ctx.str_value(name).ok())
@@ -219,6 +232,8 @@ impl BuiltinDescriptor {
             )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("__reduce__", "__doc__") if self.owner == stdlib::os::stat::CLASS => return Some(NONE),
+                    ("__reduce__", _) if self.owner == stdlib::os::stat::CLASS => "($self, /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
                     }
@@ -231,7 +246,14 @@ impl BuiltinDescriptor {
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
-                    ("isascii" | "isalpha" | "isdigit" | "islower", _) => "($self, /)",
+                    ("istitle", "__doc__") => {
+                        "Return True if the string is a title-cased string, False otherwise.\n\nIn a title-cased string, upper- and title-case characters may only\nfollow uncased characters and lowercase characters only cased ones."
+                    }
+                    ("isascii" | "isalpha" | "isdigit" | "islower" | "istitle", _) => "($self, /)",
+                    ("zfill", "__doc__") => {
+                        "Pad a numeric string with zeros on the left, to fill a field of the given width.\n\nThe string is never truncated."
+                    }
+                    ("zfill", _) => "($self, width, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

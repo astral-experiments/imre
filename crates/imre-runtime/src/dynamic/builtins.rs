@@ -21,85 +21,15 @@ pub(super) use text::{
     bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
 };
 
-macro_rules! exception_kinds {
-    ($($kind:ident),* $(,)?) => {
-        const EXCEPTIONS: &[&str] = &[$(stringify!($kind)),*];
-        pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
-            use crate::objects::exceptions::Kind;
-            match name {
-                $(stringify!($kind) => Some(Kind::$kind),)*
-                "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
-                "binascii.Error" => Some(Kind::BinasciiError),
-                "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
-                _ => None,
-            }
-        }
-    };
+pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::Kind> {
+    use crate::objects::exceptions::Kind;
+    match name {
+        "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+        "binascii.Error" => Some(Kind::BinasciiError),
+        "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
+        _ => imre_ast::exceptions::boxed_builtin_kind(name),
+    }
 }
-
-exception_kinds!(
-    BaseException,
-    Exception,
-    RuntimeError,
-    RecursionError,
-    NotImplementedError,
-    TypeError,
-    ValueError,
-    EOFError,
-    SyntaxError,
-    IndentationError,
-    UnicodeError,
-    UnicodeDecodeError,
-    UnicodeEncodeError,
-    ArithmeticError,
-    OverflowError,
-    ZeroDivisionError,
-    LookupError,
-    IndexError,
-    KeyError,
-    NameError,
-    UnboundLocalError,
-    AttributeError,
-    ImportError,
-    ModuleNotFoundError,
-    OSError,
-    InterruptedError,
-    ChildProcessError,
-    ProcessLookupError,
-    ConnectionError,
-    ConnectionRefusedError,
-    ConnectionResetError,
-    ConnectionAbortedError,
-    BrokenPipeError,
-    BlockingIOError,
-    TimeoutError,
-    FileNotFoundError,
-    FileExistsError,
-    IsADirectoryError,
-    NotADirectoryError,
-    PermissionError,
-    AssertionError,
-    MemoryError,
-    BufferError,
-    ReferenceError,
-    SystemExit,
-    GeneratorExit,
-    KeyboardInterrupt,
-    StopIteration,
-    StopAsyncIteration,
-    Warning,
-    RuntimeWarning,
-    DeprecationWarning,
-    EncodingWarning,
-    UserWarning,
-    PendingDeprecationWarning,
-    SyntaxWarning,
-    FutureWarning,
-    ImportWarning,
-    UnicodeWarning,
-    BytesWarning,
-    ResourceWarning,
-);
 
 const FUNCTIONS: &[&str] = &[
     "len",
@@ -122,6 +52,7 @@ const FUNCTIONS: &[&str] = &[
     "issubclass",
     "getattr",
     "globals",
+    "vars",
     "setattr",
     "delattr",
     "hasattr",
@@ -169,7 +100,11 @@ const TYPES: &[&str] = &[
 ];
 
 pub(super) fn names() -> impl Iterator<Item = &'static str> {
-    FUNCTIONS.iter().chain(TYPES).chain(EXCEPTIONS).copied()
+    FUNCTIONS
+        .iter()
+        .chain(TYPES)
+        .chain(imre_ast::exceptions::BOXED_BUILTINS)
+        .copied()
 }
 
 pub(super) fn is_exception(name: &str) -> bool {
@@ -245,7 +180,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 pub(super) fn is_static_gc_type(name: &str) -> bool {
     TYPES.contains(&name)
         || name == super::stdlib::flags::TYPE
-        || EXCEPTIONS.contains(&name)
+        || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
         || (is_iterator_type(name) && !name.contains('.'))
         || matches!(
             name,
@@ -335,6 +270,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "items",
     "keys",
     "pop",
+    "popitem",
     "setdefault",
     "update",
     "values",
@@ -346,7 +282,14 @@ pub(super) const LIST_METHODS: &[&str] = &[
 ];
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
-    "__repr__", "append", "clear", "copy", "endswith", "extend", "reverse",
+    "__repr__",
+    "append",
+    "clear",
+    "copy",
+    "endswith",
+    "extend",
+    "reverse",
+    "startswith",
 ];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
@@ -377,6 +320,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "isdigit",
     "islower",
     "isspace",
+    "istitle",
     "isupper",
     "join",
     "lower",
@@ -395,6 +339,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "strip",
     "translate",
     "upper",
+    "zfill",
 ];
 
 /// Select the builtin formatting implementation inherited by this native value or type.
@@ -428,7 +373,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             iter.kind
         }
         Value::Slice(_) if super::slice::METHODS.contains(&attr) => "slice",
-        Value::TupleGetterDoc | Value::ReadOnlyMember(_, _)
+        Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. }
             if super::namedtuple::GETTER_METHODS.contains(&attr) =>
         {
             "member_descriptor"
@@ -437,6 +382,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             super::namedtuple::GETTER
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
+        Value::NamedTuple {
+            class: Some(super::stdlib::os::stat::CLASS),
+            ..
+        } if attr == "__reduce__" => super::stdlib::os::stat::CLASS,
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
@@ -498,7 +447,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "socket.socket"
         }
-        Value::BufferedRandom(_) if super::stdlib::tempfile::METHODS.contains(&attr) => {
+        Value::BufferedRandom(..) if super::stdlib::tempfile::METHODS.contains(&attr) => {
             "BufferedRandom"
         }
         Value::TextFile(_)
@@ -766,6 +715,9 @@ pub(super) fn bind_builtin_arguments<const N: usize>(
             .iter()
             .find(|(key, _)| !names.contains(&key.as_str()))
             && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
+            && !names[..args.len()]
+                .iter()
+                .any(|name| kwargs.iter().any(|(key, _)| *name == key))
         {
             return Err(type_error(format!(
                 "{builtin}() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"
@@ -1039,7 +991,7 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if matches!(method, "decode" | "endswith") => {
+            "bytearray" if matches!(method, "decode" | "endswith" | "startswith") => {
                 text::method(ctx, owner, method, args, kwargs)
             }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
@@ -1215,6 +1167,27 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
             Ok(boolean(ctx.callable(args[0])))
+        }
+        "vars" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("vars() takes no keyword arguments"));
+            }
+            match args {
+                [object] => match ctx.lookup_attr(*object, "__dict__") {
+                    Err(error) if ctx.is_attribute_error(&error) => {
+                        Err(type_error("vars() argument must have __dict__ attribute"))
+                    }
+                    result => result,
+                },
+                [] => Err(Error::new(
+                    "NotImplementedError",
+                    "vars() requires caller locals",
+                )),
+                _ => Err(type_error(format!(
+                    "vars expected at most 1 argument, got {}",
+                    args.len()
+                ))),
+            }
         }
         "globals" => {
             if !kwargs.is_empty() {
@@ -1539,7 +1512,7 @@ pub(super) fn call(
         "property" => super::property::construct(ctx, args, kwargs),
         "open" => super::stdlib::io::open(ctx, args, kwargs),
         "__import__" => {
-            let [module, _, _, fromlist, level] = bind(
+            let [module, globals, _, fromlist, level] = bind(
                 name,
                 args,
                 kwargs,
@@ -1548,11 +1521,24 @@ pub(super) fn call(
             let name = ctx
                 .str_value(module.ok_or_else(|| type_error("__import__ requires a name"))?)?
                 .to_owned();
-            if level.map(|v| ctx.as_integer(v)).transpose()?.unwrap_or(0) != 0 {
-                return Err(Error::new(
-                    "ImportError",
-                    "explicit relative __import__ is unsupported",
-                ));
+            let level = match level {
+                Some(level) => ctx
+                    .index_integer(level)?
+                    .to_i64()
+                    .and_then(|level| i32::try_from(level).ok())
+                    .ok_or_else(|| {
+                        Error::new("OverflowError", "Python int too large to convert to C int")
+                    })?,
+                None => 0,
+            };
+            if level < 0 {
+                return Err(Error::new("ValueError", "level must be >= 0"));
+            }
+            if level != 0 {
+                return ctx.relative_import(&name, globals, fromlist, level);
+            }
+            if name.is_empty() {
+                return Err(Error::new("ValueError", "Empty module name"));
             }
             let result = ctx.module(&name)?;
             if ctx.optional_truth(fromlist, false)? {

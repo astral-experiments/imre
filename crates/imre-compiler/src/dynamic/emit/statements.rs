@@ -321,7 +321,7 @@ impl Function<'_, '_> {
                         if args
                             .keywords
                             .iter()
-                            .any(|kw| kw.arg.as_deref() != Some("total"))
+                            .any(|kw| !matches!(kw.arg.as_deref(), Some("total" | "metaclass")))
                             || args.keywords.len() > 1
                         {
                             self.unsupported("class keyword arguments");

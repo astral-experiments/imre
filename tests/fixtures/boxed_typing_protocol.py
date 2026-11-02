@@ -1,5 +1,5 @@
 import typing
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sized
 from typing import Protocol, is_protocol
 
@@ -62,6 +62,20 @@ def current():
         pass
 
     print(Explicit._is_protocol, GenericProtocol._is_protocol, Ordinary._is_protocol)
+    class Mixed(Abstract, ABC):
+        @classmethod
+        def __subclasshook__(cls, candidate):
+            return True if candidate is str else NotImplemented
+
+    class MixedConcrete(Mixed):
+        def operation(self):
+            return 42
+
+    assert type(Mixed) is type(Abstract) and not is_protocol(Mixed)
+    assert Mixed.__abstractmethods__ == {"operation"} and MixedConcrete().operation() == 42
+    assert Mixed.register(Concrete) is Concrete and isinstance(Concrete(), Mixed)
+    assert issubclass(str, Mixed)
+
     for base in (Concrete, Mapping, int):
         try:
             class Invalid(base, Protocol):

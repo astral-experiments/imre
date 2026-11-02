@@ -70,9 +70,7 @@ impl Checker<'_> {
                 Some(Self::weak_proxy_type_name(callable))
             }
             Some(Binding::Intrinsic(Intrinsic::Deque)) => Some("collections.deque"),
-            Some(Binding::Intrinsic(Intrinsic::Mapping {
-                typing_alias: false,
-            })) => Some("collections.abc.Mapping"),
+            Some(Binding::Intrinsic(Intrinsic::Mapping)) => Some("collections.abc.Mapping"),
             _ => None,
         }
     }

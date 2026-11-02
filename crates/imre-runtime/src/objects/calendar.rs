@@ -86,15 +86,35 @@ pub unsafe extern "C" fn imre_calendar_date_order(
 unsafe fn compare(a: *const Object, b: *const Object, equality: bool, operator: &str) -> i32 {
     // SAFETY: both calendar operands remain rooted throughout the comparison.
     let (a, b) = unsafe { (object(a), object(b)) };
-    let res = with(a, |a| {
+    finish(
+        compare_rooted(a, b, equality, operator).map(|ord| ord as i32),
+        0,
+    )
+}
+
+fn compare_rooted(
+    a: &Object,
+    b: &Object,
+    equality: bool,
+    operator: &str,
+) -> Result<std::cmp::Ordering, Error> {
+    with(a, |a| {
         with(b, |b| {
             let ord = match (a, b) {
+                (Value::Time { .. }, Value::Time { .. }) => {
+                    clock::order(a, b).ok_or_else(|| {
+                        Error::new(
+                            Kind::TypeError,
+                            "can't compare offset-naive and offset-aware times",
+                        )
+                    })?
+                }
                 (Value::Delta(a), Value::Delta(b)) => a.cmp(b),
                 (Value::DateOnly(a), Value::DateOnly(b)) => a.cmp(b),
                 (Value::DateOnly(_), Value::Date { .. })
                 | (Value::Date { .. }, Value::DateOnly(_)) => {
                     if equality {
-                        return Ok(1);
+                        return Ok(std::cmp::Ordering::Greater);
                     }
                     let (left, right) = if matches!(a, Value::DateOnly(_)) {
                         ("datetime.date", "datetime.datetime")
@@ -121,7 +141,7 @@ unsafe fn compare(a: *const Object, b: *const Object, equality: bool, operator: 
                 ) => match (az, bz) {
                     (None, None) => a.cmp(b),
                     (Some(az), Some(bz)) => (a - offset(az)).cmp(&(b - offset(bz))),
-                    _ if equality => return Ok(1),
+                    _ if equality => return Ok(std::cmp::Ordering::Greater),
                     _ => {
                         return Err(Error::new(
                             Kind::TypeError,
@@ -131,10 +151,9 @@ unsafe fn compare(a: *const Object, b: *const Object, equality: bool, operator: 
                 },
                 _ => unreachable!(),
             };
-            Ok(ord as i32)
+            Ok(ord)
         })
-    });
-    finish(res, 0)
+    })
 }
 
 use num_bigint::BigInt;
@@ -736,21 +755,6 @@ pub unsafe extern "C" fn imre_calendar_datetime(
     // SAFETY: a present zone remains rooted until the new datetime owns it.
     let zone = (z != 0).then(|| unsafe { retain(z as *const Object) });
     rc_result(new_date([y, m, d, h, mi, s, u, f], zone))
-}
-/// # Safety
-/// The argument is a rooted exact fixed timezone, retained by the resulting datetime.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_calendar_now(z: *const Object) -> *const Object {
-    // SAFETY: the caller roots this nonnull fixed zone until the new datetime owns it.
-    let zone = unsafe { retain(z) };
-    let epoch_us = match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_micros() as i128,
-        Err(e) => (-(e.duration().as_nanos() as i128)).div_euclid(1000),
-    };
-    rc_result(date(
-        (EPOCH_ORD - 1) * DAY + epoch_us + offset(&zone),
-        Some(zone),
-    ))
 }
 /// # Safety
 /// The first argument is a rooted date, datetime or timedelta, and the second a rooted timedelta.

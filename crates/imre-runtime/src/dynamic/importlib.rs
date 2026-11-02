@@ -26,6 +26,163 @@ impl SourceBody {
 }
 
 impl Context {
+    /// Infer the package from import globals, following the CPython fallback order.
+    fn import_package(&mut self, globals: Option<Id>) -> Result<String> {
+        use crate::objects::exceptions::Kind::{DeprecationWarning, ImportWarning};
+        let missing_name = |ctx: &mut Self| {
+            let key = ctx.text("'__name__' not in globals");
+            ctx.lookup_error("KeyError", key)
+        };
+        let globals = globals.ok_or_else(|| missing_name(self))?;
+        let globals = self
+            .dict_storage(globals)
+            .ok_or_else(|| Error::new("TypeError", "globals must be a dict"))?;
+        let package = self
+            .dict_named_item(globals, "__package__")
+            .filter(|id| *id != NONE);
+        let spec = self
+            .dict_named_item(globals, "__spec__")
+            .filter(|id| *id != NONE);
+        Ok(if let Some(package) = package {
+            let name = self
+                .str_value(package)
+                .map_err(|_| Error::new("TypeError", "package must be a string"))?
+                .to_owned();
+            if let Some(spec) = spec {
+                let parent = self.lookup_attr(spec, "parent")?;
+                let equal = self.binary("==", package, parent)?;
+                if !self.truth(equal)? {
+                    self.emit_builtin_warning(
+                        DeprecationWarning,
+                        "__package__ != __spec__.parent",
+                        1,
+                    )?;
+                }
+            }
+            name
+        } else if let Some(spec) = spec {
+            let parent = self.lookup_attr(spec, "parent")?;
+            self.str_value(parent)
+                .map_err(|_| Error::new("TypeError", "__spec__.parent must be a string"))?
+                .to_owned()
+        } else {
+            self.emit_builtin_warning(ImportWarning, "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__", 1)?;
+            let name = self
+                .dict_named_item(globals, "__name__")
+                .ok_or_else(|| missing_name(self))?;
+            let name = self
+                .str_value(name)
+                .map_err(|_| Error::new("TypeError", "__name__ must be a string"))?;
+            if self.dict_named_item(globals, "__path__").is_some() {
+                name.to_owned()
+            } else {
+                name.rsplit_once('.')
+                    .map_or("", |(parent, _)| parent)
+                    .to_owned()
+            }
+        })
+    }
+
+    /// Resolve the package supplied by the caller of a relative builtin import.
+    pub(super) fn relative_import(
+        &mut self,
+        name: &str,
+        globals: Option<Id>,
+        fromlist: Option<Id>,
+        level: i32,
+    ) -> Result<Id> {
+        let parent = self.import_package(globals)?;
+        if parent.is_empty() {
+            return Err(Error::new(
+                "ImportError",
+                "attempted relative import with no known parent package",
+            ));
+        }
+        let mut base = parent.as_str();
+        for _ in 1..level {
+            base = base
+                .rsplit_once('.')
+                .ok_or_else(|| {
+                    Error::new(
+                        "ImportError",
+                        "attempted relative import beyond top-level package",
+                    )
+                })?
+                .0;
+        }
+        let absolute = if name.is_empty() {
+            base.to_owned()
+        } else {
+            format!("{base}.{name}")
+        };
+        let module = self.module(&absolute)?;
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(module);
+        if let Some(list) = fromlist
+            && self.truth(list)?
+        {
+            match self.lookup_attr(module, "__path__") {
+                Ok(_) => self.load_fromlist(module, list, None)?,
+                Err(err) if self.is_attribute_error(&err) => {}
+                Err(err) => return Err(err),
+            }
+        } else if let Some((first, _)) = name.split_once('.') {
+            let head = format!("{base}.{first}");
+            let key = self.text(&head);
+            return self.registered_module(key)?.ok_or_else(|| {
+                let key = self.text(format!("'{}' not in sys.modules as expected", head));
+                self.lookup_error("KeyError", key)
+            });
+        }
+        Ok(module)
+    }
+
+    /// Import missing children of a package requested by a nonempty fromlist.
+    fn load_fromlist(&mut self, module: Id, list: Id, all: Option<&str>) -> Result<()> {
+        let iterator = self.iterator(list)?;
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(iterator);
+        while let Some(item) = self.next_item(iterator)? {
+            let name = self
+                .str_value(item)
+                .map_err(|_| {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "Item in {} must be str, not {}",
+                            all.unwrap_or("``from list''"),
+                            self.type_name(item)
+                        ),
+                    )
+                })?
+                .to_owned();
+            if name == "*" {
+                if all.is_none() {
+                    match self.lookup_attr(module, "__all__") {
+                        Ok(names) => {
+                            let id = self.lookup_attr(module, "__name__")?;
+                            let owner = format!("{}.__all__", self.str_value(id)?);
+                            self.load_fromlist(module, names, Some(&owner))?;
+                        }
+                        Err(err) if self.is_attribute_error(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+                }
+                continue;
+            }
+            match self.lookup_attr(module, &name) {
+                Ok(_) => continue,
+                Err(err) if self.is_attribute_error(&err) => {}
+                Err(err) => return Err(err),
+            }
+            let id = self.lookup_attr(module, "__name__")?;
+            let child = format!("{}.{name}", self.str_value(id)?);
+            // Missing children are ignored, but a missing dependency inside a child propagates.
+            self.find_module(&child)?;
+        }
+        Ok(())
+    }
+
     /// Bootstrap modules remain available even while ordinary frozen imports are disabled.
     pub(super) fn is_frozen(&self, name: &str) -> bool {
         match name {

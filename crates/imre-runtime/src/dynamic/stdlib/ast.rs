@@ -90,6 +90,8 @@ const NODES: &[Node] = &[
     node!(USub: unaryop, false;),
     node!(Not: unaryop, false;),
     node!(Invert: unaryop, false;),
+    node!(TemplateStr: expr, true; values: List),
+    node!(Interpolation: expr, true; value: Required, str: Required, conversion: Required, format_spec: Optional),
     node!(JoinedStr: expr, true; values: List),
     node!(FormattedValue: expr, true; value: Required, conversion: Required, format_spec: Optional),
     node!(Load: expr_context, false;),
@@ -259,6 +261,7 @@ fn parsed_instance(
         property: None,
         weak_reference: None,
         cycle: None,
+        member_values: None,
         memory_stream: None,
     })
 }
