@@ -260,8 +260,13 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         None
     };
-    let close_fds = ctx.truth(close_fds)?;
-    let restore_signals = ctx.truth(restore_signals)?;
+    let (close_fds, restore_signals) = if direct == Some(true) {
+        // _posix_spawn builds signal defaults before its closefrom file action.
+        let restore = ctx.truth(restore_signals)?;
+        (ctx.truth(close_fds)?, restore)
+    } else {
+        (ctx.truth(close_fds)?, ctx.truth(restore_signals)?)
+    };
     let new_session = direct != Some(true) && ctx.truth(start_new_session)?;
     let mut keep = Vec::new();
     if let Some(fds) = normalized {
