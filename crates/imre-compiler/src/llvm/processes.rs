@@ -880,6 +880,18 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            ProcessOperation::EnvironClear => {
+                self.checked_line("call void @imre_environ_clear()");
+                none()
+            }
+            ProcessOperation::EnvironUpdate { bytes } => {
+                self.checked_line(format!(
+                    "call void @imre_environ_update(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(bytes)
+                ));
+                none()
+            }
             ProcessOperation::CheckReturnCode => {
                 self.checked_line(format!(
                     "call void @imre_subprocess_check(ptr {})",

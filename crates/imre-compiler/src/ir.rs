@@ -2303,6 +2303,10 @@ pub(crate) enum ProcessOperation {
     EnvironCopy {
         bytes: bool,
     },
+    EnvironClear,
+    EnvironUpdate {
+        bytes: bool,
+    },
     EnvironGet,
     EnvironSet {
         bytes: bool,
