@@ -224,6 +224,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "dict"
             | "float"
             | "function"
+            | "cell"
             | "int"
             | "str"
             | "super"
@@ -1756,14 +1757,16 @@ pub(super) fn call(
             }
             "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
-            "function" if method == "__new__" => {
+            "function" | "cell" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {
-                    return Err(type_error("function.__new__(): not enough arguments"));
+                    return Err(type_error(format!(
+                        "{owner}.__new__(): not enough arguments"
+                    )));
                 };
-                if class != ctx.builtin("function") {
-                    return Err(ctx.invalid_new_subtype("function", class));
+                if class != ctx.builtin(owner) {
+                    return Err(ctx.invalid_new_subtype(owner, class));
                 }
-                ctx.construct_function(args, kwargs)
+                call(ctx, owner, args, kwargs)
             }
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -2345,6 +2348,18 @@ pub(super) fn call(
                 "NotImplementedType" => NOT_IMPLEMENTED,
                 _ => ELLIPSIS,
             })
+        }
+        "cell" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("cell() takes no keyword arguments"));
+            }
+            if args.len() > 1 {
+                return Err(type_error(format!(
+                    "cell expected at most 1 argument, got {}",
+                    args.len()
+                )));
+            }
+            Ok(ctx.alloc(Value::Cell(args.first().copied())))
         }
         "function" => ctx.construct_function(args, kwargs),
         "ImportError" | "ModuleNotFoundError" => {

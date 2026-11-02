@@ -1,4 +1,5 @@
 import types
+from types import CellType
 from _weakref import ref
 
 marker = "module"
@@ -68,6 +69,23 @@ def make():
 
 
 def current():
+    assert CellType is types.CellType
+    empty = CellType()
+    assert type(empty) is CellType
+    try:
+        empty.cell_contents
+    except ValueError as error:
+        assert error.args == ("Cell is empty",)
+    else:
+        raise AssertionError("empty cell had a value")
+
+    empty.cell_contents = None
+    assert empty.cell_contents is None
+    payload = object()
+    cell = CellType.__new__(CellType, payload)
+    assert cell.cell_contents is payload
+    assert CellType(payload) is not cell
+
     read, write = make()
     code = read.__code__
     cell = read.__closure__[0]
