@@ -1,6 +1,14 @@
 from builtins import dict as _Dict
 from typing import Any, Callable
 
+class _SentinelObject: ...
+
+class _Sentinel:
+    def __getattr__(self, name: str) -> _SentinelObject: ...
+
+sentinel: _Sentinel
+DEFAULT: _SentinelObject
+
 _Scalar = bool | int | str | bytes | None
 
 class _DictionaryPatch:

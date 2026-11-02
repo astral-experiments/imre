@@ -7,7 +7,39 @@ from types import ModuleType
 
 
 _builtins = {name for name in dir(builtins) if not name.startswith('_')}
-DEFAULT = object()
+
+
+# CPython 3.14.5 Lib/unittest/mock.py
+class _SentinelObject(object):
+    "A unique, named, sentinel object."
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self):
+        return 'sentinel.%s' % self.name
+
+    def __reduce__(self):
+        return 'sentinel.%s' % self.name
+
+
+class _Sentinel(object):
+    """Access attributes to return a named object, usable as a sentinel."""
+    def __init__(self):
+        self._sentinels = {}
+
+    def __getattr__(self, name):
+        if name == '__bases__':
+            # Without this help(unittest.mock) raises an exception
+            raise AttributeError
+        return self._sentinels.setdefault(name, _SentinelObject(name))
+
+    def __reduce__(self):
+        return 'sentinel'
+
+
+sentinel = _Sentinel()
+
+DEFAULT = sentinel.DEFAULT
 
 
 def _patch_owner(name):

@@ -1,5 +1,9 @@
 import sys
-from unittest.mock import patch
+from unittest.mock import DEFAULT, patch, sentinel
+
+assert DEFAULT is sentinel.DEFAULT
+assert sentinel.value is sentinel.value and sentinel.value is not DEFAULT
+assert str(sentinel.value) == 'sentinel.value'
 
 original_exit = sys.exit
 original_stderr = sys.stderr
