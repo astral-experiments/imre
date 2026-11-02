@@ -1,12 +1,13 @@
 """POSIX named temporary files and directories for runtime-loaded modules."""
 
 import functools as _functools
+import io as _io
 import warnings as _warnings
 import os as _os
 import errno as _errno
 from _thread import allocate_lock as _allocate_lock
 
-from _imre_tempfile import abspath as _abspath
+from _imre_tempfile import abspath as _abspath, check_text_options as _check_text_options
 from _imre_tempfile import finish_named as _finish_named, keep_named as _keep_named, open_named as _open_named
 from _imre_tempfile import mkdir as _mkdir, open_file as _open_file, random_name as _random_name
 
@@ -405,7 +406,8 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
     prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
     if not isinstance(mode, str):
         raise TypeError("mode must be a string")
-    write_only = mode in ("wb", "bw")
+    text_write = mode in ("w", "wt", "tw")
+    write_only = text_write or mode in ("wb", "bw")
     if not write_only and (len(mode) != 3 or set(mode) not in ({"b", "+", "w"}, {"b", "+", "r"})):
         if len(set(mode)) != len(mode) or any(c not in "xrwabt+" for c in mode):
             raise ValueError(f"invalid mode: {mode!r}")
@@ -416,18 +418,25 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
             raise ValueError("Must have exactly one of create/read/write/append mode and at most one plus")
         if kinds != 1:
             raise ValueError("must have exactly one of create/read/write/append mode")
-        raise NotImplementedError("NamedTemporaryFile supports binary write and update modes")
+        raise NotImplementedError("NamedTemporaryFile supports write mode and binary update mode")
     if buffering != -1:
         raise NotImplementedError("NamedTemporaryFile supports default buffering")
-    if encoding is not None:
-        raise ValueError("binary mode doesn't take an encoding argument")
-    if errors is not None:
-        raise ValueError("binary mode doesn't take an errors argument")
-    if newline is not None:
-        raise ValueError("binary mode doesn't take a newline argument")
+    if text_write:
+        encoding = _io.text_encoding(encoding)
+        _check_text_options(encoding, errors, newline)
+    else:
+        if encoding is not None:
+            raise ValueError("binary mode doesn't take an encoding argument")
+        if errors is not None:
+            raise ValueError("binary mode doesn't take an errors argument")
+        if newline is not None:
+            raise ValueError("binary mode doesn't take a newline argument")
     if write_only:
         file, name = _create_file(dir, prefix, suffix, output_type, _open_named, delete_on_close, True)
         try:
+            if text_write:
+                file = _io.TextIOWrapper(file, encoding, errors, newline)
+                file.mode = mode
             return _TemporaryFileWrapper(file, name, delete, delete_on_close)
         except BaseException:
             try:
