@@ -5397,26 +5397,20 @@ impl Emitter<'_, '_> {
             }
             Builtin::SysThreadInfo => {
                 let text = self.module.types.optional(Type::Str);
-                let field = |version| Expr {
+                let field = |field| Expr {
                     ty: text,
-                    kind: ExprKind::Builtin(Builtin::SysThreadText { version }, vec![]),
+                    kind: ExprKind::Builtin(Builtin::SysThreadText { field }, vec![]),
                 };
-                // The Rust runtime does not expose either Python thread-lock implementation.
-                let lock = Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                };
+                // The runtime ABI predates the lock field: name = 0, version = 1, lock = 2.
                 self.tuple(
                     returns,
-                    &[field(false), lock, field(true)],
+                    &[field(0), field(2), field(1)],
                     Some("sys_thread_info"),
                 )
             }
-            Builtin::SysThreadText { version } => {
-                let pointer = self.instruction(format!(
-                    "call ptr @imre_sys_thread_text(i32 {})",
-                    u32::from(*version)
-                ));
+            Builtin::SysThreadText { field } => {
+                let pointer =
+                    self.instruction(format!("call ptr @imre_sys_thread_text(i32 {field})"));
                 Value {
                     ty: returns,
                     operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),

@@ -20,7 +20,8 @@ def check_record(binary, clang):
     imported, repeated, fields, names, sliced, representation = lines(binary, "describe")
     name, lock, version = ast.literal_eval(fields)
     assert imported == repeated == "True"
-    assert lock is None and ast.literal_eval(sliced) == (name, lock, version)
+    assert lock == ("mutex+cond" if name == "pthread" else None)
+    assert ast.literal_eval(sliced) == (name, lock, version)
     assert ast.literal_eval(names) == ("name", "lock", "version")
     assert representation == f"sys.thread_info(name={name!r}, lock={lock!r}, version={version!r})"
     if "CS_GNU_LIBPTHREAD_VERSION" in getattr(os, "confstr_names", {}):
@@ -34,7 +35,7 @@ def check_record(binary, clang):
             env = dict(os.environ, LD_PRELOAD=preload, IMRE_TEST_PTHREAD_VERSION=supplied)
             imported, repeated, fields, _, sliced, _ = lines(binary, "describe", env=env)
             assert imported == repeated == "True"
-            assert ast.literal_eval(fields) == ast.literal_eval(sliced) == (name, None, expected)
+            assert ast.literal_eval(fields) == ast.literal_eval(sliced) == (name, lock, expected)
 
 
 def observer(module, binary, method_sha256, level):

@@ -1374,6 +1374,7 @@ impl Context {
                         class @ ("time.struct_time"
                         | stdlib::fixed_structseq::UNRAISABLE_ARGS
                         | stdlib::fixed_structseq::HASH_INFO
+                        | stdlib::fixed_structseq::THREAD_INFO
                         | stdlib::fixed_structseq::SCHED_PARAM
                         | stdlib::fixed_structseq::TERMINAL_SIZE
                         | stdlib::flags::TYPE
@@ -1528,6 +1529,7 @@ impl Context {
                             class @ ("time.struct_time"
                             | stdlib::fixed_structseq::UNRAISABLE_ARGS
                             | stdlib::fixed_structseq::HASH_INFO
+                            | stdlib::fixed_structseq::THREAD_INFO
                             | stdlib::fixed_structseq::SCHED_PARAM
                             | stdlib::fixed_structseq::TERMINAL_SIZE
                             | stdlib::flags::TYPE
@@ -3832,6 +3834,7 @@ impl Context {
                     owner @ ("time.struct_time"
                     | stdlib::fixed_structseq::UNRAISABLE_ARGS
                     | stdlib::fixed_structseq::HASH_INFO
+                    | stdlib::fixed_structseq::THREAD_INFO
                     | stdlib::fixed_structseq::SCHED_PARAM
                     | stdlib::fixed_structseq::TERMINAL_SIZE
                     | stdlib::flags::TYPE),

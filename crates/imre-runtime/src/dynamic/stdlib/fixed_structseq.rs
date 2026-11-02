@@ -1,9 +1,10 @@
 //! Fixed-size struct sequences whose named fields are all visible tuple elements.
 
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value};
 use crate::python_hash;
 
 pub(in crate::dynamic) const HASH_INFO: &str = "sys.hash_info";
+pub(in crate::dynamic) const THREAD_INFO: &str = "sys.thread_info";
 pub(in crate::dynamic) const SCHED_PARAM: &str = "posix.sched_param";
 pub(in crate::dynamic) const TERMINAL_SIZE: &str = "os.terminal_size";
 pub(in crate::dynamic) const UNRAISABLE_ARGS: &str = "UnraisableHookArgs";
@@ -22,6 +23,7 @@ const HASH_FIELDS: [&str; 9] = [
 pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
     match name {
         HASH_INFO => Some(HASH_INFO),
+        THREAD_INFO => Some(THREAD_INFO),
         UNRAISABLE_ARGS => Some(UNRAISABLE_ARGS),
         TERMINAL_SIZE => Some(TERMINAL_SIZE),
         SCHED_PARAM if cfg!(target_os = "linux") => Some(SCHED_PARAM),
@@ -32,6 +34,7 @@ pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
 pub(in crate::dynamic) fn fields(class: &str) -> &'static [&'static str] {
     match class {
         HASH_INFO => &HASH_FIELDS,
+        THREAD_INFO => &["name", "lock", "version"],
         UNRAISABLE_ARGS => &[
             "exc_type",
             "exc_value",
@@ -61,6 +64,13 @@ pub(in crate::dynamic) fn record(ctx: &mut Context, class: &'static str, values:
         values,
         extras: Vec::new(),
     })
+}
+
+pub(in crate::dynamic) fn thread_info(ctx: &mut Context) -> Id {
+    let name = crate::sys::thread_name().map_or(NONE, |value| ctx.text(value));
+    let lock = crate::sys::thread_lock_backend().map_or(NONE, |value| ctx.text(value));
+    let version = crate::sys::thread_version().map_or(NONE, |value| ctx.text(value));
+    record(ctx, THREAD_INFO, vec![name, lock, version])
 }
 
 pub(super) fn current_hash_info(ctx: &mut Context) -> Id {
@@ -267,6 +277,9 @@ pub(in crate::dynamic) fn type_attribute(
         "__doc__" if class == UNRAISABLE_ARGS => {
             ctx.text("UnraisableHookArgs\n\nType used to pass arguments to sys.unraisablehook.")
         }
+        "__doc__" if class == THREAD_INFO => ctx.text(
+            "sys.thread_info\n\nA named tuple holding information about the thread implementation.",
+        ),
         "__doc__" if class == TERMINAL_SIZE => {
             ctx.text("A tuple of (columns, lines) for holding terminal window size")
         }
