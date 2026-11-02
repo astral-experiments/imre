@@ -10,6 +10,7 @@ use crate::StrOwner;
 mod annotations;
 mod argparse;
 mod args;
+pub(crate) use args::python_executable_text;
 mod asyncio;
 mod binascii;
 pub(crate) use binascii::{adler32, binascii_decode, binascii_encode, crc32, unhexlify};

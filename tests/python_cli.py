@@ -1411,6 +1411,34 @@ print(found.value)
         )
         assert executable.stdout.decode().strip() == str(imre), executable.stderr
 
+        source = root / "boxed_executable.py"
+        source.write_text(
+            "import subprocess, sys\n"
+            "sys.path.append('unused')\n"
+            "assert sys._base_executable == sys.executable\n"
+            "print(sys.executable)\n"
+            "print(sys.prefix)\n"
+            "if sys.argv[1:] == ['spawn']:\n"
+            "    child = subprocess.run([sys.executable, '-c', "
+            "\"import sys; print('child'); sys.exit(47)\"], capture_output=True)\n"
+            "    assert (child.stdout, child.stderr, child.returncode) == (b'child\\n', b'', 47)\n"
+        )
+        image = root / "boxed-executable"
+        built = run(imre, "build", "--runtime-imports", source, "-o", image)
+        assert built.returncode == 0, built.stderr
+        helper_dir = root / "python-helpers"
+        helper_dir.mkdir()
+        helper = helper_dir / "python3"
+        helper.symlink_to(imre)
+        for args, extra, expected in (
+            ((), {"PATH": ""}, ""),
+            ((), {"PATH": str(helper_dir)}, str(helper)),
+            (("spawn",), {"IMRE_PYTHON": str(helper.relative_to(root))}, str(helper_dir.resolve() / "python3")),
+        ):
+            result = run(image, *args, extra=extra)
+            assert result.returncode == 0, result.stderr
+            assert result.stdout.decode().splitlines() == [expected, str(root.resolve())]
+
         # An isolated command can add a package search root itself. Exercise its
         # normal Python code, including live dictionary views and descriptor errors.
         helpers = root / "helpers"
