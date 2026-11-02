@@ -140,6 +140,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "_thread"
             | "abc"
             | "array"
+            | "_typing"
             | "_collections"
             | "codecs"
             | "_codecs"
@@ -540,6 +541,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("_typing", "_idfunc") => ctx.builtin("_typing._idfunc"),
         ("typing", "NoDefault") => super::typing::no_default(ctx),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
@@ -1955,6 +1957,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("abc.") {
         return super::mapping_abc::call(ctx, method, args, kwargs);
+    }
+    if name == "_typing._idfunc" {
+        return builtins::one_positional_arg(name, args, kwargs);
     }
     if let Some(operation) = name.strip_prefix("typing.") {
         return super::typing::call(ctx, operation, args, kwargs);
