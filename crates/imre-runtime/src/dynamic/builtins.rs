@@ -683,6 +683,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "unregister"
                     | "select"
                     | "get_key"
+                    | "get_map"
                     | "close"
                     | "__enter__"
                     | "__exit__"
