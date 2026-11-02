@@ -298,3 +298,50 @@ for descriptor in (False, True):
             inner.close()
             if descriptor:
                 os.unlink(path)
+
+
+# Reinitialization abandons the outgoing buffer without flushing or closing its raw.
+old = io.BytesIO(b"abcdef")
+target = io.BufferedRandom(old, 4)
+assert target.read(1) == b"a" and old.tell() == 4
+target.__init__(old, 2)
+assert target.read(1) == b"e"
+assert target.write(b"X") == 1
+
+
+class RefusesSeek(io.BytesIO):
+    def seekable(self):
+        assert target.raw is old
+        try:
+            target.read(0)
+        except ValueError as exc:
+            assert "uninitialized" in str(exc)
+        else:
+            raise AssertionError("buffer remained usable during capability check")
+        return False
+
+
+rejected = RefusesSeek()
+try:
+    target.__init__(rejected)
+except io.UnsupportedOperation:
+    assert target.raw is old and old.getvalue() == b"abcdef"
+else:
+    raise AssertionError("accepted non-seekable raw")
+
+
+class RevivesInSeekable(io.BytesIO):
+    def seekable(self):
+        target.__init__(inner, 4)
+        return True
+
+
+inner = io.BytesIO(b"inner")
+replacement = RevivesInSeekable(b"new")
+target.__init__(replacement, 2)
+assert target.raw is replacement and target.read() == b"new"
+target.close()
+assert replacement.closed and not old.closed and not rejected.closed and not inner.closed
+old.close()
+rejected.close()
+inner.close()
