@@ -357,7 +357,43 @@ def test_calendar_reduction():
     assert super(Mixed, item).__reduce_ex__(4) == 4
 
 
+def test_calendar_strftime():
+    calls = []
+
+    class Name(str):
+        def replace(self, old, new):
+            calls.append((old, new))
+            return super().replace(old, new)
+
+    class Moment(dt):
+        def timetuple(self):
+            return (7, 1, 2, 3, 4, 5, 1, 2, -1)
+
+        @property
+        def microsecond(self):
+            raise AssertionError("strftime read the Python attribute")
+
+        def utcoffset(self):
+            raise AssertionError("strftime used a receiver method")
+
+        def tzname(self):
+            raise AssertionError("strftime used a receiver method")
+
+    zone = timezone(timedelta(seconds=-75, microseconds=-2), Name("west%Y"))
+    stamp = Moment(2001, 2, 3, 8, 9, 10, 123, zone)
+    assert stamp.strftime(format="%F %C %T %f") == "0007-01-02 00 03:04:05 000123"
+    assert stamp.strftime("%%Z/%:z/%z") == "%Z/-00:01:15.000002/-000115.000002"
+    assert calls == []
+    assert stamp.strftime("%Z %Z %%f") == "west%Y west%Y %f"
+    assert calls == [("%", "%%")]
+    clock = time(8, 9, 10, 456, UTC)
+    assert clock.strftime("%F %H:%M:%S.%f %z %:z %Z") == "1900-01-01 08:09:10.000456 +0000 +00:00 UTC"
+    assert date(2000, 1, 1).strftime("\ud800%f\0%Z\udcff") == "\ud800000000\0\udcff"
+    assert time().strftime("%z%:z%Z") == ""
+
+
 def current():
+    test_calendar_strftime()
     test_calendar_reduction()
     test_calendar_format()
     test_timedelta_negation()
