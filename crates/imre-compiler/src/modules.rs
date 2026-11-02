@@ -1454,6 +1454,7 @@ impl IntrinsicModule {
             (Self::Inspect, "BoundArguments") => {
                 Intrinsic::ObjectRuntimeExport("inspect.BoundArguments")
             }
+            (Self::Inspect, "getmodule") => Intrinsic::ObjectRuntimeExport("inspect.getmodule"),
             (Self::Inspect, "signature") => Intrinsic::ObjectRuntimeExport("inspect.signature"),
             (Self::Inspect, "getattr_static") => Intrinsic::InspectGetattrStatic,
             (Self::Inspect, "ismethoddescriptor") => Intrinsic::InspectIsMethodDescriptor,
