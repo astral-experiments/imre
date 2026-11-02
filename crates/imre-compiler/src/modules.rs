@@ -1412,6 +1412,8 @@ impl IntrinsicModule {
             (Self::Typing, "MutableMapping") => {
                 Intrinsic::ObjectRuntimeExport("typing.MutableMapping")
             }
+            (Self::Typing, "get_args") => Intrinsic::ObjectRuntimeExport("typing.get_args"),
+            (Self::Typing, "get_origin") => Intrinsic::ObjectRuntimeExport("typing.get_origin"),
             (Self::Typing, "get_type_hints") => {
                 Intrinsic::ObjectRuntimeExport("typing.get_type_hints")
             }
