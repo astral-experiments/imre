@@ -623,7 +623,10 @@ fn collect_class(
                     continue;
                 }
                 if method.type_params.is_some() {
-                    return Err(module.error(method, "method type parameters are unsupported"));
+                    graph.needs_object_runtime.set(true);
+                    return Err(
+                        module.error(method, "method type parameters require the object runtime")
+                    );
                 }
                 let name = method.name.as_str();
                 if base.is_some_and(|(_, base)| base.fields.iter().any(|field| field.name == name))

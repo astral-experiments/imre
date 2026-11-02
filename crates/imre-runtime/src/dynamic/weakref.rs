@@ -220,6 +220,7 @@ impl Context {
             | Value::Partial { .. }
             | Value::HandlerLock(_)
             | Value::PrimitiveLock(_)
+            | Value::TypeVar(_)
             | Value::Native(_) => true,
             _ => false,
         }

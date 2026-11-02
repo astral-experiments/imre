@@ -1298,7 +1298,15 @@ fn signature(
             )
         })
         .map(|context| classes.instance(context.class));
-    if !function.decorator_list.is_empty() || function.type_params.is_some() {
+    if function.type_params.is_some() {
+        graph.needs_object_runtime.set(true);
+        return Err(error(
+            source,
+            function,
+            "function type parameters require the object runtime",
+        ));
+    }
+    if !function.decorator_list.is_empty() {
         if function.decorator_list.iter().any(|decorator| {
             decorator.expression.as_call_expr().is_some_and(|call| {
                 graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::Wraps))
