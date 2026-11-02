@@ -92,5 +92,22 @@ def original_stream():
         assert count == len(text)
 
 
+def first_write(hook):
+    text = chr(0xd800)
+    if hook:
+        class Render:
+            def __repr__(self):
+                return text
+
+        sys.__displayhook__(Render())
+    else:
+        try:
+            sys.stdout.write(text)
+        except UnicodeEncodeError:
+            sys.stdout.write("A")
+        else:
+            raise AssertionError("strict encoding accepted a lone surrogate")
+
+
 if __name__ == "__main__":
     current()

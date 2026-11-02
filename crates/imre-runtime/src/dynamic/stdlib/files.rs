@@ -619,7 +619,7 @@ pub(super) fn text_method(
                     let newline = points.iter().any(|&p| matches!(p, 10 | 13));
                     let stderr = file.standard_writer()?;
                     let fd = if stderr { 2 } else { 1 };
-                    let encoding = ctx.text(crate::sys::standard_field(fd, false).as_str());
+                    let encoding = ctx.text(crate::sys::standard_write_encoding(stderr));
                     ctx.heap.keep(encoding);
                     let errors = ctx.text(crate::sys::standard_field(fd, true).as_str());
                     ctx.heap.keep(errors);

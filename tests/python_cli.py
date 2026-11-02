@@ -1978,6 +1978,9 @@ def report(text):
                               "cp1251:surrogateescape", "utf-8-sig:strict"):
                     compare("-B", "-c", imports + "arithmetic.original_stream()",
                             extra={"PYTHONIOENCODING": stdio})
+                for hook in (False, True):
+                    compare("-B", "-c", imports + f"arithmetic.first_write({hook})",
+                            extra={"PYTHONIOENCODING": "utf-8-sig:strict"})
             if fixture == "boxed_recursive_repr.py":
                 for limit in (640, 4300, 0):
                     compare(

@@ -176,27 +176,33 @@ pub(super) fn flush_standard(stderr: bool) -> io::Result<()> {
     }
 }
 
+/// The incremental UTF-8-SIG encoder consumes the signature on its first
+/// attempt, even if that write subsequently raises UnicodeEncodeError.
+pub(crate) fn standard_write_encoding(stderr: bool) -> &'static str {
+    let codec = encoding::settings(false, None).codec;
+    if !matches!(codec, Codec::Utf8 { signature: true }) {
+        return codec.name();
+    }
+    let emitted = if stderr {
+        let mut err = STDERR.lock().unwrap_or_else(|p| p.into_inner());
+        std::mem::replace(&mut err.stream.signature_emitted, true)
+    } else {
+        let mut out = OUTPUT.lock().unwrap_or_else(|p| p.into_inner());
+        std::mem::replace(&mut out.signature_emitted, true)
+    };
+    if emitted { "utf-8" } else { codec.name() }
+}
+
 /// Non-scalar Python strings are encoded by the boxed codec. Successful writes
-/// still share the original text buffer and its incremental UTF-8 signature.
+/// still share the original text buffer and its line buffering.
 pub(crate) fn write_standard_encoded(
     stderr: bool,
     bytes: &[u8],
     newline: bool,
 ) -> super::Result<()> {
-    fn write<W: Write>(out: &mut Output<W>, mut bytes: &[u8], newline: bool) -> io::Result<()> {
+    fn write<W: Write>(out: &mut Output<W>, bytes: &[u8], newline: bool) -> io::Result<()> {
         if !out.captures.is_empty() {
             return out.write_all(bytes);
-        }
-        if matches!(
-            encoding::settings(false, None).codec,
-            Codec::Utf8 { signature: true }
-        ) {
-            if out.signature_emitted {
-                bytes = bytes
-                    .strip_prefix(b"\xef\xbb\xbf")
-                    .expect("UTF-8-SIG encoder supplies the signature");
-            }
-            out.signature_emitted = true;
         }
         out.text
             .write(&mut out.raw, bytes, out.line_buffered && newline)
