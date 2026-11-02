@@ -2572,15 +2572,21 @@ impl Context {
             Expr::NoneLiteral(_) => Ok(NONE),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
             Expr::NumberLiteral(v) => {
-                if let ast::Number::Float(value) = &v.value {
-                    return Ok(self.alloc(Value::Float(*value)));
-                }
-                let ast::Number::Int(n) = &v.value else {
-                    return Err(unsupported("noninteger literal"));
+                let value = match &v.value {
+                    ast::Number::Float(value) => Value::Float(*value),
+                    ast::Number::Complex { real, imag } => {
+                        Value::Complex(super::complex::Complex {
+                            real: *real,
+                            imag: *imag,
+                        })
+                    }
+                    ast::Number::Int(n) => {
+                        let n = crate::parse_integer_literal(&n.to_string())
+                            .ok_or_else(|| Error::new("ValueError", "invalid integer"))?;
+                        Value::Int(crate::Int::new(n))
+                    }
                 };
-                let n = crate::parse_integer_literal(&n.to_string())
-                    .ok_or_else(|| Error::new("ValueError", "invalid integer"))?;
-                Ok(self.alloc(Value::Int(crate::Int::new(n))))
+                Ok(self.alloc(value))
             }
             Expr::List(v) => {
                 let items = v
