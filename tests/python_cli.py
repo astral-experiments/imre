@@ -1732,6 +1732,7 @@ def report(text):
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
+            "boxed_int_from_bytes.py",
             "boxed_divmod_slots.py",
             "boxed_complex.py",
             "boxed_float.py",
