@@ -2,6 +2,8 @@
 use super::Context;
 use super::value::{Error, Id, NONE, NOT_IMPLEMENTED, Result, Value};
 
+pub(super) const PROXY_TYPE: &str = "weakref.ProxyType";
+pub(super) const PROXY_METHODS: &[&str] = &["__bytes__", "__reversed__"];
 pub(super) const REFERENCE_HASH: &str = "weakref.ReferenceType.__hash__";
 pub(super) const REFERENCE_TYPE: &str = "weakref.ReferenceType";
 pub(super) const REFERENCE_METHODS: &[&str] = &[
@@ -19,7 +21,7 @@ impl Kind {
     pub fn class(self) -> &'static str {
         match self {
             Self::Reference => REFERENCE_TYPE,
-            Self::Proxy => "weakref.ProxyType",
+            Self::Proxy => PROXY_TYPE,
             Self::CallableProxy => "weakref.CallableProxyType",
         }
     }
@@ -421,6 +423,16 @@ pub(super) fn call(
                     ))
                 }
             }
+        }
+        "weakref.ProxyType.__bytes__" | "weakref.ProxyType.__reversed__" => {
+            let method = function.rsplit('.').next().unwrap();
+            let proxy =
+                super::builtins::noargs_method_receiver(ctx, PROXY_TYPE, method, args, kwargs)?;
+            let target = ctx.weak_proxy_target(proxy)?;
+            ctx.with_weak_target(target, |ctx| {
+                let hook = ctx.lookup_attr(target, method)?;
+                ctx.call(hook, Vec::new(), Vec::new())
+            })
         }
         "weakref.ReferenceType.__new__" => {
             let Some((&class, rest)) = args.split_first() else {

@@ -304,6 +304,29 @@ def current():
             print(repeated)
         print(watched() is None)
 
+    wrapped_proxy_methods()
+
+
+def wrapped_proxy_methods():
+    class Target:
+        def __bytes__(self):
+            return b"class"
+
+        def __reversed__(self):
+            return iter("class")
+
+    owner = Target()
+    observer = proxy(owner)
+    owner.__bytes__ = lambda: b"instance"
+    owner.__reversed__ = lambda: iter("instance")
+    assert bytes(observer) == b"instance"
+    assert ProxyType.__bytes__(observer) == b"instance"
+    assert type(ProxyType.__bytes__).__name__ == "method_descriptor"
+    assert not hasattr(CallableProxyType, "__bytes__")
+    assert "".join(reversed(observer)) == "instance"
+    assert bytes(owner) == b"class"
+    assert "".join(reversed(owner)) == "class"
+
 
 def saved_bound_method():
     class Target:
