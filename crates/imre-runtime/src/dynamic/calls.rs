@@ -1101,6 +1101,7 @@ impl Context {
     pub(super) fn native_base(class: &str) -> Option<&'static str> {
         Some(match class {
             "bool" => "int",
+            "typing._AnyMeta" => "type",
             "collections.abc._CallableGenericAlias" => "types.GenericAlias",
             "datetime.datetime" => "datetime.date",
             "datetime.timezone" => stdlib::datetime::TZINFO,

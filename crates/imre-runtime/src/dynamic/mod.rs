@@ -3211,6 +3211,17 @@ impl Context {
             {
                 self.classes.insert("decimal.Decimal".into(), class);
             }
+            if name == "typing"
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("typing.py"))
+                && let Some(class) = self.scope_name(scope, "_SpecialGenericAlias")
+            {
+                // Callable retains its defining base even when sys.modules["typing"] changes.
+                self.classes
+                    .entry("typing._SpecialGenericAlias".into())
+                    .or_insert(class);
+            }
         }
         Ok(())
     }
