@@ -12,6 +12,7 @@ pub(super) enum Kind {
 #[derive(Clone)]
 pub(super) struct Guard {
     pub(super) regex: Regex,
+    pub(super) program: String,
     pub(super) kind: Kind,
     pub(super) width: usize,
 }
