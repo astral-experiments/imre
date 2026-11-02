@@ -452,6 +452,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "TypeVar"
             | "TypeVarTuple"
             | "_UnpackGenericAlias"
+            | "_eval_type_expression"
             | "Any"
             | "Callable"
             | "cast"

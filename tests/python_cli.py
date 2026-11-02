@@ -1458,6 +1458,8 @@ def report(text):
         for name in ("boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py"):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
+        hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
+        compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":
             exe = root / "marshal-allocation"
             built = run(imre, "build", fixtures / "boxed_marshal_allocation.py",
