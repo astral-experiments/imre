@@ -2829,19 +2829,16 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if class == "mappingproxy" && matches!(name, "__repr__" | "__str__") =>
+                if class == "mappingproxy"
+                    && (matches!(name, "__repr__" | "__str__") || builtins::MAPPING_PROXY_METHODS.contains(&name)) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
-            Value::MappingProxy(_) if matches!(name, "__repr__" | "__str__") => {
+            Value::MappingProxy(_)
+                if matches!(name, "__repr__" | "__str__") || builtins::MAPPING_PROXY_METHODS.contains(&name) => {
                 let descriptor = self.builtin(&format!("mappingproxy.{name}"));
                 let owner = self.builtin("mappingproxy");
                 return self.bind_attribute(descriptor, obj, owner);
-            }
-            Value::MappingProxy(_)
-                if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
-            {
-                return self.lookup_attr(self.mapping_proxy_target(obj), name);
             }
             Value::Native(ref symbol) if symbol == "open" && name == "__self__" => {
                 if !self.builtins.contains_key("_io.open.__self__") {

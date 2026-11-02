@@ -65,6 +65,7 @@ impl BuiltinDescriptor {
                 Some((defaultdict::CLASS, attr, defaultdict::METHODS))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("mappingproxy", attr)) => Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS)),
             Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
@@ -327,6 +328,17 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__doc__" if self.owner == "mappingproxy" && self.method => ctx.text(match self.name {
+                "keys" => "D.keys() -> a set-like object providing a view on D's keys",
+                "values" => "D.values() -> an object providing a view on D's values",
+                "items" => "D.items() -> a set-like object providing a view on D's items",
+                "copy" => "D.copy() -> a shallow copy of D",
+                "get" => "Return the value for key if key is in the mapping, else default.",
+                _ => return None,
+            }),
+            "__text_signature__" if self.owner == "mappingproxy" && self.method => {
+                ctx.text(if self.name == "get" { "($self, key, default=None, /)" } else { "($self, /)" })
+            }
             "__doc__" if self.name == "add_note" => ctx.text("Add a note to the exception"),
             "__text_signature__" if self.name == "add_note" => ctx.text("($self, note, /)"),
             "__doc__" if self.name == "__call__" => ctx.text("Call self as a function."),
