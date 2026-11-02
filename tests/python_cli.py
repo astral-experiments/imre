@@ -3070,6 +3070,21 @@ for name in ("md4", "ripemd160"):
                         extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
                     )
         if os.name == "posix":
+            compare("-B", "-c", "import os; print('PATH' in list(os.environ.keys()))")
+            compare("-B", "-c", """from os import environb as env
+keys = env.keys()
+key = b'IMRE_KEYS_VIEW_\\xff'
+env[key] = b'\\xfe'
+assert key in keys
+del env[key]
+assert key not in keys
+try:
+    env.keys(1)
+except TypeError:
+    pass
+else:
+    raise AssertionError("keys accepted an argument")
+""")
             check_boxed_unittest_main_reporting(imre, root, run)
             check_unittest_main_names(imre, root, run)
             check_unittest_file_discovery(imre, root, run)
