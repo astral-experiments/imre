@@ -31,10 +31,10 @@ pub(super) struct ChildPipes {
 impl ChildPipes {
     /// Open all pipe handles before allocating their Python stream buffers.
     fn open(
-        modes: [u32; 3],
+        modes: &[u32],
         descriptors: [RawFd; 3],
         pipe_capacity: Option<u32>,
-    ) -> Result<(Self, [Option<OwnedFd>; 3])> {
+    ) -> io::Result<(Self, [Option<OwnedFd>; 3])> {
         let mut child = Self::default();
         let mut parents = [None, None, None];
         if modes.iter().any(|mode| matches!(mode, 1 | 2)) {
@@ -44,9 +44,9 @@ impl ChildPipes {
                 fd >= 0 && unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0
             });
         }
-        for (i, mode) in modes.into_iter().enumerate() {
+        for (i, &mode) in modes.iter().enumerate() {
             if mode == 1 {
-                let (read, write) = super::pipe_size::open(pipe_capacity).map_err(errno_error)?;
+                let (read, write) = super::pipe_size::open(pipe_capacity)?;
                 let (read, write): (OwnedFd, OwnedFd) = (read.into(), write.into());
                 let (parent, other) = if i == 0 { (write, read) } else { (read, write) };
                 parents[i] = Some(parent);
@@ -56,8 +56,7 @@ impl ChildPipes {
                     fs::OpenOptions::new()
                         .read(true)
                         .write(true)
-                        .open("/dev/null")
-                        .map_err(errno_error)?,
+                        .open("/dev/null")?,
                 );
             }
         }
@@ -307,22 +306,8 @@ fn check_handles(
     fork_error_pipe: bool,
     pipe_capacity: Option<u32>,
 ) -> io::Result<()> {
-    let mut pipes = [const { None }; 3];
-    let mut devnull = None;
-    for (pipe, mode) in pipes.iter_mut().zip(modes) {
-        match mode {
-            1 => *pipe = Some(super::pipe_size::open(pipe_capacity)?),
-            2 if devnull.is_none() => {
-                devnull = Some(
-                    fs::OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .open("/dev/null")?,
-                );
-            }
-            _ => {}
-        }
-    }
+    // Keep the stream descriptors open while probing the fork error pipe.
+    let _handles = ChildPipes::open(modes, [-1; 3], pipe_capacity)?;
     if fork_error_pipe {
         let (_read, write) = io::pipe()?;
         // The fork child needs its error writer above the standard descriptors.
@@ -402,7 +387,8 @@ unsafe fn spawn(config: &LaunchConfig, extras: LaunchExtras) -> Result<Popen> {
             _ => -1,
         };
     }
-    let (prepared, parents) = ChildPipes::open(modes, descriptors, pipe_capacity)?;
+    let (prepared, parents) =
+        ChildPipes::open(&modes, descriptors, pipe_capacity).map_err(errno_error)?;
     // Python opens the parent-side pipe wrappers after it collects the file handles.
     let bufsize = if modes.contains(&1) {
         // SAFETY: the caller roots the buffer-size integer.
