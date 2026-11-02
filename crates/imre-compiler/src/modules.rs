@@ -1007,6 +1007,7 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const REGEX_DEBUG: Self = Self::ScopedObjectExport("re.DEBUG");
     pub(crate) const SOCKETSERVER_CLASS: Self = Self::ScopedObjectExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
@@ -2561,6 +2562,7 @@ impl IntrinsicModule {
             (Self::Re, "split") => Intrinsic::ObjectRuntimeExport("re.split"),
             (Self::Re, "sub") => Intrinsic::RegexSub,
             (Self::Re, "subn") => Intrinsic::ObjectRuntimeExport("re.subn"),
+            (Self::Re, "DEBUG") => Intrinsic::REGEX_DEBUG,
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
             (Self::Re, "UNICODE") => Intrinsic::RegexUnicode,
             (Self::Re, "Pattern") => Intrinsic::RegexPattern,

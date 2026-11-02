@@ -237,8 +237,24 @@ impl Checker<'_> {
                 ));
             }
         };
+        if self.debug_flags(flags) {
+            // Emitting a fresh diagnostic uses the current Python stdout on each compile.
+            return Err(self.scoped_builtin_error("re.DEBUG", flags));
+        }
         self.fixed_flags(flags).ok_or_else(|| error(self.source, flags,
             "regex flags must be literal 0, re.VERBOSE or re.UNICODE, optionally combined with |"))
+    }
+
+    fn debug_flags(&self, expression: &ast::Expr) -> bool {
+        match expression {
+            ast::Expr::BinOp(op) if op.op == ast::Operator::BitOr => {
+                self.debug_flags(&op.left) || self.debug_flags(&op.right)
+            }
+            ast::Expr::NumberLiteral(n) => {
+                matches!(&n.value, ast::Number::Int(value) if value.as_i64().is_some_and(|bits| bits & 128 != 0))
+            }
+            _ => self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::REGEX_DEBUG)),
+        }
     }
 
     /// UNICODE is already the matching mode for a str pattern, but is still a

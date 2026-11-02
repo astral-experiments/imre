@@ -193,6 +193,37 @@ impl Pattern {
         }
     }
 
+    /// Describe the matcher and translated program that this Pattern will execute.
+    fn debug_program(&self, output: &mut String) {
+        let backend = match &self.regex {
+            Matcher::Standard(_) => "regex-automata meta",
+            Matcher::Lookahead(_) => "fancy-regex",
+            Matcher::Guarded(_) => "progress-aware PikeVM",
+            Matcher::Asserted(_) => "assertion-aware Thompson NFA",
+        };
+        let kind = if self.bytes { "bytes" } else { "str" };
+        write!(
+            output,
+            "Imre regex ({backend}, {kind}, flags={:#x}, groups={})\n  program {:?}",
+            self.flags,
+            self.group_count(),
+            self.engine_source,
+        )
+        .unwrap();
+        for (slot, guard) in &self.assertions {
+            write!(
+                output,
+                "\n  assertion {slot} {:?} width={} {:?}",
+                guard.kind, guard.width, guard.program,
+            )
+            .unwrap();
+        }
+        if let Some(surrogates) = &self.surrogate_literals {
+            output.push_str("\n  surrogate matcher\n");
+            surrogates.debug_program(output);
+        }
+    }
+
     pub(in crate::dynamic) fn group_count(&self) -> usize {
         let info = self.regex.group_info();
         info.to_index(PatternID::ZERO, "imre.eol")
@@ -833,8 +864,9 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
             .to_i64()
             .unwrap()
     });
+    let debug = flags & DEBUG;
     let unknown = flags & !KNOWN_FLAGS;
-    let flags = flags & KNOWN_FLAGS;
+    let flags = flags & KNOWN_FLAGS & !DEBUG;
     let scalar = ctx.heap.get(ctx.scalar_value(id));
     let bytes = matches!(scalar, Value::Bytes(_));
     let projections = if let Value::SurrogateStr(points) = scalar {
@@ -976,7 +1008,14 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
             "Python int too large to convert to C int",
         ));
     }
-    pattern.flags |= unknown;
+    pattern.flags |= unknown | debug;
+    if debug != 0 {
+        let mut output = String::new();
+        pattern.debug_program(&mut output);
+        let print = ctx.builtin("print");
+        let text = ctx.text(output);
+        ctx.call(print, vec![text], Vec::new())?;
+    }
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))))
 }
 
@@ -1003,12 +1042,6 @@ fn check_flags(flags: i64, bytes: bool) -> Result<()> {
         return Err(Error::new(
             "ValueError",
             "ASCII and UNICODE flags are incompatible",
-        ));
-    }
-    if flags & DEBUG != 0 {
-        return Err(Error::new(
-            "NotImplementedError",
-            "unsupported native regular expression flags",
         ));
     }
     Ok(())
