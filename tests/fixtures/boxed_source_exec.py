@@ -202,7 +202,39 @@ class Cases(unittest.TestCase):
     assert visited == ["setup", "fail", "teardown", "setup", "pass", "teardown"]
 
 
+def source_name_deletion():
+    import gc
+    import weakref
+
+    namespace = {"weakref": weakref, "gc": gc, "name": "global"}
+    exec(
+        "class Box:\n"
+        "    name = 'local'\n"
+        "    del name\n"
+        "    remaining = name\n"
+        "def check():\n"
+        "    value = Box()\n"
+        "    ref = weakref.ref(value)\n"
+        "    del value\n"
+        "    gc.collect()\n"
+        "    return ref()\n",
+        namespace,
+    )
+    assert namespace["Box"].remaining == "global"
+    assert not hasattr(namespace["Box"], "name")
+    assert namespace["check"]() is None
+    try:
+        exec("def f():\n    del name\nf()", namespace)
+    except UnboundLocalError as error:
+        assert str(error) == "cannot access local variable 'name' where it is not associated with a value"
+    else:
+        raise AssertionError("deleting an unbound local must raise")
+    exec("del name", namespace)
+    assert "name" not in namespace
+
+
 def current():
+    source_name_deletion()
     source_classes()
     source_test_cases()
     syntax_members()
