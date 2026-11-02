@@ -372,11 +372,16 @@ fn unpack_arg(ctx: &Context, alias: &Alias) -> Option<Id> {
 }
 
 fn unpacked_tuple_args(ctx: &Context, arg: Id) -> Result<Id> {
-    let Value::GenericAlias(inner) = ctx.heap.get(arg) else { return Ok(NONE); };
+    let Value::GenericAlias(inner) = ctx.heap.get(arg) else {
+        return Ok(NONE);
+    };
     if ctx.builtins.get("tuple") == Some(&inner.origin) {
         Ok(inner.args)
     } else {
-        Err(Error::new("TypeError", "Unpack[...] must be used with a tuple type"))
+        Err(Error::new(
+            "TypeError",
+            "Unpack[...] must be used with a tuple type",
+        ))
     }
 }
 
@@ -1077,7 +1082,7 @@ fn generic_alias_method(ctx: &Context, name: &str) -> Option<Id> {
 
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
     if name != "__name__"
-        && matches!(ctx.heap.get(value), Value::Native(class) if class.starts_with("typing.") && !(class == "typing.TypeAliasType" && name == "__module__") )
+        && matches!(ctx.heap.get(value), Value::Native(class) if class.starts_with("typing.") && !(class == "typing.TypeAliasType" && name == "__module__"))
         && let Some(&dictionary) = ctx.native_type_dicts.get(&value)
         && let Some(member) = ctx.dict_named_item(dictionary, name)
     {

@@ -141,7 +141,9 @@ impl BuiltinDescriptor {
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 Some((layout.class, attr, &["__reduce__"][..]))
             }
-            Some(("typing.TypeAliasType", attr)) => Some(("typing.TypeAliasType", attr, &["__reduce__"][..])),
+            Some(("typing.TypeAliasType", attr)) => {
+                Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
+            }
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
             _ => None,
         };
