@@ -1,0 +1,911 @@
+{
+  "prior_final": {
+    "source": "d7beefe0352e3cd83a6d4a1642357b499dcd4eee",
+    "archive_sha256": "c3594e8dd2354e83c6b84675b75b5616e46421c9bf22b2aa9b15e813f35059ae",
+    "spki_der_sha256": "196e7b8a7df217e481f6e74eba8dc0e88589309e77d4389d9da6077ca44cd71f",
+    "base_url": "https://raw.githubusercontent.com/astral-experiments/imre/24f0785a1bd0825c76bee95e6f592cdf9dea2931/"
+  },
+  "prior_supplement": {
+    "source": "d7beefe0352e3cd83a6d4a1642357b499dcd4eee",
+    "archive_sha256": "1a8e1dba062ffc832589d391f5a86b6a281c525da8719d3c20d21351d1798c45",
+    "spki_der_sha256": "f8bc33df880d1970ef5d62b18e9b111bba0ffb2f4f84e9d45df9f6f7c81d6862",
+    "base_url": "https://raw.githubusercontent.com/astral-experiments/imre/de4b1e83e6d1a366825e43407e8f1277bb7b5174/"
+  },
+  "guard_base": "e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4",
+  "public_writer_squash": "3d5aada66355de4bc824d6a246fb52609a4af78c",
+  "public_native_verdict_head": "0c9885cf2953271a30a7a40b7ac2f5a8bf4f76db",
+  "writer_squash_build": "Cargo failed before any native compiler or test process ran. See public-squash-failure/ in the archive.",
+  "public_build_repair": {
+    "pr": 4033,
+    "tested_sha": "03bea799c3e587e03f02728bdd9b367402e08f91",
+    "sha": "0c9885cf2953271a30a7a40b7ac2f5a8bf4f76db",
+    "url": "https://github.com/astral-experiments/imre/pull/4033",
+    "native_results_credited_to_writer_classes": 0
+  },
+  "public_first_parent": "83112e95c9bf505091edecfaa4ce0d73dbee52e0",
+  "public_tree": "40dc641b7051992d156444b83dc71e5e1b410df0",
+  "public_patch_sha256": "79c2a8eaa2055e52c6ccdc7fca0ad8425c5988ecaf612d62316067e16be4c044",
+  "qualified_head": "8e36c4a58c01425b23692657aa0489b58ed83c5a",
+  "intermediate_heads": {
+    "base": "aa1c3a37ed8624318a63c5790d24264803526677",
+    "tested": "18b0d5b672718985c2e1f2cfad9f32033172c943",
+    "guarded": "0797c323a1a1afa9fa2d8580514efbca27acce4e",
+    "final": "55b01ff2fa1d4699581bcf9c1c47f362ffd4696f",
+    "reparent": "f01be6aab50dd0d5b116e3406ba993093a0edf9d",
+    "resolved": "dc5c34db72c51b0166bbab5d867a77de2b3c8fa3"
+  },
+  "exploratory_scope": "A distinct stock-only exploratory process is described in the source-review note and contributes zero canonical outcomes or matched controls.",
+  "separate_pre_writer_public_attribution": [
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_error_through_destructor",
+      "occurrence": 1,
+      "opt": "O0",
+      "head": "e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4",
+      "raw": "class/attribution/upstream/O0/case/callbacks.stdout",
+      "sha256": "7976c576e55a5c2e2394c937b483a3bbdc1b03f47dc973d19b2cbb4964c00072",
+      "ordinal_in_667": 180
+    },
+    {
+      "id": "test.test_io.CBufferedWriterTest.test_error_through_destructor",
+      "occurrence": 1,
+      "opt": "O3",
+      "head": "e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4",
+      "raw": "class/attribution/upstream/O3/case/callbacks.stdout",
+      "sha256": "7976c576e55a5c2e2394c937b483a3bbdc1b03f47dc973d19b2cbb4964c00072",
+      "ordinal_in_667": 180
+    }
+  ],
+  "current_public_complete_profiles": [
+    "default",
+    "opt2"
+  ],
+  "current_public_passed_both_complete_class": [
+    "test.test_io.CBufferedWriterTest.test_args_error",
+    "test.test_io.CBufferedWriterTest.test_close_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_constructor",
+    "test.test_io.CBufferedWriterTest.test_context_manager",
+    "test.test_io.CBufferedWriterTest.test_destructor",
+    "test.test_io.CBufferedWriterTest.test_detach",
+    "test.test_io.CBufferedWriterTest.test_detach_flush",
+    "test.test_io.CBufferedWriterTest.test_error_through_destructor",
+    "test.test_io.CBufferedWriterTest.test_fileno",
+    "test.test_io.CBufferedWriterTest.test_flush",
+    "test.test_io.CBufferedWriterTest.test_flush_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_initialization",
+    "test.test_io.CBufferedWriterTest.test_invalid_args",
+    "test.test_io.CBufferedWriterTest.test_max_buffer_size_removal",
+    "test.test_io.CBufferedWriterTest.test_misbehaved_io",
+    "test.test_io.CBufferedWriterTest.test_multi_close",
+    "test.test_io.CBufferedWriterTest.test_nonnormalized_close_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_override_destructor",
+    "test.test_io.CBufferedWriterTest.test_readonly_attributes",
+    "test.test_io.CBufferedWriterTest.test_truncate",
+    "test.test_io.CBufferedWriterTest.test_truncate_after_write",
+    "test.test_io.CBufferedWriterTest.test_unseekable",
+    "test.test_io.CBufferedWriterTest.test_write",
+    "test.test_io.CBufferedWriterTest.test_write_and_rewind",
+    "test.test_io.CBufferedWriterTest.test_write_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_write_overflow",
+    "test.test_io.CBufferedWriterTest.test_writelines",
+    "test.test_io.CBufferedWriterTest.test_writelines_error",
+    "test.test_io.CBufferedWriterTest.test_writelines_userlist"
+  ],
+  "current_public_passed_both_supplement": [
+    "test.test_io.CBufferedWriterTest.test_writes",
+    "test.test_io.CBufferedWriterTest.test_writes_and_flushes",
+    "test.test_io.CBufferedWriterTest.test_writes_and_seeks",
+    "test.test_io.CBufferedWriterTest.test_writes_and_truncates"
+  ],
+  "raw_controls": {
+    "stock": [
+      {
+        "opt": "reference",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/stock/reference/files/result.json"
+      },
+      {
+        "opt": "reference",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/stock/reference/wrong-bytes/result.json"
+      },
+      {
+        "opt": "reference",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/stock/reference/invalid/result.json"
+      },
+      {
+        "opt": "reference",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/stock/reference/weak/result.json"
+      },
+      {
+        "opt": "reference",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/stock/reference/writable/result.json"
+      },
+      {
+        "opt": "reference",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/stock/reference/tell/result.json"
+      }
+    ],
+    "base": [
+      {
+        "opt": "O0",
+        "case": "files",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O0/files/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O0/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "invalid",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O0/invalid/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "weak",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O0/weak/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "writable",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O0/writable/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "tell",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O0/tell/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "files",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O3/files/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O3/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "invalid",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O3/invalid/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "weak",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O3/weak/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "writable",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O3/writable/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "tell",
+        "exit": 1,
+        "stock_matched": false,
+        "raw": "controls/base/O3/tell/result.json"
+      }
+    ],
+    "tested": [
+      {
+        "opt": "O0",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/tested/O0/files/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/tested/O0/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/tested/O0/invalid/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/tested/O0/weak/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/tested/O0/writable/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/tested/O0/tell/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/tested/O3/files/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/tested/O3/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/tested/O3/invalid/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/tested/O3/weak/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/tested/O3/writable/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/tested/O3/tell/result.json"
+      }
+    ],
+    "guarded": [
+      {
+        "opt": "O0",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/guarded/O0/files/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/guarded/O0/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/guarded/O0/invalid/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/guarded/O0/weak/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/guarded/O0/writable/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/guarded/O0/tell/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/guarded/O3/files/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/guarded/O3/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/guarded/O3/invalid/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/guarded/O3/weak/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/guarded/O3/writable/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/guarded/O3/tell/result.json"
+      }
+    ],
+    "final": [
+      {
+        "opt": "O0",
+        "original_build": "controls/tested/O0/build.json",
+        "original_stage": "tested",
+        "final_refs": {
+          "action": "reuse_verified_binary",
+          "build_exit_at_prior_head": 0,
+          "prior_head": "18b0d5b672718985c2e1f2cfad9f32033172c943",
+          "prior_argv": [
+            "/workspace/scratch/cbwr-bin-tested/imre",
+            "build",
+            "/workspace/scratch/cbwr-controls/probe.py",
+            "--no-cache",
+            "--runtime",
+            "/workspace/scratch/cbwr-bin-tested/libimre_runtime.a",
+            "--clang",
+            "/workspace/scratch/tools/clang",
+            "--opt-level",
+            "0",
+            "-o",
+            "/workspace/scratch/cbwr-controls/tested/O0/probe"
+          ],
+          "prior_build_receipt": "tested/O0/build.json",
+          "prior_build_receipt_sha256": "45225d79bf27b2500a9f793baab414ee87dc20620d5b0bc5b926abf1a02248b6",
+          "source_sha256": "4b2960501c145942b24fc420b485589c9b6fba8de839f619a954d55e83100bc6",
+          "same_compiler_runtime_sha256": {
+            "imre": "b59912b8f5a184577614dab5bac0790540c6a3f8279ddb49dee1d4e582afd145",
+            "libimre_runtime.a": "66df551fb5913f1c8ab8d96ba4356b7f289b520898fe36238ed7fadbf0a50e6a"
+          },
+          "executable_sha256": "f63c86dc7a1db4ce60d9ea40109abd97f9d0df5d92bedc9e9d2aa628976f6b88",
+          "final_head": "55b01ff2fa1d4699581bcf9c1c47f362ffd4696f",
+          "opt": 0
+        }
+      },
+      {
+        "opt": "O0",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/final/O0/files/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/final/O0/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/final/O0/invalid/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/final/O0/weak/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/final/O0/writable/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/final/O0/tell/result.json"
+      },
+      {
+        "opt": "O3",
+        "original_build": "controls/tested/O3/build.json",
+        "original_stage": "tested",
+        "final_refs": {
+          "action": "reuse_verified_binary",
+          "build_exit_at_prior_head": 0,
+          "prior_head": "18b0d5b672718985c2e1f2cfad9f32033172c943",
+          "prior_argv": [
+            "/workspace/scratch/cbwr-bin-tested/imre",
+            "build",
+            "/workspace/scratch/cbwr-controls/probe.py",
+            "--no-cache",
+            "--runtime",
+            "/workspace/scratch/cbwr-bin-tested/libimre_runtime.a",
+            "--clang",
+            "/workspace/scratch/tools/clang",
+            "--opt-level",
+            "3",
+            "-o",
+            "/workspace/scratch/cbwr-controls/tested/O3/probe"
+          ],
+          "prior_build_receipt": "tested/O3/build.json",
+          "prior_build_receipt_sha256": "24d83cbdce0a3fb4ef5d59e163cef7891156c3998a28f15d2e10f927b071a874",
+          "source_sha256": "4b2960501c145942b24fc420b485589c9b6fba8de839f619a954d55e83100bc6",
+          "same_compiler_runtime_sha256": {
+            "imre": "b59912b8f5a184577614dab5bac0790540c6a3f8279ddb49dee1d4e582afd145",
+            "libimre_runtime.a": "66df551fb5913f1c8ab8d96ba4356b7f289b520898fe36238ed7fadbf0a50e6a"
+          },
+          "executable_sha256": "e94bfed1a57cdd26bbbe3b53d87306f859265576ea4bf6be87ba007219b333f5",
+          "final_head": "55b01ff2fa1d4699581bcf9c1c47f362ffd4696f",
+          "opt": 3
+        }
+      },
+      {
+        "opt": "O3",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/final/O3/files/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/final/O3/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/final/O3/invalid/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/final/O3/weak/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/final/O3/writable/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/final/O3/tell/result.json"
+      }
+    ],
+    "resolved": [
+      {
+        "opt": "O0",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/resolved/O0/files/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/resolved/O0/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/resolved/O0/invalid/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/resolved/O0/weak/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/resolved/O0/writable/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/resolved/O0/tell/result.json"
+      },
+      {
+        "opt": "O3",
+        "build_exit": null,
+        "build_timed_out": true,
+        "build_elapsed_s": 900.227551,
+        "native_comparisons": 0,
+        "scope": "Incomplete or interrupted stage; this entry covers compilation."
+      }
+    ],
+    "integrated": [
+      {
+        "opt": "O0",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/integrated/O0/files/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/integrated/O0/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/integrated/O0/invalid/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/integrated/O0/weak/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/integrated/O0/writable/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/integrated/O0/tell/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/integrated/O3/files/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/integrated/O3/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/integrated/O3/invalid/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/integrated/O3/weak/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/integrated/O3/writable/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/integrated/O3/tell/result.json"
+      }
+    ],
+    "public": [
+      {
+        "opt": "O0",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/public/O0/files/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/public/O0/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/public/O0/invalid/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/public/O0/weak/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/public/O0/writable/result.json"
+      },
+      {
+        "opt": "O0",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/public/O0/tell/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "files",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/public/O3/files/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "wrong-bytes",
+        "exit": 1,
+        "stock_matched": true,
+        "raw": "controls/public/O3/wrong-bytes/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "invalid",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/public/O3/invalid/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "weak",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/public/O3/weak/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "writable",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/public/O3/writable/result.json"
+      },
+      {
+        "opt": "O3",
+        "case": "tell",
+        "exit": 0,
+        "stock_matched": true,
+        "raw": "controls/public/O3/tell/result.json"
+      }
+    ]
+  },
+  "focused_build_provenance": {
+    "base": {
+      "O0": "fresh native compiler invocation",
+      "O3": "fresh native compiler invocation"
+    },
+    "tested": {
+      "O0": "fresh native compiler invocation",
+      "O3": "fresh native compiler invocation"
+    },
+    "guarded": {
+      "O0": "fresh native compiler invocation",
+      "O3": "fresh native compiler invocation"
+    },
+    "final": {
+      "O0": "independently hash-verified build from tested 18b0d5b672718985c2e1f2cfad9f32033172c943; fresh process",
+      "O3": "independently hash-verified build from tested 18b0d5b672718985c2e1f2cfad9f32033172c943; fresh process"
+    },
+    "reparent": {
+      "O0": "fresh native compiler invocation",
+      "O3": "fresh native compiler invocation"
+    },
+    "resolved": {
+      "O0": "fresh native compiler invocation",
+      "O3": "fresh native compiler invocation"
+    },
+    "upstream": {
+      "O0": "fresh native compiler invocation",
+      "O3": "fresh native compiler invocation"
+    },
+    "integrated": {
+      "O0": "fresh native compiler invocation",
+      "O3": "fresh native compiler invocation"
+    },
+    "public": {
+      "O0": "fresh native compiler invocation",
+      "O3": "fresh native compiler invocation"
+    }
+  },
+  "stage": "final",
+  "source_heads": {
+    "base": "aa1c3a37ed8624318a63c5790d24264803526677",
+    "tested": "18b0d5b672718985c2e1f2cfad9f32033172c943",
+    "guarded": "0797c323a1a1afa9fa2d8580514efbca27acce4e",
+    "final": "55b01ff2fa1d4699581bcf9c1c47f362ffd4696f",
+    "reparent": "f01be6aab50dd0d5b116e3406ba993093a0edf9d",
+    "resolved": "dc5c34db72c51b0166bbab5d867a77de2b3c8fa3",
+    "upstream": "e3ff3e595bcd5dc0a92048b18e49885d77fb0ee4",
+    "integrated": "8e36c4a58c01425b23692657aa0489b58ed83c5a",
+    "public": "0c9885cf2953271a30a7a40b7ac2f5a8bf4f76db"
+  },
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "prior_primary_paired_pass": 26,
+  "prior_supplement_extra_paired_pass": 4,
+  "scope": "Post-merge public 43-case replay and focused raw controls.",
+  "base_focused_paired_pass": [],
+  "tested_focused_paired_pass": [
+    "test.test_io.CBufferedWriterTest.test_constructor",
+    "test.test_io.CBufferedWriterTest.test_initialization"
+  ],
+  "guarded_focused_paired_pass": [
+    "test.test_io.CBufferedWriterTest.test_constructor",
+    "test.test_io.CBufferedWriterTest.test_initialization"
+  ],
+  "final_focused_paired_pass": [
+    "test.test_io.CBufferedWriterTest.test_constructor",
+    "test.test_io.CBufferedWriterTest.test_initialization"
+  ],
+  "reparent_focused_paired_pass": [],
+  "resolved_focused_paired_pass": [
+    "test.test_io.CBufferedWriterTest.test_constructor",
+    "test.test_io.CBufferedWriterTest.test_initialization"
+  ],
+  "upstream_focused_paired_pass": [],
+  "integrated_focused_paired_pass": [
+    "test.test_io.CBufferedWriterTest.test_constructor",
+    "test.test_io.CBufferedWriterTest.test_initialization"
+  ],
+  "public_focused_paired_pass": [
+    "test.test_io.CBufferedWriterTest.test_constructor",
+    "test.test_io.CBufferedWriterTest.test_initialization"
+  ],
+  "current_public_paired_gains_vs_prior": [
+    "test.test_io.CBufferedWriterTest.test_constructor",
+    "test.test_io.CBufferedWriterTest.test_error_through_destructor",
+    "test.test_io.CBufferedWriterTest.test_initialization"
+  ],
+  "gains_reproduced_on_current_parent_and_resolved_on_reviewed_and_public_heads": [
+    "test.test_io.CBufferedWriterTest.test_constructor",
+    "test.test_io.CBufferedWriterTest.test_initialization"
+  ],
+  "other_new_public_paired_ids_vs_prior": [
+    "test.test_io.CBufferedWriterTest.test_error_through_destructor"
+  ],
+  "historical_and_current_paired_union": 33,
+  "actually_observed_current_public_paired_pass": [
+    "test.test_io.CBufferedWriterTest.test_args_error",
+    "test.test_io.CBufferedWriterTest.test_close_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_constructor",
+    "test.test_io.CBufferedWriterTest.test_context_manager",
+    "test.test_io.CBufferedWriterTest.test_destructor",
+    "test.test_io.CBufferedWriterTest.test_detach",
+    "test.test_io.CBufferedWriterTest.test_detach_flush",
+    "test.test_io.CBufferedWriterTest.test_error_through_destructor",
+    "test.test_io.CBufferedWriterTest.test_fileno",
+    "test.test_io.CBufferedWriterTest.test_flush",
+    "test.test_io.CBufferedWriterTest.test_flush_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_initialization",
+    "test.test_io.CBufferedWriterTest.test_invalid_args",
+    "test.test_io.CBufferedWriterTest.test_max_buffer_size_removal",
+    "test.test_io.CBufferedWriterTest.test_misbehaved_io",
+    "test.test_io.CBufferedWriterTest.test_multi_close",
+    "test.test_io.CBufferedWriterTest.test_nonnormalized_close_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_override_destructor",
+    "test.test_io.CBufferedWriterTest.test_readonly_attributes",
+    "test.test_io.CBufferedWriterTest.test_truncate",
+    "test.test_io.CBufferedWriterTest.test_truncate_after_write",
+    "test.test_io.CBufferedWriterTest.test_unseekable",
+    "test.test_io.CBufferedWriterTest.test_write",
+    "test.test_io.CBufferedWriterTest.test_write_and_rewind",
+    "test.test_io.CBufferedWriterTest.test_write_error_on_close",
+    "test.test_io.CBufferedWriterTest.test_write_overflow",
+    "test.test_io.CBufferedWriterTest.test_writelines",
+    "test.test_io.CBufferedWriterTest.test_writelines_error",
+    "test.test_io.CBufferedWriterTest.test_writelines_userlist",
+    "test.test_io.CBufferedWriterTest.test_writes",
+    "test.test_io.CBufferedWriterTest.test_writes_and_flushes",
+    "test.test_io.CBufferedWriterTest.test_writes_and_seeks",
+    "test.test_io.CBufferedWriterTest.test_writes_and_truncates"
+  ],
+  "pairing_scope": "Each credited ID has a successful START/PASS/STOP in both ordinary O0 and O3 on the same source head in one labeled profile. An ID contributes at most once to the set union."
+}

@@ -1,0 +1,466 @@
+diff --git a/crates/imre-runtime/src/dynamic/stdlib/io.rs b/crates/imre-runtime/src/dynamic/stdlib/io.rs
+index 087bb7c2..d0256a7d 100644
+--- a/crates/imre-runtime/src/dynamic/stdlib/io.rs
++++ b/crates/imre-runtime/src/dynamic/stdlib/io.rs
+@@ -41,6 +41,7 @@ pub(in crate::dynamic) enum MemoryStream {
+     BufferedFile(Id),
+     Reader(std::rc::Rc<buffered_reader::Reader>),
+     UninitializedReader(Option<Id>),
++    UninitializedWriter(Option<Id>),
+     BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
+     Pair(rwpair::Pair),
+     Bytes(std::rc::Rc<bytes_io::BytesIo>),
+diff --git a/crates/imre-runtime/src/dynamic/stdlib/io/bytes_writer.rs b/crates/imre-runtime/src/dynamic/stdlib/io/bytes_writer.rs
+index 7180cd86..486dc13d 100644
+--- a/crates/imre-runtime/src/dynamic/stdlib/io/bytes_writer.rs
++++ b/crates/imre-runtime/src/dynamic/stdlib/io/bytes_writer.rs
+@@ -13,6 +13,8 @@ use super::{Context, Error, Id, MemoryStream, NONE, Result, TRUE, Value};
+ 
+ pub(in crate::dynamic) struct Writer {
+     pub(in crate::dynamic) raw: Cell<Option<Id>>,
++    pub(super) active: super::native_writer::ActiveCall,
++    pub(super) ready: Cell<bool>,
+     capacity: usize,
+     pending: RefCell<Vec<u8>>,
+     written: Cell<usize>,
+@@ -58,26 +60,23 @@ fn native_writer(ctx: &Context, raw: Id) -> Option<Rc<BytesIo>> {
+     None
+ }
+ 
+-pub(super) fn initialize(ctx: &mut Context, receiver: Id, raw: Id, capacity: usize) -> Result<Id> {
+-    // CPython probes the initial position, including when the stream is not seekable.
+-    let _ = invoke(ctx, raw, "tell", vec![]);
+-    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+-        return Err(Error::new(
+-            "NotImplementedError",
+-            "BufferedWriter reinitialization is unsupported",
+-        ));
+-    };
+-    if memory_stream.is_some() {
+-        return Err(Error::new(
+-            "NotImplementedError",
+-            "BufferedWriter reinitialization is unsupported",
+-        ));
+-    }
++pub(super) fn initialize(
++    ctx: &mut Context,
++    receiver: Id,
++    raw: Id,
++    capacity: usize,
++    revived: bool,
++) -> Result<Id> {
+     let mut pending = Vec::new();
+     pending
+         .try_reserve_exact(capacity)
+         .map_err(|_| crate::Error::allocation())?;
++    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
++        unreachable!()
++    };
+     *memory_stream = Some(MemoryStream::BufferedBytes(Rc::new(Writer {
++        active: super::native_writer::ActiveCall::default(),
++        ready: Cell::new(revived),
+         raw: Cell::new(Some(raw)),
+         capacity,
+         pending: RefCell::new(pending),
+@@ -85,6 +84,9 @@ pub(super) fn initialize(ctx: &mut Context, receiver: Id, raw: Id, capacity: usi
+         unflushed: Cell::new(0),
+         busy: Cell::new(false),
+     })));
++    // Both tell() and conversion of its result may recursively initialize this same writer.
++    let _ = invoke(ctx, raw, "tell", vec![]).and_then(|value| position(ctx, value));
++    super::descriptor_buffer::finish_writer_probe(ctx, receiver)?;
+     Ok(NONE)
+ }
+ 
+@@ -208,6 +210,15 @@ fn position(ctx: &mut Context, result: Id) -> Result<i64> {
+ }
+ 
+ impl Writer {
++    pub(super) fn finish_probe(&self) -> Result<()> {
++        self.raw()?;
++        self.pending.borrow_mut().clear();
++        self.unflushed.set(0);
++        self.written.set(0);
++        self.ready.set(true);
++        Ok(())
++    }
++
+     fn raw(&self) -> Result<Id> {
+         self.raw
+             .get()
+@@ -310,6 +321,12 @@ impl Writer {
+         if name == "raw" {
+             return Ok(self.raw.get().unwrap_or(NONE));
+         }
++        if !self.ready.get() {
++            return Err(Error::new(
++                "ValueError",
++                "I/O operation on uninitialized object",
++            ));
++        }
+         let whence = if name == "seek" && args.len() == 2 {
+             ctx.index_integer(args[1])?
+                 .to_i64()
+diff --git a/crates/imre-runtime/src/dynamic/stdlib/io/descriptor_buffer.rs b/crates/imre-runtime/src/dynamic/stdlib/io/descriptor_buffer.rs
+index ccdc777c..4cd70656 100644
+--- a/crates/imre-runtime/src/dynamic/stdlib/io/descriptor_buffer.rs
++++ b/crates/imre-runtime/src/dynamic/stdlib/io/descriptor_buffer.rs
+@@ -46,6 +46,72 @@ pub(super) fn explicit_reader_raw(ctx: &Context, receiver: Id) -> Option<Id> {
+     (fd.reading && !fd.writing).then_some(fd.raw)
+ }
+ 
++/// Argument conversion precedes invalidation. During writable() raw still names
++/// the outgoing stream; after it succeeds raw names the replacement even on error.
++fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -> Result<()> {
++    let previous = match ctx.heap.get(receiver) {
++        Value::Instance {
++            memory_stream: Some(MemoryStream::BufferedBytes(writer)),
++            ..
++        } => {
++            writer.active.check_idle()?;
++            writer.raw.get()
++        }
++        Value::Instance {
++            memory_stream: Some(MemoryStream::UninitializedWriter(raw)),
++            ..
++        } => *raw,
++        Value::Instance {
++            memory_stream: None,
++            ..
++        } => None,
++        _ => {
++            let Some((_, fd, fallback)) =
++                wrapper_fallback(ctx, receiver).filter(|(_, fd, _)| fd.writing && !fd.reading)
++            else {
++                return Err(Error::new(
++                    "NotImplementedError",
++                    "reinitializing a directly owned file writer is unsupported",
++                ));
++            };
++            fd.active.check_idle()?;
++            // Retiring this backing must neither flush pending writes nor close the caller's FileIO.
++            fallback.set(false);
++            Some(fd.raw)
++        }
++    };
++    let raw = replacement.or(previous);
++    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
++        unreachable!()
++    };
++    *memory_stream = Some(MemoryStream::UninitializedWriter(raw));
++    if let Some(old) = previous
++        && raw != previous
++    {
++        ctx.heap.weak_edge_removed(old);
++    }
++    Ok(())
++}
++
++/// A successful nested __init__ in tell() supplies the final raw and buffer.
++/// CPython resets that buffer after the outer position probe returns.
++pub(super) fn finish_writer_probe(ctx: &Context, receiver: Id) -> Result<()> {
++    if let Some(writer) = super::bytes_writer::state(ctx, receiver) {
++        return writer.finish_probe();
++    }
++    if let Some((_, fd, _)) = wrapper_fallback(ctx, receiver)
++        && let Some(Buffer::Writer(output)) = fd.buffer.borrow_mut().as_mut()
++    {
++        output.buffer.clear();
++        output.written = 0;
++        return Ok(());
++    }
++    Err(Error::new(
++        "NotImplementedError",
++        "position probe left the buffered writer uninitialized",
++    ))
++}
++
+ /// A Python finalizer can decline close, raise, or resurrect the writer.
+ pub(in crate::dynamic) fn note_writer_finalizer(ctx: &Context, owner: Id) {
+     if let Some((_, _, armed)) = wrapper_fallback(ctx, owner) {
+@@ -166,6 +232,9 @@ pub(super) fn initialize(
+     {
+         return super::buffered_reader::initialize(ctx, receiver, raw, capacity);
+     }
++    if owner == "BufferedWriter" {
++        invalidate_writer(ctx, receiver, None)?;
++    }
+     for &capability in capabilities {
+         let method = ctx.lookup_attr(raw, capability)?;
+         if ctx.call(method, vec![], Vec::new())? != TRUE {
+@@ -175,6 +244,13 @@ pub(super) fn initialize(
+             ));
+         }
+     }
++    let mut revived = false;
++    if owner == "BufferedWriter" {
++        // A successful nested initialization in writable() can make methods usable during tell().
++        revived = super::bytes_writer::state(ctx, receiver).is_some_and(|w| w.ready.get())
++            || backing(ctx, receiver).is_some();
++        invalidate_writer(ctx, receiver, Some(raw))?;
++    }
+     if capacity <= 0 {
+         return Err(Error::new(
+             "ValueError",
+@@ -184,7 +260,7 @@ pub(super) fn initialize(
+     let handle = match native_raw(ctx, raw, methods, owner) {
+         Ok(handle) => handle,
+         Err(_) if owner == "BufferedWriter" => {
+-            return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize);
++            return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize, revived);
+         }
+         Err(error) => return Err(error),
+     };
+@@ -462,6 +538,7 @@ pub(in crate::dynamic) struct BufferedFd {
+     drop_fallback: Option<Cell<bool>>,
+     handle: Rc<RawFile>,
+     callback_active: Cell<bool>,
++    pub(super) active: super::native_writer::ActiveCall,
+     buffer: RefCell<Option<Buffer>>,
+ }
+ 
+@@ -501,6 +578,7 @@ impl BufferedFd {
+             handle,
+             drop_fallback: None,
+             callback_active: Cell::new(false),
++            active: super::native_writer::ActiveCall::default(),
+             buffer: RefCell::new(Some(buffer)),
+         })
+     }
+@@ -522,6 +600,7 @@ impl BufferedFd {
+             writing: true,
+             drop_fallback: None,
+             callback_active: Cell::new(false),
++            active: super::native_writer::ActiveCall::default(),
+             buffer: RefCell::new(Some(Buffer::Random(buffer))),
+         })
+     }
+@@ -534,6 +613,7 @@ impl BufferedFd {
+             writing: !reading,
+             drop_fallback: None,
+             callback_active: Cell::new(false),
++            active: super::native_writer::ActiveCall::default(),
+             buffer: RefCell::new(Some(Buffer::Pipe(pipe))),
+         }
+     }
+diff --git a/crates/imre-runtime/src/dynamic/stdlib/io/native_writer.rs b/crates/imre-runtime/src/dynamic/stdlib/io/native_writer.rs
+index 34abb23e..3c8deae3 100644
+--- a/crates/imre-runtime/src/dynamic/stdlib/io/native_writer.rs
++++ b/crates/imre-runtime/src/dynamic/stdlib/io/native_writer.rs
+@@ -1,9 +1,36 @@
+ //! BufferedWriter retains the original FileIO and writes through its shared descriptor.
+ 
++use std::cell::Cell;
++
+ use super::super::{builtins, files};
+-use super::{Context, Error, FALSE, Id, NONE, Result, Value, descriptor_buffer, file_io};
++use super::{
++    Context, Error, FALSE, Id, MemoryStream, NONE, Result, Value, descriptor_buffer, file_io,
++};
+ use files::BinaryFile;
+ 
++/// A raw callback must not switch the backing under a native operation already using it.
++#[derive(Default)]
++pub(super) struct ActiveCall(Cell<bool>);
++
++impl ActiveCall {
++    pub(super) fn check_idle(&self) -> Result<()> {
++        if self.0.get() {
++            return Err(Error::new(
++                "NotImplementedError",
++                "reinitializing a buffered writer during an active I/O operation is unsupported",
++            ));
++        }
++        Ok(())
++    }
++
++    fn run<T>(&self, f: impl FnOnce() -> T) -> T {
++        let previous = self.0.replace(true);
++        let result = f();
++        self.0.set(previous);
++        result
++    }
++}
++
+ pub(super) const METHODS: &[&str] = &[
+     "__init__", "raw", "closed", "name", "mode", "writable", "seekable", "isatty", "fileno",
+     "flush", "close", "tell", "seek", "write", "truncate", "detach",
+@@ -70,18 +97,24 @@ pub(super) fn call(
+         return ctx.call(close, vec![], Vec::new());
+     }
+     if let Some(writer) = super::bytes_writer::state(ctx, receiver) {
+-        return if name == "write" {
+-            ctx.with_buffer_export(args[0], |ctx| writer.call(ctx, receiver, name, args))
+-        } else {
+-            writer.call(ctx, receiver, name, args)
+-        };
+-    }
+-    if name == "detach" {
+-        return Err(Error::new("UnsupportedOperation", "detach"));
++        return writer.active.run(|| {
++            if name == "write" {
++                ctx.with_buffer_export(args[0], |ctx| writer.call(ctx, receiver, name, args))
++            } else {
++                writer.call(ctx, receiver, name, args)
++            }
++        });
+     }
+     let Some(buffer) = descriptor_buffer::backing(ctx, receiver) else {
+         return if name == "raw" {
+-            Ok(NONE)
++            let raw = match ctx.heap.get(receiver) {
++                Value::Instance {
++                    memory_stream: Some(MemoryStream::UninitializedWriter(raw)),
++                    ..
++                } => *raw,
++                _ => None,
++            };
++            Ok(raw.unwrap_or(NONE))
+         } else {
+             Err(Error::new(
+                 "ValueError",
+@@ -89,6 +122,9 @@ pub(super) fn call(
+             ))
+         };
+     };
++    if name == "detach" {
++        return Err(Error::new("UnsupportedOperation", "detach"));
++    }
+     let Value::File(handle) = ctx.heap.get(buffer) else {
+         unreachable!("BufferedWriter backing must be a binary file")
+     };
+@@ -100,7 +136,7 @@ pub(super) fn call(
+         return Err(Error::new("ValueError", "truncate of closed file"));
+     }
+     if let BinaryFile::Descriptor(fd) = handle.as_ref() {
+-        return match name {
++        return fd.active.run(|| match name {
+             "raw" => Ok(fd.raw),
+             "name" | "mode" => ctx.lookup_attr(fd.raw, name),
+             "truncate" if owner == "BufferedRandom" => fd.call(ctx, receiver, name, args, kwargs),
+@@ -128,7 +164,7 @@ pub(super) fn call(
+                 }
+             }
+             _ => fd.call(ctx, receiver, name, args, kwargs),
+-        };
++        });
+     }
+     let (path, mode) = handle
+         .path_metadata()
+diff --git a/crates/imre-runtime/src/dynamic/value.rs b/crates/imre-runtime/src/dynamic/value.rs
+index 778ebef2..1a9168b2 100644
+--- a/crates/imre-runtime/src/dynamic/value.rs
++++ b/crates/imre-runtime/src/dynamic/value.rs
+@@ -1575,9 +1575,10 @@ impl Value {
+                         visit.extend(reader.raw.get());
+                         visit.push(reader.buffer);
+                     }
+-                    Some(super::stdlib::io::MemoryStream::UninitializedReader(raw)) => {
+-                        visit.extend(raw)
+-                    }
++                    Some(
++                        super::stdlib::io::MemoryStream::UninitializedReader(raw)
++                        | super::stdlib::io::MemoryStream::UninitializedWriter(raw),
++                    ) => visit.extend(raw),
+                     Some(super::stdlib::io::MemoryStream::BufferedBytes(writer)) => {
+                         visit.extend(writer.raw.get())
+                     }
+diff --git a/tests/fixtures/io_buffered_writer_reinitialize.py b/tests/fixtures/io_buffered_writer_reinitialize.py
+new file mode 100644
+index 00000000..47a987bb
+--- /dev/null
++++ b/tests/fixtures/io_buffered_writer_reinitialize.py
+@@ -0,0 +1,79 @@
++import gc
++import sys
++import weakref
++from _io import BufferedWriter
++from io import BytesIO, FileIO, RawIOBase
++
++
++class ReplaceOnTell(RawIOBase):
++    def __init__(self, writer, inner):
++        self.writer = writer
++        self.inner = inner
++
++    def writable(self):
++        return True
++
++    def tell(self):
++        self.writer.__init__(self.inner, 8)
++        self.writer.write(b"x")
++        return 0
++
++
++path = sys.argv[1]
++old = FileIO(path, "w+")
++writer = BufferedWriter(old, 8)
++writer.write(b"a")
++writer.flush()
++writer.write(b"lost")
++
++new = BytesIO()
++writer.__init__(new, 8)
++gc.collect()
++assert writer.raw is new and not old.closed
++old.seek(0)
++actual = old.read()
++assert actual == (b"alost" if "--invert" in sys.argv else b"a"), actual
++
++writer.write(b"pending")
++try:
++    writer.__init__(old, "invalid")
++except TypeError:
++    pass
++else:
++    raise AssertionError("accepted a non-index size")
++writer.flush()
++assert new.getvalue() == b"pending"
++ref = weakref.ref(new)
++del new
++gc.collect()
++assert ref() is writer.raw
++try:
++    writer.__init__(old, 0)
++except ValueError:
++    pass
++else:
++    raise AssertionError("accepted a zero size")
++assert writer.raw is old
++try:
++    writer.flush()
++except ValueError:
++    pass
++else:
++    raise AssertionError("used an uninitialized writer")
++gc.collect()
++assert ref() is None
++writer.__init__(old)
++writer.write(b"b")
++writer.close()
++assert old.closed
++with FileIO(path, "r") as result:
++    assert result.read() == b"ab"
++
++# The outer initializer resets whichever buffer its position probe leaves installed.
++inner = BytesIO()
++writer.__init__(ReplaceOnTell(writer, inner))
++assert writer.raw is inner
++writer.write(b"y")
++writer.flush()
++assert inner.getvalue() == b"y"
++writer.close()
+diff --git a/tests/python_cli.py b/tests/python_cli.py
+index 9643113f..2256041c 100644
+--- a/tests/python_cli.py
++++ b/tests/python_cli.py
+@@ -2044,6 +2044,9 @@ def report(text):
+         compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
+         reader_fixture = fixtures / "io_buffered_reader_type.py"
+         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
++        reinit_writer = fixtures / "io_buffered_writer_reinitialize.py"
++        reinit_path = root / "reinitialized-writer.bin"
++        compare("-IB", reinit_writer, reinit_path, native_args=("run", reinit_writer, "--quiet", "--", reinit_path))
+         callback_writer = fixtures / "io_buffered_writer_callbacks.py"
+         compare("-IB", callback_writer, native_args=("run", callback_writer, "--quiet"))
+         shutdown_writer = fixtures / "io_buffered_writer_shutdown.py"
