@@ -1861,6 +1861,7 @@ def report(text):
             "boxed_io_text_encoding.py",
             "boxed_io_protocols.py",
             "boxed_io_abc_registration.py",
+            "boxed_logging_handler_list.py",
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
