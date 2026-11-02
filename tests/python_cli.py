@@ -1900,6 +1900,15 @@ def report(text):
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
         callback_writer = fixtures / "io_buffered_writer_callbacks.py"
         compare("-IB", callback_writer, native_args=("run", callback_writer, "--quiet"))
+        shutdown_writer = fixtures / "io_buffered_writer_shutdown.py"
+        sink = root / "callback-shutdown.bin"
+        command = ("run", shutdown_writer, "--quiet", "--", sink)
+        for mode in ("close", "temporary-close"):
+            compare("-IB", shutdown_writer, sink, mode, native_args=(*command, mode))
+            assert sink.read_bytes() == b"abc"
+        pending = run(imre, *command, "pending")
+        assert pending.returncode == 1 and b"unflushed bytes at shutdown" in pending.stderr, pending
+        assert sink.read_bytes() == b""
         memory_writer = fixtures / "io_buffered_writer_bytesio.py"
         compare("-IB", memory_writer, native_args=("run", memory_writer, "--quiet"))
         writer_fixture = fixtures / "io_buffered_writer_type.py"

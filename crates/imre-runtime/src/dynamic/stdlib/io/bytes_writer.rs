@@ -30,6 +30,19 @@ pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<Writer>> {
     }
 }
 
+/// Detect bytes that would be discarded when the VM drops a live Python-backed
+/// writer. During shutdown, inspecting the raw or resolving close could run Python.
+pub(in crate::dynamic) fn has_pending_callback_write(ctx: &Context) -> bool {
+    ctx.heap.pending_finalizers().iter().copied().any(|owner| {
+        state(ctx, owner).is_some_and(|w| {
+            w.unflushed.get() != 0
+                && w.raw
+                    .get()
+                    .is_some_and(|raw| native_writer(ctx, raw).is_none())
+        })
+    })
+}
+
 /// Bypass Python only on an exact BytesIO whose write method is still native.
 fn native_writer(ctx: &Context, raw: Id) -> Option<Rc<BytesIo>> {
     if let Value::Instance {
@@ -399,7 +412,17 @@ impl Writer {
                 let flushed = invoke(ctx, receiver, "flush", vec![]);
                 let _guard = self.lock()?;
                 // invoke retains the exception roots across raw.close().
-                match (flushed, invoke(ctx, self.raw()?, "close", vec![])) {
+                let raw = self.raw()?;
+                let python_raw = native_writer(ctx, raw).is_none();
+                let closed = invoke(ctx, raw, "close", vec![]);
+                if python_raw && closed.is_ok() {
+                    // CPython retires its buffer after calling raw.close, even if
+                    // public flush was overridden. An already-closed raw skips this.
+                    self.pending.borrow_mut().clear();
+                    self.unflushed.set(0);
+                    self.written.set(0);
+                }
+                match (flushed, closed) {
                     (Err(flush), Err(mut close)) => {
                         close.context = ctx.raised_instance(flush);
                         Err(close)

@@ -12,6 +12,7 @@ pub(in crate::dynamic) use descriptor_buffer::{
 };
 mod bytes_io;
 mod bytes_writer;
+pub(in crate::dynamic) use bytes_writer::has_pending_callback_write;
 mod docstrings;
 mod file_io;
 pub(super) use file_io::{
