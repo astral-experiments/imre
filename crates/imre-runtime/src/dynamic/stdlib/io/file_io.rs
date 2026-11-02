@@ -97,7 +97,7 @@ impl RawFile {
     }
 }
 
-fn state(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
+pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
     match ctx.heap.get(receiver) {
         Value::Instance {
             memory_stream: Some(MemoryStream::Raw(raw)),

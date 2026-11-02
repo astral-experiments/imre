@@ -1046,6 +1046,17 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    /// Class of a native file whose Python descriptors are installed by _io.
+    pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
+        match self {
+            Self::TextFile(_) => Some("_io.TextIOWrapper"),
+            Self::File(_) if self.intrinsic_type_name() == Some("_io.BufferedReader") => {
+                Some("_io.BufferedReader")
+            }
+            _ => None,
+        }
+    }
+
     /// Returns the name used for both builtin class lookup and diagnostic messages.
     pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
         Some(match self {
@@ -1440,6 +1451,9 @@ impl Value {
                     cycle.children(visit);
                 }
                 match memory_stream {
+                    Some(super::stdlib::io::MemoryStream::BufferedReader(file)) => {
+                        visit.push(*file)
+                    }
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
                     }

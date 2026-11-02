@@ -73,7 +73,7 @@ impl Seek for Descriptor {
 }
 
 /// Return buffered bytes first, or perform one raw read without reading ahead.
-fn read_once(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Vec<u8>> {
+pub(super) fn read_once(reader: &mut BufReader<impl Read>, size: i64) -> Result<Vec<u8>> {
     let size = usize::try_from(size).unwrap_or(reader.capacity());
     let buffered = reader.buffer();
     if !buffered.is_empty() {
@@ -96,6 +96,56 @@ fn read_once(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Vec<u8>> {
         }
     }
     Ok(bytes)
+}
+
+/// RawFile.tell() exposes read-ahead. Read whole blocks directly and fill one
+/// complete buffer for a final partial block, as CPython's BufferedReader does.
+fn read_bytes(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Option<Vec<u8>>> {
+    let mut data = Vec::new();
+    let result = (|| -> io::Result<()> {
+        if size < 0 {
+            reader.read_to_end(&mut data)?;
+            return Ok(());
+        }
+        while data.len() < size as usize {
+            let remaining = size as usize - data.len();
+            if reader.buffer().is_empty() && remaining >= reader.capacity() {
+                let direct = remaining - remaining % reader.capacity();
+                if reader
+                    .get_mut()
+                    .take(direct as u64)
+                    .read_to_end(&mut data)?
+                    < direct
+                {
+                    break;
+                }
+            } else {
+                let buffered = match reader.fill_buf() {
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    result => result?,
+                };
+                let count = remaining.min(buffered.len());
+                if count == 0 {
+                    break;
+                }
+                data.try_reserve(count)
+                    .map_err(|_| io::ErrorKind::OutOfMemory)?;
+                data.extend_from_slice(&buffered[..count]);
+                reader.consume(count);
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => Ok(Some(data)),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            Ok((!data.is_empty()).then_some(data))
+        }
+        Err(error) if error.kind() == io::ErrorKind::OutOfMemory => {
+            Err(Error::new("MemoryError", ""))
+        }
+        Err(error) => Err(os_error(error)),
+    }
 }
 
 enum Buffer {
@@ -186,6 +236,10 @@ impl BufferedFd {
         }
     }
 
+    pub(super) fn uses_raw(&self, raw: &Rc<RawFile>) -> bool {
+        Rc::ptr_eq(raw, &self.handle)
+    }
+
     pub(in crate::dynamic) fn closed(&self) -> bool {
         self.handle.live_fd().is_none()
     }
@@ -217,10 +271,23 @@ impl BufferedFd {
     ) -> Result<Id> {
         let name = name.strip_prefix("file.").unwrap_or(name);
         if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
+            super::native_reader::check_raw(ctx, receiver, self, name)?;
             self.close()?;
             return Ok(NONE);
         }
-        let closed = || Error::new("ValueError", "I/O operation on closed file.");
+        let closed = || {
+            Error::new(
+                "ValueError",
+                match name {
+                    "read" | "read1" => "read of closed file",
+                    "readline" => "readline of closed file",
+                    "readinto" => "readinto of closed file",
+                    "seek" => "seek of closed file",
+                    "flush" | "__enter__" => "I/O operation on closed file.",
+                    _ => "I/O operation on closed file",
+                },
+            )
+        };
         let size = if let ("read1", [n]) = (name, args) {
             Some(ctx.index_integer(*n)?.to_i64().ok_or_else(|| {
                 Error::new(
@@ -256,6 +323,7 @@ impl BufferedFd {
         } else {
             None
         };
+        super::native_reader::check_raw(ctx, receiver, self, name)?;
         let fd = self.handle.live_fd().ok_or_else(closed)?;
         let mut slot = self.buffer.borrow_mut();
         let buffer = slot.as_mut().ok_or_else(closed)?;
@@ -313,14 +381,14 @@ impl BufferedFd {
                 let Buffer::Reader(r) = buffer else {
                     unreachable!()
                 };
+                if name == "read" {
+                    return Ok(
+                        read_bytes(r, size)?.map_or(NONE, |data| ctx.alloc(Value::Bytes(data)))
+                    );
+                }
                 let mut reader = r.take(if size < 0 { u64::MAX } else { size as u64 });
                 let mut data = Vec::new();
-                if name == "readline" {
-                    reader.read_until(b'\n', &mut data)
-                } else {
-                    reader.read_to_end(&mut data)
-                }
-                .map_err(os_error)?;
+                reader.read_until(b'\n', &mut data).map_err(os_error)?;
                 Ok(ctx.alloc(Value::Bytes(data)))
             }
             "readinto" if args.len() == 1 => {

@@ -2218,7 +2218,7 @@ impl Context {
             "io" => stdlib::io::install(self, scope),
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
-            "_io" => stdlib::io::install_native(self, scope),
+            "_io" => stdlib::io::install_native(self, scope, module),
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => {
                 stdlib::readiness::initialize(self, scope)?;

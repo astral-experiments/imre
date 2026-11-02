@@ -62,7 +62,9 @@ pub(super) fn resolve(
                         | Intrinsic::BUFFERED_IO_BASE
                         | Intrinsic::TEXT_IO_BASE
                         | Intrinsic::ObjectRuntimeExport(
-                            "_io._IOBase"
+                            "io.BufferedReader"
+                            | "_io.BufferedReader"
+                            | "_io._IOBase"
                             | "_io._RawIOBase"
                             | "_io._BufferedIOBase"
                             | "_io._TextIOBase",
