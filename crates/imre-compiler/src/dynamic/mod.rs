@@ -185,6 +185,16 @@ fn boxed_operator(name: &str) -> bool {
     matches!(
         name,
         "attrgetter"
+            | "__lt__"
+            | "__le__"
+            | "__eq__"
+            | "__ne__"
+            | "__ge__"
+            | "__gt__"
+            | "__and__"
+            | "__or__"
+            | "__sub__"
+            | "__xor__"
             | "itemgetter"
             | "lt"
             | "le"
