@@ -4523,6 +4523,7 @@ impl<'a> Loader<'a> {
                             IntrinsicModule::Marshal
                                 | IntrinsicModule::Pickle
                                 | IntrinsicModule::Struct
+                                | IntrinsicModule::Warnings
                                 | IntrinsicModule::ImportlibReaders
                                 | IntrinsicModule::ImportlibResourceReaders
                                 | IntrinsicModule::ImportlibResources

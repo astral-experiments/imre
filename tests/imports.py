@@ -16,6 +16,13 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "unused_warn_preserves_typed_arguments": ({
+        "main.py": (
+            "from warnings import warn\n"
+            "def identity(n: int) -> int: return n\n"
+            "identity('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "codeop_import_keeps_return_check": ({
         "main.py": 'import codeop\ndef wrong() -> int:\n    return "invalid return"\nwrong()\n',
     }, "invalid-return-type"),
