@@ -2723,7 +2723,7 @@ impl Context {
             self.bind(scope, "BlockingIOError", error);
         }
         #[cfg(unix)]
-        if name == "posix" && source.is_none() {
+        if source.is_none() && matches!(name, "os" | "posix") {
             let geteuid = self.builtin("posix.geteuid");
             self.bind(scope, "geteuid", geteuid);
         }
