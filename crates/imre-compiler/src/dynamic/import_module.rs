@@ -3,7 +3,7 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
-    if let Some(source) = asyncio_source(name) {
+    if let Some(source) = stdlib_package_source(name) {
         return Some(source);
     }
     match name {
@@ -367,8 +367,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
-/// CPython 3.14.5 sources for asyncio and its concurrent.futures dependency.
-fn asyncio_source(name: &str) -> Option<(&'static str, &'static str)> {
+/// Pinned CPython 3.14.5 packages for runtime imports.
+fn stdlib_package_source(name: &str) -> Option<(&'static str, &'static str)> {
     macro_rules! source {
         ($file:literal) => {
             Some(($file, include_str!(concat!("../../stdlib/", $file))))
@@ -416,6 +416,29 @@ fn asyncio_source(name: &str) -> Option<(&'static str, &'static str)> {
         "concurrent.futures.interpreter" => source!("concurrent/futures/interpreter.py"),
         "concurrent.futures.process" => source!("concurrent/futures/process.py"),
         "concurrent.futures.thread" => source!("concurrent/futures/thread.py"),
+        "multiprocessing" => source!("multiprocessing/__init__.py"),
+        "multiprocessing.connection" => source!("multiprocessing/connection.py"),
+        "multiprocessing.context" => source!("multiprocessing/context.py"),
+        "multiprocessing.dummy" => source!("multiprocessing/dummy/__init__.py"),
+        "multiprocessing.dummy.connection" => source!("multiprocessing/dummy/connection.py"),
+        "multiprocessing.forkserver" => source!("multiprocessing/forkserver.py"),
+        "multiprocessing.heap" => source!("multiprocessing/heap.py"),
+        "multiprocessing.managers" => source!("multiprocessing/managers.py"),
+        "multiprocessing.pool" => source!("multiprocessing/pool.py"),
+        "multiprocessing.popen_fork" => source!("multiprocessing/popen_fork.py"),
+        "multiprocessing.popen_forkserver" => source!("multiprocessing/popen_forkserver.py"),
+        "multiprocessing.popen_spawn_posix" => source!("multiprocessing/popen_spawn_posix.py"),
+        "multiprocessing.popen_spawn_win32" => source!("multiprocessing/popen_spawn_win32.py"),
+        "multiprocessing.process" => source!("multiprocessing/process.py"),
+        "multiprocessing.queues" => source!("multiprocessing/queues.py"),
+        "multiprocessing.reduction" => source!("multiprocessing/reduction.py"),
+        "multiprocessing.resource_sharer" => source!("multiprocessing/resource_sharer.py"),
+        "multiprocessing.resource_tracker" => source!("multiprocessing/resource_tracker.py"),
+        "multiprocessing.shared_memory" => source!("multiprocessing/shared_memory.py"),
+        "multiprocessing.sharedctypes" => source!("multiprocessing/sharedctypes.py"),
+        "multiprocessing.spawn" => source!("multiprocessing/spawn.py"),
+        "multiprocessing.synchronize" => source!("multiprocessing/synchronize.py"),
+        "multiprocessing.util" => source!("multiprocessing/util.py"),
         _ => None,
     }
 }
