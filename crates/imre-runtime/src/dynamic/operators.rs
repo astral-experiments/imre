@@ -3527,6 +3527,9 @@ impl Context {
         right: Id,
         inplace: bool,
     ) -> Result<Id> {
+        if op == "^" {
+            return self.set_xor(left, right, inplace);
+        }
         // Both union and self-intersection start from the left set's native table.
         if op != "|" && !(op == "&" && left == right) {
             return self.set_algebra(op, left, right, inplace);
@@ -3545,6 +3548,60 @@ impl Context {
         if left != right {
             builtins::update_set(self, result, right)?;
         }
+        Ok(result)
+    }
+
+    /// Binary XOR starts with the right table and toggles left keys, so its right
+    /// residents get the first comparison. In-place XOR toggles the left table.
+    fn set_xor(&mut self, left: Id, right: Id, inplace: bool) -> Result<Id> {
+        let frozen = matches!(self.heap.get(left), Value::Set { frozen: true, .. });
+        let (result, source) = if inplace && !frozen {
+            if left == right {
+                self.set_difference_update(left, right)?;
+                return Ok(left);
+            }
+            (left, right)
+        } else {
+            let Value::Set { entries, .. } = self.heap.get(right) else {
+                unreachable!()
+            };
+            let entries = entries.try_clone()?;
+            (self.alloc(Value::Set { entries, frozen }), left)
+        };
+        self.visit_set_operand(source, |ctx, key, hash| {
+            let roots = ctx.heap.temporary_mark();
+            ctx.heap.keep(key);
+            let toggle = ctx
+                .find_dictionary_key(result, key, hash)
+                .and_then(|(hash, found)| {
+                    if let Some(index) = found {
+                        let Value::Set { entries, .. } = ctx.heap.get_mut(result) else {
+                            unreachable!()
+                        };
+                        let (resident, _) = entries.remove(index)?;
+                        let mark = ctx.heap.temporary_mark();
+                        ctx.heap.keep(resident);
+                        ctx.heap.weak_edge_removed(resident);
+                        ctx.discard_truth(mark);
+                    } else {
+                        // Insertion probes again: a collision callback may change its answer.
+                        ctx.set_dictionary_key(result, key, NONE, Some(hash), false)?;
+                    }
+                    Ok(())
+                });
+            // Comparison can clear the source. Release our key before advancing
+            // the live cursor, and preserve any active exception during finalization.
+            ctx.heap.release_temporaries_since(roots);
+            if let Err(error) = &toggle {
+                for id in error.roots() {
+                    ctx.heap.keep(id);
+                }
+            }
+            let mark = ctx.heap.temporary_mark();
+            ctx.heap.keep(key);
+            ctx.discard_truth(mark);
+            toggle
+        })?;
         Ok(result)
     }
 
@@ -4137,9 +4194,15 @@ impl Context {
                 }
                 return self.dict_view_union(a, b);
             }
-            "|" | "&" | "-"
-                if matches!(self.heap.get(a), Value::Set { .. })
-                    || matches!(self.heap.get(b), Value::Set { .. }) =>
+            "|" | "&" | "-" | "^"
+                if [a, b].into_iter().any(|value| {
+                    let storage = if op == "^" {
+                        self.scalar_value(value)
+                    } else {
+                        value
+                    };
+                    matches!(self.heap.get(storage), Value::Set { .. })
+                }) =>
             {
                 if matches!(
                     (self.heap.get(a), self.heap.get(b)),
@@ -4525,7 +4588,11 @@ impl Context {
         {
             return Ok(None);
         }
-        let method = if name == "__ne__" && !self.has_custom_ne(obj) {
+        let method = if matches!(name, "__xor__" | "__rxor__")
+            && matches!(self.heap.get(obj), Value::Set { .. })
+        {
+            Some(self.lookup_attr(obj, name)?)
+        } else if name == "__ne__" && !self.has_custom_ne(obj) {
             None
         } else if matches!(
             name,
@@ -4841,7 +4908,18 @@ impl Context {
                 }
             })
         };
-        let (ac, bc) = (class(a), class(b));
+        let (mut ac, mut bc) = (class(a), class(b));
+        let set_xor = op == "^"
+            && [a, b]
+                .into_iter()
+                .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
+        if set_xor {
+            for (value, class) in [(a, &mut ac), (b, &mut bc)] {
+                if matches!(self.heap.get(value), Value::Set { .. }) {
+                    *class = Some(self.exact_type(value)?);
+                }
+            }
+        }
         if ac.is_none()
             && bc.is_none()
             && !(inplace.is_empty()
@@ -4889,8 +4967,13 @@ impl Context {
             ));
         }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
-            ac != bc
-                && self.subclass(bc, ac)
+            let strict_subclass = ac != bc
+                && if set_xor {
+                    self.direct_subclass(bc, ac)
+                } else {
+                    self.subclass(bc, ac)
+                };
+            strict_subclass
                 && (inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right))
         } else {
             false
@@ -4924,7 +5007,7 @@ impl Context {
             return Ok(result);
         }
         // A mutable set's in-place slot runs before the right operand's reflected slot.
-        if matches!(op, "|" | "-" | "&")
+        if matches!(op, "|" | "-" | "&" | "^")
             && matches!(self.heap.get(a), Value::Set { frozen: false, .. })
             && let right = self.scalar_value(b)
             && matches!(self.heap.get(right), Value::Set { .. })
