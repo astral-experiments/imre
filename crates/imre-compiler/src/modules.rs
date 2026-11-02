@@ -756,6 +756,7 @@ pub(crate) enum Intrinsic {
     Environ,
     GetEnv,
     GetCwd,
+    Chdir,
     Strerror,
     StatResult,
     Fd(crate::ir::FdOperation),

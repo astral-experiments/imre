@@ -24,7 +24,7 @@ pub(in crate::dynamic) fn install_capabilities(
         ),
         (
             "supports_fd",
-            &["chmod", "listdir", "scandir", "stat", "utime"][..],
+            &["chdir", "chmod", "listdir", "scandir", "stat", "utime"][..],
         ),
         (
             "supports_follow_symlinks",
@@ -346,6 +346,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "mkdir"
             | "mkfifo"
             | "chmod"
+            | "chdir"
             | "utime"
             | "dup"
             | "dup2"
@@ -461,6 +462,33 @@ fn path_and_dir_fd(
     )?;
     let dir_fd = directory_fd(ctx, dir_fd)?;
     Ok((path, pathname, dir_fd))
+}
+
+/// Change the process working directory after converting and auditing the supplied path or fd.
+fn chdir(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(path)] = builtins::bind_builtin_arguments("chdir", args, kwargs, ["path"], 1)? else {
+        unreachable!("chdir requires a path")
+    };
+    let (path, filename) = path_or_fd(ctx, "chdir", path, true, stat::warn_bool_fd)?;
+    super::audit::event(ctx, "os.chdir", &[filename])?;
+    let rc = match path {
+        // CPython reserves -1 for a missing fd and has no pathname in this case.
+        PathArg::Fd(-1) => {
+            let error = std::io::Error::from_raw_os_error(libc::EFAULT);
+            return Err(
+                ctx.with_errno_filename(crate::objects::errno_error(error).into(), filename)?
+            );
+        }
+        // SAFETY: fchdir checks the caller-supplied descriptor without taking ownership.
+        PathArg::Fd(fd) => unsafe { libc::fchdir(fd) },
+        // SAFETY: the converted, NUL-terminated pathname lives through the call.
+        PathArg::Name(name) => unsafe { libc::chdir(name.as_ptr()) },
+    };
+    if rc < 0 {
+        let error = crate::objects::errno_error(std::io::Error::last_os_error());
+        return Err(ctx.with_errno_filename(error.into(), filename)?);
+    }
+    Ok(NONE)
 }
 
 /// Return the link contents with the string type of its converted path.
@@ -635,6 +663,9 @@ pub(super) fn descriptor(
     }
     if name == "utime" {
         return utime::call(ctx, args, kwargs);
+    }
+    if name == "chdir" {
+        return chdir(ctx, args, kwargs);
     }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);

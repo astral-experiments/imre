@@ -624,21 +624,24 @@ impl Session {
         )
     }
 
-    /// Check annotated return types when a program leaves the exact native type checker.
-    pub(crate) fn check_return_types(
+    /// Preserve first-party contracts when lowering a checked file to object operations.
+    pub(crate) fn check_fallback_contracts(
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
+        scoped_builtin: bool,
     ) -> Result<(), String> {
         let mut rules = RuleSelection::default();
-        let rule = default_lint_registry()
-            .get("invalid-return-type")
-            .expect("registered ty lint");
-        rules.enable(
-            rule,
-            Severity::Error,
-            ty_python_semantic::lint::LintSource::Default,
-        );
+        let argument_rule = scoped_builtin.then_some("invalid-argument-type");
+        for name in std::iter::once("invalid-return-type").chain(argument_rule) {
+            rules.enable(
+                default_lint_registry()
+                    .get(name)
+                    .expect("registered ty lint"),
+                Severity::Error,
+                ty_python_semantic::lint::LintSource::Default,
+            );
+        }
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(Arc::new(rules));
@@ -808,6 +811,8 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
+                            || (diagnostic.id().as_str() == "invalid-argument-type"
+                                && vendored_argument(db, file, range))
                             // ty also reports implicit None returns at the annotation span.
                             || (diagnostic.id().as_str() == "invalid-return-type"
                                 && diagnostic.headline_message()
@@ -831,6 +836,38 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                 .to_string()
         })
         .collect()
+}
+
+/// Leave argument conversion to Python only for calls proved to target vendored code.
+fn vendored_argument(db: &dyn Db, file: File, range: TextRange) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_semantic::types::Type;
+    let file = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
+    let root = AnyNodeRef::from(parsed.syntax());
+    if !root.range().contains_range(range) {
+        return false;
+    }
+    let nodes = covering_node(root, range);
+    let Some(call) = nodes.ancestors().find_map(|node| match node {
+        AnyNodeRef::ExprCall(call) if call.arguments.range().contains_range(range) => Some(call),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let model = SemanticModel::new(db, file);
+    let Some(callee) = call.func.inferred_type(&model) else {
+        return false;
+    };
+    let is_vendored = |ty: Type<'_>| {
+        ty.definition(db, &model.program_environment())
+            .and_then(|definition| definition.definition())
+            .is_some_and(|definition| definition.file(db).path(db).is_vendored_path())
+    };
+    match callee {
+        Type::Union(union) => union.elements(db).iter().copied().all(is_vendored),
+        ty => is_vendored(ty),
+    }
 }
 
 fn resolves_to_stdlib_function(
