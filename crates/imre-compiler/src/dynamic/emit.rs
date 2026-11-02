@@ -201,6 +201,7 @@ enum Body<'a> {
     Statements(&'a [ast::Stmt]),
     /// A suspended suite and whether it was declared with async def.
     GeneratorFunction((&'a [ast::Stmt], bool)),
+    ModuleAnnotations(Vec<(&'a str, &'a ast::Expr)>),
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
         Vec<(&'a str, &'a ast::Expr)>,
@@ -333,6 +334,7 @@ impl Output {
             output: self,
             source,
             class_sites: None,
+            module_annotation_sites: Default::default(),
             in_function,
             module,
             declared_globals: Default::default(),
@@ -359,11 +361,12 @@ impl Output {
         };
         match body {
             Body::Namespace(stmts) => {
-                if module
-                    && source.string_annotations
-                    && imre_ast::annotations::has_variable_annotation(stmts)
-                {
-                    f.op("setup_module_string_annotations", &[&f.scope.clone()]);
+                if module && imre_ast::annotations::has_variable_annotation(stmts) {
+                    if source.string_annotations {
+                        f.op("setup_module_string_annotations", &[&f.scope.clone()]);
+                    } else {
+                        f.setup_deferred_module_annotations(stmts);
+                    }
                 }
                 if f.output.keep_docstrings
                     && let Some(doc) = f.source.docstring(f.prefix.trim_end_matches('.'), stmts)
@@ -384,7 +387,8 @@ impl Output {
             }
             Body::GeneratorFunction(_) | Body::YieldingLambda(_) => {}
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
-            Body::Annotations(entries, class) => f.annotations(&entries, class),
+            Body::Annotations(entries, class) => f.annotations(&entries, class, false),
+            Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
             Body::Unsupported(stmt, reason) => {
                 f.checkpoint(stmt);
                 f.unsupported(reason);
@@ -444,6 +448,7 @@ struct Function<'a, 'p> {
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
     module: bool,
+    module_annotation_sites: std::collections::BTreeMap<ruff_text_size::TextSize, usize>,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,
