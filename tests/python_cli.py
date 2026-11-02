@@ -1151,6 +1151,15 @@ def main():
                 expected.stderr,
             )
 
+        locale_script = root / "get_locale.py"
+        locale_script.write_text(
+            "from _locale import LC_ALL, setlocale\n"
+            "from locale import getlocale\n"
+            "setlocale(LC_ALL, 'C')\n"
+            "print(getlocale(), getlocale(category=LC_ALL))\n"
+        )
+        compare("-B", locale_script)
+
         if os.name == "posix":
             compare(
                 "-IB", "-c",
