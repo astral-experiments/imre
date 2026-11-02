@@ -264,6 +264,7 @@ impl Output {
             output: self,
             source,
             class_sites: None,
+            declared_globals: Default::default(),
             annotation_lookup: false,
             class_locals: match &body {
                 Body::Namespace(stmts) if !prefix.is_empty() => {
@@ -363,6 +364,7 @@ struct Function<'a, 'p> {
     output: &'a mut Output,
     source: &'p SourceMap<'p>,
     prefix: String,
+    declared_globals: std::collections::BTreeSet<String>,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,

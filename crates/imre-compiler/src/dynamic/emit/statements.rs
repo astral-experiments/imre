@@ -212,6 +212,7 @@ impl Function<'_, '_> {
         let mut globals = Globals::default();
         globals.visit_body(suite);
         for name in globals.0 {
+            self.declared_globals.insert(name.to_owned());
             let name = self.code_name(name);
             self.op("declare_global", &[&self.scope.clone(), &name]);
         }
@@ -251,6 +252,7 @@ impl Function<'_, '_> {
                     let evaluator = self.define(
                         v.start(),
                         name.id.as_str(),
+                        false,
                         None,
                         None,
                         None,
@@ -359,6 +361,7 @@ impl Function<'_, '_> {
                     let function = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
+                        self.declared_globals.contains(v.name.as_str()),
                         Some(&v.parameters),
                         v.returns.as_deref(),
                         crate::dynamic::function_type_params(v).filter(|_| self.prefix.is_empty()),
@@ -402,6 +405,7 @@ impl Function<'_, '_> {
                     let init = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
+                        self.declared_globals.contains(v.name.as_str()),
                         None,
                         None,
                         None,
@@ -613,12 +617,17 @@ impl Function<'_, '_> {
         &mut self,
         start: TextSize,
         name: &str,
+        global: bool,
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
         type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> String {
-        let qualname = format!("{}{name}", self.prefix);
+        let qualname = if global {
+            name.to_owned()
+        } else {
+            format!("{}{name}", self.prefix)
+        };
         let prefix = if matches!(body, Body::Namespace(_)) {
             format!("{qualname}.")
         } else {
