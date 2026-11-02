@@ -290,7 +290,7 @@ pub(in crate::dynamic) fn encode_text(
     }
     let errors = errors.to_owned();
     match encoder {
-        StrEncoder::Fixed(encoder) => encode_fixed_codepoints(ctx, id, encoder, &errors),
+        StrEncoder::Fixed(encoder) => encode_fixed(ctx, id, encoder, &errors, encoder.name()),
         StrEncoder::Registered(Codec::Utf8 { signature }) => {
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
@@ -315,13 +315,17 @@ pub(in crate::dynamic) fn encode_text(
     }
 }
 
-/// The fixed-endian UTF encoders report one surrogate at a time, even for consecutive high and low surrogates.
-fn encode_fixed_codepoints(
+/// Fixed-endian encoders report one surrogate at a time, including consecutive surrogates.
+pub(super) fn encode_fixed(
     ctx: &mut Context,
     id: Id,
     encoder: FixedUnicode,
     errors: &str,
+    name: &str,
 ) -> Result<Vec<u8>> {
+    if let Ok(text) = ctx.str_value(id) {
+        return Ok(StrEncoder::Fixed(encoder).encode_str(text, errors)?);
+    }
     let points = ctx.string_codepoints(id)?;
     let mut bytes = Vec::new();
     for (i, &point) in points.iter().enumerate() {
@@ -346,7 +350,7 @@ fn encode_fixed_codepoints(
             "strict" | "surrogateescape" => {
                 return Err(ctx.string_encoding_error(
                     id,
-                    encoder.name(),
+                    name,
                     "surrogates not allowed",
                     point,
                     i..i + 1,
