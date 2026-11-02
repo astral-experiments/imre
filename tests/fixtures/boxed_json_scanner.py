@@ -41,6 +41,12 @@ def current():
         assert json.JSONDecoder(parse_constant=str).decode("NaN") == "NaN"
     finally:
         json.decoder._CONSTANTS = constants
+    decoder = json.decoder
+    json.decoder = None
+    try:
+        assert json.JSONDecoder(parse_constant=str).decode("NaN") == "NaN"
+    finally:
+        json.decoder = decoder
     try:
         default_scan('é [ ?', 2)
     except StopIteration as error:
