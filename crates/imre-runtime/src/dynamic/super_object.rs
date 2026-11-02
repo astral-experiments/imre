@@ -306,11 +306,27 @@ impl Context {
                     )
                     && !(exception_method && builtins::is_exception(kind))
                 {
-                    match self.lookup_attr(class, name) {
-                        Ok(value) => return self.bind_attribute(value, instance, owner),
-                        Err(error) if error.kind == "AttributeError" => {}
+                    let mut member = match self.lookup_attr(class, name) {
+                        Ok(member) => member,
+                        Err(error) if error.kind == "AttributeError" => continue,
                         Err(error) => return Err(error),
+                    };
+                    if let Value::Method {
+                        callable,
+                        receiver: bound,
+                        ..
+                    } = *self.heap.get(member)
+                        && bound == class
+                        && self.class_attr(class, name) == Some(callable)
+                    {
+                        // Lookup may have installed the raw descriptor on this native class.
+                        // An inherited descriptor must wait for its own position in the MRO.
+                        if self.own_class_attr(class, name) != Some(callable) {
+                            continue;
+                        }
+                        member = callable;
                     }
+                    return self.bind_attribute(member, instance, owner);
                 }
             }
         }

@@ -104,6 +104,7 @@ def current():
         print(str(error))
 
     check_mro()
+    check_native_classmethod()
     check_subclass_hooks()
 
 
@@ -139,6 +140,42 @@ def check_mro():
             pass
         else:
             raise AssertionError("invalid mro call succeeded")
+
+
+def check_native_classmethod():
+    from datetime import date, datetime
+
+    class Stamp(datetime):
+        @classmethod
+        def fromisocalendar(cls, *args):
+            return super().fromisocalendar(*args)
+
+    class Child(Stamp):
+        pass
+
+    class Mapping(dict):
+        pass
+
+    class Integer(int):
+        pass
+
+    for _ in range(2):
+        keys = super(Mapping, Mapping).fromkeys
+        assert keys.__self__ is Mapping and type(keys("a")) is Mapping
+        integer = super(Integer, Integer).from_bytes
+        assert integer.__self__ is Integer and type(integer(b"A")) is Integer
+        assert type(Child.fromisocalendar(2019, 1, 1)) is Child
+    assert super(Stamp, Child(2000, 1, 1)).fromordinal.__self__ is Child
+
+    class Alternate(date):
+        @classmethod
+        def fromisocalendar(cls, *args):
+            return cls, args
+
+    class Mixed(Stamp, Alternate):
+        pass
+
+    assert Mixed.fromisocalendar(2019, 1, 1) == (Mixed, (2019, 1, 1))
 
 
 def check_subclass_hooks():
