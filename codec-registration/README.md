@@ -19,3 +19,5 @@ The intact O0 class on public 0c9885cf registered all 82 originals. Its first co
 PR #4034 merged as e64c7815dbdd35d7261edfb9c78bac90df29cbad from independently reviewed eaeb30852ebc6a892972345aeaaef48231c15f8f. The integrated head matched the eight CPython callback controls at native O0 and O3. The original writable reader fixture and hash/lifetime controls passed. These view tests are separate from the 82 original-case results pinned to #4033.
 
 Public O0 completed its first 37 original bodies with 25 success callbacks, 7 errors and 5 failures. All twelve exception traces lead into the original bodies. The live checkpoint predates the outcome of module ordinal 482.
+
+A clean build of merged #4034 at e64c7815 passed all eight view controls at both native optimization levels. The unchanged combined registry fixture passed at ordinary O0. The O3 class on 0c9885cf independently reproduced the first #445 and #446 body errors and the #447 success callback.
