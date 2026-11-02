@@ -1016,7 +1016,7 @@ impl ParameterClass {
         let (owner, methods, fields, doc): (_, &[_], &[_], _) = match name {
             "typing.TypeVar" => (
                 "typing.TypeVar",
-                &["has_default"],
+                &["__typing_subst__", "has_default"],
                 &VARIANCE_FIELDS[..],
                 include_str!("../../native/typing-TypeVar-doc.txt"),
             ),
@@ -1346,8 +1346,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__bound__" => var.bound,
             "__constraints__" => var.constraints,
             "__default__" => no_default(ctx),
-            "has_default" => {
-                let callable = ctx.builtin("typing.TypeVar.has_default");
+            "__typing_subst__" | "has_default" => {
+                let callable = ctx.builtin(&format!("typing.TypeVar.{name}"));
                 ctx.alloc(Value::Method {
                     callable,
                     receiver: value,
@@ -1804,23 +1804,28 @@ pub(super) fn call(
 ) -> Result<Id> {
     if matches!(
         operation,
-        "ParamSpec.__typing_subst__" | "ParamSpec.__typing_prepare_subst__"
+        "TypeVar.__typing_subst__"
+            | "ParamSpec.__typing_subst__"
+            | "ParamSpec.__typing_prepare_subst__"
     ) {
-        let method = operation.strip_prefix("ParamSpec.").unwrap();
+        let (owner, method) = operation.split_once('.').unwrap();
         let Some((&parameter, rest)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
                 format!("unbound method {operation}() needs an argument"),
             ));
         };
-        if !matches!(ctx.heap.get(parameter), Value::ParamSpec(_)) {
+        if !matches!(
+            (owner, ctx.heap.get(parameter)),
+            ("TypeVar", Value::TypeVar(_)) | ("ParamSpec", Value::ParamSpec(_))
+        ) {
             let actual = ctx
                 .builtin_type_name(parameter)
                 .unwrap_or_else(|| ctx.type_name(parameter));
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "descriptor '{method}' for 'typing.ParamSpec' objects doesn't apply to a '{actual}' object"
+                    "descriptor '{method}' for 'typing.{owner}' objects doesn't apply to a '{actual}' object"
                 ),
             ));
         }
@@ -1831,6 +1836,7 @@ pub(super) fn call(
             ));
         }
         let helper = match (method, rest.len()) {
+            ("__typing_subst__", 1) if owner == "TypeVar" => "_typevar_subst",
             ("__typing_subst__", 1) => "_paramspec_subst",
             ("__typing_prepare_subst__", 2) => "_paramspec_prepare_subst",
             ("__typing_subst__", n) => {
