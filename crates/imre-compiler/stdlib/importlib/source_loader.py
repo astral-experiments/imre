@@ -14,7 +14,7 @@ from _imre_importlib import (
     warn_loader_deprecation as _warn_loader_deprecation,
     warn_import as _warn_import,
 )
-from os import fsdecode as _fsdecode, fspath as _fspath, sep
+from os import fspath as _fspath, sep
 
 
 _MS_WINDOWS = sys.platform == "win32"
@@ -172,7 +172,9 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
         return _path_stats(path)
 
     def source_to_code(self, data, path, *, _optimize=-1):
-        filename = _fsdecode(path)
+        filename = _fspath(path)
+        if isinstance(filename, bytes):
+            filename = filename.decode(sys.getfilesystemencoding(), sys.getfilesystemencodeerrors())
         if "\0" in filename:
             raise ValueError("embedded null character")
         level = _index(_optimize)

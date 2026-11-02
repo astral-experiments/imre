@@ -47,9 +47,13 @@ with tempfile.TemporaryDirectory() as directory:
         scope = {}
         # The direct loader must work even when ordinary imports cannot find its helpers.
         operator_module = sys.modules.pop('operator', None)
+        os_module = sys.modules.pop('os', None)
         try:
             exec(direct.get_code(name), scope)
+            assert direct.source_to_code(b'pass', b'probe.py').co_filename == 'probe.py'
         finally:
+            if os_module is not None:
+                sys.modules['os'] = os_module
             if operator_module is not None:
                 sys.modules['operator'] = operator_module
         assert scope['answer'] == 42 and name not in sys.modules
