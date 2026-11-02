@@ -344,12 +344,17 @@ fn resolve(owner: &str, package: bool, level: u32, name: &str) -> Option<String>
     Some(parts.join("."))
 }
 
+pub(crate) enum ObjectOperation<'a> {
+    Builtin,
+    ConditionalMethods(&'a crate::modules::SourceGraph),
+}
+
 pub(crate) fn compile(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
     runtime_imports: bool,
-    object_builtin: bool,
+    operation: Option<ObjectOperation<'_>>,
     registered_imports: RegisteredImports,
     check_returns: impl FnOnce() -> Result<(), String>,
 ) -> Result<Option<Compilation>, String> {
@@ -394,9 +399,11 @@ pub(crate) fn compile(
             SourceKind::File
         },
     ) {
-        // A checked builtin can require the object ABI even in a file without imports.
+        // A checked operation can require the object ABI even in a file without imports.
         Ok(i)
-            if i.runtime_imports || object_builtin || (runtime_imports && !i.names.is_empty()) =>
+            if i.runtime_imports
+                || operation.is_some()
+                || (runtime_imports && !i.names.is_empty()) =>
         {
             i
         }
@@ -465,7 +472,16 @@ pub(crate) fn compile(
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     while let Some((owner, package, imports)) = work.pop_front() {
-        if !options.runtime_imports && !registered_imports.called && imports.needs_typed_machinery()
+        if !options.runtime_imports
+            && !registered_imports.called
+            && imports.needs_typed_machinery()
+            // Enforce the checked-file machinery contract on the original graph.
+            // A module discovered only by boxed imports has no typed layout to preserve.
+            && match operation {
+                Some(ObjectOperation::ConditionalMethods(graph)) => owner == "__main__"
+                    || graph.modules.iter().any(|m| m.name == owner),
+                _ => true,
+            }
         {
             return Ok(None);
         }
