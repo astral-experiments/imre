@@ -32,6 +32,11 @@ mod watch;
 mod zip_entry;
 pub use zip_entry::is_zip_path;
 
+/// Emits native provider IR for packaging alongside the Linux toolchain.
+pub fn write_bundled_provider_ir(directory: &std::path::Path) -> Result<(), String> {
+    dynamic::provider_pack::write(directory)
+}
+
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
@@ -91,6 +96,8 @@ pub struct CompileOptions {
     pub runtime_imports: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
+    /// Optional archive of bundled native provider bodies for this target and LLVM optimization.
+    pub bundled_provider_archive: Option<PathBuf>,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
 }
@@ -293,11 +300,21 @@ fn object_fallback<T>(
     let check_returns = || {
         if checked_file && let Some(graph) = &graph {
             let (skipped, overloads) = graph.diagnostic_scopes();
+            let entry = &graph.modules[graph.entry];
+            let all_calls = !entry.optional_imports.is_empty()
+                || !graph.needs_object_runtime.get()
+                    && graph.object_builtin_errors.borrow().contains(&error);
+            let checked_calls = if all_calls {
+                analysis::FallbackCalls::All
+            } else if entry.has_entry_guard() {
+                analysis::FallbackCalls::Entry(graph.entry)
+            } else {
+                analysis::FallbackCalls::None
+            };
             graph.session.diagnostic_copy()?.check_fallback_contracts(
                 skipped.as_deref(),
                 &overloads,
-                !graph.needs_object_runtime.get()
-                    && graph.object_builtin_errors.borrow().contains(&error),
+                checked_calls,
                 graph
                     .modules
                     .iter()

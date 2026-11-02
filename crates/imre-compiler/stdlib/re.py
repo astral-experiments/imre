@@ -59,6 +59,37 @@ def escape(pattern):
 from re import compile as _compile, split as _split
 
 
+# CPython checks a small FIFO before moving an entry in the larger LRU.
+_cache = {}
+_cache2 = {}
+
+
+def _compile_cached(compile_uncached, pattern, flags):
+    key = (type(pattern), pattern, flags)
+    try:
+        return _cache2[key]
+    except KeyError:
+        pass
+    compiled = _cache.pop(key, None)
+    if compiled is None:
+        compiled = compile_uncached(pattern, flags)
+        if compiled is pattern:
+            return compiled
+        if len(_cache) >= 512:
+            del _cache[next(iter(_cache))]
+    _cache[key] = compiled
+    if len(_cache2) >= 256:
+        del _cache2[next(iter(_cache2))]
+    _cache2[key] = compiled
+    return compiled
+
+
+def purge():
+    """Clear the compiled pattern caches."""
+    _cache.clear()
+    _cache2.clear()
+
+
 class _ZeroSentinel(int):
     pass
 _zero_sentinel = _ZeroSentinel()

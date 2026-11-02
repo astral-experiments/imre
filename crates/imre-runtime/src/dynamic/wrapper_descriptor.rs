@@ -145,6 +145,9 @@ impl BuiltinDescriptor {
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 Some((layout.class, attr, &["__reduce__"][..]))
             }
+            Some(("typing.TypeAliasType", attr)) => {
+                Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
+            }
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
             _ => None,
         };
@@ -177,6 +180,14 @@ impl BuiltinDescriptor {
         let (owner, name) = match symbol {
             "type.__init__" => ("type", "__init__"),
             "object.__format__" => ("object", "__format__"),
+            "object.__sizeof__" => ("object", "__sizeof__"),
+            "dict.__sizeof__" => ("dict", "__sizeof__"),
+            "int.__sizeof__" => ("int", "__sizeof__"),
+            "str.__sizeof__" => ("str", "__sizeof__"),
+            "bytearray.__sizeof__" => ("bytearray", "__sizeof__"),
+            "list.__sizeof__" => ("list", "__sizeof__"),
+            "set.__sizeof__" => ("set", "__sizeof__"),
+            "frozenset.__sizeof__" => ("frozenset", "__sizeof__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
@@ -238,6 +249,7 @@ impl BuiltinDescriptor {
             method: matches!(
                 name,
                 "__format__"
+                    | "__sizeof__"
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"
@@ -307,6 +319,7 @@ impl BuiltinDescriptor {
             owner if typing::ParameterClass::lookup(owner).is_some() => {
                 ctx.builtin_type_name(receiver) == Some(owner)
             }
+            "typing.TypeAliasType" => matches!(ctx.heap.get(receiver), Value::TypeAlias { .. }),
             "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),
             "object" => true,
             "type" => ctx.is_type_object(receiver),
@@ -485,6 +498,8 @@ impl BuiltinDescriptor {
             )),
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("utctimetuple", "__doc__") if self.owner == "datetime.datetime" => "Return UTC time tuple, compatible with time.localtime().",
+                    ("utctimetuple", _) if self.owner == "datetime.datetime" => "($self, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::datetime::TZINFO => "-> (cls, state)",
                     ("__reduce__", _) if self.owner == stdlib::datetime::TZINFO => "($self, /)",
                     ("tzname", "__doc__") if self.owner == "datetime.timezone" => "If name is specified when timezone is created, returns the name.  Otherwise returns offset as 'UTC(+|-)HH:MM'.",

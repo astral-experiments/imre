@@ -378,6 +378,23 @@ pub(crate) fn close(fd: i32) -> Result<()> {
     checked(unsafe { libc::close(fd) }).map(|_| ())
 }
 
+/// Close the descriptors in `[low, high)`, ignoring individual close errors.
+pub(crate) fn close_range(low: i32, high: i32) {
+    let low = low.max(0);
+    if low >= high {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    // SAFETY: the syscall accepts descriptor numbers with an inclusive upper bound.
+    if unsafe { libc::syscall(libc::SYS_close_range, low as u32, (high - 1) as u32, 0) } == 0 {
+        return;
+    }
+    for fd in low..high {
+        // SAFETY: close accepts any descriptor number. Retrying could close a reused fd.
+        unsafe { libc::close(fd) };
+    }
+}
+
 /// Duplicate the open file description with close-on-exec already set.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_dup(fd: usize) -> usize {

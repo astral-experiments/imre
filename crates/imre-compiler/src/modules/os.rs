@@ -65,6 +65,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
     Some(match name {
         "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
+        "umask" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.umask"),
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
         "chdir" if cfg!(unix) => Intrinsic::Chdir,
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
@@ -103,6 +104,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "terminal_size" => Intrinsic::ObjectRuntimeExport("os.terminal_size"),
         "close" => Intrinsic::Fd(FdOperation::Close),
+        "closerange" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.closerange"),
         "read" => Intrinsic::Fd(FdOperation::Read),
         "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),

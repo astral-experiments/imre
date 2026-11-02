@@ -92,6 +92,7 @@ fn fixed_zone_method(name: &str) -> bool {
 
 pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
     match name {
+        "utctimetuple" => receiver == Type::Calendar(C::DateTime),
         "min" | "max" | "resolution" | "__reduce__" | "__reduce_ex__" => {
             matches!(
                 receiver,
@@ -107,7 +108,10 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
             receiver == Type::Calendar(C::Delta)
         }
         "fromisoformat" | "strptime" => receiver == Type::ClockTime,
-        "ctime" | "isoweekday" => matches!(receiver, Type::Calendar(C::Date | C::DateTime)),
+        "fromtimestamp" => receiver == Type::Calendar(C::Date),
+        "ctime" | "isoweekday" | "today" => {
+            matches!(receiver, Type::Calendar(C::Date | C::DateTime))
+        }
         _ => false,
     }
 }

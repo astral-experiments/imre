@@ -235,8 +235,26 @@ pub fn backtracking_source(
     )
 }
 
+/// Translate Python syntax for validation without requiring a particular matcher.
+pub fn validation_source(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+) -> Result<(String, Vec<Option<String>>), String> {
+    tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        false,
+        Grammar::Validation,
+    )
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Grammar {
+    Validation,
     Standard { multiline: bool },
     Lookahead,
     Backtracking,
@@ -355,18 +373,6 @@ fn reference_id(
         .iter()
         .position(|g| g.as_deref() == Some(&name))
         .ok_or_else(|| "unknown regex group name".into())
-}
-
-/// Comments before an initial global verbose flag do not consume a pattern atom.
-pub fn leading_verbose(mut pattern: &str) -> bool {
-    while let Some(body) = pattern.strip_prefix("(?#") {
-        let mut chars = body.chars();
-        if skip_comment(&mut chars).is_err() {
-            return false;
-        }
-        pattern = chars.as_str();
-    }
-    pattern.starts_with("(?x)")
 }
 
 fn skip_comment(input: &mut impl Iterator<Item = char>) -> Result<(), String> {

@@ -870,7 +870,7 @@ def scan(left: list[Row], right: list[Row]) -> int:
         );
         let body = emitted_body(&module, id);
         assert!(body.contains("call ptr @imre_seq_data_readonly"), "{body}");
-        assert!(body.contains("call i64 @imre_seq_borrow_index_proven"));
+        assert!(body.contains("call i64 @imre_seq_borrow_index_proven_fast("));
         assert!(!body.contains("call void @imre_record_retain"), "{body}");
         assert!(!body.contains("call void @imre_record_release"), "{body}");
     }
@@ -1061,7 +1061,7 @@ def total(rows: list[Row], fail: bool) -> int:
         );
         // The read after the branches cannot reuse either branch's SSA pointer.
         assert_eq!(
-            body.matches("call i64 @imre_seq_borrow_index_proven")
+            body.matches("call i64 @imre_seq_borrow_index_proven_fast(")
                 .count(),
             1,
             "{body}"
@@ -1141,7 +1141,7 @@ def total(rows: list[Row], fail: bool) -> int:
             let (_, read_guard) = body.rsplit_once("icmp eq ptr").unwrap();
             let cached = read_guard.find("getelementptr inbounds i64").unwrap();
             let fallback = read_guard
-                .find("call i64 @imre_seq_borrow_index_proven")
+                .find("call i64 @imre_seq_borrow_index_proven_fast(")
                 .unwrap();
             let merged = read_guard.find("phi i64").unwrap();
             assert!(cached < fallback && fallback < merged, "{body}");
@@ -1160,7 +1160,7 @@ def total(rows: list[Row], fail: bool) -> int:
         let body = emitted_body(&module, 1);
         assert!(!body.contains("call ptr @imre_seq_data_readonly"), "{body}");
         assert!(
-            body.contains("call i64 @imre_seq_borrow_index_proven"),
+            body.contains("call i64 @imre_seq_borrow_index_proven_fast("),
             "{body}"
         );
     }

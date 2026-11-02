@@ -1059,7 +1059,7 @@ pub(crate) enum Builtin {
     SysPlatform,
     SysThreadInfo,
     SysThreadText {
-        version: bool,
+        field: u32,
     },
     SysImplementation,
     SysStdlibModuleNames,
@@ -2309,7 +2309,10 @@ pub(crate) enum ProcessOperation {
         bytes: bool,
     },
     EnvironGet,
-    EnvironIndex,
+    EnvironKeys,
+    EnvironIndex {
+        bytes: bool,
+    },
     EnvironDelete {
         bytes: bool,
     },

@@ -17,6 +17,7 @@ enum Format {
     UnsignedInt,
     Long,
     UnsignedLong,
+    LongLong,
     Unicode,
     Float,
     Double,
@@ -34,6 +35,7 @@ impl Format {
             Self::UnsignedInt => "I",
             Self::Long => "l",
             Self::UnsignedLong => "L",
+            Self::LongLong => "q",
             Self::Unicode => "u",
             Self::Float => "f",
             Self::Double => "d",
@@ -46,7 +48,7 @@ impl Format {
             Self::SignedByte | Self::UnsignedByte => 1,
             Self::Short | Self::UnsignedShort => 2,
             Self::Long | Self::UnsignedLong => size_of::<c_long>(),
-            Self::Double => 8,
+            Self::LongLong | Self::Double => 8,
             _ => 4,
         }
     }
@@ -88,6 +90,13 @@ impl Format {
                     Error::new("OverflowError", "Python int too large to convert to C long")
                 })?;
                 out[..self.width()].copy_from_slice(&n.to_ne_bytes());
+            }
+            Self::LongLong => {
+                let n = ctx
+                    .index_integer(item)?
+                    .to_i64()
+                    .ok_or_else(|| Error::new("OverflowError", "int too big to convert"))?;
+                out = n.to_ne_bytes();
             }
             Self::UnsignedInt | Self::UnsignedLong => {
                 let n = ctx.index_integer(item)?;
@@ -224,6 +233,9 @@ impl Array {
             Format::Long => Value::Int(Int::from(
                 c_long::from_ne_bytes(element.try_into().unwrap()) as i64,
             )),
+            Format::LongLong => {
+                Value::Int(Int::from(i64::from_ne_bytes(element.try_into().unwrap())))
+            }
             Format::UnsignedLong => Value::Int(Int::new(
                 c_ulong::from_ne_bytes(element.try_into().unwrap()).into(),
             )),
@@ -275,6 +287,27 @@ fn array_mut(ctx: &mut Context, receiver: Id) -> &mut Array {
         unreachable!("expected array receiver");
     };
     array
+}
+
+/// Replace the selected element even if converting the value grows or copies the array.
+pub(super) fn set_item(ctx: &mut Context, receiver: Id, index: i64, item: Id) -> Result<()> {
+    let out_of_range = || Error::new("IndexError", "array assignment index out of range");
+    let array = array_mut(ctx, receiver);
+    let len = array.len() as i64;
+    let index = if index < 0 { index + len } else { index };
+    if !(0..len).contains(&index) {
+        return Err(out_of_range());
+    }
+    let format = array.format;
+    let width = format.width();
+    let start = index as usize * width;
+    let value = format.encode(ctx, item)?;
+    let array = array_mut(ctx, receiver);
+    if index as usize >= array.len() {
+        return Err(out_of_range());
+    }
+    array.as_bytes_mut()?[start..start + width].copy_from_slice(&value[..width]);
+    Ok(())
 }
 
 /// CPython validates the item, resizes at the original append offset, and converts
@@ -332,13 +365,14 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
         "I" => Format::UnsignedInt,
         "l" => Format::Long,
         "L" => Format::UnsignedLong,
+        "q" => Format::LongLong,
         // Imre's supported Linux and macOS targets store wchar_t as a 32-bit code point.
         #[cfg(unix)]
         "u" if size_of::<libc::wchar_t>() == 4 => Format::Unicode,
         "f" => Format::Float,
         "d" => Format::Double,
         "w" => Format::Wide,
-        "u" | "q" | "Q" => {
+        "u" | "Q" => {
             return Err(Error::new(
                 "NotImplementedError",
                 format!("unsupported array typecode '{code}'"),

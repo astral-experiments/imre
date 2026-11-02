@@ -349,6 +349,9 @@ impl Checker<'_> {
         returns: Option<Type>,
         pull: bool,
     ) -> Result<Expr, String> {
+        if matches!(*lambda.body, ast::Expr::Yield(_)) {
+            return Err(self.object_builtin_error("generator lambda", lambda));
+        }
         let declared = lambda.parameters.as_deref();
         if declared.is_some_and(|parameters| {
             parameters.vararg.is_some()

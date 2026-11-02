@@ -1183,7 +1183,7 @@ def main():
         }
         env["IMRE_CACHE_DIR"] = str(root / "cache")
 
-        def run(exe, *args, extra=None, stdin=None):
+        def run(exe, *args, extra=None, stdin=None, timeout=60):
             return subprocess.run(
                 [exe, *args],
                 cwd=root,
@@ -1191,7 +1191,7 @@ def main():
                 input=stdin,
                 capture_output=True,
                 check=False,
-                timeout=60,
+                timeout=timeout,
             )
 
         if sys.platform == "darwin" or sys.platform.startswith("linux"):
@@ -1344,9 +1344,9 @@ def main():
             target["python_version"] + ".0",
         ]
 
-        def compare(*args, extra=None, status=0, native_args=None):
+        def compare(*args, extra=None, status=0, native_args=None, native_timeout=60):
             expected = run(sys.executable, *args, extra=extra)
-            actual = run(imre, *(args if native_args is None else native_args), extra=extra)
+            actual = run(imre, *(args if native_args is None else native_args), extra=extra, timeout=native_timeout)
             assert actual.returncode == expected.returncode == status, (
                 args,
                 actual.stderr,
@@ -1475,6 +1475,19 @@ def main():
             "print(Example().value())\n"
         )
         compare("-IB", decorated)
+
+        unrelated = root / "unrelated_asdict.py"
+        unrelated.write_text(
+            "from collections import namedtuple\n"
+            "Point = namedtuple('Point', 'x y')\n"
+            "class Other:\n"
+            "    def _asdict(self): return 37\n"
+            "def read(other: Other):\n"
+            "    saved = other._asdict\n"
+            "    return other._asdict(), saved()\n"
+            "print(read(Other()))\n"
+        )
+        compare("-B", unrelated, native_args=("run", unrelated, "--quiet"))
 
         locale_script = root / "get_locale.py"
         locale_script.write_text(
@@ -1703,6 +1716,15 @@ def main():
         )
         compare("-IB", "-c", "import sys; print(__import__(sys.argv[1]).SelectorKey('f', 7, 1, 'd'))", "selectors")
         compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
+        compare(
+            "-IB", "-c",
+            "import copyreg\n"
+            "from copyreg import dispatch_table, pickle\n"
+            "pickle(bytes, tuple)\n"
+            "print(dispatch_table is copyreg.dispatch_table, dispatch_table[bytes] is tuple)\n"
+            "try: pickle(bytes, None)\n"
+            "except TypeError as error: print(error)\n",
+        )
         compare(
             "-IB", "-c", "import sys; sys.path; m = __import__(sys.argv[1]); "
             "sys.version = '7.42 (custom) [cc]'; print(m.python_version())", "platform",
@@ -2252,6 +2274,7 @@ def report(text):
             "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
             "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
             "boxed_thread_bound_lock.py",
+            "boxed_thread_captured_acquire.py",
             "boxed_thread_hash_update.py",
         ):
             thread_fixture = fixtures / name
@@ -2357,6 +2380,18 @@ def report(text):
         compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
         boxed_call_args = fixtures / "boxed_unittest_call_args.py"
         compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
+        mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
+        compare(
+            "-B", "-c", "from unittest.mock import Mock\nm = Mock(['close'])\nm.close()\nassert not hasattr(m, 'read')\n",
+            extra=mock_compile_flags, native_timeout=300,
+        )
+        open_fixture = fixtures / "boxed_unittest_mock_open.py"
+        for import_flags in ((), ("--runtime-imports",)):
+            compare(
+                "-IB", open_fixture, extra=mock_compile_flags,
+                native_args=("run", open_fixture, *import_flags, "--quiet"),
+                native_timeout=300,
+            )
         for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py", "boxed_unittest_mock_call.py"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
@@ -2382,12 +2417,14 @@ def report(text):
             "boxed_interactive.py",
             "boxed_relative_package_imports.py",
             "boxed_sys_getframe.py",
+            "boxed_sys_getsizeof.py",
             "boxed_sys_audit.py",
             "boxed_sys_audit_recursion.py",
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
             "boxed_sys_byteorder.py",
             "boxed_sys_hash_info.py",
+            "boxed_sys_thread_info.py",
             "boxed_sys_flags.py",
             "boxed_sys_jit.py",
             "boxed_sys_monitoring_events.py",
@@ -2444,6 +2481,7 @@ def report(text):
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
             "boxed_typing_type_predicates.py",
+            "boxed_typing_bytestring.py",
             "boxed_typing_new_type.py",
             "boxed_typing_typeddict.py",
             "boxed_typing_dataclass_transform.py",
@@ -2451,13 +2489,16 @@ def report(text):
             "boxed_typing_literal.py",
             "boxed_typing_protocol.py",
             "boxed_typing_typevar_members.py",
+            "boxed_typing_alias_namespaces.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
             "boxed_typing_async_collection_aliases.py",
+            "boxed_typing_abc_aliases.py",
             "boxed_typing_alias_defaults.py",
             "boxed_typing_type.py",
             "boxed_type_alias_statements.py",
             "boxed_typing_mapping.py",
+            "boxed_typing_concrete_collections.py",
             "boxed_typing_iterable.py",
             "boxed_typing_regex_aliases.py",
             "boxed_pprint.py",
@@ -2470,6 +2511,7 @@ def report(text):
             "boxed_re_lookahead.py",
             "boxed_re_split.py",
             "boxed_re_match_subscript.py",
+            "boxed_re_pattern_cache.py",
             "boxed_re_sub.py",
             "boxed_re_findall_empty.py",
             "boxed_memoryview_context.py",

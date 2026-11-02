@@ -582,6 +582,16 @@ impl Context {
                 if check_special && let Some(result) = self.binary_special("==", a, b)? {
                     break 'current self.truth(result)?;
                 }
+                if let (Value::RegexPattern(left), Value::RegexPattern(right)) =
+                    (self.heap.get(a), self.heap.get(b))
+                {
+                    if !left.same_program(right) {
+                        break 'current false;
+                    }
+                    pair = Some((left.source, right.source));
+                    check_special = true;
+                    continue 'walk;
+                }
                 if let Some(equal) = stdlib::datetime::comparison::compare(self, a, b, "==")? {
                     break 'current equal;
                 }
@@ -832,6 +842,9 @@ impl Context {
                 a.comparison_parts(b).is_some_and(|(x, y)| equal(x, y))
             }
             (Value::Slice(x), Value::Slice(y)) => x.iter().zip(y).all(|(&i, &j)| equal(i, j)),
+            (Value::RegexPattern(a), Value::RegexPattern(b)) => {
+                a.same_program(b) && equal(a.source, b.source)
+            }
             (Value::Union(a), Value::Union(b)) => a.structural_equal(*b, self, equal),
             (Value::List(x), Value::List(y)) => {
                 x.len() == y.len() && x.iter().zip(y).all(|(&i, &j)| equal(i, j))
@@ -3065,6 +3078,9 @@ impl Context {
     /// Convert a scalar subscript before looking up a mutable sequence's current length.
     fn mutation_index(&mut self, key: Id, kind: &str) -> Result<i64> {
         let index = self.index_value(key)?.ok_or_else(|| {
+            if kind == "array" {
+                return Error::new("TypeError", "array indices must be integers");
+            }
             Error::new(
                 "TypeError",
                 format!(
@@ -3111,6 +3127,12 @@ impl Context {
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));
+        }
+        if matches!(self.heap.get(obj), Value::Array(_))
+            && !matches!(self.heap.get(key), Value::Slice(_))
+        {
+            let index = self.mutation_index(key, "array")?;
+            return super::array::set_item(self, obj, index, val);
         }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Set(val)

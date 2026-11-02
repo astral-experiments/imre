@@ -41,6 +41,14 @@ impl Value {
 }
 
 impl Property {
+    pub(super) fn readonly(get: Id, name: Id) -> Self {
+        Self {
+            get,
+            name: Some(name),
+            ..Self::default()
+        }
+    }
+
     pub(super) fn children(self, visit: &mut super::value::MarkQueue<'_>) {
         visit.extend([self.get, self.set, self.delete, self.doc]);
         visit.extend(self.name);

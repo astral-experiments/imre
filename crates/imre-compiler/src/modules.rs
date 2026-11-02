@@ -1545,6 +1545,7 @@ impl IntrinsicModule {
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "get_clock_info") => Intrinsic::ObjectRuntimeExport("time.get_clock_info"),
             (Self::Time, "tzset") => Intrinsic::ObjectRuntimeExport("time.tzset"),
             (Self::Time, "timezone") => Intrinsic::ObjectRuntimeExport("time.timezone"),
             (Self::Time, "altzone") => Intrinsic::ObjectRuntimeExport("time.altzone"),
@@ -1816,6 +1817,7 @@ impl IntrinsicModule {
                 Intrinsic::TracebackFormatter("traceback.print_exception")
             }
             (Self::Sys, "_getframemodulename") => Intrinsic::SysGetFrameModuleName,
+            (Self::Sys, "getsizeof") => Intrinsic::ObjectRuntimeExport("sys.getsizeof"),
             (Self::Sys, "getrecursionlimit") => Intrinsic::SysGetRecursionLimit,
             (Self::Sys, "setrecursionlimit") => Intrinsic::SysSetRecursionLimit,
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
@@ -1957,6 +1959,7 @@ impl IntrinsicModule {
             (Self::Typing, "Generator") => Intrinsic::ObjectRuntimeExport("typing.Generator"),
             (Self::Typing, "Reversible") => Intrinsic::ObjectRuntimeExport("typing.Reversible"),
             (Self::Typing, "Sized") => Intrinsic::ObjectRuntimeExport("typing.Sized"),
+            (Self::Typing, "ByteString") => Intrinsic::ObjectRuntimeExport("typing.ByteString"),
             (Self::Typing, "ContextManager") => {
                 Intrinsic::ObjectRuntimeExport("typing.ContextManager")
             }
@@ -1964,11 +1967,33 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.AsyncContextManager")
             }
             (Self::Typing, "Awaitable") => Intrinsic::ObjectRuntimeExport("typing.Awaitable"),
+            (Self::Typing, "AbstractSet") => Intrinsic::ObjectRuntimeExport("typing.AbstractSet"),
+            (Self::Typing, "AsyncGenerator") => {
+                Intrinsic::ObjectRuntimeExport("typing.AsyncGenerator")
+            }
+            (Self::Typing, "AsyncIterable") => {
+                Intrinsic::ObjectRuntimeExport("typing.AsyncIterable")
+            }
+            (Self::Typing, "Collection") => Intrinsic::ObjectRuntimeExport("typing.Collection"),
+            (Self::Typing, "Container") => Intrinsic::ObjectRuntimeExport("typing.Container"),
+            (Self::Typing, "Coroutine") => Intrinsic::ObjectRuntimeExport("typing.Coroutine"),
+            (Self::Typing, "Hashable") => Intrinsic::ObjectRuntimeExport("typing.Hashable"),
+            (Self::Typing, "ItemsView") => Intrinsic::ObjectRuntimeExport("typing.ItemsView"),
+            (Self::Typing, "KeysView") => Intrinsic::ObjectRuntimeExport("typing.KeysView"),
+            (Self::Typing, "MappingView") => Intrinsic::ObjectRuntimeExport("typing.MappingView"),
+            (Self::Typing, "MutableSequence") => {
+                Intrinsic::ObjectRuntimeExport("typing.MutableSequence")
+            }
+            (Self::Typing, "MutableSet") => Intrinsic::ObjectRuntimeExport("typing.MutableSet"),
+            (Self::Typing, "ValuesView") => Intrinsic::ObjectRuntimeExport("typing.ValuesView"),
             (Self::Typing, "AsyncIterator") => {
                 Intrinsic::ObjectRuntimeExport("typing.AsyncIterator")
             }
             (Self::Typing, "Pattern") => Intrinsic::ObjectRuntimeExport("typing.Pattern"),
             (Self::Typing, "Match") => Intrinsic::ObjectRuntimeExport("typing.Match"),
+            (Self::Typing, "ChainMap") => Intrinsic::ObjectRuntimeExport("typing.ChainMap"),
+            (Self::Typing, "Deque") => Intrinsic::ObjectRuntimeExport("typing.Deque"),
+            (Self::Typing, "OrderedDict") => Intrinsic::ObjectRuntimeExport("typing.OrderedDict"),
             (Self::Typing, "Counter") => Intrinsic::ObjectRuntimeExport("typing.Counter"),
             (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
             (Self::Typing, "Mapping") => Intrinsic::TYPING_MAPPING,
@@ -2626,6 +2651,9 @@ impl IntrinsicModule {
             }
             (Self::Posix, name) => os::symbol(name)?,
             (Self::Os, "makedirs") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.makedirs"),
+            (Self::Os, "removedirs") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("os.removedirs")
+            }
             (Self::Os, "walk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.walk"),
             (Self::Os, "fwalk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.fwalk"),
             (Self::Os, "F_OK") => Intrinsic::AccessMode(0),
@@ -2872,8 +2900,10 @@ pub(crate) struct SourceModule {
     /// Decorated declarations register their original function at module initialization.
     pub(crate) overloads: HashSet<usize>,
     pub(crate) type_guards: Vec<usize>,
-    /// Fixed pattern declarations in the entry module precede ordinary executable statements.
+    /// Entry bindings and guards that run during initialization, before later definitions.
     pub(crate) entry_globals: Vec<usize>,
+    /// Guarded standard-library imports that run in source order through the object importer.
+    pub(crate) optional_imports: HashMap<TextRange, String>,
     /// First assignment of each module value that needs a rebindable cell.
     pub(crate) rebound_values: HashSet<usize>,
     /// Mutable intrinsic exports read at the source from-import, keyed by statement.
@@ -2904,11 +2934,26 @@ impl SearchRoots {
 pub(crate) fn boxed_mock_export(name: &str) -> bool {
     matches!(
         name,
-        "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal" | "call" | "_Call" | "_CallList"
+        "sentinel"
+            | "DEFAULT"
+            | "ANY"
+            | "MagicMock"
+            | "mock_open"
+            | "seal"
+            | "call"
+            | "_Call"
+            | "_CallList"
     )
 }
 
 impl SourceModule {
+    /// An entry capability guard runs before its subsequent declarations and calls.
+    pub(crate) fn has_entry_guard(&self) -> bool {
+        self.entry_globals
+            .iter()
+            .any(|&index| matches!(self.parsed.syntax().body[index], ast::Stmt::If(_)))
+    }
+
     fn local_value(&self, id: ModuleId, statement: &ast::Stmt) -> Option<DefinitionId> {
         let name = value_name(statement)?;
         let Binding::Value(first) = *self.bindings.get(name)? else {
@@ -4120,6 +4165,7 @@ impl<'a> Loader<'a> {
             overloads: HashSet::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
+            optional_imports: HashMap::new(),
             rebound_values: HashSet::new(),
             snapshots: HashMap::new(),
             executable: Vec::new(),
@@ -4340,6 +4386,20 @@ impl<'a> Loader<'a> {
                         }
                     }
                 }
+                ast::Stmt::Try(guard)
+                    if id == 0
+                        && !executable
+                        && self.modules[id].entry_globals.is_empty()
+                        && let Some((module, name)) =
+                            optional_stdlib_import(&self.modules, id, guard) =>
+                {
+                    self.reject_stdlib_shadow(module)?;
+                    self.bind(id, name, Binding::ConditionalValue, statement)?;
+                    self.modules[id]
+                        .optional_imports
+                        .insert(statement.range(), name.to_owned());
+                    self.modules[id].executable.push(index);
+                }
                 _ if self.alias_declaration(id, statement)? => {
                     self.modules[id].type_guards.push(index);
                 }
@@ -4543,6 +4603,11 @@ impl<'a> Loader<'a> {
                                 module_value(statement),
                                 Some(ast::Expr::Call(call)) if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
                             ));
+                    if entry_global && module_attribute_guard(&self.modules, id, statement) {
+                        // Run the guard in the initializer before subsequent declarations.
+                        self.modules[id].entry_globals.push(index);
+                        continue;
+                    }
                     self.scan_value_writes(id, statement)?;
                     if let Some(name) = value_name(statement) {
                         if (id != 0 || entry_global)
@@ -5161,7 +5226,14 @@ impl<'a> Loader<'a> {
             "selectors" if cfg!(any(target_os = "linux", target_os = "macos")) => {
                 Some(("selectors.py", include_str!("../stdlib/selectors.py")))
             }
-            "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "doctest" => Some((
+                "doctest.py",
+                concat!(
+                    include_str!("../stdlib/doctest.py"),
+                    "\n",
+                    include_str!("../stdlib/doctest_typed.py"),
+                ),
+            )),
             "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "zipimport" if cfg!(unix) => Some((
@@ -5254,11 +5326,7 @@ impl<'a> Loader<'a> {
 
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
-        let vendored = ty_vendored::file_system();
-        if INTRINSIC_MODULES.contains(&first)
-            || vendored.is_file(format!("stdlib/{first}.pyi").as_str())
-            || vendored.is_file(format!("stdlib/{first}/__init__.pyi").as_str())
-        {
+        if stdlib_top_level(first) {
             return Err(format!(
                 "standard-library imports and shadowing are unsupported: {first:?}"
             ));
@@ -5449,6 +5517,55 @@ pub(crate) fn errno_import(statement: &ast::Stmt) -> Option<&ast::StmtImportFrom
     .then_some(import)
 }
 
+fn stdlib_top_level(name: &str) -> bool {
+    let vendored = ty_vendored::file_system();
+    INTRINSIC_MODULES.contains(&name)
+        || vendored.is_file(format!("stdlib/{name}.pyi").as_str())
+        || vendored.is_file(format!("stdlib/{name}/__init__.pyi").as_str())
+}
+
+/// An optional module import may occur between ordinary imports in the entry prefix.
+fn optional_stdlib_import<'a>(
+    modules: &[SourceModule],
+    module: ModuleId,
+    guard: &'a ast::StmtTry,
+) -> Option<(&'a str, &'a str)> {
+    let [ast::Stmt::Import(import)] = guard.body.as_slice() else {
+        return None;
+    };
+    let [alias] = import.names.as_slice() else {
+        return None;
+    };
+    let [fallback] = import_error_fallback(modules, module, guard)? else {
+        return None;
+    };
+    let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+    (!alias.name.contains('.')
+        && stdlib_top_level(alias.name.as_str())
+        && matches!(fallback, ast::Stmt::Assign(_))
+        && value_name(fallback) == Some(name)
+        && matches!(module_value(fallback), Some(ast::Expr::NoneLiteral(_))))
+    .then_some((alias.name.as_str(), name))
+}
+
+fn import_error_fallback<'a>(
+    modules: &[SourceModule],
+    module: ModuleId,
+    guard: &'a ast::StmtTry,
+) -> Option<&'a [ast::Stmt]> {
+    let [ast::ExceptHandler::ExceptHandler(handler)] = guard.handlers.as_slice() else {
+        return None;
+    };
+    let exception = handler.type_.as_deref()?;
+    (!guard.is_star
+        && guard.orelse.is_empty()
+        && guard.finalbody.is_empty()
+        && handler.name.is_none()
+        && matches!(exception, ast::Expr::Name(n) if n.id.as_str() == "ImportError")
+        && resolve_binding(modules, module, exception).is_none())
+    .then_some(&handler.body)
+}
+
 /// Both arms bind one name. The source importer runs the selected imports and
 /// their module initializers before continuing to the next statement.
 fn conditional_import<'a>(
@@ -5457,21 +5574,9 @@ fn conditional_import<'a>(
     statement: &'a ast::Stmt,
 ) -> Option<&'a str> {
     if let ast::Stmt::Try(guard) = statement {
-        let [ast::ExceptHandler::ExceptHandler(handler)] = guard.handlers.as_slice() else {
-            return None;
-        };
-        let exception = handler.type_.as_deref()?;
-        if guard.is_star
-            || !guard.orelse.is_empty()
-            || !guard.finalbody.is_empty()
-            || handler.name.is_some()
-            || !matches!(exception, ast::Expr::Name(n) if n.id.as_str() == "ImportError")
-            || resolve_binding(modules, module, exception).is_some()
-        {
-            return None;
-        }
+        let fallback = import_error_fallback(modules, module, guard)?;
         let name = single_import_binding(&guard.body)?;
-        return (single_import_binding(&handler.body)? == name).then_some(name);
+        return (single_import_binding(fallback)? == name).then_some(name);
     }
     let guard = statement.as_if_stmt()?;
     let test = guard.test.as_compare_expr()?;
@@ -5527,6 +5632,26 @@ fn single_import_binding(body: &[ast::Stmt]) -> Option<&str> {
     // An unaliased dotted import binds only the first component.
     let name = alias.name.as_str().split('.').next()?;
     (name != "*").then_some(name)
+}
+
+/// Recognize a module attribute test whose only branch raises.
+fn module_attribute_guard(modules: &[SourceModule], id: ModuleId, statement: &ast::Stmt) -> bool {
+    let ast::Stmt::If(guard) = statement else {
+        return false;
+    };
+    if !guard.elif_else_clauses.is_empty()
+        || !matches!(guard.body.as_slice(), [ast::Stmt::Raise(_)])
+    {
+        return false;
+    }
+    let test = match &*guard.test {
+        ast::Expr::UnaryOp(op) if op.op == ast::UnaryOp::Not => &*op.operand,
+        other => other,
+    };
+    matches!(test, ast::Expr::Attribute(attr) if matches!(
+        resolve_binding(modules, id, &attr.value),
+        Some(Binding::Module(_) | Binding::IntrinsicModule(_))
+    ))
 }
 
 /// Allow an identity check with a closed builtin raise before importing a dependency.

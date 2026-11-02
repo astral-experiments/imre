@@ -42,6 +42,11 @@ def _boxed_docs(obj, name, owner, found, seen):
             _boxed_docs(item, name + ".__test__." + attr, owner, found, seen)
 
 
+class _DocTestSuite(unittest.TestSuite):
+    def _removeTestAtIndex(self, index):
+        pass
+
+
 def DocTestSuite(module=None, globs=None, extraglobs=None):
     if module is None:
         module = sys.modules[sys._getframemodulename(1)]
@@ -56,9 +61,7 @@ def DocTestSuite(module=None, globs=None, extraglobs=None):
     found = {}
     _boxed_docs(module, module.__name__, module, found, set())
     parser = DocTestParser()
-    suite = unittest.TestSuite()
-    # CPython's doctest suite retains its cases, including their saved globals, for reruns.
-    suite._cleanup = False
+    suite = _DocTestSuite()
     for name in sorted(found):
         doc = found[name]
         examples = parser.get_examples(doc, name)

@@ -127,7 +127,7 @@ pub(super) fn decoded_points<I: Iterator<Item = u32> + Clone>(
 
 /// Resolve the active decoder's exception just as the accelerator does; a fresh
 /// import may install a distinct JSONDecodeError class.
-fn scan_error(ctx: &mut Context, input: Id, pos: i64, message: &str) -> Error {
+pub(super) fn scan_error(ctx: &mut Context, input: Id, pos: i64, message: &str) -> Error {
     let result = (|| {
         let decoder = ctx.module("json.decoder")?;
         let class = ctx.lookup_attr(decoder, "JSONDecodeError")?;

@@ -15,6 +15,7 @@ pub(crate) enum DecodedJson<T, S> {
     Null,
     Bool(bool),
     Number(JsonNumber),
+    Constant(&'static str),
     String(S),
     Array(Vec<T>),
     Object(Vec<(S, T)>),
@@ -33,11 +34,11 @@ impl<T, S> Frame<T, S> {
         }
     }
 
-    fn key(
+    fn key<E>(
         &mut self,
         cursor: &mut Cursor<'_>,
-        string: &impl Fn(&str, usize) -> Result<S, Problem>,
-    ) -> Result<(), Problem> {
+        string: &impl Fn(&str, usize) -> Result<S, Problem<E>>,
+    ) -> Result<(), Problem<E>> {
         if let Self::Object { key, .. } = self {
             if cursor.peek() != Some(b'"') {
                 return Err((
@@ -53,11 +54,12 @@ impl<T, S> Frame<T, S> {
                 return Err((cursor.pos, "Expecting ':' delimiter").into());
             }
             cursor.pos += 1;
+            cursor.space();
         }
         Ok(())
     }
 
-    fn add(&mut self, value: T) -> Result<(), Problem> {
+    fn add<E>(&mut self, value: T) -> Result<(), Problem<E>> {
         match self {
             Self::Array(items) => push(items, value),
             Self::Object { fields, key } => push(fields, (key.take().expect("parsed key"), value)),
@@ -72,49 +74,54 @@ impl<T, S> Frame<T, S> {
     }
 }
 
-enum Problem {
-    Syntax(Failure),
-    String(usize, serde_json::Error),
-    Exhausted,
-    Memory,
-    Build(Error),
+/// Distinguish document errors from exceptions raised while building a value.
+pub(crate) enum JsonTokenError<E> {
+    Parse(Error),
+    Build(E),
 }
 
-impl From<Failure> for Problem {
+enum Problem<E> {
+    Syntax(Failure),
+    String(usize, serde_json::Error),
+    Parse(Error),
+    Build(E),
+}
+
+impl<E> From<Failure> for Problem<E> {
     fn from(failure: Failure) -> Self {
         Self::Syntax(failure)
     }
 }
 
-fn push<T>(items: &mut Vec<T>, value: T) -> Result<(), Problem> {
-    items.try_reserve(1).map_err(|_| Problem::Memory)?;
+fn push<T, E>(items: &mut Vec<T>, value: T) -> Result<(), Problem<E>> {
+    items
+        .try_reserve(1)
+        .map_err(|_| Problem::Parse(Error::allocation()))?;
     items.push(value);
     Ok(())
 }
 
-fn string(token: &str, start: usize) -> Result<Str, Problem> {
+fn string(token: &str, start: usize) -> Result<Str, Problem<Error>> {
     serde_json::from_str::<String>(token)
         .map(Str::from)
         .map_err(|e| Problem::String(start, e))
 }
 
-fn parse<T, S>(
-    text: &str,
-    string: impl Fn(&str, usize) -> Result<S, Problem>,
-    mut build: impl FnMut(DecodedJson<T, S>) -> Result<T, Error>,
-) -> Result<T, Problem> {
+fn parse<T, S, E>(
+    cursor: &mut Cursor<'_>,
+    string: impl Fn(&str, usize) -> Result<S, Problem<E>>,
+    mut build: impl FnMut(DecodedJson<T, S>) -> Result<T, E>,
+) -> Result<T, Problem<E>> {
     let digit_limit = crate::integer_text::decimal_digit_limit();
-    let mut cursor = Cursor {
-        source: text,
-        pos: 0,
-    };
     let mut frames = Vec::new();
     loop {
-        cursor.space();
         let mut node = match cursor.peek() {
             Some(open @ (b'[' | b'{')) => {
                 if frames.len() >= MAX_OPEN_CONTAINERS {
-                    return Err(Problem::Exhausted);
+                    return Err(Problem::Parse(Error::new(
+                        Kind::RecursionError,
+                        "maximum recursion depth exceeded",
+                    )));
                 }
                 cursor.pos += 1;
                 cursor.space();
@@ -127,7 +134,7 @@ fn parse<T, S>(
                     }
                 };
                 if cursor.peek() != Some(frame.close()) {
-                    frame.key(&mut cursor, &string)?;
+                    frame.key(cursor, &string)?;
                     push(&mut frames, frame)?;
                     continue;
                 }
@@ -140,6 +147,9 @@ fn parse<T, S>(
                     "true" => DecodedJson::Bool(true),
                     "false" => DecodedJson::Bool(false),
                     "null" => DecodedJson::Null,
+                    "NaN" => DecodedJson::Constant("NaN"),
+                    "Infinity" => DecodedJson::Constant("Infinity"),
+                    "-Infinity" => DecodedJson::Constant("-Infinity"),
                     token if token.starts_with('"') => DecodedJson::String(string(token, start)?),
                     token => {
                         if digit_limit != 0
@@ -148,7 +158,7 @@ fn parse<T, S>(
                         {
                             let digits = token.strip_prefix('-').unwrap_or(token);
                             crate::integer_text::check_input_digits(digits, digit_limit)
-                                .map_err(Problem::Build)?;
+                                .map_err(Problem::Parse)?;
                         }
                         DecodedJson::Number(number(token))
                     }
@@ -157,13 +167,10 @@ fn parse<T, S>(
         };
         loop {
             let value = build(node).map_err(Problem::Build)?;
-            cursor.space();
             let Some(frame) = frames.last_mut() else {
-                if cursor.pos != text.len() {
-                    return Err((cursor.pos, "Extra data").into());
-                }
                 return Ok(value);
             };
+            cursor.space();
             frame.add(value)?;
             match cursor.peek() {
                 Some(close) if close == frame.close() => {
@@ -181,7 +188,7 @@ fn parse<T, S>(
                         };
                         return Err((comma, message).into());
                     }
-                    frame.key(&mut cursor, &string)?;
+                    frame.key(cursor, &string)?;
                     break;
                 }
                 _ => return Err((cursor.pos, "Expecting ',' delimiter").into()),
@@ -190,20 +197,11 @@ fn parse<T, S>(
     }
 }
 
-/// Parse bottom up so a typed arena and the boxed heap share token, number and error semantics.
-fn decode_json<T, S>(
-    text: &str,
-    string: impl Fn(&str, usize) -> Result<S, Problem>,
-    owner: impl FnOnce() -> Option<StrOwner>,
-    build: impl FnMut(DecodedJson<T, S>) -> Result<T, Error>,
-) -> Result<T, Error> {
-    parse(text, string, build).map_err(|problem| {
-        let (at, message) = match problem {
-            Problem::Exhausted => {
-                return Error::new(Kind::RecursionError, "maximum recursion depth exceeded");
-            }
-            Problem::Memory => return Error::allocation(),
-            Problem::Build(error) => return error,
+impl<E> Problem<E> {
+    fn finish(self, text: &str, owner: impl FnOnce() -> Option<StrOwner>) -> JsonTokenError<E> {
+        let (at, message) = match self {
+            Problem::Parse(error) => return JsonTokenError::Parse(error),
+            Problem::Build(error) => return JsonTokenError::Build(error),
             Problem::Syntax((at, message)) => (at, std::borrow::Cow::Borrowed(message)),
             Problem::String(start, error) => {
                 let message = error.to_string();
@@ -216,23 +214,32 @@ fn decode_json<T, S>(
                 )
             }
         };
-        owner().map_or_else(Error::allocation, |doc| syntax::at_error(doc, at, &message))
-    })
+        JsonTokenError::Parse(
+            owner().map_or_else(Error::allocation, |doc| syntax::at_error(doc, at, &message)),
+        )
+    }
 }
 
-/// Boxed strings can preserve unpaired surrogate code points. Return each validated string's
-/// body span so the caller can decode it using its original storage.
-pub(crate) fn decode_json_tokens<T>(
+/// Scan one value at a validated UTF-8 byte boundary. String bodies and the end
+/// of the root (before trailing whitespace) are byte offsets in the original document.
+pub(crate) fn decode_json_tokens_at<T, E>(
     text: &str,
+    start: usize,
     owner: impl FnOnce() -> Option<StrOwner>,
-    build: impl FnMut(DecodedJson<T, std::ops::Range<usize>>) -> Result<T, Error>,
-) -> Result<T, Error> {
-    decode_json(
-        text,
+    build: impl FnMut(DecodedJson<T, std::ops::Range<usize>>) -> Result<T, E>,
+) -> Result<(T, usize), JsonTokenError<E>> {
+    debug_assert!(text.is_char_boundary(start));
+    let mut cursor = Cursor {
+        source: text,
+        pos: start,
+    };
+    let value = parse(
+        &mut cursor,
         |token, start| Ok(start + 1..start + token.len() - 1),
-        owner,
         build,
     )
+    .map_err(|err| err.finish(text, owner))?;
+    Ok((value, cursor.pos))
 }
 
 pub(super) fn loads(
@@ -241,11 +248,17 @@ pub(super) fn loads(
 ) -> Result<*const Object, Error> {
     let keys = KeyMemo::default();
     let mut nodes = Vec::new();
-    let index = decode_json(text, string, owner, |value| {
+    let mut cursor = Cursor {
+        source: text,
+        pos: 0,
+    };
+    cursor.space();
+    let index = parse(&mut cursor, string, |value| {
         let node = match value {
             DecodedJson::Null => Node::Null,
             DecodedJson::Bool(value) => Node::Bool(value),
             DecodedJson::Number(value) => value.into(),
+            DecodedJson::Constant(raw) => number(raw).into(),
             DecodedJson::String(value) => Node::String(StrOwner::new(value)),
             DecodedJson::Array(items) => Node::Array(items),
             DecodedJson::Object(fields) => {
@@ -256,6 +269,17 @@ pub(super) fn loads(
         nodes.try_reserve(1).map_err(|_| Error::allocation())?;
         nodes.push(node);
         Ok(index)
+    })
+    .and_then(|index| {
+        cursor.space();
+        if cursor.pos == text.len() {
+            Ok(index)
+        } else {
+            Err((cursor.pos, "Extra data").into())
+        }
+    })
+    .map_err(|problem| match problem.finish(text, owner) {
+        JsonTokenError::Parse(error) | JsonTokenError::Build(error) => error,
     })?;
     // A standard root list, unlike its nested views, may be mutated by its caller.
     if let Node::Array(children) = &mut nodes[index] {
@@ -283,5 +307,50 @@ pub(super) fn loads(
             index,
         }
         .into_handle())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefix_ends_before_whitespace_and_distinguishes_constants_from_overflow() {
+        let text = "π{ \"x\" : [ NaN, Infinity, -Infinity, 1e999 ] }   tail";
+        let mut literals = Vec::new();
+        let result = decode_json_tokens_at(
+            text,
+            "π".len(),
+            || None,
+            |value| {
+                match value {
+                    DecodedJson::Constant(raw) => literals.push(raw),
+                    DecodedJson::Number(JsonNumber::Float(n)) => assert_eq!(n, f64::INFINITY),
+                    DecodedJson::Array(values) => assert_eq!(values.len(), 4),
+                    DecodedJson::Object(fields) => assert_eq!(&text[fields[0].0.clone()], "x"),
+                    _ => panic!("unexpected token"),
+                }
+                Ok::<_, ()>(())
+            },
+        );
+        assert!(matches!(result, Ok(((), end)) if &text[end..] == "   tail"));
+        assert_eq!(literals, ["NaN", "Infinity", "-Infinity"]);
+    }
+
+    #[test]
+    fn prefix_preserves_error_positions_and_builder_exceptions() {
+        for (text, at) in [("π null", 1), ("π[ { \"x\" :  ?} ]", 12)] {
+            let result = decode_json_tokens_at(
+                text,
+                "π".len(),
+                || Some(StrOwner::new(Str::new(text))),
+                |_| Ok::<_, ()>(()),
+            );
+            assert!(matches!(result, Err(JsonTokenError::Parse(e))
+                if e.json_decode_fields() == Some(("Expecting value", text, at))));
+        }
+        let raised = Rc::new(());
+        let result = decode_json_tokens_at("[0, ?]", 0, || None, |_| Err::<(), _>(raised.clone()));
+        assert!(matches!(result, Err(JsonTokenError::Build(e)) if Rc::ptr_eq(&raised, &e)));
     }
 }

@@ -27,7 +27,7 @@ def current():
     import sys
     import warnings
 
-    for code in ("h", "H", "I", "l", "L"):
+    for code in ("h", "H", "I", "l", "L", "q"):
         a = array(code)
         bits = a.itemsize * 8
         signed = code.islower()
@@ -46,6 +46,28 @@ def current():
                 pass
             else:
                 raise AssertionError("out-of-range array element accepted")
+    transitions = array("q", array("i", [-42, 0, 42]))
+    view = memoryview(transitions)
+    assert view.format == "q" and view.itemsize == 8
+    view[0] = -(1 << 63)
+    assert transitions.tolist() == [-(1 << 63), 0, 42]
+
+    class OffsetOverflow(OverflowError):
+        pass
+
+    class BadOffset:
+        def __index__(self):
+            raise OffsetOverflow("offset")
+
+    try:
+        view[0] = BadOffset()
+    except ValueError as error:
+        assert type(error) is ValueError
+        assert str(error) == "memoryview: invalid value for format 'q'"
+    else:
+        raise AssertionError("out-of-range offset accepted")
+    assert transitions[0] == -(1 << 63)
+
     if array("L").itemsize == 8:
         n = 1 << 53
         assert memoryview(array("L", [n+1])) != memoryview(array("L", [n]))
@@ -58,6 +80,22 @@ def current():
         assert a.typecode == "u" and list(a) == ["A", "😀"]
         assert array("w", a).tobytes() == a.tobytes()
         assert len(seen) == 1 and seen[0].category is DeprecationWarning
+
+    offsets = array("i", [10, 20])
+    copies = []
+
+    class Offset:
+        def __index__(self):
+            offsets.append(30)
+            copies.append(array("i", offsets))
+            return -7
+
+    offsets[-1] = Offset()
+    assert offsets.tolist() == [10, -7, 30] and copies[0].tolist() == [10, 20, 30]
+    view = memoryview(offsets)
+    offsets[0] += 2
+    assert view[0] == 12
+    view.release()
 
     for code in ("b", "B", "i", "f", "d"):
         owner = array(code, [65, 66])
