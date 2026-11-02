@@ -636,15 +636,14 @@ fn tokenize(
                 can_repeat = false;
                 0
             }
+            '\\' if lookahead && push_octal_escape(&mut input, &mut output, false)? => {
+                can_repeat = true;
+                1
+            }
             '\\' if lookahead && matches!(input.peek(), Some('1'..='9')) => {
                 let first = input.next().unwrap();
                 let mut id = (first as u8 - b'0') as usize;
                 if let Some(second) = input.next_if(char::is_ascii_digit) {
-                    if first <= '7' && second <= '7' && matches!(input.peek(), Some('0'..='7')) {
-                        return Err(
-                            "three-digit octal escapes in lookaheads are unsupported".into()
-                        );
-                    }
                     id = id * 10 + (second as u8 - b'0') as usize;
                 }
                 if id >= groups.len() {
@@ -926,12 +925,47 @@ enum Escape {
     Anchor,
 }
 
+/// Consume a Python pattern octal and emit one scalar (or one octet in a bytes pattern).
+/// Outside a class, a nonzero escape with fewer than three octal digits is a group reference.
+fn push_octal_escape(
+    input: &mut Input<'_>,
+    output: &mut String,
+    in_class: bool,
+) -> Result<bool, String> {
+    let Some(&first @ '0'..='7') = input.peek() else {
+        return Ok(false);
+    };
+    let mut digits = input.clone();
+    let mut value = 0u16;
+    let mut count = 0;
+    while count < 3
+        && let Some(c) = digits.next_if(|c| matches!(c, '0'..='7'))
+    {
+        value = value * 8 + (c as u16 - u16::from(b'0'));
+        count += 1;
+    }
+    if !in_class && first != '0' && count < 3 {
+        return Ok(false);
+    }
+    if value > 0xff {
+        return Err(format!(
+            r"octal escape value \{value:o} outside of range 0-0o377"
+        ));
+    }
+    *input = digits;
+    write!(output, r"\x{value:02x}").unwrap();
+    Ok(true)
+}
+
 fn escaped(
     input: &mut Input<'_>,
     output: &mut String,
     in_class: bool,
     escapes: &mut Escapes,
 ) -> Result<Escape, String> {
+    if push_octal_escape(input, output, in_class)? {
+        return Ok(Escape::Scalar);
+    }
     let c = input.next().ok_or("incomplete regex escape")?;
     let ascii = escapes.alphabet.ascii();
     if ascii && let Some(class) = ascii_class(c) {
