@@ -27,6 +27,30 @@ impl Checker<'_> {
         self.bundled_mock_class(class, "Mock")
     }
 
+    /// Check the argument expressions before selecting the boxed constructor. A
+    /// type error inside an expression is independent of how Mock stores it.
+    pub(super) fn boxed_mock_keywords(&mut self, call: &ast::ExprCall) -> Result<bool, String> {
+        let mut boxed = false;
+        for keyword in &call.arguments.keywords {
+            let value = self.evaluated_argument(&keyword.value)?;
+            boxed |= match keyword.arg.as_deref() {
+                Some("name") => false,
+                Some("side_effect") => matches!(value.ty, Type::Callable(_) | Type::FunctionRef),
+                _ => true,
+            };
+        }
+        Ok(boxed)
+    }
+
+    pub(super) fn mock_side_effect_target(
+        &self,
+        receiver: Type,
+        attr: &ast::ExprAttribute,
+    ) -> bool {
+        attr.attr.as_str() == "side_effect"
+            && matches!(receiver, Type::Class(class) if self.native_mock(class))
+    }
+
     pub(super) fn bundled_mock_class(&self, class: usize, name: &str) -> bool {
         let record = &self.classes.declarations.definitions[class];
         let module = &self.graph.modules[record.definition.module];
@@ -96,6 +120,9 @@ impl Checker<'_> {
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = attr.attr.as_str();
+        if name == "configure_mock" {
+            return Err(self.object_runtime_export("unittest.mock.Mock.configure_mock", attr));
+        }
         // An unimplemented real member must never become a successful child mock.
         if name.starts_with('_')
             || Self::mock_state_member(name)
@@ -106,7 +133,6 @@ impl Checker<'_> {
                     | "assert_called_once_with"
                     | "assert_called_with"
                     | "attach_mock"
-                    | "configure_mock"
                     | "mock_add_spec"
                     | "mock_calls"
                     | "method_calls"
