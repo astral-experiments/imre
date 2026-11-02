@@ -1695,8 +1695,8 @@ pub(super) fn call(
         return os::stat::construct(ctx, layout, args, kwargs);
     }
     #[cfg(target_os = "linux")]
-    if name == "posix.pipe2" {
-        return os::descriptor(ctx, "pipe2", args, kwargs);
+    if let Some(op @ ("pipe2" | "ptsname")) = name.strip_prefix("posix.") {
+        return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if let Some(op @ ("statvfs" | "fstatvfs")) = name.strip_prefix("posix.") {
@@ -1816,11 +1816,11 @@ pub(super) fn call(
     if name == "_imre_itertools._starmap_next" {
         return itertools::starmap_next(ctx, args, kwargs);
     }
-    if name == "_imre_itertools._filterfalse_allocate" {
-        return itertools::filterfalse_allocate(ctx, args, kwargs);
+    if name == "_imre_itertools._predicate_allocate" {
+        return itertools::predicate_allocate(ctx, args, kwargs);
     }
-    if name == "_imre_itertools._filterfalse_state" {
-        return itertools::filterfalse_state(ctx, args, kwargs);
+    if name == "_imre_itertools._predicate_state" {
+        return itertools::predicate_state(ctx, args, kwargs);
     }
     if name == "_imre_itertools._chain_allocate" {
         let [base, class, source] = args else {
@@ -2473,11 +2473,8 @@ pub(super) fn call(
                 kwargs,
             );
         }
-        "file.seek" => (3, &["whence"]),
-        "file.truncate" => (2, &[]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "file.read" | "file.read1" | "file.readline" | "file.readlines"
-        | "file.readinto" | "file.write" => (2, &[]),
+        "struct.unpack" => (2, &[]),
         "match.expand" => return regex::match_expand(ctx, args, kwargs),
         "match.group" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
@@ -2501,14 +2498,6 @@ pub(super) fn call(
         | "collections.defaultdict.__reduce__"
         | "functools._lru_cache_wrapper.cache_clear"
         | "functools._lru_cache_wrapper.cache_info"
-        | "file.close"
-        | "file.readable"
-        | "file.writable"
-        | "file.seekable"
-        | "file.isatty"
-        | "file.flush"
-        | "file.fileno"
-        | "file.tell"
         | "file.__enter__" => (1, &[]),
         _ => (0, &[]),
     };
@@ -2518,20 +2507,6 @@ pub(super) fn call(
                 .iter()
                 .any(|(key, _)| !keywords.contains(&key.as_str())))
     {
-        if name == "file.flush"
-            && let Some((&receiver, positional)) = args.split_first()
-        {
-            let class = ctx.type_name(receiver).trim_start_matches("_io.");
-            let message = if kwargs.is_empty() {
-                format!(
-                    "{class}.flush() takes no arguments ({} given)",
-                    positional.len()
-                )
-            } else {
-                format!("{class}.flush() takes no keyword arguments")
-            };
-            return Err(Error::new("TypeError", message));
-        }
         return Err(Error::new(
             "TypeError",
             format!("unsupported arguments to {name}"),
@@ -2791,7 +2766,9 @@ pub(super) fn call(
             }
             return Err(ctx.exception("SystemExit", args));
         }
-        name if name.starts_with("os.path.") || name.starts_with("file.") => {
+        name if name.starts_with("os.path.")
+            || matches!(name, "file.__enter__" | "file.__exit__") =>
+        {
             return files::call(ctx, name, args, kwargs);
         }
         "match.groups" | "match.groupdict" => {

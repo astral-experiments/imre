@@ -9,25 +9,6 @@ use std::path::{Path, PathBuf};
 use super::{Context, Error, Id, NONE, Result, Value, argument};
 use crate::objects::{FileState, errno_error};
 
-pub(in crate::dynamic) const METHODS: &[&str] = &[
-    "read",
-    "readline",
-    "readable",
-    "readinto",
-    "writable",
-    "seekable",
-    "isatty",
-    "write",
-    "seek",
-    "tell",
-    "truncate",
-    "fileno",
-    "flush",
-    "close",
-    "__enter__",
-    "__exit__",
-];
-
 /// Decode a POSIX spelling as a Python filesystem string, including surrogate escapes.
 fn filesystem_text(ctx: &mut Context, path: PathBuf) -> Id {
     match path.into_os_string().into_string() {

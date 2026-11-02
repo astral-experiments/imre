@@ -124,7 +124,7 @@ descriptor_constants! { descriptor_constant -> i32;
 }
 // The Linux posix initializer installs these flags in the live module dictionary.
 #[cfg(target_os = "linux")]
-descriptor_constants! { imre_os_o_path = O_PATH, imre_os_o_tmpfile = O_TMPFILE }
+descriptor_constants! { imre_os_o_path = O_PATH, imre_os_o_tmpfile = O_TMPFILE, imre_os_o_noctty = O_NOCTTY }
 
 descriptor_constants! { poll_constant -> i16;
     imre_os_pollin = POLLIN, imre_os_pollpri = POLLPRI, imre_os_pollout = POLLOUT,
@@ -338,6 +338,20 @@ pub(crate) fn seek(fd: i32, position: i64, whence: i32) -> Result<i64> {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_close(fd: usize) {
     finish(c_int(fd).and_then(close), ());
+}
+
+/// Return the process group selected by the kernel for this PID.
+#[cfg(unix)]
+pub(crate) fn getpgid(pid: libc::pid_t) -> Result<libc::pid_t> {
+    // SAFETY: getpgid takes a process ID and retains no pointers.
+    checked(unsafe { libc::getpgid(pid) })
+}
+
+/// Set a process group, preserving the kernel's membership and permission checks.
+#[cfg(unix)]
+pub(crate) fn setpgid(pid: libc::pid_t, group: libc::pid_t) -> Result<()> {
+    // SAFETY: setpgid accepts two integers and reports failures through errno.
+    checked(unsafe { libc::setpgid(pid, group) }).map(|_| ())
 }
 
 /// Read the kernel session ID without changing the caller's process state.
@@ -739,6 +753,51 @@ pub(crate) fn pipe(flags: libc::c_int) -> Result<[i32; 2]> {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_isatty(fd: usize) -> i32 {
     finish(c_int(fd).map(|fd| i32::from(isatty(fd))), 0)
+}
+
+/// Return the raw slave pathname supplied by the Linux PTY interface.
+#[cfg(target_os = "linux")]
+pub(crate) fn ptsname(fd: i32) -> io::Result<Vec<u8>> {
+    let mut name = [0; libc::PATH_MAX as usize + 1];
+    // SAFETY: the writable buffer spans the supplied length. On success libc NUL-terminates it.
+    let status = unsafe { libc::ptsname_r(fd, name.as_mut_ptr(), name.len()) };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status));
+    }
+    // SAFETY: the successful call initialized a NUL-terminated name in this buffer.
+    Ok(unsafe { CStr::from_ptr(name.as_ptr()) }.to_bytes().to_vec())
+}
+
+/// Resolve a file descriptor, reporting a bool warning at the calling source location.
+///
+/// # Safety
+/// When a bool was supplied, both strings are rooted and line is a tagged integer.
+#[cfg(target_os = "linux")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_ptsname(
+    fd: usize,
+    module: *const Str,
+    filename: *const Str,
+    line: usize,
+) -> *const Str {
+    let result = (|| {
+        if !module.is_null() {
+            // SAFETY: the caller keeps both source strings alive through validation.
+            let (module, filename) = unsafe { (&*module, &*filename) };
+            super::runtime_warning(
+                module,
+                filename,
+                (line >> 1) as isize,
+                "bool is used as a file descriptor",
+            )?;
+        }
+        let fd = super::readiness::checked_fd(c_int(fd)?)?;
+        let name = ptsname(fd).map_err(errno_error)?;
+        let encoding = crate::sys::filesystem_encoding()?;
+        let name = super::Codec::lookup(&encoding)?.decode(&name, None)?;
+        super::text::try_owned_string(&name).map(StrOwner::into_raw)
+    })();
+    finish(result, std::ptr::null())
 }
 
 /// A terminal follows UTF-8 mode or the current character locale. Other fds have no encoding.

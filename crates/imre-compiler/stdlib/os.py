@@ -9,7 +9,7 @@ from posix import _exit
 from posix import pread, pwrite, readinto
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getpgid, getppid, kill, listdir, mkdir, putenv, read, scandir, setpgid, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
 from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, open, rmdir, stat, truncate
 
@@ -22,7 +22,7 @@ if sys.platform == "linux":
     from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
     import posix as _posix
-    from posix import pipe2
+    from posix import O_NOCTTY, pipe2, ptsname
     for _name in vars(_posix):
         if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in ("posix_spawn", "posix_spawnp"):
             globals()[_name] = getattr(_posix, _name)

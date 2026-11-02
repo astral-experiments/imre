@@ -153,7 +153,7 @@ def _make_filterfalse(_allocate, _state):
     return filterfalse
 
 
-filterfalse = _make_filterfalse(_itertools._filterfalse_allocate, _itertools._filterfalse_state)
+filterfalse = _make_filterfalse(_itertools._predicate_allocate, _itertools._predicate_state)
 
 
 def _make_starmap(_allocate, _advance):
@@ -191,6 +191,131 @@ def _make_starmap(_allocate, _advance):
 
 
 starmap = _make_starmap(_itertools._starmap_allocate, _itertools._starmap_next)
+
+
+def _make_takewhile(_allocate, _state):
+    class takewhile:
+        """Return successive input items while the predicate is true."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.takewhile.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.takewhile.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.takewhile")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("takewhile() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"takewhile expected 2 arguments, got {len(args)}")
+            return _allocate(__class__, cls, [args[0], False], args[1])
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a takewhile instance")
+            return self
+
+        def __next__(self):
+            source, state = _state(__class__, self)
+            if not state[1]:
+                item = next(source)
+                if state[0](item):
+                    return item
+                # Only a false result stops future pulls; exceptions leave the cursor live.
+                state[1] = True
+            raise StopIteration
+
+    takewhile.__qualname__ = "takewhile"
+    return takewhile
+
+
+takewhile = _make_takewhile(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_dropwhile(_allocate, _state):
+    class dropwhile:
+        """Drop input items while the predicate is true, then yield all remaining items."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.dropwhile.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.dropwhile.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.dropwhile")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("dropwhile() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"dropwhile expected 2 arguments, got {len(args)}")
+            return _allocate(__class__, cls, [args[0], False], args[1])
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a dropwhile instance")
+            return self
+
+        def __next__(self):
+            source, state = _state(__class__, self)
+            while True:
+                item = next(source)
+                if state[1]:
+                    return item
+                if not state[0](item):
+                    state[1] = True
+                    return item
+                del item
+
+    dropwhile.__qualname__ = "dropwhile"
+    return dropwhile
+
+
+dropwhile = _make_dropwhile(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_compress(_allocate, _state):
+    class compress:
+        """Yield each data item whose corresponding selector is true."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, data, selectors):
+            if not isinstance(cls, type) or not issubclass(cls, __class__):
+                raise TypeError("expected a compress subclass")
+            # Acquire data first. The allocator then obtains the selectors iterator.
+            return _allocate(__class__, cls, iter(data), selectors)
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a compress instance")
+            return self
+
+        def __next__(self):
+            selectors, data = _state(__class__, self)
+            while True:
+                item = next(data)
+                if next(selectors):
+                    return item
+                del item
+
+    compress.__qualname__ = "compress"
+    return compress
+
+
+compress = _make_compress(_itertools._predicate_allocate, _itertools._predicate_state)
 del _itertools
 
 

@@ -49,6 +49,14 @@ REJECTED = {
             "class Both(Left, Right): pass\n"
         ),
     }, "multiple independent base classes"),
+    "inspect_isdatadescriptor_preserves_typed_call": ({
+        "main.py": (
+            "from inspect import isdatadescriptor\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(isdatadescriptor(property()))\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "optional_import_keeps_typed_call_check": ({
         "main.py": (
             "import http.client\n"

@@ -2786,8 +2786,8 @@ impl Context {
                     "_cycle_next",
                     "_starmap_allocate",
                     "_starmap_next",
-                    "_filterfalse_allocate",
-                    "_filterfalse_state",
+                    "_predicate_allocate",
+                    "_predicate_state",
                     "_chain_allocate",
                     "_chain_next",
                     "_chain_set",
@@ -2829,12 +2829,13 @@ impl Context {
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
-                let lockf = self.builtin("posix.lockf");
-                self.bind(scope, "lockf", lockf);
-                let fadvise = self.builtin("posix.posix_fadvise");
-                self.bind(scope, "posix_fadvise", fadvise);
+                for name in ["lockf", "posix_fadvise", "ptsname"] {
+                    let function = self.builtin(&format!("posix.{name}"));
+                    self.bind(scope, name, function);
+                }
                 for (attr, flag) in [
                     ("O_PATH", libc::O_PATH),
+                    ("O_NOCTTY", libc::O_NOCTTY),
                     ("O_TMPFILE", libc::O_TMPFILE),
                     ("F_LOCK", libc::F_LOCK),
                     ("F_TLOCK", libc::F_TLOCK),
@@ -2906,6 +2907,7 @@ impl Context {
                 if source.is_none() {
                     let posix = self.module("posix")?;
                     for attr in [
+                        "ptsname", "O_NOCTTY",
                         "getxattr", "setxattr", "listxattr", "removexattr",
                         "XATTR_CREATE", "XATTR_REPLACE", "XATTR_SIZE_MAX",
                     ] {
@@ -3276,12 +3278,21 @@ impl Context {
                 && self.config["bundled_root"]
                     .as_str()
                     .is_some_and(|root| path == std::path::Path::new(root).join("itertools.py"))
-                && let Some(class) = self.scope_name(scope, "starmap")
-                && let Value::Class { scope, .. } = *self.heap.get(class)
-                && let Value::Scope(frame) = self.heap.get_mut(scope)
-                && let Some(layout) = &mut frame.class_namespace
             {
-                layout.itertools_layout = Some("itertools.starmap");
+                for (name, owner) in [
+                    ("starmap", "itertools.starmap"),
+                    ("takewhile", "itertools.takewhile"),
+                    ("dropwhile", "itertools.dropwhile"),
+                    ("compress", "itertools.compress"),
+                ] {
+                    if let Some(class) = self.scope_name(scope, name)
+                        && let Value::Class { scope, .. } = *self.heap.get(class)
+                        && let Value::Scope(frame) = self.heap.get_mut(scope)
+                        && let Some(layout) = &mut frame.class_namespace
+                    {
+                        layout.itertools_layout = Some(owner);
+                    }
+                }
             }
             if name == "itertools"
                 && let Some(owner) = self.scope_name(scope, "batched")

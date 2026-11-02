@@ -1651,6 +1651,9 @@ impl IntrinsicModule {
             }
             (Self::Inspect, "getmodule") => Intrinsic::ObjectRuntimeExport("inspect.getmodule"),
             (Self::Inspect, "isroutine") => Intrinsic::ObjectRuntimeExport("inspect.isroutine"),
+            (Self::Inspect, "isdatadescriptor") => {
+                Intrinsic::ScopedObjectExport("inspect.isdatadescriptor")
+            }
             (Self::Inspect, "ismethodwrapper") => {
                 Intrinsic::ObjectRuntimeExport("inspect.ismethodwrapper")
             }
@@ -2584,7 +2587,10 @@ impl IntrinsicModule {
                 Intrinsic::Combinatorial(crate::ir::Combinatorial::CombinationsWithReplacement)
             }
             (Self::Itertools, "batched") => Intrinsic::ObjectRuntimeExport("itertools.batched"),
+            (Self::Itertools, "compress") => Intrinsic::ObjectRuntimeExport("itertools.compress"),
             (Self::Itertools, "count") => Intrinsic::Count,
+            (Self::Itertools, "takewhile") => Intrinsic::ObjectRuntimeExport("itertools.takewhile"),
+            (Self::Itertools, "dropwhile") => Intrinsic::ObjectRuntimeExport("itertools.dropwhile"),
             (Self::Itertools, "filterfalse") => {
                 Intrinsic::ObjectRuntimeExport("itertools.filterfalse")
             }

@@ -420,6 +420,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "endswith",
     "extend",
     "hex",
+    "ljust",
     "lstrip",
     "reverse",
     "rstrip",
@@ -440,6 +441,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "hex",
     "index",
     "join",
+    "ljust",
     "lstrip",
     "rfind",
     "rsplit",
@@ -622,10 +624,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "socket.socket"
         }
-        Value::BufferedRandom(..) if attr == "writelines" => "file",
-        Value::BufferedRandom(..) if super::stdlib::tempfile::METHODS.contains(&attr) => {
-            "BufferedRandom"
-        }
+        // Context-manager lookup bypasses the normal _io descriptors for native files.
+        Value::BufferedRandom(..) if matches!(attr, "__enter__" | "__exit__") => "BufferedRandom",
+        Value::File(_) if matches!(attr, "__enter__" | "__exit__") => "file",
         Value::TextFile(_)
             if matches!(
                 attr,
@@ -711,42 +712,6 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ) =>
         {
             "selectors"
-        }
-        Value::File(handle)
-            if attr == "truncate"
-                && matches!(handle.as_ref(), super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing) =>
-        {
-            "file"
-        }
-        Value::File(handle)
-            if attr == "read1"
-                && matches!(handle.as_ref(), super::stdlib::BinaryFile::Descriptor(fd) if fd.reading) =>
-        {
-            "file"
-        }
-        Value::File(_)
-            if matches!(
-                attr,
-                "readable"
-                    | "writable"
-                    | "seekable"
-                    | "isatty"
-                    | "seek"
-                    | "tell"
-                    | "read"
-                    | "fileno"
-                    | "readline"
-                    | "readlines"
-                    | "readinto"
-                    | "write"
-                    | "writelines"
-                    | "flush"
-                    | "close"
-                    | "__enter__"
-                    | "__exit__"
-            ) =>
-        {
-            "file"
         }
         Value::RegexPattern(_) | Value::RegexMatch(_)
             if value::REGEX_COPY_METHODS.contains(&attr) =>
@@ -1640,6 +1605,7 @@ pub(super) fn call(
                     method,
                     "decode"
                         | "endswith"
+                        | "ljust"
                         | "lstrip"
                         | "rstrip"
                         | "split"

@@ -457,6 +457,9 @@ pub(in crate::dynamic) mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
+    if matches!(name, "getpgid" | "setpgid") {
+        return cfg!(unix);
+    }
     if name == "_exit" {
         return cfg!(unix);
     }
@@ -948,6 +951,31 @@ pub(super) fn descriptor(
         let previous = unsafe { libc::umask(mask as libc::mode_t) };
         return Ok(ctx.int(i64::from(previous)));
     }
+    #[cfg(unix)]
+    if name == "getpgid" {
+        let [Some(pid)] = builtins::bind_builtin_arguments(name, args, kwargs, ["pid"], 1)? else {
+            unreachable!("pid is required")
+        };
+        let group = native::getpgid(c_int(ctx, pid)?)?;
+        return Ok(ctx.int(i64::from(group)));
+    }
+    #[cfg(unix)]
+    if name == "setpgid" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "posix.setpgid() takes no keyword arguments",
+            ));
+        }
+        let [pid, group] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("setpgid expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        native::setpgid(c_int(ctx, *pid)?, c_int(ctx, *group)?)?;
+        return Ok(NONE);
+    }
     if name == "open" {
         return open(ctx, args, kwargs);
     }
@@ -1048,6 +1076,23 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "ptsname" {
+        let [fd] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.ptsname() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        stat::warn_bool_fd(ctx, *fd)?;
+        let fd = super::select::fd(ctx, *fd)?;
+        let bytes = native::ptsname(fd).map_err(super::os_error)?;
+        let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        return Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?));
     }
     #[cfg(target_os = "linux")]
     if name == "posix_fadvise" {
