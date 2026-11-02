@@ -1,4 +1,4 @@
-from _imre_dataclasses import load_global as _load_global, loaded_module as _loaded_module, members as _members, metadata as _metadata
+from _imre_dataclasses import is_defaultdict as _is_defaultdict, load_global as _load_global, loaded_module as _loaded_module, members as _members, metadata as _metadata
 from types import FunctionType, GenericAlias
 
 __all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "asdict", "astuple", "replace",
@@ -511,6 +511,15 @@ def _convert(obj, factory, named):
         return type(obj)([_convert(x, factory, named) for x in obj])
     if type(obj) is dict:
         return {_convert(k, factory, named): _convert(v, factory, named) for k, v in obj.items()}
+    obj_type = type(obj)
+    if (issubclass(obj_type, dict) if named else isinstance(obj, dict)):
+        if hasattr(obj_type, 'default_factory') or _is_defaultdict(obj):
+            result = obj_type(obj.default_factory)
+            for k, v in obj.items():
+                result[_convert(k, factory, named)] = _convert(v, factory, named)
+            return result
+        return obj_type((_convert(k, factory, named), _convert(v, factory, named))
+                        for k, v in obj.items())
     if obj is None or type(obj) in (bool, int, float, str, bytes):
         return obj
     from copy import deepcopy

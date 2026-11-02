@@ -405,7 +405,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "warn_debug_override",
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
-        | ("_imre_dataclasses", "load_global" | "loaded_module" | "members" | "metadata") => {
+        | ("_imre_dataclasses", "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
@@ -1482,6 +1482,10 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
+            ("is_defaultdict", [obj], []) => {
+                // Boxed defaultdict exposes its factory on instances, including derived instances.
+                return Ok(if ctx.defaultdict_factory(*obj).is_some() { TRUE } else { FALSE });
+            }
             ("load_global", [module, name], []) => {
                 let scope = match ctx.heap.get(*module) {
                     Value::Module { scope, .. } => *scope,
