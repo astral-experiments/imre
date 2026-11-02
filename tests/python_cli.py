@@ -1755,7 +1755,7 @@ def report(text):
             "boxed_unittest_subclass.py",
             "boxed_unittest_not_has_attr.py",
             "boxed_unittest_not_equal.py",
-            "boxed_unittest_less_equal.py",
+            "boxed_unittest_ordering.py",
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_assert_warns.py",
             "boxed_unittest_assert_regex.py",

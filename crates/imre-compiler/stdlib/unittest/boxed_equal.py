@@ -25,10 +25,31 @@ def assertNotEqual(self, first, second, msg=None):
         raise self.failureException(msg)
 
 
+def assertLess(self, a, b, msg=None):
+    """Just like self.assertTrue(a < b), but with a nicer default message."""
+    if not a < b:
+        standardMsg = '%s not less than %s' % (_safe_repr(a), _safe_repr(b))
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
 def assertLessEqual(self, a, b, msg=None):
     """Just like self.assertTrue(a <= b), but with a nicer default message."""
     if not a <= b:
         standardMsg = '%s not less than or equal to %s' % (_safe_repr(a), _safe_repr(b))
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
+def assertGreater(self, a, b, msg=None):
+    """Just like self.assertTrue(a > b), but with a nicer default message."""
+    if not a > b:
+        standardMsg = '%s not greater than %s' % (_safe_repr(a), _safe_repr(b))
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
+def assertGreaterEqual(self, a, b, msg=None):
+    """Just like self.assertTrue(a >= b), but with a nicer default message."""
+    if not a >= b:
+        standardMsg = '%s not greater than or equal to %s' % (_safe_repr(a), _safe_repr(b))
         self.fail(self._formatMessage(msg, standardMsg))
 
 
@@ -111,7 +132,10 @@ def assertIsNot(self, expr1, expr2, msg=None):
 TestCase._baseAssertEqual = _baseAssertEqual
 TestCase.assertEqual = assertEqual
 TestCase.assertNotEqual = assertNotEqual
+TestCase.assertLess = assertLess
 TestCase.assertLessEqual = assertLessEqual
+TestCase.assertGreater = assertGreater
+TestCase.assertGreaterEqual = assertGreaterEqual
 TestCase.assertIsInstance = assertIsInstance
 TestCase.assertNotIsInstance = assertNotIsInstance
 TestCase.assertIsSubclass = assertIsSubclass
