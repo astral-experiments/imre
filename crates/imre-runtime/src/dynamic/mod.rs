@@ -2722,6 +2722,11 @@ impl Context {
             let error = self.builtin("BlockingIOError");
             self.bind(scope, "BlockingIOError", error);
         }
+        #[cfg(unix)]
+        if name == "posix" && source.is_none() {
+            let geteuid = self.builtin("posix.geteuid");
+            self.bind(scope, "geteuid", geteuid);
+        }
         match name {
             "_frozen_importlib_external" | "importlib._bootstrap_external" => {
                 let finder = if self.finder_external == NONE {
@@ -2888,6 +2893,8 @@ impl Context {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
             }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            "pwd" => stdlib::pwd::install(self, scope),
             "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {
                 for name in [

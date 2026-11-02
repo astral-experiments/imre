@@ -2940,6 +2940,9 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        if sys.platform in ("darwin", "linux"):
+            plugin.write_bytes((fixtures / "boxed_pwd.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
             plugin.write_bytes((fixtures / "boxed_posix_fallocate.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

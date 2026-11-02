@@ -2,7 +2,7 @@
 //! can observe a closed number or a number subsequently reused by the kernel.
 
 mod credentials;
-pub(crate) use credentials::{credential_id, getgid, getgroups, getuid};
+pub(crate) use credentials::{credential_id, geteuid, getgid, getgroups, getuid};
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
