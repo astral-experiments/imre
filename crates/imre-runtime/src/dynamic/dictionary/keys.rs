@@ -550,6 +550,7 @@ impl Context {
             return Ok(ControlFlow::Break(normalized(hash)));
         }
         // Immutable scalar subclasses inherit the hash of their backing value.
+        let receiver = key;
         let key = self.scalar_value(key);
         let child = match self.heap.get(key) {
             Value::Method {
@@ -645,8 +646,21 @@ impl Context {
                 }
                 Value::Bytes(bytes) => crate::python_hash::bytes(bytes),
                 Value::None => 0xfca8_6420,
-                Value::Calendar { value, .. } => {
-                    if let Some((d, s, u)) = value.hash_delta_parts() {
+                Value::Calendar { value, tzinfo, .. } => {
+                    let value = value.clone();
+                    let kind = value.class();
+                    let mut duration = value.hash_delta_parts();
+                    if matches!(kind, "time" | "datetime")
+                        && (receiver != key
+                            || crate::dynamic::stdlib::datetime::comparison::custom(self, *tzinfo))
+                        && let Some(offset) =
+                            crate::dynamic::stdlib::datetime::comparison::hash_offset(
+                                self, receiver,
+                            )?
+                    {
+                        duration = Some(value.clock_hash_parts(offset));
+                    }
+                    let hash = if let Some((d, s, u)) = duration {
                         finish_tuple(
                             [d, s, u]
                                 .into_iter()
@@ -655,7 +669,12 @@ impl Context {
                         )
                     } else {
                         let [year, month, day, hour, minute, second, microsecond, _] =
-                            value.fields();
+                            if kind == "time" {
+                                let [h, m, s, us, _] = value.clock_parts().map(i128::from);
+                                [0, 0, 0, h, m, s, us, 0]
+                            } else {
+                                value.fields()
+                            };
                         let bytes = [
                             (year >> 8) as u8,
                             year as u8,
@@ -668,12 +687,13 @@ impl Context {
                             (microsecond >> 8) as u8,
                             microsecond as u8,
                         ];
-                        crate::python_hash::bytes(if value.class() == "date" {
-                            &bytes[..4]
-                        } else {
-                            &bytes
+                        crate::python_hash::bytes(match kind {
+                            "date" => &bytes[..4],
+                            "time" => &bytes[4..],
+                            _ => &bytes,
                         })
-                    }
+                    };
+                    self.cache_key_hash(key, normalized(hash))?
                 }
                 Value::Range(range) => {
                     let len = range.len.as_small();
