@@ -58,6 +58,9 @@ pub struct CommandFlags {
     pub warn_default_encoding: bool,
     /// Warning options supplied on the command line.
     pub warnoptions: Vec<String>,
+    /// Ordered command-line operands used to construct sys._xoptions.
+    pub xoptions: Vec<String>,
+    pub faulthandler: bool,
 }
 
 /// The in-memory entry and launcher used by a Python-style `-c` invocation.

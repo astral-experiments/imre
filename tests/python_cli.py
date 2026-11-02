@@ -855,6 +855,35 @@ def check_class_metadata_allocation(imre, run, flags):
 
 
 
+def check_faulthandler(imre, root, env):
+    import resource
+    import signal
+
+    source = root / "fault.py"
+    source.write_text(
+        "import sys\n"
+        "assert 'faulthandler' in sys.modules\n"
+        "import faulthandler, subprocess\n"
+        "assert sys._xoptions == {'faulthandler': '0'} and faulthandler.is_enabled()\n"
+        "if 'disable' in sys.argv: assert faulthandler.disable()\n"
+        "def crash():\n"
+        "    subprocess.run(['/bin/sh', '-c', 'kill -ABRT \"$PPID\"'])\n"
+        "crash()\n"
+    )
+    for args in ([], ["disable"]):
+        result = subprocess.run(
+            [imre, "-X", "faulthandler=0", "-I", source, *args],
+            cwd=root, env=env, capture_output=True, timeout=60,
+            preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_CORE, (0, 0)),
+        )
+        assert result.returncode == -signal.SIGABRT and not result.stdout, result
+        if args:
+            assert not result.stderr, result
+        else:
+            assert b"Fatal Python error: Aborted" in result.stderr, result
+            assert f'File "{source}", line 7 in crash'.encode() in result.stderr, result
+
+
 def check_pending_signals(imre, root, env):
     import signal
 
@@ -1067,6 +1096,7 @@ def main():
 
         if sys.platform.startswith("linux"):
             check_pending_signals(imre, root, env)
+            check_faulthandler(imre, root, env)
             marked_call_flags = marked_call_refusal_flags(root)
             check_bound_method_allocation(imre, run, marked_call_flags)
             check_sysconfig_build(imre, root, run)

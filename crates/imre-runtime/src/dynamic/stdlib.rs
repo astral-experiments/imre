@@ -16,6 +16,7 @@ mod contextvars;
 mod csv;
 pub(super) mod datetime;
 mod email;
+pub(super) mod faulthandler;
 #[cfg(target_os = "linux")]
 mod fcntl;
 mod files;
@@ -113,6 +114,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "atexit"
             | "builtins"
             | "errno"
+            | "faulthandler"
             | "genericpath"
             | "io"
             | "itertools"
@@ -933,6 +935,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(method) = name.strip_prefix("faulthandler.") {
+        return faulthandler::call(ctx, method, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("atexit.") {
         return super::atexit::call(ctx, method, args, kwargs);
     }

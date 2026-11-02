@@ -62,6 +62,34 @@ const PUBLIC_NAMES: &[&str] = &[
     "Writer",
 ];
 
+/// An absent standard descriptor is exposed as None in both sys bindings.
+pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Result<Id> {
+    let fd = if stderr {
+        libc::STDERR_FILENO
+    } else {
+        libc::STDOUT_FILENO
+    };
+    // The flag query uses F_GETFD, which also checks whether this descriptor exists.
+    if crate::objects::os::INHERITABLE.enabled(fd).is_err() {
+        return Ok(NONE);
+    }
+    let file = crate::objects::TextFile::standard(stderr);
+    let path = ctx.text(if stderr { "<stderr>" } else { "<stdout>" });
+    let buffer = ctx.alloc(
+        super::BinaryFile::Standard {
+            file: file.clone(),
+            path,
+        }
+        .into_value()?,
+    );
+    Ok(
+        ctx.alloc(Value::TextFile(super::super::value::BoxedTextFile {
+            file,
+            buffer: Some(buffer),
+        })),
+    )
+}
+
 /// Build the interpreter's shared text reader without taking ownership of fd 0.
 pub(in crate::dynamic) fn standard_input(ctx: &mut Context) -> Result<Id> {
     let fd = ctx.int(0);

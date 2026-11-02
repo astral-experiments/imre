@@ -11,11 +11,15 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) mod fatal_signals;
+
 pub(super) fn launch(
     output: &Path,
     directory: TempDir,
     source: &Path,
     args: impl Iterator<Item = OsString>,
+    _report_faults: bool,
 ) -> io::Result<ExitStatus> {
     let (mut control, peer) = UnixStream::pair()?;
     let fd = peer.as_raw_fd();
@@ -60,7 +64,32 @@ pub(super) fn launch(
     } else {
         Ok(())
     };
+    // Install before releasing the running image. Signals sent to the interpreter
+    // PID should reach the Python frame that is actually executing the program.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let relay = if _report_faults && matches!(started, Ok(Some(_))) {
+        match fatal_signals::Relay::install(child.id()) {
+            Ok(relay) => Some(relay),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
     drop(control); // EOF releases the runtime after removal.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(relay) = relay {
+        // Keep the PID reserved until all forwarding handlers have retired.
+        let observed = relay.wait_for_exit(child.id());
+        drop(relay);
+        if let Err(error) = observed {
+            let _ = child.wait();
+            return Err(error);
+        }
+    }
     let status = child.wait();
     cleanup?;
     started?;

@@ -114,6 +114,8 @@ pub(crate) struct Context {
     sys_path: Id,
     default_encoding: Id,
     audit_hooks: Vec<Id>,
+    // The fatal handler borrows its descriptor while Python retains the destination.
+    fault_file: Option<Id>,
     exit_callbacks: Vec<Id>,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
@@ -2640,6 +2642,7 @@ impl Context {
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),
+            "faulthandler" => stdlib::faulthandler::install(self, scope),
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
             "socket"
                 if source.is_none()
@@ -2694,6 +2697,18 @@ impl Context {
                 stdlib::readiness::initialize(self, scope)?;
             }
             "sys" => {
+                let options: Vec<String> =
+                    serde_json::from_value(self.config["xoptions"].clone()).unwrap_or_default();
+                let xoptions = self.dict(Vec::new());
+                for option in options {
+                    let (key, value) = match option.split_once('=') {
+                        Some((key, value)) => (key, self.text(value)),
+                        None => (option.as_str(), TRUE),
+                    };
+                    let key = self.text(key);
+                    self.put_item(xoptions, key, value)?;
+                }
+                self.bind(scope, "_xoptions", xoptions);
                 if self.threads.system_module.is_none() {
                     self.bind(scope, "modules", self.modules);
                 }
@@ -2729,19 +2744,7 @@ impl Context {
                     ("stdout", "__stdout__", false),
                     ("stderr", "__stderr__", true),
                 ] {
-                    let file = crate::objects::TextFile::standard(stderr);
-                    let path = self.text(if stderr { "<stderr>" } else { "<stdout>" });
-                    let buffer = self.alloc(
-                        stdlib::BinaryFile::Standard {
-                            file: file.clone(),
-                            path,
-                        }
-                        .into_value()?,
-                    );
-                    let stream = self.alloc(Value::TextFile(value::BoxedTextFile {
-                        file,
-                        buffer: Some(buffer),
-                    }));
+                    let stream = stdlib::io::standard_output(self, stderr)?;
                     self.bind(scope, name, stream);
                     self.bind(scope, original, stream);
                     if stderr && self.threads.system_module.is_none() {

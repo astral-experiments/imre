@@ -630,6 +630,11 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
             .as_bool()
             .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
     );
+    if config["faulthandler"].is_null() {
+        config["faulthandler"] = (!ignore_environment
+            && std::env::var_os("PYTHONFAULTHANDLER").is_some_and(|value| !value.is_empty()))
+        .into();
+    }
     let options: Vec<String> =
         serde_json::from_value(config["warnoptions"].take()).unwrap_or_default();
     config["warnoptions"] = crate::sys::startup_warning_options(ignore_environment, options).into();
@@ -688,6 +693,7 @@ pub(super) fn new_context<S: Into<String>>(
         sys_path: NONE,
         default_encoding: NONE,
         audit_hooks: Vec::new(),
+        fault_file: None,
         exit_callbacks: Vec::new(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
@@ -760,6 +766,14 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     let mut ctx = unsafe { Box::from_raw(ctx) };
     let mark = ctx.heap.temporary_mark();
     let result = ctx.module("sys").and_then(|_| {
+        if ctx.config["faulthandler"].as_bool() == Some(true) {
+            let handler = ctx.module("faulthandler")?;
+            let enable = ctx.lookup_attr(handler, "enable")?;
+            // CPython enables the handler with its preliminary stderr printer, before
+            // exposing the final standard streams. Its descriptor is 2 even when closed.
+            let fd = ctx.int(i64::from(libc::STDERR_FILENO));
+            ctx.call(enable, vec![fd], Vec::new())?;
+        }
         // The module registry now owns sys. Its startup temporaries must not
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
@@ -817,6 +831,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     ctx.workers.join_before_exit_callbacks();
     atexit::run(&mut ctx);
     stdlib::io::prepare_writer_shutdown(&ctx);
+    crate::fault_handler::disable();
     status
 }
 
@@ -1466,6 +1481,7 @@ impl Context {
                 .copied()
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
+                .chain(self.fault_file)
                 .chain(self.contexts.iter().copied())
                 .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))

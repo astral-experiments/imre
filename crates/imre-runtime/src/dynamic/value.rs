@@ -1,9 +1,9 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::Context;
@@ -244,6 +244,12 @@ impl Context {
         } else {
             self.alloc(Value::Raised(error))
         }
+    }
+
+    /// Snapshot active Python code without materializing Python frame objects.
+    pub(super) fn publish_fault_frames(&self) {
+        self.heap
+            .publish_fault_frames(crate::fault_handler::generation());
     }
 
     /// Return the same Python frame to introspection and traceback construction.
@@ -2044,6 +2050,8 @@ pub(super) struct Heap {
     // Call-history markers belong to list storage and expire when it is collected.
     pub(super) mock_call_lists: HashSet<Id>,
     frames: Vec<Frame>,
+    fault_generation: Cell<Option<u32>>,
+    fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
     // Worker heaps share the interpreter’s automatic cyclic collection setting.
     pub(super) automatic_gc: Arc<AtomicBool>,
@@ -2133,6 +2141,8 @@ impl Heap {
             immutable_hashes: HashMap::new(),
             mock_call_lists: HashSet::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
+            fault_generation: Cell::new(None),
+            fault_workers: RefCell::new(None),
             next_collection: 4096,
             automatic_gc: Arc::new(AtomicBool::new(true)),
             weak: HashMap::new(),
@@ -2522,10 +2532,26 @@ impl Heap {
             activation.object = *frame;
         }
         self.frames.push(activation);
+        if self.fault_frames_current() {
+            self.publish_fault_frame(self.python_depth() - 1);
+        }
     }
     /// Release the activation and report whether a returning function may have dropped a writer.
     pub fn leave(&mut self, value: Id, returning: bool) -> bool {
         let frame = self.frames.pop().expect("returning native activation");
+        let depth = self.python_depth();
+        if depth == 0 {
+            // Explicit dumps can publish a snapshot even while disabled.
+            if self.fault_generation.take().is_some() {
+                crate::fault_handler::truncate(0);
+            }
+        } else if self.fault_frames_current() {
+            crate::fault_handler::truncate(depth);
+            // The popped frame displaced this caller in the bounded native snapshot.
+            if let Some(index) = depth.checked_sub(crate::fault_handler::MAX_FRAMES) {
+                self.publish_fault_frame(index);
+            }
+        }
         let opened = frame.created_finalizer && self.tracks_finalizers();
         if opened {
             self.frames.last_mut().unwrap().created_finalizer = true;
@@ -2743,6 +2769,68 @@ impl Heap {
                 fields.module
             }
         })
+    }
+
+    /// Python workers share this lifetime so a dump can see a blocked peer even before enable.
+    pub(super) fn begin_fault_worker(&self) -> Arc<()> {
+        let workers = self
+            .fault_workers
+            .borrow()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .unwrap_or_else(|| Arc::new(()));
+        self.observe_fault_workers(&workers);
+        workers
+    }
+
+    pub(super) fn observe_fault_workers(&self, workers: &Arc<()>) {
+        self.fault_workers.replace(Some(Arc::downgrade(workers)));
+        self.publish_fault_frames(crate::fault_handler::generation());
+    }
+
+    fn publish_fault_frame(&self, index: usize) {
+        let frame = &self.frames[index + 1];
+        let Value::Code(code) = self.get(frame.code) else {
+            unreachable!("Python frame owns its code");
+        };
+        let (Value::Str(filename), Value::Str(name)) =
+            (self.get(code.filename), self.get(code.name))
+        else {
+            unreachable!("code locations and names come from source text");
+        };
+        let line = frame
+            .location
+            .as_ref()
+            .map_or(code.first_line, |loc| loc.line);
+        crate::fault_handler::frame(index, filename, name, line);
+    }
+
+    fn publish_fault_frames(&self, generation: u32) {
+        let depth = self.python_depth();
+        for index in depth.saturating_sub(crate::fault_handler::MAX_FRAMES)..depth {
+            self.publish_fault_frame(index);
+        }
+        crate::fault_handler::truncate(depth);
+        self.fault_generation.set(Some(generation));
+    }
+
+    /// A new enable period needs all callers, including those already on the stack.
+    fn fault_frames_current(&mut self) -> bool {
+        let generation = crate::fault_handler::generation();
+        if generation == 0 {
+            let Some(workers) = self.fault_workers.get_mut() else {
+                return false;
+            };
+            if workers.strong_count() == 0 {
+                *self.fault_workers.get_mut() = None;
+                return false;
+            }
+        }
+        if self.fault_generation.get() != Some(generation) {
+            self.publish_fault_frames(generation);
+            return false;
+        }
+        true
     }
 
     /// The first activation is a sentinel outside the Python frame stack.
@@ -3107,6 +3195,11 @@ impl Heap {
             && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
         {
             *lineno = line;
+        }
+        if self.fault_frames_current()
+            && let Some(index) = self.python_depth().checked_sub(1)
+        {
+            crate::fault_handler::line(index, line);
         }
     }
 

@@ -106,6 +106,7 @@ impl Imports {
                 name,
                 "_imp"
                     | "atexit"
+                    | "faulthandler"
                     | "code"
                     | "codeop"
                     | "json"
@@ -142,7 +143,14 @@ fn boxed_opcode(name: &str) -> bool {
 fn boxed_sys_export(name: &str) -> bool {
     matches!(
         name,
-        "path" | "modules" | "version_info" | "implementation" | "exit" | "exc_info" | "exception"
+        "path"
+            | "modules"
+            | "_xoptions"
+            | "version_info"
+            | "implementation"
+            | "exit"
+            | "exc_info"
+            | "exception"
     )
 }
 
@@ -463,6 +471,7 @@ pub(crate) fn compile(
             "__future__",
             "_imp",
             "atexit",
+            "faulthandler",
             "code",
             "weakref",
             "pathlib",
@@ -838,6 +847,8 @@ pub(crate) fn compile(
         "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
         "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
+        "xoptions":startup.map(|(flags, _)| &flags.xoptions),
+        "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
         "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
