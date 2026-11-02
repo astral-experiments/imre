@@ -341,6 +341,8 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "isatty"
             | "lseek"
             | "pipe"
+            | "read"
+            | "write"
             | "close"
             | "get_blocking"
             | "set_blocking"
@@ -613,6 +615,33 @@ pub(super) fn descriptor(
             result.push(ctx.int(i64::from(fd)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
+    }
+    if matches!(name, "read" | "write") {
+        let [fd, data] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        return if name == "read" {
+            let length = crate::signed_index(&ctx.index_integer(*data)?).ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+            Ok(ctx.alloc(Value::Bytes(native::read(fd, length)?)))
+        } else {
+            // The synchronous syscall borrows the buffer after fd conversion.
+            // It cannot reenter Python, so mutable storage cannot resize underneath it.
+            let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
+                Value::Array(array) => array.as_bytes(),
+                _ => ctx.bytes_like(*data)?,
+            };
+            let count = native::write(fd, bytes)?;
+            Ok(ctx.int(count as i64))
+        };
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

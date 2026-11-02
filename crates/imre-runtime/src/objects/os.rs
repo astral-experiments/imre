@@ -345,6 +345,95 @@ pub extern "C" fn imre_os_dup(fd: usize) -> usize {
     )
 }
 
+/// Validate the range of a Python integer descriptor before converting the next argument.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_transfer_fd(fd: usize) -> usize {
+    finish(c_int(fd).map(|_| fd), 0)
+}
+
+/// Read at most length bytes from a borrowed descriptor.
+///
+/// # Safety
+/// The compiler retains both integer arguments, and fd was normalized to C int.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_read(fd: usize, length: usize) -> *const crate::Bytes {
+    // SAFETY: the tagged length is rooted by the caller.
+    let length = unsafe { Int::borrow(length) };
+    finish(
+        (|| {
+            let length = crate::signed_index(&length).ok_or_else(|| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+            read(c_int(fd)?, length)
+                .map(|bytes| crate::BytesOwner::into_raw(crate::BytesOwner::new(bytes)))
+        })(),
+        std::ptr::null(),
+    )
+}
+
+/// Write the contiguous bytes supplied by a typed caller, returning the actual count.
+///
+/// # Safety
+/// The immutable bytes handle is rooted, and fd was normalized to C int.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_os_write(fd: usize, bytes: *const crate::Bytes) -> usize {
+    // SAFETY: the compiler roots bytes throughout this synchronous call.
+    let bytes = unsafe { &*bytes };
+    finish(
+        c_int(fd)
+            .and_then(|fd| write(fd, bytes))
+            .map(|n| Int::from_usize(n).into_raw()),
+        0,
+    )
+}
+
+/// Restart an interrupted descriptor transfer, but return any short success or other errno.
+fn transfer(mut syscall: impl FnMut() -> isize) -> Result<usize> {
+    loop {
+        let count = syscall();
+        if count >= 0 {
+            return Ok(count as usize);
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(errno_error(error));
+        }
+    }
+}
+
+pub(crate) fn read(fd: i32, length: isize) -> Result<Vec<u8>> {
+    let length = usize::try_from(length)
+        .map_err(|_| errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?;
+    #[cfg(target_os = "macos")]
+    let length = length.min(i32::MAX as usize);
+    if length > crate::MAX_BYTES_LEN {
+        return Err(Error::new(Kind::OverflowError, "byte string is too large"));
+    }
+    let mut bytes = Vec::<u8>::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_| Error::memory_error())?;
+    // SAFETY: bytes has at least length writable bytes; read borrows the integer
+    // descriptor and initializes the returned prefix without retaining either.
+    let count = transfer(|| unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), length) })?;
+    // SAFETY: read initialized exactly count bytes, including zero on EOF.
+    unsafe { bytes.set_len(count) };
+    crate::compact_bytes(&mut bytes);
+    Ok(bytes)
+}
+
+pub(crate) fn write(fd: i32, data: &[u8]) -> Result<usize> {
+    crate::initialize_io();
+    let length = data.len();
+    #[cfg(target_os = "macos")]
+    let length = length.min(i32::MAX as usize);
+    // SAFETY: write borrows the descriptor; the byte slice stays live for each call.
+    transfer(|| unsafe { libc::write(fd, data.as_ptr().cast(), length) })
+}
+
 /// Return a new non-inheritable descriptor for the same open file description.
 pub(crate) fn dup(fd: i32) -> Result<i32> {
     // SAFETY: F_DUPFD_CLOEXEC takes the integer lower bound for the new fd.
