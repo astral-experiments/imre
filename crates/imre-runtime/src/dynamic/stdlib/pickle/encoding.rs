@@ -42,6 +42,17 @@ pub(super) fn int(out: &mut Vec<u8>, protocol: u8, number: &crate::Int) -> Resul
     Ok(())
 }
 
+pub(super) fn float(out: &mut Vec<u8>, protocol: u8, value: f64) {
+    if protocol == 0 {
+        out.push(b'F'); // FLOAT
+        out.extend_from_slice(crate::floats::render(value).as_bytes());
+        out.push(b'\n');
+    } else {
+        out.push(b'G'); // BINFLOAT
+        out.extend_from_slice(&value.to_be_bytes());
+    }
+}
+
 pub(super) fn boolean(out: &mut Vec<u8>, protocol: u8, value: bool) {
     if protocol < 2 {
         out.extend_from_slice(if value { b"I01\n" } else { b"I00\n" });

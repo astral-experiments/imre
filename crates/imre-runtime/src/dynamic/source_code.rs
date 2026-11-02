@@ -29,7 +29,7 @@ pub(super) struct Program {
     private_names: Option<Rc<imre_ast::Names>>,
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
-    lambdas: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
+    expression_functions: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -129,6 +129,47 @@ struct Definition {
 enum DefinitionKind {
     Function(Box<ast::Parameters>),
     Class(Option<Box<ast::Arguments>>),
+}
+
+/// An await or an asynchronous comprehension in the deferred body requires
+/// an async generator. Assignment expressions need the enclosing binding scope.
+fn synchronous_genexpr(genexpr: &ast::ExprGenerator) -> bool {
+    use ast::visitor::{self, Visitor};
+    struct Body<'a>(Vec<&'a ast::Expr>);
+    impl<'a> Visitor<'a> for Body<'a> {
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            self.0.push(expr);
+        }
+    }
+    let mut body = Body(vec![&genexpr.elt]);
+    for (index, clause) in genexpr.generators.iter().enumerate() {
+        if clause.is_async {
+            return false;
+        }
+        body.visit_expr(&clause.target);
+        if index != 0 {
+            body.visit_expr(&clause.iter);
+        }
+        for condition in &clause.ifs {
+            body.visit_expr(condition);
+        }
+    }
+    while let Some(expr) = body.0.pop() {
+        match expr {
+            ast::Expr::Await(_) | ast::Expr::Named(_) => return false,
+            ast::Expr::Lambda(lambda) => {
+                if let Some(params) = &lambda.parameters {
+                    body.visit_parameters(params);
+                }
+            }
+            ast::Expr::Generator(nested) => body.visit_expr(&nested.generators[0].iter),
+            ast::Expr::ListComp(c) if c.generators.iter().any(|g| g.is_async) => return false,
+            ast::Expr::SetComp(c) if c.generators.iter().any(|g| g.is_async) => return false,
+            ast::Expr::DictComp(c) if c.generators.iter().any(|g| g.is_async) => return false,
+            _ => visitor::walk_expr(&mut body, expr),
+        }
+    }
+    true
 }
 
 /// CPython records self.X stores from code units immediately enclosed by a class.
@@ -512,9 +553,9 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(())
     }
 
-    fn scan(&mut self) -> Result<(bool, Vec<&'a ast::ExprLambda>)> {
+    fn scan(&mut self) -> Result<(bool, Vec<&'a ast::Expr>)> {
         use ast::visitor::Visitor;
-        let mut lambdas = Vec::new();
+        let mut functions = Vec::new();
         if !self.directives.is_empty() {
             self.check_directive_reads()?;
         }
@@ -532,13 +573,21 @@ impl<'a> CompiledStrings<'a, '_> {
                     self.heap.code_name(attr.attr.as_str());
                 }
                 ast::Expr::Lambda(lambda) => {
-                    lambdas
+                    functions
                         .try_reserve(1)
                         .map_err(|_| Error::new("MemoryError", ""))?;
-                    lambdas.push(lambda);
+                    functions.push(expr);
                     if let Some(parameters) = &lambda.parameters {
                         self.visit_parameters(parameters);
                     }
+                    continue;
+                }
+                ast::Expr::Generator(genexpr) if synchronous_genexpr(genexpr) => {
+                    functions
+                        .try_reserve(1)
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                    functions.push(expr);
+                    self.visit_expr(&genexpr.generators[0].iter);
                     continue;
                 }
                 ast::Expr::StringLiteral(literal) => {
@@ -577,7 +626,7 @@ impl<'a> CompiledStrings<'a, '_> {
         if self.exhausted {
             return Err(Error::new("MemoryError", ""));
         }
-        Ok((class_cell, lambdas))
+        Ok((class_cell, functions))
     }
 
     fn finish(self) -> Id {
@@ -773,35 +822,47 @@ impl Program {
                 | Instruction::Delegate => {}
             }
         }
-        let (class_cell, lambdas) = strings.scan()?;
+        let (class_cell, functions) = strings.scan()?;
         self.class_cell |= class_cell;
-        self.lambdas
-            .try_reserve(lambdas.len())
+        self.expression_functions
+            .try_reserve(functions.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for (site, lambda) in lambdas.into_iter().enumerate() {
-            let params = lambda.parameters.clone().unwrap_or_default();
-            let mut child = Self::new(self.filename.clone(), "<lambda>");
+        for (site, expr) in functions.into_iter().enumerate() {
+            let name = if matches!(expr, ast::Expr::Lambda(_)) {
+                "<lambda>"
+            } else {
+                "<genexpr>"
+            };
+            let mut child = Self::new(self.filename.clone(), name);
             child.qualname =
-                Self::qualified_name(&self.qualname, self.class_attributes.is_some(), "<lambda>");
+                Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
             child.method_imports = self.method_imports.clone();
             child.template_expressions = self.template_expressions.clone();
             child.private_names = self.private_names.clone();
+            child.first_line = line_at(expr.start().to_usize());
+            let params = match expr {
+                ast::Expr::Lambda(lambda) => {
+                    let params = lambda.parameters.clone().unwrap_or_default();
+                    let line = child.first_line;
+                    let end = match child.lower_suspension(*lambda.body.clone(), line, true)? {
+                        Some(body) => Instruction::Return(Some(body)),
+                        None => Instruction::ReturnSent,
+                    };
+                    child.instructions.push((line, end));
+                    params
+                }
+                ast::Expr::Generator(genexpr) => child.lower_genexpr(genexpr, line_at)?,
+                _ => unreachable!("anonymous function expression"),
+            };
             child
                 .locals
                 .extend(params.iter().map(|p| p.name().to_string()));
-            let line = line_at(lambda.start().to_usize());
-            child.first_line = line;
-            let end = match child.lower_suspension(*lambda.body.clone(), line, true)? {
-                Some(body) => Instruction::Return(Some(body)),
-                None => Instruction::ReturnSent,
-            };
-            child.instructions.push((line, end));
-            self.lambdas.insert(
-                lambda.range(),
+            self.expression_functions.insert(
+                expr.range(),
                 (
                     site,
                     Definition {
-                        binding: "<lambda>".to_owned(),
+                        binding: name.to_owned(),
                         decorators: Vec::new(),
                         body: Rc::new(child),
                         kind: DefinitionKind::Function(params),
@@ -809,8 +870,9 @@ impl Program {
                 ),
             );
         }
-        for (_, lambda) in self.lambdas.values_mut() {
-            let child = Rc::get_mut(&mut lambda.body).expect("newly lowered lambda");
+        for (_, definition) in self.expression_functions.values_mut() {
+            let child =
+                Rc::get_mut(&mut definition.body).expect("newly lowered expression function");
             let (roots, reads) =
                 child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
             if self.class_attributes.is_none() && !self.locals.contains("__class__") {
@@ -844,6 +906,62 @@ impl Program {
             });
         }
         Ok((self.string_roots, &self.reads))
+    }
+
+    /// Lower a generator expression to resumable for loops. Its frame already
+    /// owns the outer iterator; only inner clauses evaluate Iter instructions.
+    fn lower_genexpr(
+        &mut self,
+        genexpr: &ast::ExprGenerator,
+        line_at: &impl Fn(usize) -> u32,
+    ) -> Result<Box<ast::Parameters>> {
+        self.kind = FunctionKind::Generator;
+        let mut heads = Vec::new();
+        for (index, clause) in genexpr.generators.iter().enumerate() {
+            self.declare_target(&clause.target)?;
+            let line = line_at(clause.target.start().to_usize());
+            if index != 0 {
+                self.instructions
+                    .push((line, Instruction::Iter(clause.iter.clone())));
+            }
+            let head = self.instructions.len();
+            heads.push(head);
+            self.instructions
+                .push((line, Instruction::Next(Some(clause.target.clone()), 0)));
+            for predicate in &clause.ifs {
+                self.instructions.push((
+                    line_at(predicate.start().to_usize()),
+                    Instruction::Unless(predicate.clone(), head),
+                ));
+            }
+        }
+        self.instructions.push((
+            line_at(genexpr.elt.start().to_usize()),
+            Instruction::Yield(Some(*genexpr.elt.clone())),
+        ));
+        for head in heads.into_iter().rev() {
+            self.instructions
+                .push((self.instructions[head].0, Instruction::Jump(head)));
+            let end = self.instructions.len();
+            let Instruction::Next(_, target) = &mut self.instructions[head].1 else {
+                unreachable!("loop head")
+            };
+            *target = end;
+        }
+        let range = genexpr.range();
+        let mut params = ast::Parameters::default();
+        params.args.push(ast::ParameterWithDefault {
+            range,
+            node_index: ast::AtomicNodeIndex::NONE,
+            default: None,
+            parameter: ast::Parameter {
+                range,
+                node_index: ast::AtomicNodeIndex::NONE,
+                name: ast::Identifier::new(".0", range),
+                annotation: None,
+            },
+        });
+        Ok(Box::new(params))
     }
 
     fn declare(&mut self, kind: ScopeDirective, names: &[ast::Identifier]) -> Result<()> {
@@ -946,7 +1064,7 @@ impl Program {
             private_names: None,
             template_expressions: Rc::default(),
             instructions: Vec::new(),
-            lambdas: HashMap::new(),
+            expression_functions: HashMap::new(),
         }
     }
 
@@ -3086,8 +3204,8 @@ impl Context {
                     self.import_source_module(owner, scope, module, Some(names), *level)?;
                 for (name, local) in names {
                     if name == "*" {
-                        let custom_hook = importer != self.builtin("__import__");
-                        self.import_star(scope, m, custom_hook)?;
+                        let fromlist_handled = *level > 0 || importer != self.builtin("__import__");
+                        self.import_star(scope, m, fromlist_handled)?;
                         continue;
                     }
                     let name = self.text(name);
@@ -3394,15 +3512,30 @@ impl Context {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
         match expr {
-            Expr::Lambda(lambda) => {
-                let (site, definition) = &code.lambdas[&lambda.range()];
-                self.source_definition(
+            Expr::Lambda(_) | Expr::Generator(_)
+                if code.expression_functions.contains_key(&expr.range()) =>
+            {
+                let (site, definition) = &code.expression_functions[&expr.range()];
+                let function = self.source_definition(
                     code,
                     self.heap.current_code(),
                     scope,
                     code.instructions.len() + site,
                     definition,
-                )
+                )?;
+                if let Expr::Generator(genexpr) = expr {
+                    self.heap.keep(function);
+                    let outer = eval(self, &genexpr.generators[0].iter)?;
+                    let iter = self.iterator(outer)?;
+                    let generator = self.call(function, vec![iter], Vec::new())?;
+                    let Value::Generator { iterators, .. } = self.heap.get_mut(generator) else {
+                        unreachable!("source generator expression")
+                    };
+                    iterators.push(iter);
+                    Ok(generator)
+                } else {
+                    Ok(function)
+                }
             }
             Expr::Name(n) => {
                 let name = n.id.as_str();

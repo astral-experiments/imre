@@ -33,3 +33,9 @@ def read_text(anchor, *path_names, encoding=_missing, errors='strict'):
     if anchor is None:
         raise TypeError("anchor must be module or string, got None")
     return files(anchor).joinpath(*path_names).read_text(encoding=encoding, errors=errors)
+
+
+def as_file(path):
+    """Provide a pathlib.Path for the duration of a context manager."""
+    from importlib.resources._as_file import as_file as materialize
+    return materialize(path)

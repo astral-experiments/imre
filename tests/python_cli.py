@@ -1361,6 +1361,19 @@ print(found.value)
 """,
         )
 
+        compare(
+            "-B", "-c",
+            """import sys
+from importlib import import_module
+import_members = import_module("import_members")
+import_members.__all__ = ["found"]
+assert "import_members.found" not in sys.modules
+namespace = {"__package__": "import_members"}
+exec("from . import *", namespace)
+assert namespace["found"] is import_members.found is sys.modules["import_members.found"]
+""",
+        )
+
         opcode = run(imre, "-B", "-c", 'op = __import__("".join(("_", "opcode")))\n'
                      'print(op.ENABLE_SPECIALIZATION, op.ENABLE_SPECIALIZATION_FT)')
         assert (opcode.returncode, opcode.stdout, opcode.stderr) == (0, b"0 0\n", b""), opcode
@@ -1686,6 +1699,7 @@ def report(text):
             "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
             "boxed_tempfile_default_directory.py",
+            "boxed_tempfile_mktemp.py",
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
@@ -1701,6 +1715,7 @@ def report(text):
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
             "boxed_typing_no_type_check.py",
+            "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
             "boxed_typing_typeddict.py",
             "boxed_typing_dataclass_transform.py",
@@ -1721,6 +1736,7 @@ def report(text):
             "boxed_re_escape.py",
             "boxed_datetime.py",
             "boxed_dataclasses.py",
+            "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
             "boxed_dataclass_classvars.py",
@@ -1728,6 +1744,7 @@ def report(text):
             "boxed_time.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_io_exports.py",
             "boxed_io_text_encoding.py",
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",

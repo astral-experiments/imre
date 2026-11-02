@@ -512,7 +512,19 @@ impl Encoder {
                 if ctx.truth(self.skipkeys)? {
                     return Ok(());
                 }
-                return Err(Error::new("TypeError", "unsupported JSON object key"));
+                let name = if self.stream.is_some() {
+                    let class = ctx.lookup_attr(key, "__class__")?;
+                    let name = ctx.lookup_attr(class, "__name__")?;
+                    super::builtins::format_value(ctx, name, None)?
+                } else {
+                    // The one-shot encoder reports up to 100 bytes of the actual type name.
+                    let class = ctx.exact_type(key)?;
+                    let name = ctx.class_name(class);
+                    ctx.text(name[..name.floor_char_boundary(100)].to_owned())
+                };
+                let prefix = ctx.text("keys must be str, int, float, bool or None, not ");
+                let message = ctx.concat_strings(prefix, name)?;
+                return Err(ctx.exception("TypeError", &[message]));
             }
         };
         self.separator(*nonempty, depth)?;
