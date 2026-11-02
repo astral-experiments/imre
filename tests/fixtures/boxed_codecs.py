@@ -120,7 +120,7 @@ def check_boms():
 def current():
     check_text_encoding_flag()
     check_escape_decode()
-    utf16_encoders()
+    fixed_endian_encoders()
     utf16_extended_decoder()
     check_raw_unicode_escape()
     check_boms()
@@ -290,8 +290,11 @@ def current():
         print(e is seen[0], str(e))
 
 
-def utf16_encoders():
-    for name, canonical in (('unicodelittleunmarked', 'utf-16-le'), ('utf_16be', 'utf-16-be')):
+def fixed_endian_encoders():
+    for name, canonical in (
+        ('unicodelittleunmarked', 'utf-16-le'), ('utf_16be', 'utf-16-be'),
+        ('utf_32le', 'utf-32-le'), ('utf-32be', 'utf-32-be'),
+    ):
         text = '🙂\ud800\udcffZ'
         try:
             text.encode(name)
@@ -308,6 +311,9 @@ def utf16_encoders():
     assert '\ud800\udcff'.encode('utf-16-le', 'surrogatepass') == b'\x00\xd8\xff\xdc'
     assert '\ud800\udcff'.encode('utf-16-be', 'surrogatepass') == b'\xd8\x00\xdc\xff'
     assert 'ü'.encode('utf-16-le', 'unused handler') == b'\xfc\x00'
+
+    assert '\ud800\udcff'.encode('utf-32-le', 'surrogatepass') == b'\x00\xd8\x00\x00\xff\xdc\x00\x00'
+    assert '\ud800\udcff'.encode('utf-32-be', 'surrogatepass') == b'\x00\x00\xd8\x00\x00\x00\xdc\xff'
 
 
 def utf16_extended_decoder():
