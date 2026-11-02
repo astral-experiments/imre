@@ -12,6 +12,25 @@ class Raises:
 
 
 def current():
+    class Meta(type):
+        pass
+
+    class Subject(metaclass=Meta):
+        pass
+
+    for subject, name in (
+        (type, "type"),
+        (int, "type"),
+        (len, "builtin_function_or_method"),
+        (Subject, "Meta"),
+        (Subject(), "Subject"),
+    ):
+        try:
+            re.search("x*", subject)
+        except TypeError as error:
+            assert str(error) == "expected string or bytes-like object, got '%s'" % name
+        else:
+            assert False
     for pattern, subject, want in (
         (r"(?P<outer>(?P<inner>))", "", (1, "outer")),
         (r"(?P<first>)(?P<second>)", "", (2, "second")),
