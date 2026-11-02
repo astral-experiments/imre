@@ -3,6 +3,7 @@
 use super::*;
 
 pub(super) mod auto;
+mod bases;
 mod display;
 mod float;
 

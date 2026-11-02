@@ -392,6 +392,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
+    "__str__",
     "__format__",
     "__repr__",
     "capitalize",
@@ -1234,6 +1235,7 @@ pub(super) fn call(
                 translation::translate(ctx, owner, args, kwargs)
             }
             "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }

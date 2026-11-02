@@ -130,6 +130,8 @@ pub(crate) struct Context {
     // The running frozen bootstrap keeps its globals even if its registry entry is replaced.
     bootstrap_globals: Id,
     classes: HashMap<String, Id>,
+    // The Python enum bases use native layouts but have writable class dictionaries.
+    enum_scopes: HashMap<Id, Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
@@ -1803,6 +1805,9 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if builtins::is_enum_base(name) {
+            self.install_enum_base(value, name);
+        }
         if let Some(constants) = crate::objects::Calendar::class_constants(name) {
             stdlib::datetime::install_members(self, name);
             for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
@@ -1852,10 +1857,6 @@ impl Context {
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
-            "enum.IntEnum" | "enum.IntFlag" => {
-                self.builtin("int.__repr__");
-                &[]
-            }
             "memoryview" => builtins::MEMORYVIEW_METHODS,
             "bool" => &["__repr__"],
             "int" => {

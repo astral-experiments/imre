@@ -708,6 +708,7 @@ pub(super) fn new_context<S: Into<String>>(
         import_missing: NONE,
         bootstrap_globals: NONE,
         classes: HashMap::new(),
+        enum_scopes: HashMap::new(),
         typing: super::typing::Registry::default(),
         logger_wrappers: HashMap::new(),
         builtins: HashMap::new(),
@@ -1441,6 +1442,7 @@ impl Context {
             &mut self.heap,
             self.classes
                 .values()
+                .chain(self.enum_scopes.values())
                 .chain(self.logger_wrappers.values())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())

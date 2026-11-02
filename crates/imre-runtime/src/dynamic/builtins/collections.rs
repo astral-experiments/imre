@@ -1291,15 +1291,18 @@ pub(super) fn builtin_slot(
         list_extend(ctx, storage, *value)?;
         return Ok(object);
     }
-    if method == "__repr__" {
+    if matches!(method, "__repr__" | "__str__") {
         if !kwargs.is_empty() {
-            return Err(type_error("wrapper __repr__() takes no keyword arguments"));
+            return Err(type_error(format!("wrapper {method}() takes no keyword arguments")));
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__str__" {
+            return Ok(storage);
         }
         let text = match ctx.heap.get(storage) {
             Value::Bool(value) if owner == "int" => u8::from(*value).to_string(),
