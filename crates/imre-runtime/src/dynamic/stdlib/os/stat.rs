@@ -206,14 +206,13 @@ pub(super) fn packed(ctx: &mut Context, stat: &libc::stat) -> Id {
     wrap(ctx, values, extras)
 }
 
-pub(super) fn warn_bool_fd(ctx: &Context, value: Id) -> Result<()> {
+pub(super) fn warn_bool_fd(ctx: &mut Context, value: Id) -> Result<()> {
     if matches!(ctx.heap.get(value), Value::Bool(_)) {
-        let location = ctx.heap.current_location();
-        let (file, line) = location.as_ref().map_or(("<string>", 1), |loc| {
-            (loc.file.as_ref(), loc.line as isize)
-        });
-        let module = &ctx.scope_data(ctx.heap.current_scope()).module;
-        crate::objects::runtime_warning(module, file, line, "bool is used as a file descriptor")?;
+        ctx.emit_builtin_warning(
+            crate::objects::exceptions::Kind::RuntimeWarning,
+            "bool is used as a file descriptor",
+            1,
+        )?;
     }
     Ok(())
 }
@@ -234,7 +233,7 @@ pub(super) fn query(
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
-    warn_bool_fd: fn(&Context, Id) -> Result<()>,
+    warn_bool_fd: fn(&mut Context, Id) -> Result<()>,
 ) -> Result<libc::stat> {
     let mut output = std::mem::MaybeUninit::<libc::stat>::uninit();
     let (rc, filename) = if name == "fstat" {
