@@ -10,13 +10,6 @@ fn operation(op: Log, ty: Type, args: Vec<Expr>) -> Expr {
     }
 }
 
-pub(super) fn number(level: u8) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(level.to_string()),
-    }
-}
-
 fn text(value: &str) -> Expr {
     Expr {
         ty: Type::Str,
@@ -162,7 +155,7 @@ impl Checker<'_> {
         })?;
         let op = if let Some(kind) = scalar {
             args.order.push(args.values.len());
-            args.values.push(number(kind));
+            args.values.push(Expr::integer(kind));
             Log::DictConfigTyped
         } else {
             Log::DictConfig
@@ -218,7 +211,7 @@ impl Checker<'_> {
                 )?,
             ),
             Intrinsic::LoggingDisable => {
-                let params = [parameter("level", Type::Int, Some(number(50)))];
+                let params = [parameter("level", Type::Int, Some(Expr::integer(50)))];
                 (
                     Log::Disable,
                     Type::None,
@@ -276,7 +269,7 @@ impl Checker<'_> {
     pub(super) fn new_logger(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let params = [
             parameter("name", Type::Str, None),
-            parameter("level", Type::Int, Some(number(0))),
+            parameter("level", Type::Int, Some(Expr::integer(0))),
         ];
         let mut scope = calls::ArgumentScope::default();
         let args = self.bind_supplied(
@@ -624,11 +617,11 @@ impl Checker<'_> {
                 return Ok(operation(Log::Enabled, Type::Bool, vec![logger, level]));
             }
             ("log", [level, args @ ..]) => (self.expr_expected(level, Type::Int)?, args),
-            ("debug", args) => (number(10), args),
-            ("info", args) => (number(20), args),
-            ("warning", args) => (number(30), args),
-            ("error", args) => (number(40), args),
-            ("critical" | "fatal", args) => (number(50), args),
+            ("debug", args) => (Expr::integer(10), args),
+            ("info", args) => (Expr::integer(20), args),
+            ("warning", args) => (Expr::integer(30), args),
+            ("error", args) => (Expr::integer(40), args),
+            ("critical" | "fatal", args) => (Expr::integer(50), args),
             _ => {
                 return Err(error(
                     self.source,
@@ -647,7 +640,7 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let args = call.arguments.args.as_ref();
         let (level, args) = if let Some(level) = level {
-            (number(level), args)
+            (Expr::integer(level), args)
         } else if let Some((level, args)) = args.split_first() {
             (self.expr_expected(level, Type::Int)?, args)
         } else {
@@ -697,7 +690,7 @@ impl Checker<'_> {
         }
         let args = call.arguments.args.as_ref();
         let (level, args) = if let Some(level) = method_level {
-            (number(level), args)
+            (Expr::integer(level), args)
         } else if let Some((level, rest)) = args.split_first() {
             (self.expr_expected(level, Type::Int)?, rest)
         } else {
@@ -860,10 +853,7 @@ impl Checker<'_> {
             .filter(|&b| b == b'\n')
             .count()
             + 1;
-        let lineno = Expr {
-            ty: Type::Int,
-            kind: ExprKind::Int(line.to_string()),
-        };
+        let lineno = Expr::integer(line);
         let caller = caller_name(
             &self.graph.modules[self.module].parsed.syntax().body,
             call.range(),

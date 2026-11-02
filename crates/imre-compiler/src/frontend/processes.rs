@@ -664,14 +664,7 @@ impl Checker<'_> {
         let path = self.types.optional(Type::Str);
         let params = [
             ("cmd", Type::Str, None),
-            (
-                "mode",
-                Type::Int,
-                Some(Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Int("1".into()),
-                }),
-            ),
+            ("mode", Type::Int, Some(Expr::integer(1))),
             ("path", path, Some(Expr::absent(path))),
         ]
         .map(|(name, ty, default)| Parameter {
@@ -964,10 +957,7 @@ impl Checker<'_> {
         };
         let stdin = if input_given { 1 } else { stdin };
         let mut streams = streams | (stdin << 12) | (u32::from(capture.text) << 16);
-        let default_bufsize = || Expr {
-            ty: Type::Int,
-            kind: ExprKind::Int("-1".into()),
-        };
+        let default_bufsize = || Expr::integer(-1);
         let mut params = [
             ("args", self.types.list(Type::Str), None),
             ("bufsize", Type::Int, Some(default_bufsize())),
@@ -1107,7 +1097,7 @@ impl Checker<'_> {
                 2 | 10 => checker.optional_exec_path(arg),
                 4..=6 if stream_mode(checker.graph, checker.module, arg) == 6 => {
                     if let ast::Expr::BooleanLiteral(flag) = arg {
-                        return Ok(Expr { ty: Type::Int, kind: ExprKind::Int(u8::from(flag.value).to_string()) });
+                        return Ok(Expr::integer(u8::from(flag.value)));
                     }
                     let value = checker.expr(arg)?;
                     // Keep arbitrary integers out of the fixed stream layout: a
@@ -1300,10 +1290,7 @@ impl Checker<'_> {
                 ));
             }
             name @ ("kill" | "terminate") if call.arguments.is_empty() => {
-                args.push(Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Int(if name == "kill" { "9" } else { "15" }.into()),
-                });
+                args.push(Expr::integer(if name == "kill" { 9 } else { 15 }));
                 (ProcessOperation::PopenSignal, Type::None)
             }
             _ => {

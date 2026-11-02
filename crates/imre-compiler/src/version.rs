@@ -18,26 +18,19 @@ pub(crate) fn components(implementation: bool) -> [u32; 3] {
     }
 }
 
-pub(crate) fn integer(value: u32) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(value.to_string()),
-    }
-}
-
 pub(crate) fn hex(components: [u32; 3]) -> u32 {
     let [major, minor, micro] = components;
     (major << 24) | (minor << 16) | (micro << 8) | 0xf0
 }
 
 pub(crate) fn tuple_items(implementation: bool) -> Vec<Expr> {
-    let mut values = components(implementation).map(integer).to_vec();
+    let mut values = components(implementation).map(Expr::integer).to_vec();
     values.extend([
         Expr {
             ty: Type::Str,
             kind: ExprKind::Str("final".into()),
         },
-        integer(0),
+        Expr::integer(0),
     ]);
     values
 }
@@ -91,7 +84,7 @@ pub(crate) fn implementation_values(types: &crate::types::Types) -> Vec<Expr> {
                 vec![],
             ),
         },
-        integer(hex(components(true))),
+        Expr::integer(hex(components(true))),
         Expr {
             ty: Type::Bool,
             kind: ExprKind::Bool(false),

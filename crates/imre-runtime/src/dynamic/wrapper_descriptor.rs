@@ -55,12 +55,14 @@ impl BuiltinDescriptor {
             "object.__format__" => ("object", "__format__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
+            "str.islower" => ("str", "islower"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "collections.deque.__contains__" => (deque::CLASS, "__contains__"),
             "collections.defaultdict.__repr__" => ("collections.defaultdict", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "set.__repr__" => ("set", "__repr__"),
@@ -78,7 +80,7 @@ impl BuiltinDescriptor {
         Some(Self {
             owner,
             name,
-            method: name == "__format__",
+            method: matches!(name, "__format__" | "islower"),
         })
     }
 
@@ -118,6 +120,7 @@ impl BuiltinDescriptor {
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
             "dict" => ctx.dict_storage(receiver).is_some(),
+            deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"
             | "frozenset" => ctx.builtin_slot_accepts(receiver, self.owner),
@@ -167,6 +170,8 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
+            "__text_signature__" if self.name == "__contains__" => ctx.text("($self, key, /)"),
             "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
             "__text_signature__" if matches!(self.name, "__add__" | "__iadd__") => {
@@ -174,6 +179,10 @@ impl BuiltinDescriptor {
             }
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("islower", "__doc__") => {
+                        "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
+                    }
+                    ("islower", _) => "($self, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

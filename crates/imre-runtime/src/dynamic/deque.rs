@@ -20,6 +20,7 @@ pub(super) const METHODS: &[&str] = &[
     "popleft",
     "reverse",
     "__len__",
+    "__contains__",
     "__iter__",
     "__reversed__",
     "__getitem__",
@@ -486,8 +487,8 @@ pub(super) fn method(
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            if name == "__init__" {
-                "descriptor '__init__' of 'collections.deque' object needs an argument".to_owned()
+            if matches!(name, "__init__" | "__contains__") {
+                format!("descriptor '{name}' of 'collections.deque' object needs an argument")
             } else {
                 format!("unbound method deque.{name}() needs an argument")
             },
@@ -497,9 +498,9 @@ pub(super) fn method(
         let actual = ctx.type_name(receiver);
         return Err(Error::new(
             "TypeError",
-            if name == "__init__" {
+            if matches!(name, "__init__" | "__contains__") {
                 format!(
-                    "descriptor '__init__' requires a 'collections.deque' object but received a '{actual}'"
+                    "descriptor '{name}' requires a 'collections.deque' object but received a '{actual}'"
                 )
             } else {
                 format!(
@@ -515,8 +516,8 @@ pub(super) fn method(
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            if name == "__iadd__" {
-                "wrapper __iadd__() takes no keyword arguments".to_owned()
+            if matches!(name, "__iadd__" | "__contains__") {
+                format!("wrapper {name}() takes no keyword arguments")
             } else {
                 format!("deque.{name}() takes no keyword arguments")
             },
@@ -526,6 +527,7 @@ pub(super) fn method(
         return index(ctx, receiver, rest);
     }
     match (name, rest) {
+        ("__contains__", [item]) => return ctx.contains(*item, receiver).map(builtins::boolean),
         ("__getitem__", [index]) => return IndexOp::Get.apply(ctx, receiver, *index, true),
         ("__setitem__", [index, value]) => {
             return IndexOp::Set(*value).apply(ctx, receiver, *index, true);
@@ -535,7 +537,7 @@ pub(super) fn method(
             extend(ctx, receiver, *item, false)?;
             return Ok(receiver);
         }
-        ("__getitem__" | "__delitem__" | "__iadd__", _) => {
+        ("__getitem__" | "__delitem__" | "__iadd__" | "__contains__", _) => {
             return Err(Error::new(
                 "TypeError",
                 format!("expected 1 argument, got {}", rest.len()),

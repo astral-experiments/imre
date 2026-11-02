@@ -7,6 +7,7 @@ const CONSTANTS: &[(&str, i32)] = &[
     ("AF_INET6", libc::AF_INET6),
     ("AF_UNSPEC", libc::AF_UNSPEC),
     ("AF_UNIX", libc::AF_UNIX),
+    ("AI_PASSIVE", libc::AI_PASSIVE),
     ("SOCK_STREAM", libc::SOCK_STREAM),
     ("SOL_SOCKET", libc::SOL_SOCKET),
     ("IPPROTO_TCP", libc::IPPROTO_TCP),

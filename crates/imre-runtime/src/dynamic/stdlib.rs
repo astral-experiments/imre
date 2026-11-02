@@ -9,7 +9,7 @@ use super::{
 use crate::objects::interpreter_stdlib as system;
 
 pub(super) mod ast;
-mod audit;
+pub(super) mod audit;
 mod binascii;
 pub(super) mod codecs;
 mod contextvars;
@@ -434,6 +434,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("typing", "NoDefault") => super::typing::no_default(ctx),
         ("typing", "TYPE_CHECKING") => FALSE,
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
@@ -449,6 +450,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "typing",
             "TypeVar"
+            | "TypeVarTuple"
+            | "_UnpackGenericAlias"
             | "Any"
             | "Callable"
             | "cast"
@@ -804,6 +807,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if super::lowlevel_threads::function_name(name).is_some() {
+        return super::lowlevel_threads::call(ctx, name, args, kwargs);
+    }
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
     }
@@ -1648,8 +1654,8 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if name == "pattern.search" {
-        return regex::search(ctx, args, kwargs);
+    if let Some(method @ ("match" | "fullmatch" | "search")) = name.strip_prefix("pattern.") {
+        return regex::search(ctx, method, args, kwargs);
     }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);
@@ -1697,10 +1703,8 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "pattern.match" | "pattern.fullmatch" | "pattern.findall"
-        | "file.read" | "file.readline" | "file.readinto" | "file.write" | "warnings.warn" => {
-            (2, &[])
-        }
+        "struct.unpack" | "pattern.findall" | "file.read" | "file.readline" | "file.readinto"
+        | "file.write" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" => (2, &["default"]),

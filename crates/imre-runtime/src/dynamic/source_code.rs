@@ -1282,7 +1282,7 @@ impl Context {
         let cells = cells.to_vec();
         let builtins = if let Some(v) = self.dict_named_item(globals, "__builtins__") {
             if let Value::Module { scope, .. } = *self.heap.get(v) {
-                self.module_globals(scope)
+                self.module_globals(scope)?
             } else {
                 v
             }
@@ -1319,7 +1319,7 @@ impl Context {
     }
 
     /// Populate the public module with the same native objects used by compiled calls.
-    pub(super) fn install_builtins(&mut self, scope: Id) {
+    pub(super) fn install_builtins(&mut self, scope: Id) -> Result<()> {
         for (name, value) in [
             ("None", NONE),
             ("False", value::FALSE),
@@ -1334,9 +1334,10 @@ impl Context {
             let value = self.builtin(name);
             self.bind(scope, name, value);
         }
-        let dict = self.module_globals(scope);
+        let dict = self.module_globals(scope)?;
         // Reimporting an evicted module leaves existing frames' builtins intact.
         self.source_builtins.get_or_insert(dict);
+        Ok(())
     }
 
     pub(super) fn default_source_builtins(&mut self) -> Result<Id> {
@@ -1392,7 +1393,7 @@ impl Context {
         }
         let builtins = if let Some(builtins) = self.dict_named_item(globals, "__builtins__") {
             if let Value::Module { scope, .. } = *self.heap.get(builtins) {
-                self.module_globals(scope)
+                self.module_globals(scope)?
             } else {
                 builtins
             }
@@ -2018,7 +2019,7 @@ impl Context {
         while let Some(parent) = self.scope_data(root).parent {
             root = parent;
         }
-        let globals = self.module_globals(root);
+        let globals = self.module_globals(root)?;
         let builtins = match self.scope_data(root).exec_globals {
             Some(supplied) => supplied.builtins,
             None => self.default_source_builtins()?,

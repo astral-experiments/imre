@@ -563,12 +563,7 @@ impl Checker<'_> {
         )?;
         let kinds = Expr {
             ty: Type::ListInt,
-            kind: ExprKind::List(
-                kinds
-                    .into_iter()
-                    .map(|kind| pipelines::integer(kind.into()))
-                    .collect(),
-            ),
+            kind: ExprKind::List(kinds.into_iter().map(Expr::integer).collect()),
         };
         let mut pattern = pattern
             .and_then(|(slot, _)| slot)

@@ -237,7 +237,7 @@ impl Checker<'_> {
                 Type::Int,
                 vec![
                     pos.parameter("pos", Type::Int, None),
-                    pos.parameter("whence", Type::Int, Some(logging::number(0))),
+                    pos.parameter("whence", Type::Int, Some(Expr::integer(0))),
                 ],
             ),
             "tell" => (Op::Position, Type::Int, vec![]),

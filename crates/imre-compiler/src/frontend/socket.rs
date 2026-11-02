@@ -48,7 +48,7 @@ impl Checker<'_> {
         let params = [
             ("family", constant("af_inet")),
             ("type", constant("sock_stream")),
-            ("proto", pipelines::integer(0)),
+            ("proto", Expr::integer(0)),
         ]
         .map(|(name, default)| Parameter {
             name: name.into(),
@@ -70,7 +70,7 @@ impl Checker<'_> {
         use SocketOp::*;
         let address = self.types.tuple(vec![Type::Str, Type::Int]);
         let int = Type::Int;
-        let zero = || Some(pipelines::integer(0));
+        let zero = || Some(Expr::integer(0));
         let (op, ty, params): (_, _, Vec<(&str, Type, Option<Expr>)>) = match attr.attr.as_str() {
             "bind" => (Bind, Type::None, vec![("address", address, None)]),
             "connect" => (Connect, Type::None, vec![("address", address, None)]),

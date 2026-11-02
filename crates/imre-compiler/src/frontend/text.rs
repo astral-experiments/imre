@@ -271,6 +271,7 @@ impl Checker<'_> {
                 let predicate = match name {
                     "isalnum" => ir::TextPredicate::Alnum,
                     "isspace" => ir::TextPredicate::Space,
+                    "islower" => ir::TextPredicate::Lower,
                     "isupper" => ir::TextPredicate::Upper,
                     _ => unreachable!("resolved text predicate"),
                 };
@@ -580,14 +581,7 @@ impl Checker<'_> {
                 self.types.list(Type::Str),
                 vec![
                     parameter("sep", optional_string, Some(Expr::absent(optional_string))),
-                    parameter(
-                        "maxsplit",
-                        Type::Int,
-                        Some(Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Int("-1".to_owned()),
-                        }),
-                    ),
+                    parameter("maxsplit", Type::Int, Some(Expr::integer(-1))),
                 ],
             ),
             "strip" | "lstrip" | "rstrip" => (

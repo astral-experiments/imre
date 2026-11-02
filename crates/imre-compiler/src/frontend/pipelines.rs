@@ -199,13 +199,6 @@ pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Ex
                 if matches!(attribute.attr.as_str(), "iterdir" | "glob" | "rglob" | "walk")))
 }
 
-pub(super) fn integer(value: i64) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(value.to_string()),
-    }
-}
-
 fn binary(operation: Binary, left: Expr, right: Expr) -> Expr {
     Expr {
         ty: Type::Int,
@@ -536,7 +529,7 @@ impl Checker<'_> {
                 let start = if let Some(start) = call.arguments.args.get(1) {
                     self.expr_expected(start, Type::Int)?
                 } else {
-                    integer(0)
+                    Expr::integer(0)
                 };
                 let counter = self.hidden(Type::Int);
                 input.evaluate.push(Statement::Assign(counter, start));
@@ -575,7 +568,7 @@ impl Checker<'_> {
                     Statement::Clear(input.value),
                     Statement::Assign(
                         counter,
-                        binary(Binary::Add, self.local(counter), integer(1)),
+                        binary(Binary::Add, self.local(counter), Expr::integer(1)),
                     ),
                 ]);
                 input
@@ -678,7 +671,7 @@ impl Checker<'_> {
         let active = self.hidden(Type::Int);
         let acquired = self.hidden(Type::Bool);
         let mut evaluate = vec![
-            Statement::Assign(active, integer(0)),
+            Statement::Assign(active, Expr::integer(0)),
             Statement::Assign(acquired, Expr::boolean(false)),
         ];
         let mut next = vec![
@@ -713,12 +706,16 @@ impl Checker<'_> {
                 self.local(input.ready),
                 yielded,
                 vec![
-                    Statement::Assign(active, integer(index as i64 + 1)),
+                    Statement::Assign(active, Expr::integer(index as i64 + 1)),
                     Statement::Assign(acquired, Expr::boolean(false)),
                 ],
             ));
             next.push(Statement::If(
-                compare(Compare::Equal, self.local(active), integer(index as i64)),
+                compare(
+                    Compare::Equal,
+                    self.local(active),
+                    Expr::integer(index as i64),
+                ),
                 pull,
                 Vec::new(),
             ));
@@ -1057,14 +1054,14 @@ impl Checker<'_> {
             arguments.push(slot);
         }
         let (start, stop, step) = match arguments.as_slice() {
-            [stop] => (integer(0), self.local(*stop), integer(1)),
-            [start, stop] => (self.local(*start), self.local(*stop), integer(1)),
+            [stop] => (Expr::integer(0), self.local(*stop), Expr::integer(1)),
+            [start, stop] => (self.local(*start), self.local(*stop), Expr::integer(1)),
             [start, stop, step] => (self.local(*start), self.local(*stop), self.local(*step)),
             _ => unreachable!("range arity was checked"),
         };
         if arguments.len() == 3 {
             evaluate.push(Statement::If(
-                compare(Compare::Equal, step.clone(), integer(0)),
+                compare(Compare::Equal, step.clone(), Expr::integer(0)),
                 vec![raise_value_error("range() arg 3 must not be zero".into())],
                 Vec::new(),
             ));
@@ -1075,7 +1072,7 @@ impl Checker<'_> {
         let value = self.hidden(Type::Int);
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);
-        let positive = compare(Compare::Greater, step.clone(), integer(0));
+        let positive = compare(Compare::Greater, step.clone(), Expr::integer(0));
         let nonempty = Expr {
             ty: Type::Bool,
             kind: ExprKind::Conditional(
@@ -1090,8 +1087,8 @@ impl Checker<'_> {
                 ty: Type::Int,
                 kind: ExprKind::Conditional(
                     Box::new(positive),
-                    Box::new(integer(1)),
-                    Box::new(integer(-1)),
+                    Box::new(Expr::integer(1)),
+                    Box::new(Expr::integer(-1)),
                 ),
             };
             let last = binary(
@@ -1125,9 +1122,9 @@ impl Checker<'_> {
                     ),
                 ],
                 vec![
-                    Statement::Assign(cursor, integer(0)),
-                    Statement::Assign(end, integer(0)),
-                    Statement::Assign(stride, integer(1)),
+                    Statement::Assign(cursor, Expr::integer(0)),
+                    Statement::Assign(end, Expr::integer(0)),
+                    Statement::Assign(stride, Expr::integer(1)),
                 ],
             ));
         } else {
@@ -1140,7 +1137,11 @@ impl Checker<'_> {
         let available = Expr {
             ty: Type::Bool,
             kind: ExprKind::Conditional(
-                Box::new(compare(Compare::Greater, self.local(stride), integer(0))),
+                Box::new(compare(
+                    Compare::Greater,
+                    self.local(stride),
+                    Expr::integer(0),
+                )),
                 Box::new(compare(Compare::Less, self.local(cursor), self.local(end))),
                 Box::new(compare(
                     Compare::Greater,
@@ -1321,9 +1322,9 @@ impl Checker<'_> {
             acquire.push(Statement::Assign(
                 cursor,
                 if reverse {
-                    binary(Binary::Subtract, length(), integer(1))
+                    binary(Binary::Subtract, length(), Expr::integer(1))
                 } else {
-                    integer(0)
+                    Expr::integer(0)
                 },
             ));
             let in_bounds = compare(Compare::Less, self.local(cursor), length());
@@ -1333,7 +1334,7 @@ impl Checker<'_> {
                     kind: ExprKind::Boolean(
                         true,
                         vec![
-                            compare(Compare::GreaterEqual, self.local(cursor), integer(0)),
+                            compare(Compare::GreaterEqual, self.local(cursor), Expr::integer(0)),
                             in_bounds,
                         ],
                     ),
@@ -1366,7 +1367,7 @@ impl Checker<'_> {
                                 Box::new(compare(
                                     Compare::Equal,
                                     self.local(cursor),
-                                    integer(index as i64),
+                                    Expr::integer(index as i64),
                                 )),
                                 Box::new(field),
                                 Box::new(item),
@@ -1407,7 +1408,7 @@ impl Checker<'_> {
                                 Binary::Add
                             },
                             self.local(cursor),
-                            integer(1),
+                            Expr::integer(1),
                         ),
                     ),
                     Statement::Assign(ready, Expr::boolean(true)),
@@ -1542,7 +1543,7 @@ impl Checker<'_> {
                     Box::new(compare(
                         Compare::Equal,
                         self.local(cursor),
-                        integer(i as i64),
+                        Expr::integer(i as i64),
                     )),
                     Box::new(self.local(slot)),
                     Box::new(next),
@@ -1550,7 +1551,7 @@ impl Checker<'_> {
             });
         Prepared {
             evaluate,
-            acquire: vec![Statement::Assign(cursor, integer(0))],
+            acquire: vec![Statement::Assign(cursor, Expr::integer(0))],
             next: vec![
                 Statement::Clear(value),
                 Statement::Assign(
@@ -1558,7 +1559,7 @@ impl Checker<'_> {
                     compare(
                         Compare::Less,
                         self.local(cursor),
-                        integer(slots.len() as i64),
+                        Expr::integer(slots.len() as i64),
                     ),
                 ),
                 Statement::If(
@@ -1567,7 +1568,7 @@ impl Checker<'_> {
                         Statement::Assign(value, item),
                         Statement::Assign(
                             cursor,
-                            binary(Binary::Add, self.local(cursor), integer(1)),
+                            binary(Binary::Add, self.local(cursor), Expr::integer(1)),
                         ),
                     ],
                     release,
@@ -1948,7 +1949,7 @@ impl Checker<'_> {
         clear.extend((first_private..self.locals.len()).filter(|slot| !exported.contains(slot)));
         let mut evaluate = std::mem::take(&mut inputs[0].evaluate);
         evaluate.extend([
-            Statement::Assign(depth, integer(0)),
+            Statement::Assign(depth, Expr::integer(0)),
             Statement::Assign(done, Expr::boolean(false)),
         ]);
         let mut cases = Vec::new();
@@ -1961,7 +1962,7 @@ impl Checker<'_> {
             } else {
                 let mut initialize = inputs[index + 1].evaluate.clone();
                 initialize.extend(inputs[index + 1].acquire.clone());
-                initialize.push(Statement::Assign(depth, integer((index + 1) as i64)));
+                initialize.push(Statement::Assign(depth, Expr::integer((index + 1) as i64)));
                 initialize
             };
             for condition in filters[index].iter().rev() {
@@ -1985,7 +1986,7 @@ impl Checker<'_> {
             exhausted.push(if index == 0 {
                 Statement::Assign(done, Expr::boolean(true))
             } else {
-                Statement::Assign(depth, integer((index - 1) as i64))
+                Statement::Assign(depth, Expr::integer((index - 1) as i64))
             });
             let mut step = inputs[index].next.clone();
             step.push(Statement::If(
@@ -1994,7 +1995,11 @@ impl Checker<'_> {
                 exhausted,
             ));
             cases = vec![Statement::If(
-                compare(Compare::Equal, self.local(depth), integer(index as i64)),
+                compare(
+                    Compare::Equal,
+                    self.local(depth),
+                    Expr::integer(index as i64),
+                ),
                 step,
                 cases,
             )];

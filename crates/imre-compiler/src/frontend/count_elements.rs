@@ -158,14 +158,14 @@ impl Checker<'_> {
                         ty: Type::Int,
                         kind: ExprKind::Builtin(
                             Builtin::DictGetDefault,
-                            vec![mapped.clone(), k, pipelines::integer(0)],
+                            vec![mapped.clone(), k, Expr::integer(0)],
                         ),
                     }
                 } else if class.is_some() {
                     checker.record_primitive(
                         mapped.clone(),
                         "get",
-                        &[key.clone(), pipelines::integer(0)],
+                        &[key.clone(), Expr::integer(0)],
                         target,
                     )?
                 } else {
@@ -174,11 +174,7 @@ impl Checker<'_> {
                 checker.expect(Type::Int, get.ty, target)?;
                 let count = Expr {
                     ty: Type::Int,
-                    kind: ExprKind::Binary(
-                        Binary::Add,
-                        Box::new(get),
-                        Box::new(pipelines::integer(1)),
-                    ),
+                    kind: ExprKind::Binary(Binary::Add, Box::new(get), Box::new(Expr::integer(1))),
                 };
                 Ok(vec![if class.is_some() {
                     Statement::Expr(checker.record_primitive(

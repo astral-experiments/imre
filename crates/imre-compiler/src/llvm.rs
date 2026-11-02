@@ -10020,6 +10020,7 @@ declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
 declare ptr @imre_sys_stdlib_module_names()
+declare i32 @imre_str_is_lower(ptr)
 declare i32 @imre_str_is_upper(ptr)
 declare ptr @imre_errno_module()
 declare ptr @imre_errno_namespace(ptr)
@@ -11813,10 +11814,7 @@ def total(text: str) -> int:
             kind: ExprKind::Scope {
                 body: vec![Statement::Assign(
                     *slot,
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Int("100000000000000000000000000000000".into()),
-                    },
+                    Expr::integer("100000000000000000000000000000000"),
                 )],
                 value: right.clone(),
                 clear: Vec::new(),

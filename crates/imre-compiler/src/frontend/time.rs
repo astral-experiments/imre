@@ -126,7 +126,7 @@ impl Checker<'_> {
                 ty: Type::Int,
                 kind: ExprKind::Conditional(
                     Box::new(absent),
-                    Box::new(pipelines::integer(0)),
+                    Box::new(Expr::integer(0)),
                     Box::new(indexed),
                 ),
             });
@@ -158,7 +158,7 @@ impl Checker<'_> {
                     op(
                         Builtin::ListGet,
                         element,
-                        vec![source.clone(), pipelines::integer(n)],
+                        vec![source.clone(), Expr::integer(n)],
                     )
                 };
                 let extra_ty = self.types.optional(element);
@@ -166,7 +166,7 @@ impl Checker<'_> {
                     let present = self.coerce(item(n), extra_ty, arg)?;
                     let absent = self.coerce(Expr::none(), extra_ty, arg)?;
                     let test =
-                        pipelines::compare(Compare::Greater, count.clone(), pipelines::integer(n));
+                        pipelines::compare(Compare::Greater, count.clone(), Expr::integer(n));
                     Ok(Expr {
                         ty: extra_ty,
                         kind: ExprKind::Conditional(
@@ -307,6 +307,6 @@ impl Checker<'_> {
                 ));
             }
         };
-        Ok(pipelines::integer(n))
+        Ok(Expr::integer(n))
     }
 }

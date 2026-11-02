@@ -1689,17 +1689,13 @@ mod tests {
             let mut module = module("def scoped(again: bool) -> int:\n    return 0\n");
             let function = &mut module.functions[0];
             function.locals.push(Type::Int);
-            let integer = |value: &str| Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int(value.into()),
-            };
             let mut body = vec![Statement::Assign(
                 1,
-                integer("1000000000000000000000000000000"),
+                Expr::integer("1000000000000000000000000000000"),
             )];
             body.extend(exit);
             function.body = vec![
-                Statement::Assign(1, integer("2")),
+                Statement::Assign(1, Expr::integer(2)),
                 Statement::While(
                     Expr::local(0, Type::Bool),
                     vec![Statement::Scope {
@@ -1732,10 +1728,7 @@ mod tests {
                 kind: ExprKind::Scope {
                     body: vec![Statement::Assign(
                         1,
-                        Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Int("1000000000000000000000000000000".into()),
-                        },
+                        Expr::integer("1000000000000000000000000000000"),
                     )],
                     value: Box::new(Expr {
                         ty: Type::Bool,
@@ -1757,13 +1750,7 @@ mod tests {
                 _ => ExprKind::BooleanValue(false, Box::new(flag), Box::new(write)),
             };
             function.body = vec![
-                Statement::Assign(
-                    1,
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Int("0".into()),
-                    },
-                ),
+                Statement::Assign(1, Expr::integer(0)),
                 Statement::Expr(Expr {
                     ty: Type::Bool,
                     kind: expression,
@@ -1785,11 +1772,7 @@ mod tests {
         let mut module = module("def compared() -> int:\n    return 0\n");
         let function = &mut module.functions[0];
         function.locals = vec![Type::Int; 2];
-        let integer = |value: &str| Expr {
-            ty: Type::Int,
-            kind: ExprKind::Int(value.into()),
-        };
-        let huge = integer("1000000000000000000000000000000");
+        let huge = Expr::integer("1000000000000000000000000000000");
         let test = Expr {
             ty: Type::Bool,
             kind: ExprKind::Compare(
@@ -1799,7 +1782,7 @@ mod tests {
                         ty: Type::Int,
                         kind: ExprKind::Scope {
                             body: vec![Statement::Assign(0, huge.clone())],
-                            value: Box::new(integer("2")),
+                            value: Box::new(Expr::integer(2)),
                             clear: Vec::new(),
                         },
                     },
@@ -1808,8 +1791,8 @@ mod tests {
             ),
         };
         function.body = vec![
-            Statement::Assign(0, integer("1")),
-            Statement::Assign(1, integer("0")),
+            Statement::Assign(0, Expr::integer(1)),
+            Statement::Assign(1, Expr::integer(0)),
             // The actual comparison is 1 < 2. Rereading slot 0 after the RHS
             // would incorrectly discard this branch and prove the result zero.
             Statement::If(test, vec![Statement::Assign(1, huge)], Vec::new()),
@@ -1828,12 +1811,8 @@ mod tests {
         let mut module = module("def growing(again: bool) -> int:\n    return 0\n");
         let function = &mut module.functions[0];
         function.locals.push(Type::Int);
-        let integer = |value: &str| Expr {
-            ty: Type::Int,
-            kind: ExprKind::Int(value.into()),
-        };
         function.body = vec![
-            Statement::Assign(1, integer("1")),
+            Statement::Assign(1, Expr::integer(1)),
             Statement::While(
                 Expr {
                     ty: Type::Bool,
@@ -1845,7 +1824,7 @@ mod tests {
                                 kind: ExprKind::Binary(
                                     Binary::Multiply,
                                     Box::new(Expr::local(1, Type::Int)),
-                                    Box::new(integer("2")),
+                                    Box::new(Expr::integer(2)),
                                 ),
                             },
                         )],
@@ -2199,13 +2178,7 @@ def parameter(unknown: int) -> int:
         let function = &mut module.functions[0];
         function.locals.extend([Type::Int; 5]);
         function.body = vec![
-            Statement::Assign(
-                1,
-                Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Int("1".into()),
-                },
-            ),
+            Statement::Assign(1, Expr::integer(1)),
             Statement::Move(2, 1),
             Statement::Move(1, 2),
             // This reverse-order edge needs a second pass after slot 3 becomes
@@ -2246,20 +2219,8 @@ def parameter(unknown: int) -> int:
             let function = &mut module.functions[0];
             function.locals = vec![Type::Iterator, Type::Int, Type::Int, Type::Bool];
             function.body = vec![
-                Statement::Assign(
-                    1,
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Int("1".into()),
-                    },
-                ),
-                Statement::Assign(
-                    2,
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Int("2".into()),
-                    },
-                ),
+                Statement::Assign(1, Expr::integer(1)),
+                Statement::Assign(2, Expr::integer(2)),
                 Statement::IterNext {
                     iterator: 0,
                     key: 1,

@@ -94,6 +94,14 @@ try:
     print("".isspace(wrong=argument(-1)))
 except TypeError as err:
     print(err)
+unbound_lower = str.islower
+for text in ("", "7東", "ʕ東", "aǅ", "ⅷ", "𐐨", "𐐀"):
+    print(text.islower())
+    print(unbound_lower(text))
+try:
+    unbound_lower(3)
+except TypeError as err:
+    print(err)
 try:
     print(source("A").isupper(argument(-1), wrong=argument(1)))
 except TypeError as err:

@@ -1252,6 +1252,12 @@ impl IntrinsicModule {
             (Self::DoctestRuntime, "execute") => Intrinsic::DocExecute,
             (Self::MockRuntime, "mark_call_list") => Intrinsic::MockCallList { mark: true },
             (Self::MockRuntime, "is_call_list") => Intrinsic::MockCallList { mark: false },
+            (Self::Typing, "TypeVarTuple") => Intrinsic::ObjectRuntimeExport("typing.TypeVarTuple"),
+            (Self::Typing, "Unpack") => Intrinsic::ObjectRuntimeExport("typing.Unpack"),
+            (Self::Typing, "NoDefault") => Intrinsic::ObjectRuntimeExport("typing.NoDefault"),
+            (Self::Typing, "T") => Intrinsic::ObjectRuntimeExport("typing.T"),
+            (Self::Typing, "KT") => Intrinsic::ObjectRuntimeExport("typing.KT"),
+            (Self::Typing, "VT") => Intrinsic::ObjectRuntimeExport("typing.VT"),
             (Self::Typing, "List") => Intrinsic::ObjectRuntimeExport("typing.List"),
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
@@ -1284,6 +1290,10 @@ impl IntrinsicModule {
             (Self::Thread, "allocate") => Intrinsic::ObjectRuntimeExport("_thread.allocate"),
             (Self::Thread | Self::Threading, "TIMEOUT_MAX") => {
                 Intrinsic::ObjectRuntimeExport("_thread.TIMEOUT_MAX")
+            }
+            (Self::Thread, "_count") => Intrinsic::ObjectRuntimeExport("_thread._count"),
+            (Self::Thread, "start_new_thread") => {
+                Intrinsic::ObjectRuntimeExport("_thread.start_new_thread")
             }
             (Self::Threading, "Lock") | (Self::Thread, "LockType") => {
                 Intrinsic::ObjectRuntimeExport("_thread.lock")
@@ -1584,6 +1594,12 @@ impl IntrinsicModule {
             (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
+            (Self::UrllibParse, "uses_relative") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.uses_relative")
+            }
+            (Self::UrllibParse, "uses_netloc") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.uses_netloc")
+            }
             (Self::UrllibParse, "quote") => Intrinsic::Quote,
             (Self::UrllibParse, "quote_from_bytes") => Intrinsic::QuoteFromBytes,
             (Self::UrllibParse, "quote_plus") => Intrinsic::QuotePlus,

@@ -27,6 +27,24 @@ def current():
     print(parts.geturl(), urlunsplit((b"custom", b"", b"/path", b"", b"")))
     uses_netloc.pop()
     print(parts.geturl())
+    join = parse.urljoin
+    try:
+        parse.urljoin = None
+        assert parse.urljoin is None
+        del parse.urljoin
+        assert not hasattr(parse, "urljoin")
+    finally:
+        parse.urljoin = join
+    assert parse.urljoin is join
+    print(parse.urljoin("http://a/b/c/d?x#y", "?"))
+    print(parse.urljoin(b"http://a/b/", b"../g#"))
+    print(parse.urljoin(None, b"path"))
+    parse.uses_relative.append("custom")
+    uses_netloc.append("custom")
+    print(parse.urljoin("custom://a/b", "c"))
+    uses_netloc.pop()
+    print(parse.urljoin("custom://a/b", "c"))
+    parse.uses_relative.pop()
     print(urllib.__package__, parse.__package__, parse.__name__, hasattr(urllib, "__path__"))
     for target in ("/health", "/hello%20there?suffix=%26&suffix=%C3%A9", "//first/second?x=1",
                    "https://user:pass@[FE80::1%25Scope]:443/a%2Fb?x=1#frag",

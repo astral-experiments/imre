@@ -39,7 +39,7 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
                 "dir() cannot enumerate lazy native module exports",
             ));
         } else {
-            ctx.module_globals(scope)
+            ctx.module_globals(scope)?
         }
     } else {
         object_names(ctx, object)?

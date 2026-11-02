@@ -330,7 +330,7 @@ impl Checker<'_> {
         };
         Ok(Statement::SetItem(
             self.globals.slot_value(slot),
-            pipelines::integer(0),
+            Expr::integer(0),
             value,
         ))
     }

@@ -652,6 +652,14 @@ impl Expr {
         }
     }
 
+    /// Store the decimal spelling so the literal can exceed the host integer width.
+    pub(crate) fn integer(value: impl ToString) -> Self {
+        Self {
+            ty: Type::Int,
+            kind: ExprKind::Int(value.to_string()),
+        }
+    }
+
     /// Construct an absent optional from a literal None.
     pub(crate) fn absent(ty: Type) -> Self {
         Self {
@@ -1725,6 +1733,7 @@ pub(crate) enum StrDescriptor {
     LStrip,
     RStrip,
     IsAlnum,
+    IsLower,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
@@ -1734,6 +1743,7 @@ impl StrDescriptor {
             "lstrip" => Self::LStrip,
             "rstrip" => Self::RStrip,
             "isalnum" => Self::IsAlnum,
+            "islower" => Self::IsLower,
             _ => return None,
         })
     }
@@ -1744,6 +1754,7 @@ impl StrDescriptor {
             Self::LStrip => "lstrip",
             Self::RStrip => "rstrip",
             Self::IsAlnum => "isalnum",
+            Self::IsLower => "islower",
         }
     }
 }
@@ -1817,6 +1828,7 @@ pub(crate) enum UrlProperty {
 pub(crate) enum TextPredicate {
     Alnum,
     Space,
+    Lower,
     Upper,
 }
 

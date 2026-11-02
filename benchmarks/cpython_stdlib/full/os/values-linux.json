@@ -88,27 +88,28 @@
       ]
     },
     "test.test_os.MiscTests.test_getcwd": {
-      "status": "host_driven_native",
-      "native_getcwd_calls": 1,
-      "host_calls": {},
-      "host_fixtures": [
-        "test_os.tearDownModule"
-      ],
+      "execution": "native-body",
+      "body": "Imre",
+      "assertions": "Imre",
+      "fixture_execution": "CPython module/class/instance hooks; native instance in child",
+      "method_sha256": "192a250a3620ab851cad16959e632ebb702c0d01d90870b16a088ad3ef4a3177",
       "observation": {
         "roles": {
-          "body": "cpython",
-          "assertions": "cpython",
+          "body": "imre",
+          "assertions": "imre",
           "operation": "imre",
-          "fixture": "cpython"
+          "fixture": "mixed"
         },
         "evidence": {
           "operation": "os.getcwd",
-          "fixture": "test_os.tearDownModule",
-          "native_call_count": 1,
-          "host_calls": {}
+          "fixture": "CPython module/class/instance hooks; native instance in child",
+          "method_sha256": "192a250a3620ab851cad16959e632ebb702c0d01d90870b16a088ad3ef4a3177"
         }
       },
-      "native_body_blocker": "MiscTests.test_getcwd, self.assertIsInstance(cwd, str): unknown class method",
+      "status": "native_body_host_fixture",
+      "host_fixtures": [
+        "test_os.tearDownModule"
+      ],
       "opt_levels": [
         0,
         3

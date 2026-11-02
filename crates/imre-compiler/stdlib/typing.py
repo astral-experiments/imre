@@ -5,6 +5,9 @@ from functools import lru_cache
 from typing import Generic, TypeVar
 
 
+T = TypeVar("T")
+KT = TypeVar("KT")
+VT = TypeVar("VT")
 AnyStr = TypeVar("AnyStr", bytes, str)
 
 
@@ -239,6 +242,15 @@ def Final(self, parameters):
     if isinstance(item, str):
         raise NotImplementedError("string Final arguments require typing.ForwardRef")
     return _typing._GenericAlias(self, (type(None) if item is None else item,))
+
+
+@_SpecialForm
+def Unpack(self, parameters):
+    """Unpack the types in a tuple or a variadic type parameter."""
+    item = _type_check(parameters, f"{self} accepts only single type.")
+    if isinstance(item, str):
+        raise NotImplementedError("string Unpack arguments require typing.ForwardRef")
+    return _typing._UnpackGenericAlias(self, (type(None) if item is None else item,))
 
 
 @_SpecialForm

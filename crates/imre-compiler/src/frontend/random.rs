@@ -2,12 +2,6 @@
 use super::*;
 use ir::RandomOperation as Op;
 
-fn integer(n: usize) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(n.to_string()),
-    }
-}
 fn random(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -25,7 +19,7 @@ impl Checker<'_> {
             Op::Randrange => vec![
                 ("start", None),
                 ("stop", Some(Expr::none())),
-                ("step", Some(integer(1))),
+                ("step", Some(Expr::integer(1))),
             ],
             _ => unreachable!(),
         };
@@ -66,13 +60,13 @@ impl Checker<'_> {
             Op::Float => random(op, Type::Float, values),
             Op::Bits => random(op, Type::Int, values),
             Op::Randint => {
-                values.push(integer(1));
+                values.push(Expr::integer(1));
                 random(op, Type::Int, values)
             }
             Op::Randrange if values[1].ty == Type::None => random(
                 Op::RandrangeOne,
                 Type::Int,
-                vec![integer(0), values[0].clone(), values[2].clone()],
+                vec![Expr::integer(0), values[0].clone(), values[2].clone()],
             ),
             Op::Randrange => random(op, Type::Int, values),
             _ => unreachable!(),
@@ -116,8 +110,8 @@ impl Checker<'_> {
                 .map(|v| self.expr_expected(v, Type::Int))
                 .collect::<Result<Vec<_>, _>>()?;
             let bounds = match values.as_slice() {
-                [stop] => vec![integer(0), stop.clone(), integer(1)],
-                [start, stop] => vec![start.clone(), stop.clone(), integer(1)],
+                [stop] => vec![Expr::integer(0), stop.clone(), Expr::integer(1)],
+                [start, stop] => vec![start.clone(), stop.clone(), Expr::integer(1)],
                 [start, stop, step] => vec![start.clone(), stop.clone(), step.clone()],
                 _ => {
                     return Err(error(

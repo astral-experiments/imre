@@ -356,6 +356,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "find",
     "format",
     "isalnum",
+    "islower",
     "isspace",
     "isupper",
     "join",
@@ -1158,7 +1159,7 @@ pub(super) fn call(
                     args.len()
                 )));
             }
-            Ok(ctx.module_globals(ctx.heap.current_scope()))
+            ctx.module_globals(ctx.heap.current_scope())
         }
         "getattr" | "hasattr" => {
             positional(name, kwargs)?;
@@ -1652,6 +1653,10 @@ pub(super) fn call(
             };
             Ok(ctx.alloc(Value::Raised(error)))
         }
+        "NoDefaultType" if args.is_empty() && kwargs.is_empty() => {
+            Ok(super::typing::no_default(ctx))
+        }
+        "NoDefaultType" => Err(type_error("NoDefaultType takes no arguments")),
         name => Err(type_error(format!("unsupported builtin {name}"))),
     }
 }

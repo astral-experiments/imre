@@ -12,7 +12,7 @@ fn op(operation: Op, ty: Type, args: Vec<Expr>) -> Expr {
 
 impl Checker<'_> {
     pub(super) fn clock_time(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let integer = |name| parameter(name, Type::Int, Some(logging::number(0)));
+        let integer = |name| parameter(name, Type::Int, Some(Expr::integer(0)));
         let mut fold = integer("fold");
         fold.kind = ParameterKind::KeywordOnly;
         let params = [
@@ -41,8 +41,8 @@ impl Checker<'_> {
                     kind: ExprKind::Str("h".into()),
                 }),
             ),
-            parameter("interval", Type::Int, Some(logging::number(1))),
-            parameter("backupCount", Type::Int, Some(logging::number(0))),
+            parameter("interval", Type::Int, Some(Expr::integer(1))),
+            parameter("backupCount", Type::Int, Some(Expr::integer(0))),
             parameter("encoding", string, Some(Expr::absent(string))),
             parameter("delay", Type::Bool, Some(off.clone())),
             parameter("utc", Type::Bool, Some(off)),
@@ -84,7 +84,7 @@ impl Checker<'_> {
             return Ok(op(
                 Op::ClockPart,
                 Type::Int,
-                vec![receiver, logging::number(index as u8)],
+                vec![receiver, Expr::integer(index as u8)],
             ));
         }
         let (operation, ty) = match name {
