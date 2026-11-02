@@ -30,7 +30,7 @@ pub(super) mod tempfile;
 mod time;
 mod tokenize;
 pub(super) use files::{BinaryFile, ReadSource};
-pub(super) use socket::install_lowlevel_socket;
+pub(super) use socket::{import_socket_constants, install_lowlevel_socket};
 pub(super) mod io;
 mod json;
 mod logging;

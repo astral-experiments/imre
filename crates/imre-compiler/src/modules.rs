@@ -1440,6 +1440,7 @@ impl IntrinsicModule {
                 "SOCK_SEQPACKET" => "_socket.SOCK_SEQPACKET",
                 "SOL_SOCKET" => "_socket.SOL_SOCKET",
                 "IPPROTO_TCP" => "_socket.IPPROTO_TCP",
+                "IPPROTO_UDP" => "_socket.IPPROTO_UDP",
                 "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
                 "IPV6_V6ONLY" => "_socket.IPV6_V6ONLY",
                 "SO_REUSEADDR" => "_socket.SO_REUSEADDR",
@@ -1457,6 +1458,7 @@ impl IntrinsicModule {
             (Self::Socket, "has_dualstack_ipv6") => {
                 Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")
             }
+            (Self::Socket, "IPPROTO_UDP") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_UDP"),
             (Self::Socket, "IPPROTO_IPV6") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_IPV6"),
             (Self::Socket, "IPV6_V6ONLY") => Intrinsic::ObjectRuntimeExport("socket.IPV6_V6ONLY"),
             (Self::Socket, "has_ipv6") => Intrinsic::ObjectRuntimeExport("socket.has_ipv6"),
