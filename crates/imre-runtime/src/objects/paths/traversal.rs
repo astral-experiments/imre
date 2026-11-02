@@ -97,7 +97,7 @@ impl Scan {
             let Some(dir) = self.stack.pop() else {
                 return Ok(None);
             };
-            let entries = snapshot(&dir, true)?.into_iter();
+            let entries = snapshot(&dir)?.into_iter();
             self.entries = Some((dir, entries));
         }
     }
@@ -115,7 +115,7 @@ impl Scan {
     }
 }
 
-pub(super) struct Glob {
+pub(in crate::objects) struct Glob {
     parts: Vec<Part>,
     follow: bool,
     stack: Vec<Work>,
@@ -214,7 +214,7 @@ impl Glob {
                         Part::Directory if known || is_dir(&path, true) => return Ok(Some(path)),
                         Part::Directory => (),
                         Part::Wild(_) => {
-                            let names = snapshot(&path, true)?.into_iter();
+                            let names = snapshot(&path)?.into_iter();
                             self.stack.push(Work::Children { path, part, names });
                         }
                         Part::Recursive(filter) => {
