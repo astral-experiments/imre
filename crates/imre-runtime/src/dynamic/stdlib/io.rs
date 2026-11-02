@@ -197,6 +197,8 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         .collect();
     let exports = ctx.alloc(Value::List(names));
     ctx.bind(module, "__all__", exports);
+    let open_code = ctx.builtin("io.open_code");
+    ctx.bind(module, "open_code", open_code);
     for (name, origin) in [("SEEK_SET", 0), ("SEEK_CUR", 1), ("SEEK_END", 2)] {
         let value = ctx.int(origin);
         ctx.bind(module, name, value);
