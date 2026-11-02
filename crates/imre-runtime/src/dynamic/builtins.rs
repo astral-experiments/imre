@@ -2154,6 +2154,10 @@ pub(super) fn call(
                 } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
                 Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
+                value if value.is_weak_proxy() => {
+                    let target = ctx.weak_proxy_target(args[0])?;
+                    return ctx.with_weak_target(target, |ctx| call(ctx, "len", &[target], &[]));
+                }
                 Value::MappingProxy(_) => {
                     let mapping = ctx.mapping_proxy_target(args[0]);
                     return call(ctx, "len", &[mapping], &[]);
