@@ -6073,7 +6073,13 @@ impl Context {
         if typed_dict_meta.is_none() {
             super::typing::class_parameters(self, scope, original, &bases)?;
         }
-        let class = self.allocate_class(name.clone(), scope, bases)?;
+        let object = self.builtin("object");
+        let ordinary_slots = typed_dict_meta.is_none()
+            && enum_kind.is_none()
+            && bases
+                .iter()
+                .all(|&base| base == object || self.allocation_base(base) == Some(object));
+        let class = self.allocate_class_with_slots(name.clone(), scope, bases, ordinary_slots)?;
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
             unreachable!()
         };
