@@ -129,6 +129,7 @@ def main():
             return binary
 
         for level in args.opt_levels:
+            assert observe([build(threaded, level)]) == threaded_output
             assert observe([build(threaded, level, "--runtime-imports")]) == threaded_output
             check_handler_error([build(failure, level)], failure)
             timed_binary = build(timed, level)

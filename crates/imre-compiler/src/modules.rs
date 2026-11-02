@@ -943,6 +943,7 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const SOCKETSERVER_CLASS: Self = Self::ObjectRuntimeExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
@@ -2818,6 +2819,14 @@ impl SourceModule {
 
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
+        if self.is_bundled("socketserver")
+            && matches!(
+                name,
+                "DatagramRequestHandler" | "UDPServer" | "ThreadingMixIn" | "ThreadingTCPServer" | "ThreadingUDPServer"
+            )
+        {
+            return Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS));
+        }
         if self.is_bundled("unittest") {
             let export = match name {
                 "registerResult" => Some("unittest.registerResult"),
