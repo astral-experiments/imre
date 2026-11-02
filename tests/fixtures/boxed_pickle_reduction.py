@@ -20,6 +20,43 @@ class InheritedProtocol(WithProtocol):
     pass
 
 
+class ShadowedAppend(list):
+    append = "shadowed"
+
+    def __reduce__(self):
+        return type(self), ()
+
+
+def check_bound_builtin(protocol):
+    mapping = {"entry": 37}
+    method = mapping.__getitem__
+    assert method.__reduce__() == (getattr, (mapping, "__getitem__"))
+    assert type(method).__reduce__(method) == method.__reduce_ex__(protocol)
+    restored, getter = pickle.loads(pickle.dumps((mapping, method), protocol))
+    assert getter.__self__ is restored and getter("entry") == 37
+
+    append = list.append.__get__(ShadowedAppend())
+    assert pickle.loads(pickle.dumps(append, protocol)) == "shadowed"
+    assert len.__reduce__() == "len"
+
+    scope = {"method": method, "getattr": str, "__builtins__": {"getattr": None}}
+    exec("reduced = method.__reduce__()", scope)
+    assert scope["reduced"] == (None, (mapping, "__getitem__"))
+    del scope["__builtins__"]["getattr"]
+    try:
+        exec("method.__reduce__()", scope)
+    except AttributeError as error:
+        assert error.args == ("getattr",)
+    else:
+        raise AssertionError("missing getattr in caller's builtins")
+
+    copyreg.pickle(type(method), registered_reducer)
+    try:
+        assert pickle.loads(pickle.dumps(method, protocol)) == "registered"
+    finally:
+        del copyreg.dispatch_table[type(method)]
+
+
 def registered_reducer(value):
     return str, ("registered",)
 
@@ -372,6 +409,7 @@ def produce():
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         check_global_names(protocol)
+        check_bound_builtin(protocol)
         check_registered_reducer(protocol)
         check_reduction_state(protocol)
         check_list_items(protocol)

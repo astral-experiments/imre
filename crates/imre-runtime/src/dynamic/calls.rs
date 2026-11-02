@@ -1882,6 +1882,18 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if matches!(name, "__reduce__" | "__reduce_ex__") {
+            let unbound = matches!(self.heap.get(obj), Value::Native(class) if class == "builtin_function_or_method");
+            if unbound || self.builtin_type_name(obj) == Some("builtin_function_or_method") {
+                let owner = self.builtin("builtin_function_or_method");
+                let descriptor = self.builtin(if name == "__reduce__" {
+                    "builtin_function_or_method.__reduce__"
+                } else {
+                    "object.__reduce_ex__"
+                });
+                return self.bind_attribute(descriptor, if unbound { NONE } else { obj }, owner);
+            }
+        }
         if name == "__dict__"
             && let Some(&dictionary) = self.native_type_dicts.get(&obj)
         {
@@ -5747,6 +5759,7 @@ impl Context {
                                 | "slice"
                                 | "function"
                                 | "method"
+                                | "builtin_function_or_method"
                                 | "object"
                                 | "property"
                                 | "staticmethod"

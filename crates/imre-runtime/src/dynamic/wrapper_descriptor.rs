@@ -99,6 +99,9 @@ impl BuiltinDescriptor {
                 Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS))
             }
             Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
+            Some(("builtin_function_or_method", attr)) => {
+                Some(("builtin_function_or_method", attr, &["__reduce__"][..]))
+            }
             Some(("int", attr)) => Some(("int", attr, builtins::real_methods("int"))),
             Some(("float", "as_integer_ratio")) => {
                 Some(("float", "as_integer_ratio", &["as_integer_ratio"][..]))
