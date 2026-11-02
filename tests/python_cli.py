@@ -1046,25 +1046,26 @@ def main():
 
         compare(
             "-X", "warn_default_encoding", "-Walways", "-c",
+            "from io import text_encoding\n"
             "import io, sys, warnings\n"
-            "original = sys.stderr\n"
-            "sys.stderr = io.StringIO()\n"
-            "io.text_encoding(None, 1)\n"
-            "print(sys.stderr.getvalue().strip())\n"
-            "sys.stderr = original\n"
             "def hook(message, category, filename, lineno, file, line):\n"
             "    print(type(message) is category is EncodingWarning, str(message), filename, lineno, file, line)\n"
             "    raise OSError('from hook')\n"
+            "original = sys.stderr\n"
+            "sys.stderr = io.StringIO()\n"
+            "text_encoding(None, 1)\n"
+            "print(sys.stderr.getvalue().strip())\n"
+            "sys.stderr = original\n"
             "warnings.showwarning = hook\n"
-            "try: io.text_encoding(None, 1)\n"
+            "try: text_encoding(None, 1)\n"
             "except OSError as exc: print(exc)\n"
             "warnings.showwarning = 42\n"
-            "try: io.text_encoding(None, 1)\n"
+            "try: text_encoding(None, 1)\n"
             "except TypeError as exc: print(exc)",
         )
         compare(
             "-X", "warn_default_encoding", "-Werror::EncodingWarning", "-c",
-            "import io\n__name__ = None\nprint(io.text_encoding(None, 1))",
+            "from io import text_encoding\n__name__ = None\nprint(text_encoding(None, 1))",
         )
 
         subset_method = root / "set_issubset.py"
