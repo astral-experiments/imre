@@ -51,6 +51,12 @@ pub(crate) fn emit(
             .map_err(|err| format!("{}: {err}", path.display()))?;
         crate::analysis::check_star_import_scopes(source, &parsed.syntax().body)
             .map_err(|error| format!("{}:{error}", path.display()))?;
+        if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
+            let name = keyword.arg.as_ref().expect("repeated named argument");
+            let reason = format!("SyntaxError: keyword argument repeated: {name}");
+            let error = crate::frontend::error(source, keyword, &reason);
+            return Err(format!("{}:{error}", path.display()));
+        }
         let replacements = strings::literal_replacements(source, parsed.tokens());
         if output.keep_docstrings && !replacements.is_empty() {
             strings::check_docs(source, &parsed.syntax().body, &replacements)

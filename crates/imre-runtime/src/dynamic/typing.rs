@@ -1924,7 +1924,11 @@ impl Context {
             if let Some(function) = self.namespace_binding(self.scope_data(scope), name)
                 && matches!(self.heap.get(function), Value::Function { .. })
             {
-                let method = self.alloc(Value::ClassMethod(function));
+                let dictionary = self.dict(Vec::new());
+                let method = self.alloc(Value::ClassMethod {
+                    callable: function,
+                    dictionary,
+                });
                 self.bind_local(scope, name, method);
             }
         }

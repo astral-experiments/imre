@@ -863,47 +863,6 @@ pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Resul
     Ok(starts)
 }
 
-/// Check explicit keyword names before lowering can mangle class-private names.
-fn repeated_keyword(module: &ast::Mod) -> Option<&ast::Keyword> {
-    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
-
-    struct Children<'a>(Vec<ast::AnyNodeRef<'a>>);
-    impl<'a> SourceOrderVisitor<'a> for Children<'a> {
-        fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
-            self.0.push(node);
-            TraversalSignal::Skip
-        }
-    }
-
-    let mut pending = Children(vec![module.into()]);
-    while let Some(node) = pending.0.pop() {
-        let args = match node {
-            // A call's own keyword list is validated before its callable is compiled.
-            ast::AnyNodeRef::ExprCall(call) => Some(&call.arguments),
-            ast::AnyNodeRef::StmtClassDef(class) => class.arguments.as_deref(),
-            _ => None,
-        };
-        if let Some(args) = args {
-            for (index, keyword) in args.keywords.iter().enumerate() {
-                if let Some(name) = &keyword.arg
-                    && let Some(repeated) = args.keywords[index + 1..].iter().find(|other| {
-                        other
-                            .arg
-                            .as_ref()
-                            .is_some_and(|id| id.as_str() == name.as_str())
-                    })
-                {
-                    return Some(repeated);
-                }
-            }
-        }
-        let start = pending.0.len();
-        node.visit_source_order(&mut pending);
-        pending.0[start..].reverse();
-    }
-    None
-}
-
 /// Interactive input accepts one compound statement or one logical line of simple statements.
 fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result<()> {
     use ast::token::TokenKind::{Dedent, Newline};
@@ -1701,14 +1660,10 @@ impl Program {
                 }
                 Stmt::ClassDef(mut s) if s.type_params.is_none() => {
                     if let Some(args) = &s.arguments
-                        && (args
-                            .keywords
-                            .iter()
-                            .any(|kw| !matches!(kw.arg.as_deref(), Some("total" | "metaclass")))
-                            || args.keywords.len() > 1
+                        && (args.keywords.iter().any(|kw| kw.arg.is_none())
                             || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))))
                     {
-                        return Err(unsupported("class keywords or expanded bases"));
+                        return Err(unsupported("expanded class arguments"));
                     }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
                     let spellings = child.private_names.get_or_insert_with(|| {
@@ -2258,7 +2213,7 @@ impl Context {
         }
         let spellings = string_replacements(source, parsed.tokens());
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        if let Some(keyword) = repeated_keyword(parsed.syntax()) {
+        if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
             let message = format!(
                 "keyword argument repeated: {}",
                 keyword.arg.as_ref().unwrap()
@@ -3488,7 +3443,8 @@ impl Context {
         let value = self.enum_assignment(scope, name, value)?;
         let replaced = self.replacing_finalizer(scope, name, value);
         let scope = self.binding_scope(scope, name);
-        if let Some(locals) = self.scope_data(scope).exec_locals {
+        let frame = self.scope_data(scope);
+        if let Some(locals) = frame.exec_locals.or(frame.class_body_mapping()) {
             if matches!(self.heap.get(locals), Value::List(_)) {
                 return Err(Error::new(
                     "TypeError",
@@ -4052,15 +4008,12 @@ impl Context {
                 let key = self.heap.code_name(name);
                 let spelling = self.source_expr(code, scope, expression)?;
                 // LOAD_NAME for this implicit store skips enclosing function locals.
-                let annotations = match self.scope_name(scope, "__annotations__") {
-                    Some(mapping) => mapping,
-                    None => self.lookup(self.root_scope(scope), "__annotations__")?,
-                };
+                let annotations = self.lookup_class_local(scope, "__annotations__")?;
                 self.put_item(annotations, key, spelling)?;
             }
             Instruction::ClassAnnotator(provider) => {
                 let annotate = self.source_annotator(provider, owner, scope)?;
-                self.bind(scope, "__annotate_func__", annotate);
+                self.bind_source_name(scope, "__annotate_func__", annotate)?;
             }
             Instruction::ClassStart => {
                 self.enable_class_annotation_provider(scope);
@@ -4089,7 +4042,7 @@ impl Context {
                     .map(|name| self.heap.code_name(name))
                     .collect();
                 let attrs = self.alloc(Value::Tuple(names));
-                self.bind(scope, "__static_attributes__", attrs);
+                self.bind_source_name(scope, "__static_attributes__", attrs)?;
             }
             Instruction::Define(definition) => {
                 let value = self.source_definition(code, owner, scope, *ip - 1, definition)?;
@@ -4121,25 +4074,21 @@ impl Context {
         let sig = match &definition.kind {
             DefinitionKind::Class(args) => {
                 let mut values = Vec::new();
-                let mut total = None;
-                let mut metaclass = None;
+                let mut keywords = Vec::new();
                 if let Some(args) = args {
                     for expression in &args.args {
                         let base = eval(self, expression)?;
                         self.heap.keep(base);
                         values.push(base);
                     }
-                    if let Some(keyword) = args.keywords.first() {
+                    for keyword in &args.keywords {
+                        let name = keyword.arg.as_ref().expect("validated class keyword");
                         let value = eval(self, &keyword.value)?;
                         self.heap.keep(value);
-                        match keyword.arg.as_deref() {
-                            Some("total") => total = Some(value),
-                            Some("metaclass") => metaclass = Some(value),
-                            _ => unreachable!("validated class keyword"),
-                        }
+                        keywords.push((name.to_string(), value));
                     }
                 }
-                bases = Some((self.alloc(Value::List(values)), metaclass, total));
+                bases = Some((self.alloc(Value::List(values)), keywords));
                 serde_json::json!({})
             }
             DefinitionKind::Function(p) => {
@@ -4213,8 +4162,8 @@ impl Context {
             let annotate = self.source_annotator(provider, code, defining_scope)?;
             self.set_function_attr(value, "__annotate__", annotate)?;
         }
-        if let Some((bases, metaclass, total)) = bases {
-            value = self.class(bases, value, metaclass, total, false)?;
+        if let Some((bases, keywords)) = bases {
+            value = self.class(bases, value, keywords, false)?;
         }
         for decorator in decorators.into_iter().rev() {
             value = self.call(decorator, vec![value], Vec::new())?;
@@ -4558,11 +4507,8 @@ impl Context {
             }
             Expr::Name(n) => {
                 let name = n.id.as_str();
-                if code.class_attributes.is_some()
-                    && code.locals.contains(name)
-                    && self.scope_name(scope, name).is_none()
-                {
-                    return self.lookup(self.root_scope(scope), name);
+                if code.class_attributes.is_some() && code.locals.contains(name) {
+                    return self.lookup_class_local(scope, name);
                 }
                 self.check_source_local(code, scope, name)?;
                 self.lookup(scope, name)

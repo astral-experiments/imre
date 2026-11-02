@@ -1509,6 +1509,10 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, forward
         return value
     args = getattr(value, '__args__', ())
     resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, forwardrefs) for a in args)
+    if isinstance(value, _AnnotatedAlias):
+        if not include_extras:
+            return resolved[0]
+        return value if resolved == args else value.copy_with(resolved)
     if not include_extras:
         for name in ('Required', 'NotRequired', 'ReadOnly'):
             if origin is getattr(_typing, name, None):

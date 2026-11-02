@@ -891,6 +891,7 @@ impl Intrinsic {
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
     pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
     pub(crate) const TEXT_IO_BASE: Self = Self::ObjectRuntimeExport("io.TextIOBase");
+    pub(crate) const TYPING_PROTOCOL: Self = Self::ObjectRuntimeExport("typing.Protocol");
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
 
     /// Subclasses of these immutable types keep their calendar value in the object runtime.
@@ -1319,6 +1320,9 @@ impl IntrinsicModule {
             (Self::ImportlibMetadata, "FileHash") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.FileHash")
             }
+            (Self::ImportlibMetadata, "packages_distributions") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.packages_distributions")
+            }
             (Self::ImportlibMetadata, "files") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.files")
             }
@@ -1351,6 +1355,18 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.entry_points")
             }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
+            (Self::ImportlibMachinery, "all_suffixes") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.all_suffixes")
+            }
+            (Self::ImportlibMachinery, "SOURCE_SUFFIXES") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.SOURCE_SUFFIXES")
+            }
+            (Self::ImportlibMachinery, "BYTECODE_SUFFIXES") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.BYTECODE_SUFFIXES")
+            }
+            (Self::ImportlibMachinery, "EXTENSION_SUFFIXES") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.EXTENSION_SUFFIXES")
+            }
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
             }
@@ -1415,6 +1431,9 @@ impl IntrinsicModule {
                 "cache" => crate::ir::LinecacheOperation::Cache,
                 _ => return None,
             }),
+            (Self::Inspect, "getmodulename") => {
+                Intrinsic::ObjectRuntimeExport("inspect.getmodulename")
+            }
             (Self::Inspect, "Signature") => Intrinsic::ObjectRuntimeExport("inspect.Signature"),
             (Self::Inspect, "Parameter") => Intrinsic::ObjectRuntimeExport("inspect.Parameter"),
             (Self::Inspect, "BoundArguments") => {
@@ -1743,6 +1762,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.no_type_check_decorator")
             }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
+            (Self::Typing, "Protocol") => Intrinsic::TYPING_PROTOCOL,
             (Self::Typing, "runtime_checkable") => {
                 Intrinsic::ObjectRuntimeExport("typing.runtime_checkable")
             }
@@ -3259,6 +3279,18 @@ impl SourceGraph {
             return self.local_import_value(module, expression, import);
         }
         resolve_binding(&self.modules, module, expression)
+    }
+
+    /// Recognize Protocol and Protocol[T] at the point where the class is defined.
+    pub(crate) fn is_protocol_base(&self, module: ModuleId, expression: &ast::Expr) -> bool {
+        let origin = match expression {
+            ast::Expr::Subscript(subscript) => &*subscript.value,
+            base => base,
+        };
+        matches!(
+            self.resolve(module, origin),
+            Some(Binding::Intrinsic(Intrinsic::TYPING_PROTOCOL))
+        ) && self.session.is_typing_protocol(module, origin)
     }
 
     /// An import binds its name throughout the function, even before the import executes.

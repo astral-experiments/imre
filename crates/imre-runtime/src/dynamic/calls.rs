@@ -159,6 +159,24 @@ impl Context {
         }
         let attr = self.find_in_mro(class, |base| self.own_class_attr(base, name));
         if attr.is_none()
+            && matches!(name, "__reduce__" | "__reduce_ex__" | "__getstate__")
+            && let Value::Native(kind) = self.heap.get(class)
+            && matches!(
+                kind.as_str(),
+                stdlib::datetime::TZINFO | "datetime.timezone"
+            )
+        {
+            let parent = if kind == stdlib::datetime::TZINFO {
+                "object"
+            } else {
+                stdlib::datetime::TZINFO
+            };
+            return self
+                .builtins
+                .get(parent)
+                .and_then(|&base| self.class_attr(base, name));
+        }
+        if attr.is_none()
             && name == "__reduce_ex__"
             && self.own_class_attr(class, "__reduce__").is_some()
         {
@@ -724,7 +742,7 @@ impl Context {
                 explicit: false,
             }));
         }
-        if let Value::ClassMethod(callable) = *self.heap.get(value) {
+        if let Value::ClassMethod { callable, .. } = *self.heap.get(value) {
             return Ok(self.alloc(Value::Method {
                 callable,
                 receiver: owner,
@@ -991,7 +1009,7 @@ impl Context {
             "bool" => "int",
             "datetime.datetime" => "datetime.date",
             "datetime.timezone" => stdlib::datetime::TZINFO,
-            stdlib::flags::TYPE | stdlib::os::stat::CLASS => "tuple",
+            stdlib::flags::TYPE | stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS => "tuple",
             class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
             "typing._UnpackGenericAlias" => "typing._GenericAlias",
             HashState::XOF_CLASS => HashState::CLASS,
@@ -1160,6 +1178,7 @@ impl Context {
                             | "_contextvars.ContextVar"
                             | "_contextvars.Token"
                             | stdlib::os::stat::CLASS
+                            | stdlib::os::stat::VFS_CLASS
                             | "array.array"
                             | "selectors.PollSelector"
                             | "selectors.SelectSelector"
@@ -1246,7 +1265,8 @@ impl Context {
                         | stdlib::fixed_structseq::HASH_INFO
                         | stdlib::fixed_structseq::TERMINAL_SIZE
                         | stdlib::flags::TYPE
-                        | stdlib::os::stat::CLASS),
+                        | stdlib::os::stat::CLASS
+                        | stdlib::os::stat::VFS_CLASS),
                     ),
                 ..
             } => Ok(self.builtin(class)),
@@ -1401,13 +1421,6 @@ impl Context {
             {
                 qualified.strip_prefix("urllib.parse.") == Some(*name)
             }
-            (
-                stdlib::os::stat::CLASS,
-                Value::NamedTuple {
-                    class: Some(stdlib::os::stat::CLASS),
-                    ..
-                },
-            ) => true,
             ("typing._GenericAlias", Value::GenericAlias(alias))
                 if alias.kind == super::typing::AliasKind::Unpack =>
             {
@@ -1423,7 +1436,9 @@ impl Context {
                             | stdlib::fixed_structseq::UNRAISABLE_ARGS
                             | stdlib::fixed_structseq::HASH_INFO
                             | stdlib::fixed_structseq::TERMINAL_SIZE
-                            | stdlib::flags::TYPE),
+                            | stdlib::flags::TYPE
+                            | stdlib::os::stat::CLASS
+                            | stdlib::os::stat::VFS_CLASS),
                         ),
                     ..
                 },
@@ -2029,22 +2044,16 @@ impl Context {
                     }));
                 }
             }
-            Value::ClassMethod(callable) if name == "__isabstractmethod__" => {
-                return Ok(if self.is_abstract_method(callable)? {
-                    TRUE
-                } else {
-                    FALSE
-                });
+            Value::ClassMethod {
+                callable,
+                dictionary,
             }
-            Value::ClassMethod(callable) if matches!(name, "__func__" | "__wrapped__") => {
-                return Ok(callable);
-            }
-            Value::StaticMethod {
+            | Value::StaticMethod {
                 callable,
                 dictionary,
             } => {
                 if let Some(value) =
-                    super::static_method::attribute(self, callable, dictionary, name)?
+                    super::method_decorator::attribute(self, callable, dictionary, name)?
                 {
                     return Ok(value);
                 }
@@ -2508,6 +2517,9 @@ impl Context {
             Value::RegexPattern(ref pattern) if name == "groups" => {
                 return Ok(self.int(pattern.group_count() as i64));
             }
+            Value::RegexPattern(ref pattern) if name == "groupindex" => {
+                return pattern.clone().group_index(self);
+            }
             Value::RegexPattern(ref pattern) if name == "pattern" => {
                 return Ok(pattern.source);
             }
@@ -2522,24 +2534,29 @@ impl Context {
                     format!("'datetime.{kind}' object has no attribute '{name}'"),
                 ));
             }
-            Value::Native(ref class) if class == stdlib::os::stat::CLASS => match name {
-                "__reduce__" => return Ok(self.builtin("os.stat_result.__reduce__")),
-                field if let Some(id) = stdlib::os::stat::member(self, field) => return Ok(id),
-                "__module__" => return Ok(self.text("os")),
-                "__name__" | "__qualname__" => return Ok(self.text("stat_result")),
-                "__base__" => return Ok(self.builtin("tuple")),
-                "__match_args__" => {
-                    let names = stdlib::os::stat::FIELDS[..7]
-                        .iter()
-                        .map(|&n| self.text(n))
-                        .collect();
-                    return Ok(self.alloc(Value::Tuple(names)));
+            Value::Native(ref class) if let Some(layout) = stdlib::os::stat::layout(class) => {
+                match name {
+                    "__reduce__" => return Ok(self.builtin(&format!("{class}.__reduce__"))),
+                    field if let Some(id) = stdlib::os::stat::member(self, layout, field) => {
+                        return Ok(id);
+                    }
+                    "__module__" => return Ok(self.text("os")),
+                    "__name__" | "__qualname__" => return Ok(self.text(layout.name())),
+                    "__base__" => return Ok(self.builtin("tuple")),
+                    "__match_args__" => {
+                        let names = layout
+                            .match_fields()
+                            .iter()
+                            .map(|&n| self.text(n))
+                            .collect();
+                        return Ok(self.alloc(Value::Tuple(names)));
+                    }
+                    field if let Some(n) = stdlib::os::stat::count_attribute(layout, field) => {
+                        return Ok(self.int(n));
+                    }
+                    _ => {}
                 }
-                field if let Some(n) = stdlib::os::stat::count_attribute(field) => {
-                    return Ok(self.int(n));
-                }
-                _ => {}
-            },
+            }
             Value::Native(ref class)
                 if class == "datetime.datetime"
                     && matches!(name, "now" | "fromtimestamp" | "combine") =>
@@ -2684,7 +2701,7 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if class == "tuple" && matches!(name, "__new__" | "__getitem__") =>
+                if class == "tuple" && matches!(name, "__new__" | "__getitem__" | "index") =>
             {
                 return Ok(self.builtin(&format!("tuple.{name}")));
             }
@@ -2841,14 +2858,20 @@ impl Context {
                 });
             }
             Value::Native(ref symbol)
-                if name == "__self__"
+                if matches!(name, "__self__" | "__qualname__" | "__module__")
                     && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
-                let owner = owner.to_owned();
-                return Ok(self.builtin(&owner));
+                return Ok(match name {
+                    "__self__" => self.builtin(&owner.to_owned()),
+                    "__qualname__" => {
+                        let class = owner.rsplit('.').next().unwrap_or(owner);
+                        self.text(format!("{class}.__new__"))
+                    }
+                    _ => NONE,
+                });
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "int" | "float") && name == "__new__" =>
+                if matches!(class.as_str(), "int" | "float" | "function") && name == "__new__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
             }
@@ -3462,11 +3485,11 @@ impl Context {
                 if let Some(i) = names.iter().position(|n| n == name) {
                     return Ok(values[i]);
                 }
-                if class == Some(stdlib::os::stat::CLASS) {
+                if let Some(layout) = class.and_then(stdlib::os::stat::layout) {
                     if name == "__class__" {
-                        return Ok(self.builtin(stdlib::os::stat::CLASS));
+                        return Ok(self.builtin(layout.class));
                     }
-                    if let Some(n) = stdlib::os::stat::count_attribute(name) {
+                    if let Some(n) = stdlib::os::stat::count_attribute(layout, name) {
                         return Ok(self.int(n));
                     }
                 }
@@ -3571,6 +3594,7 @@ impl Context {
                     return Ok(self.builtin("dict.__new__"));
                 }
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
+                Value::Function { .. } => return Ok(self.builtin("function.__new__")),
                 Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 Value::Class { .. } | Value::Instance { .. } => {
@@ -3819,8 +3843,8 @@ impl Context {
                 self.heap.get_mut(obj).property_mut().unwrap().doc = NONE;
                 Ok(())
             }
-            Value::StaticMethod { dictionary, .. } => {
-                super::static_method::update_attribute(self, obj, dictionary, name, None)
+            Value::StaticMethod { dictionary, .. } | Value::ClassMethod { dictionary, .. } => {
+                super::method_decorator::update_attribute(self, obj, dictionary, name, None)
             }
             Value::Module { scope, .. } => {
                 self.update_module_annotations(scope, name, None)?;
@@ -4022,8 +4046,8 @@ impl Context {
             class: Some(owner), ..
         } = *self.heap.get(obj)
         {
-            let member = if owner == stdlib::os::stat::CLASS {
-                stdlib::os::stat::member(self, name)
+            let member = if let Some(layout) = stdlib::os::stat::layout(owner) {
+                stdlib::os::stat::member(self, layout, name)
             } else if let Some(class) = stdlib::fixed_structseq::fixed_type(owner) {
                 stdlib::fixed_structseq::member(self, class, name)
             } else {
@@ -4115,9 +4139,9 @@ impl Context {
             Value::Function { fields, .. } => self.function_attr(obj, fields, "__dict__")?,
             Value::Raised(ref error) => error.trace.as_ref().and_then(|trace| trace.dictionary),
             Value::Partial { dictionary, .. } => dictionary,
-            Value::StaticMethod { dictionary, .. } | Value::Cached { dictionary, .. } => {
-                Some(dictionary)
-            }
+            Value::ClassMethod { dictionary, .. }
+            | Value::StaticMethod { dictionary, .. }
+            | Value::Cached { dictionary, .. } => Some(dictionary),
             Value::Class { scope, .. }
                 if self.classes.get(super::namespace::CLASS) != Some(&obj) =>
             {
@@ -4388,8 +4412,10 @@ impl Context {
             error.context = value;
             return Ok(());
         }
-        if let Value::StaticMethod { dictionary, .. } = *self.heap.get(obj) {
-            return super::static_method::update_attribute(
+        if let Value::StaticMethod { dictionary, .. } | Value::ClassMethod { dictionary, .. } =
+            *self.heap.get(obj)
+        {
+            return super::method_decorator::update_attribute(
                 self,
                 obj,
                 dictionary,
@@ -6078,8 +6104,7 @@ impl Context {
         &mut self,
         bases: Id,
         body: Id,
-        explicit_metaclass: Option<Id>,
-        total: Option<Id>,
+        mut keywords: Vec<(String, Id)>,
         parameterized: bool,
     ) -> Result<Id> {
         let (original, mut bases) = super::typing::resolve_bases(self, bases)?;
@@ -6105,6 +6130,20 @@ impl Context {
         } else {
             self.enum_namespace(&bases)
         };
+        let explicit_metaclass = keywords
+            .iter()
+            .position(|(name, _)| name == "metaclass")
+            .map(|index| keywords.remove(index).1);
+        if enum_namespace.is_some()
+            && keywords
+                .iter()
+                .any(|(name, _)| matches!(name.as_str(), "boundary" | "_simple"))
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "boxed enum metaclass options are unsupported",
+            ));
+        }
         let class_meta = self.select_class_metaclass(
             &bases,
             explicit_metaclass,
@@ -6208,6 +6247,22 @@ impl Context {
             );
         }
         let typed_dict_fields = if let Some(meta) = typed_dict_meta {
+            let mut total = TRUE;
+            for (name, value) in keywords.drain(..) {
+                if name == "total" {
+                    total = value;
+                } else {
+                    let reason = if matches!(name.as_str(), "cls" | "name" | "bases" | "ns") {
+                        "got multiple values for argument"
+                    } else {
+                        "got an unexpected keyword argument"
+                    };
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("_TypedDictMeta.__new__() {reason} '{name}'"),
+                    ));
+                }
+            }
             let generic = self.classes.get("typing.Generic").copied();
             if bases.iter().any(|&base| {
                 self.heap.get(base).instance_class() != Some(meta) && generic != Some(base)
@@ -6224,7 +6279,7 @@ impl Context {
             bases.push(dict);
             let parents = self.alloc(Value::Tuple(parents));
             let (fields, annotate) = self.prepare_typeddict_namespace(scope, annotations)?;
-            Some((parents, fields, annotate, generic))
+            Some((parents, fields, annotate, generic, total))
         } else {
             None
         };
@@ -6310,13 +6365,7 @@ impl Context {
         }
         // Look up the inherited hook after __set_name__, before publishing the class.
         let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
-        let mut kwargs = Vec::new();
-        if typed_dict_meta.is_none()
-            && let Some(total) = total
-        {
-            kwargs.push(("total".to_owned(), total));
-        }
-        self.call(hook, Vec::new(), kwargs)?;
+        self.call(hook, Vec::new(), keywords)?;
         if module == "_collections_abc"
             && matches!(
                 name.as_str(),
@@ -6330,7 +6379,7 @@ impl Context {
         if self.is_protocol_declaration(class) {
             self.call_typing_helper("_freeze_protocol_members", vec![class, annotations])?;
         }
-        if let Some((parents, fields, annotate, generic)) = typed_dict_fields {
+        if let Some((parents, fields, annotate, generic, total)) = typed_dict_fields {
             if let Some(generic) = generic {
                 // Generic.__init_subclass__ reads the declared bases after __set_name__.
                 let raw = self
@@ -6345,7 +6394,7 @@ impl Context {
                 .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
             self.call(
                 configure,
-                vec![class, fields, total.unwrap_or(TRUE), annotate, parents],
+                vec![class, fields, total, annotate, parents],
                 Vec::new(),
             )?;
         }

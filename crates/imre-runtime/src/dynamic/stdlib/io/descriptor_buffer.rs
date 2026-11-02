@@ -151,8 +151,11 @@ pub(super) fn initialize(
             "buffer size must be strictly positive",
         ));
     }
+    if !reading && super::bytes_writer::is_bytes_io(ctx, raw) {
+        return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize);
+    }
     let handle = native_raw(ctx, raw, methods, owner)?;
-    if backing(ctx, receiver).is_some() {
+    if backing(ctx, receiver).is_some() || super::bytes_writer::state(ctx, receiver).is_some() {
         return Err(Error::new(
             "NotImplementedError",
             format!("{owner} reinitialization is unsupported"),

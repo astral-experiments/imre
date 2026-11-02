@@ -139,6 +139,12 @@ a 200,000-byte exchange on all three pipes, recovery after a zero deadline,
 rejection of new input, repeated output, text newline conversion, and shared
 descriptor/close state. It is not another upstream ID.
 
+On public commit `6a399d7f`, the normal unittest lifecycle passed six
+default-poll originals at O0 and O3. These are ordinals 118, 119, 122, 123,
+124, and 126 in the 353-case stock discovery order. The receipt records the
+positive cases, fault controls, and terminal process-group checks separately.
+[Six intact communicate originals](communicate-intact-six-linux.json)
+
 ## Original fixtures and per-ID evidence
 
 Use the shared [suite runner](../../SUITE_RUNNER.md) from

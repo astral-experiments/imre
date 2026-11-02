@@ -1203,6 +1203,35 @@ def main():
                 expected.stderr,
             )
 
+        module_pkg = root / "module_pkg"
+        module_pkg.mkdir()
+        (module_pkg / "__init__.py").write_text("import sys\nassert sys.argv[0] == '-m'\n")
+        (module_pkg / "child.py").write_text(
+            "import os, sys\n"
+            "from . import __path__\n"
+            "assert __package__ == 'module_pkg' and __spec__.name == 'module_pkg.child'\n"
+            "assert __file__ == sys.argv[0] == __spec__.origin and __loader__ is __spec__.loader\n"
+            "assert sys.path[0] == os.getcwd() and __spec__.name not in sys.modules\n"
+            "assert sys.modules['__main__'].__dict__ is globals()\n"
+            "print(sys.argv[1:], sys.orig_argv[1:])\n"
+        )
+        (module_pkg / "__main__.py").write_text(
+            "import sys\nassert __spec__.name == 'module_pkg.__main__'\n"
+            "assert __name__ == '__main__' and __file__ == sys.argv[0]\n"
+            "print(__package__, sys.argv[1:])\n"
+        )
+        compare("-Bm", "module_pkg.child", "-m", "tail")
+        compare("-B", "-mmodule_pkg", "tail")
+        # An ordinary module under the first root wins over a package in a later root.
+        (root / "preferred.py").write_text("print('file wins')\n")
+        (root / "preferred").mkdir()
+        (root / "preferred" / "__main__.py").write_text("invalid syntax!\n")
+        later = root / "later" / "preferred"
+        later.mkdir(parents=True)
+        (later / "__init__.py").write_text("invalid syntax!\n")
+        compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
+
+
         locale_script = root / "get_locale.py"
         locale_script.write_text(
             "from _locale import LC_ALL, setlocale\n"
@@ -1847,12 +1876,21 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
+        compare("-B", fixtures / "typing_protocol_import.py")
+        compare(
+            "-B", "-c",
+            "import typing as t\ndef build():\n    class P(t.Protocol): pass\n"
+            "    return P._is_protocol\nprint(build())",
+        )
         final_fixture = fixtures / "boxed_typing_final.py"
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
         io_registration = fixtures / "io_abc_registration.py"
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        memory_writer = fixtures / "io_buffered_writer_bytesio.py"
+        compare("-IB", memory_writer, native_args=("run", memory_writer, "--quiet"))
         writer_fixture = fixtures / "io_buffered_writer_type.py"
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"
@@ -1869,6 +1907,8 @@ def report(text):
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
+        class_locals = fixtures / "boxed_class_locals.py"
+        compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
         compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":
@@ -2110,6 +2150,7 @@ def report(text):
             "boxed_logging_filter.py",
             "boxed_logging_file_error.py",
             "boxed_class_attribute.py",
+            "boxed_class_locals.py",
             "boxed_missing_attribute_owners.py",
             "boxed_request_strings.py",
             "boxed_str_maketrans.py",
@@ -2159,6 +2200,7 @@ def report(text):
             "boxed_property_setter.py",
             "boxed_cached_property.py",
             "boxed_staticmethod.py",
+            "boxed_classmethod_attributes.py",
             "boxed_item_assignment.py",
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
@@ -2211,6 +2253,7 @@ def report(text):
             "boxed_list_pop.py",
             "boxed_sequence_repeat.py",
             "boxed_sequence_order.py",
+            "boxed_tuple_index.py",
             "boxed_json_containers.py",
             "boxed_json_decoder.py",
             "boxed_json_module_doc.py",

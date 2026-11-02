@@ -403,7 +403,7 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let doc = ctx.text(format!("{typename}({})", names.join(", ")));
     ctx.bind(scope, "__doc__", doc);
     let make = ctx.builtin("_collections._make");
-    let make = ctx.alloc(Value::ClassMethod(make));
+    let make = super::method_decorator::class_method(ctx, make)?;
     ctx.bind(scope, "_make", make);
     let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
     bind_new(ctx, scope, &typename, &names, defaults)?;
@@ -502,7 +502,7 @@ pub(super) fn bind_new(
     if let Some(defaults) = defaults {
         ctx.set_attr(new, "__defaults__", defaults)?;
     }
-    let descriptor = super::static_method::construct(ctx, new)?;
+    let descriptor = super::method_decorator::static_method(ctx, new)?;
     ctx.bind(scope, "__new__", descriptor);
     Ok(())
 }

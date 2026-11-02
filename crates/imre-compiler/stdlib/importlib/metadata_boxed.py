@@ -222,6 +222,40 @@ def files(distribution_name):
     return distribution(distribution_name).files
 
 
+def _get_toplevel_name(path):
+    top, *rest = path.parts
+    if rest:
+        return top
+    from inspect import getmodulename
+    return getmodulename(path) or str(path)
+
+
+def _top_level_inferred(paths):
+    if paths is None:
+        return ()
+    if isinstance(paths, (str, bytes)):
+        paths = (paths,)
+    try:
+        files = iter(paths)
+    except TypeError:
+        # A custom distribution may supply just one PackagePath.
+        files = (paths,)
+    names = set(map(_get_toplevel_name, files))
+    return (name for name in names if '.' not in name)
+
+
+def packages_distributions():
+    """Map top-level import names to the distributions providing them."""
+    result = {}
+    for dist in distributions():
+        names = (dist.read_text('top_level.txt') or '').split()
+        if not names:
+            names = _top_level_inferred(dist.files)
+        for name in names:
+            result.setdefault(name, []).append(dist.metadata['Name'])
+    return result
+
+
 def __getattr__(name):
     # Loading pathlib is only necessary for callers using installed file paths.
     if name in ('PackagePath', 'FileHash'):

@@ -26,6 +26,38 @@ impl SourceBody {
 }
 
 impl Context {
+    /// Enter the selected module in the startup __main__ namespace via the frozen runpy.
+    pub(super) fn run_module_as_main(&mut self, name: String) -> Result<Id> {
+        let mark = self.heap.temporary_mark();
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if let Some(bytes) =
+            crate::run_start::wait_for_cleanup(true).map_err(crate::objects::errno_error)?
+        {
+            let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+            let mut original = Vec::new();
+            for arg in bytes
+                .strip_suffix(&[0])
+                .unwrap_or(&bytes)
+                .split(|byte| *byte == 0)
+            {
+                original.push(self.text_codepoints(codec.decode_filesystem(arg)?));
+            }
+            let original = self.alloc(Value::List(original));
+            let sys = self.module("sys")?;
+            self.set_attr(sys, "orig_argv", original)?;
+        }
+        let requested = self.text(&name);
+        stdlib::audit::event(self, "cpython.run_module", &[requested])?;
+        let runpy = self.module("runpy")?;
+        let run = self.lookup_attr(runpy, "_run_module_as_main")?;
+        // sys and runpy now own their initialization results. Keep only the callable
+        // for this invocation before running arbitrary parent-package and target code.
+        self.heap.release_temporaries_since(mark);
+        self.heap.keep(run);
+        let name = self.text(name);
+        self.call(run, vec![name], Vec::new())
+    }
+
     /// Infer the package from import globals, following the CPython fallback order.
     fn import_package(&mut self, globals: Option<Id>) -> Result<String> {
         use crate::objects::exceptions::Kind::{DeprecationWarning, ImportWarning};
@@ -209,7 +241,7 @@ impl Context {
             "stat" => {
                 cfg!(any(target_os = "linux", target_os = "macos")) && self.frozen_override >= 0
             }
-            "__hello__" => self.frozen_override >= 0,
+            "__hello__" | "runpy" => self.frozen_override >= 0,
             _ => false,
         }
     }

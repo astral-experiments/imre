@@ -344,6 +344,9 @@ impl FileState {
             ));
         }
         if self.kind == FileKind::BinaryRandom {
+            if size != 0 {
+                self.check_random_reentry()?;
+            }
             return self.read_bytes(usize::try_from(size).ok());
         }
         if size == 0 && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
