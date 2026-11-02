@@ -9,7 +9,9 @@ pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
     let released = ctx.heap.has_unbound_finalizer(NONE)
         && match ctx.heap.get(receiver) {
             Value::List(items) => items.iter().any(owns_finalizer),
-            Value::Dict(entries) | Value::DefaultDict { entries, .. } => entries
+            Value::Dict(entries)
+            | Value::DefaultDict { entries, .. }
+            | Value::Set { entries, .. } => entries
                 .iter()
                 .any(|(key, value)| owns_finalizer(key) || owns_finalizer(value)),
             Value::Deque(ring) => ring.items.iter().any(owns_finalizer),
@@ -21,7 +23,7 @@ pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
                 ctx.heap.weak_edge_removed(item);
             }
         }
-        Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
+        Value::Dict(entries) | Value::DefaultDict { entries, .. } | Value::Set { entries, .. } => {
             for (key, value) in entries.clear() {
                 ctx.heap.weak_edge_removed(key);
                 ctx.heap.weak_edge_removed(value);
@@ -388,7 +390,11 @@ pub(in super::super) fn remove_dict_item_hashed(
     Ok(Some(remove_table_entry(ctx, dict, index)?.1))
 }
 
-fn remove_table_entry(ctx: &mut Context, receiver: Id, index: usize) -> Result<(Id, Id)> {
+pub(in super::super) fn remove_table_entry(
+    ctx: &mut Context,
+    receiver: Id,
+    index: usize,
+) -> Result<(Id, Id)> {
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. } | Value::Set { entries, .. }) =
         ctx.heap.get_mut(receiver)
     else {
@@ -737,6 +743,8 @@ pub(super) fn method(
             | "list.__init__"
             | "list.__repr__"
             | "tuple.__repr__"
+            | "list.__len__"
+            | "tuple.__len__"
             | "set.__repr__"
             | "frozenset.__repr__"
     ) {
@@ -884,7 +892,13 @@ pub(super) fn method(
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
             None if matches!(
                 name,
-                "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
+                "set.clear"
+                    | "set.discard"
+                    | "set.pop"
+                    | "set.remove"
+                    | "set.difference_update"
+                    | "set.symmetric_difference_update"
+                    | "set.update"
             ) || name.ends_with(".issubset")
                 || name.ends_with(".intersection")
                 || name.ends_with(".difference")
@@ -923,7 +937,13 @@ pub(super) fn method(
         })?
     } else if matches!(
         name,
-        "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
+        "set.clear"
+            | "set.discard"
+            | "set.pop"
+            | "set.remove"
+            | "set.difference_update"
+            | "set.symmetric_difference_update"
+            | "set.update"
     ) {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
@@ -1025,10 +1045,12 @@ pub(super) fn method(
             | "frozenset.issubset"
             | "set.issuperset"
             | "frozenset.issuperset"
+            | "set.clear"
             | "set.discard"
             | "set.pop"
             | "set.remove"
             | "set.difference_update"
+            | "set.symmetric_difference_update"
             | "set.update"
             | "frozenset.copy"
             | "set.copy"
@@ -1197,18 +1219,41 @@ pub(super) fn method(
         }
         "set.intersection" | "frozenset.intersection" => set_intersection(ctx, receiver, args),
         "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
+        "set.symmetric_difference_update" => {
+            let other = super::one_positional_arg(name, args, kwargs)?;
+            let storage = ctx.scalar_value(other);
+            let source = if matches!(ctx.heap.get(storage), Value::Set { .. }) {
+                storage
+            } else if matches!(ctx.heap.get(other), Value::Dict(_)) {
+                other
+            } else {
+                // Deduplicate the iterable completely before changing the receiver.
+                let unique = ctx.alloc(Value::Set {
+                    entries: Default::default(),
+                    frozen: false,
+                });
+                update_set(ctx, unique, other)?;
+                unique
+            };
+            ctx.set_binary("^", receiver, source, true)?;
+            Ok(NONE)
+        }
         "set.difference_update" => {
             for &source in args {
                 ctx.set_difference_update(receiver, source)?;
             }
             Ok(NONE)
         }
-        "set.pop" => {
+        "set.pop" | "set.clear" => {
             if !args.is_empty() {
                 return Err(type_error(format!(
-                    "set.pop() takes no arguments ({} given)",
+                    "{name}() takes no arguments ({} given)",
                     args.len()
                 )));
+            }
+            if name == "set.clear" {
+                clear_container(ctx, receiver);
+                return Ok(NONE);
             }
             let Some(last) = ctx.stored_entries(receiver).len().checked_sub(1) else {
                 let message = ctx.text("pop from an empty set");
@@ -1441,7 +1486,7 @@ pub(super) fn builtin_slot(
     }
     if matches!(
         method,
-        "__repr__" | "__str__" | "__index__" | "__abs__" | "__int__" | "__float__"
+        "__repr__" | "__str__" | "__index__" | "__abs__" | "__int__" | "__float__" | "__len__"
     ) {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
@@ -1453,6 +1498,19 @@ pub(super) fn builtin_slot(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__len__" {
+            let length = match ctx.heap.get(storage) {
+                Value::List(items)
+                | Value::Tuple(items)
+                | Value::NamedTuple { values: items, .. } => items.len(),
+                Value::Instance { class, .. } => ctx
+                    .namedtuple_fields(*class)
+                    .expect("validated tuple receiver")
+                    .len(),
+                _ => unreachable!("validated list or tuple receiver"),
+            };
+            return Ok(ctx.int(length as i64));
         }
         if method == "__abs__" {
             return super::absolute_value(ctx, object);

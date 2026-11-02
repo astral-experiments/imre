@@ -1,4 +1,5 @@
 import sys
+from annotationlib import Format, get_annotations
 from collections.abc import Callable as ABCCallable
 from operator import getitem
 from types import GenericAlias, ModuleType
@@ -35,6 +36,15 @@ def current():
         return variadic.__annotations__["args"]
 
     assert vararg_annotation(ts) is unpacked
+
+    def unresolved(*args: *Missing["field"]):
+        pass
+
+    assert get_annotations(unresolved, format=Format.STRING) == {"args": "*Missing['field']"}
+    forward = get_annotations(unresolved, format=Format.FORWARDREF)["args"]
+    assert type(forward) is ForwardRef and forward.__owner__ is unresolved
+    assert forward.__forward_arg__ == "*Missing['field']"
+
     try:
         vararg_annotation((int, str))
     except ValueError as exc:
@@ -102,9 +112,56 @@ def current():
 
     from typing import Generic
     class Pack(Generic[*ts]): pass
+
+    import typing
+    from types import GeneratorType
+    from typing import Concatenate, Literal
+    from collections.abc import Iterable
+
+    for alias in (Pack[int, str], List[int], Literal[1], Concatenate[int, p], unpacked):
+        assert isinstance(alias, Iterable)
+        it = alias.__iter__()
+        assert type(it) is GeneratorType and iter(it) is it
+        assert next(it) is Unpack[alias] and next(it, None) is None
+        assert (*alias,) == (Unpack[alias],)
+    method = type(Pack[int]).__iter__
+    assert method.__name__ == method.__code__.co_name == "__iter__"
+    assert method.__qualname__ == method.__code__.co_qualname == "_GenericAlias.__iter__"
+    assert iter(Pack[int]).gi_code is method.__code__
+    assert vararg_annotation(Pack[int, str]) is Unpack[Pack[int, str]]
+    assert Callable[[int], str].__iter__ is None and not isinstance(Callable[[int], str], Iterable)
+    it = iter(Pack[int, str])
+    try:
+        retained = Pack[int, str]
+        sys.modules["typing"] = ModuleType("replacement")
+        typing.Unpack = {retained: "late lookup"}
+        assert next(it) == next(iter(retained)) == "late lookup"
+    finally:
+        typing.Unpack = Unpack
+        sys.modules["typing"] = typing
+
     u = TypeVar("U")
     class Mixed(Generic[t, *ts, u]): pass
     class Fixed(Generic[t, u]): pass
+    class Signature(Generic[p, t]): pass
+    class Parameters(Generic[p]): pass
+
+    spelling = [int, u]
+    signature = Signature[spelling, Callable[[u], t]]
+    spelling[0] = bytes
+    assert signature.__args__[0] == (int, u)
+    assert signature.__parameters__ == (u, t)
+    assert signature[str, bool] == Signature[[int, str], Callable[[str], bool]]
+    assert Parameters[int, str] == Parameters[[int, str]]
+    assert Parameters[(int, str),] is Parameters[(int, str),]
+    assert Parameters[[int, str]] is not Parameters[[int, str]]
+    try:
+        Signature[[int]]
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("missing return parameter accepted")
+
     defaulted = TypeVarTuple("Defaulted", default=Unpack[tuple[str, int]])
     class Defaulted(Generic[*defaulted]): pass
     other = TypeVarTuple("Other")

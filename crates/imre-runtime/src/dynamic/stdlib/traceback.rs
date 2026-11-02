@@ -65,6 +65,33 @@ impl FrameLine<'_> {
     }
 }
 
+/// Capture the bindings that FrameSummary will immediately convert to representations.
+pub(super) fn frame_locals(ctx: &mut Context, frame: Id) -> Result<Id> {
+    match *ctx.heap.get(frame) {
+        Value::PythonFrame { scope: NONE, .. } => Ok(ctx.dict(Vec::new())),
+        Value::PythonFrame { scope, code, .. } => ctx.locals_for_code(scope, code),
+        _ => ctx.lookup_attr(frame, "f_locals"),
+    }
+}
+
+/// Return the recorded line and expression byte range of a native traceback node.
+pub(super) fn tb_position(ctx: &mut Context, tb: Id) -> Id {
+    let Value::Traceback { lineno, span, .. } = *ctx.heap.get(tb) else {
+        return NONE;
+    };
+    let line = ctx.int(lineno);
+    let positions = match span {
+        Some([start, _, end]) => vec![
+            line,
+            line,
+            ctx.int(i64::from(start)),
+            ctx.int(i64::from(end)),
+        ],
+        None => vec![line, NONE, NONE, NONE],
+    };
+    ctx.alloc(Value::Tuple(positions))
+}
+
 /// Visit the public traceback protocol, ignoring frames that cannot be cleared yet.
 pub(super) fn clear_frames(ctx: &mut Context, mut tb: Id) -> Result<Id> {
     let runtime_error = ctx.builtin("RuntimeError");

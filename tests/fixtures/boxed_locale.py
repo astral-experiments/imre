@@ -54,3 +54,16 @@ def current():
     finally:
         _locale.setlocale(locale.LC_ALL, original)
     assert locale.setlocale(locale.LC_ALL) == original
+
+if hasattr(locale, "nl_langinfo"):
+    import _locale
+    class Item:
+        def __index__(self):
+            return locale.DAY_1
+    print(locale.nl_langinfo is _locale.nl_langinfo)
+    print(locale.nl_langinfo(Item()) == locale.nl_langinfo(locale.DAY_1))
+    for key in [-1, 2**40, None]:
+        try:
+            locale.nl_langinfo(key)
+        except (TypeError, ValueError, OverflowError) as exc:
+            print(type(exc).__name__, str(exc))

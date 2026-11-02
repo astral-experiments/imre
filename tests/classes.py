@@ -68,6 +68,8 @@ REJECTED = {
     "nested_class_before_invalid_class": "class Outer:\n    class Inner: pass\nclass Bad:\n    x: int\n    x: str\n",
     "nested_class_after_invalid_class": "class Bad:\n    x: int\n    x: str\nclass Outer:\n    class Inner: pass\n",
     **INVALID_OBJECT_BASES,
+    "local_shadowed_super_base": "def f(super: int):\n    class Proxy(super): pass\n    return Proxy.__name__\nprint(f(7))\n",
+    "shadowed_super_base": "super = 7\nclass Child(super): pass\n",
     "weak_proxy_callback": "import weakref\nclass Target:\n    pass\ndef callback(proxy: Target) -> None:\n    pass\ntarget = Target()\nweakref.proxy(target, callback)\n",
     "constructor_uninitialized_container": "class C:\n    data: dict[int, int]\n    def __init__(self):\n        self.data[0] = 1\n        self.data = {}\n",
     "constructor_uninitialized_index": "class C:\n    data: dict[int, int]\n    key: int\n    def __init__(self):\n        self.data = {}\n        self.data[self.key] = 1\n        self.key = 0\n",
@@ -326,7 +328,7 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

@@ -749,6 +749,7 @@ impl Emitter<'_, '_> {
                     tuple
                 }
             }
+            ProcessOperation::GetPid => self.call("imre_os_getpid", Type::Int, &[]),
             ProcessOperation::GetCwd { bytes: false } => self.call("imre_getcwd", Type::Str, &[]),
             ProcessOperation::GetCwd { bytes: true } => self.call("imre_getcwdb", Type::Bytes, &[]),
             ProcessOperation::RmTree => {

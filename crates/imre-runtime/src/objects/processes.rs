@@ -288,7 +288,7 @@ fn cstring(bytes: &[u8]) -> Result<CString> {
 }
 
 /// Self-contained immutable C arrays: moving the owner never moves CString data.
-struct CStrings {
+pub(crate) struct CStrings {
     strings: Vec<CString>,
     pointers: Vec<*const libc::c_char>,
 }
@@ -300,7 +300,7 @@ unsafe impl Send for CStrings {}
 unsafe impl Sync for CStrings {}
 
 impl CStrings {
-    fn new(strings: Vec<CString>) -> Result<Self> {
+    pub(crate) fn new(strings: Vec<CString>) -> Result<Self> {
         let size = strings.len().checked_add(1).ok_or_else(Error::allocation)?;
         let mut pointers = Vec::new();
         pointers
@@ -309,6 +309,75 @@ impl CStrings {
         pointers.extend(strings.iter().map(|value| value.as_ptr()));
         pointers.push(std::ptr::null());
         Ok(Self { strings, pointers })
+    }
+
+    /// Spawn a waitable child, optionally searching the parent's PATH for the executable.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn spawn(
+        &self,
+        executable: &CStr,
+        search_path: bool,
+        environment: Option<&Self>,
+        actions: Option<&libc::posix_spawn_file_actions_t>,
+        attributes: &libc::posix_spawnattr_t,
+    ) -> io::Result<libc::pid_t> {
+        let launch = if search_path {
+            libc::posix_spawnp
+        } else {
+            libc::posix_spawn
+        };
+        let _guard = ENVIRONMENT.lock().unwrap();
+        let envp = environment.map_or_else(native_environ, |env| env.pointers.as_ptr());
+        let mut pid = 0;
+        // SAFETY: libc only reads these live, terminated argv/envp arrays and the
+        // caller's initialized actions and attributes. The lock also protects PATH
+        // lookup by posix_spawnp when the child has an explicit environment.
+        let result = unsafe {
+            launch(
+                &mut pid,
+                executable.as_ptr(),
+                actions.map_or(std::ptr::null(), std::ptr::from_ref),
+                attributes,
+                self.pointers.as_ptr().cast(),
+                envp.cast(),
+            )
+        };
+        if result == 0 {
+            Ok(pid)
+        } else {
+            Err(io::Error::from_raw_os_error(result))
+        }
+    }
+
+    /// Replace the process with its current environment, returning the errno on failure.
+    pub(crate) fn execv(&self, executable: &CStr) -> Error {
+        let _guard = ENVIRONMENT.lock().unwrap();
+        // SAFETY: the path and all argv entries remain live and NUL-terminated,
+        // and the environment lock excludes runtime changes to libc's environ.
+        unsafe { libc::execv(executable.as_ptr(), self.pointers.as_ptr()) };
+        super::errno_error(io::Error::last_os_error())
+    }
+
+    /// Fork with the inherited environment and descriptors; failed execs exit with 127.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn fork_execv(command: Option<(&CStr, &Self)>) -> Result<libc::pid_t> {
+        let image = command.map(|(path, argv)| (path.as_ptr(), argv.pointers.as_ptr()));
+        let _guard = ENVIRONMENT.lock().unwrap();
+        // SAFETY: the environment lock excludes concurrent changes at fork. The
+        // child only calls async-signal-safe functions on the inherited C arrays
+        // and never returns to Rust to drop the guard or the arrays' owners.
+        unsafe {
+            match libc::fork() {
+                0 => {
+                    if let Some((path, argv)) = image {
+                        libc::execv(path, argv);
+                    }
+                    libc::_exit(127)
+                }
+                -1 => Err(super::errno_error(io::Error::last_os_error())),
+                pid => Ok(pid),
+            }
+        }
     }
 
     fn from_environment(env: StringPairs) -> Result<Self> {

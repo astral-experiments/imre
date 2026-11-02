@@ -111,6 +111,16 @@ pub(crate) fn nsig() -> i32 {
     }
 }
 
+/// Kernel-pending signals are not inherited. Clear their Python counterparts
+/// while delivery is blocked, before any new signal can be recorded in the child.
+#[cfg(target_os = "linux")]
+pub(crate) fn clear_pending_after_fork() {
+    for bit in &PENDING {
+        bit.store(false, Ordering::Relaxed);
+    }
+    TRIPPED.store(false, Ordering::Release);
+}
+
 pub(crate) fn begin_dispatch() -> bool {
     TRIPPED.load(Ordering::Acquire) && is_main() && TRIPPED.swap(false, Ordering::AcqRel)
 }

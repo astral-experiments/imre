@@ -24,6 +24,9 @@ def check(template: str) -> None:
 
 def main() -> None:
     events: list[int] = []
+    print("{{{}}} {}🦀".format("é", number(events, 1), number(events, 2)))
+    print("{{}}{}".format("", number(events, 3)))
+    print(repr(events))
     print(location("#{line}"))
     print(
         receiver(events).format(

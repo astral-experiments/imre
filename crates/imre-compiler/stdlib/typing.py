@@ -23,6 +23,127 @@ from typing import Any, Callable, Generic, Protocol, TypeVar, Union
 from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
+# Please keep __all__ alphabetized within each category.
+__all__ = [
+    # Super-special typing primitives.
+    'Annotated',
+    'Any',
+    'Callable',
+    'ClassVar',
+    'Concatenate',
+    'Final',
+    'ForwardRef',
+    'Generic',
+    'Literal',
+    'Optional',
+    'ParamSpec',
+    'Protocol',
+    'Tuple',
+    'Type',
+    'TypeVar',
+    'TypeVarTuple',
+    'Union',
+
+    # ABCs (from collections.abc).
+    'AbstractSet',  # collections.abc.Set.
+    'ByteString',
+    'Container',
+    'ContextManager',
+    'Hashable',
+    'ItemsView',
+    'Iterable',
+    'Iterator',
+    'KeysView',
+    'Mapping',
+    'MappingView',
+    'MutableMapping',
+    'MutableSequence',
+    'MutableSet',
+    'Sequence',
+    'Sized',
+    'ValuesView',
+    'Awaitable',
+    'AsyncIterator',
+    'AsyncIterable',
+    'Coroutine',
+    'Collection',
+    'AsyncGenerator',
+    'AsyncContextManager',
+
+    # Structural checks, a.k.a. protocols.
+    'Reversible',
+    'SupportsAbs',
+    'SupportsBytes',
+    'SupportsComplex',
+    'SupportsFloat',
+    'SupportsIndex',
+    'SupportsInt',
+    'SupportsRound',
+
+    # Concrete collection types.
+    'ChainMap',
+    'Counter',
+    'Deque',
+    'Dict',
+    'DefaultDict',
+    'List',
+    'OrderedDict',
+    'Set',
+    'FrozenSet',
+    'NamedTuple',  # Not really a type.
+    'TypedDict',  # Not really a type.
+    'Generator',
+
+    # Other concrete types.
+    'BinaryIO',
+    'IO',
+    'Match',
+    'Pattern',
+    'TextIO',
+
+    # One-off things.
+    'AnyStr',
+    'assert_type',
+    'assert_never',
+    'cast',
+    'clear_overloads',
+    'dataclass_transform',
+    'evaluate_forward_ref',
+    'final',
+    'get_args',
+    'get_origin',
+    'get_overloads',
+    'get_protocol_members',
+    'get_type_hints',
+    'is_protocol',
+    'is_typeddict',
+    'LiteralString',
+    'Never',
+    'NewType',
+    'no_type_check',
+    'no_type_check_decorator',
+    'NoDefault',
+    'NoReturn',
+    'NotRequired',
+    'overload',
+    'override',
+    'ParamSpecArgs',
+    'ParamSpecKwargs',
+    'ReadOnly',
+    'Required',
+    'reveal_type',
+    'runtime_checkable',
+    'Self',
+    'Text',
+    'TYPE_CHECKING',
+    'TypeAlias',
+    'TypeGuard',
+    'TypeIs',
+    'TypeAliasType',
+    'Unpack',
+]
+
+
 # From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
 def _is_unpacked_typevartuple(x: Any) -> bool:
     # Need to check 'is True' here
@@ -498,7 +619,8 @@ class _TypedDictSymbol:
 
     def __repr__(self):
         tokens, _ = self.__expression__()
-        return "".join(t if type(t) is str else t[0] for t in tokens)
+        from annotationlib import _render_tokens
+        return _render_tokens(tokens)
 
     def __hash__(self):
         return id(self)
@@ -507,6 +629,13 @@ class _TypedDictSymbol:
         if type(value) is _TypedDictSymbol:
             tokens, priority = value.__expression__()
             return ("(", *tokens, ")") if priority < precedence else tokens
+        from annotationlib import _template_constant, _template_repr
+        from string.templatelib import Template
+        if type(value) is Template:
+            return ((_template_repr, value),)
+        if self.__stringifier_dict__.stringify or value is None or type(value) in (str, int, float, bool, complex):
+            # Rendering a constant may run a user's repr. Keep the value until unparse.
+            return ((_template_constant, value),)
         if type(value) in (list, tuple, set, dict):
             if type(value) is set and not value:
                 return ("{*()}",)
@@ -524,10 +653,6 @@ class _TypedDictSymbol:
                 tokens.append(",")
             tokens.append(closing)
             return tuple(tokens)
-        if self.__stringifier_dict__.symbolic and value is ...:
-            return ("...",)
-        if self.__stringifier_dict__.symbolic or value is None or type(value) in (str, int, float, bool, complex):
-            return (repr(value),)
         # Real operands may have no name in the eventual evaluation namespace.
         names = self.__stringifier_dict__
         key = f"__annotationlib_name_{names.next_id}__"
@@ -535,12 +660,19 @@ class _TypedDictSymbol:
         return ((key, value),)
 
     def __derived__(self, tokens, precedence=20):
-        return self.__stringifier_dict__.symbol(tokens, None, precedence)
+        return self.__stringifier_dict__.symbol(tokens, None, self.__globals__, self.__owner__,
+                                               self.__forward_is_class__, precedence)
 
     def __getattr__(self, name):
         return self.__derived__((*self.__operand__(self, 20), ".", name))
 
+    def __iter__(self):
+        # ast.unparse uses bitwise-or precedence for the operand of a star.
+        yield self.__derived__(("*", *self.__operand__(self, 6)))
+
     def __getitem__(self, index):
+        if self.__ast_node__ == "__classdict__":
+            raise KeyError
         tokens = [*self.__operand__(self, 20), "["]
         items = index if isinstance(index, tuple) and index else (index,)
         for i, item in enumerate(items):
@@ -608,33 +740,35 @@ class _TypedDictSymbol:
 class _TypedDictNames(dict):
     """Resolve missing names without modifying the provider's globals or cells."""
 
-    def symbol(self, tokens, cells, precedence=20):
+    def symbol(self, tokens, cell, globals, owner, is_class, precedence=20):
         value = _TypedDictSymbol()
         value.__arg__ = None
         value.__ast_node__ = tokens[0] if len(tokens) == 1 else (tokens, precedence)
         value.__code__ = None
         value.__stringifier_dict__ = self
-        value.__globals__ = self.source_globals
-        value.__cell__ = cells
+        value.__globals__ = globals
+        value.__cell__ = cell
         value.__forward_module__ = None
-        value.__forward_is_class__ = self.is_class
+        value.__forward_is_class__ = is_class
         value.__forward_is_argument__ = False
-        value.__owner__ = self.owner
-        value.__extra_names__ = dict(t for t in tokens if type(t) is tuple) or None
+        value.__owner__ = owner
+        value.__extra_names__ = dict(t for t in tokens if type(t) is tuple and type(t[0]) is str) or None
         value.__resolved_str_cache__ = None
         self.symbols.append(value)
         return value
 
     def __missing__(self, name):
-        return self.symbol((name,), None)
+        return self.symbol((name,), None, self.source_globals, self.owner, self.is_class)
 
     def finish(self):
         # Convert the actual operands as in CPython. They can be held inside a
         # typing alias, an arbitrary container, or a callback's saved state.
         for value in self.symbols:
-            tokens, _ = value.__expression__()
-            value.__arg__ = repr(value)
-            value.__ast_node__ = tokens if value.__extra_names__ else None
+            if type(value.__ast_node__) is str:
+                value.__arg__ = value.__ast_node__
+                value.__ast_node__ = None
+            else:
+                value.__ast_node__, _ = value.__expression__()
             value.__stringifier_dict__ = None
             if value.__cell__ is None:
                 value.__cell__ = self.cells
@@ -642,13 +776,13 @@ class _TypedDictNames(dict):
         self.symbols.clear()
 
 
-def _typeddict_names(source_globals, cells, owner, known, is_class=None):
+def _typeddict_names(source_globals, cells, owner, known, is_class=None, *, stringify=False):
     names = _TypedDictNames()
     names.source_globals = source_globals
     names.cells = cells
     names.owner = owner
     names.is_class = isinstance(owner, type) if is_class is None else is_class
-    names.symbolic = known is None
+    names.stringify = stringify
     names.symbols = []
     names.next_id = 1
     if known is not None:
@@ -660,29 +794,30 @@ def _typeddict_cell(value):
     return (lambda: value).__closure__[0]
 
 
-def _typeddict_replay(annotate, owner, allow_evaluation):
+def _typeddict_replay(annotate, owner, format, allow_evaluation):
+    from annotationlib import Format
     from types import FunctionType
-    cells = (dict(zip(annotate.__code__.co_freevars, annotate.__closure__))
-             if annotate.__closure__ else None)
     known = {**annotate.__builtins__, **annotate.__globals__} if allow_evaluation else None
-    names = _typeddict_names(annotate.__globals__, cells, owner, known)
+    stringify = format == Format.STRING
+    source_globals = None if stringify else annotate.__globals__
+    names = _typeddict_names(source_globals, None, None if stringify else owner, known,
+                             stringify=stringify)
+    is_class = isinstance(owner, type)
     closure = None
-    if cells:
+    if annotate.__closure__:
+        names.cells = {}
         new_cells = []
-        for name, cell in cells.items():
+        for name, cell in zip(annotate.__code__.co_freevars, annotate.__closure__, strict=True):
+            names.cells[name] = cell
             if allow_evaluation:
                 try:
                     cell.cell_contents
                 except ValueError:
-                    value = names.symbol((name,), cell)
+                    pass
                 else:
                     new_cells.append(cell)
                     continue
-            elif name == "__classdict__":
-                # A miss here must fall through to the free variable or global.
-                value = {}
-            else:
-                value = names.symbol((name,), cell)
+            value = names.symbol((name,), cell, annotate.__globals__, owner, is_class)
             new_cells.append(_typeddict_cell(value))
         closure = tuple(new_cells)
     func = FunctionType(annotate.__code__, names, argdefs=annotate.__defaults__,
@@ -691,45 +826,8 @@ def _typeddict_replay(annotate, owner, allow_evaluation):
 
 
 def _call_annotate(annotate, format, owner=None):
-    from annotationlib import Format
-    if format == Format.VALUE_WITH_FAKE_GLOBALS:
-        raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
-    try:
-        return annotate(format)
-    except NotImplementedError:
-        pass
-
-    if format == Format.VALUE:
-        raise RuntimeError("annotate function does not support VALUE format")
-    if format not in (Format.FORWARDREF, Format.STRING):
-        raise ValueError(f"Invalid format: {format!r}")
-
-    if format == Format.FORWARDREF:
-        probe, names = _typeddict_replay(annotate, owner, True)
-    else:
-        probe = annotate
-    try:
-        result = probe(Format.VALUE_WITH_FAKE_GLOBALS)
-    except NotImplementedError:
-        values = annotate(Format.VALUE)
-        return _annotation_strings(values) if format == Format.STRING else values
-    except Exception:
-        pass
-    else:
-        if format == Format.FORWARDREF:
-            names.finish()
-            return result
-
-    # Known names can themselves raise on evaluation. Re-run the provider with
-    # symbolic names, keeping its constants, control flow and exception behavior.
-    symbolic, names = _typeddict_replay(annotate, owner, False)
-    result = symbolic(Format.VALUE_WITH_FAKE_GLOBALS)
-    if format == Format.STRING:
-        return {key: value if isinstance(value, str) else
-                "..." if value is ... else repr(value) for key, value in result.items()}
-    names.finish()
-    return {key: value.evaluate(format=Format.FORWARDREF)
-            if isinstance(value, ForwardRef) else value for key, value in result.items()}
+    from annotationlib import call_annotate_function
+    return call_annotate_function(annotate, format, owner=owner)
 
 
 _sentinel = object()
@@ -1124,6 +1222,78 @@ def assert_never(arg, /):
     if len(value) > _ASSERT_NEVER_REPR_MAX_LENGTH:
         value = value[:_ASSERT_NEVER_REPR_MAX_LENGTH] + "..."
     raise AssertionError(f"Expected code to be unreachable, but got: {value}")
+
+
+# Runtime overload registration from CPython 3.14.5 Lib/typing.py.
+def _overload_dummy(*args, **kwds):
+    """Helper for @overload to raise when called."""
+    raise NotImplementedError(
+        "You should not call an overloaded function. "
+        "A series of @overload-decorated functions "
+        "outside a stub module should always be followed "
+        "by an implementation that is not @overload-ed.")
+
+
+# {module: {qualname: {firstlineno: func}}}
+_overload_registry = _defaultdict(functools.partial(_defaultdict, dict))
+
+
+def overload(func):
+    """Decorator for overloaded functions/methods.
+
+    In a stub file, place two or more stub definitions for the same
+    function in a row, each decorated with @overload.
+
+    For example::
+
+        @overload
+        def utf8(value: None) -> None: ...
+        @overload
+        def utf8(value: bytes) -> bytes: ...
+        @overload
+        def utf8(value: str) -> bytes: ...
+
+    In a non-stub file (i.e. a regular .py file), do the same but
+    follow it with an implementation.  The implementation should *not*
+    be decorated with @overload::
+
+        @overload
+        def utf8(value: None) -> None: ...
+        @overload
+        def utf8(value: bytes) -> bytes: ...
+        @overload
+        def utf8(value: str) -> bytes: ...
+        def utf8(value):
+            ...  # implementation goes here
+
+    The overloads for a function can be retrieved at runtime using the
+    get_overloads() function.
+    """
+    # classmethod and staticmethod
+    f = getattr(func, "__func__", func)
+    try:
+        _overload_registry[f.__module__][f.__qualname__][f.__code__.co_firstlineno] = func
+    except AttributeError:
+        # Not a normal function; ignore.
+        pass
+    return _overload_dummy
+
+
+def get_overloads(func):
+    """Return all defined overloads for *func* as a sequence."""
+    # classmethod and staticmethod
+    f = getattr(func, "__func__", func)
+    if f.__module__ not in _overload_registry:
+        return []
+    mod_dict = _overload_registry[f.__module__]
+    if f.__qualname__ not in mod_dict:
+        return []
+    return list(mod_dict[f.__qualname__].values())
+
+
+def clear_overloads():
+    """Clear all overloads in the registry."""
+    _overload_registry.clear()
 
 
 # Runtime decorator from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
@@ -1780,6 +1950,12 @@ def _paramspec_prepare_subst(self, alias, args):
     return args
 
 
+@_typing_runtime._install_generic_alias_iter
+class _GenericAlias:
+    def __iter__(self):
+        yield Unpack[self]
+
+
 def _concatenate_copy_with(self, params):
     if isinstance(params[-1], (list, tuple)):
         return (*params[:-1], *params[-1])
@@ -1812,7 +1988,7 @@ def _alias_type_arg(arg, message="Parameters to generic types must be types."):
 
 
 def _is_parameterized_typing_alias(value):
-    return type(value) in (_typing._GenericAlias, _typing._CallableGenericAlias, _typing._LiteralGenericAlias)
+    return _typing_runtime._get_alias_kind(value) == "typing"
 
 
 def _named_alias_bases(alias, bases):
@@ -1916,7 +2092,7 @@ class _SpecialGenericAlias(_NotIterable):
             cls = _typing._GenericAlias
         else:
             cls = type(self)
-            if cls is _typing._UnpackGenericAlias:
+            if _typing_runtime._get_alias_kind(self) == "unpack":
                 return cls(self.__origin__, params)
         return cls(self.__origin__, params, name=self._name, inst=self._inst)
 
@@ -2064,11 +2240,13 @@ def _rebuild_builtin_alias(alias, args):
     return next(iter(result)) if alias.__unpacked__ else result
 
 
-def _substitute_alias_arguments(args, replacements):
+def _substitute_alias_arguments(args, replacements, *, parameter_tuples=False):
     result = []
     for arg in args:
         if _is_unpacked_typevartuple(arg):
             result.extend(replacements[arg.__args__[0]])
+        elif parameter_tuples and isinstance(arg, tuple):
+            result.append(_substitute_alias_arguments(arg, replacements, parameter_tuples=True))
         else:
             result.append(_substitute_alias_argument(arg, replacements))
     return tuple(result)
@@ -2144,23 +2322,34 @@ def _variadic_class_getitem_uncached(cls, args, constructor):
         args = (args,)
     args = tuple(_type_convert(arg) for arg in args)
     parameters = cls.__parameters__
-    for index, param in enumerate(parameters):
+    for param in parameters:
         prepare = getattr(param, "__typing_prepare_subst__", None)
         if prepare is not None:
             args = prepare(cls, args)
         elif isinstance(param, _typing.TypeVarTuple):
             args = _prepare_typevartuple(param, cls, args)
-        elif isinstance(param, _typing.TypeVar) and index >= len(args):
-            if index == len(args) and param.has_default():
-                args += (param.__default__,)
+        elif isinstance(param, _typing.TypeVar):
+            # An earlier preparation hook may have changed the class parameters.
+            for index, current in enumerate(cls.__parameters__):
+                if current is param or current == param:
+                    break
             else:
-                raise TypeError(f"Too few arguments for {cls}; actual {len(args)}, expected at least {index + 1}")
+                raise ValueError("sequence.index(x): x not in sequence")
+            actual = len(args)
+            if index >= actual:
+                default = param.__default__ if index == actual else _typing.NoDefault
+                if default is _typing.NoDefault:
+                    raise TypeError(f"Too few arguments for {cls}; actual {actual}, expected at least {index + 1}")
+                args = args + (default,)
 
-    actual, expected = len(args), len(parameters)
+    expected = len(cls.__parameters__)
+    if not expected:
+        raise TypeError(f"{cls} is not a generic class")
+    actual = len(args)
     if actual > expected:
         raise TypeError(f"Too many arguments for {cls}; actual {actual}, expected {expected}")
-    if actual < expected and not parameters[actual].has_default():
-        required = expected - sum(p.has_default() for p in parameters)
+    if actual < expected and not cls.__parameters__[actual].has_default():
+        required = expected - sum(p.has_default() for p in cls.__parameters__)
         raise TypeError(f"Too few arguments for {cls}; actual {actual}, expected at least {required}")
     flattened = tuple(item for param, arg in zip(parameters, args)
                       for item in (arg if isinstance(param, _typing.TypeVarTuple) else (arg,)))
@@ -2174,7 +2363,8 @@ def _variadic_class_getitem(cls, args, constructor):
     try:
         return _cached_variadic_class_getitem(cls, args, constructor)
     except TypeError:
-        return _variadic_class_getitem_uncached(cls, args, constructor)
+        pass
+    return _variadic_class_getitem_uncached(cls, args, constructor)
 
 
 def _specialize_generic_alias_uncached(alias, args):
@@ -2210,23 +2400,30 @@ def _specialize_generic_alias_uncached(alias, args):
         if _typing.get_origin(arg) is Unpack:
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
-    args = _substitute_alias_arguments(alias.__args__, replacements)
+
+    def substituted_args(*, parameter_tuples=False):
+        return _substitute_alias_arguments(alias.__args__, replacements, parameter_tuples=parameter_tuples)
+
     if type(alias) is GenericAlias:
-        return _rebuild_builtin_alias(alias, args)
+        return _rebuild_builtin_alias(alias, substituted_args())
     if isinstance(alias, _typing.Union):
-        return _typing.Union[args]
+        return _typing.Union[substituted_args()]
     if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):
-        return alias.copy_with(args)
+        return alias.copy_with(substituted_args())
     if type(alias) is _typing._CallableGenericAlias:
         # typing flattens each substituted tuple, even one in the result position.
-        flat = tuple(item for arg in args for item in (arg if isinstance(arg, tuple) else (arg,)))
+        flat = tuple(item for arg in substituted_args() for item in (arg if isinstance(arg, tuple) else (arg,)))
         return _typing._CallableGenericAlias(alias.__origin__, flat, name="Callable")
     if alias.__origin__ is _typing.get_origin(Callable):
         # collections.abc.Callable rebuilds its argument list separately from its result.
+        args = substituted_args()
         if not isinstance(args[0], (tuple, list)):
             args = (args[:-1], args[-1])
         return alias.__origin__[args]
-    return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
+    constructor = _typing._GenericAlias
+    # Only a generic class alias stores a ParamSpec expression as a nested tuple.
+    args = substituted_args(parameter_tuples=type(alias) is constructor)
+    return constructor(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
 _cached_generic_specialization = lru_cache(_specialize_generic_alias_uncached)
@@ -2333,6 +2530,108 @@ def Literal(self, *parameters):
     return _typing._LiteralGenericAlias(self, parameters)
 
 
+def evaluate_forward_ref(
+    forward_ref,
+    *,
+    owner=None,
+    globals=None,
+    locals=None,
+    type_params=None,
+    format=None,
+    _recursive_guard=frozenset(),
+):
+    """Evaluate a forward reference as a type hint.
+
+    This is similar to calling the ForwardRef.evaluate() method,
+    but unlike that method, evaluate_forward_ref() also
+    recursively evaluates forward references nested within the type hint.
+
+    *forward_ref* must be an instance of ForwardRef. *owner*, if given,
+    should be the object that holds the annotations that the forward reference
+    derived from, such as a module, class object, or function. It is used to
+    infer the namespaces to use for looking up names. *globals* and *locals*
+    can also be explicitly given to provide the global and local namespaces.
+    *type_params* is a tuple of type parameters that are in scope when
+    evaluating the forward reference. This parameter should be provided (though
+    it may be an empty tuple) if *owner* is not given and the forward reference
+    does not already have an owner set. *format* specifies the format of the
+    annotation and is a member of the annotationlib.Format enum, defaulting to
+    VALUE.
+
+    """
+    from annotationlib import Format
+
+    if format == Format.STRING:
+        return forward_ref.__forward_arg__
+    if forward_ref.__forward_arg__ in _recursive_guard:
+        return forward_ref
+
+    if format is None:
+        format = Format.VALUE
+    value = forward_ref.evaluate(globals=globals, locals=locals,
+                                 type_params=type_params, owner=owner, format=format)
+
+    if (isinstance(value, ForwardRef)
+            and format == Format.FORWARDREF):
+        return value
+
+    if isinstance(value, str):
+        value = _make_forward_ref(value, module=forward_ref.__forward_module__,
+                                  owner=owner or forward_ref.__owner__,
+                                  is_argument=forward_ref.__forward_is_argument__,
+                                  is_class=forward_ref.__forward_is_class__)
+    if owner is None:
+        owner = forward_ref.__owner__
+    return _resolve_forward_type(
+        value, globals, locals, type_params, owner, format,
+        _recursive_guard | {forward_ref.__forward_arg__}, forward_ref,
+    )
+
+
+def _resolve_forward_type(value, globals, locals, type_params, owner, format, guard, parent=None):
+    from types import GenericAlias
+
+    if isinstance(value, ForwardRef):
+        return evaluate_forward_ref(value, globals=globals, locals=locals, type_params=type_params,
+                                    owner=owner, format=format, _recursive_guard=guard)
+
+    # Query the native alias representation without publishing private classes in typing.
+    kind = _typing_runtime._get_alias_kind(value)
+    if kind is None and not isinstance(value, (_AnnotatedAlias, Union)):
+        return value
+    if kind == "builtin":
+        args = tuple(
+            _make_forward_ref(arg, module=getattr(parent, "__forward_module__", None),
+                              owner=getattr(parent, "__owner__", None))
+            if isinstance(arg, str) else arg for arg in value.__args__
+        )
+        unpacked = value.__unpacked__
+        if _should_unflatten_callable_args(value, args):
+            value = value.__origin__[(args[:-1], args[-1])]
+        else:
+            value = value.__origin__[args]
+        if unpacked:
+            value = Unpack[value]
+        kind = _typing_runtime._get_alias_kind(value)
+
+    resolved = tuple(_resolve_forward_type(arg, globals, locals, type_params, owner, format,
+                                           guard) for arg in value.__args__)
+    if resolved == value.__args__:
+        return value
+    if kind == "builtin":
+        return GenericAlias(value.__origin__, resolved)
+    if isinstance(value, _typing.Union):
+        union = resolved[0]
+        for arg in resolved[1:]:
+            union = union | arg
+        return union
+    copy_with = getattr(value, "copy_with", None)
+    if copy_with is not None:
+        return copy_with(resolved)
+    # The native literal alias lacks an instance copy_with.
+    return type(value)(value.__origin__, resolved)
+
+
 # VALUE-format annotation resolution from CPython 3.14.5 Lib/typing.py.
 def _hint_scope(params, globalns, localns, is_class):
     if params:
@@ -2345,7 +2644,8 @@ def _hint_scope(params, globalns, localns, is_class):
     return globalns, localns
 
 
-def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format, parent_ref=None):
+def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format, parent_ref=None,
+                  *, prefer_fwd_module=True):
     from annotationlib import Format, ForwardRef
     from types import GenericAlias, ModuleType
     if isinstance(value, str):
@@ -2354,18 +2654,25 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         expr = value.__forward_arg__
         if expr in seen:
             return value
-        if value.__forward_module__ is not None:
-            import sys
-            module = sys.modules.get(value.__forward_module__)
-            if module is not None:
-                globalns = module.__dict__
+        if prefer_fwd_module and value.__forward_module__ is not None:
+            globalns = None
+            # A reference with its own module replaces the globals built by _hint_scope.
+            # Restore the owner's parameters without modifying the real module dictionary.
+            if params := getattr(owner, "__type_params__", None):
+                import sys
+                namespace = getattr(sys.modules.get(value.__forward_module__), "__dict__", None)
+                if namespace is not None:
+                    globalns = dict(namespace)
+                    for param in params:
+                        globalns[param.__name__] = param
         result = value.evaluate(globals=globalns, locals=localns, type_params=(), owner=owner, format=format)
         if format == Format.FORWARDREF and isinstance(result, ForwardRef):
             return result
         if isinstance(result, str):
             result = ForwardRef(result, module=value.__forward_module__, owner=owner or value.__owner__,
                                 is_argument=value.__forward_is_argument__, is_class=value.__forward_is_class__)
-        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras, format, value)
+        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras, format,
+                             value, prefer_fwd_module=False)
 
     origin = _typing.get_origin(value)
     if origin is None or origin is Literal:
@@ -2377,7 +2684,8 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         module = getattr(parent_ref, '__forward_module__', None)
         ref_owner = getattr(parent_ref, '__owner__', None)
         values = tuple(ForwardRef(arg, module=module, owner=ref_owner) if isinstance(arg, str) else arg for arg in args)
-    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, format) for a in values)
+    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, format,
+                                   prefer_fwd_module=prefer_fwd_module) for a in values)
     if isinstance(value, _AnnotatedAlias):
         if not include_extras:
             return resolved[0]
@@ -2553,6 +2861,17 @@ def __getattr__(attr):
     elif attr in {"ContextManager", "AsyncContextManager"}:
         import contextlib
         alias = _SpecialGenericAlias(getattr(contextlib, f"Abstract{attr}"), 2, name=attr, defaults=(bool | None,))
+    elif attr == "_collect_parameters":
+        import warnings
+
+        warnings.warn(
+            "The private _collect_parameters function is deprecated and will be"
+            " removed in a future version of Python. Any use of private functions"
+            " is discouraged and may break in the future.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        alias = _collect_type_parameters
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
     globals()[attr] = alias

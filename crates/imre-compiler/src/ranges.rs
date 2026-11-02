@@ -6,7 +6,7 @@
 //! bound, but no relationship to a container's later length is retained. Indexed
 //! accesses must keep checking current bounds, including after alias mutation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 
 use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type};
@@ -51,6 +51,15 @@ impl RangeFacts<'_> {
     /// start/stop/step arguments are small and the step has a nonzero fixed sign.
     pub(crate) fn range_cursor(&self, statement: &Statement) -> Option<IntRange> {
         self.cursors.get(&std::ptr::from_ref(statement))?.small()
+    }
+
+    /// Keeps the identities of proven loops for an in-place rewrite. Callers may
+    /// query only original statements that have not yet been moved or replaced.
+    pub(crate) fn into_small_cursors(self) -> HashSet<*const Statement> {
+        self.cursors
+            .into_iter()
+            .filter_map(|(statement, interval)| interval.small().map(|_| statement))
+            .collect()
     }
 
     /// Finds slots whose initial value and every possible replacement are small.

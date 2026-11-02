@@ -28,7 +28,7 @@ def miss(name):
 def custom_escape(name):
     if name == "raw_unicode_escape":
         calls.append(name)
-        return (None, lambda value: ("custom", len(value)), None, None)
+        return (lambda value: (b"custom", len(value)), lambda value: ("custom", len(value)), None, None)
 
 
 def decode_live(view):
@@ -126,10 +126,13 @@ calls.clear()
 codecs.register(custom_escape)
 try:
     assert codecs.decode(br"\u0042", "raw-unicode-escape") == "B"
+    assert "B".encode("raw-unicode-escape") == b"B"
     assert calls == []
     codecs.unregister(encodings.search_function)
     try:
         assert codecs.decode(br"\u0042", "raw-unicode-escape") == "custom"
+        assert "B".encode("raw-unicode-escape") == b"custom"
+        assert codecs.encode("B", "raw-unicode-escape") == b"custom"
         assert codecs.lookup("raw_unicode_escape")[1](b"x") == ("custom", 1)
         assert calls == ["raw_unicode_escape"]
     finally:

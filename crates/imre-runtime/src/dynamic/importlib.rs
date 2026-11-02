@@ -484,7 +484,8 @@ impl Context {
             first_line: 1,
             module_definition: true,
             coroutine: false,
-            flags: None,
+            flags: 0,
+            flags_complete: false,
         }))
     }
 

@@ -142,7 +142,7 @@ def gettempdir():
 
 
 def gettempdirb():
-    return _fsencode(_gettempdir())
+    return _os.fsencode(_gettempdir())
 
 
 def gettempprefix():
@@ -150,7 +150,7 @@ def gettempprefix():
 
 
 def gettempprefixb():
-    return _fsencode(template)
+    return _os.fsencode(template)
 
 
 # From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.

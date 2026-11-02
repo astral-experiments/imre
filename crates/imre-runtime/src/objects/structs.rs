@@ -305,9 +305,7 @@ impl Rows {
         };
         // Equality of public values deliberately ignores signed zero and NaN bits.
         // Storage must preserve them: fields can expose the original float bits.
-        if row == base_row(base, width) {
-            edits.remove(at, width);
-        } else if edits.write_binary(at, len, row) {
+        if edits.write_known(at, len, row, base_row(base, width)) {
             return Ok(());
         } else if !edits.should_pack(at, len, width) {
             edits.put(at, row)?;

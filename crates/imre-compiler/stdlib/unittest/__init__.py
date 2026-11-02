@@ -8,7 +8,7 @@ import fnmatch
 from io import StringIO
 from types import ModuleType
 import typing
-from typing import Callable
+from typing import TYPE_CHECKING, Callable, overload
 import sys
 import time
 
@@ -458,9 +458,18 @@ class TestCase(_SuiteMember):
         if not hasattr(obj, name):
             self.fail(self._formatMessage(msg, "module " + repr(obj.__name__) + " has no attribute " + repr(name)))
 
-    def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
-        if member not in container:
-            self.fail(self._formatMessage(msg, repr(member) + " not found in " + repr(container)))
+    if TYPE_CHECKING:
+        @overload
+        def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+        @overload
+        def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+        @overload
+        def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None: ...
+        def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    else:
+        def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+            if member not in container:
+                self.fail(self._formatMessage(msg, repr(member) + " not found in " + repr(container)))
 
     def setUp(self) -> None:
         pass
@@ -708,7 +717,7 @@ class TestResult:
             if self.failfast:
                 self.stop()
 
-    def _recordException(self, case: TestCase, exc: Exception, detail: str) -> None:
+    def _recordException(self, case: TestCase, exc: BaseException, detail: str) -> None:
         if isinstance(exc, case.failureException):
             self.failures.append((case, detail))
             self._mark("F", "FAIL")

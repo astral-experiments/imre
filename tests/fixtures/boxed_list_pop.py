@@ -66,6 +66,21 @@ def growth_allocation(name, bound):
 
 
 def current():
+    class SizedList(list):
+        def __len__(self):
+            return 17
+
+    class SizedTuple(tuple):
+        def __len__(self):
+            return 17
+
+    for owner, value in ((list, SizedList([1, 2])), (tuple, SizedTuple((1, 2)))):
+        slot = getattr(owner, "__len__")
+        assert type(slot).__name__ == "wrapper_descriptor" and slot.__objclass__ is owner
+        assert slot.__doc__ == "Return len(self)." and slot.__text_signature__ == "($self, /)"
+        assert len(value) == value.__len__() == 17
+        assert slot(value) == slot.__get__(value, type(value))() == 2
+
     class Source(list):
         def __iter__(self):
             return iter((9,))

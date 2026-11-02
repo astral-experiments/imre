@@ -103,8 +103,13 @@ pub(super) fn boxed_date_arithmetic(receiver: Type, name: &str) -> bool {
         && matches!(name, "__add__" | "__radd__" | "__sub__" | "__rsub__")
 }
 
+pub(super) fn date_isoformat(receiver: Type, name: &str) -> bool {
+    receiver == Type::Calendar(C::Date) && name == "isoformat"
+}
+
 pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
     match name {
+        "replace" | "__replace__" | "strptime" if receiver == Type::Calendar(C::Date) => true,
         "utctimetuple" => receiver == Type::Calendar(C::DateTime),
         "min" | "max" | "resolution" | "__reduce__" | "__reduce_ex__" => {
             matches!(
@@ -121,10 +126,13 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
             receiver == Type::Calendar(C::Delta)
         }
         "fromisoformat" | "strptime" => {
-            matches!(receiver, Type::Calendar(C::DateTime) | Type::ClockTime)
+            matches!(
+                receiver,
+                Type::Calendar(C::Date | C::DateTime) | Type::ClockTime
+            )
         }
         "fromtimestamp" => receiver == Type::Calendar(C::Date),
-        "ctime" | "fromisocalendar" | "fromordinal" | "isoweekday" | "today" => {
+        "ctime" | "fromisocalendar" | "fromordinal" | "isocalendar" | "isoweekday" | "today" => {
             matches!(receiver, Type::Calendar(C::Date | C::DateTime))
         }
         _ => boxed_comparison(receiver, name) || boxed_date_arithmetic(receiver, name),
@@ -145,6 +153,7 @@ impl Checker<'_> {
         if matches!(a.attr.as_str(), "__module__" | "__name__" | "__qualname__")
             || (kind == Type::Calendar(C::Zone) && fixed_zone_method(a.attr.as_str()))
             || (kind == Type::Calendar(C::DateTime) && a.attr.as_str() == "astimezone")
+            || date_isoformat(kind, a.attr.as_str())
             || boxed_member(kind, a.attr.as_str())
         {
             return Err(self.object_runtime_export("datetime class member", a));
@@ -467,6 +476,9 @@ impl Checker<'_> {
             return Err(self.object_runtime_export("timezone method call", call));
         }
         if !call.arguments.is_empty() {
+            if date_isoformat(Type::Calendar(kind), name) {
+                return Err(self.object_runtime_export("date.isoformat call", call));
+            }
             return Err(error(
                 self.source,
                 call,

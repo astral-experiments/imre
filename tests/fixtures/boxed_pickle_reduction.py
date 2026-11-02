@@ -1,4 +1,5 @@
 import _codecs
+import builtins
 import codecs
 import copyreg
 import pickle
@@ -34,6 +35,66 @@ def check_registered_reducer(protocol):
     assert pickle.loads(pickle.dumps(WithProtocol(), protocol)) == ("rebuilt", protocol)
     for value in (Ellipsis, NotImplemented, type(None), type(Ellipsis), type(NotImplemented)):
         assert pickle.loads(pickle.dumps(value, protocol)) is value
+
+
+def check_builtin_method_reduction():
+    d = {}
+    method = d.__getitem__
+    descriptor = type(len).__reduce__
+    for reduced in (method.__reduce__(), descriptor(method), method.__reduce_ex__(4)):
+        reconstruct, (receiver, name) = reduced
+        assert reconstruct is getattr and receiver is d and name == "__getitem__"
+    assert descriptor(len) == "len"
+    assert descriptor(_codecs.encode) == "encode"
+    assert descriptor(dict.__new__) == (getattr, (dict, "__new__"))
+    assert descriptor(str.maketrans) == (getattr, (str, "maketrans"))
+    for class_method in (dict.__new__, str.maketrans):
+        assert pickle.loads(pickle.dumps(class_method)) is class_method
+    assert descriptor.__doc__ is None and descriptor.__text_signature__ == "($self, /)"
+    for args, kwargs in (
+        ((), {}), ((WithProtocol().__reduce__,), {}), ((tuple.__repr__,), {}),
+        ((().__repr__,), {}), ((dict.__getitem__,), {}),
+        ((method, 0), {}), ((method,), {"extra": 0}),
+    ):
+        try:
+            descriptor(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("accepted invalid builtin method reducer arguments")
+
+    class Shadow(dict):
+        pass
+
+    shadow = Shadow()
+    saved = shadow.__getitem__
+    shadow.__getitem__ = None
+    reconstruct, (receiver, name) = saved.__reduce__()
+    assert receiver is shadow and reconstruct(receiver, name) is None
+    assert eval("m.__reduce__()[0]", {"__builtins__": {"getattr": 9}, "m": method}) == 9
+
+    original = builtins.getattr
+    try:
+        builtins.getattr = 42
+        assert method.__reduce__()[0] == 42
+        del builtins.getattr
+        try:
+            method.__reduce__()
+        except AttributeError as error:
+            assert error.args == ("getattr",)
+        else:
+            raise AssertionError("ignored missing builtins.getattr")
+    finally:
+        builtins.getattr = original
+
+    d["method"] = method
+    restored = pickle.loads(pickle.dumps(method))
+    assert restored.__self__["method"] is restored and restored("method") is restored
+    copyreg.pickle(type(method), lambda value: (int, (7,)))
+    try:
+        assert pickle.loads(pickle.dumps(method)) == 7
+    finally:
+        del copyreg.dispatch_table[type(method)]
 
 
 class WithoutProtocol:
@@ -303,6 +364,26 @@ def check_global_names(protocol):
     finally:
         _operator.getitem = getitem
 
+    for value, legacy_name in ((super, "super"), (len, "len"), (min, "min"), (chr, "unichr")):
+        for fix_imports in (True, False):
+            data = pickle.dumps(value, protocol, fix_imports=fix_imports)
+            if protocol <= 3:
+                legacy = protocol < 3 and fix_imports
+                module = "__builtin__" if legacy else "builtins"
+                name = legacy_name if legacy else value.__name__
+                assert ("c" + module + "\n" + name + "\n").encode() in data
+            assert pickle.loads(data, fix_imports=fix_imports) is value
+
+    from itertools import chain, filterfalse
+
+    for cls, legacy_name in ((chain, "chain"), (filterfalse, "ifilterfalse")):
+        for fix_imports in (True, False):
+            data = pickle.dumps(cls, protocol, fix_imports=fix_imports)
+            if protocol < 3:
+                name = legacy_name if fix_imports else cls.__name__
+                assert ("citertools\n" + name + "\n").encode() in data
+            assert pickle.loads(data, fix_imports=fix_imports) is cls
+
     from collections import OrderedDict, UserDict, UserList, UserString
     from datetime import date, datetime, timedelta
 
@@ -369,6 +450,7 @@ def check_list_items(protocol):
 def produce():
     check_namedtuple_reducer()
     check_object_reducer()
+    check_builtin_method_reduction()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         check_global_names(protocol)

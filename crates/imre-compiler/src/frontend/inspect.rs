@@ -99,7 +99,7 @@ fn builtin_plain_name(ty: Type, name: &str) -> bool {
         .any(|existing| existing == name)
 }
 
-fn class_has_name(base: &crate::classes::Class, name: &str) -> bool {
+pub(super) fn class_has_name(base: &crate::classes::Class, name: &str) -> bool {
     base.static_bindings.contains_key(name)
         || base.node.body.iter().any(|statement| match statement {
             ast::Stmt::Assign(assign) => assign

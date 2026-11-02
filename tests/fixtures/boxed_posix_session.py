@@ -30,15 +30,33 @@ class Program:
 def current():
     assert os.getsid is posix.getsid
     parent_sid = os.getsid(CurrentProcess())
+    assert os.getpgid is posix.getpgid and os.setpgid is posix.setpgid
+    group = os.getpgid(pid=CurrentProcess())
+    assert os.getpgrp is posix.getpgrp
+    assert os.getpgrp() == group == os.getpgid(os.getpid())
+    for args, kwargs in [((0,), {}), ((), {"pid": 0})]:
+        try:
+            os.getpgrp(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("getpgrp accepted an argument")
+    if os.getpid() != parent_sid:
+        assert os.setpgid(CurrentProcess(), group) is None
     assert parent_sid == os.getsid(os.getpid())
-    for create, executable in ((False, None), (True, None), (False, "/bin/cat"), (True, "/bin/cat")):
+    for create, executable, process_group in (
+        (False, None, None), (True, None, None),
+        (False, "/bin/cat", None), (True, "/bin/cat", None),
+        (False, "/bin/cat", 0),
+    ):
         # An absolute executable override with close_fds=False is eligible for posix_spawn
-        # unless a new session is requested. Hold cat open to observe its real session.
+        # unless a new session or group is requested. Hold cat open to observe both.
         args = ["/bin/cat"] if executable is None else ["alternate-argv0"]
         with subprocess.Popen(args, executable=executable, close_fds=executable is None,
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                              start_new_session=create) as child:
+                              start_new_session=create, process_group=process_group) as child:
             try:
+                assert os.getpgid(child.pid) == (child.pid if create or process_group == 0 else group)
                 sid = os.getsid(child.pid)
                 assert sid == (child.pid if create else parent_sid)
                 assert (sid != parent_sid) == create
@@ -51,6 +69,19 @@ def current():
             assert error.errno == errno.ECHILD
         else:
             raise AssertionError("child still waitable")
+
+    # Observe both settings on the same live child before releasing its stdin.
+    with open(__file__, "rb") as marker:
+        fd = marker.fileno()
+        args = ["/bin/sh", "-c", 'test "/dev/fd/$1" -ef "$2" && cat', "sh", str(fd), __file__]
+        with subprocess.Popen(args, process_group=0, pass_fds=(fd,), stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE) as child:
+            try:
+                assert os.getpgid(child.pid) == child.pid
+            finally:
+                out, err = child.communicate(b"kept")
+            assert (out, err, child.returncode) == (b"kept", None, 0)
+        assert not os.get_inheritable(fd)
 
     # A failed spawn eligibility check and the subsequent fork can observe different
     # values. Compare the resulting session and argv[0] with CPython on this host.

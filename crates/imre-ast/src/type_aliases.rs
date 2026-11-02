@@ -1,4 +1,4 @@
-//! Expression restrictions in module-level type alias annotation scopes.
+//! Expression restrictions in annotation scopes used by type aliases and generic classes.
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
@@ -30,8 +30,19 @@ pub fn type_alias_error(body: &[Stmt]) -> Option<Error<'_>> {
     module.0
 }
 
+/// Validate the base and keyword expressions executed in a generic class's parameter scope.
+pub fn generic_class_arguments_error(arguments: &ast::Arguments) -> Option<Error<'_>> {
+    let mut rhs = Rhs {
+        generic_class: true,
+        ..Default::default()
+    };
+    rhs.visit_arguments(arguments);
+    rhs.error
+}
+
 #[derive(Default)]
 struct Rhs<'a> {
+    generic_class: bool,
     error: Option<Error<'a>>,
     comprehension: Option<&'a Expr>,
     async_allowed: bool,
@@ -44,16 +55,25 @@ impl<'a> Visitor<'a> for Rhs<'a> {
             return;
         }
         let error = match expr {
-            Expr::Named(_) if self.comprehension.is_none() => {
-                (expr, "named expression cannot be used within a type alias")
-            }
+            Expr::Named(_) if self.comprehension.is_none() => (
+                expr,
+                if self.generic_class {
+                    "named expression cannot be used within the definition of a generic"
+                } else {
+                    "named expression cannot be used within a type alias"
+                },
+            ),
             Expr::Named(_) if self.in_iterable => (
                 expr,
                 "assignment expression cannot be used in a comprehension iterable expression",
             ),
             Expr::Named(n) => (
                 &*n.target,
-                "assignment expression within a comprehension cannot be used in a type alias",
+                if self.generic_class {
+                    "assignment expression within a comprehension cannot be used within the definition of a generic"
+                } else {
+                    "assignment expression within a comprehension cannot be used in a type alias"
+                },
             ),
             Expr::Yield(_) | Expr::YieldFrom(_) => (
                 expr,
@@ -62,6 +82,9 @@ impl<'a> Visitor<'a> for Rhs<'a> {
                     Some(Expr::SetComp(_)) => "'yield' inside set comprehension",
                     Some(Expr::DictComp(_)) => "'yield' inside dict comprehension",
                     Some(_) => "'yield' inside generator expression",
+                    None if self.generic_class => {
+                        "yield expression cannot be used within the definition of a generic"
+                    }
                     None => "yield expression cannot be used within a type alias",
                 },
             ),
@@ -69,6 +92,10 @@ impl<'a> Visitor<'a> for Rhs<'a> {
                 Some(comp) => (
                     comp,
                     "asynchronous comprehension outside of an asynchronous function",
+                ),
+                None if self.generic_class => (
+                    expr,
+                    "await expression cannot be used within the definition of a generic",
                 ),
                 None => (expr, "await expression cannot be used within a type alias"),
             },
@@ -106,6 +133,7 @@ impl<'a> Rhs<'a> {
         // The first iterable still runs in the enclosing scope.
         self.visit_expr(&clauses[0].iter);
         let mut child = Self {
+            generic_class: self.generic_class,
             error: self.error,
             comprehension: Some(expr),
             async_allowed: self.async_allowed || matches!(expr, Expr::Generator(_)),

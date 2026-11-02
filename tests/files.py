@@ -17,6 +17,34 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "device_encoding": """
+        import locale
+        import os
+        import sys
+
+        class Descriptor:
+            number: int
+            calls: int
+
+            def __init__(self, number: int) -> None:
+                self.number = number
+                self.calls = 0
+
+            def __index__(self) -> int:
+                self.calls += 1
+                return self.number
+
+        master, slave = os.openpty()
+        try:
+            fd = Descriptor(slave)
+            expected = "utf-8" if sys.flags.utf8_mode else locale.getencoding()
+            assert os.device_encoding(fd=fd) == expected
+            assert fd.calls == 1
+        finally:
+            os.close(master)
+            os.close(slave)
+        assert os.device_encoding(slave) is None
+    """,
     "binary_update_path_builtin": """
         with open("checked-update.bin", "wb+") as stream:
             stream.write(b"payload")
@@ -585,6 +613,30 @@ with opened() as stream:
 """,
 }
 
+if sys.platform == "linux":
+    ACCEPTED["ptsname"] = """
+        import errno
+        import os
+
+        master, slave = os.openpty()
+        try:
+            reopened = os.open(os.ptsname(master), os.O_RDWR | os.O_NOCTTY)
+            try:
+                assert os.write(reopened, b'pty') == 3
+                assert os.read(master, 3) == b'pty'
+            finally:
+                os.close(reopened)
+            try:
+                os.ptsname(slave)
+            except OSError as error:
+                assert error.errno == errno.ENOTTY
+            else:
+                raise AssertionError("expected ENOTTY")
+        finally:
+            os.close(slave)
+            os.close(master)
+    """
+
 ERRORS = {
     "uncaught_missing": ('open("missing", "r", encoding="utf-8")', "FileNotFoundError"),
     "uncaught_decode": (
@@ -893,6 +945,11 @@ def main() -> None:
             passed += 1
         cases = [(name, source, None) for name, source in ACCEPTED.items()]
         for fixture in sorted((Path(__file__).parent / "fixtures/files").glob("*.py")):
+            if fixture.stem == "copy_file_range" and (
+                sys.platform != "linux"
+                or run([args.python, "-c", "import os, sys; sys.exit(not hasattr(os, 'copy_file_range'))"], temporary).returncode
+            ):
+                continue
             source = fixture.read_text(encoding="utf-8")
             cases.append((fixture.stem, source, None))
             if fixture.stem == "zipimport_resources":

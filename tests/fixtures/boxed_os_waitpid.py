@@ -39,9 +39,12 @@ def current():
     else:
         raise AssertionError("options must be positional")
     assert os.waitstatus_to_exitcode is posix.waitstatus_to_exitcode
+    assert os.WIFSTOPPED is posix.WIFSTOPPED
+    assert os.WIFSTOPPED(status=Index(0x137f)) is True
     with subprocess.Popen(["/bin/sh", "-c", "exit 23"]) as child:
         pid, status = os.waitpid(child.pid, 0)
         assert pid == child.pid
+        assert os.WIFSTOPPED(status=Index(status)) is False
         assert os.waitstatus_to_exitcode(status=Index(status)) == 23
 
     for status, kind in ((1 << 100, OverflowError), (2.5, TypeError), (-1, ValueError)):

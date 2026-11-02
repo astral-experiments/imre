@@ -1,5 +1,42 @@
 //! Raw Unicode escapes preserve Latin-1 bytes and unpaired surrogate code points.
-use super::{Context, DecodeIssue, Id, Result, resume_decode};
+use std::io::Write;
+
+use super::{Context, DecodeIssue, Id, NONE, Result, Value, resume_decode, type_error};
+
+/// Encode every Python code point, including unpaired surrogates, without calling an error handler.
+pub(super) fn encode(ctx: &mut Context, input: Id) -> Result<Id> {
+    let output = match ctx.heap.get(ctx.scalar_value(input)) {
+        Value::Str(text) => encode_points(text.chars().map(u32::from))?,
+        Value::SurrogateStr(points) => encode_points(points.iter().copied())?,
+        _ => {
+            let kind = if input == NONE {
+                "None"
+            } else {
+                ctx.type_name(input)
+            };
+            return Err(type_error(format!(
+                "raw_unicode_escape_encode() argument 1 must be str, not {kind}"
+            )));
+        }
+    };
+    Ok(ctx.alloc(Value::Bytes(output)))
+}
+
+fn encode_points(points: impl Iterator<Item = u32>) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    for point in points {
+        // The longest escape consists of a backslash, an uppercase U and eight hex digits.
+        output
+            .try_reserve(10)
+            .map_err(|_| crate::Error::allocation())?;
+        match point {
+            0..=0xff => output.push(point as u8),
+            0x100..=0xffff => write!(output, "\\u{point:04x}").unwrap(),
+            _ => write!(output, "\\U{point:08x}").unwrap(),
+        }
+    }
+    Ok(output)
+}
 
 pub(super) fn decode(ctx: &mut Context, input: Id, errors: &str) -> Result<Id> {
     let data = ctx.bytes_like(input)?;

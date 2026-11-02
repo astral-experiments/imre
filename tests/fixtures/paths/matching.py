@@ -1,4 +1,4 @@
-from pathlib import Path, PosixPath
+from pathlib import Path, PosixPath, PurePosixPath, PureWindowsPath
 
 
 def check(path: Path, pattern: Path, sensitive: bool | None) -> None:
@@ -8,6 +8,63 @@ def check(path: Path, pattern: Path, sensitive: bool | None) -> None:
     except ValueError as error:
         print(str(error))
     print(path.full_match(case_sensitive=sensitive, pattern=pattern))
+
+
+class Pattern:
+    def __init__(self, value: str):
+        self.value = value
+
+    def __fspath__(self) -> str:
+        print(f"convert {self.value}")
+        return self.value
+
+
+class InheritedPattern(Pattern):
+    pass
+
+
+class BytesPattern:
+    def __fspath__(self) -> bytes:
+        return b"*.py"
+
+
+class FailingPattern:
+    def __fspath__(self) -> str:
+        raise ValueError("pattern conversion")
+
+
+def make_pattern(value: str) -> InheritedPattern:
+    print("evaluate pattern")
+    return InheritedPattern(value)
+
+
+def make_sensitivity(fail: bool) -> bool:
+    print("evaluate sensitivity")
+    if fail:
+        raise ValueError("sensitivity expression")
+    return True
+
+
+posix_target = PurePosixPath("src/app.py")
+windows_target = PureWindowsPath("src/app.py")
+print(posix_target.match(path_pattern=make_pattern("src/*.py"), case_sensitive=make_sensitivity(False)))
+print(windows_target.full_match(case_sensitive=make_sensitivity(False), pattern=make_pattern("src/*.rst")))
+print(posix_target.full_match(InheritedPattern("src/*.py")))
+print(windows_target.match(InheritedPattern("SRC/*.PY")))
+print(posix_target.match(PureWindowsPath("src/*")))
+print(posix_target.full_match(PureWindowsPath("src/*")))
+try:
+    windows_target.full_match(FailingPattern(), case_sensitive=make_sensitivity(True))
+except ValueError as error:
+    print(str(error))
+try:
+    posix_target.match(BytesPattern())
+except TypeError as error:
+    print(str(error))
+try:
+    posix_target.full_match(FailingPattern())
+except ValueError as error:
+    print(str(error))
 
 
 for text in ["", "/", "//", "a", "/a", "//a", "a/b", "/a/b", ".dot",

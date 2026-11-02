@@ -20,6 +20,10 @@ import files
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "workspaces"
 IMPORTS = "from pathlib import Path\nfrom tempfile import TemporaryDirectory\n"
 REJECTED = {
+    "cleanup_option_bad_call": (
+        "def size(count: int) -> int:\n    return count\n"
+        "with TemporaryDirectory(delete=True):\n    size('bad')"
+    ),
     "nullcontext_integer": "from contextlib import nullcontext\nwith nullcontext(1):\n    pass",
     "nullcontext_two_args": "from contextlib import nullcontext\nwith nullcontext('a', 'b'):\n    pass",
     "constructor_value": "factory = TemporaryDirectory",
@@ -27,16 +31,12 @@ REJECTED = {
     "manual_enter": "print(TemporaryDirectory().__enter__())",
     "manual_cleanup": "TemporaryDirectory().cleanup()",
     "manager_attribute": "print(TemporaryDirectory().name)",
-    "positional_directory": "with TemporaryDirectory('suffix') as name:\n    print(name)",
-    "delete_option": "with TemporaryDirectory(delete=False):\n    pass",
-    "ignore_cleanup_option": "with TemporaryDirectory(ignore_cleanup_errors=True):\n    pass",
     "unknown_option": "with TemporaryDirectory(encoding='utf-8'):\n    pass",
     "wrong_directory": "with TemporaryDirectory(dir=1):\n    pass",
     "bytes_directory": "with TemporaryDirectory(dir=b'.'):\n    pass",
     "wrong_prefix": "with TemporaryDirectory(prefix=1):\n    pass",
     "nullable_prefix": "with TemporaryDirectory(prefix=None):\n    pass",
     "wrong_suffix": "with TemporaryDirectory(suffix=Path('tail')):\n    pass",
-    "computed_keywords": "with TemporaryDirectory(**{str('prefix'): 'tmp'}):\n    pass",
     "unpacked_target": "with TemporaryDirectory() as (left, right):\n    pass",
     "changed_target_type": "name = Path('.')\nwith TemporaryDirectory() as name:\n    pass",
     "mkdir_wrong_mode": "Path('a').mkdir(mode='700')",

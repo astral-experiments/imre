@@ -95,6 +95,7 @@ impl BoxedPopen {
         bufsize: Int,
         pipesize: Int,
         start_new_session: bool,
+        process_group: i32,
         umask: i32,
         keep: Vec<RawFd>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
@@ -147,9 +148,9 @@ impl BoxedPopen {
             environment: env,
             boxed_child: Some(ChildAttributes {
                 new_session: start_new_session,
+                group: process_group,
                 mask: (umask >= 0).then_some(umask as libc::mode_t),
                 keep,
-                ..Default::default()
             }),
             ..Default::default()
         };
@@ -170,11 +171,14 @@ impl BoxedPopen {
         // Reserve the public handle before a successful spawn can leave a child to reap.
         let mut owner = triomphe::UniqueArc::try_new_uninit().map_err(|_| Error::allocation())?;
         // SAFETY: argv, executable, cwd, sizes and descriptor integers stay rooted through spawn.
-        let process = unsafe { spawn(&config, extras) }.map_err(|error| BoxedLaunchError {
+        let mut process = unsafe { spawn(&config, extras) }.map_err(|error| BoxedLaunchError {
             error,
             directory: site.map(|(site, _)| matches!(site, launch_error::Site::Directory)),
             direct: site.is_some_and(|(_, direct)| direct),
         })?;
+        // The boxed Python owner emits the warning. Drop still reaps or defers
+        // the child if that owner's finalizer raises or releases a live handle.
+        process.native_finalizer_pending = false;
         owner.write(RefCell::new(process));
         // SAFETY: write initialized the unique allocation; sharing it performs no allocation.
         Ok(Self(
@@ -190,14 +194,8 @@ impl BoxedPopen {
         self.0.borrow().control.pid
     }
 
-    pub(crate) fn status(&self, poll: bool) -> Result<Option<i32>> {
-        let process = self.0.borrow();
-        let status = if poll {
-            process.control.poll()?
-        } else {
-            process.control.status()
-        };
-        Ok(status.map(ReturnCode::kernel))
+    pub(crate) fn poll(&self) -> Result<Option<i32>> {
+        Ok(self.0.borrow().control.poll()?.map(ReturnCode::kernel))
     }
 
     pub(crate) fn wait<E: From<Error>>(
@@ -217,9 +215,6 @@ impl BoxedPopen {
 
     pub(crate) fn close_wait(&self) -> Result<()> {
         self.0.borrow_mut().close_wait()
-    }
-    pub(crate) fn finalize(&self) -> bool {
-        self.0.borrow_mut().finalize()
     }
     pub(crate) fn cleanup() {
         cleanup()

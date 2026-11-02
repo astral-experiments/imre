@@ -4,6 +4,7 @@ import sys
 from types import CodeType
 
 assert sys._getframe().f_code.co_qualname == "<module>"
+assert sys._getframe().f_code.co_argcount == 0
 
 registered = set()
 
@@ -33,7 +34,7 @@ def factory():
 
 
 def current():
-    from types import GeneratorType, coroutine
+    from types import FunctionType, GeneratorType, coroutine
 
     def values():
         yield 1
@@ -49,8 +50,38 @@ def current():
     assert coroutine(values).__code__ is after.gi_code
     assert next(before) == next(after) == 1
 
+    def mixed(first, /, second, optional=3, *args, required, **kwargs):
+        pass
+
+    def variadic(*args, **kwargs):
+        pass
+
     saved = view.__code__
     method = Views().get
+    assert mixed.__code__.co_argcount == 3 and variadic.__code__.co_argcount == 0
+    assert saved.co_argcount == 1
+    assert method.__code__.co_argcount == Views.get.__code__.co_argcount == 1
+    assert CodeType.co_argcount.__get__(mixed.__code__, CodeType) == 3
+    try:
+        CodeType.co_argcount.__get__(object(), object)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("argument-count descriptor accepted a non-code receiver")
+    rebuilt = FunctionType(saved, globals())
+    assert rebuilt.__code__.co_argcount == 1 and rebuilt(41) == 42
+    compiled_gen = (x for x in range(2))
+    loaded_gen = eval("(x for x in range(2))")
+    for gen in (compiled_gen, loaded_gen):
+        assert gen.gi_code.co_argcount == 1
+        assert next(gen) == 0 and next(gen) == 1
+    for change in (lambda: setattr(saved, "co_argcount", 7), lambda: delattr(saved, "co_argcount")):
+        try:
+            change()
+        except AttributeError as error:
+            assert str(error) == "readonly attribute"
+        else:
+            raise AssertionError("code argument count is writable")
     assert saved.co_qualname == "view" and method.__code__.co_qualname == "Views.get"
     view.__qualname__ = "renamed"
     assert saved.co_qualname == "view"

@@ -48,11 +48,19 @@ impl Emitter<'_, '_> {
                 ));
                 return none();
             }
-            FdOperation::Pipe | FdOperation::Pipe2 => {
+            FdOperation::Pipe | FdOperation::Pipe2 | FdOperation::OpenPty => {
                 let tuple = self.record(returns);
                 match args {
                     [] => {
-                        self.checked_line(format!("call void @imre_os_pipe(ptr {})", tuple.operand))
+                        let call = if op == FdOperation::OpenPty {
+                            "openpty"
+                        } else {
+                            "pipe"
+                        };
+                        self.checked_line(format!(
+                            "call void @imre_os_{call}(ptr {})",
+                            tuple.operand
+                        ))
                     }
                     [flags] => self.checked_line(format!(
                         "call void @imre_os_pipe2(ptr {}, i64 {})",
@@ -62,7 +70,33 @@ impl Emitter<'_, '_> {
                 }
                 return tuple;
             }
+            FdOperation::PtsName => {
+                let (word, site) = match args {
+                    [fd] => (
+                        fd.value.operand.clone(),
+                        "ptr null, ptr null, i64 0".to_owned(),
+                    ),
+                    [fd, module, filename, line] => (
+                        self.instruction(format!("select i1 {}, i64 3, i64 1", fd.value.operand)),
+                        format!(
+                            "ptr {}, ptr {}, i64 {}",
+                            module.value.operand, filename.value.operand, line.value.operand
+                        ),
+                    ),
+                    _ => unreachable!(),
+                };
+                let operand = self
+                    .checked_instruction(format!("call ptr @imre_os_ptsname(i64 {word}, {site})"));
+                return self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                });
+            }
             FdOperation::TransferFd => "transfer_fd",
+            FdOperation::CopyFileRange => "copy_file_range",
+            FdOperation::CheckCopyCount => "check_copy_count",
+            FdOperation::CheckCopyOffset => "check_copy_offset",
             FdOperation::Read => "read",
             FdOperation::Write => "write",
             FdOperation::Close => "close",
@@ -70,6 +104,7 @@ impl Emitter<'_, '_> {
             FdOperation::Dup => "dup",
             FdOperation::Dup2 => "dup2",
             FdOperation::Isatty => "isatty",
+            FdOperation::DeviceEncoding => "device_encoding",
             FdOperation::GetBlocking => "get_blocking",
             FdOperation::SetBlocking => "set_blocking",
             FdOperation::GetInheritable => "get_inheritable",

@@ -110,6 +110,23 @@ def current():
         except ValueError as error:
             print(str(error))
 
+    class Index:
+        def __index__(self):
+            return 0xd800
+
+    surrogate = chr(0xd800)
+    assert "%d:%-3.0c%c/%s" % (2, Index(), Text(chr(0xdc00)), "end") == (
+        "2:" + surrogate + "  " + chr(0xdc00) + "/end"
+    )
+    assert "%(ch)3c" % {"ch": 0xd800} == "  " + surrogate
+    assert "%c%c" % (surrogate, chr(0xdc00)) == surrogate + chr(0xdc00)
+
+    low = chr(0xdc00)
+    private = chr(0xf0000)
+    assert "[%3.1s%3.0c%.0s%-2c%-.2s]" % (
+        low + private, surrogate, surrogate, low, private + surrogate
+    ) == "[  " + low + "  " + surrogate + low + " " + private + surrogate + "]"
+
     print("[%5.2s][%-6.3r][%.2a][%4c]" % ("éπx", "abc", "a", "x"))
     print("[%*.*s][%.*s]" % (-6, 2, "abc", -1, "hidden"))
     print("%(name)6.2s/%(name)-4.1s" % {"name": "abcd"})
