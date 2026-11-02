@@ -28,6 +28,8 @@ pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
 }
 
 pub mod annotations;
+pub mod class_attributes;
+pub mod class_cell;
 pub mod code_flags;
 
 /// Names imported by the module scope disable method binding even after reassignment.
