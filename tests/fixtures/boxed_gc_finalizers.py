@@ -137,6 +137,19 @@ def check_unpack_operands():
     events.clear()
 
 
+def read_after_stdin_replacement(path):
+    original = sys.__stdin__
+    try:
+        stream = open(path, "wb")
+        sys.__stdin__ = stream
+        stream.write(b"ready")
+        del stream
+    finally:
+        sys.__stdin__ = original
+    with open(path, "rb") as reader:
+        yield reader.read()
+
+
 def current():
     check_unraisable()
     check_unpack_operands()
@@ -179,3 +192,8 @@ def current():
     assert (setattr(outer, "inner", None), events.copy()) == (None, ["finalize"])
     saved.clear()
     events.clear()
+
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory() as root:
+        assert list(read_after_stdin_replacement(root + "/buffered")) == [b"ready"]

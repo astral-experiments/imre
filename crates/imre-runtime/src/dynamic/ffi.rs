@@ -1667,7 +1667,14 @@ impl Context {
                 let _ = self.collect_full();
                 return;
             }
-            if !self.heap.caller_keeps_only_finalizer() && self.heap.has_unbound_finalizer(NONE) {
+            let stdin = if self.heap.pending_finalizers().len() > 1 {
+                super::stdlib::io::rooted_input_chain(self)
+            } else {
+                None
+            };
+            if !self.heap.caller_keeps_finalizers(stdin.as_ref())
+                && self.heap.has_unbound_finalizer(NONE)
+            {
                 match self.drain_acyclic_finalizers() {
                     Ok(true) => {
                         // Dropping a finalized instance releases its remaining strong edges,
@@ -1695,14 +1702,30 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if self.heap.discard_truth_operands(mark, self.modules) {
+        let stdin = self.discard_input_roots();
+        if self
+            .heap
+            .discard_truth_with_roots(mark, self.modules, stdin.as_ref())
+        {
             self.collect_unreachable();
+        }
+    }
+
+    fn discard_input_roots(&self) -> Option<[Id; 3]> {
+        if self.heap.tracks_finalizers() {
+            super::stdlib::io::rooted_input_chain(self)
+        } else {
+            None
         }
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
     pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
-        if self.heap.discard_operands(mark, result, self.modules) {
+        let stdin = self.discard_input_roots();
+        if self
+            .heap
+            .discard_operands(mark, result, self.modules, stdin.as_ref())
+        {
             self.collect_unreachable();
         }
     }

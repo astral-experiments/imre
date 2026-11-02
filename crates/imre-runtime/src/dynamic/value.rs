@@ -2847,15 +2847,19 @@ impl Heap {
         if !self.retains_first_child(value, old) {
             return false;
         }
-        let operands = &self.frames.last().unwrap().live;
-        let mut budget = 64;
-        operands.len() <= budget
-            && operands.chunk_by(|a, b| a == b).all(|copies| {
-                self.kept_assignment_operand(scope, value, old, copies[0], &mut budget)
-            })
+        self.retained_operands(scope, &self.frames.last().unwrap().live, value, old)
     }
 
-    fn kept_assignment_operand(
+    /// Check that trimming this part of the frame cannot release an observable owner.
+    fn retained_operands(&self, scope: &Scope, operands: &[Id], value: Id, old: Id) -> bool {
+        let mut budget = 64;
+        operands.len() <= budget
+            && operands
+                .chunk_by(|a, b| a == b)
+                .all(|copies| self.kept_operand(scope, value, old, copies[0], &mut budget))
+    }
+
+    fn kept_operand(
         &self,
         scope: &Scope,
         value: Id,
@@ -2874,6 +2878,9 @@ impl Heap {
                 .values()
                 .take(16)
                 .any(|&bound| bound == operand || self.retains_first_child(bound, operand))
+            || scope.closure.cells.values().take(16).any(
+                |&cell| matches!(self.get(cell), Value::Cell(Some(bound)) if *bound == operand),
+            )
         {
             return true;
         }
@@ -2883,7 +2890,7 @@ impl Heap {
         if self.finalizer_free_scalar(operand) {
             return true;
         }
-        let mut kept = |item| self.kept_assignment_operand(scope, value, old, item, budget);
+        let mut kept = |item| self.kept_operand(scope, value, old, item, budget);
         match self.get(operand) {
             Value::Range(_) | Value::RangeIterator(_) => true,
             // An exhausted unpack iterator has released its sequence.
@@ -2915,7 +2922,13 @@ impl Heap {
     }
 
     /// Release an expression while preserving its result and earlier operands.
-    pub(super) fn discard_operands(&mut self, mark: usize, result: Id, modules: Id) -> bool {
+    pub(super) fn discard_operands(
+        &mut self,
+        mark: usize,
+        result: Id,
+        modules: Id,
+        stdin: Option<&[Id; 3]>,
+    ) -> bool {
         if !self.tracks_finalizers() {
             return false;
         }
@@ -2944,9 +2957,19 @@ impl Heap {
         if !could_own_finalizer {
             return false;
         }
+        let frame = self.frames.last().unwrap();
+        let kept = stdin.is_some()
+            && !self.collect_next_statement
+            && matches!(self.get(frame.scope), Value::Scope(scope)
+                if self.retained_operands(scope, &frame.live[mark..], result, NONE));
         self.release_temporaries_since(mark);
         if result != NONE {
             self.keep(result);
+        }
+        // Another operation may already have dropped a writer. Check all tracked owners
+        // against the surviving roots after trimming, before suppressing this sweep.
+        if kept && self.caller_keeps_finalizers(stdin) {
+            return false;
         }
         self.file_writers
             .iter()
@@ -2963,6 +2986,15 @@ impl Heap {
     /// A consumed truth value cannot retain its receiver into the next operand.
     /// Earlier operands of enclosing expressions stay below this mark.
     pub(super) fn discard_truth_operands(&mut self, mark: usize, modules: Id) -> bool {
+        self.discard_truth_with_roots(mark, modules, None)
+    }
+
+    pub(super) fn discard_truth_with_roots(
+        &mut self,
+        mark: usize,
+        modules: Id,
+        stdin: Option<&[Id; 3]>,
+    ) -> bool {
         let weak_release = self.has_weak_values
             && self
                 .frames
@@ -2972,7 +3004,7 @@ impl Heap {
                 .iter()
                 .skip(mark)
                 .any(|&id| self.weak_edge(id) && !self.bound_in_active_frame(id));
-        let finalizer_release = self.discard_operands(mark, NONE, modules);
+        let finalizer_release = self.discard_operands(mark, NONE, modules, stdin);
         self.release_temporaries_since(mark);
         weak_release || finalizer_release
     }
@@ -3427,11 +3459,27 @@ impl Heap {
         Ok(id)
     }
 
-    /// Recheck the strong path from a caller-held method to the sole pending finalizer.
-    pub(super) fn caller_keeps_only_finalizer(&mut self) -> bool {
-        let [owner] = self.ordinary_finalizers.as_slice() else {
+    /// The current stdin chain and a field on a caller-held method receiver can keep
+    /// every pending finalizer alive. Recheck both paths before omitting the trace.
+    pub(super) fn caller_keeps_finalizers(&mut self, stdin: Option<&[Id; 3]>) -> bool {
+        if let Some(chain) = stdin
+            && self
+                .file_writers
+                .iter()
+                .any(|writer| !chain.contains(writer))
+        {
             return false;
+        }
+        let mut others = self
+            .ordinary_finalizers
+            .iter()
+            .filter(|owner| !stdin.is_some_and(|chain| chain.contains(owner)));
+        let Some(owner) = others.next() else {
+            return true;
         };
+        if others.next().is_some() {
+            return false;
+        }
         let receiver_fields = |operand: &Id| {
             let Value::Method { receiver, .. } = self.get(*operand) else {
                 return None;
@@ -3455,8 +3503,8 @@ impl Heap {
         }
 
         // Earlier operands hold outer expressions such as pending context manager exits.
-        // Learn the position while its frame is the immediate caller, before recursion.
-        if let Some((frame_index, caller)) = self.frames.iter().enumerate().rev().nth(1) {
+        // Learn the position near the call, then validate it at any recursion depth.
+        for (frame_index, caller) in self.frames.iter().enumerate().rev().skip(1).take(8) {
             for (operand_index, operand) in caller.live.iter().take(8).enumerate() {
                 if let Some(fields) = receiver_fields(operand)
                     && let Some(field) = fields.values().take(8).position(|value| value == owner)
