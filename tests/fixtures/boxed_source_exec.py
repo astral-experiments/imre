@@ -530,7 +530,129 @@ def source_eval():
         raise AssertionError("eval accepted a statement")
 
 
+def starred_calls():
+    events = []
+
+    def mark(value):
+        events.append(value)
+        return value
+
+    def spread():
+        mark("iter")
+        yield 2
+
+    def collect(*values, label):
+        return values, label
+
+    scope = {"collect": collect, "mark": mark, "spread": spread}
+    exec("answer = collect(*spread(), label=mark(3))", scope)
+    assert scope["answer"] == ((2,), 3) and events == [3, "iter"]
+    events.clear()
+    exec("answer = collect(mark(1), *spread(), *(), label=mark(3))", scope)
+    assert scope["answer"] == ((1, 2), 3) and events == [1, "iter", 3]
+
+    for source in ("collect(**{}, label=1, label=2)", "collect(label=1, **{}, label=2)"):
+        events.clear()
+        try:
+            exec("mark(0)\n" + source, scope)
+        except SyntaxError as error:
+            assert error.msg == "keyword argument repeated: label" and not events
+            assert error.filename == "<string>" and (error.lineno, error.end_lineno) == (2, 2)
+            assert (error.offset, error.end_offset) == (24, 31)
+        else:
+            raise AssertionError("duplicate explicit keyword compiled")
+
+    try:
+        compile("x=1\rcollect(a=1, a=2)(b=1, b=2)", "<caller>", "exec")
+    except SyntaxError as error:
+        assert error.msg == "keyword argument repeated: b"
+        assert (error.lineno, error.offset, error.end_lineno, error.end_offset) == (2, 24, 2, 27)
+    else:
+        raise AssertionError("invalid outer call accepted")
+
+    class Options:
+        def keys(self):
+            return ["label"]
+
+        def __getitem__(self, key):
+            return mark(4)
+
+    scope["options"] = Options()
+    events.clear()
+    exec("answer = collect(*spread(), **options)", scope)
+    assert scope["answer"] == ((2,), 4) and events == [4, "iter"]
+
+    events.clear()
+    try:
+        exec("collect(*spread(), **options, label=mark(5), other=mark(6), **mark(7))", scope)
+    except TypeError as error:
+        assert "got multiple values for keyword argument 'label'" in str(error)
+        assert events == [4, 5, 6]
+    else:
+        raise AssertionError("duplicate keyword was accepted")
+
+    events.clear()
+    try:
+        exec("collect(*spread(), **{1: mark(5)})", scope)
+    except TypeError as error:
+        assert error.args == ("keywords must be strings",) and events == [5, "iter"]
+    else:
+        raise AssertionError("non-string keyword was accepted")
+
+    class NoIter:
+        __iter__ = None
+
+    class BrokenIter:
+        def __iter__(self):
+            raise TypeError("from iterator")
+
+    scope["no_iter"] = NoIter()
+    scope["broken_iter"] = BrokenIter()
+    for source, message in (
+        ("collect(*42)", f"{collect.__module__}.{collect.__qualname__}() argument after * must be an iterable, not int"),
+        ("collect(1, *42)", "Value after * must be an iterable, not int"),
+        ("collect(*no_iter)", "'NoIter' object is not iterable"),
+        ("collect(1, *broken_iter)", "from iterator"),
+    ):
+        try:
+            exec(source, scope)
+        except TypeError as error:
+            assert str(error) == message
+        else:
+            raise AssertionError("invalid positional unpack was accepted")
+
+    class BadHint:
+        def __iter__(self):
+            return iter(())
+
+        def __length_hint__(self):
+            raise LookupError("bad hint")
+
+    scope["bad_hint"] = BadHint()
+    exec("answer = collect(*bad_hint, label=0)", scope)
+    assert scope["answer"] == ((), 0)
+    try:
+        exec("collect(1, *bad_hint, label=0)", scope)
+    except LookupError as error:
+        assert error.args == ("bad hint",)
+    else:
+        raise AssertionError("starred length hint failure was lost")
+
+    def broken():
+        yield 0
+        raise ValueError("broken iterator")
+
+    scope["broken"] = broken
+    try:
+        exec("collect(*broken(), label=0)", scope)
+    except ValueError as error:
+        assert error.args == ("broken iterator",)
+    else:
+        raise AssertionError("starred iterator failure was lost")
+
+
 def current():
+    starred_calls()
     source_eval()
     method_argument_lifetime()
     named_bindings()
