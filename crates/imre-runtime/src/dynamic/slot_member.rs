@@ -496,7 +496,7 @@ impl Context {
             self.heap.replace_cell(dict_cell, Some(dict));
         }
         self.install_weakref_descriptor(class, scope);
-        self.initialize_class_members(class, scope)?;
+        self.initialize_class_members(class, scope, None)?;
         let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
         self.call(hook, Vec::new(), kwargs)?;
         Ok(class)
