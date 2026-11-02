@@ -2377,6 +2377,8 @@ impl Context {
                     "_getframemodulename",
                     "displayhook",
                     "unraisablehook",
+                    "get_int_max_str_digits",
+                    "set_int_max_str_digits",
                 ] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {
