@@ -59,6 +59,20 @@ Both originals passed on stock and skipped at both native levels in the unchange
 | `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_weakref_list_is_not_traversed` | 1 | A subclass, a self-referential list and a weak reference go out of scope before collection. A crash would affect ordinary subclass users. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L954-L971) | `CPythonOrderedDictSubclassTests.test_reference_loop` |
 | `test.test_ordered_dict.CPythonOrderedDictTests.test_weakref_list_is_not_traversed` | 1 | The body creates a reference cycle containing a weak reference and calls the public collector. A crash in that sequence is observable in an ordinary program. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L954-L971) | `CPythonOrderedDictTests.test_reference_loop` |
 
+### `io`
+
+Each original below is occurrence 1 in the pinned I/O inventory. A private fixture detail can expose a stream behavior that applications rely on. These seven decisions add no omissions.
+
+| Original CPython test | Occurrence | Reason to keep it in scope |
+| --- | ---: | --- |
+| `test.test_io.StatefulIncrementalDecoderTest.test_decoder` | 1 | The test decoder buffers incomplete input until the next decode call and flushes it at end of input. The text-stream tests depend on this fixture behaving consistently across calls. [Pinned original](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_io.py#L2815-L2824) |
+| `test.test_io.CTextIOWrapperTest.test_illegal_decoder` | 1 | A decoder can return bytes where a text stream requires strings, or supply invalid state. Reading must raise a catchable TypeError. The private codec flag lets the fixture reach these public read operations. [Pinned original](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_io.py#L3747-L3785) |
+| `test.test_io.CTextIOWrapperTest.test_illegal_encoder` | 1 | Writing text must raise TypeError if the codec returns an object the binary stream cannot accept. The test changes a private flag to reach the write operation. [Pinned original](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_io.py#L3739-L3745) |
+| `test.test_io.CTextIOWrapperTest.test_seek_and_tell` | 1 | A file opened with a registered stateful encoding must return the same text after seeking to a position saved by tell(). The test varies the buffer boundary and treats the saved position as opaque. [Pinned original](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_io.py#L3278-L3323) |
+| `test.test_io.PyTextIOWrapperTest.test_illegal_decoder` | 1 | A decoder can return bytes where a text stream requires strings, or supply invalid state. Reading must raise a catchable TypeError. The private codec flag lets the fixture reach these public read operations. [Pinned original](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_io.py#L3747-L3785) |
+| `test.test_io.PyTextIOWrapperTest.test_illegal_encoder` | 1 | Writing text must raise TypeError if the codec returns an object the binary stream cannot accept. The test changes a private flag to reach the write operation. [Pinned original](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_io.py#L3739-L3745) |
+| `test.test_io.PyTextIOWrapperTest.test_seek_and_tell` | 1 | A file opened with a registered stateful encoding must return the same text after seeking to a position saved by tell(). The test varies the buffer boundary and treats the saved position as opaque. [Pinned original](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_io.py#L3278-L3323) |
+
 ### `os`
 
 Stock passed the unchanged original. The native observations below come from separate filesystem controls. The unchanged native original has yet to run.
