@@ -2524,6 +2524,12 @@ impl IntrinsicModule {
             (Self::UrllibParse, "urldefrag") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.urldefrag")
             }
+            (Self::UrllibParse, "ParseResult") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.ParseResult")
+            }
+            (Self::UrllibParse, "ParseResultBytes") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.ParseResultBytes")
+            }
             (Self::UrllibParse, "DefragResult") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.DefragResult")
             }

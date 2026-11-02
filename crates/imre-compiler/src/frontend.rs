@@ -6306,6 +6306,9 @@ impl<'a> Checker<'a> {
                 Intrinsic::UrlSplit => {
                     return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
                 }
+                Intrinsic::SplitResult { .. } => {
+                    return Err(self.scoped_builtin_error("urllib.parse result class", expression));
+                }
                 Intrinsic::Chdir => {
                     return Err(self.scoped_builtin_error("posix.chdir", expression));
                 }
@@ -7577,6 +7580,13 @@ impl<'a> Checker<'a> {
                 if self.resolve(&attribute.value) == Some(Binding::Intrinsic(Intrinsic::StructTime))
                 {
                     return self.struct_time_class_field(attribute);
+                }
+                if matches!(
+                    (self.resolve(&attribute.value), attribute.attr.as_str()),
+                    (Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: false })), "_encoded_counterpart")
+                    | (Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: true })), "_decoded_counterpart")
+                ) {
+                    return Err(self.scoped_builtin_error("urllib.parse result counterpart", attribute));
                 }
                 if let Some((_, declaration)) = self.namedtuple_factory(&attribute.value) {
                     return self.namedtuple_class_attribute(attribute, &declaration);
@@ -10837,9 +10847,9 @@ impl<'a> Checker<'a> {
             {
                 (Builtin::HashType, Type::BuiltinClass)
             }
-            "id" if args.len() == 1
+            name @ ("type" | "id") if args.len() == 1
                 && self.types.is_url_split_result(args[0].ty)
-                && self.unshadowed_builtin(&call.func, "id") =>
+                && self.unshadowed_builtin(&call.func, name) =>
             {
                 return Err(self.scoped_builtin_error("urllib.parse.urlsplit result identity", call));
             }

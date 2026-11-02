@@ -9,11 +9,15 @@ from urllib.parse import unquote
 
 @functools.lru_cache(typed=True)
 def urlsplit(url, scheme='', allow_fragments=True):
-    return _imre_urlsplit(url, scheme, allow_fragments)
+    fields = _imre_urlsplit(url, scheme, allow_fragments)
+    result = SplitResult(*fields)
+    return result if isinstance(url, str) else result.encode('ascii', 'strict')
 
 
 def urlparse(url, scheme='', allow_fragments=True):
-    return _imre_urlparse(url, scheme, allow_fragments)
+    fields = _imre_urlparse(url, scheme, allow_fragments)
+    result = ParseResult(*fields)
+    return result if isinstance(url, str) else result.encode('ascii', 'strict')
 
 
 class _ResultMixinStr(object):
@@ -73,6 +77,64 @@ class DefragResultBytes(_DefragResultBase, _ResultMixinBytes):
 
 DefragResult._encoded_counterpart = DefragResultBytes
 DefragResultBytes._decoded_counterpart = DefragResult
+
+
+_SplitResultBase = namedtuple('_SplitResultBase', 'scheme netloc path query fragment')
+_ParseResultBase = namedtuple('_ParseResultBase', 'scheme netloc path params query fragment')
+
+
+class _NetlocResultMixinBase:
+    __slots__ = ()
+
+    @property
+    def username(self):
+        return _netloc_property(self.netloc, 'username')
+
+    @property
+    def password(self):
+        return _netloc_property(self.netloc, 'password')
+
+    @property
+    def hostname(self):
+        return _netloc_property(self.netloc, 'hostname')
+
+    @property
+    def port(self):
+        return _netloc_property(self.netloc, 'port')
+
+
+class SplitResult(_SplitResultBase, _NetlocResultMixinBase, _ResultMixinStr):
+    __slots__ = ()
+
+    def geturl(self):
+        return urlunsplit(self)
+
+
+class ParseResult(_ParseResultBase, _NetlocResultMixinBase, _ResultMixinStr):
+    __slots__ = ()
+
+    def geturl(self):
+        return urlunparse(self)
+
+
+class SplitResultBytes(_SplitResultBase, _NetlocResultMixinBase, _ResultMixinBytes):
+    __slots__ = ()
+
+    def geturl(self):
+        return urlunsplit(self)
+
+
+class ParseResultBytes(_ParseResultBase, _NetlocResultMixinBase, _ResultMixinBytes):
+    __slots__ = ()
+
+    def geturl(self):
+        return urlunparse(self)
+
+
+SplitResult._encoded_counterpart = SplitResultBytes
+SplitResultBytes._decoded_counterpart = SplitResult
+ParseResult._encoded_counterpart = ParseResultBytes
+ParseResultBytes._decoded_counterpart = ParseResult
 
 
 _WHATWG_C0_CONTROL_OR_SPACE = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f '

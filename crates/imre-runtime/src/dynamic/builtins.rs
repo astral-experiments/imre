@@ -518,14 +518,6 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "bytearray"
         }
-        Value::NamedTuple {
-            class: Some("SplitResult" | "SplitResultBytes"),
-            ..
-        } if attr == "geturl" => "urllib.parse.SplitResult",
-        Value::NamedTuple {
-            class: Some("ParseResult" | "ParseResultBytes"),
-            ..
-        } if attr == "geturl" => "urllib.parse.ParseResult",
         Value::Struct { .. } if matches!(attr, "pack" | "unpack") => "struct.Struct",
         Value::Hash(state)
             if crate::objects::HashState::is_provider_class(state.lock().class_name())
