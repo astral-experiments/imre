@@ -242,6 +242,19 @@ fn random_initialized(ctx: &Context, receiver: Id) -> bool {
         )
 }
 
+pub(super) fn check_capabilities(ctx: &mut Context, raw: Id, capabilities: &[&str]) -> Result<()> {
+    for &capability in capabilities {
+        let method = ctx.lookup_attr(raw, capability)?;
+        if ctx.call(method, vec![], Vec::new())? != TRUE {
+            return Err(Error::new(
+                "UnsupportedOperation",
+                format!("File or stream is not {capability}."),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Attach one buffered stream to a caller-owned native FileIO, without reopening its fd.
 pub(super) fn initialize(
     ctx: &mut Context,
@@ -282,18 +295,15 @@ pub(super) fn initialize(
     {
         return super::buffered_reader::initialize(ctx, receiver, raw, capacity);
     }
+    if owner == "BufferedRandom"
+        && super::buffered_reader::reinitialize_update(ctx, receiver, raw, capacity, capabilities)?
+    {
+        return Ok(NONE);
+    }
     if owner == "BufferedWriter" {
         invalidate_writer(ctx, receiver, None)?;
     }
-    for &capability in capabilities {
-        let method = ctx.lookup_attr(raw, capability)?;
-        if ctx.call(method, vec![], Vec::new())? != TRUE {
-            return Err(Error::new(
-                "UnsupportedOperation",
-                format!("File or stream is not {capability}."),
-            ));
-        }
-    }
+    check_capabilities(ctx, raw, capabilities)?;
     let mut revived = false;
     if owner == "BufferedWriter" {
         // A successful nested initialization in writable() can make methods usable during tell().
