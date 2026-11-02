@@ -760,6 +760,7 @@ pub(super) fn new_context<S: Into<String>>(
         modules: NONE,
         import_missing: NONE,
         bootstrap_globals: NONE,
+        bootstrap_module: NONE,
         import_registry_installed: false,
         bootstrap_file_spec: NONE,
         finder_external: NONE,
@@ -885,7 +886,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             1
         }
     };
-    ctx.workers.join_before_exit_callbacks();
+    super::thread_worker::shutdown(&mut ctx);
     atexit::run(&mut ctx);
     if let Err(error) = ctx.finalize_shutdown_resources() {
         super::unraisable::report(
@@ -1627,6 +1628,7 @@ impl Context {
                     self.modules,
                     self.import_missing,
                     self.bootstrap_globals,
+                    self.bootstrap_module,
                     self.bootstrap_file_spec,
                     self.finder_external,
                     self.default_encoding,

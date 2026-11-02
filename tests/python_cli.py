@@ -2302,6 +2302,22 @@ def report(text):
         compare("-IB", coroutine_fixture, native_args=("run", coroutine_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
+        compare(
+            "-I", "-c",
+            "import atexit, threading\n"
+            "seen = []\n"
+            "def register(value):\n"
+            "    def callback(*, suffix): seen.append(value + suffix)\n"
+            "    threading._register_atexit(callback, suffix='!')\n"
+            "register('first')\n"
+            "threading._register_atexit(seen.append, 'last')\n"
+            "def check():\n"
+            "    main = threading.main_thread()\n"
+            "    print(seen, main.is_alive(), 'stopped' in repr(main))\n"
+            "atexit.register(check)\n"
+            "threading._shutdown()\n"
+            "threading._shutdown()",
+        )
         for name in (
             "boxed_threading_deprecated_accessors.py",
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
