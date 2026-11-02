@@ -1801,17 +1801,14 @@ pub(super) fn call(
                 ctx.warn_bootstrap_loader(*globals, line, message, frozen)?;
                 return Ok(NONE);
             }
-            ("warn_debug_override", [source_globals], []) => {
-                if *source_globals == NONE {
-                    crate::objects::cache_paths::warn_debug_override()?;
-                } else {
-                    ctx.warn_bootstrap_loader(
-                        *source_globals,
-                        258,
-                        crate::objects::cache_paths::DEBUG_OVERRIDE_WARNING,
-                        false,
-                    )?;
-                }
+            ("warn_debug_override", [globals, frozen], []) => {
+                let frozen = ctx.truth(*frozen)?;
+                ctx.warn_bootstrap_loader(
+                    *globals,
+                    258,
+                    crate::objects::cache_paths::DEBUG_OVERRIDE_WARNING,
+                    frozen,
+                )?;
                 return Ok(NONE);
             }
             ("native_spec_info", [name, path, bundled], []) => {
