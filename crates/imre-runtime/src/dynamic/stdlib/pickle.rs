@@ -399,11 +399,23 @@ impl Pickler {
                 format!("object differs from {module}.{name}"),
             ));
         }
+        // Before STACK_GLOBAL, rebuild dotted names as getattr(getattr(outer, ...), ...).
+        let (global_name, suffix) = if self.protocol < 4 {
+            name.split_once('.').unwrap_or((&name, ""))
+        } else {
+            (name.as_str(), "")
+        };
+        let attributes = suffix.split_terminator('.');
+        for _ in attributes.clone() {
+            let getattr = ctx.builtin("getattr");
+            self.save(ctx, getattr)?;
+            encoding::tuple_start(&mut self.out, self.protocol, 2);
+        }
         encoding::global(
             &mut self.out,
             self.protocol,
             &module,
-            &name,
+            global_name,
             self.fix_imports,
         )
         .map_err(|e| {
@@ -413,6 +425,12 @@ impl Pickler {
                 e
             }
         })?;
+        for attribute in attributes {
+            let attribute = ctx.text(attribute);
+            self.save(ctx, attribute)?;
+            encoding::tuple_end(&mut self.out, self.protocol, 2);
+            self.out.push(b'R'); // REDUCE
+        }
         self.remember(ctx, obj)
     }
 
