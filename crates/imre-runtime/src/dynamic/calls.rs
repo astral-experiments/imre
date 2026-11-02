@@ -39,6 +39,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
     let (module, function) = symbol.split_once('.')?;
     match module {
+        "operator" if stdlib::operator::Operation::named(function).is_some() => {
+            Some(("_operator", function))
+        }
         "_typing" if function == "_idfunc" => Some((module, function)),
         "encodings" if function == "search_function" => Some((module, function)),
         "posix"
@@ -1685,6 +1688,7 @@ impl Context {
         original: Option<Id>,
     ) -> Result<Id> {
         let obj = self.weak_proxy_target(obj)?;
+        let obj = super::typing::generic_attr_target(self, obj, name, false)?;
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
             return self
                 .local_attribute(obj, super::thread_local::Name::from_lookup(name, original));
@@ -4612,6 +4616,7 @@ impl Context {
         value: Id,
     ) -> Result<()> {
         let obj = self.weak_proxy_target(obj)?;
+        let obj = super::typing::generic_attr_target(self, obj, name, true)?;
         if matches!(self.heap.get(obj), Value::DirEntry(_)) && matches!(name, "name" | "path") {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }

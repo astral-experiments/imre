@@ -212,6 +212,7 @@ impl Function<'_, '_> {
         let mut globals = Globals::default();
         globals.visit_body(suite);
         for name in globals.0 {
+            self.declared_globals.insert(name.to_owned());
             let name = self.code_name(name);
             self.op("declare_global", &[&self.scope.clone(), &name]);
         }
@@ -251,6 +252,7 @@ impl Function<'_, '_> {
                     let evaluator = self.define(
                         v.start(),
                         name.id.as_str(),
+                        false,
                         None,
                         None,
                         None,
@@ -308,12 +310,14 @@ impl Function<'_, '_> {
                                 self.source,
                                 String::new(),
                                 Body::AnnotationValue(&v.annotation),
+                                false,
                             );
                             let code = self.output.definition(
                                 self.source,
                                 String::new(),
                                 Body::AnnotationThunk(value.clone(), v.annotation.range()),
                                 v.annotation.start(),
+                                false,
                             );
                             self.remember_annotation(v, name.id.as_str(), &value);
                             let name = self.text("__annotate__");
@@ -359,6 +363,7 @@ impl Function<'_, '_> {
                     let function = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
+                        self.declared_globals.contains(v.name.as_str()),
                         Some(&v.parameters),
                         v.returns.as_deref(),
                         crate::dynamic::function_type_params(v).filter(|_| self.prefix.is_empty()),
@@ -402,6 +407,7 @@ impl Function<'_, '_> {
                     let init = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
+                        self.declared_globals.contains(v.name.as_str()),
                         None,
                         None,
                         None,
@@ -613,12 +619,17 @@ impl Function<'_, '_> {
         &mut self,
         start: TextSize,
         name: &str,
+        global: bool,
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
         type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> String {
-        let qualname = format!("{}{name}", self.prefix);
+        let qualname = if global {
+            name.to_owned()
+        } else {
+            format!("{}{name}", self.prefix)
+        };
         let prefix = if matches!(body, Body::Namespace(_)) {
             format!("{qualname}.")
         } else {
@@ -646,7 +657,7 @@ impl Function<'_, '_> {
                 if params.is_some_and(|p| p.kwarg.is_some()) {
                     flags |= VARKEYWORDS;
                 }
-                if type_params.is_some() || self.prefix.contains(".<locals>.") {
+                if type_params.is_some() || self.in_function {
                     flags |= NESTED;
                 }
                 if !self.prefix.is_empty() && !self.prefix.ends_with(".<locals>.") {
@@ -700,7 +711,7 @@ impl Function<'_, '_> {
             );
             use imre_ast::code_flags::*;
             let mut annotation_flags = OPTIMIZED | NEWLOCALS;
-            if type_params.is_some() || self.prefix.contains(".<locals>.") {
+            if type_params.is_some() || self.in_function {
                 annotation_flags |= NESTED;
             }
             if self.source.string_annotations {
@@ -725,6 +736,7 @@ impl Function<'_, '_> {
                 String::new(),
                 Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
+                false,
             );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
@@ -819,7 +831,10 @@ impl Function<'_, '_> {
             let value_format = self.integer(1);
             self.op("put", &[&defaults, &format, &value_format]);
         }
-        let code = self.output.definition(self.source, prefix, body, start);
+        let in_function = self.in_function || !matches!(body, Body::Namespace(_));
+        let code = self
+            .output
+            .definition(self.source, prefix, body, start, in_function);
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         let scalar = |expr: &ast::Expr| {

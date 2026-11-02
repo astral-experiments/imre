@@ -126,6 +126,7 @@ impl Function<'_, '_> {
             ast::Expr::Lambda(v) => self.define(
                 v.start(),
                 "<lambda>",
+                false,
                 v.parameters.as_deref(),
                 None,
                 None,
@@ -157,6 +158,7 @@ impl Function<'_, '_> {
                 let step = self.define(
                     v.start(),
                     "<genexpr>",
+                    false,
                     None,
                     None,
                     None,
