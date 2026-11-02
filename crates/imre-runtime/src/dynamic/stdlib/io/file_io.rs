@@ -290,28 +290,29 @@ pub(in crate::dynamic) fn open(
         let raw_mode = mode_text.replace('t', "");
         return open_raw(ctx, raw_arg, raw_mode, binary, owns);
     }
-    let text_output = !binary && !mode_text.contains('+') && mode_text.contains(['w', 'a', 'x']);
+    let update = mode_text.contains('+');
+    let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
     let text_input_with_newline =
         buffering < 0 && newline.is_some() && matches!(mode_text, "r" | "rt" | "tr");
-    let text_update = !binary && mode_text.contains('+');
     let binary_bytes_path = binary
         && buffering < 0
-        && !mode_text.contains('+')
+        && !update
         && !numeric
         && matches!(ctx.heap.get(ctx.scalar_value(raw_arg)), Value::Bytes(_));
+    if binary && update && buffering == 1 {
+        ctx.emit_builtin_warning(
+            crate::objects::exceptions::Kind::RuntimeWarning,
+            "line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used",
+            1,
+        )?;
+    }
     let fd = descriptor_from_argument(ctx, raw_arg);
-    let named_text_update = text_update && fd.is_none();
-    if fd.is_some()
-        || text_output
-        || text_input_with_newline
-        || binary_bytes_path
-        || named_text_update
-    {
+    if fd.is_some() || text_output || text_input_with_newline || binary_bytes_path || update {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
         let mode_text = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
-        if fd.is_some() && mode_text.contains('+') {
+        if fd.is_some() && update && !binary {
             return Err(Error::new(
                 "NotImplementedError",
                 "buffered update descriptors are unsupported",
@@ -319,7 +320,7 @@ pub(in crate::dynamic) fn open(
         }
         let reading = mode_text.contains('r');
         let raw_mode = mode_text.replace('t', "");
-        if buffering > 0 && !named_text_update {
+        if buffering > 0 && !update {
             return Err(Error::new(
                 "ValueError",
                 "explicit buffer sizes are unsupported",
@@ -338,7 +339,7 @@ pub(in crate::dynamic) fn open(
             None,
         )?;
         let handle = state(ctx, raw).expect("initialized FileIO");
-        let buffer = if named_text_update {
+        let buffer = if update {
             let capacity = if buffering > 1 {
                 buffering as usize
             } else {
