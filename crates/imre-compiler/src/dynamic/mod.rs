@@ -110,6 +110,8 @@ impl Imports {
                     | "atexit"
                     | "json"
                     | "json.encoder"
+                    | "opcode"
+                    | "_opcode_metadata"
                     | "sysconfig"
                     | "platform"
                     | "keyword"
@@ -452,8 +454,8 @@ pub(crate) fn compile(
             "keyword",
             "site",
             "importlib",
-            "_opcode",
             "json",
+            "opcode",
             "operator",
             "struct",
             "traceback",
@@ -709,10 +711,11 @@ pub(crate) fn compile(
         Path::new(bundled_root).join("io.py"),
         include_str!("../../stdlib/io.py").into(),
     ));
-    // The fixed list has only native dependencies and may be selected by name at runtime.
+    // These modules and their dependencies must be available when selected by name at runtime.
     for name in [
         "__future__",
         "__hello__",
+        "_opcode_metadata",
         "_tokenize",
         "abc",
         "annotationlib",
@@ -727,6 +730,7 @@ pub(crate) fn compile(
         "json.decoder",
         "json.encoder",
         "json.scanner",
+        "opcode",
         "platform",
         "re",
         "signal",
