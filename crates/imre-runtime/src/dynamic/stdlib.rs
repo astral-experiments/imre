@@ -46,6 +46,8 @@ mod posixpath;
 mod random;
 pub(super) mod readiness;
 pub(super) mod regex;
+#[cfg(target_os = "linux")]
+mod resource;
 mod select;
 #[cfg(target_os = "linux")]
 pub(super) mod signal;
@@ -86,6 +88,7 @@ pub(super) fn is_module(name: &str) -> bool {
 pub(super) fn has_lazy_attributes(name: &str) -> bool {
     if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport")
         || cfg!(all(unix, not(target_os = "linux"))) && name == "_signal"
+        || cfg!(target_os = "linux") && name == "resource"
     {
         return true;
     }
@@ -532,6 +535,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("hashlib", "algorithms_available" | "algorithms_guaranteed") => {
             return hashlib::algorithms(ctx);
         }
+        #[cfg(target_os = "linux")]
+        ("resource", "getrlimit") => ctx.builtin("resource.getrlimit"),
+        #[cfg(target_os = "linux")]
+        ("resource", "RLIMIT_STACK") => ctx.int(i64::from(libc::RLIMIT_STACK)),
+        #[cfg(target_os = "linux")]
+        ("resource", "RLIM_INFINITY") => resource::limit(ctx, resource::INFINITY),
         ("secrets", "choice") => ctx.builtin("secrets.choice"),
         ("select", "select" | "poll") => ctx.builtin(&format!("select.{name}")),
         ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
@@ -1205,6 +1214,10 @@ pub(super) fn call(
             // As in typed SysJitPredicate, Imre compiles before the process starts.
             _ => FALSE,
         });
+    }
+    #[cfg(target_os = "linux")]
+    if name == "resource.getrlimit" {
+        return resource::getrlimit(ctx, args, kwargs);
     }
     if name == "random.random" {
         if !kwargs.is_empty() {
