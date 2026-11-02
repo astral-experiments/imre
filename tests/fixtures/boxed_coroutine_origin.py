@@ -31,6 +31,24 @@ def dotted(producer):
         .produce()
     )
 
+class Cleanup:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        coro = target()
+        origin = coro.cr_origin[1]
+        coro.close()
+        assert origin[1:] == (exit_origin.__code__.co_firstlineno + 1, "exit_origin"), origin
+
+
+def exit_origin(divisor):
+    with Cleanup():
+        int(
+            1 / divisor
+        )
+
+
 class Payload: pass
 
 def with_payload():
@@ -75,6 +93,8 @@ def current():
         class Index:
             def __index__(self): return 2
         assert set_depth(Index()) is None and get() == 2
+        exit_origin(1)
+        expect(ZeroDivisionError, "division by zero", lambda: exit_origin(0))
         two = outer()
         expected_two = expected_one + ((file, outer.__code__.co_firstlineno + 2, "outer"),)
         stored = two.cr_origin

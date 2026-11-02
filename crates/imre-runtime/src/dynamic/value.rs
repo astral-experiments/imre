@@ -3585,7 +3585,7 @@ impl Heap {
         self.set_statement_line(line);
     }
 
-    /// A match statement can execute separate pattern and guard expressions in one step.
+    /// Update the current source line without crossing a statement boundary.
     pub(super) fn set_statement_line(&mut self, line: u32) {
         let frame = self.frames.last_mut().unwrap();
         frame
