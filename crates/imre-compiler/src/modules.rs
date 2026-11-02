@@ -1150,6 +1150,7 @@ impl IntrinsicModule {
             (Self::Logging, "INFO") => Intrinsic::LogLevel(20),
             (Self::Abc, "ABC") => Intrinsic::Abc,
             (Self::Abc, "ABCMeta") => Intrinsic::AbcMeta,
+            (Self::Abc, "get_cache_token") => Intrinsic::ObjectRuntimeExport("abc.get_cache_token"),
             (Self::Abc, "abstractmethod") => Intrinsic::AbstractMethod,
             (Self::Asyncio, "create_subprocess_exec") => Intrinsic::CreateSubprocessExec,
             (Self::Asyncio, "run") => Intrinsic::RunLoop,
