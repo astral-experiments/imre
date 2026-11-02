@@ -145,6 +145,21 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
         if not isinstance(explicit, Signature):
             raise TypeError(f"unexpected object {explicit!r} in __signature__ attribute")
         return explicit
+    partialmethod = getattr(obj, "__partialmethod__", None)
+    if isinstance(partialmethod, functools.partialmethod):
+        wrapped = _signature_from_callable(
+            partialmethod.func, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
+            globals=globals, locals=locals, eval_str=eval_str,
+            annotation_format=annotation_format)
+        # Reserve the receiver while binding the partial arguments, then restore it
+        # in the signature of the unbound method.
+        sig = _signature_get_partial(wrapped, partialmethod, (None,))
+        receiver = tuple(wrapped.parameters.values())[0]
+        if receiver.kind is Parameter.VAR_POSITIONAL:
+            return sig
+        if partialmethod.args.count(functools.Placeholder):
+            receiver = receiver.replace(kind=Parameter.POSITIONAL_ONLY)
+        return sig.replace(parameters=(receiver,) + tuple(sig.parameters.values()))
     if isinstance(obj, functools.partial):
         wrapped = _signature_from_callable(
             obj.func, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
