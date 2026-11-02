@@ -267,6 +267,8 @@ impl Context {
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
+            ("types.GenericAlias", Value::GenericAlias(alias)) => alias.is_builtin_alias(),
+            ("generic_alias_iterator", Value::GenericAliasIterator(_)) => true,
             ("builtin_function_or_method", _) => {
                 self.builtin_type_name(object) == Some("builtin_function_or_method")
             }
