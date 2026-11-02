@@ -553,10 +553,10 @@ pub(crate) fn compile(
         .iter()
         .any(|name| src.contains(name));
     // Python normalizes non-ASCII identifiers, including imported module names.
-    let logging_hint = startup.is_some()
+    let provider_hint = startup.is_some()
         && !options.runtime_imports
-        && (src.contains("logging") || !src.is_ascii());
-    if !object_hint && !logging_hint {
+        && (src.contains("logging") || src.contains("tokenize") || !src.is_ascii());
+    if !object_hint && !provider_hint {
         return Ok(None);
     }
     let Ok(mut first) = imports(
@@ -590,12 +590,13 @@ pub(crate) fn compile(
             || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
             || provider_script);
     // Existing object imports keep their normal project-module lookup. Only a new
-    // startup fallback needs to verify that the imported logging package is bundled.
-    let logging_script = !object_entry && logging_hint && first.imports_logging;
-    if !object_entry && !logging_script {
+    // startup fallback needs to verify that the imported provider is bundled.
+    let logging_script = !object_entry && provider_hint && first.imports_logging;
+    let tokenize_script = !object_entry && imports_provider("tokenize");
+    if !object_entry && !logging_script && !tokenize_script {
         return Ok(None);
     }
-    let provider_script = provider_script || logging_script;
+    let provider_script = provider_script || logging_script || tokenize_script;
     if let Some(name) = module_entry {
         first.add(0, "runpy");
         // Register source candidates without interpreting a module operand as a filesystem path.
@@ -841,7 +842,8 @@ pub(crate) fn compile(
                         && ((request_script && prefix == "urllib")
                             || (ftp_script && prefix == "ftplib")
                             || (argparse_script && prefix == "argparse")
-                            || (logging_script && prefix == "logging"))
+                            || (logging_script && prefix == "logging")
+                            || (tokenize_script && prefix == "tokenize"))
                     {
                         return Ok(None);
                     }
