@@ -664,6 +664,7 @@ pub(super) fn new_context<S: Into<String>>(
         buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
+        repr_sequence_words: None,
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,

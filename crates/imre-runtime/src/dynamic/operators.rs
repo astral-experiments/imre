@@ -1125,7 +1125,7 @@ impl Context {
             RenderRoot::Object(id),
             false,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
@@ -1159,7 +1159,7 @@ impl Context {
             RenderRoot::Object(id),
             true,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception repr() failed>".to_owned())
     }
@@ -1251,7 +1251,9 @@ impl Context {
             root,
             quoted,
             true,
-            |ctx, id, quoted, work, ancestors| ctx.element_format(id, quoted, work, ancestors),
+            |ctx, id, quoted, work, ancestors, remaining| {
+                ctx.element_format(id, quoted, work, ancestors, remaining)
+            },
         )
     }
 
@@ -1345,6 +1347,7 @@ impl Context {
         quoted: bool,
         work: &mut [FormatPart],
         ancestors: &[Id],
+        sequence_words: Option<usize>,
     ) -> Result<Option<String>> {
         if self.format_slot(id, "__repr__").is_none()
             && (quoted || self.format_slot(id, "__str__").is_none())
@@ -1363,11 +1366,13 @@ impl Context {
             part.keep_alive(&mut self.heap);
         }
         self.repr_ancestors.extend_from_slice(ancestors);
+        let previous = std::mem::replace(&mut self.repr_sequence_words, sequence_words);
         let converted = if quoted {
             self.repr_override(id)
         } else {
             builtins::call(self, "str", &[id], &[]).map(Some)
         };
+        self.repr_sequence_words = previous;
         let result = converted.and_then(|value| {
             value
                 .map(|s| {
@@ -1525,6 +1530,7 @@ impl Context {
             bool,
             &mut [FormatPart],
             &[Id],
+            Option<usize>,
         ) -> Result<Option<String>>,
     ) -> Result<String> {
         use FormatPart as Part;
@@ -1608,17 +1614,13 @@ impl Context {
             .flatten()
             .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS));
         let slice_budget = stack_words.map(|words| words / SLICE_FRAME_WORDS);
-        // A Python repr hook can start another renderer while its caller's
-        // container frames are suspended on this iterative worklist.
-        let sequence_stack_words = stack_words.map(|budget| {
-            ctx.repr_ancestors.iter().fold(budget, |remaining, &id| {
-                remaining.saturating_sub(match ctx.heap.get(id) {
-                    Value::Deque(_) => SEQUENCE_FRAME_WORDS + EXTRA_DEQUE_FRAME_WORDS,
-                    Value::List(_) | Value::Tuple(_) => SEQUENCE_FRAME_WORDS,
-                    _ => 0,
-                })
-            })
-        });
+        // A Python callback may run on a new stack segment. Its renderer
+        // still shares the logical space left by the suspended containers.
+        let sequence_stack_words = if checked {
+            stack_words.into_iter().chain(ctx.repr_sequence_words).min()
+        } else {
+            None
+        };
         let mut extra_deque_words = 0usize;
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
@@ -1629,6 +1631,9 @@ impl Context {
         let mut type_words = 0usize;
         let mut typing_frames = 0usize;
         while let Some(part) = work.pop() {
+            let remaining_sequence_words = sequence_stack_words.map(|limit| {
+                limit.saturating_sub(active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words)
+            });
             match part {
                 Part::Closing(count) => close_parens(&mut output, count)?,
                 Part::Text(text) => append_rendered_text(&mut output, text)?,
@@ -1788,7 +1793,14 @@ impl Context {
                     }
                 }
                 Part::SyntaxMessage(id) => {
-                    if let Some(text) = element_repr(&mut ctx, id, false, &mut work, &active)? {
+                    if let Some(text) = element_repr(
+                        &mut ctx,
+                        id,
+                        false,
+                        &mut work,
+                        &active,
+                        remaining_sequence_words,
+                    )? {
                         append_rendered_text(&mut output, &text)?;
                     } else if let Some(storage) = ctx.string_storage(id) {
                         append_rendered_text(&mut output, ctx.str_value(storage)?)?;
@@ -1809,7 +1821,14 @@ impl Context {
                     if checked
                         && repr
                         && native_storage.is_none()
-                        && let Some(text) = element_repr(&mut ctx, id, true, &mut work, &active)?
+                        && let Some(text) = element_repr(
+                            &mut ctx,
+                            id,
+                            true,
+                            &mut work,
+                            &active,
+                            remaining_sequence_words,
+                        )?
                     {
                         append_rendered_text(&mut output, &text)?;
                         continue;
@@ -2216,9 +2235,7 @@ impl Context {
                     if matches!(
                         ctx.heap.get(storage),
                         Value::List(_) | Value::Tuple(_) | Value::Deque(_)
-                    ) && sequence_stack_words.is_some_and(|limit| {
-                        active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words >= limit
-                    })
+                    ) && remaining_sequence_words == Some(0)
                     {
                         return Err(Error::new(
                             "RecursionError",
@@ -2265,7 +2282,7 @@ impl Context {
             RenderRoot::Exception(error),
             false,
             false,
-            |_, _, _, _, _| Ok(None),
+            |_, _, _, _, _, _| Ok(None),
         )
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
@@ -2530,7 +2547,7 @@ impl Context {
                 RenderRoot::Exception(error),
                 repr,
                 false,
-                |_, _, _, _, _| Ok(None),
+                |_, _, _, _, _, _| Ok(None),
             )
             .unwrap_or_else(|_| {
                 if repr {
