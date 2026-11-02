@@ -142,6 +142,19 @@ impl Context {
 
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
+            "template_interpolation" => {
+                let (Value::List(meta) | Value::Tuple(meta)) = self.heap.get(c) else {
+                    unreachable!("compiled interpolation metadata");
+                };
+                let &[conversion, spec] = meta.as_slice() else {
+                    unreachable!("compiled interpolation metadata length");
+                };
+                self.template_interpolation(a, b, conversion, spec)
+            }
+            "template_literal" => {
+                let parts = self.items(a)?;
+                self.template_literal(&parts)
+            }
             "match_class" => self.match_class(a, b, c),
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),

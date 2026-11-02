@@ -1898,6 +1898,32 @@ impl Context {
                             }
                             continue;
                         }
+                        Value::Template {
+                            strings,
+                            interpolations,
+                        } => {
+                            append_rendered_text(&mut output, "Template(strings=")?;
+                            push_frame(&mut work, Part::Text(")"))?;
+                            push_frame(&mut work, Part::Value(*interpolations, true))?;
+                            push_frame(&mut work, Part::Text(", interpolations="))?;
+                            push_frame(&mut work, Part::Value(*strings, true))?;
+                            continue;
+                        }
+                        Value::Interpolation {
+                            value,
+                            expression,
+                            conversion,
+                            format_spec,
+                        } => {
+                            append_rendered_text(&mut output, "Interpolation(")?;
+                            push_frame(&mut work, Part::Text(")"))?;
+                            for field in [*format_spec, *conversion, *expression] {
+                                push_frame(&mut work, Part::Value(field, true))?;
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                            push_frame(&mut work, Part::Value(*value, true))?;
+                            continue;
+                        }
                         Value::Slice(_) => {
                             if slice_budget.is_some_and(|limit| slice_depth >= limit) {
                                 return Err(Error::new(
@@ -2228,6 +2254,10 @@ impl Context {
                     self.format_value(*variable, true, active)
                 )
             }
+            Value::Template { .. } | Value::Interpolation { .. } => self.repr(id),
+            Value::TemplateIter { .. } => {
+                format!("<{} object at {id:#x}>", super::value::TEMPLATE_ITER_TYPE)
+            }
             Value::Scandir(scan) => super::stdlib::os::scandir::iterator_repr(scan),
             Value::DirEntry(entry) => {
                 format!("<DirEntry {}>", self.format_value(entry.name, true, active))
@@ -2380,7 +2410,8 @@ impl Context {
                 format!("{variance}{}", self.display(var.name))
             }
             Value::GetSetDescriptor { owner, name, .. }
-                if crate::objects::HashState::is_provider_class(owner) =>
+                if crate::objects::HashState::is_provider_class(owner)
+                    || *owner == super::value::TEMPLATE_TYPE =>
             {
                 format!("<attribute '{name}' of '{owner}' objects>")
             }
@@ -3356,6 +3387,49 @@ impl Context {
         Ok(self.alloc(Value::List(items)))
     }
 
+    /// Join the boundary strings and preserve the existing interpolation objects.
+    fn concat_template(&mut self, left: Id, right: Id) -> Result<Id> {
+        let Value::Template {
+            strings: left_strings,
+            interpolations: left_interpolations,
+        } = *self.heap.get(left)
+        else {
+            unreachable!("template addition")
+        };
+        let Value::Template {
+            strings: right_strings,
+            interpolations: right_interpolations,
+        } = *self.heap.get(right)
+        else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "can only concatenate string.templatelib.Template (not \"{}\") to string.templatelib.Template",
+                    self.type_name(right)
+                ),
+            ));
+        };
+        let (Value::Tuple(left), Value::Tuple(right)) =
+            (self.heap.get(left_strings), self.heap.get(right_strings))
+        else {
+            unreachable!("template string tuples")
+        };
+        let boundary = left.len() - 1;
+        let mut strings = concat_ids(left, &right[1..])?;
+        let (last, first) = (strings[boundary], right[0]);
+        strings[boundary] = match (self.heap.get(last), self.heap.get(first)) {
+            (Value::Str(s), Value::Str(_) | Value::SurrogateStr(_)) if s.is_empty() => first,
+            (Value::Str(_) | Value::SurrogateStr(_), Value::Str(s)) if s.is_empty() => last,
+            _ => self.concat_strings(last, first)?,
+        };
+        let interpolations = self.binary("+", left_interpolations, right_interpolations)?;
+        let strings = self.alloc(Value::Tuple(strings));
+        Ok(self.alloc(Value::Template {
+            strings,
+            interpolations,
+        }))
+    }
+
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
         self.binary_operation(op, a, b, false)
     }
@@ -3486,6 +3560,9 @@ impl Context {
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
             "<" | "<=" | ">" | ">=" => return self.order(op, a, b),
+            "+" if matches!(self.heap.get(a), Value::Template { .. }) => {
+                return self.concat_template(a, b);
+            }
             "+" | "-"
                 if matches!(self.heap.get(a), Value::Complex(_))
                     || matches!(self.heap.get(b), Value::Complex(_)) =>

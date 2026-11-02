@@ -960,6 +960,9 @@ impl Context {
                             | stdlib::os::scandir::ENTRY
                             | stdlib::os::scandir::ITER
                             | super::thread_lock::CLASS
+                            | value::TEMPLATE_TYPE
+                            | value::TEMPLATE_ITER_TYPE
+                            | value::INTERPOLATION_TYPE
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
@@ -1150,6 +1153,9 @@ impl Context {
             | (stdlib::os::scandir::ENTRY, Value::DirEntry(_))
             | (stdlib::os::scandir::ITER, Value::Scandir(_))
             | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
+            | (value::TEMPLATE_TYPE, Value::Template { .. })
+            | (value::TEMPLATE_ITER_TYPE, Value::TemplateIter { .. })
+            | (value::INTERPOLATION_TYPE, Value::Interpolation { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
                 qualified,
@@ -2047,7 +2053,8 @@ impl Context {
             }
             Value::GetSetDescriptor {
                 owner, name: field, ..
-            } if HashState::is_provider_class(owner) => match name {
+            } if HashState::is_provider_class(owner) || owner == value::TEMPLATE_TYPE => match name
+            {
                 "__objclass__" => return Ok(self.builtin(owner)),
                 "__name__" => return Ok(self.text(field)),
                 "__qualname__" => {
@@ -2173,6 +2180,28 @@ impl Context {
                 "__module__" => return Ok(self.text("datetime")),
                 _ => {}
             },
+            Value::Template { strings, .. } if name == "strings" => return Ok(strings),
+            Value::Template { interpolations, .. } if name == "interpolations" => {
+                return Ok(interpolations);
+            }
+            Value::Template { interpolations, .. } if name == "values" => {
+                return self.template_values(interpolations);
+            }
+            Value::Interpolation { value, .. } if name == "value" => return Ok(value),
+            Value::Interpolation { expression, .. } if name == "expression" => {
+                return Ok(expression);
+            }
+            Value::Interpolation { conversion, .. } if name == "conversion" => {
+                return Ok(conversion);
+            }
+            Value::Interpolation { format_spec, .. } if name == "format_spec" => {
+                return Ok(format_spec);
+            }
+            Value::Native(ref class) if let Some(class) = super::templatelib::class_name(class) => {
+                if let Some(attr) = self.template_class_attr(class, name) {
+                    return Ok(attr);
+                }
+            }
             Value::DirEntry(ref entry) if name == "name" => return Ok(entry.name),
             Value::DirEntry(ref entry) if name == "path" => return Ok(entry.path),
             Value::Native(ref class)
@@ -2917,6 +2946,7 @@ impl Context {
 
     /// Bypass the object's deletion hook, while honoring data descriptors on its class.
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+        self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         self.check_thread_reporting_binding(obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
@@ -3444,6 +3474,7 @@ impl Context {
     }
 
     pub(super) fn default_set_attr(&mut self, obj: Id, name: &str, value: Id) -> Result<()> {
+        self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
             && (HashState::is_provider_class(class)

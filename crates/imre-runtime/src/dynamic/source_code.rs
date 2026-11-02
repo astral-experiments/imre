@@ -25,6 +25,7 @@ pub(super) struct Program {
     reads: BTreeSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
     private_names: Option<Rc<imre_ast::Names>>,
+    template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
     instructions: Vec<(u32, Instruction)>,
 }
 
@@ -516,6 +517,7 @@ impl Program {
             reads: BTreeSet::new(),
             method_imports: Rc::default(),
             private_names: None,
+            template_expressions: Rc::default(),
             instructions: Vec::new(),
         }
     }
@@ -565,6 +567,7 @@ impl Program {
         }
         child.method_imports = self.method_imports.clone();
         child.private_names = self.private_names.clone();
+        child.template_expressions = self.template_expressions.clone();
         child.first_line = decorators.first().map_or(line, |d| {
             lines.partition_point(|n| *n <= d.start().to_usize()) as u32
         });
@@ -1069,6 +1072,11 @@ impl Context {
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut code = Program::new(Rc::from(filename), "<module>");
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
+        code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
+            &source,
+            parsed.tokens(),
+            &parsed.syntax().body,
+        ));
         code.lower(parsed.into_syntax().body, &lines, false, None)?;
         code.prepare_strings(&mut self.heap, &mut HashMap::new())?;
         Ok(self.box_source_code(Rc::new(code), None))
@@ -1583,6 +1591,8 @@ impl Context {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| Error::new("SyntaxError", err.to_string()))?;
         check_runtime_strings(source, parsed.tokens())?;
+        let template_expressions =
+            imre_ast::strings::template_expressions(source, parsed.tokens(), &parsed.syntax().body);
         let mut syntax = parsed.into_syntax();
         let [ast::Stmt::FunctionDef(def)] = syntax.body.as_mut_slice() else {
             return Err(Error::new("SystemError", "invalid generator body"));
@@ -1605,6 +1615,7 @@ impl Context {
             self.str_value(code.name)?,
         );
         program.method_imports = Rc::new(signature.method_imports);
+        program.template_expressions = Rc::new(template_expressions);
         program.private_names = private_names;
         program.first_line = code.first_line;
         program.generator = true;
@@ -2677,6 +2688,33 @@ impl Context {
                 self.lookup(scope, name)
             }
             Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
+            Expr::TString(template) => {
+                let mut parts = Vec::new();
+                for element in template.value.elements() {
+                    let part = match element {
+                        ast::InterpolatedStringElement::Literal(lit) => self.text(&*lit.value),
+                        ast::InterpolatedStringElement::Interpolation(field) => {
+                            let spec = imre_ast::strings::template_format_spec(field)
+                                .map_err(unsupported)?;
+                            let spelling = code
+                                .template_expressions
+                                .get(&field.start())
+                                .ok_or_else(|| unsupported("t-string expression spelling"))?;
+                            let value = eval(self, &field.expression)?;
+                            let expression = self.text(spelling);
+                            let conversion = field
+                                .conversion
+                                .to_char()
+                                .map_or(NONE, |c| self.text(c.to_string()));
+                            let spec = self.text(spec.map_or("", |lit| &*lit.value));
+                            self.template_interpolation(value, expression, conversion, spec)?
+                        }
+                    };
+                    self.heap.keep(part);
+                    parts.push(part);
+                }
+                self.template_literal(&parts)
+            }
             Expr::NoneLiteral(_) => Ok(NONE),
             Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
             Expr::NumberLiteral(v) => {

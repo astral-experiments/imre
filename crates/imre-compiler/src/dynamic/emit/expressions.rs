@@ -127,6 +127,7 @@ impl Function<'_, '_> {
                 None,
                 Body::Expression(&v.body),
             ),
+            ast::Expr::TString(v) => self.template(&v.value),
             ast::Expr::FString(v) => {
                 let mut parts = Vec::new();
                 for part in v.value.iter() {
@@ -374,6 +375,39 @@ impl Function<'_, '_> {
             }
         }
         kwargs
+    }
+
+    /// Capture values once, leaving conversion and formatting to the template consumer.
+    fn template(&mut self, template: &ast::TStringValue) -> String {
+        let parts = self.op("list", &[]);
+        for element in template.elements() {
+            let part = match element {
+                ast::InterpolatedStringElement::Literal(lit) => self.format_literal(lit),
+                ast::InterpolatedStringElement::Interpolation(field) => {
+                    let spec = match imre_ast::strings::template_format_spec(field) {
+                        Ok(Some(lit)) => self.format_literal(lit),
+                        Ok(None) => self.text(""),
+                        Err(reason) => return self.unsupported(reason),
+                    };
+                    let Some(spelling) = self.source.template_expressions.get(&field.start())
+                    else {
+                        return self.unsupported("t-string expression spelling");
+                    };
+                    let expression = self.text(spelling);
+                    let value = self.expr(&field.expression);
+                    let conversion = field
+                        .conversion
+                        .to_char()
+                        .map_or_else(|| "0".to_owned(), |c| self.text(&c.to_string()));
+                    let metadata = self.op("list", &[]);
+                    self.op("append", &[&metadata, &conversion]);
+                    self.op("append", &[&metadata, &spec]);
+                    self.op("template_interpolation", &[&value, &expression, &metadata])
+                }
+            };
+            self.op("append", &[&parts, &part]);
+        }
+        self.op("template_literal", &[&parts])
     }
 
     /// Evaluate the fields and their conversions in source order before joining their text.

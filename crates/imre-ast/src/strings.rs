@@ -1,13 +1,17 @@
-//! Source locations for decoded string values outside Rust's Unicode scalar domain.
+//! Recover string spellings and code points that the decoded AST does not retain.
 use ruff_python_ast::{
-    StringFlags,
-    token::{Token, TokenKind},
+    self as ast, StringFlags,
+    token::{Token, TokenKind, Tokens},
 };
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
+use std::collections::HashMap;
 
 /// Raw and byte literals have no cooked Unicode escapes.
 pub fn cooked_content(token: &Token) -> Option<TextRange> {
-    if !matches!(token.kind(), TokenKind::String | TokenKind::FStringMiddle) {
+    if !matches!(
+        token.kind(),
+        TokenKind::String | TokenKind::FStringMiddle | TokenKind::TStringMiddle
+    ) {
         return None;
     }
     let flags = token.unwrap_string_flags();
@@ -54,4 +58,91 @@ pub fn replacements(source: &str) -> impl Iterator<Item = u32> + '_ {
             }
         }
     })
+}
+
+/// CPython keeps the original expression spelling, including leading whitespace
+/// and enclosing parentheses. Commented expressions require a separate tokenizer
+/// transformation and are left unsupported.
+pub fn template_expressions(
+    source: &str,
+    tokens: &Tokens,
+    body: &[ast::Stmt],
+) -> HashMap<TextSize, String> {
+    use ast::visitor::{self, Visitor};
+    struct Fields<'a> {
+        source: &'a str,
+        tokens: &'a Tokens,
+        expressions: HashMap<TextSize, String>,
+    }
+    impl<'a> Visitor<'a> for Fields<'_> {
+        fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                visitor::walk_expr(self, expr)
+            });
+        }
+
+        fn visit_t_string(&mut self, template: &'a ast::TString) {
+            for field in template.elements.interpolations() {
+                // Ruff's expression range omits redundant outer parentheses. End
+                // at the field delimiter to retain both those and explicit line joins.
+                let Some(delimiter) = self
+                    .tokens
+                    .after(field.expression.end())
+                    .iter()
+                    .find(|t| !t.kind().is_trivia() && t.kind() != TokenKind::Rpar)
+                else {
+                    continue;
+                };
+                if !matches!(
+                    delimiter.kind(),
+                    TokenKind::Equal
+                        | TokenKind::Exclamation
+                        | TokenKind::Colon
+                        | TokenKind::Rbrace
+                ) {
+                    continue;
+                }
+                let range = TextRange::new(field.start() + TextSize::new(1), delimiter.start());
+                if self
+                    .tokens
+                    .in_range(range)
+                    .iter()
+                    .any(|t| t.kind() == TokenKind::Comment)
+                {
+                    continue;
+                }
+                let spelling = self.source[range].trim_end();
+                let expression = if spelling.contains('\r') {
+                    spelling.replace("\r\n", "\n").replace('\r', "\n")
+                } else {
+                    spelling.to_owned()
+                };
+                self.expressions.insert(field.start(), expression);
+            }
+            visitor::walk_t_string(self, template);
+        }
+    }
+    let mut fields = Fields {
+        source,
+        tokens,
+        expressions: HashMap::new(),
+    };
+    if tokens.iter().any(|t| t.kind() == TokenKind::TStringStart) {
+        fields.visit_body(body);
+    }
+    fields.expressions
+}
+
+/// Limit the field metadata to forms supported by both native evaluators.
+pub fn template_format_spec(
+    field: &ast::InterpolatedElement,
+) -> Result<Option<&ast::InterpolatedStringLiteralElement>, &'static str> {
+    if field.debug_text.is_some() {
+        return Err("debug t-string interpolation");
+    }
+    match field.format_spec.as_deref().map(|spec| &spec.elements[..]) {
+        None | Some([]) => Ok(None),
+        Some([ast::InterpolatedStringElement::Literal(literal)]) => Ok(Some(literal)),
+        _ => Err("nested t-string format spec"),
+    }
 }

@@ -63,10 +63,13 @@ pub(crate) fn emit(
         };
         let name = output.data(name.as_bytes());
         let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
+        let template_expressions =
+            imre_ast::strings::template_expressions(source, parsed.tokens(), &parsed.syntax().body);
         let mut body = parsed.into_syntax().body;
         let method_imports = imre_ast::module_imports(&body);
         let private_names = imre_ast::lower(&mut body);
         let location = SourceMap {
+            template_expressions,
             replacements,
             method_imports,
             barry_as_flufl: body.iter().any(|stmt| {
@@ -111,6 +114,7 @@ enum Body<'a> {
 }
 
 struct SourceMap<'a> {
+    template_expressions: HashMap<ruff_text_size::TextSize, String>,
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,

@@ -52,6 +52,10 @@ pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 
+pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
+pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
+pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Location {
     pub file: std::borrow::Cow<'static, str>,
@@ -601,6 +605,21 @@ pub(super) enum Value {
     DirEntry(super::stdlib::os::scandir::Entry),
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Slice([Id; 3]),
+    Template {
+        strings: Id,
+        interpolations: Id,
+    },
+    TemplateIter {
+        strings: Id,
+        interpolations: Id,
+        from_strings: bool,
+    },
+    Interpolation {
+        value: Id,
+        expression: Id,
+        conversion: Id,
+        format_spec: Id,
+    },
     Range(super::range::Range),
     RangeIterator(super::range::Cursor),
     Str(String),
@@ -920,6 +939,9 @@ impl Value {
             Self::CallableIterator(_) => "callable_iterator",
             Self::Tuple(_) => "tuple",
             Self::Slice(_) => "slice",
+            Self::Template { .. } => TEMPLATE_TYPE,
+            Self::TemplateIter { .. } => TEMPLATE_ITER_TYPE,
+            Self::Interpolation { .. } => INTERPOLATION_TYPE,
             Self::Range(_) => "range",
             Self::Scandir(_) => super::stdlib::os::scandir::ITER,
             Self::DirEntry(_) => super::stdlib::os::scandir::ENTRY,
@@ -1089,6 +1111,21 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::Template {
+                strings,
+                interpolations,
+            }
+            | Self::TemplateIter {
+                strings,
+                interpolations,
+                ..
+            } => visit.extend([*strings, *interpolations]),
+            Self::Interpolation {
+                value,
+                expression,
+                conversion,
+                format_spec,
+            } => visit.extend([*value, *expression, *conversion, *format_spec]),
             Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),

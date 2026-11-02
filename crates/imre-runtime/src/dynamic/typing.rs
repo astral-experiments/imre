@@ -1449,6 +1449,9 @@ impl Context {
                             | "NoneType"
                             | "NotImplementedType"
                             | "ellipsis"
+                            | super::value::TEMPLATE_ITER_TYPE
+                            | super::value::TEMPLATE_TYPE
+                            | super::value::INTERPOLATION_TYPE
                             | super::namedtuple::GETTER
                             | "functools.KeyWrapper"
                             | "member_descriptor"

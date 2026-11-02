@@ -31,6 +31,7 @@ mod source_code;
 mod static_method;
 mod stdlib;
 mod super_object;
+mod templatelib;
 mod thread_callback;
 mod thread_local;
 mod thread_lock;
@@ -400,6 +401,7 @@ impl Context {
         matches!(
             self.heap.get(id),
             Value::Iterator { .. }
+                | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
@@ -444,6 +446,12 @@ impl Context {
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
+            Value::Template {
+                strings,
+                interpolations,
+            } => {
+                return self.template_iterator(strings, interpolations);
+            }
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::Deque(ref ring) => {
                 let cursor = deque::iterator(id, ring, false);
@@ -541,7 +549,8 @@ impl Context {
         let value = self.heap.get(source);
         if matches!(
             value,
-            Value::SequenceIterator { .. }
+            Value::TemplateIter { .. }
+                | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::Scandir(_)
@@ -873,6 +882,7 @@ impl Context {
             }
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
+            Value::TemplateIter { .. } => return self.next_template_item(id),
             Value::DictIterator(iter) => return (*iter).next(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Enumerate { input, .. } => {
@@ -1103,6 +1113,8 @@ impl Context {
         if matches!(
             self.heap.get(id),
             Value::AstWalk { .. }
+                | Value::Template { .. }
+                | Value::TemplateIter { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }

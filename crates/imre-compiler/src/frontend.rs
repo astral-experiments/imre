@@ -6498,6 +6498,9 @@ impl<'a> Checker<'a> {
                 (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
             }
             ast::Expr::FString(value) => return self.fstring(value),
+            ast::Expr::TString(_) => {
+                return Err(self.object_builtin_error("template literal", expression));
+            }
             ast::Expr::Lambda(lambda) => return self.lambda_value(lambda, None, None),
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
