@@ -601,7 +601,7 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
         _ => Cow::Borrowed(ctx.str_value(source).ok()?),
     };
     let bytes = matches!(ctx.heap.get(ctx.scalar_value(source)), Value::Bytes(_));
-    let normalized = match escapes::normalize(&text, bytes, flags) {
+    let normalized = match escapes::normalize(&text, bytes, flags, true) {
         Ok(normalized) => normalized,
         Err(error) => return Some(error),
     };
@@ -1111,7 +1111,7 @@ fn prepare(
             .expect("text pattern")
             .to_owned()
     };
-    let source = match escapes::normalize(&source, bytes, flags) {
+    let source = match escapes::normalize(&source, bytes, flags, false) {
         Ok(Some(names)) => names.text,
         Ok(None) => source,
         Err((message, _)) => return Err(message),
