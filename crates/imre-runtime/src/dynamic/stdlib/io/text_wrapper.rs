@@ -514,6 +514,9 @@ impl Wrapper {
                 )
             };
             let data = invoke(ctx, buffer, method, args)?;
+            if all && data == NONE {
+                return Err(Error::new("BlockingIOError", "Read returned None."));
+            }
             let w = Self::from_receiver(ctx, receiver)?;
             w.binary()?;
             let bytes = ctx.bytes_like(data).map_err(|_| {
