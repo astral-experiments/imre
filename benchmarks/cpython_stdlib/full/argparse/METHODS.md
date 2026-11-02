@@ -41,44 +41,18 @@ python3.14 -B benchmarks/cpython_stdlib/full/argparse/native_methods.py \
 
 ## Whole-file startup
 
-The original entry point at main `76d74f9` still hit the pre-parser complexity
-guard. [#576](https://github.com/astral-sh/imre/pull/576) cleared its flat f-string
-without changing the upstream test. With the original CPython
-[`Lib/_colorize.py`](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/_colorize.py#L115)
-(blob `d6673f6692f76151b3b226ebe4d7976456a257e5`), both modes then reached
-`ThemeSection(Mapping[str, str])`. The [collections coordination note](https://github.com/astral-sh/imre/pull/572#issuecomment-6392290392)
-tracks that real subclass requirement. Neither startup observation is counted
-as a passing routine.
+Check the import and the standard unittest entry point using the vendored tests.
 
-The post-merge [startup record](startup-linux.json) reruns both the imports
-entry point and the original suite runner on main
-`f5807a7d6d6edcc55cd01e061b73d097820c614d`, with and without
-`--reachable-only`. The module root contained the pinned `Lib/test` and
-`Lib/_colorize.py`; Imre supplied argparse and the other intrinsic modules.
-All four checks exited 1 with empty stdout and the same unsupported
-`collections.abc.Mapping` export on stderr. No upstream case executed.
+```sh
+python3 benchmarks/cpython_stdlib/full/check_suite_startup.py \
+  --compiler /path/to/imre test.test_argparse
+```
 
-On merged numeric main `e3145753e23633a9acbc857e9ac8f363560523db`, the
-[four startup controls](startup-merged-e314575-linux.json) still exit 1 before
-any test executes. Normal compilation stops at the original
-`collections.abc.Mapping` import in `Lib/_colorize.py:4`; reachable-only
-compilation reaches `dataclasses.Field` on the next line. The controls use the
-same pinned files and preserve stderr for both entry points.
-
-The [four controls on main `06d678c`](startup-color-06d678c-linux.json)
-reproduce that split. The [collections owner](https://github.com/astral-sh/imre/pull/642#issuecomment-6396766712)
-reports that on the Mapping branch all four reach `dataclasses.Field`.
-None of these native startup checks executed a test.
-
-After [Mapping support merged](https://github.com/astral-sh/imre/pull/642#issuecomment-6400456745),
-the [startup and theme controls](startup-after-mapping-linux.json) tested
-canonical main and the exact tree merged in
-[#968](https://github.com/astral-sh/imre/pull/968). On each tree, both entry
-points at `-O0` and `-O3`, with and without `--reachable-only`, exited 1
-with empty stdout. All eight diagnostics point to `dataclasses.Field` at
-the original `Lib/_colorize.py:5`. The [hosted run](https://github.com/astral-sh/imre/actions/runs/40212060769)
-also compared the Mapping controls against CPython at both levels. The
-reference runner passed all 1,893 tests; no native whole-file test started.
+The checker tries each entry point with and without `--reachable-only`. To
+include CPython's original `_colorize.py`, pass `--cpython-git /path/to/cpython`
+and `--support-file _colorize.py`. These compilation checks execute zero
+upstream tests. To exercise mapping operations on CPython's original
+dataclass-backed theme, run the [theme probe](../collections/theme_section.py).
 
 ### What the color theme needs at runtime
 
