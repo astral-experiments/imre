@@ -58,6 +58,7 @@ const EMPTY_TUPLE: Id = 5;
 
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
+pub(super) const REGEX_SCANNER_TYPE: &str = "_sre.SRE_Scanner";
 pub(super) const REGEX_COPY_METHODS: &[&str] = &["__copy__", "__deepcopy__"];
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
@@ -1241,7 +1242,7 @@ impl Value {
             Self::CallableIterator(_) => "callable_iterator",
             Self::RegexPattern(_) => REGEX_PATTERN_TYPE,
             Self::RegexMatch(_) => REGEX_MATCH_TYPE,
-            Self::RegexScanner { .. } => "_sre.SRE_Scanner",
+            Self::RegexScanner { .. } => REGEX_SCANNER_TYPE,
             Self::Tuple(_) => "tuple",
             Self::Slice(_) => "slice",
             Self::Template { .. } => TEMPLATE_TYPE,
