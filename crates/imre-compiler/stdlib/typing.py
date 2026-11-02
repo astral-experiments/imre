@@ -2249,6 +2249,8 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         for name in ('Required', 'NotRequired', 'ReadOnly'):
             if origin is getattr(_typing, name, None):
                 return resolved[0]
+    if type(value) is GenericAlias and value.__unpacked__:
+        return Unpack[GenericAlias(origin, resolved)]
     if resolved == args:
         return value
     if origin is _typing.Union:
