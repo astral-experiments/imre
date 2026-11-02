@@ -105,9 +105,14 @@ except CalledProcessError:
         print(len(again.output))
 """
 
-INVALID_ENV = """import os
+INVALID_ENV = r"""import os
 import subprocess
 from sys import argv
+raw = dict(os.environb)
+if b'IMRE_INVALID' in raw:
+    assert raw[b'IMRE_INVALID'] == b'\xff'
+else:
+    assert raw[b'IMRE_\xff'] == b'value'
 for turn in range(2):
     try:
         os.environ.copy()

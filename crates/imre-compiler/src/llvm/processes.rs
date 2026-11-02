@@ -855,8 +855,13 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
-            ProcessOperation::EnvironCopy => {
-                let operand = self.checked_instruction("call ptr @imre_environ_copy()");
+            ProcessOperation::EnvironCopy { bytes } => {
+                let function = if bytes {
+                    "imre_environb_copy"
+                } else {
+                    "imre_environ_copy"
+                };
+                let operand = self.checked_instruction(format!("call ptr @{function}()"));
                 self.owned(Value {
                     ty: returns,
                     operand,

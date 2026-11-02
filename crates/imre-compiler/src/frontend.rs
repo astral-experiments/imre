@@ -6500,6 +6500,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 Intrinsic::StringConstant(value) => return Ok(unpacking::string(value)),
+                Intrinsic::BoolConstant(value) => return Ok(Expr::boolean(value)),
                 Intrinsic::LogRecordFlag(mask) => {
                     return Ok(logging_records::op(
                         ir::LogRecordOperation::Flag,
