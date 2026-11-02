@@ -1,6 +1,7 @@
 import fcntl
 import os
-from fcntl import F_GETPIPE_SZ, F_SETPIPE_SZ
+from fcntl import FD_CLOEXEC, F_GETPIPE_SZ, F_SETPIPE_SZ
+from posix import O_PATH
 
 
 class Descriptor:
@@ -21,6 +22,14 @@ class Index:
 
 def current():
     query = fcntl.fcntl
+    assert os.O_PATH == O_PATH
+    fd = os.open("/dev/null", O_PATH)
+    try:
+        assert query(fd, fcntl.F_GETFD) & FD_CLOEXEC
+        os.set_inheritable(fd, True)
+        assert query(fd, fcntl.F_GETFD) & fcntl.FD_CLOEXEC == 0
+    finally:
+        os.close(fd)
     reader, writer = os.pipe()
     try:
         before = query(reader, F_GETPIPE_SZ)
