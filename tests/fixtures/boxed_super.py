@@ -114,6 +114,7 @@ def check_mro():
     assert D.mro() == type.mro(D) == [D, C, B, A, object]
     from collections import defaultdict
     from os import terminal_size
+    from types import ModuleType
     assert bool.mro() == type.mro(bool) == [bool, int, object]
     assert terminal_size.mro() == [terminal_size, tuple, object]
     assert type.mro(defaultdict) == [defaultdict, dict, object]
@@ -126,7 +127,10 @@ def check_mro():
     assert ViaMeta.mro.__qualname__ == ViaMeta.__qualname__ + ".mro"
     assert type.mro(Meta) == [Meta, type, object]
     assert Shadow.mro is None and type.mro(Shadow)[1:] == D.mro()
-    for invalid in (lambda: type.mro(D()), lambda: D.mro(1), lambda: Meta.mro()):
+    class NamedModule(ModuleType): pass
+    NamedModule.__name__ = "type"
+    fake = NamedModule("fake")
+    for invalid in (lambda: type.mro(fake), lambda: type.mro(D()), lambda: D.mro(1), lambda: Meta.mro()):
         try:
             invalid()
         except TypeError:

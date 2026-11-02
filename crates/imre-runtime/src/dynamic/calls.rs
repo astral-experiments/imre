@@ -1016,10 +1016,11 @@ impl Context {
     }
 
     pub(super) fn is_type_object(&self, obj: Id) -> bool {
-        matches!(
-            self.builtin_type_name(obj),
-            Some("type" | "typing._AnyMeta")
-        )
+        match self.heap.get(obj) {
+            Value::Class { .. } => true,
+            Value::Native(_) => matches!(self.builtin_type_name(obj), Some("type" | "typing._AnyMeta")),
+            _ => false,
+        }
     }
 
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
