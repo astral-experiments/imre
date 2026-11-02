@@ -1,0 +1,1442 @@
+{
+  "group": "test.test_typing.AnyTests",
+  "first_ordinal": 31,
+  "last_ordinal": 38,
+  "originals": 8,
+  "archive": "/workspace/scratch/intact-results/eaae-cohorts/038-test.test_typing.AnyTests.tar.gz",
+  "archive_sha256": "84369c4c757dade48d499d9f7210d53e9b30dab30a1a2122cb99ffcce71152dc",
+  "modes": {
+    "ordinary-O0": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 196,
+        "next_class_START": {
+          "index": 197,
+          "kind": "START",
+          "case": "test.test_typing.AssertNeverTests.test_exception",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "ece278eb5fc1b22047e640411cd53fb59c79e875fe17826d8ef2dd97bfa8f0ea",
+      "methods": [
+        {
+          "ordinal": 31,
+          "id": "test.test_typing.AnyTests.test_any_instance_type_error",
+          "parent_callbacks": [
+            {
+              "index": 173,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 174,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 175,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 32,
+          "id": "test.test_typing.AnyTests.test_any_works_with_alias",
+          "parent_callbacks": [
+            {
+              "index": 176,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 177,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 178,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 33,
+          "id": "test.test_typing.AnyTests.test_can_subclass",
+          "parent_callbacks": [
+            {
+              "index": 179,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 180,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 181,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 34,
+          "id": "test.test_typing.AnyTests.test_cannot_instantiate",
+          "parent_callbacks": [
+            {
+              "index": 182,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 183,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 184,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 35,
+          "id": "test.test_typing.AnyTests.test_errors",
+          "parent_callbacks": [
+            {
+              "index": 185,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 186,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 187,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 36,
+          "id": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          "parent_callbacks": [
+            {
+              "index": 188,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 189,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 190,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 37,
+          "id": "test.test_typing.AnyTests.test_repr",
+          "parent_callbacks": [
+            {
+              "index": 191,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 192,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 193,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 38,
+          "id": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          "parent_callbacks": [
+            {
+              "index": 194,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 195,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 196,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ],
+      "new_to_frozen_186_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ]
+    },
+    "ordinary-O3": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 196,
+        "next_class_START": {
+          "index": 197,
+          "kind": "START",
+          "case": "test.test_typing.AssertNeverTests.test_exception",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "9879eecafbacc1a0877c579dd9e65b19eb011c49d603c5bc06d550566a6ba60d",
+      "methods": [
+        {
+          "ordinal": 31,
+          "id": "test.test_typing.AnyTests.test_any_instance_type_error",
+          "parent_callbacks": [
+            {
+              "index": 173,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 174,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 175,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 32,
+          "id": "test.test_typing.AnyTests.test_any_works_with_alias",
+          "parent_callbacks": [
+            {
+              "index": 176,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 177,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 178,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 33,
+          "id": "test.test_typing.AnyTests.test_can_subclass",
+          "parent_callbacks": [
+            {
+              "index": 179,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 180,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 181,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 34,
+          "id": "test.test_typing.AnyTests.test_cannot_instantiate",
+          "parent_callbacks": [
+            {
+              "index": 182,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 183,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 184,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 35,
+          "id": "test.test_typing.AnyTests.test_errors",
+          "parent_callbacks": [
+            {
+              "index": 185,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 186,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 187,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 36,
+          "id": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          "parent_callbacks": [
+            {
+              "index": 188,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 189,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 190,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 37,
+          "id": "test.test_typing.AnyTests.test_repr",
+          "parent_callbacks": [
+            {
+              "index": 191,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 192,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 193,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 38,
+          "id": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          "parent_callbacks": [
+            {
+              "index": 194,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 195,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 196,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ],
+      "new_to_frozen_186_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ]
+    },
+    "boxed-O0": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 196,
+        "next_class_START": {
+          "index": 197,
+          "kind": "START",
+          "case": "test.test_typing.AssertNeverTests.test_exception",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "b27c57183a7cabf9231998a5dae8c71b637b462d04b1d95acea4565bf563cf34",
+      "methods": [
+        {
+          "ordinal": 31,
+          "id": "test.test_typing.AnyTests.test_any_instance_type_error",
+          "parent_callbacks": [
+            {
+              "index": 173,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 174,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 175,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 32,
+          "id": "test.test_typing.AnyTests.test_any_works_with_alias",
+          "parent_callbacks": [
+            {
+              "index": 176,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 177,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 178,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 33,
+          "id": "test.test_typing.AnyTests.test_can_subclass",
+          "parent_callbacks": [
+            {
+              "index": 179,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 180,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 181,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 34,
+          "id": "test.test_typing.AnyTests.test_cannot_instantiate",
+          "parent_callbacks": [
+            {
+              "index": 182,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 183,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 184,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 35,
+          "id": "test.test_typing.AnyTests.test_errors",
+          "parent_callbacks": [
+            {
+              "index": 185,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 186,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 187,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 36,
+          "id": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          "parent_callbacks": [
+            {
+              "index": 188,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 189,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 190,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 37,
+          "id": "test.test_typing.AnyTests.test_repr",
+          "parent_callbacks": [
+            {
+              "index": 191,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 192,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 193,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 38,
+          "id": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          "parent_callbacks": [
+            {
+              "index": 194,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 195,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 196,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ],
+      "new_to_frozen_186_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ]
+    },
+    "boxed-O3": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 196,
+        "next_class_START": {
+          "index": 197,
+          "kind": "START",
+          "case": "test.test_typing.AssertNeverTests.test_exception",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "803ffbd2ee0ee7e338908cb3307e002c5652ef6ec44c5f8105b291e17e5c2d14",
+      "methods": [
+        {
+          "ordinal": 31,
+          "id": "test.test_typing.AnyTests.test_any_instance_type_error",
+          "parent_callbacks": [
+            {
+              "index": 173,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 174,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 175,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_any_instance_type_error",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 32,
+          "id": "test.test_typing.AnyTests.test_any_works_with_alias",
+          "parent_callbacks": [
+            {
+              "index": 176,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 177,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 178,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_any_works_with_alias",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 33,
+          "id": "test.test_typing.AnyTests.test_can_subclass",
+          "parent_callbacks": [
+            {
+              "index": 179,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 180,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 181,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_can_subclass",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 34,
+          "id": "test.test_typing.AnyTests.test_cannot_instantiate",
+          "parent_callbacks": [
+            {
+              "index": 182,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 183,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 184,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_cannot_instantiate",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 35,
+          "id": "test.test_typing.AnyTests.test_errors",
+          "parent_callbacks": [
+            {
+              "index": 185,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 186,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 187,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_errors",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 36,
+          "id": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          "parent_callbacks": [
+            {
+              "index": 188,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 189,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 190,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 37,
+          "id": "test.test_typing.AnyTests.test_repr",
+          "parent_callbacks": [
+            {
+              "index": 191,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 192,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 193,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_repr",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        },
+        {
+          "ordinal": 38,
+          "id": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          "parent_callbacks": [
+            {
+              "index": 194,
+              "kind": "START",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 195,
+              "kind": "PASS",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 196,
+              "kind": "STOP",
+              "case": "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ],
+      "new_to_frozen_186_paired_in_mode": [
+        [
+          "test.test_typing.AnyTests.test_any_instance_type_error",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_any_works_with_alias",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_can_subclass",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_cannot_instantiate",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_errors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_multiple_inheritance_with_custom_constructors",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_repr",
+          1
+        ],
+        [
+          "test.test_typing.AnyTests.test_subclassing_with_custom_constructor",
+          1
+        ]
+      ]
+    }
+  }
+}

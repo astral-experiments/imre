@@ -1,0 +1,294 @@
+{
+  "group": "test.test_typing.AssertNeverTests",
+  "first_ordinal": 39,
+  "last_ordinal": 39,
+  "originals": 1,
+  "archive": "/workspace/scratch/intact-results/eaae-cohorts/039-test.test_typing.AssertNeverTests.tar.gz",
+  "archive_sha256": "0f7344f0ae6298019c459262005428c4149ed401178a3b565e6c59513186ab5a",
+  "modes": {
+    "ordinary-O0": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 199,
+        "next_class_START": {
+          "index": 200,
+          "kind": "START",
+          "case": "test.test_typing.AssertTypeTests.test_basics",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "efb6b1d37af54eb737a7ed1b491aaccbe95ee9b0011bdc213b74d51e66d09805",
+      "methods": [
+        {
+          "ordinal": 39,
+          "id": "test.test_typing.AssertNeverTests.test_exception",
+          "parent_callbacks": [
+            {
+              "index": 197,
+              "kind": "START",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 198,
+              "kind": "PASS",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 199,
+              "kind": "STOP",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ],
+      "new_to_frozen_186_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ]
+    },
+    "ordinary-O3": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 199,
+        "next_class_START": {
+          "index": 200,
+          "kind": "START",
+          "case": "test.test_typing.AssertTypeTests.test_basics",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "a0a8a04e272881e37a360a19870d22fa09367867e44de81516543781cdf65ace",
+      "methods": [
+        {
+          "ordinal": 39,
+          "id": "test.test_typing.AssertNeverTests.test_exception",
+          "parent_callbacks": [
+            {
+              "index": 197,
+              "kind": "START",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 198,
+              "kind": "PASS",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 199,
+              "kind": "STOP",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ],
+      "new_to_frozen_186_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ]
+    },
+    "boxed-O0": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 199,
+        "next_class_START": {
+          "index": 200,
+          "kind": "START",
+          "case": "test.test_typing.AssertTypeTests.test_basics",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "834fb34e327b08ece78176db55bc0680cadcbc981bf84132437ccc2ec5cf4c12",
+      "methods": [
+        {
+          "ordinal": 39,
+          "id": "test.test_typing.AssertNeverTests.test_exception",
+          "parent_callbacks": [
+            {
+              "index": 197,
+              "kind": "START",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 198,
+              "kind": "PASS",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 199,
+              "kind": "STOP",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ],
+      "new_to_frozen_186_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ]
+    },
+    "boxed-O3": {
+      "class_boundary": {
+        "basis": "later_original_class_START",
+        "last_original_STOP_event": 199,
+        "next_class_START": {
+          "index": 200,
+          "kind": "START",
+          "case": "test.test_typing.AssertTypeTests.test_basics",
+          "subject": "",
+          "detail": ""
+        }
+      },
+      "module_boundary": {
+        "status": "open",
+        "next_module_group_START": null
+      },
+      "intervening_fixture_or_other_callbacks": [],
+      "runner_count": [],
+      "process_exit": null,
+      "native_xml_closed": false,
+      "raw_stderr_sha256": "12f0c67b38f285ed0d5ceed552a8aaab8fae1d4eafc4b03aad8cf75d099c7127",
+      "methods": [
+        {
+          "ordinal": 39,
+          "id": "test.test_typing.AssertNeverTests.test_exception",
+          "parent_callbacks": [
+            {
+              "index": 197,
+              "kind": "START",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 198,
+              "kind": "PASS",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            },
+            {
+              "index": 199,
+              "kind": "STOP",
+              "case": "test.test_typing.AssertNeverTests.test_exception",
+              "subject": "",
+              "detail": ""
+            }
+          ],
+          "child_callbacks": {},
+          "true_skip_events": []
+        }
+      ],
+      "stock_identical_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ],
+      "new_to_named_181_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ],
+      "new_to_frozen_186_paired_in_mode": [
+        [
+          "test.test_typing.AssertNeverTests.test_exception",
+          1
+        ]
+      ]
+    }
+  }
+}
