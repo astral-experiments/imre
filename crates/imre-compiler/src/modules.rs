@@ -1608,6 +1608,7 @@ impl IntrinsicModule {
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
             (Self::Re, "match") => Intrinsic::RegexMatchStart,
+            (Self::Re, "findall") => Intrinsic::ObjectRuntimeExport("re.findall"),
             (Self::Re, "Scanner") => Intrinsic::ObjectRuntimeExport("re.Scanner"),
             (Self::Re, "sub") => Intrinsic::RegexSub,
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
