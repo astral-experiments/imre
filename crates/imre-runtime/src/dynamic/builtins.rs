@@ -161,6 +161,7 @@ pub(super) const IMPORT_KEYWORDS: [&str; 3] = ["name", "path", "name_from"];
 pub(super) fn exception_initializer(kind: &str) -> &'static str {
     match kind {
         "StopIteration" => "StopIteration.__init__",
+        "SystemExit" => "SystemExit.__init__",
         "ImportError" | "ModuleNotFoundError" => "ImportError.__init__",
         kind if exception_subclass(kind, "OSError") == Some(true) => "OSError.__init__",
         _ => "BaseException.__init__",
@@ -1067,8 +1068,9 @@ pub(super) fn call(
     {
         return exceptions::allocate(ctx, owner, args);
     }
-    if let Some(owner @ ("BaseException" | "StopIteration" | "OSError" | "ImportError")) =
-        name.strip_suffix(".__init__")
+    if let Some(
+        owner @ ("BaseException" | "StopIteration" | "SystemExit" | "OSError" | "ImportError"),
+    ) = name.strip_suffix(".__init__")
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }

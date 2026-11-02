@@ -2595,7 +2595,11 @@ pub(super) fn call(
                         let items = items.clone();
                         return Err(ctx.exception("SystemExit", &items));
                     }
-                    Value::Raised(error) if error.kind == "SystemExit" => return Err(error.clone()),
+                    Value::Raised(error) if ctx.is_builtin_error(error, "SystemExit") => {
+                        let mut error = error.clone();
+                        error.tracing().instance = Some(*arg);
+                        return Err(error);
+                    }
                     _ => {}
                 }
             }

@@ -1,3 +1,6 @@
+import sys
+
+
 class Missing(AttributeError):
     pass
 
@@ -59,6 +62,26 @@ def current():
     print(error.label is saved, error.token is saved)
     del error.label
     print(error.label, error.token)
+
+    try:
+        sys.exit(2)
+    except SystemExit as caught:
+        assert caught.args == (2,) and caught.code == 2
+    else:
+        raise AssertionError("sys.exit returned")
+
+    class RequestedExit(SystemExit):
+        pass
+
+    request = RequestedExit("first", "second")
+    original_args = request.args
+    assert request.code is original_args
+    request.args = (3,)
+    assert request.code is original_args
+    request.code = 7
+    assert request.code == 7 and request.args == (3,)
+    del request.code
+    assert request.code is None and request.args == (3,)
 
     class Done(StopIteration):
         pass
