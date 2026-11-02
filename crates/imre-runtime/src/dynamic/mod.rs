@@ -280,6 +280,7 @@ impl Context {
             ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | ("mappingproxy", Value::MappingProxy(_))
             | ("super", Value::Super { .. })
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
