@@ -501,6 +501,12 @@ impl Reader {
     }
 }
 
+pub(super) fn pending_update(ctx: &Context, receiver: Id) -> Option<Id> {
+    let reader = Reader::get(ctx, receiver).ok()?;
+    reader.update.as_ref()?.dirty.get()?;
+    reader.raw.get()
+}
+
 pub(super) fn initialized_raw(ctx: &Context, receiver: Id) -> Option<Id> {
     Reader::get(ctx, receiver).ok()?.raw.get()
 }

@@ -855,7 +855,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
 
         let _ = writeln!(
             std::io::stderr().lock(),
-            "NotImplementedError: BufferedWriter has unflushed bytes at shutdown; explicitly flush or close Python-backed writers"
+            "NotImplementedError: buffered stream has unflushed bytes at shutdown; explicitly flush or close Python-backed writers"
         );
         return 1;
     }
