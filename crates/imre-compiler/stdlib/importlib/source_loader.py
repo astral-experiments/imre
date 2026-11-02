@@ -21,18 +21,19 @@ if __name__ == "_frozen_importlib_external":
 else:
     # The package connects the selected core after this module has executed.
     _bootstrap = None
-    import warnings as _warnings
 
     def _warn_debug_override():
-        _warnings.warn(
+        import warnings
+        warnings.warn(
             "the debug_override parameter is deprecated; use 'optimization' instead",
             DeprecationWarning, stacklevel=2,
         )
 
     def _warn_loader_deprecation(module_globals, mismatch):
+        import warnings
         message = ("Module globals; __loader__ != __spec__.loader" if mismatch
                    else "Module globals is missing a __spec__.loader")
-        _warnings.warn(message, DeprecationWarning, stacklevel=2)
+        warnings.warn(message, DeprecationWarning, stacklevel=2)
 
 
 # Boxed source directories are searched directly; only ZIP path finders are cached.

@@ -290,6 +290,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     let begin = UPSTREAM.find(start).unwrap();
                     UPSTREAM[begin..].split_once(end).unwrap().0
                 };
+                // The native warning backend is the public warnings module; load it only on emission.
+                let imports = section("def _gcd_import(", "def _builtin_from_name(")
+                    .replace("_warnings.warn(", "_warning_module().warn(");
                 // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
                 [
                     include_str!("../../stdlib/importlib/legacy_source_loader.py"),
@@ -298,7 +301,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     section("def _call_with_frames_removed(", "def _requires_builtin("),
                     section("def _resolve_name(", "def _find_spec("),
                     section("def _sanity_check(", "_ERR_MSG_PREFIX ="),
-                    section("def _gcd_import(", "def _builtin_from_name("),
+                    &imports,
                 ].join("\n")
             })))
         }
