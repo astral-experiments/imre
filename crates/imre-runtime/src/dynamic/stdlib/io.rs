@@ -6,6 +6,7 @@ use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 mod newline_decoder;
 pub(in crate::dynamic) const NEWLINE_DECODER: &str = "IncrementalNewlineDecoder";
 mod buffered_io;
+mod buffered_reader;
 mod descriptor_buffer;
 mod native_random;
 mod native_reader;
@@ -37,6 +38,8 @@ pub(in crate::dynamic) enum NativeClass {
 pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
     BufferedFile(Id),
+    Reader(std::rc::Rc<buffered_reader::Reader>),
+    UninitializedReader(Option<Id>),
     BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
     Pair(rwpair::Pair),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
