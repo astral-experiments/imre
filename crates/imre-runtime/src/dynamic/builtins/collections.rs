@@ -900,6 +900,7 @@ pub(super) fn method(
                     | "set.symmetric_difference_update"
                     | "set.update"
             ) || name.ends_with(".issubset")
+                || name.ends_with(".symmetric_difference")
                 || name.ends_with(".intersection")
                 || name.ends_with(".difference")
                 || name.ends_with(".union") =>
@@ -910,7 +911,7 @@ pub(super) fn method(
         })?;
     let receiver = if let Some((
         kind,
-        method @ ("difference" | "intersection" | "issubset" | "union"),
+        method @ ("difference" | "intersection" | "issubset" | "symmetric_difference" | "union"),
     )) = name.split_once('.')
     {
         let storage = ctx.scalar_value(object);
@@ -1037,6 +1038,8 @@ pub(super) fn method(
             | "dict.popitem"
             | "set.difference"
             | "frozenset.difference"
+            | "set.symmetric_difference"
+            | "frozenset.symmetric_difference"
             | "set.intersection"
             | "frozenset.intersection"
             | "set.union"
@@ -1219,6 +1222,10 @@ pub(super) fn method(
         }
         "set.intersection" | "frozenset.intersection" => set_intersection(ctx, receiver, args),
         "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
+        "set.symmetric_difference" | "frozenset.symmetric_difference" => {
+            let other = super::one_positional_arg(name, args, kwargs)?;
+            ctx.set_xor(receiver, other, false)
+        }
         "set.symmetric_difference_update" => {
             let other = super::one_positional_arg(name, args, kwargs)?;
             let storage = ctx.scalar_value(other);
