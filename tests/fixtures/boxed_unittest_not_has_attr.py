@@ -25,3 +25,16 @@ def current():
     with case.assertRaises(RuntimeError) as caught:
         case.assertNotHasAttr(subject, "broken")
     assert str(caught.exception) == "lookup failed"
+
+    assert case.assertHasAttr(subject, "present") is None
+    for target, expected in (
+        (subject, "'Subject' object has no attribute 'absent'"),
+        (Subject, "type object 'Subject' has no attribute 'absent'"),
+        (sys, "module 'sys' has no attribute 'absent'"),
+    ):
+        with case.assertRaises(AssertionError) as caught:
+            case.assertHasAttr(target, "absent", msg="detail")
+        assert str(caught.exception) == expected + " : detail"
+    with case.assertRaises(RuntimeError) as caught:
+        case.assertHasAttr(subject, "broken")
+    assert str(caught.exception) == "lookup failed"
