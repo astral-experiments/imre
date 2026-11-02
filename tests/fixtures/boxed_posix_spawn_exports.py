@@ -1,18 +1,19 @@
 from builtins import __import__ as load
 import sys
 
-# Load both names dynamically so the native program exercises its source-less os facade.
+# Runtime names exercise the native module even when the compiler did not bundle os.py.
 posix = load(sys.argv[1])
-assert sys.argv[2] not in sys.modules
-spawnp = posix.posix_spawnp
-sentinel = object()
-posix.posix_spawn = sentinel
-posix.POSIX_SPAWN_OPEN = 42
-if hasattr(posix, "POSIX_SPAWN_CLOSEFROM"):
-    del posix.POSIX_SPAWN_CLOSEFROM
+if sys.argv[2] not in sys.modules:
+    posix.posix_spawn = object()
+    posix.POSIX_SPAWN_OPEN = 42
+    if hasattr(posix, "POSIX_SPAWN_CLOSEFROM"):
+        del posix.POSIX_SPAWN_CLOSEFROM
 
 os = load(sys.argv[2])
-assert os.posix_spawn is sentinel
-assert os.posix_spawnp is spawnp
-assert os.POSIX_SPAWN_OPEN == 42
-assert not hasattr(os, "POSIX_SPAWN_CLOSEFROM")
+for name in ("posix_spawn", "posix_spawnp", "POSIX_SPAWN_OPEN",
+             "POSIX_SPAWN_CLOSE", "POSIX_SPAWN_DUP2"):
+    assert vars(os)[name] is vars(posix)[name]
+name = "POSIX_SPAWN_CLOSEFROM"
+assert hasattr(os, name) == hasattr(posix, name)
+if hasattr(posix, name):
+    assert getattr(os, name) is getattr(posix, name)

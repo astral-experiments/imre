@@ -22,7 +22,7 @@ fn check(code: libc::c_int) -> Result<()> {
 
 // A conversion can remove the current action from its list or raise a Python-owned exception.
 // Release borrowed operands before the next list lookup, preserving any exception through GC.
-fn discard(ctx: &mut Context, mark: usize, error: Option<&Error>) {
+pub(super) fn discard(ctx: &mut Context, mark: usize, error: Option<&Error>) {
     let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
     if let Some(error) = error {
         for root in error.roots() {

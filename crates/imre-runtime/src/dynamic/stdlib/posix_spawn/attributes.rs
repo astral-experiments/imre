@@ -106,6 +106,14 @@ fn check(code: i32) -> Result<()> {
 }
 
 fn signal_set(ctx: &mut Context, value: Id) -> Result<libc::sigset_t> {
+    // Releasing the iterator can close a descriptor used by a later file action.
+    let mark = ctx.heap.temporary_mark();
+    let mask = convert_signal_set(ctx, value);
+    super::actions::discard(ctx, mark, mask.as_ref().err());
+    mask
+}
+
+fn convert_signal_set(ctx: &mut Context, value: Id) -> Result<libc::sigset_t> {
     // SAFETY: Linux sigset_t contains only integer words; zero even the bits libc reserves.
     let mut mask = unsafe { std::mem::zeroed::<libc::sigset_t>() };
     // SAFETY: mask is writable caller-owned storage.

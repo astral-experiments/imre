@@ -1,3 +1,4 @@
+import errno
 import os
 import posix
 
@@ -22,3 +23,36 @@ def current():
                 assert output.read() == program
     finally:
         os.unlink(path)
+    check_signal_iterator()
+
+
+def check_signal_iterator():
+    reader, writer = os.pipe()
+
+    class ClosingIterator:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise StopIteration
+
+        def __del__(self):
+            os.close(reader)
+
+    class SignalSet:
+        def __iter__(self):
+            return ClosingIterator()
+
+    try:
+        pid = os.posix_spawn(
+            "/bin/true", ["true"], None,
+            setsigmask=SignalSet(),
+            file_actions=[(os.POSIX_SPAWN_DUP2, reader, writer)],
+        )
+    except OSError as error:
+        assert error.errno == errno.EBADF
+    else:
+        os.waitpid(pid, 0)
+        raise AssertionError("signal iterator must close the pipe before spawn")
+    finally:
+        os.close(writer)
