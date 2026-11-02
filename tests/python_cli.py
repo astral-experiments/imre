@@ -2931,6 +2931,7 @@ for name in ("md4", "ripemd160"):
             "boxed_set_difference.py",
             "boxed_set_intersection.py",
             "boxed_set_pop.py",
+            "boxed_set_clear.py",
             "boxed_set_remove.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
