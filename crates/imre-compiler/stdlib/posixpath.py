@@ -84,6 +84,16 @@ def basename(p):
     return p[p.rfind(sep) + 1:]
 
 
+def dirname(p):
+    """Returns the directory component of a pathname"""
+    p = os.fspath(p)
+    sep = b"/" if isinstance(p, bytes) else "/"
+    head = p[:p.rfind(sep) + 1]
+    if head and head != sep * len(head):
+        head = head.rstrip(sep)
+    return head
+
+
 def splitext(p):
     p = os.fspath(p)
     if type(p) is str or type(p) is bytes:

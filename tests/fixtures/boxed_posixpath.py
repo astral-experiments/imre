@@ -227,6 +227,17 @@ def current():
         raise AssertionError("accepted conflicting PATH keys")
     assert ":λ::some path:".split(pathsep) == ["", "λ", "", "some path", ""]
     assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join
+    assert os.path.dirname is posixpath.dirname
+    for value, expected in (
+        (Text("a//b"), "a"),
+        (Raw(b"//"), b"//"),
+        (b"\xff//leaf", b"\xff"),
+        ("leaf", ""),
+    ):
+        path = Path(value)
+        path.__fspath__ = lambda: None
+        result = os.path.dirname(p=path)
+        assert result == expected and type(result) is type(expected)
     assert fspath is os.fspath is posix.fspath
     assert fspath.__self__ is posix and fspath.__module__ == "posix"
     for value in ("", ".profile", "a.b/.c", "a/.a.b", "/résumé.☃", "r/", b"a.\xff", Text("a.tar.gz"), Raw(b"a.tar.gz")):
