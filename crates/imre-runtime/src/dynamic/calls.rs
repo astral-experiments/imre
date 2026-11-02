@@ -996,9 +996,25 @@ impl Context {
         }
         if matches!(self.heap.get(parent), Value::Native(name) if name == "typing.Callable") {
             let origin = super::mapping_abc::class(self, "Callable")?;
-            let result =
-                self.call_typing_helper("_special_alias_subclasscheck", vec![origin, child])?;
-            return self.truth(result);
+            // Unsubscripted typing aliases use their origins as the candidate class.
+            let typing_instance = |name| {
+                self.module_value("typing", name)
+                    .is_some_and(|class| self.instance_of(child, class))
+            };
+            let child = match self.heap.get(child) {
+                _ if child == parent => origin,
+                Value::GenericAlias(alias) if !alias.is_builtin_alias() => {
+                    return Err(alias.kind.class_check_error("issubclass"));
+                }
+                Value::Instance { .. } if typing_instance("_SpecialGenericAlias") => {
+                    self.lookup_attr(child, "__origin__")?
+                }
+                Value::Instance { .. } if typing_instance("_AnnotatedAlias") => {
+                    return Err(super::typing::AliasKind::Generic.class_check_error("issubclass"));
+                }
+                _ => child,
+            };
+            return self.python_subclass_check(child, origin);
         }
         if let Value::GenericAlias(alias) = self.heap.get(parent) {
             return Err(alias.kind.class_check_error("issubclass"));

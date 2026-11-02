@@ -1845,17 +1845,6 @@ def _named_alias_bases(alias, bases):
     return tuple(result)
 
 
-def _special_alias_subclasscheck(origin, cls):
-    if isinstance(cls, _SpecialGenericAlias):
-        cls = cls.__origin__
-    elif cls is _typing.Callable:
-        cls = _typing.get_origin(cls)
-    elif isinstance(cls, (_typing._GenericAlias, _typing._CallableGenericAlias,
-                          _typing._LiteralGenericAlias)):
-        raise TypeError("Subscripted generics cannot be used with class and instance checks")
-    return issubclass(cls, origin)
-
-
 class _SpecialGenericAlias(_NotIterable):
     """A named typing alias for a builtin collection."""
     __module__ = __name__
@@ -1934,7 +1923,13 @@ class _SpecialGenericAlias(_NotIterable):
         return self.__subclasscheck__(type(value))
 
     def __subclasscheck__(self, cls):
-        return _special_alias_subclasscheck(self.__origin__, cls)
+        if isinstance(cls, _SpecialGenericAlias):
+            cls = cls.__origin__
+        elif cls is _typing.Callable:
+            cls = _typing.get_origin(cls)
+        elif _is_parameterized_typing_alias(cls):
+            raise TypeError("Subscripted generics cannot be used with class and instance checks")
+        return issubclass(cls, self.__origin__)
 
     def __mro_entries__(self, bases):
         return _named_alias_bases(self, bases)

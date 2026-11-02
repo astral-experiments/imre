@@ -92,10 +92,14 @@ def dynamic_collection_classes():
 
 
 def callable_classes():
+    import typing
     from abc import ABCMeta
     from typing import Callable as TypingCallable, get_origin
     from collections.abc import Callable
 
+    before = set(vars(typing))
+    assert issubclass(type(lambda: None), TypingCallable)
+    assert set(vars(typing)) == before
     assert get_origin(TypingCallable) is Callable
     assert type(Callable) is ABCMeta and Callable.__abstractmethods__ == frozenset({"__call__"})
 
