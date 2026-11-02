@@ -111,11 +111,11 @@ branches. Skipped tests count toward the suite size only.
 
 | Module | Paired passes | Upstream tests | How the tests ran |
 | --- | ---: | ---: | --- |
-| `argparse` | 1,593 | 1,893 | An intact run passed 1,397 originals. Selected runs added 196 distinct registrations across builds, including 54 more help cases with clean teardown and inverted assertions. |
+| `argparse` | 1,614 | 1,893 | The intact baseline passed 1,397 cases. Selected runs added 217 distinct original registrations, including 18 more help cases and three Boolean-action, encoding and FileType cases verified with teardown and failing controls. |
 | `collections` | 528 | 659 | Eleven new passes came from intact UserDict, UserList, Counter and test_collections runs on a development build. The last of these ran all 116 registrations, with 74 passes at each native level. |
 | `csv` | 122 | 128 | Complete suite on `main`, 122 passed and six matched upstream skips. |
 | `dataclasses` | 247 | 276 | The latest intact public run passed 206, and the retained intact run passed 207. Thirteen more TestDocString originals pass on a sealed development tree after all 276 register. Their public replay needs annotationlib.get_annotations for #3578. |
-| `datetime` | 553 | 1,098 | Both intact development runs passed 545 of 1,098. Eight additional original cases passed in focused numeric and warning tests. |
+| `datetime` | 636 | 1,098 | The intact development build ran all 1,098 registrations under the reference resource settings. Both levels passed 628, errored on 416 and skipped 54. Eight additional originals passed on earlier focused builds. |
 | `fnmatch` | 24 | 24 | Complete suite on `main`, all 24 passed. |
 | `functools` | 91 | 329 | The intact 325-case primary module passed 89 in all four modes. Two more original cases passed in separate runs. |
 | `hashlib` | 65 | 82 | Four complete public runs passed 48 of 82, with three errors and 31 skips. Earlier selections account for the other credited IDs. |
@@ -132,11 +132,11 @@ branches. Skipped tests count toward the suite size only.
 | `subprocess` | 49 | 353 | The full Linux module registers all 353 cases. Public focused runs execute the original timeout and stdin tests at ordinals 130 and 168 in Imre at both levels. The socket-fixture timeout at ordinal 131 still runs its assertions in CPython and earns no credit here. |
 | `tempfile` | 83 | 118 | Four intact public runs passed the same 83 of 118, with 24 errored IDs, one failure, 10 skips and zero ignored finalizer exceptions. |
 | `textwrap` | 68 | 68 | Complete suite on `main`, all 68 passed. |
-| `threading` | 81 | 228 | All 228 original cases ran in four native modes. An intact development build passed 81 and a later replay passed 77. |
+| `threading` | 83 | 228 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
 | `typing` | 107 | 712 | The complete public TypedDict class ran all 32 originals at both levels. Nineteen passed, one failed, and 12 errored. The table retains 107 until those 19 can be reconciled with the older inventory. |
 | `unittest` | 160 | 1,090 | An intact package run discovered 244 originals, started 213 and passed 160 at both levels. |
 | `urllib` | 110 | 178 | Both intact modules register all 178 cases on Linux and macOS. Public native runs pass 65/77 parser and 42/101 request/error cases at both levels. Three earlier focused passes bring the distinct total to 110. |
-| **Total** | **4,787** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **4,893** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
