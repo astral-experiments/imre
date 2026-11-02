@@ -807,6 +807,15 @@ impl Program {
                     continue;
                 }
                 Stmt::Try(s)
+                    if s.handlers
+                        .iter()
+                        .rev()
+                        .skip(1)
+                        .any(|ast::ExceptHandler::ExceptHandler(handler)| handler.type_.is_none()) =>
+                {
+                    return Err(Error::new("SyntaxError", "default 'except:' must be last"));
+                }
+                Stmt::Try(s)
                     if !s.is_star
                         && !s.handlers.is_empty()
                         && s.finalbody.is_empty()

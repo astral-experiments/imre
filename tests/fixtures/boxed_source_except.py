@@ -81,6 +81,17 @@ def suspended():
     else:
         raise AssertionError("invalid except target accepted")
 
+    filename = "<handlers>"
+    code = "try: raise ValueError()\nexcept KeyError: pass\nexcept: caught = True"
+    exec(compile(code, filename, "exec"), namespace)
+    assert namespace["caught"] is True
+    try:
+        compile("try: pass\nexcept: pass\nexcept ValueError: pass", filename, "exec")
+    except SyntaxError as error:
+        assert "default 'except:' must be last" in str(error)
+    else:
+        raise AssertionError("bare handler accepted before a typed handler")
+
     print("source exception handlers passed")
 
 
