@@ -20,6 +20,11 @@ def current():
         inherited = ignored_signals(False)
         assert ignored_signals(True) != inherited
         assert ignored_signals(False) == inherited
+    report_umask = ["/bin/sh", "-c", "umask"]
+    inherited_mask = int(subprocess.check_output(report_umask), 8)
+    child_mask = inherited_mask ^ 0o077
+    assert int(subprocess.check_output(report_umask, umask=child_mask), 8) == child_mask
+    assert int(subprocess.check_output(report_umask), 8) == inherited_mask
     assert subprocess.Popen is Popen and Popen.__module__ == "subprocess"
     args = ["imre-argv-zero", "-c", 'printf "%s" "$0"']
     with Popen(args, executable=b"./sh", cwd="/bin", stdout=subprocess.PIPE) as child:

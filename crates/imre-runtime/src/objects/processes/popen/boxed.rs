@@ -81,6 +81,7 @@ impl BoxedPopen {
         bufsize: Int,
         pipesize: Int,
         start_new_session: bool,
+        umask: i32,
         warn_line_buffering: &mut dyn FnMut() -> Result<()>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
@@ -122,6 +123,7 @@ impl BoxedPopen {
             config.cwd = crate::BytesOwner::as_ptr(path).cast();
             config.cwd_kind = 8;
         }
+        let mask = Int::from(i64::from(umask));
         let mut site = None;
         let mut extras = LaunchExtras {
             pipe_size: handles.is_none().then_some((pipesize.0, 2)),
@@ -131,8 +133,7 @@ impl BoxedPopen {
             search_path,
             warn_line_buffering: Some(warn_line_buffering),
             environment: env,
-            // A new session uses the ordinary child-settings path with no group or umask change.
-            child: start_new_session.then_some((0, Int::small(-1).unwrap().0, true)),
+            child: (start_new_session || umask >= 0).then_some((0, mask.0, start_new_session)),
             ..Default::default()
         };
         for (i, ((mode, fd), shift)) in streams.iter().zip([12, 0, 4]).enumerate() {

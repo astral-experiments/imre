@@ -65,7 +65,7 @@ fn redirect(ctx: &mut Context, stream: Id, index: usize) -> Result<(u32, Option<
 
 type Environment = Vec<(Vec<u8>, Vec<u8>)>;
 
-fn environment(ctx: &mut Context, mapping: Id) -> Result<Option<Environment>> {
+fn environment(ctx: &mut Context, mapping: Id, fork: bool) -> Result<Option<Environment>> {
     if mapping == NONE {
         return Ok(None);
     }
@@ -82,6 +82,9 @@ fn environment(ctx: &mut Context, mapping: Id) -> Result<Option<Environment>> {
         ctx.heap.keep(pair[0]);
         ctx.heap.keep(pair[1]);
         let key = path(ctx, pair[0])?;
+        if fork && key.contains(&b'=') {
+            return Err(Error::new("ValueError", "illegal environment variable name"));
+        }
         let value = path(ctx, pair[1])?;
         entries
             .try_reserve(1)
@@ -108,6 +111,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         errors,
         shell,
         start_new_session,
+        umask,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -122,8 +126,9 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         io::text_options(ctx, encoding, errors, NONE)?;
     }
     let pipesize = ctx.as_int(pipesize)?;
-    // A session argument can run Python during both spawn selection and fork conversion.
-    let handles = (executable != NONE || start_new_session != FALSE)
+    // Child settings can run Python during both spawn selection and fork conversion.
+    let default_umask = matches!(ctx.heap.get(umask), Value::Int(n) if n.as_small() == Some(-1));
+    let handles = (executable != NONE || start_new_session != FALSE || !default_umask)
         .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
         .transpose()?;
     let shell = ctx.truth(shell)?;
@@ -185,18 +190,23 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         false
     };
     let close_fds_flag = handles.as_ref().map(|_| ctx.truth(close_fds)).transpose()?;
-    let direct = match handles.as_ref().zip(close_fds_flag) {
+    let mut direct = match handles.as_ref().zip(close_fds_flag) {
         Some((handles, close_fds)) => Some(
             handles.uses_posix_spawn(probed_directory, cwd != NONE, close_fds, &streams)
                 && !ctx.truth(start_new_session)?,
         ),
         None => None,
     };
+    if direct == Some(true) && !default_umask {
+        let zero = ctx.int(0);
+        let negative = ctx.binary("<", umask, zero)?;
+        direct = Some(ctx.truth(negative)?);
+    }
     // Fork snapshots environ before encoding the executable; posix_spawn packs it after argv.
     let mut child_env = if direct == Some(true) {
         None
     } else {
-        environment(ctx, env)?
+        environment(ctx, env, direct == Some(false))?
     };
     let mut argv = Vec::new();
     argv.try_reserve_exact(items.len())
@@ -220,6 +230,11 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     };
     let restore_signals = ctx.truth(restore_signals)?;
     let new_session = direct != Some(true) && ctx.truth(start_new_session)?;
+    let umask = if default_umask || direct == Some(true) {
+        -1
+    } else {
+        os::c_int(ctx, umask)?
+    };
     // On the prepared path, argv[0] is converted independently of the executable.
     let (alternate, arguments) = if handles.is_some() {
         (Some(program_bytes), items.as_slice())
@@ -231,7 +246,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         argv.push(path(ctx, *arg)?);
     }
     if direct == Some(true) {
-        child_env = environment(ctx, env)?;
+        child_env = environment(ctx, env, false)?;
     }
     let directory = (cwd != NONE).then(|| path(ctx, cwd)).transpose()?;
     let mut warning_error = None;
@@ -249,6 +264,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         ctx.as_int(bufsize)?,
         pipesize,
         new_session,
+        umask,
         &mut || {
             let result = (|| -> Result<()> {
                 let warnings = ctx.module("warnings")?;
