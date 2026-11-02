@@ -12,6 +12,19 @@ class Raises:
 
 
 def current():
+    for pattern, subject, want in (
+        (r"(?P<outer>(?P<inner>))", "", (1, "outer")),
+        (r"(?P<first>)(?P<second>)", "", (2, "second")),
+        (r"(?=a(?P<look>bc))(?P<consume>ab)", "abc", (2, "consume")),
+        (r"(?:(?P<a>a)|(?P<b>b))+", "ba", (1, "a")),
+        (r"(?:(?P<empty>\Z)|(?P<char>.))+", "x", (1, "empty")),
+    ):
+        match = re.match(pattern, subject)
+        assert (match.lastindex, match.lastgroup) == want
+    data = bytearray(b"!abz")
+    match = re.compile(br"(?P<outer>(a))(b)$").search(data, 1, 3)
+    data[:] = b""
+    assert (match.lastindex, match.lastgroup) == (3, None)
     for pattern, text in [(r"(?P<word>é)(b)?", "é"), (br"(?P<word>\xff)(b)?", b"\xff")]:
         match = re.compile(pattern).match(text)
         assert match[0] == text
