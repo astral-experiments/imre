@@ -113,6 +113,8 @@ impl BuiltinDescriptor {
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
+            "mappingproxy.__str__" => ("mappingproxy", "__str__"),
             "collections.deque.__contains__" => (deque::CLASS, "__contains__"),
             "collections.defaultdict.__repr__" => ("collections.defaultdict", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
@@ -215,6 +217,7 @@ impl BuiltinDescriptor {
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
             "dict" => ctx.dict_storage(receiver).is_some(),
+            "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
             deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"

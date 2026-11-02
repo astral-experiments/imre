@@ -670,6 +670,7 @@ pub(crate) enum Intrinsic {
     CodecInfoClass,
     UnicodeNormalize { check: bool },
     ObjectRuntimeExport(&'static str),
+    ScopedObjectRuntimeExport(&'static str),
     WeakProxy,
     WeakProxyClass { callable: bool },
     CodecLookup,
@@ -1569,7 +1570,7 @@ impl IntrinsicModule {
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Types, "MappingProxyType") => {
-                Intrinsic::ObjectRuntimeExport("types.MappingProxyType")
+                Intrinsic::ScopedObjectRuntimeExport("types.MappingProxyType")
             }
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,

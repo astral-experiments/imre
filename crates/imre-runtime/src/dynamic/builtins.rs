@@ -1015,13 +1015,20 @@ pub(super) fn call(
     if matches!(
         name,
         "object.__hash__" | "object.__repr__" | "object.__str__"
+            | "mappingproxy.__repr__" | "mappingproxy.__str__"
     ) {
-        let method = name.trim_start_matches("object.");
+        let (owner, method) = name.split_once('.').unwrap();
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
-                "descriptor '{method}' of 'object' object needs an argument"
+                "descriptor '{method}' of '{owner}' object needs an argument"
             )));
         };
+        if owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)) {
+            return Err(type_error(format!(
+                "descriptor '{method}' requires a 'mappingproxy' object but received a '{}'",
+                ctx.type_name(receiver)
+            )));
+        }
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
@@ -1032,6 +1039,13 @@ pub(super) fn call(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if owner == "mappingproxy" {
+            if method == "__str__" {
+                return call(ctx, "str", &[receiver], &[]);
+            }
+            let repr = ctx.checked_format(receiver, true)?;
+            return Ok(ctx.text(repr));
         }
         if method == "__repr__" {
             return ctx.object_repr(receiver);

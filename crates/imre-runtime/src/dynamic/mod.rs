@@ -510,6 +510,7 @@ impl Context {
                 return self.template_iterator(strings, interpolations);
             }
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
+            Value::MappingProxy(_) => return self.iterator(self.mapping_proxy_target(id)),
             Value::Deque(ref ring) => {
                 let cursor = deque::iterator(id, ring, false);
                 return Ok(self.alloc(cursor));

@@ -1829,7 +1829,7 @@ impl Context {
             }
             Value::Native(ref class)
                 if ((builtins::is_builtin_type(class) && !class.contains('.'))
-                    || matches!(class.as_str(), "traceback" | "frame"))
+                    || matches!(class.as_str(), "traceback" | "frame" | "mappingproxy"))
                     && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {
@@ -2586,6 +2586,16 @@ impl Context {
             }
             Value::Native(ref class) if class == "datetime.timezone" && name == "utc" => {
                 return Ok(stdlib::datetime::utc(self));
+            }
+            Value::Native(ref class)
+                if class == "mappingproxy" && matches!(name, "__repr__" | "__str__") =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
+            }
+            Value::MappingProxy(_) if matches!(name, "__repr__" | "__str__") => {
+                let descriptor = self.builtin(&format!("mappingproxy.{name}"));
+                let owner = self.builtin("mappingproxy");
+                return self.bind_attribute(descriptor, obj, owner);
             }
             Value::MappingProxy(_)
                 if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
@@ -4776,6 +4786,7 @@ impl Context {
                                 | "list"
                                 | "map"
                                 | "filter"
+                                | "mappingproxy"
                                 | "set"
                                 | "int"
                                 | "frozenset"
