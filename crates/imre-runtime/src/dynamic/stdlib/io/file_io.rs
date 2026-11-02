@@ -293,18 +293,25 @@ pub(in crate::dynamic) fn open(
     let text_output = !binary && !mode_text.contains('+') && mode_text.contains(['w', 'a', 'x']);
     let text_input_with_newline =
         buffering < 0 && newline.is_some() && matches!(mode_text, "r" | "rt" | "tr");
+    let text_update = !binary && mode_text.contains('+');
     let binary_bytes_path = binary
         && buffering < 0
         && !mode_text.contains('+')
         && !numeric
         && matches!(ctx.heap.get(ctx.scalar_value(raw_arg)), Value::Bytes(_));
     let fd = descriptor_from_argument(ctx, raw_arg);
-    if fd.is_some() || text_output || text_input_with_newline || binary_bytes_path {
+    let named_text_update = text_update && fd.is_none();
+    if fd.is_some()
+        || text_output
+        || text_input_with_newline
+        || binary_bytes_path
+        || named_text_update
+    {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
         let mode_text = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
-        if mode_text.contains('+') {
+        if fd.is_some() && mode_text.contains('+') {
             return Err(Error::new(
                 "NotImplementedError",
                 "buffered update descriptors are unsupported",
@@ -312,7 +319,7 @@ pub(in crate::dynamic) fn open(
         }
         let reading = mode_text.contains('r');
         let raw_mode = mode_text.replace('t', "");
-        if buffering > 0 {
+        if buffering > 0 && !named_text_update {
             return Err(Error::new(
                 "ValueError",
                 "explicit buffer sizes are unsupported",
@@ -331,7 +338,22 @@ pub(in crate::dynamic) fn open(
             None,
         )?;
         let handle = state(ctx, raw).expect("initialized FileIO");
-        let buffer = buffered_descriptor(ctx, raw, handle, reading)?;
+        let buffer = if named_text_update {
+            let capacity = if buffering > 1 {
+                buffering as usize
+            } else {
+                crate::text_output::binary_capacity(handle.blksize.get().into())
+            };
+            let result = super::BufferedFd::update(raw, handle.clone(), capacity)
+                .and_then(|buffer| files::BinaryFile::Descriptor(buffer).into_value())
+                .and_then(|value| ctx.heap.alloc_file_writer(value));
+            if result.is_err() {
+                let _ = handle.close();
+            }
+            result?
+        } else {
+            buffered_descriptor(ctx, raw, handle, reading)?
+        };
         if binary {
             return Ok(buffer);
         }
@@ -344,6 +366,7 @@ pub(in crate::dynamic) fn open(
                     encoding.unwrap_or(NONE),
                     errors.unwrap_or(NONE),
                     newline.unwrap_or(NONE),
+                    builtins::boolean(buffering == 1),
                 ],
                 Vec::new(),
             )
