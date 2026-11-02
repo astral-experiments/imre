@@ -967,6 +967,10 @@ impl Context {
             }
             return Ok(false);
         }
+        if matches!(self.heap.get(parent), Value::Native(name) if name == "typing.Callable") {
+            let origin = super::mapping_abc::class(self, "Callable")?;
+            return self.python_subclass_check(child, origin);
+        }
         if let Value::GenericAlias(alias) = self.heap.get(parent) {
             return Err(alias.kind.class_check_error("issubclass"));
         }
@@ -1383,9 +1387,6 @@ impl Context {
     pub(super) fn instance_of(&self, value: Id, class: Id) -> bool {
         if self.classes.get("typing.Union") == Some(&class) {
             return matches!(self.heap.get(value), Value::Union(_));
-        }
-        if self.classes.get("collections.abc.Callable") == Some(&class) {
-            return self.callable(value);
         }
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
@@ -5882,12 +5883,6 @@ impl Context {
                     && self.class_attr(callable, "__init__").is_none()
                 {
                     return Err(Error::new("TypeError", "Protocols cannot be instantiated"));
-                }
-                if self.classes.get("collections.abc.Callable") == Some(&callable) {
-                    return Err(Error::new(
-                        "TypeError",
-                        "Can't instantiate abstract class Callable without an implementation for abstract method '__call__'",
-                    ));
                 }
                 if self.classes.get("typing.Generic") == Some(&callable) {
                     return Err(Error::new(

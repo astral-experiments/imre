@@ -4,6 +4,7 @@ use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 /// Return the raw methods used by each structural collection ABC.
 fn structural_methods(name: &str) -> Option<&'static [&'static str]> {
     match name {
+        "Callable" => Some(&["__call__"]),
         "Iterable" => Some(&["__iter__"]),
         "Sized" => Some(&["__len__"]),
         "Container" => Some(&["__contains__"]),
@@ -16,7 +17,13 @@ fn structural_methods(name: &str) -> Option<&'static [&'static str]> {
 pub(super) fn bootstrapped(name: &str) -> bool {
     matches!(
         name,
-        "Sized" | "Iterable" | "Container" | "Collection" | "Mapping" | "MutableMapping"
+        "Callable"
+            | "Sized"
+            | "Iterable"
+            | "Container"
+            | "Collection"
+            | "Mapping"
+            | "MutableMapping"
     )
 }
 
@@ -27,6 +34,7 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
         return Ok(class);
     }
     let (parents, abstract_methods, methods): (&[&str], &[&str], &[&str]) = match name {
+        "Callable" => (&[], &["__call__"], &[]),
         "Sized" => (&[], &["__len__"], &[]),
         "Iterable" => (&[], &["__iter__"], &[]),
         "Container" => (&[], &["__contains__"], &[]),
@@ -52,6 +60,10 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     ctx.bind(scope, "__module__", module);
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
+    if name == "Callable" {
+        let slots = ctx.alloc(Value::Tuple(Vec::new()));
+        ctx.bind(scope, "__slots__", slots);
+    }
     if name == "Mapping" {
         ctx.bind(scope, "__reversed__", NONE);
     }
@@ -297,6 +309,22 @@ pub(super) fn call(
     }
     if let Some(name) = name.strip_prefix("abstract.") {
         return match name {
+            "Callable.__call__" => {
+                let keyword_self = kwargs.iter().any(|(name, _)| name == "self");
+                if args.is_empty() && !keyword_self {
+                    Err(Error::new(
+                        "TypeError",
+                        "Callable.__call__() missing 1 required positional argument: 'self'",
+                    ))
+                } else if !args.is_empty() && keyword_self {
+                    Err(Error::new(
+                        "TypeError",
+                        "Callable.__call__() got multiple values for argument 'self'",
+                    ))
+                } else {
+                    Ok(FALSE)
+                }
+            }
             "Sized.__len__" => Ok(ctx.int(0)),
             "Container.__contains__" => Ok(FALSE),
             "Iterable.__iter__" => {
