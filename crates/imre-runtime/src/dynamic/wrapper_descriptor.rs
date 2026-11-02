@@ -118,6 +118,7 @@ impl BuiltinDescriptor {
             "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
+            "str.__str__" => ("str", "__str__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
             "dict.__ior__" => ("dict", "__ior__"),

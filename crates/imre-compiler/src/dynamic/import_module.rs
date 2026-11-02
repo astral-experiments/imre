@@ -6,6 +6,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
         "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
         "datetime" => Some(("datetime.py", include_str!("../../stdlib/datetime.py"))),
+        "enum" => Some(("enum.py", include_str!("../../stdlib/enum.py"))),
         "json" => Some((
             "json/__init__.py",
             concat!(

@@ -174,6 +174,21 @@ impl Context {
     ) -> Option<T> {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return lookup(class).or_else(|| {
+                if let Value::Native(kind) = self.heap.get(class)
+                    && builtins::is_enum_base(kind)
+                {
+                    let scalar = match kind.as_str() {
+                        "enum.IntEnum" | "enum.IntFlag" => Some("int"),
+                        "enum.StrEnum" => Some("str"),
+                        _ => None,
+                    };
+                    return scalar
+                        .into_iter()
+                        .chain((kind != "enum.Enum").then_some("enum.Enum"))
+                        .chain(["object"])
+                        .filter_map(|name| self.builtins.get(name))
+                        .find_map(|&base| lookup(base));
+                }
                 if matches!(self.heap.get(class), Value::Native(name) if name == "datetime.datetime") {
                     self.builtins.get("datetime.date").and_then(|&base| lookup(base))
                 } else {
@@ -213,14 +228,12 @@ impl Context {
                 };
                 self.builtins.get(&format!("{owner}.{name}")).copied()
             }
-            // ReprEnum keeps int.__repr__ for str(), independently of __repr__ on the enum.
-            Value::Native(kind)
-                if name == "__str__" && matches!(kind.as_str(), "enum.IntEnum" | "enum.IntFlag") =>
-            {
-                self.builtins.get("int.__repr__").copied()
-            }
-            Value::Native(kind) if builtins::is_enum_base(kind) => {
-                self.builtins.get(&format!("enum.Enum.{name}")).copied()
+            Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&class) => {
+                self.namespace_binding(self.scope_data(scope), name).or_else(|| {
+                    if name == "_numeric_repr_" && matches!(self.heap.get(class), Value::Native(kind) if kind == "enum.IntFlag") {
+                        self.builtins.get("repr").copied()
+                    } else { None }
+                })
             }
             Value::Native(kind)
                 if name == "__hash__"
@@ -754,6 +767,7 @@ impl Context {
                             | "object.__getattribute__"
                             | "enum.auto.__init__"
                             | "enum.auto.__repr__"
+                            | "enum.Flag.__repr__"
                             | "enum.Enum.__repr__"
                             | "enum.Enum.__str__"
                             | "enum.Enum.__format__"
@@ -1716,6 +1730,11 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if let Some(&scope) = self.enum_scopes.get(&obj) {
+            if let Some(value) = self.enum_base_attribute(obj, scope, name)? {
+                return Ok(value);
+            }
+        }
         if matches!(name, "numerator" | "denominator") {
             let receiver = match self.heap.get(obj) {
                 Value::Int(_) | Value::Bool(_) => Some(obj),
@@ -3802,6 +3821,9 @@ impl Context {
                     Err(self.missing_attribute(obj, name))
                 }
             }
+            Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&obj) => {
+                return self.update_enum_base(scope, name, None);
+            }
             Value::Class { scope, .. } => {
                 if matches!(name, "__annotations__" | "__annotate__")
                     && self.has_class_annotation_provider(scope)
@@ -4599,6 +4621,9 @@ impl Context {
                 {
                     self.heap.weak_edge_removed(previous);
                 }
+            }
+            Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&obj) => {
+                self.update_enum_base(scope, name, Some(value))?;
             }
             Value::Class { scope, .. } => {
                 if name == "__dict__" {
