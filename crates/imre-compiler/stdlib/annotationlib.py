@@ -42,10 +42,9 @@ _TEMPLATE_QUOTES = ("'", '"', '"""', "'''")
 
 def _template_constant(value):
     def simple(item):
-        text = repr(item)
         if isinstance(item, (float, complex)):
-            return text.replace("inf", "1e309").replace("nan", "(1e309-1e309)")
-        return text
+            return repr(item).replace("inf", "1e309").replace("nan", "(1e309-1e309)")
+        return repr(item)
 
     if isinstance(value, tuple):
         if len(value) == 1:
@@ -66,13 +65,12 @@ def _template_constructor(template):
     return "Template(" + ", ".join(parts) + ")"
 
 
-def _template_interpolation(part):
-    expression = part.expression
+def _template_interpolation(expression, conversion, format_spec):
     parts = ["{ " if expression.startswith("{") else "{", expression]
-    if part.conversion:
-        parts.extend(("!", chr(ord(part.conversion))))
-    if part.format_spec:
-        spec = part.format_spec.replace("{", "{{").replace("}", "}}")
+    if conversion != -1:
+        parts.extend(("!", chr(conversion)))
+    if format_spec is not None:
+        spec = format_spec.replace("{", "{{").replace("}", "}}")
         spec = spec.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
         parts.extend((":", spec.replace("\n", "\\n")))
     parts.append("}")
@@ -125,12 +123,26 @@ def _template_repr(template):
             _check_annotation_syntax(f"({part.expression})")
     except SyntaxError:
         return _template_constructor(template)
-    parts = []
+    # Construct all fields before writing any text. Conversion, format specs and
+    # subclasses of str can run Python code in both phases.
+    fields = []
     for part in template:
         if isinstance(part, str):
-            parts.append((part.replace("{", "{{").replace("}", "}}"), True))
+            fields.append(part)
         else:
-            parts.append((_template_interpolation(part), False))
+            fields.append((
+                part.expression,
+                ord(part.conversion) if part.conversion else -1,
+                part.format_spec if part.format_spec else None,
+            ))
+
+    parts = []
+    for field in fields:
+        if type(field) is tuple:
+            parts.append((_template_interpolation(*field), False))
+        else:
+            text = field.replace("{", "{{").replace("}", "}}")
+            parts.append(("".join((text,)), True))
     return _quoted_template(parts)
 
 

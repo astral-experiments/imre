@@ -30,9 +30,24 @@ def current():
         def __radd__(self, other):
             raise AssertionError("template formatting concatenated user values")
 
+    rendered_values = []
+
     class Value:
+        @property
+        def __class__(self):
+            assert not rendered_values
+            return Value
+
         def __repr__(self):
+            rendered_values.append(self)
             return Token("shown")
+
+    class Literal(str):
+        def replace(self, old, new):
+            return self
+
+        def __iter__(self):
+            raise AssertionError("iterated a buffered string subclass")
 
     literal = Template("a{", Interpolation(1, "{x: y}", "r", "{spec}"))
     assert module.type_repr(literal) == "t'a{{{ {x: y}!r:{{spec}}}'"
@@ -40,6 +55,7 @@ def current():
     assert module.type_repr(Template(Interpolation((Value(),), ""))) == (
         "Template(Interpolation((shown,), '', None, ''))"
     )
+    assert module.type_repr(Template(Literal("text"))) == "t'text'"
     fallback = Template(Interpolation(..., "ok"), Interpolation(1, "x +"))
     assert module.annotations_to_string({"a": fallback}) == {
         "a": "Template(Interpolation(..., 'ok', None, ''), Interpolation(1, 'x +', None, ''))"
