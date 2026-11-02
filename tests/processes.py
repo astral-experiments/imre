@@ -46,7 +46,7 @@ REJECTED = {
     "wrong_env": "run(['command'], capture_output=True, encoding='utf-8', env={'KEY': 1})",
     "wrong_env_key": "run(['command'], capture_output=True, encoding='utf-8', env={1: 'value'})",
     "raw_environ": "run(['command'], capture_output=True, encoding='utf-8', env=os.environ)",
-    "environ_index": "print(os.environ['KEY'])",
+    "environ_index_type": "print(os.environ[42])",
     "environ_assignment_type": "os.environ['KEY'] = 42",
     "environ_copy_args": "os.environ.copy(1)",
     "environ_wrong_key": "print(os.getenv(1))",

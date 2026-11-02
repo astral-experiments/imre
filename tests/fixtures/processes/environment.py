@@ -57,7 +57,28 @@ os.environb[b"IMRE_PROCESS_OVERRIDE"] = b"bytes assignment"
 print(os.environ.get("IMRE_PROCESS_OVERRIDE"))
 os.environb[b"IMRE_PROCESS_NEW_BYTES"] = b"\xff"
 print(dict(os.environb)[b"IMRE_PROCESS_NEW_BYTES"])
-os.environb[b"IMRE_PROCESS_NEW_BYTES"] = b""
+del os.environb[b"IMRE_PROCESS_NEW_BYTES"]
+label = marked("IMRE_PROCESS_OVERRIDE")
+print(os.environ[label])
+del os.environ[label]
+print(subprocess.run(command, capture_output=True, encoding="utf-8").stdout)
+try:
+    os.environ[label]
+except KeyError as error:
+    assert error.args[0] is label
+    assert error.args[0] is not (label + "_")[:-1]
+    assert error.__suppress_context__
+try:
+    del os.environ[label]
+except KeyError as error:
+    assert error.args[0] is label
+    assert error.__suppress_context__
+byte_label = label.encode("utf-8")
+try:
+    del os.environb[byte_label]
+except KeyError as error:
+    assert error.args[0] is byte_label
+    assert error.__suppress_context__
 for invalid in ("", "bad=name", "bad\0name"):
     try:
         os.environ[invalid] = "rejected"
