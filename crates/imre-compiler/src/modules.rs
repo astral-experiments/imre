@@ -722,7 +722,6 @@ pub(crate) enum Intrinsic {
     Union,
     Literal,
     Callable,
-    Sequence,
     Mapping,
     Iterable,
     Iterator,
@@ -892,6 +891,7 @@ impl Intrinsic {
     pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
     pub(crate) const TEXT_IO_BASE: Self = Self::ObjectRuntimeExport("io.TextIOBase");
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
+    pub(crate) const TYPING_SEQUENCE: Self = Self::ObjectRuntimeExport("typing.Sequence");
 
     /// Subclasses of these immutable types keep their calendar value in the object runtime.
     pub(crate) fn is_subclassable_calendar(self) -> bool {
@@ -1769,7 +1769,7 @@ impl IntrinsicModule {
             (Self::Typing, "assert_type") => Intrinsic::ObjectRuntimeExport("typing.assert_type"),
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
-            (Self::Typing, "Sequence") => Intrinsic::Sequence,
+            (Self::Typing, "Sequence") => Intrinsic::TYPING_SEQUENCE,
             (Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping,
             (Self::Typing | Self::CollectionsAbc, "Iterable") => Intrinsic::Iterable,
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
