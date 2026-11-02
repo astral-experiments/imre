@@ -1606,6 +1606,7 @@ def report(text):
             "boxed_map_capwords.py",
             "boxed_module_globals.py",
             "boxed_dir.py",
+            "boxed_unittest_assert_almost_equal.py",
             "boxed_unittest_assert_count_equal.py",
             "boxed_unittest_membership.py",
             "boxed_unittest_instance.py",
