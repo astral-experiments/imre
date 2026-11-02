@@ -207,6 +207,7 @@ impl BuiltinDescriptor {
             "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
             "types.SimpleNamespace.__ne__" => (super::namespace::CLASS, "__ne__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
+            "tuple.count" => ("tuple", "count"),
             "tuple.index" => ("tuple", "index"),
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
             "_thread._local.__setattr__" => (thread_local::CLASS, "__setattr__"),
@@ -222,6 +223,7 @@ impl BuiltinDescriptor {
                     | "__getstate__"
                     | "__reduce__"
                     | "__reduce_ex__"
+                    | "count"
                     | "index"
                     | "isascii"
                     | "isalpha"
@@ -473,6 +475,8 @@ impl BuiltinDescriptor {
                     ("__reduce_ex__", _) if self.owner == "object" => "($self, protocol, /)",
                     ("__reduce__", "__doc__") if stdlib::os::stat::layout(self.owner).is_some() => return Some(NONE),
                     ("__reduce__", _) if stdlib::os::stat::layout(self.owner).is_some() => "($self, /)",
+                    ("count", "__doc__") if self.owner == "tuple" => "Return number of occurrences of value.",
+                    ("count", _) if self.owner == "tuple" => "($self, value, /)",
                     ("count", "__doc__") if self.owner == "bytes" => {
                         "Return the number of non-overlapping occurrences of subsection 'sub' in bytes B[start:end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes."
                     }
