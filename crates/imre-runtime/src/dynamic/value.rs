@@ -2858,7 +2858,7 @@ impl Heap {
         next
     }
 
-    /// Track a disk writer in the activation whose locals or return value may own it.
+    /// Track a file that must flush or close its descriptor when its last owner disappears.
     pub(super) fn alloc_file_writer(&mut self, file: Value) -> Result<Id> {
         self.file_writers
             .try_reserve(1)
