@@ -215,14 +215,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
     (matches!(
         owner,
-        "object"
-            | "dict"
-            | "float"
-            | "function"
-            | "int"
-            | "str"
-            | "type"
-            | super::thread_local::CLASS
+        "object" | "dict" | "float" | "function" | "int" | "str" | "type" | super::thread_local::CLASS
     ) || super::stdlib::itertools::cursor_type(owner).is_some()
         || is_exception(owner)
         || owner == super::stdlib::fixed_structseq::SCHED_PARAM
