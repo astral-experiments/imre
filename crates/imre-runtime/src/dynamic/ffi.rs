@@ -213,15 +213,11 @@ impl Context {
                 self.lookup(a, &name)
             }
             "assign" | "assign_target" | "assign_named_target" => {
-                let mut scope = a;
-                if op == "assign_named_target" {
-                    while self.scope_data(scope).comprehension.is_some() {
-                        scope = self
-                            .scope_data(scope)
-                            .parent
-                            .expect("enclosing comprehension scope");
-                    }
-                }
+                let scope = if op == "assign_named_target" {
+                    self.named_expression_scope(a)
+                } else {
+                    a
+                };
                 let name = copy_label(self.str_value(b)?)?;
                 let replaced = self.store_source_name(scope, &name, c)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
@@ -1116,6 +1112,10 @@ impl Context {
             let Some(parent) = frame.parent else {
                 return Some(false);
             };
+            // A separate exec/eval locals mapping supplies names to the module, never closure cells.
+            if frame.exec_locals.is_some() {
+                return Some(false);
+            }
             if frame.class_body.is_none() {
                 if frame.globals.contains(name) {
                     return Some(false);
@@ -1357,10 +1357,7 @@ pub(super) unsafe extern "C" fn imre_dyn_truth_mark(ctx: *const Context) -> usiz
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, mark: usize) {
     // SAFETY: the generated caller owns the context and recorded this mark in its active frame.
-    let ctx = unsafe { &mut *ctx };
-    ctx.heap.release_temporaries_since(mark);
-    ctx.heap.reserve_slot_or_request_collection();
-    ctx.collect_garbage();
+    unsafe { (&mut *ctx).comprehension_step(mark) }
 }
 
 /// Release a consumed truth operand on the branch that no longer needs it.
