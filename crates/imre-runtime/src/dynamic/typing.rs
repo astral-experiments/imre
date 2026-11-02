@@ -1405,27 +1405,41 @@ impl Context {
         let Some(slots) = self.scope_name(scope, "__slots__") else {
             return Ok(None);
         };
-        if let Ok(name) = self.str_value(slots) {
-            return Ok(Some([name.to_owned()].into()));
-        }
-        let iterator = self.iterator(slots)?;
-        self.heap.keep(iterator);
-        let mut items = Vec::new();
-        while let Some(slot) = self.next_item(iterator)? {
-            self.heap.keep(slot);
-            items.push(slot);
-        }
+        let items = if self.string_storage(slots).is_some() {
+            vec![slots]
+        } else {
+            let iterator = self.iterator(slots)?;
+            self.heap.keep(iterator);
+            let mut items = Vec::new();
+            while let Some(slot) = self.next_item(iterator)? {
+                self.heap.keep(slot);
+                items.push(slot);
+            }
+            items
+        };
         let mut names = Vec::with_capacity(items.len());
         for slot in items {
-            let name = self.str_value(slot).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "__slots__ items must be strings, not '{}'",
-                        self.type_name(slot)
-                    ),
-                )
-            })?;
+            let name = match self.str_value(slot) {
+                // Python permits keyword spellings as slot names.
+                Ok(name)
+                    if ruff_python_stdlib::identifiers::is_identifier(name)
+                        || ruff_python_stdlib::keyword::is_keyword(name) =>
+                {
+                    name
+                }
+                _ if self.string_storage(slot).is_some() => {
+                    return Err(Error::new("TypeError", "__slots__ must be identifiers"));
+                }
+                _ => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "__slots__ items must be strings, not '{}'",
+                            self.type_name(slot)
+                        ),
+                    ));
+                }
+            };
             names.push(name.to_owned());
         }
         Ok(Some(names.into()))

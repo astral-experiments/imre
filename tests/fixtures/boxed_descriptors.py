@@ -24,6 +24,22 @@ def current():
         pass
     assert seen == [1]
 
+    for slots in ("", ("valid", "not-a-name"), {"two words": "documentation"}, chr(0xD800)):
+        try:
+            class InvalidSlot:
+                __slots__ = slots
+        except TypeError as error:
+            assert str(error) == "__slots__ must be identifiers"
+        else:
+            raise AssertionError("accepted an invalid slot name")
+
+    class KeywordSlot:
+        __slots__ = "class"
+
+    keyword_slot = KeywordSlot()
+    setattr(keyword_slot, "class", 42)
+    assert getattr(keyword_slot, "class") == 42
+
     class Document:
         __slots__ = ("__doc__",)
 
