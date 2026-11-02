@@ -1,7 +1,5 @@
 //! BufferedReader over a native FileIO retains that raw object and its descriptor.
 
-use std::io::Read;
-
 use super::super::{builtins, files, os_error};
 use super::{BufferedFd, Context, Error, FALSE, Id, MemoryStream, NONE, Result, TRUE, Value};
 use super::{descriptor_buffer, file_io};
@@ -265,7 +263,7 @@ pub(super) fn call(
             ReadSource::File(reader) => descriptor_buffer::read_once(reader, size)?,
             ReadSource::Socket(socket) => {
                 let mut data = builtins::zeroed_bytes(size)?;
-                let n = socket.read(&mut data).map_err(os_error)?;
+                let n = socket.read1(&mut data).map_err(os_error)?;
                 data.truncate(n);
                 data
             }
