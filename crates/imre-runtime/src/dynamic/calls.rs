@@ -1100,7 +1100,7 @@ impl Context {
             Value::Union(_) => Ok(super::union::class(self)),
             Value::TextFile(_) => {
                 self.module("io")?;
-                Ok(self.builtins["_io.TextIOWrapper"])
+                Ok(self.builtins[stdlib::io::STANDARD_STREAM_CLASS])
             }
             Value::Instance { class, .. }
             | Value::Class {
@@ -1168,12 +1168,16 @@ impl Context {
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
         }
-        if let Some(actual) = self
+        if matches!(self.heap.get(value), Value::TextFile(_)) {
+            if let Some(&actual) = self.builtins.get(stdlib::io::STANDARD_STREAM_CLASS)
+                && self.subclass(actual, class)
+            {
+                return true;
+            }
+        } else if let Some(actual) = self
             .builtin_type_name(value)
             .and_then(|name| self.builtins.get(name))
-            && (super::mapping_abc::registered_subclass(self, *actual, class)
-                || matches!(self.heap.get(value), Value::TextFile(_))
-                    && self.direct_subclass(*actual, class))
+            && super::mapping_abc::registered_subclass(self, *actual, class)
         {
             return true;
         }
@@ -4435,6 +4439,7 @@ impl Context {
                 ancestors,
                 namedtuple_fields,
                 metaclass,
+                io_kind,
             } => {
                 let mut copied_name = String::new();
                 copied_name
@@ -4448,6 +4453,7 @@ impl Context {
                 copied_ancestors.extend_from_slice(ancestors);
                 Value::Class {
                     metaclass: *metaclass,
+                    io_kind: *io_kind,
                     name: copied_name,
                     scope: *scope,
                     ancestors: copied_ancestors,
