@@ -718,7 +718,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexMatch(_)
             if matches!(
                 attr,
-                "group" | "groups" | "groupdict" | "start" | "end" | "span"
+                "group" | "groups" | "groupdict" | "expand" | "start" | "end" | "span"
             ) =>
         {
             "match"
