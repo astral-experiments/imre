@@ -1872,6 +1872,9 @@ impl IntrinsicModule {
             (Self::Locale | Self::LocaleNative, "getencoding") => {
                 Intrinsic::SysEncoding(SysEncoding::Locale)
             }
+            (Self::Locale, "getpreferredencoding") => {
+                Intrinsic::ObjectRuntimeExport("locale.getpreferredencoding")
+            }
             (Self::Locale, "getlocale") => Intrinsic::ObjectRuntimeExport("locale.getlocale"),
             (Self::Locale, "setlocale") => Intrinsic::ObjectRuntimeExport("locale.setlocale"),
             (Self::LocaleNative, "setlocale") => {
