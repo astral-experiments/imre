@@ -453,6 +453,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "traceback",
             "clear_frames" | "format_exc" | "format_exception" | "print_exc" | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
+        ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
@@ -1726,29 +1727,7 @@ pub(super) fn call(
                     return Ok(ctx.dict(entries));
                 }
             }
-            ("metadata", [mapping], []) => {
-                let mapping = *mapping;
-                // Like mappingproxy_new, require mapping subscription and exclude lists and tuples.
-                let supported = match ctx.heap.get(ctx.scalar_value(mapping)) {
-                    Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => false,
-                    Value::Instance { class, .. } if ctx.namedtuple_fields(*class).is_some() => false,
-                    Value::Dict(_) | Value::DefaultDict { .. } | Value::MappingProxy(_)
-                    | Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) | Value::ByteArray(_)
-                    | Value::Array(_) | Value::Range(_) | Value::MemoryView { .. }
-                    | Value::Context(_) => true,
-                    _ => {
-                        ctx.dict_storage(mapping).is_some()
-                            || ctx.slot(mapping, "__getitem__").is_some()
-                            || ctx.enum_values(mapping).is_some()
-                    }
-                };
-                if !supported {
-                    return Err(Error::new("TypeError", format!(
-                        "mappingproxy() argument must be a mapping, not {}", ctx.type_name(mapping)
-                    )));
-                }
-                return Ok(ctx.alloc(Value::MappingProxy(mapping)));
-            }
+            ("metadata", [mapping], []) => return ctx.mapping_proxy(*mapping),
             _ => {}
         }
         return Err(Error::new(

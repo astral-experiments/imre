@@ -469,6 +469,43 @@ impl Context {
         self.equal_inner(a, b, usize::MAX, &mut false)
     }
 
+    pub(super) fn mapping_proxy(&mut self, mapping: Id) -> Result<Id> {
+        // Like mappingproxy_new, require mapping subscription and exclude lists and tuples.
+        let supported = match self.heap.get(self.scalar_value(mapping)) {
+            Value::List(_) | Value::Tuple(_) | Value::NamedTuple { .. } => false,
+            Value::Instance { class, .. } if self.namedtuple_fields(*class).is_some() => false,
+            Value::Dict(_)
+            | Value::DefaultDict { .. }
+            | Value::MappingProxy(_)
+            | Value::Str(_)
+            | Value::SurrogateStr(_)
+            | Value::Bytes(_)
+            | Value::ByteArray(_)
+            | Value::Array(_)
+            | Value::Range(_)
+            | Value::MemoryView { .. }
+            | Value::Context(_)
+            | Value::RegexMatch(_)
+            | Value::GenericAlias(_)
+            | Value::Union(_) => true,
+            _ => {
+                self.dict_storage(mapping).is_some()
+                    || self.slot(mapping, "__getitem__").is_some()
+                    || self.enum_values(mapping).is_some()
+            }
+        };
+        if !supported {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "mappingproxy() argument must be a mapping, not {}",
+                    self.type_name(mapping)
+                ),
+            ));
+        }
+        Ok(self.alloc(Value::MappingProxy(mapping)))
+    }
+
     /// Return the wrapped object without recursing through nested read-only views.
     pub(super) fn mapping_proxy_target(&self, mut value: Id) -> Id {
         while let Value::MappingProxy(mapping) = *self.heap.get(value) {
