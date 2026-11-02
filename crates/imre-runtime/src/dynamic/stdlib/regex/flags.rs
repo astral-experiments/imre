@@ -4,10 +4,10 @@ use super::*;
 pub(super) struct Flags {
     pub bits: i64,
     pub skip: usize,
-    pub misplaced: Option<Misplaced>,
+    pub deferred: Option<DeferredError>,
 }
 
-pub(super) struct Misplaced {
+pub(super) struct DeferredError {
     pub error: (&'static str, usize),
     pub prefix: Vec<u8>,
 }
@@ -51,7 +51,7 @@ pub(super) fn parse(
     let mut result = Flags {
         bits,
         skip: 0,
-        misplaced: None,
+        deferred: None,
     };
     if !source.windows(2).any(|pair| pair == b"(?") {
         return Ok(result);
@@ -136,7 +136,32 @@ pub(super) fn parse(
                         }
                         added |= flag;
                     }
-                    if added != 0 && source.get(j) == Some(&b')') {
+                    let removing = source.get(j) == Some(&b'-');
+                    if removing {
+                        j += 1;
+                        while let Some(flag) = source.get(j).and_then(|c| bit(*c)) {
+                            j += 1;
+                            if flag & (ASCII | LOCALE | UNICODE) != 0 {
+                                invalid.get_or_insert_with(|| {
+                                    (
+                                        "bad inline flags: cannot turn off flags 'a', 'u' and 'L'",
+                                        position(j),
+                                    )
+                                });
+                            }
+                            removed |= flag;
+                        }
+                    }
+                    if (added != 0 || removing) && source.get(j) == Some(&b')') {
+                        // Removing flags requires both a flag and a scoped body.
+                        if removing {
+                            let message = if removed == 0 {
+                                "missing flag"
+                            } else {
+                                "missing :"
+                            };
+                            invalid.get_or_insert_with(|| (message, position(j)));
+                        }
                         if leading {
                             if let Some(error) = invalid {
                                 return Err(error);
@@ -151,18 +176,11 @@ pub(super) fn parse(
                         // groups lets errors earlier than this token retain their precedence.
                         let mut prefix = source[result.skip..open].to_vec();
                         prefix.extend(std::iter::repeat_n(b')', parents.len()));
-                        result.misplaced = Some(Misplaced {
+                        result.deferred = Some(DeferredError {
                             error: invalid.unwrap_or_else(|| (PLACEMENT, position(open))),
                             prefix,
                         });
                         break;
-                    }
-                    if source.get(j) == Some(&b'-') {
-                        j += 1;
-                        while let Some(flag) = source.get(j).and_then(|c| bit(*c)) {
-                            removed |= flag;
-                            j += 1;
-                        }
                     }
                     if (added | removed) != 0 && source.get(j) == Some(&b':') {
                         parents.push(verbose);

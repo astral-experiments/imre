@@ -733,7 +733,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
     let inline_verbose = flags & VERBOSE == 0 && parsed.bits & VERBOSE != 0;
     let flags = parsed.bits;
     let spelling = &spelling[parsed.skip..];
-    if let Some(bad) = &parsed.misplaced
+    if let Some(bad) = &parsed.deferred
         && valid_prefix(id, &bad.prefix, flags, bytes, inline_verbose)
     {
         return Err(pattern_error_at(
@@ -761,7 +761,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
             ));
         }
     }
-    if let Some(bad) = parsed.misplaced {
+    if let Some(bad) = parsed.deferred {
         return Err(pattern_error_at(
             ctx,
             id,
