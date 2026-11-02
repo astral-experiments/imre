@@ -1610,7 +1610,9 @@ pub(super) fn call(
             Value::Union(u) => u.args,
             _ => ctx.alloc(Value::Tuple(vec![])),
         }),
-        ("Union.__origin__", [receiver]) => ctx.read_member("typing.Union", "__origin__", *receiver),
+        ("Union.__origin__", [receiver]) => {
+            ctx.read_member("typing.Union", "__origin__", *receiver)
+        }
         ("Union.__parameters__", [receiver]) => {
             ctx.read_member("typing.Union", "__parameters__", *receiver)
         }
