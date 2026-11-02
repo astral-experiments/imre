@@ -566,6 +566,11 @@ impl Context {
             || self.slot(descriptor, "__delete__").is_some()
     }
 
+    fn readable_data_descriptor(&self, member: Id) -> bool {
+        self.native_data_descriptor(member)
+            || (self.slot(member, "__get__").is_some() && self.data_descriptor(member))
+    }
+
     /// Bind a native class method to the class through which it was retrieved.
     fn bind_native_classmethod(&mut self, callable: Id, owner: Id) -> Id {
         self.alloc(Value::Method {
@@ -703,11 +708,7 @@ impl Context {
             return Ok(value);
         }
         match (member, field) {
-            (Some(member), _)
-                if self.data_descriptor(member)
-                    && (self.slot(member, "__get__").is_some()
-                        || self.native_data_descriptor(member)) =>
-            {
+            (Some(member), _) if self.readable_data_descriptor(member) => {
                 self.bind_attribute(member, object, class)
             }
             // Without a Python class member, object.__class__ is a data descriptor.
@@ -1061,6 +1062,10 @@ impl Context {
                 Ok(self.builtins["_io.TextIOWrapper"])
             }
             Value::Instance { class, .. }
+            | Value::Class {
+                metaclass: Some(class),
+                ..
+            }
             | Value::Module {
                 constructor: Some(class),
                 ..
@@ -1400,6 +1405,10 @@ impl Context {
         }
         let class = match *self.heap.get(obj) {
             Value::Instance { class, .. }
+            | Value::Class {
+                metaclass: Some(class),
+                ..
+            }
             | Value::Module {
                 constructor: Some(class),
                 ..
@@ -1509,6 +1518,18 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        let metaclass_member = match *self.heap.get(obj) {
+            Value::Class {
+                metaclass: Some(meta),
+                ..
+            } => self.class_attr(meta, name).map(|member| (meta, member)),
+            _ => None,
+        };
+        if let Some((meta, member)) = metaclass_member
+            && self.readable_data_descriptor(member)
+        {
+            return self.bind_attribute(member, obj, meta);
+        }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
                 "__args__" => return Ok(union.args),
@@ -2763,6 +2784,9 @@ impl Context {
                 }
                 if name == "__new__" && self.has_base(obj, "float") {
                     return Ok(self.builtin("float.__new__"));
+                }
+                if let Some((meta, member)) = metaclass_member {
+                    return self.bind_attribute(member, obj, meta);
                 }
             }
             Value::NamedTuple {
@@ -4050,6 +4074,7 @@ impl Context {
                 scope,
                 ancestors,
                 namedtuple_fields,
+                metaclass,
             } => {
                 let mut copied_name = String::new();
                 copied_name
@@ -4062,6 +4087,7 @@ impl Context {
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 copied_ancestors.extend_from_slice(ancestors);
                 Value::Class {
+                    metaclass: *metaclass,
                     name: copied_name,
                     scope: *scope,
                     ancestors: copied_ancestors,
@@ -4404,6 +4430,9 @@ impl Context {
                 ancestors,
                 ..
             } => {
+                if let Some(call) = self.bound_slot(callable, "__call__")? {
+                    return self.call(call, args, kwargs);
+                }
                 let (mut args, mut kwargs) = (args, kwargs);
                 if let Some(&decimal) = self.classes.get("decimal.Decimal")
                     && (callable == decimal
@@ -4817,9 +4846,40 @@ impl Context {
         }
     }
 
-    pub(super) fn class(&mut self, name: Id, bases: Id, body: Id) -> Result<Id> {
+    pub(super) fn class(
+        &mut self,
+        name: Id,
+        bases: Id,
+        body: Id,
+        parameterized: bool,
+    ) -> Result<Id> {
         let name = self.str_value(name)?.to_owned();
-        let (original, bases) = super::typing::resolve_bases(self, bases)?;
+        let (original, mut bases) = super::typing::resolve_bases(self, bases)?;
+        let mut typed_dict_meta = None;
+        if let Some(meta) = self.module_value("typing", "_TypedDictMeta")
+            && bases
+                .iter()
+                .any(|&base| self.heap.get(base).instance_class() == Some(meta))
+        {
+            let root = self.module_value("typing", "_TypedDict");
+            if bases.iter().any(|&base| {
+                self.heap.get(base).instance_class() != Some(meta)
+                    && self.classes.get("typing.Generic") != Some(&base)
+            }) {
+                return Err(Error::new(
+                    "TypeError",
+                    "cannot inherit from both a TypedDict type and a non-TypedDict base class",
+                ));
+            }
+            if parameterized || bases.len() != 1 || Some(bases[0]) != root {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "inherited and generic TypedDict declarations are unsupported",
+                ));
+            }
+            bases = vec![self.builtin("dict")];
+            typed_dict_meta = Some(meta);
+        }
         let Value::Function {
             scope: parent,
             code,
@@ -4902,6 +4962,10 @@ impl Context {
             self.bind_local(scope, "__init_subclass__", method);
         }
         let class = self.allocate_class(name.clone(), scope, bases)?;
+        let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
+            unreachable!()
+        };
+        *metaclass = typed_dict_meta;
         self.install_weakref_descriptor(class, scope);
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
@@ -4960,6 +5024,27 @@ impl Context {
                 .insert(format!("collections.abc.{name}"), class);
         }
         self.init_abstract_class(class, &name, scope)?;
+        if typed_dict_meta.is_some() {
+            // The class tracks unevaluated fields in its own namespace. Reading
+            // __annotations__ here would cache their values before user code can rebind names.
+            let fields = self
+                .own_class_attr(class, "__annotations__")
+                .ok_or_else(|| Error::new("TypeError", "missing TypedDict annotations"))?;
+            let thunks = self
+                .scope_data(scope)
+                .class_namespace
+                .as_ref()
+                .and_then(|ns| ns.annotation_thunks)
+                .unwrap_or(NONE);
+            let configure = self
+                .module_value("typing", "_configure_typeddict")
+                .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
+            self.call(
+                configure,
+                vec![class, fields, TRUE, TRUE, thunks],
+                Vec::new(),
+            )?;
+        }
         self.classes.insert(name, class);
         Ok(class)
     }

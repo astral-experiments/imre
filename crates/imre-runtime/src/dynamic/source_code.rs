@@ -2457,7 +2457,7 @@ impl Context {
                 let mut value = self.source_function(code, defining_scope, defaults);
                 if let Some(bases) = bases {
                     let name = self.heap.code_name(&child.name);
-                    value = self.class(name, bases, value)?;
+                    value = self.class(name, bases, value, false)?;
                 }
                 for decorator in decorators.into_iter().rev() {
                     value = self.call(decorator, vec![value], Vec::new())?;
