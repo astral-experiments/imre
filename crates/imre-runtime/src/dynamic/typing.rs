@@ -1561,7 +1561,8 @@ fn typevar(
             "Variance cannot be specified with infer_variance.",
         ));
     }
-    if bound != NONE {
+    let has_bound = bound != NONE;
+    if has_bound {
         let module = ctx.module("typing")?;
         let check = ctx.lookup_attr(module, "_type_check")?;
         let message = ctx.text("Bound must be a type.");
@@ -1573,7 +1574,7 @@ fn typevar(
             "A single constraint is not allowed",
         ));
     }
-    if !constraints.is_empty() && bound != NONE {
+    if !constraints.is_empty() && has_bound {
         return Err(Error::new(
             "TypeError",
             "Constraints cannot be combined with bound=...",
