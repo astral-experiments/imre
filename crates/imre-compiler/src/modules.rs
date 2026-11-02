@@ -2256,7 +2256,9 @@ impl IntrinsicModule {
             (Self::Re, "findall") => Intrinsic::ObjectRuntimeExport("re.findall"),
             (Self::Re, "finditer") => Intrinsic::ObjectRuntimeExport("re.finditer"),
             (Self::Re, "Scanner") => Intrinsic::ObjectRuntimeExport("re.Scanner"),
+            (Self::Re, "split") => Intrinsic::ObjectRuntimeExport("re.split"),
             (Self::Re, "sub") => Intrinsic::RegexSub,
+            (Self::Re, "subn") => Intrinsic::ObjectRuntimeExport("re.subn"),
             (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
             (Self::Re, "UNICODE") => Intrinsic::RegexUnicode,
             (Self::Re, "Pattern") => Intrinsic::RegexPattern,
@@ -2771,6 +2773,32 @@ impl SourceGraph {
                         | Binding::IntrinsicModule(IntrinsicModule::Imre)
                 )
             })
+        })
+    }
+
+    pub(crate) fn boxed_pattern_method(
+        &self,
+        module: usize,
+        expr: &ast::Expr,
+    ) -> Option<&'static str> {
+        let attr = expr.as_attribute_expr()?;
+        let method = match attr.attr.as_str() {
+            "split" => "re.Pattern.split",
+            "subn" => "re.Pattern.subn",
+            _ => return None,
+        };
+        self.session
+            .is_regex_pattern(module, &attr.value)
+            .then_some(method)
+    }
+
+    /// A pattern created in an imported helper can reach a boxed method in another module.
+    pub(crate) fn uses_boxed_pattern_method(&self) -> bool {
+        self.modules.iter().enumerate().any(|(id, module)| {
+            !module.bundled
+                && ast::helpers::any_over_body(&module.parsed.syntax().body, |expr| {
+                    self.boxed_pattern_method(id, expr).is_some()
+                })
         })
     }
 

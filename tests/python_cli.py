@@ -2120,6 +2120,15 @@ def report(text):
             "print(first is urlsplit('http://host/a'), first is urlsplit(b'http://host/a'))\n"
         )
         compare("-IB", split_entry, native_args=("run", split_entry, "--quiet"))
+        regex_entry = root / "regex_entry.py"
+        for program in (
+            "import re as rx\nprint(rx.split(b'(:+)', b'a::b:c', maxsplit=1))",
+            "from re import subn as replace\nprint(replace('x*', '!', 'abxd', count=3))",
+            "import re\npattern = re.compile(b'(:*)')\nprint(pattern.split(b':a:b', 2))",
+            "from re import compile as make\nreplace = make('x*').subn\nprint(replace('!', 'abxd', 3))",
+        ):
+            regex_entry.write_text(program)
+            compare("-IB", regex_entry, native_args=("run", regex_entry, "--quiet"))
         hex_entry = root / "hex_entry.py"
         for program in (
             "class Offset:\n    def __index__(self): return -(1 << 100)\nprint(hex(Offset()))",
