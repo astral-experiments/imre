@@ -120,7 +120,7 @@ impl Builtin {
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
-            Self::MappingObjectGet => Contract::new(true, PreservesOwners),
+            Self::MappingObjectGet | Self::ObjectTextProject => Contract::new(true, PreservesOwners),
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
@@ -1205,6 +1205,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_splitlines_options"
                 | "imre_str_translate"
                 | "imre_mapping_object_get"
+                | "imre_object_exact_text"
                 | "imre_exception_field_repr"
                 | "imre_system_exit_code_equal"
                 | "imre_system_exit_code_text"

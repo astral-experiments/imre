@@ -148,6 +148,26 @@ pub unsafe extern "C" fn imre_box_value(kind: u32, word: usize) -> *const Object
     ))))
 }
 
+/// Acquire the original exact string from an erased object, SystemExit code, or module member.
+///
+/// # Safety
+/// The caller roots the native object for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_object_exact_text(value: *const Object) -> *const Str {
+    // SAFETY: the caller roots both the view and its projected word.
+    if let Some((kind, word)) = unsafe { object(value).0.with(super::exceptions::projected_word) }
+        && kind.raw() == 3
+    {
+        // SAFETY: kind 3 identifies a rooted exact string.
+        return StrOwner::into_raw(unsafe { StrOwner::acquire_word(word) });
+    }
+    Error::return_static_message(
+        super::exceptions::Kind::TypeError,
+        "expected an exact str",
+        std::ptr::null(),
+    )
+}
+
 /// Borrow the original memory stream for a concrete class check or checked projection.
 ///
 /// # Safety
