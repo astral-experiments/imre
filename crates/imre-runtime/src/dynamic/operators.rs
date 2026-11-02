@@ -4204,6 +4204,15 @@ impl Context {
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        // Keep inherited dict comparisons on the iterative container walk, including cycles.
+        if op == "==" && [a, b].into_iter().all(|value| {
+            self.dict_storage(value).is_some()
+                && self.slot(value, "__eq__").is_none_or(|slot| {
+                    Some(&slot) == self.builtins.get("dict.__eq__")
+                })
+        }) {
+            return Ok(None);
+        }
         if matches!(op, "==" | "!=")
             && let Value::MemoryView { owner, .. } = self.heap.get(a)
         {

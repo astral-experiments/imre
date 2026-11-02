@@ -112,6 +112,7 @@ impl BuiltinDescriptor {
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
+            "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
             "collections.deque.__contains__" => (deque::CLASS, "__contains__"),
             "collections.defaultdict.__repr__" => ("collections.defaultdict", "__repr__"),
