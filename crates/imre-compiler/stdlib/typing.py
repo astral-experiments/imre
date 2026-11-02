@@ -2197,6 +2197,112 @@ def Literal(self, *parameters):
     return _typing._LiteralGenericAlias(self, parameters)
 
 
+def evaluate_forward_ref(
+    forward_ref,
+    *,
+    owner=None,
+    globals=None,
+    locals=None,
+    type_params=None,
+    format=None,
+    _recursive_guard=frozenset(),
+):
+    """Evaluate a forward reference as a type hint.
+
+    This is similar to calling the ForwardRef.evaluate() method,
+    but unlike that method, evaluate_forward_ref() also
+    recursively evaluates forward references nested within the type hint.
+
+    *forward_ref* must be an instance of ForwardRef. *owner*, if given,
+    should be the object that holds the annotations that the forward reference
+    derived from, such as a module, class object, or function. It is used to
+    infer the namespaces to use for looking up names. *globals* and *locals*
+    can also be explicitly given to provide the global and local namespaces.
+    *type_params* is a tuple of type parameters that are in scope when
+    evaluating the forward reference. This parameter should be provided (though
+    it may be an empty tuple) if *owner* is not given and the forward reference
+    does not already have an owner set. *format* specifies the format of the
+    annotation and is a member of the annotationlib.Format enum, defaulting to
+    VALUE.
+
+    """
+    from annotationlib import Format
+
+    if format == Format.STRING:
+        return forward_ref.__forward_arg__
+    if forward_ref.__forward_arg__ in _recursive_guard:
+        return forward_ref
+
+    if format is None:
+        format = Format.VALUE
+    value = forward_ref.evaluate(globals=globals, locals=locals,
+                                 type_params=type_params, owner=owner, format=format)
+
+    if (isinstance(value, ForwardRef)
+            and format == Format.FORWARDREF):
+        return value
+
+    if isinstance(value, str):
+        value = _make_forward_ref(value, module=forward_ref.__forward_module__,
+                                  owner=owner or forward_ref.__owner__,
+                                  is_argument=forward_ref.__forward_is_argument__,
+                                  is_class=forward_ref.__forward_is_class__)
+    if owner is None:
+        owner = forward_ref.__owner__
+    return _resolve_forward_type(
+        value, globals, locals, type_params, owner, format,
+        _recursive_guard | {forward_ref.__forward_arg__}, forward_ref,
+    )
+
+
+# The native collections.abc alias represents a GenericAlias subclass separately.
+_abc_callable_alias_type = type(_ABCCallable[..., object])
+
+
+def _resolve_forward_type(value, globals, locals, type_params, owner, format, guard, parent=None):
+    from types import GenericAlias
+
+    if isinstance(value, ForwardRef):
+        return evaluate_forward_ref(value, globals=globals, locals=locals, type_params=type_params,
+                                    owner=owner, format=format, _recursive_guard=guard)
+
+    builtin_aliases = (GenericAlias, _abc_callable_alias_type)
+    if not (isinstance(value, builtin_aliases)
+            or isinstance(value, (_typing._GenericAlias, _AnnotatedAlias, _typing.Union))
+            or _is_parameterized_typing_alias(value)):
+        return value
+    if isinstance(value, builtin_aliases):
+        args = tuple(
+            _make_forward_ref(arg, module=getattr(parent, "__forward_module__", None),
+                              owner=getattr(parent, "__owner__", None))
+            if isinstance(arg, str) else arg for arg in value.__args__
+        )
+        unpacked = value.__unpacked__
+        if _should_unflatten_callable_args(value, args):
+            value = value.__origin__[(args[:-1], args[-1])]
+        else:
+            value = value.__origin__[args]
+        if unpacked:
+            value = Unpack[value]
+
+    resolved = tuple(_resolve_forward_type(arg, globals, locals, type_params, owner, format,
+                                           guard) for arg in value.__args__)
+    if resolved == value.__args__:
+        return value
+    if isinstance(value, builtin_aliases):
+        return GenericAlias(value.__origin__, resolved)
+    if isinstance(value, _typing.Union):
+        union = resolved[0]
+        for arg in resolved[1:]:
+            union = union | arg
+        return union
+    if type(value) is _typing._CallableGenericAlias:
+        return _typing._CallableGenericAlias(value.__origin__, resolved, name="Callable")
+    if type(value) in (_typing._UnpackGenericAlias, _typing._LiteralGenericAlias):
+        return type(value)(value.__origin__, resolved)
+    return value.copy_with(resolved)
+
+
 # VALUE-format annotation resolution from CPython 3.14.5 Lib/typing.py.
 def _hint_scope(params, globalns, localns, is_class):
     if params:

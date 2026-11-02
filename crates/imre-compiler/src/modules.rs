@@ -1977,6 +1977,9 @@ impl IntrinsicModule {
             }
             (Self::Typing, "get_args") => Intrinsic::ObjectRuntimeExport("typing.get_args"),
             (Self::Typing, "get_origin") => Intrinsic::ObjectRuntimeExport("typing.get_origin"),
+            (Self::Typing, "evaluate_forward_ref") => {
+                Intrinsic::ObjectRuntimeExport("typing.evaluate_forward_ref")
+            }
             (Self::Typing, "get_type_hints") => {
                 Intrinsic::ObjectRuntimeExport("typing.get_type_hints")
             }

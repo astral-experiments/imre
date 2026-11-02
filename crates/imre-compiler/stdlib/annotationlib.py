@@ -12,7 +12,7 @@ class Format(enum.IntEnum):
     STRING = 4
 
 
-def _make_forward_ref(arg, module=None, owner=None, *, is_class=False):
+def _make_forward_ref(arg, module=None, owner=None, *, is_argument=True, is_class=False):
     from typing import _validate_forward_ref
     # typing._make_forward_ref eagerly checks the syntax, without resolving names.
     source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
@@ -20,7 +20,7 @@ def _make_forward_ref(arg, module=None, owner=None, *, is_class=False):
         _validate_forward_ref(source)
     except SyntaxError:
         raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
-    return ForwardRef(arg, module=module, owner=owner, is_class=is_class)
+    return ForwardRef(arg, module=module, owner=owner, is_argument=is_argument, is_class=is_class)
 
 
 class ForwardRef:
