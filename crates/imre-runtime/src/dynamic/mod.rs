@@ -2480,6 +2480,24 @@ impl Context {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
             }
+            "_sha3" => {
+                for name in [
+                    "sha3_224",
+                    "sha3_256",
+                    "sha3_384",
+                    "sha3_512",
+                    "shake_128",
+                    "shake_256",
+                ] {
+                    let class = crate::objects::HashState::public_constructor(name).unwrap();
+                    let constructor = self.builtin(class);
+                    self.bind(scope, name, constructor);
+                }
+                let backend = self.text("RustCrypto");
+                self.bind(scope, "implementation", backend);
+                let threshold = self.int(2048);
+                self.bind(scope, "_GIL_MINSIZE", threshold);
+            }
             "_blake2" => {
                 for name in ["blake2b", "blake2s"] {
                     let class = crate::objects::HashState::public_constructor(name).unwrap();

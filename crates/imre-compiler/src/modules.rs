@@ -530,6 +530,7 @@ pub(crate) enum IntrinsicModule {
     SocketNative,
     Hashlib,
     Blake2,
+    Sha3,
     Hmac,
     Types,
     Base64,
@@ -1023,6 +1024,7 @@ impl IntrinsicModule {
             "_socket" => Some(Self::SocketNative),
             "hashlib" => Some(Self::Hashlib),
             "_blake2" => Some(Self::Blake2),
+            "_sha3" => Some(Self::Sha3),
             "hmac" => Some(Self::Hmac),
             "base64" => Some(Self::Base64),
             "binascii" => Some(Self::Binascii),
@@ -2026,6 +2028,16 @@ impl IntrinsicModule {
                 _ => return None,
             }),
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
+            (Self::Sha3, "sha3_224") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_224"),
+            (Self::Sha3, "sha3_256") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_256"),
+            (Self::Sha3, "sha3_384") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_384"),
+            (Self::Sha3, "sha3_512") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_512"),
+            (Self::Sha3, "shake_128") => Intrinsic::ObjectRuntimeExport("_sha3.shake_128"),
+            (Self::Sha3, "shake_256") => Intrinsic::ObjectRuntimeExport("_sha3.shake_256"),
+            (Self::Sha3, "implementation") => {
+                Intrinsic::ObjectRuntimeExport("_sha3.implementation")
+            }
+            (Self::Sha3, "_GIL_MINSIZE") => Intrinsic::ObjectRuntimeExport("_sha3._GIL_MINSIZE"),
             (Self::Blake2, "blake2b") => Intrinsic::ObjectRuntimeExport("_blake2.blake2b"),
             (Self::Blake2, "blake2s") => Intrinsic::ObjectRuntimeExport("_blake2.blake2s"),
             (Self::Blake2, "_GIL_MINSIZE") => {
@@ -4527,6 +4539,7 @@ impl<'a> Loader<'a> {
                 module,
                 IntrinsicModule::Ast
                     | IntrinsicModule::Blake2
+                    | IntrinsicModule::Sha3
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp

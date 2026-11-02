@@ -213,7 +213,8 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     (matches!(
         owner,
         "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
-    ) || is_exception(owner))
+    ) || is_exception(owner)
+        || crate::objects::HashState::is_provider_class(owner))
     .then_some(owner)
 }
 
@@ -1232,18 +1233,28 @@ pub(super) fn call(
                 if values.len() != required {
                     return Err(type_error(format!("{message}, got {}", values.len())));
                 }
-                let Value::GetSetDescriptor { owner: "int", name: field, .. } = *ctx.heap.get(descriptor) else {
-                    return Err(type_error("expected an integer getset descriptor"));
+                let Value::GetSetDescriptor {
+                    owner, name: field, ..
+                } = *ctx.heap.get(descriptor)
+                else {
+                    return Err(type_error("expected a getset descriptor"));
                 };
-                if !ctx.builtin_slot_accepts(values[0], "int") {
+                let accepts = if owner == "int" {
+                    ctx.builtin_slot_accepts(values[0], owner)
+                } else if crate::objects::HashState::is_provider_class(owner) {
+                    ctx.type_name(values[0]) == owner
+                } else {
+                    return Err(type_error("expected a read-only getset descriptor"));
+                };
+                if !accepts {
                     return Err(type_error(format!(
-                        "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
+                        "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
                         ctx.type_name(values[0])
                     )));
                 }
                 Err(Error::new(
                     "AttributeError",
-                    format!("attribute '{field}' of 'int' objects is not writable"),
+                    format!("attribute '{field}' of '{owner}' objects is not writable"),
                 ))
             }
             "_int_getset" => integer::rational_field(ctx, method, args),

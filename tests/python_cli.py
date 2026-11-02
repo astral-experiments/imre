@@ -2292,6 +2292,7 @@ def report(text):
             "boxed_binascii.py",
             "boxed_zlib.py",
             "boxed_hashlib_names.py",
+            "bytes/hashlib_sha3_provider.py",
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",

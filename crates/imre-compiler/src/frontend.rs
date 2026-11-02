@@ -6477,7 +6477,14 @@ impl<'a> Checker<'a> {
                 if matches!(
                     self.resolve(expression),
                     Some(Binding::Intrinsic(Intrinsic::NamedHash(
-                        "blake2b" | "blake2s"
+                        "blake2b"
+                            | "blake2s"
+                            | "sha3_224"
+                            | "sha3_256"
+                            | "sha3_384"
+                            | "sha3_512"
+                            | "shake_128"
+                            | "shake_256"
                     )))
                 ) =>
             {
@@ -6485,7 +6492,7 @@ impl<'a> Checker<'a> {
                 return Err(self.classified_error(
                     FailureKind::ObjectOperation,
                     expression,
-                    "a BLAKE2 constructor used as a type requires native object dispatch",
+                    "a hash constructor used as a type requires native object dispatch",
                 ));
             }
             ast::Expr::Name(name) if name.id == "__debug__" => (
