@@ -114,6 +114,15 @@ def current():
     assert isinstance(ParamSpec.__name__, str)
     assert vars(ParamSpec)["__name__"].__get__(P) == "P"
 
+    sentinel_type = type(NoDefault)
+    try:
+        sentinel_type.new_attribute = 1
+    except TypeError as error:
+        assert str(error) == "cannot set 'new_attribute' attribute of immutable type 'NoDefaultType'"
+    else:
+        raise AssertionError("NoDefaultType accepted an attribute")
+    assert not hasattr(sentinel_type, "new_attribute")
+
     marker = []
     for default in (None, (), marker, NoDefault):
         parameter = TypeVar("T", default=default)

@@ -4889,6 +4889,7 @@ impl Context {
                         | HashState::XOF_CLASS
                         | "datetime.timezone"
                         | "typing.TypeVar"
+                        | "NoDefaultType"
                         | KEY_WRAPPER
                         | stdlib::flags::TYPE
                         | value::REGEX_PATTERN_TYPE
