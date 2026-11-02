@@ -441,9 +441,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
-        ("codecs" | "_codecs", "encode" | "decode" | "register" | "unregister" | "lookup" | "escape_decode" | "utf_16_ex_decode") => {
-            ctx.builtin(&format!("codecs.{name}"))
-        }
+        (
+            "codecs" | "_codecs",
+            "encode" | "decode" | "register" | "unregister" | "lookup" | "escape_decode"
+            | "utf_16_ex_decode",
+        ) => ctx.builtin(&format!("codecs.{name}")),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan" | "isqrt") => {

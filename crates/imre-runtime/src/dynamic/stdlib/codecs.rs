@@ -631,8 +631,8 @@ pub(super) fn encode_fixed(
 }
 
 mod transform;
-pub(in crate::dynamic) use transform::{decode_named, encode_text_object};
 pub(super) use transform::transform;
+pub(in crate::dynamic) use transform::{decode_named, encode_text_object};
 
 fn error_name(ctx: &Context, errors: Option<Id>) -> Result<&str> {
     let name = errors
@@ -916,13 +916,16 @@ pub(in crate::dynamic) fn entry_encode(
     } else {
         positional_codec_args(function, args, kwargs)?
     };
-    if ctx.string_storage(input).is_none() {
-        return Err(type_error(format!(
-            "{function}() argument 1 must be str, not {}",
-            ctx.type_name(input)
-        )));
-    }
-    let length = ctx.string_codepoints(input)?.len();
+    let length = match ctx.heap.get(ctx.scalar_value(input)) {
+        Value::Str(text) => text.chars().count(),
+        Value::SurrogateStr(points) => points.len(),
+        _ => {
+            return Err(type_error(format!(
+                "{function}() argument 1 must be str, not {}",
+                ctx.type_name(input)
+            )));
+        }
+    };
     let encoding = ctx.text(codec.name());
     let policy = entry_error_policy(ctx, function, errors)?;
     let data = encode_text(ctx, input, Some(encoding), policy)?;

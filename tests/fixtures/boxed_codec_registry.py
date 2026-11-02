@@ -2,14 +2,6 @@ import _codecs
 import codecs
 
 
-assert codecs.register is _codecs.register
-assert codecs.unregister is _codecs.unregister
-assert codecs.lookup is _codecs.lookup
-
-calls = []
-enabled = False
-
-
 def search(name):
     calls.append(name)
     if enabled and name == "user_test":
@@ -22,6 +14,14 @@ def search(name):
 
 def miss(name):
     calls.append("miss:" + name)
+
+
+assert codecs.register is _codecs.register
+assert codecs.unregister is _codecs.unregister
+assert codecs.lookup is _codecs.lookup
+
+calls = []
+enabled = False
 
 
 codecs.register(miss)

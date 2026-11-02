@@ -378,7 +378,9 @@ impl Checker<'_> {
             return Ok(classes);
         }
         if self.resolve(expression)
-            == Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("codecs.CodecInfo")))
+            == Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                "codecs.CodecInfo",
+            )))
         {
             return Ok(vec![InstanceType::Exact(Type::CodecInfo)]);
         }

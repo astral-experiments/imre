@@ -1238,8 +1238,12 @@ impl IntrinsicModule {
             (Self::CodecsNative, "escape_decode") => {
                 Intrinsic::ObjectRuntimeExport("_codecs.escape_decode")
             }
-            (Self::Codecs | Self::CodecsNative, "register") => Intrinsic::ObjectRuntimeExport("_codecs.register"),
-            (Self::Codecs | Self::CodecsNative, "unregister") => Intrinsic::ObjectRuntimeExport("_codecs.unregister"),
+            (Self::Codecs | Self::CodecsNative, "register") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.register")
+            }
+            (Self::Codecs | Self::CodecsNative, "unregister") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.unregister")
+            }
             (Self::CodecsNative, "lookup") => Intrinsic::ObjectRuntimeExport("_codecs.lookup"),
             (Self::CodecsNative, "_imre_native_search") => {
                 Intrinsic::ObjectRuntimeExport("_codecs._imre_native_search")
