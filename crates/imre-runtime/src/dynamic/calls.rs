@@ -1929,7 +1929,8 @@ impl Context {
         if matches!(
             self.heap.get(obj),
             Value::File(_) | Value::BufferedRandom(..)
-        ) || (name == "truncate" && matches!(self.heap.get(obj), Value::TextFile(_)))
+        ) || (matches!(name, "__repr__" | "truncate")
+            && matches!(self.heap.get(obj), Value::TextFile(_)))
         {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name)
@@ -3382,6 +3383,19 @@ impl Context {
                     && let Some(buffer) = file.buffer =>
             {
                 return Ok(buffer);
+            }
+            Value::TextFile(ref file)
+                if name == "name"
+                    && let Some(buffer) = file.buffer =>
+            {
+                return self.lookup_attr(buffer, "name");
+            }
+            Value::TextFile(_) if name == "mode" => return Ok(self.text("w")),
+            Value::TextFile(ref file)
+                if name == "encoding"
+                    && let Some(encoding) = file.encoding() =>
+            {
+                return Ok(self.text(encoding.as_str()));
             }
             Value::TextFile(_) if name == "write_through" => return Ok(FALSE),
             Value::TextFile(ref file) if name == "line_buffering" => {
