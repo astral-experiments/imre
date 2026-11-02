@@ -3486,7 +3486,11 @@ impl Context {
         .then_some(storage)
     }
 
-    pub(super) fn sequence_multiplier(&mut self, multiplier: Id, wrapper: bool) -> Result<isize> {
+    pub(super) fn sequence_multiplier(
+        &mut self,
+        multiplier: Id,
+        wrapper: bool,
+    ) -> Result<(crate::Int, isize)> {
         let count = if wrapper {
             self.index_integer(multiplier)?
         } else {
@@ -3500,7 +3504,7 @@ impl Context {
                 )
             })?
         };
-        count
+        let n = count
             .to_i64()
             .and_then(|n| isize::try_from(n).ok())
             .ok_or_else(|| {
@@ -3511,7 +3515,8 @@ impl Context {
                         self.type_name(multiplier)
                     ),
                 )
-            })
+            })?;
+        Ok((count, n))
     }
 
     fn overrides_repeat(&self, owner: Id, name: &str) -> bool {
@@ -3529,7 +3534,7 @@ impl Context {
         multiplier: Id,
         mode: RepeatMode,
     ) -> Result<Id> {
-        let n = self.sequence_multiplier(multiplier, mode == RepeatMode::Wrapper)?;
+        let (count, n) = self.sequence_multiplier(multiplier, mode == RepeatMode::Wrapper)?;
         Ok(match self.heap.get(storage) {
             Value::Deque(_) => return deque::repeat(self, owner, n, mode == RepeatMode::InPlace),
             Value::List(items) if mode == RepeatMode::InPlace => {

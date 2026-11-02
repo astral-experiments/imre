@@ -958,7 +958,7 @@ pub(super) fn method(
             return compare(ctx, op, receiver, *other).map(builtins::boolean);
         }
         ("__mul__" | "__rmul__" | "__imul__", [item]) => {
-            let n = ctx.sequence_multiplier(*item, true)?;
+            let (_, n) = ctx.sequence_multiplier(*item, true)?;
             return repeat(ctx, receiver, n, name == "__imul__");
         }
         ("__mul__" | "__rmul__" | "__imul__", _) => {
