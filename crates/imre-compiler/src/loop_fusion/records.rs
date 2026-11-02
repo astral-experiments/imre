@@ -68,13 +68,13 @@ fn is_local(expr: &Expr, slot: usize) -> bool {
 }
 
 /// Keep scalar field values separate from the identities of their enclosing records.
-enum Row {
+pub(super) enum Row {
     Scalar(Expr),
     Record(Vec<Row>),
 }
 
 impl Row {
-    fn build(
+    pub(super) fn build(
         expr: &Expr,
         constructors: &[Option<Constructor>],
         inputs: &mut HashSet<usize>,
@@ -105,7 +105,7 @@ impl Row {
     }
 
     /// Computed fields have one value per row, even if multiple projections use it.
-    fn stage(
+    pub(super) fn stage(
         &mut self,
         old: usize,
         ordinal: usize,
@@ -137,10 +137,13 @@ impl Row {
         }
     }
 
-    fn projection(&self, expr: &Expr, row: usize) -> Option<&Self> {
+    /// Follow typed field projections from the caller's chosen virtual root.
+    pub(super) fn projection(&self, expr: &Expr, root: &impl Fn(&Expr) -> bool) -> Option<&Self> {
+        if root(expr) {
+            return Some(self);
+        }
         match &expr.kind {
-            ExprKind::Local(id) if *id == row => Some(self),
-            ExprKind::Field(base, field) => match self.projection(base, row)? {
+            ExprKind::Field(base, field) => match self.projection(base, root)? {
                 Self::Record(fields) => fields.get(*field),
                 Self::Scalar(_) => None,
             },
@@ -281,7 +284,7 @@ pub(super) fn fuse(
                     .iter()
                     .any(|s| matches!(s,Statement::Assign(id,_) if id==slot))
         })
-        || !private_lists(function, first, &HashMap::from([(list, 1)]), &inputs)
+        || !private_lists(function, first, &HashMap::from([(list, 1)]), &inputs, 0)
     {
         return None;
     }
@@ -295,7 +298,7 @@ pub(super) fn fuse(
     let mut observable = false;
     ir::walk_expressions_mut(&mut body, &mut |expr| {
         if matches!(expr.kind, ExprKind::Field(..))
-            && let Some(Row::Scalar(value)) = row.projection(expr, visit.row)
+            && let Some(Row::Scalar(value)) = row.projection(expr, &|e| is_local(e, visit.row))
         {
             *expr = value.clone();
             projections += 1;

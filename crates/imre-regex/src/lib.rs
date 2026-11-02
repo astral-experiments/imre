@@ -559,6 +559,10 @@ fn escaped(
 
 fn class(input: &mut Input<'_>, output: &mut String, ascii: bool) -> Result<(), String> {
     output.push('[');
+    // An immediate second '[' is CPython's possible nested set (FutureWarning).
+    if input.peek() == Some(&'[') {
+        return Err("nested or ambiguous regex character class is not supported".into());
+    }
     if input.next_if_eq(&'^').is_some() {
         output.push('^');
     }
@@ -572,7 +576,7 @@ fn class(input: &mut Input<'_>, output: &mut String, ascii: bool) -> Result<(), 
             output.push(']');
             return Ok(());
         }
-        if c == '[' || matches!(c, '&' | '~' | '|' | '-') && input.peek() == Some(&c) {
+        if matches!(c, '&' | '~' | '|' | '-') && input.peek() == Some(&c) {
             return Err("nested or ambiguous regex character class is not supported".into());
         }
         if c == '-'

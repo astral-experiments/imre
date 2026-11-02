@@ -209,6 +209,14 @@ pub(super) fn is_builtin(name: &str) -> bool {
     (name != "UnsupportedOperation" && is_builtin_type(name)) || FUNCTIONS.contains(&name)
 }
 
+/// CPython compares built-in functions by their implementation and bound module.
+pub(super) fn native_implementation(symbol: &str) -> &str {
+    match symbol {
+        "_thread.allocate" => "_thread.allocate_lock",
+        _ => symbol,
+    }
+}
+
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;

@@ -1,5 +1,7 @@
+import _thread
+import types
 from _thread import LockType
-from threading import Lock
+from threading import Lock, TIMEOUT_MAX
 from weakref import ref
 
 
@@ -7,7 +9,41 @@ class MapLock:
     lock_class = Lock
 
 
+def factories():
+    assert TIMEOUT_MAX is _thread.TIMEOUT_MAX
+    print(TIMEOUT_MAX)
+    assert _thread.allocate is not _thread.allocate_lock
+    assert _thread.allocate == _thread.allocate_lock
+    assert {_thread.allocate: 1}[_thread.allocate_lock] == 1
+    for factory in (_thread.allocate, _thread.allocate_lock):
+        assert type(factory) is types.BuiltinFunctionType
+        assert factory.__self__ is _thread
+        assert factory is _thread.__dict__[factory.__name__]
+        print(repr(factory), factory.__name__, factory.__qualname__, factory.__module__)
+        print(factory.__text_signature__, factory.__doc__)
+        for args, kwargs in [((1,), {}), ((), {"x": 1}), ((1,), {"x": 1})]:
+            try:
+                factory(*args, **kwargs)
+            except TypeError as error:
+                print(str(error))
+            else:
+                raise AssertionError("lock factory accepted arguments")
+        left, right = factory(), factory()
+        assert type(left) is type(right) is LockType
+        assert left.acquire(timeout=TIMEOUT_MAX) and right.acquire(False)
+        assert not left.acquire(False)
+        left.release()
+        right.release()
+        try:
+            left.acquire(timeout=TIMEOUT_MAX + 1)
+        except OverflowError:
+            pass
+        else:
+            raise AssertionError("lock accepted timeout above TIMEOUT_MAX")
+
+
 def current():
+    factories()
     lock = MapLock().lock_class()
     print(type(lock) is Lock is LockType, isinstance(lock, Lock), Lock.__module__, Lock.__name__)
     print(lock.locked(), lock.acquire(False), lock.acquire(blocking=False), lock.acquire(timeout=0))
