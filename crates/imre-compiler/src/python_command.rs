@@ -8,6 +8,11 @@ use imre_compiler::{CommandFlags, PythonCommand};
 
 pub(super) enum Invocation {
     Command(PythonCommand),
+    Module {
+        name: String,
+        flags: CommandFlags,
+        executable: String,
+    },
     Script {
         path: PathBuf,
         flags: CommandFlags,
@@ -34,6 +39,7 @@ impl From<&str> for ParseError {
 
 enum Input {
     Command(String),
+    Module(String),
     Script(PathBuf),
 }
 
@@ -72,6 +78,7 @@ pub(super) fn parse(
                 'O' => optimize = optimize.checked_add(1).ok_or("too many -O options")?,
                 'B' => dont_write_bytecode = true,
                 'c' => break 'options Input::Command(operand(flags.as_str(), args, "-c")?),
+                'm' => break 'options Input::Module(operand(flags.as_str(), args, "-m")?),
                 'W' => {
                     warnoptions.push(operand(flags.as_str(), args, "-W")?);
                     break;
@@ -174,6 +181,11 @@ pub(super) fn parse(
             flags,
             executable,
         }),
+        Input::Module(name) => Invocation::Module {
+            name,
+            flags,
+            executable,
+        },
         Input::Script(path) => Invocation::Script {
             path,
             flags,

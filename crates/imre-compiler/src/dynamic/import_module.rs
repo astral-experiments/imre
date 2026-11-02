@@ -41,6 +41,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "_imre_ordered_dict.py",
             include_str!("../../stdlib/_imre_ordered_dict.py"),
         )),
+        "runpy" => Some(("runpy.py", include_str!("../../stdlib/runpy.py"))),
         "traceback" => Some((
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),

@@ -124,6 +124,7 @@ impl Imports {
                     | "traceback"
                     | "unittest.case"
                     | "string.templatelib"
+                    | "runpy"
             )
         {
             self.runtime_imports = true;
@@ -437,7 +438,11 @@ pub(crate) fn compile(
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
     let command = invocation.map(|i| &i.source);
-    let src = if let Some(command) = command {
+    let module_entry = options.module_entry.as_deref();
+    let in_memory = command.is_some() || module_entry.is_some();
+    let src = if module_entry.is_some() {
+        String::new()
+    } else if let Some(command) = command {
         command.to_owned()
     } else {
         let Ok(source) = std::fs::read_to_string(path) else {
@@ -461,6 +466,7 @@ pub(crate) fn compile(
             "keyword",
             "site",
             "importlib",
+            "runpy",
             "json",
             "opcode",
             "operator",
@@ -489,7 +495,8 @@ pub(crate) fn compile(
     ) {
         // A checked operation can require the object ABI even in a file without imports.
         Ok(i)
-            if i.runtime_imports
+            if module_entry.is_some()
+                || i.runtime_imports
                 || operation.is_some()
                 || (runtime_imports && !i.names.is_empty()) =>
         {
@@ -499,14 +506,24 @@ pub(crate) fn compile(
         Ok(i) if i.uses_import_builtin && (startup.is_some() || options.runtime_imports) => i,
         _ => return Ok(None),
     };
+    if let Some(name) = module_entry {
+        first.add(0, "runpy");
+        // Register source candidates without interpreting a module operand as a filesystem path.
+        // runpy and the normal finder decide which one can actually execute.
+        if name.split('.').all(|part| {
+            !part.is_empty() && Path::new(part).file_name().is_some_and(|file| file == part)
+        }) {
+            first.add(0, name);
+            first.add(0, &format!("{name}.__main__"));
+        }
+    }
     first
         .names
         .extend(registered_imports.targets.into_iter().map(|name| (0, name)));
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
     let entry = cwd.join(path);
-    let entry_identity = command
-        .is_none()
+    let entry_identity = (!in_memory)
         .then(|| entry.canonicalize())
         .transpose()
         .map_err(|e| e.to_string())?;
@@ -541,7 +558,7 @@ pub(crate) fn compile(
     let bundled_root = "<imre stdlib>";
     let mut sources = vec![(
         "__main__".to_owned(),
-        if command.is_some() {
+        if in_memory {
             PathBuf::from("<string>")
         } else {
             entry
@@ -557,6 +574,9 @@ pub(crate) fn compile(
         ));
     }
     let mut seen = HashSet::new();
+    // Keep source hints on the winning regular package's path. The runtime finder
+    // can still load a different child if a parent changes its __path__.
+    let mut entry_sources: HashMap<String, Option<PathBuf>> = HashMap::new();
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     let mut late_pprint = false;
@@ -580,7 +600,8 @@ pub(crate) fn compile(
             bundled_only = true;
             (String::new(), false, imports)
         };
-        if !options.runtime_imports
+        if module_entry.is_none()
+            && !options.runtime_imports
             && !registered_imports.called
             && imports.needs_typed_machinery()
             // Enforce the checked-file machinery contract on the original graph.
@@ -677,7 +698,17 @@ pub(crate) fn compile(
                 if bundled_only {
                     continue;
                 }
+                // The interpreter bootstraps runpy from its frozen copy before executing the target.
+                if prefix == "runpy" {
+                    continue;
+                }
                 for root in &roots {
+                    if let Some((parent, _)) = prefix.rsplit_once('.')
+                        && let Some(selected) = entry_sources.get(parent)
+                        && selected.as_ref() != Some(root)
+                    {
+                        continue;
+                    }
                     let stem = root.join(prefix.replace('.', "/"));
                     let file = stem.with_extension("py");
                     let init = stem.join("__init__.py");
@@ -709,6 +740,10 @@ pub(crate) fn compile(
                     ));
                     sources.push((prefix.clone(), path, src));
                     work.push_back((prefix.clone(), package, imports));
+                    if module_entry.is_some() {
+                        entry_sources.insert(prefix.clone(), package.then(|| root.clone()));
+                        break;
+                    }
                 }
             }
         }
@@ -801,7 +836,7 @@ pub(crate) fn compile(
         "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
-        "command":command.is_some(),"paths":paths,
+        "command":in_memory,"module_entry":module_entry,"paths":paths,
     });
     check_returns()?;
     let llvm_ir = emit::emit(&sources, &config.to_string(), keep_docstrings)?;

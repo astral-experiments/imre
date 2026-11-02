@@ -763,7 +763,12 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // The module registry now owns sys. Its startup temporaries must not
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
-        ctx.module("__main__")
+        let main = ctx.module("__main__")?;
+        if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
+            ctx.run_module_as_main(name)
+        } else {
+            Ok(main)
+        }
     });
     let status = match result {
         Ok(_) => 0,
