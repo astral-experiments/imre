@@ -36,6 +36,26 @@ try:
         try: context.__enter__()
         except ValueError: pass
         else: raise AssertionError("closed stream entered")
+    with Derived(io.FileIO(path,"r+"), 8) as guarded:
+        guarded.write(b"aZc")
+        class Position:
+            def __index__(self):
+                assert guarded.tell() == 3 and guarded.fileno() == guarded.raw.fileno()
+                assert guarded.readable() and guarded.writable() and guarded.seekable()
+                for attempt in (guarded.read1, guarded.flush, guarded.close):
+                    try: attempt()
+                    except RuntimeError as e: assert "reentrant" in str(e)
+                    else: raise AssertionError("reentrant buffer access was accepted")
+                return 2
+        size = Position()
+        assert guarded.truncate(size) is size and guarded.tell() == 3
+        class BadPosition:
+            def __index__(self):
+                raise LookupError("size conversion")
+        try: guarded.truncate(BadPosition())
+        except LookupError as error: assert str(error) == "size conversion"
+        else: raise AssertionError("size conversion exception lost")
+        assert guarded.seek(0) == 0 and guarded.read() == b"aZ"
     with io.open(path, "rb+") as opened:
         assert type(opened) is r and opened.read() == b"aZ"
     with tempfile.TemporaryFile("w+b") as tf:

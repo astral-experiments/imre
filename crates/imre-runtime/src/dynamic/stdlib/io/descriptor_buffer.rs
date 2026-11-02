@@ -485,7 +485,7 @@ impl BufferedFd {
     fn check_raw(&self, ctx: &Context, receiver: Id, name: &str) -> Result<()> {
         if !matches!(
             name,
-            "fileno" | "readable" | "writable" | "isatty" | "seekable"
+            "tell" | "fileno" | "readable" | "writable" | "isatty" | "seekable"
         ) && let Some(Buffer::Random(file)) = &*self.buffer.borrow()
         {
             file.check_reentry()?;
