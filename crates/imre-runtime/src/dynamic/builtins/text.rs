@@ -1699,7 +1699,7 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "find" | "rfind" | "count" | "index")
+        ("str", "find" | "rfind" | "index" | "rindex" | "count")
             | ("bytes", "count" | "find" | "rfind")
             | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
@@ -1834,6 +1834,7 @@ pub(super) fn method(
             };
             return Ok(ctx.alloc(Value::Int(value)));
         }
+        let reverse = matches!(name, "rfind" | "rindex");
         let found = if [receiver, needle]
             .iter()
             .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
@@ -1843,7 +1844,7 @@ pub(super) fn method(
                 &ctx.string_codepoints(needle)?,
                 start.as_ref(),
                 end.as_ref(),
-                name == "rfind",
+                reverse,
             )
         } else {
             crate::objects::find_text(
@@ -1851,10 +1852,10 @@ pub(super) fn method(
                 ctx.str_value(needle)?,
                 start.as_ref(),
                 end.as_ref(),
-                name == "rfind",
+                reverse,
             )
         };
-        if name == "index" && found.as_small() == Some(-1) {
+        if matches!(name, "index" | "rindex") && found.as_small() == Some(-1) {
             return Err(Error::new("ValueError", "substring not found"));
         }
         return Ok(ctx.alloc(Value::Int(found)));
