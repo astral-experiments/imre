@@ -105,7 +105,8 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
-        "_datetime"
+        "_blake2"
+            | "_datetime"
             | "_imre_ordered_dict"
             | "_opcode"
             | "atexit"
@@ -581,11 +582,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
-            if let Some(class) = crate::objects::HashState::public_constructor(name) =>
+            if crate::objects::HashState::public_constructor(name).is_none()
+                && crate::objects::HashState::algorithms().any(|alg| alg == name) =>
         {
-            ctx.builtin(class)
-        }
-        ("hashlib", name) if crate::objects::HashState::algorithms().any(|alg| alg == name) => {
             ctx.alloc(Value::Native(format!("hashlib.{name}")))
         }
         ("hashlib", "algorithms_available" | "algorithms_guaranteed") => {
@@ -772,7 +771,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "unquote" | "urlsplit" | "urlunsplit" | "SplitResult" | "SplitResultBytes" | "quote"
             | "quote_plus" | "quote_from_bytes" | "urlencode",
         )
-        | ("hashlib", "new" | "file_digest")
+        | ("hashlib", "file_digest")
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | (
             "re",
@@ -1977,6 +1976,9 @@ pub(super) fn call(
         && crate::objects::HashState::is_provider_class(class)
     {
         return hashlib::provider_method(ctx, class, method, args, kwargs);
+    }
+    if let Some(class) = crate::objects::HashState::provider_class(name) {
+        return hashlib::hash(ctx, class.rsplit_once('.').unwrap().1, args, kwargs);
     }
     if let Some(algorithm) = name.strip_prefix("hashlib.")
         && crate::objects::HashState::algorithms().any(|name| name == algorithm)

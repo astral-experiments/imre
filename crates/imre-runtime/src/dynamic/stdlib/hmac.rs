@@ -50,7 +50,11 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
                 .find(|alg| alg.starts_with("sha3_") && alg.eq_ignore_ascii_case(name))
                 .unwrap_or(name);
             let provider = HashState::provider(name)?;
-            super::attribute(ctx, "hashlib", provider.name)?
+            if let Some(class) = HashState::public_constructor(provider.name) {
+                ctx.builtin(class)
+            } else {
+                super::attribute(ctx, "hashlib", provider.name)?
+            }
         }
         Value::Module { .. } => ctx.lookup_attr(digest, "new")?,
         _ => digest,

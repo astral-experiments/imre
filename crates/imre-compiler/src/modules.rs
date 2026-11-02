@@ -528,6 +528,7 @@ pub(crate) enum IntrinsicModule {
     Socket,
     SocketNative,
     Hashlib,
+    Blake2,
     Hmac,
     Types,
     Base64,
@@ -1019,6 +1020,7 @@ impl IntrinsicModule {
             "socket" => Some(Self::Socket),
             "_socket" => Some(Self::SocketNative),
             "hashlib" => Some(Self::Hashlib),
+            "_blake2" => Some(Self::Blake2),
             "hmac" => Some(Self::Hmac),
             "base64" => Some(Self::Base64),
             "binascii" => Some(Self::Binascii),
@@ -1994,6 +1996,35 @@ impl IntrinsicModule {
                 _ => return None,
             }),
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
+            (Self::Blake2, "blake2b") => Intrinsic::ObjectRuntimeExport("_blake2.blake2b"),
+            (Self::Blake2, "blake2s") => Intrinsic::ObjectRuntimeExport("_blake2.blake2s"),
+            (Self::Blake2, "_GIL_MINSIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2._GIL_MINSIZE")
+            }
+            (Self::Blake2, "BLAKE2B_SALT_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2B_SALT_SIZE")
+            }
+            (Self::Blake2, "BLAKE2B_PERSON_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2B_PERSON_SIZE")
+            }
+            (Self::Blake2, "BLAKE2B_MAX_KEY_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2B_MAX_KEY_SIZE")
+            }
+            (Self::Blake2, "BLAKE2B_MAX_DIGEST_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2B_MAX_DIGEST_SIZE")
+            }
+            (Self::Blake2, "BLAKE2S_SALT_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_SALT_SIZE")
+            }
+            (Self::Blake2, "BLAKE2S_PERSON_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_PERSON_SIZE")
+            }
+            (Self::Blake2, "BLAKE2S_MAX_KEY_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_MAX_KEY_SIZE")
+            }
+            (Self::Blake2, "BLAKE2S_MAX_DIGEST_SIZE") => {
+                Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_MAX_DIGEST_SIZE")
+            }
             (Self::Hashlib, "md5") => Intrinsic::NamedHash("md5"),
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
             (Self::Hmac, "new") => Intrinsic::ObjectRuntimeExport("hmac.new"),
@@ -4445,6 +4476,7 @@ impl<'a> Loader<'a> {
             self.needs_object_imports |= matches!(
                 module,
                 IntrinsicModule::Ast
+                    | IntrinsicModule::Blake2
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
