@@ -750,6 +750,7 @@ pub(crate) fn compile(
         "codeop",
         "copyreg",
         "datetime",
+        "enum",
         "genericpath",
         "hashlib",
         "itertools",

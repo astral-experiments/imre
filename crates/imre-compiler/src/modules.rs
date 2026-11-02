@@ -2132,6 +2132,11 @@ impl IntrinsicModule {
             (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Enum, "StrEnum") => Intrinsic::StrEnum,
             (Self::Enum, "IntEnum") => Intrinsic::IntEnum,
+            (Self::Enum, "IntFlag") => Intrinsic::ObjectRuntimeExport("enum.IntFlag"),
+            (Self::Enum, "global_enum") => Intrinsic::ObjectRuntimeExport("enum.global_enum"),
+            (Self::Enum, "global_enum_repr") => Intrinsic::ObjectRuntimeExport("enum.global_enum_repr"),
+            (Self::Enum, "global_flag_repr") => Intrinsic::ObjectRuntimeExport("enum.global_flag_repr"),
+            (Self::Enum, "global_str") => Intrinsic::ObjectRuntimeExport("enum.global_str"),
             (Self::Enum, "_simple_enum") => Intrinsic::SimpleEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections | Self::CollectionsNative, "_count_elements") => {

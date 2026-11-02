@@ -82,6 +82,7 @@ const FUNCTIONS: &[&str] = &[
     "max",
     "ord",
     "chr",
+    "hex",
     "divmod",
     "round",
     "callable",
@@ -396,6 +397,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
 ];
 
 pub(super) const STR_METHODS: &[&str] = &[
+    "__str__",
     "__format__",
     "__repr__",
     "capitalize",
@@ -1243,6 +1245,7 @@ pub(super) fn call(
                 translation::translate(ctx, owner, args, kwargs)
             }
             "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
@@ -1407,6 +1410,11 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;
             ctx.exec_source(args[0], args[1], args.get(2).copied(), None)
+        }
+        "hex" => {
+            let value = one_positional_arg("hex", args, kwargs)?;
+            let number = ctx.index_integer(value)?;
+            Ok(ctx.text(format!("{:#x}", number.big().as_ref())))
         }
         "abs" => {
             if !kwargs.is_empty() {

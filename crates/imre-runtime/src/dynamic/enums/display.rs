@@ -76,7 +76,7 @@ impl Context {
             ctx.heap.keep(value);
             Ok(value)
         };
-        let renderer = if method == "enum.Enum.__repr__" {
+        let renderer = if matches!(method, "enum.Enum.__repr__" | "enum.Flag.__repr__") {
             let class = attr(self, member, "__class__")?;
             let renderer = attr(self, class, "_value_repr_")?;
             Some(if self.truth(renderer)? {
@@ -101,18 +101,16 @@ impl Context {
         };
         let class_name = builtins::call(self, "str", &[class_name], &[])?;
         let dot = self.text(".");
+        let unnamed_flag = name == NONE && method == "enum.Flag.__repr__";
         let name = builtins::call(self, "str", &[name], &[])?;
         let parts = if let Some(rendered) = rendered {
             let value = builtins::call(self, "str", &[rendered], &[])?;
-            vec![
-                self.text("<"),
-                class_name,
-                dot,
-                name,
-                self.text(": "),
-                value,
-                self.text(">"),
-            ]
+            let mut parts = vec![self.text("<"), class_name];
+            if !unnamed_flag {
+                parts.extend([dot, name]);
+            }
+            parts.extend([self.text(": "), value, self.text(">")]);
+            parts
         } else {
             vec![class_name, dot, name]
         };
