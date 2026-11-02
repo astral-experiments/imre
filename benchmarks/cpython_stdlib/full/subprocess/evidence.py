@@ -17,6 +17,14 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 # A completed method earns native operation credit only after inspecting what
 # its original assertions (or, in CONTROL, its retry loop) actually observe.
 OPERATIONS = {
+    "test.test_subprocess.ProcessTestCase.test_communicate_epipe":
+        "send 1 MiB through a pipe to an exiting child and return without propagating EPIPE",
+    "test.test_subprocess.ProcessTestCase.test_communicate_epipe_only_stdin":
+        "wait for the child and communicate 1 MiB through its stdin pipe without propagating EPIPE",
+    "test.test_subprocess.ProcessTestCase.test_communicate_pipe_buf":
+        "communicate across three pipes under backpressure and compare all echoed stdout bytes",
+    "test.test_subprocess.ProcessTestCase.test_communicate_pipe_fd_leak":
+        "communicate on seven pipe configurations and check each redirected stream is closed",
     "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input":
         "send a byte memoryview to the child, compare stdout bytes and check that stderr is None",
     "test.test_subprocess.ProcessTestCase.test_post_timeout_communicate_sends_input":
@@ -224,7 +232,7 @@ def report(args, level, discovered, reference):
             )
             loc = roles(
                 body="imre",
-                assertions="none" if name == CONTROL else "imre",
+                assertions="none" if name == CONTROL or body.get("assertions") == "none" else "imre",
                 operation="imre",
                 fixture="mixed",
             )
