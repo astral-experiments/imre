@@ -38,6 +38,7 @@ tempfile = "=3.23.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.190"
+object = { version = "=0.39.1", default-features = false, features = ["read_core", "std", "elf", "macho"] }
 
 [[bin]]
 name = "imre"
