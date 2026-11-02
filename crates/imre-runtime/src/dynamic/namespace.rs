@@ -13,7 +13,7 @@ pub(super) fn class(ctx: &mut Context) -> Result<Id> {
     ctx.bind(scope, "__module__", module);
     let name = ctx.text("SimpleNamespace");
     ctx.bind(scope, "__qualname__", name);
-    for slot in ["__init__", "__repr__", "__eq__", "__ne__", "__replace__"] {
+    for slot in ["__init__", "__repr__", "__eq__", "__ne__", "__reduce__", "__replace__"] {
         let method = ctx.builtin(&format!("{CLASS}.{slot}"));
         ctx.bind(scope, slot, method);
     }
@@ -90,6 +90,23 @@ pub(super) fn method(
             ));
         }
         return super::namespace_init::replace(ctx, object, class, kwargs);
+    }
+    if name == "__reduce__" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "SimpleNamespace.__reduce__() takes no keyword arguments",
+            ));
+        }
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("SimpleNamespace.__reduce__() takes no arguments ({} given)", rest.len()),
+            ));
+        }
+        let args = ctx.heap.packed_tuple(Vec::new(), false);
+        let state = ctx.instance_dictionary(object, class);
+        return Ok(ctx.alloc(Value::Tuple(vec![class, args, state])));
     }
     if name == "readonly_dict" {
         return Err(Error::new("AttributeError", "readonly attribute"));
