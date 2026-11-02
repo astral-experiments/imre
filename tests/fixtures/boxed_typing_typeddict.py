@@ -199,6 +199,21 @@ def check_deferred_fields():
     assert Row.__annotate__(Format.VALUE) == {"field": NotRequired[bytes]}
     assert ref.evaluate(locals={"Later": str}) is bytes
 
+    class Expressions(TypedDict):
+        left: (a ** b) ** c
+        right: a ** b ** -c
+        unary: ~(a - b) & 1 << c
+
+    expected = {
+        "left": "(a ** b) ** c",
+        "right": "a ** b ** (-c)",
+        "unary": "~(a - b) & 1 << c",
+    }
+    assert Expressions.__annotate__(Format.STRING) == expected
+    refs = Expressions.__annotate__(Format.FORWARDREF)
+    assert all(refs[key].__forward_arg__ == expr and refs[key].__owner__ is Expressions
+               for key, expr in expected.items())
+
 
 def check_exec_fields():
     parent_ns = {"TypedDict": TypedDict, "Alias": bytes}
