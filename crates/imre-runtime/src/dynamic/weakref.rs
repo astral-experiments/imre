@@ -217,6 +217,7 @@ impl Context {
             | Value::Code(_)
             | Value::Set { .. }
             | Value::MemoryView { .. }
+            | Value::File(_)
             | Value::Partial { .. }
             | Value::HandlerLock(_)
             | Value::PrimitiveLock(_)
