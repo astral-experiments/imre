@@ -13,6 +13,7 @@ operator_functions! {
     "truediv" => Self::Binary("/"),
     "floordiv" => Self::Binary("//"),
     "mod" => Self::Binary("%"),
+    "pow" => Self::Binary("**"),
     "lshift" => Self::Binary("<<"),
     "rshift" => Self::Binary(">>"),
     "and_" => Self::Binary("&"),
