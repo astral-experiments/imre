@@ -905,6 +905,7 @@ impl Context {
                             | "enum.Enum.__format__"
                             | "enum.Enum.__copy__"
                             | "enum.Enum.__deepcopy__"
+                            | "enum.Enum.__reduce_ex__"
                             | "object.__setattr__"
                             | "object.__delattr__"
                             | "object.__init__"

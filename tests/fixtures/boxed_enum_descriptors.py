@@ -66,6 +66,11 @@ def current():
         def __repr__(self):
             return "bits"
 
+    for member in (C.B, Status.OK, Bits(3)):
+        factory, arguments = member.__reduce_ex__(proto=4)
+        assert factory is type(member) and arguments == (member.value,)
+        assert factory(*arguments) is member
+
     assert IntEnum.__str__ is IntFlag.__str__ is int.__repr__
     assert (repr(Status.OK), str(Status.OK)) == ("status", "1")
     assert (repr(Bits(3)), str(Bits(3))) == ("bits", "3")
