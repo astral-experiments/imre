@@ -1,0 +1,32 @@
+{
+  "pin": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "driver_sha256": "f890d8906ffa0e22c1f496a219787c9a8fee28946beb46bee35383ad87523229",
+  "module_sha256": "6325b930f5fc9aa8537640423d410e2237811952ae41c097fbb03100cf26f0af",
+  "pyio_sha256": "1beee84c68ef6f7acb649dd5aada4c2f34f0476b01c293efe4afd9d0fe2d3ff1",
+  "lane": "ordinary3",
+  "head": "915ea527aa75c5787f9d566c0db939f4b459b46f",
+  "tree": "9ce8a9a4dafb8452000137836a2e5c23eb49ca38",
+  "tools": "df5b11d256033c30b0dc327c8626e3f34defcd3f2c495ed78aab9901755ec11d  imre\nd855b09939b7780498cc8e2f9d8308dc68e04135c0e06fcf91899780d1c5eff1  libimre_runtime.a\n",
+  "argv": [
+    "/workspace/scratch/imre-io/public-3960-tools/imre",
+    "build",
+    "/workspace/scratch/imre-io/native-random-evidence/whole-registration/primary_entry.py",
+    "--module-root",
+    "/workspace/scratch/imre-io/native-random-evidence/whole-registration",
+    "--runtime",
+    "/workspace/scratch/imre-io/public-3960-tools/libimre_runtime.a",
+    "--clang",
+    "/workspace/scratch/imre-io/clang/usr/lib/llvm-19/bin/clang",
+    "--opt-level",
+    "3",
+    "--no-cache",
+    "--quiet",
+    "-o",
+    "/workspace/scratch/imre-io/pair-random-primary-evidence/public-3960/ordinary3/invocation-enr26vvq/test-io"
+  ],
+  "exit": 0,
+  "bound_seconds": 5400,
+  "queue_plus_run_seconds": 3281.3357231660048,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

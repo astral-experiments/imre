@@ -1,0 +1,9 @@
+{
+  "head": "915ea527aa75c5787f9d566c0db939f4b459b46f",
+  "lane": "ordinary0",
+  "elf_sha256": "a748eecd57fa051cbe73abee21b1363f22dc0365649f617625e723f69c42613c",
+  "path": "/workspace/scratch/imre-io/pair-random-primary-evidence/public-3960/ordinary0/compiled-elf/test-io",
+  "bytes": 82115296,
+  "source": "/workspace/scratch/imre-io/pair-random-primary-evidence/public-3960/ordinary0/invocation-ndxp8dev/test-io",
+  "reason": "retained exact binary to replay canonical list/selected/whole independently of any wall-time outcome"
+}

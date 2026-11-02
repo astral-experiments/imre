@@ -1,0 +1,27 @@
+{
+  "pin": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "driver_sha256": "f890d8906ffa0e22c1f496a219787c9a8fee28946beb46bee35383ad87523229",
+  "module_sha256": "6325b930f5fc9aa8537640423d410e2237811952ae41c097fbb03100cf26f0af",
+  "pyio_sha256": "1beee84c68ef6f7acb649dd5aada4c2f34f0476b01c293efe4afd9d0fe2d3ff1",
+  "lane": "boxed3",
+  "head": "915ea527aa75c5787f9d566c0db939f4b459b46f",
+  "tree": "9ce8a9a4dafb8452000137836a2e5c23eb49ca38",
+  "tools": "df5b11d256033c30b0dc327c8626e3f34defcd3f2c495ed78aab9901755ec11d  imre\nd855b09939b7780498cc8e2f9d8308dc68e04135c0e06fcf91899780d1c5eff1  libimre_runtime.a\n",
+  "elf_sha256": "0f2934d53579dfb2a5450f7866dc192a66f5416508cb26a06bafcf05d45a9f23",
+  "argv": [
+    "/workspace/scratch/imre-io/pair-random-primary-evidence/public-3960/boxed3/invocation-pw22m0te/test-io",
+    "list"
+  ],
+  "exit": 0,
+  "bound_seconds": 3600,
+  "queue_plus_run_seconds": 3101.0090072340026,
+  "stdout_sha256": "9fafe66494ab441e1fda8122769461fe8c58653a76df7ae73a696e380d0db5f1",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "reported": [
+    "registered 667"
+  ],
+  "unique_ids": 667,
+  "missing": [],
+  "unexpected": [],
+  "identical_order": true
+}

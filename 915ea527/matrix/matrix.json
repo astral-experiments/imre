@@ -1,0 +1,40 @@
+{
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "imre": "915ea527aa75c5787f9d566c0db939f4b459b46f",
+  "phases": {
+    "ordinary0": {
+      "build": {
+        "exit": 0,
+        "elf_sha256": "a748eecd57fa051cbe73abee21b1363f22dc0365649f617625e723f69c42613c"
+      }
+    },
+    "ordinary3": {
+      "build": {
+        "exit": 0,
+        "elf_sha256": "c9e0150b96cc8b73eaffabbd681cfb53bdb50017efcbef743caa6347d993dd4b"
+      }
+    },
+    "boxed0": {
+      "build": {
+        "exit": 0,
+        "elf_sha256": "7db04e4331ec195b5775f4cb4dbf2923f7088e3981a9d9c019d31bb3ad310b12"
+      },
+      "list": {
+        "exit": 0,
+        "elf_sha256": "7db04e4331ec195b5775f4cb4dbf2923f7088e3981a9d9c019d31bb3ad310b12",
+        "registered": 667
+      }
+    },
+    "boxed3": {
+      "build": {
+        "exit": 0,
+        "elf_sha256": "0f2934d53579dfb2a5450f7866dc192a66f5416508cb26a06bafcf05d45a9f23"
+      },
+      "list": {
+        "exit": 0,
+        "elf_sha256": "0f2934d53579dfb2a5450f7866dc192a66f5416508cb26a06bafcf05d45a9f23",
+        "registered": 667
+      }
+    }
+  }
+}
