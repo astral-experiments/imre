@@ -831,6 +831,8 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        /// Private layout tag for native I/O class generations.
+        io_kind: Option<&'static str>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -1041,6 +1043,7 @@ impl Value {
     /// Returns the name used for both builtin class lookup and diagnostic messages.
     pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
         Some(match self {
+            Self::Selector(handle) => handle.borrow().class_name(),
             Self::Context(_) => "_contextvars.Context",
             Self::ContextVar { .. } => "_contextvars.ContextVar",
             Self::ContextToken { .. } => "_contextvars.Token",
@@ -1139,6 +1142,13 @@ impl Value {
             Self::PythonFrame { .. } => "frame",
             _ => return None,
         })
+    }
+
+    pub(super) fn io_kind(&self) -> Option<&'static str> {
+        match self {
+            Self::Class { io_kind, .. } => *io_kind,
+            _ => None,
+        }
     }
 
     pub(super) fn instance_class(&self) -> Option<Id> {
@@ -2126,6 +2136,11 @@ impl Heap {
             self.weak_edge_removed(old);
         }
         previous
+    }
+
+    /// An interpreter root (such as packed callback operands) can own weak targets indirectly.
+    pub(super) fn observes_released_roots(&self) -> bool {
+        self.has_weak_values || self.tracks_finalizers()
     }
 
     pub fn weak_edge_removed(&mut self, value: Id) {

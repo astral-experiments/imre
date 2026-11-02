@@ -33,6 +33,42 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
     }
 }
 
+/// Methods declared on BaseException and inherited by every native exception type.
+pub(super) fn base_exception_method(name: &str) -> Option<&'static str> {
+    match name {
+        "add_note" => Some("BaseException.add_note"),
+        "with_traceback" => Some("BaseException.with_traceback"),
+        _ => None,
+    }
+}
+
+/// Native exception ancestors in MRO order, excluding the class itself and object.
+pub(super) fn exception_ancestors(
+    kind: imre_ast::exceptions::Kind,
+) -> impl Iterator<Item = &'static str> {
+    use imre_ast::exceptions::Kind::*;
+    // These are the exception types with native boxed children. UnsupportedOperation
+    // inherits from both OSError and ValueError, in that order.
+    [
+        ConnectionError,
+        OSError,
+        UnicodeError,
+        ValueError,
+        ArithmeticError,
+        LookupError,
+        ImportError,
+        NameError,
+        RuntimeError,
+        SyntaxError,
+        Warning,
+        Exception,
+        BaseException,
+    ]
+    .into_iter()
+    .filter(move |&base| base != kind && kind.matches(base))
+    .map(|base| base.name())
+}
+
 const FUNCTIONS: &[&str] = &[
     "len",
     "hash",
@@ -876,6 +912,24 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "BaseException.add_note" {
+        let Some((&exception, args)) = args.split_first() else {
+            return Err(type_error(
+                "unbound method BaseException.add_note() needs an argument",
+            ));
+        };
+        if !matches!(ctx.heap.get(exception), Value::Raised(_)) {
+            let kind = ctx
+                .builtin_type_name(exception)
+                .unwrap_or_else(|| ctx.type_name(exception));
+            return Err(type_error(format!(
+                "descriptor 'add_note' for 'BaseException' objects doesn't apply to a '{kind}' object"
+            )));
+        }
+        let note = one_positional_arg(name, args, kwargs)?;
+        ctx.add_exception_note(exception, note)?;
+        return Ok(NONE);
+    }
     if name == "object.__getattribute__" {
         let Some((&object, values)) = args.split_first() else {
             return Err(type_error(
@@ -964,6 +1018,19 @@ pub(super) fn call(
             return Ok(NONE);
         }
         if args.len() != 1 || !kwargs.is_empty() {
+            if let Some(&receiver) = args.first() {
+                let tuple = ctx.builtin("tuple");
+                if ctx.instance_of(receiver, tuple) {
+                    let class = ctx.exact_type(receiver)?;
+                    if ctx
+                        .class_attr(class, "__init__")
+                        .is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__"))
+                    {
+                        // Tuple subtypes consume their constructor arguments in __new__.
+                        return Ok(NONE);
+                    }
+                }
+            }
             return Err(type_error(
                 "object.__init__() takes exactly one argument (the instance to initialize)",
             ));

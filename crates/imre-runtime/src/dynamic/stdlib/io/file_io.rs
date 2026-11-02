@@ -687,8 +687,12 @@ pub(super) fn call(
             ));
         }
         "__repr__" => {
-            let class = if ctx.heap.get(receiver).instance_class()
-                == ctx.builtins.get("_io.FileIO").copied()
+            let class = if ctx
+                .heap
+                .get(receiver)
+                .instance_class()
+                .and_then(|class| ctx.heap.get(class).io_kind())
+                == Some("FileIO")
             {
                 "_io.FileIO"
             } else {

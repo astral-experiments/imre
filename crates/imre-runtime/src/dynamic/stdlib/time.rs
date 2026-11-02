@@ -17,6 +17,21 @@ pub(super) fn struct_time(ctx: &mut Context, values: Vec<Id>, zone: Id, offset: 
     })
 }
 
+/// Format local civil fields with fixed English names and the caller's year width.
+pub(super) fn ctime_text(fields: [i64; 9], year_width: usize) -> String {
+    // CPython uses fixed English abbreviations regardless of LC_TIME.
+    const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let [year, month, day, hour, minute, second, weekday, ..] = fields;
+    let weekday = DAYS[weekday as usize];
+    let month = MONTHS[(month - 1) as usize];
+    // _asctime formats the calendar year as a C int.
+    let year = year as libc::c_int;
+    format!("{weekday} {month} {day:2} {hour:02}:{minute:02}:{second:02} {year:0year_width$}")
+}
+
 fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [sequence, attributes] = bind("structseq", args, kwargs, ["sequence", "dict"])?;
     let sequence = sequence.ok_or_else(|| {
@@ -221,20 +236,7 @@ pub(super) fn call(
             }
             let parts = civil(ctx, args.first().copied().unwrap_or(NONE), name == "gmtime")?;
             if name == "ctime" {
-                // CPython uses fixed English abbreviations regardless of LC_TIME.
-                const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-                const MONTHS: [&str; 12] = [
-                    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
-                    "Dec",
-                ];
-                let [year, month, day, hour, minute, second, weekday, ..] = parts.fields;
-                let weekday = DAYS[weekday as usize];
-                let month = MONTHS[(month - 1) as usize];
-                // _asctime formats the calendar year as a C int.
-                let year = year as libc::c_int;
-                return Ok(ctx.text(format!(
-                    "{weekday} {month} {day:2} {hour:02}:{minute:02}:{second:02} {year}"
-                )));
+                return Ok(ctx.text(ctime_text(parts.fields, 0)));
             }
             let fields = parts.fields.map(|n| ctx.int(n));
             let zone = parts.zone.map_or(NONE, |s| ctx.text(s.as_str()));

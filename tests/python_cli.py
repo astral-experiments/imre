@@ -1340,6 +1340,28 @@ def main():
             extra={"PYTHONDONTWRITEBYTECODE": "1", "IMREFLAGS": "--bogus"},
         )
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
+        compare(
+            "-B", "-c",
+            "import atexit, gc, sys\n"
+            "class SelfRemoving:\n"
+            "    def __call__(self): atexit.unregister(self)\n"
+            "    def __del__(self): atexit.register(print, 'registered during cleanup')\n"
+            "atexit.register(SelfRemoving())\n"
+            "atexit._run_exitfuncs()\n"
+            "assert atexit._ncallbacks() == 0\n"
+            "def first(label, *, flag):\n"
+            "    import __main__\n"
+            "    print(label, flag, __main__.message)\n"
+            "atexit.register(first, 'oldest', flag=7)\n"
+            "@atexit.register\n"
+            "def newest():\n"
+            "    print('newest')\n"
+            "    atexit.unregister(first)\n"
+            "message = 'retained'\n"
+            "gc.collect()\n"
+            "sys.exit(37)\n",
+            status=37,
+        )
         compare("-IB", "-c", "raise SystemExit")
         compare("-IB", "-c", "from sys import exit\nexit(None)")
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
@@ -1715,6 +1737,7 @@ def report(text):
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
         )
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
+        compare("-IB", fixtures / "boxed_unittest_patch.py")
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",
@@ -1798,6 +1821,7 @@ def report(text):
             "boxed_re_scanner.py",
             "boxed_re_escape.py",
             "boxed_datetime.py",
+            "boxed_timedelta_multiply.py",
             "boxed_dataclasses.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
@@ -1808,9 +1832,11 @@ def report(text):
             "boxed_time_strftime.py",
             "boxed_codecs.py",
             "boxed_io_exports.py",
+            "boxed_io_reimport.py",
             "boxed_io_text_encoding.py",
             "boxed_io_protocols.py",
             "boxed_selector_wide_fds.py",
+            "boxed_select_selector.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
             "boxed_os_descriptor_io.py",
@@ -1823,6 +1849,7 @@ def report(text):
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
+            "boxed_exception_notes.py",
             "boxed_warning_categories.py",
             "boxed_warnings.py",
             "boxed_oserror.py",
@@ -1835,8 +1862,11 @@ def report(text):
             "boxed_function_call.py",
             "boxed_any_generator.py",
             "boxed_global.py",
+            "boxed_configparser.py",
             "boxed_logging.py",
+            "boxed_logging_formatter.py",
             "boxed_logging_file.py",
+            "boxed_logging_adapter.py",
             "boxed_logging_file_error.py",
             "boxed_class_attribute.py",
             "boxed_missing_attribute_owners.py",
@@ -1857,7 +1887,6 @@ def report(text):
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_assert_warns.py",
             "boxed_unittest_assert_regex.py",
-            "boxed_unittest_patch.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
             "boxed_frozenset.py",

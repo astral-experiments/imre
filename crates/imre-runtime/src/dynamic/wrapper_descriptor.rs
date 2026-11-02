@@ -47,7 +47,9 @@ impl BuiltinDescriptor {
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
             Some(("memoryview", attr)) => Some(("memoryview", attr, builtins::MEMORYVIEW_METHODS)),
-            Some(("BaseException", attr)) => Some(("BaseException", attr, &["with_traceback"][..])),
+            Some(("BaseException", attr)) => {
+                Some(("BaseException", attr, &["add_note", "with_traceback"][..]))
+            }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
             Some(("set", attr)) => Some(("set", attr, &["issubset"][..])),
             Some(("frozenset", attr)) => Some(("frozenset", attr, &["issubset"][..])),
@@ -225,8 +227,8 @@ impl BuiltinDescriptor {
                 {
                     match ctx.heap.get(receiver) {
                         Value::NamedTuple { class: Some(stdlib::os::stat::CLASS), .. } => "stat_result",
-                        Value::Instance { class, .. } => ctx
-                            .class_attr(*class, "__qualname__")
+                        value if let Some(class) = value.instance_class() => ctx
+                            .class_attr(class, "__qualname__")
                             .and_then(|name| ctx.str_value(name).ok())
                             .unwrap_or_else(|| ctx.type_name(receiver)),
                         _ => ctx.type_name(receiver),
@@ -238,6 +240,8 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__doc__" if self.name == "add_note" => ctx.text("Add a note to the exception"),
+            "__text_signature__" if self.name == "add_note" => ctx.text("($self, note, /)"),
             "__doc__" if self.name == "__call__" => ctx.text("Call self as a function."),
             "__text_signature__" if self.name == "__call__" => {
                 ctx.text("($self, /, *args, **kwargs)")
@@ -247,8 +251,10 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__neg__" => ctx.text("-self"),
             "__text_signature__" if self.name == "__neg__" => ctx.text("($self, /)"),
             "__doc__" if self.name == "__add__" => ctx.text("Return self+value."),
+            "__doc__" if self.name == "__mul__" => ctx.text("Return self*value."),
+            "__doc__" if self.name == "__rmul__" => ctx.text("Return value*self."),
             "__doc__" if self.name == "__iadd__" => ctx.text("Implement self+=value."),
-            "__text_signature__" if matches!(self.name, "__add__" | "__iadd__") => {
+            "__text_signature__" if matches!(self.name, "__add__" | "__iadd__" | "__mul__" | "__rmul__") => {
                 ctx.text("($self, value, /)")
             }
             "__text_signature__" if self.name == "endswith" => {

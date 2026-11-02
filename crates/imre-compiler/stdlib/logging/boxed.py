@@ -1,5 +1,7 @@
 """Logging for Python modules executed by the native object runtime."""
 import sys
+import warnings
+from types import GenericAlias
 import weakref
 import _imre_logging as _native
 
@@ -27,42 +29,6 @@ _handlers = weakref.WeakValueDictionary()
 
 def _handler_level(level):
     return _checkLevel(level)
-
-
-class _MessageFormatter:
-    def format(self, record):
-        record.message = record.getMessage()
-        message = "%(message)s" % record.__dict__
-        if record.exc_info and not record.exc_text:
-            record.exc_text = self.formatException(record.exc_info)
-        for detail in (record.exc_text, record.stack_info):
-            if detail:
-                if not message.endswith("\n"):
-                    message += "\n"
-                message += detail
-        return message
-
-    def formatException(self, ei):
-        """
-        Format and return the specified exception information as a string.
-
-        This default implementation just uses
-        traceback.print_exception()
-        """
-        sio = io.StringIO()
-        tb = ei[2]
-        # See issues #9427, #1553375. Commented out for now.
-        #if getattr(self, 'fullstack', False):
-        #    traceback.print_stack(tb.tb_frame.f_back, file=sio)
-        traceback.print_exception(ei[0], ei[1], tb, limit=None, file=sio)
-        s = sio.getvalue()
-        sio.close()
-        if s[-1:] == "\n":
-            s = s[:-1]
-        return s
-
-
-_default_formatter = _MessageFormatter()
 
 
 def _flush_handler_stream(handler):
@@ -286,6 +252,28 @@ class Logger(Filterer):
         if hdlr in self.handlers:
             self.handlers.remove(hdlr)
 
+    def hasHandlers(self):
+        """
+        See if this logger has any handlers configured.
+
+        Loop through all handlers for this logger and its parents in the
+        logger hierarchy. Return True if a handler was found, else False.
+        Stop searching up the hierarchy whenever a logger with the "propagate"
+        attribute set to zero is found - that will be the last logger which
+        is checked for the existence of handlers.
+        """
+        c = self
+        rv = False
+        while c:
+            if c.handlers:
+                rv = True
+                break
+            if not c.propagate:
+                break
+            else:
+                c = c.parent
+        return rv
+
     def findCaller(self, stack_info=False, stacklevel=1):
         """
         Find the stack frame of the caller so that we can note the source
@@ -406,7 +394,7 @@ class Logger(Filterer):
                 break
             current = current.parent
         if not found and record.levelno >= WARNING:
-            sys.stderr.write(_default_formatter.format(record) + "\n")
+            sys.stderr.write(_defaultFormatter.format(record) + "\n")
             sys.stderr.flush()
 
     def info(self, msg, *args, **kwargs):
@@ -475,6 +463,158 @@ class Logger(Filterer):
         """
         if self.isEnabledFor(CRITICAL):
             self._log(CRITICAL, msg, args, **kwargs)
+
+
+# CPython 3.14.5 Lib/logging/__init__.py. See records.py for the license.
+class LoggerAdapter(object):
+    """
+    An adapter for loggers which makes it easier to specify contextual
+    information in logging output.
+    """
+
+    def __init__(self, logger, extra=None, merge_extra=False):
+        """
+        Initialize the adapter with a logger and an optional dict-like object
+        which provides contextual information. This constructor signature
+        allows easy stacking of LoggerAdapters, if so desired.
+
+        You can effectively pass keyword arguments as shown in the
+        following example:
+
+        adapter = LoggerAdapter(someLogger, dict(p1=v1, p2="v2"))
+
+        By default, LoggerAdapter objects will drop the "extra" argument
+        passed on the individual log calls to use its own instead.
+
+        Initializing it with merge_extra=True will instead merge both
+        maps when logging, the individual call extra taking precedence
+        over the LoggerAdapter instance extra
+
+        .. versionchanged:: 3.13
+           The *merge_extra* argument was added.
+        """
+        self.logger = logger
+        self.extra = extra
+        self.merge_extra = merge_extra
+
+    def process(self, msg, kwargs):
+        """
+        Process the logging message and keyword arguments passed in to
+        a logging call to insert contextual information. You can either
+        manipulate the message itself, the keyword args or both. Return
+        the message and kwargs modified (or not) to suit your needs.
+
+        Normally, you'll only need to override this one method in a
+        LoggerAdapter subclass for your specific needs.
+        """
+        if self.merge_extra and kwargs.get("extra") is not None:
+            if self.extra is not None:
+                kwargs["extra"] = {**self.extra, **kwargs["extra"]}
+        else:
+            kwargs["extra"] = self.extra
+        return msg, kwargs
+
+    #
+    # Boilerplate convenience methods
+    #
+    def debug(self, msg, *args, **kwargs):
+        """
+        Delegate a debug call to the underlying logger.
+        """
+        self.log(DEBUG, msg, *args, **kwargs)
+
+    def info(self, msg, *args, **kwargs):
+        """
+        Delegate an info call to the underlying logger.
+        """
+        self.log(INFO, msg, *args, **kwargs)
+
+    def warning(self, msg, *args, **kwargs):
+        """
+        Delegate a warning call to the underlying logger.
+        """
+        self.log(WARNING, msg, *args, **kwargs)
+
+    def warn(self, msg, *args, **kwargs):
+        warnings.warn("The 'warn' method is deprecated, "
+            "use 'warning' instead", DeprecationWarning, 2)
+        self.warning(msg, *args, **kwargs)
+
+    def error(self, msg, *args, **kwargs):
+        """
+        Delegate an error call to the underlying logger.
+        """
+        self.log(ERROR, msg, *args, **kwargs)
+
+    def exception(self, msg, *args, exc_info=True, **kwargs):
+        """
+        Delegate an exception call to the underlying logger.
+        """
+        self.log(ERROR, msg, *args, exc_info=exc_info, **kwargs)
+
+    def critical(self, msg, *args, **kwargs):
+        """
+        Delegate a critical call to the underlying logger.
+        """
+        self.log(CRITICAL, msg, *args, **kwargs)
+
+    def log(self, level, msg, *args, **kwargs):
+        """
+        Delegate a log call to the underlying logger, after adding
+        contextual information from this adapter instance.
+        """
+        if self.isEnabledFor(level):
+            msg, kwargs = self.process(msg, kwargs)
+            self.logger.log(level, msg, *args, **kwargs)
+
+    def isEnabledFor(self, level):
+        """
+        Is this logger enabled for level 'level'?
+        """
+        return self.logger.isEnabledFor(level)
+
+    def setLevel(self, level):
+        """
+        Set the specified level on the underlying logger.
+        """
+        self.logger.setLevel(level)
+
+    def getEffectiveLevel(self):
+        """
+        Get the effective level for the underlying logger.
+        """
+        return self.logger.getEffectiveLevel()
+
+    def hasHandlers(self):
+        """
+        See if the underlying logger has any handlers.
+        """
+        return self.logger.hasHandlers()
+
+    def _log(self, level, msg, args, **kwargs):
+        """
+        Low-level log implementation, proxied to allow nested logger adapters.
+        """
+        return self.logger._log(level, msg, args, **kwargs)
+
+    @property
+    def manager(self):
+        return self.logger.manager
+
+    @manager.setter
+    def manager(self, value):
+        self.logger.manager = value
+
+    @property
+    def name(self):
+        return self.logger.name
+
+    def __repr__(self):
+        logger = self.logger
+        level = getLevelName(logger.getEffectiveLevel())
+        return '<%s %s (%s)>' % (self.__class__.__name__, logger.name, level)
+
+    __class_getitem__ = classmethod(GenericAlias)
 
 
 def getLogger(name=None):

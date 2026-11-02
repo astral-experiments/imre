@@ -381,6 +381,7 @@ def current():
     else:
         raise AssertionError("invalid timezone accepted")
     test_calendar_ordering()
+    test_calendar_day_methods()
 
 
 def test_calendar_ordering():
@@ -424,6 +425,24 @@ def test_calendar_ordering():
         raise AssertionError("both calendar ordering hooks declined")
     assert first < leap
     assert (first < Reflected(2000, 2, 29)) == "reflected"
+
+
+def test_calendar_day_methods():
+    class Stamp(dt):
+        def weekday(self):
+            raise AssertionError("native isoweekday called weekday")
+
+        def timetuple(self):
+            raise AssertionError("native ctime called timetuple")
+
+        def ctime(self):
+            return "custom " + super().ctime()
+
+    value = Stamp(30, 12, 31, 22, 23, 24, tzinfo=UTC)
+    assert value.ctime() == "custom Tue Dec 31 22:23:24 0030"
+    assert date.ctime(value) == "Tue Dec 31 00:00:00 0030"
+    assert date(1, 1, 1).ctime() == "Mon Jan  1 00:00:00 0001"
+    assert value.isoweekday() == 2 and date(2024, 3, 3).isoweekday() == 7
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ pub(crate) use binascii::{base64_decode, urlsafe_encode};
 mod boxed_values;
 mod builtins;
 mod bytes;
+pub(crate) use bytes::DecodeIssue;
 pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
     bytes_contains, bytes_contains_int, concat_bytes, owned_input as owned_bytes_input,
@@ -30,7 +31,8 @@ mod chainmap;
 mod charmaps;
 mod codecs;
 pub(crate) use codecs::{
-    Codec, CodecInfo, StrEncoder, Utf16Order, decoding_error, unknown_handler, utf8_prefix,
+    Codec, CodecInfo, StrEncoder, Utf16Order, decoding_error, normalize as normalize_codec,
+    unknown_handler, utf8_prefix,
 };
 mod contexts;
 mod contextvars;
@@ -71,6 +73,7 @@ pub(crate) mod locks;
 pub(crate) mod logging;
 pub(crate) use logging::record::{brace_integer_field, percent_float_field, percent_integer_field};
 mod mappings;
+pub(crate) use mappings::IntKey;
 mod module_specs;
 mod namespaces;
 pub(crate) mod os;
