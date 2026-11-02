@@ -1855,6 +1855,8 @@ def report(text):
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
         memory_writer = fixtures / "io_buffered_writer_bytesio.py"
         compare("-IB", memory_writer, native_args=("run", memory_writer, "--quiet"))
+        pair_fixture = fixtures / "io_buffered_rw_pair.py"
+        compare("-IB", pair_fixture, native_args=("run", pair_fixture, "--quiet"))
         writer_fixture = fixtures / "io_buffered_writer_type.py"
         compare("-IB", writer_fixture, native_args=("run", writer_fixture, "--quiet"))
         io_fixture = fixtures / "boxed_io_indirect_import.py"

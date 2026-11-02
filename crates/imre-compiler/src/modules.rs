@@ -2092,6 +2092,10 @@ impl IntrinsicModule {
             (Self::IoNative, "BufferedReader") => {
                 Intrinsic::ObjectRuntimeExport("_io.BufferedReader")
             }
+            (Self::Io, "BufferedRWPair") => Intrinsic::ObjectRuntimeExport("io.BufferedRWPair"),
+            (Self::IoNative, "BufferedRWPair") => {
+                Intrinsic::ObjectRuntimeExport("_io.BufferedRWPair")
+            }
             (Self::Io, "BufferedWriter") => Intrinsic::ObjectRuntimeExport("io.BufferedWriter"),
             (Self::IoNative, "BufferedWriter") => {
                 Intrinsic::ObjectRuntimeExport("_io.BufferedWriter")

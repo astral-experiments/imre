@@ -476,7 +476,7 @@ impl BufferedFd {
                 "BufferedReader",
                 match name {
                     "read" => &["read", "readall", "readinto"],
-                    "read1" | "readline" | "readinto" => &["readinto"],
+                    "read1" | "readline" | "readinto" | "peek" => &["readinto"],
                     "seek" => &["seek", "seekable", "tell"],
                     "close" => &["flush", "close"],
                     _ => std::slice::from_ref(&name),
@@ -501,6 +501,40 @@ impl BufferedFd {
             ));
         }
         Ok(())
+    }
+
+    /// Peek into the native FileIO reader owned by a BufferedRWPair without advancing it.
+    pub(super) fn peek(&self, ctx: &mut Context, reader: Id, args: &[Id]) -> Result<Id> {
+        if args.len() > 1 {
+            return Err(Error::new(
+                "TypeError",
+                format!("peek expected at most 1 argument, got {}", args.len()),
+            ));
+        }
+        if let Some(size) = args.first() {
+            ssize(ctx, *size)?;
+        }
+        self.check_raw(ctx, reader, "peek")?;
+        if self.closed() {
+            return Err(Error::new("ValueError", "peek of closed file"));
+        }
+        let mut slot = self.buffer.borrow_mut();
+        let Some(Buffer::Reader(input)) = slot.as_mut() else {
+            return Err(Error::new("ValueError", "peek of closed file"));
+        };
+        let data = loop {
+            match input.fill_buf() {
+                Ok(bytes) => {
+                    let mut data = builtins::zeroed_bytes(bytes.len() as i64)?;
+                    data.copy_from_slice(bytes);
+                    break data;
+                }
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break Vec::new(),
+                Err(e) => return Err(os_error(e)),
+            }
+        };
+        Ok(ctx.alloc(Value::Bytes(data)))
     }
 
     pub(in crate::dynamic) fn closed(&self) -> bool {

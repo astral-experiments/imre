@@ -871,7 +871,7 @@ pub(super) enum Value {
     },
     Class {
         /// Private layout tag for native I/O class generations.
-        io_kind: Option<&'static str>,
+        io_kind: Option<super::stdlib::io::NativeClass>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -1203,7 +1203,14 @@ impl Value {
 
     pub(super) fn io_kind(&self) -> Option<&'static str> {
         match self {
-            Self::Class { io_kind, .. } => *io_kind,
+            Self::Class {
+                io_kind: Some(super::stdlib::io::NativeClass::Named(name)),
+                ..
+            } => Some(name),
+            Self::Class {
+                io_kind: Some(super::stdlib::io::NativeClass::Pair { .. }),
+                ..
+            } => Some("BufferedRWPair"),
             _ => None,
         }
     }
@@ -1452,8 +1459,12 @@ impl Value {
                 scope,
                 ancestors,
                 metaclass,
+                io_kind,
                 ..
             } => {
+                if let Some(super::stdlib::io::NativeClass::Pair { reader, writer }) = io_kind {
+                    visit.extend([*reader, *writer]);
+                }
                 visit.extend(*metaclass);
                 visit.push(*scope);
                 visit.extend(ancestors);
@@ -1502,6 +1513,10 @@ impl Value {
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::BufferedFile(file)) => visit.push(*file),
                     Some(super::stdlib::io::MemoryStream::BufferedBytes(writer)) => visit.extend(writer.raw.get()),
+                    Some(super::stdlib::io::MemoryStream::Pair(pair)) => {
+                        visit.extend(pair.reader);
+                        visit.extend(pair.writer);
+                    }
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
                     }

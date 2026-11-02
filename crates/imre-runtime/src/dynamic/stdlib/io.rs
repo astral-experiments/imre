@@ -7,6 +7,7 @@ mod buffered_io;
 mod descriptor_buffer;
 mod native_reader;
 mod native_writer;
+mod rwpair;
 pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,
 };
@@ -19,11 +20,18 @@ pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
 pub(super) use text_wrapper::text_options;
 
+#[derive(Clone, Copy)]
+pub(in crate::dynamic) enum NativeClass {
+    Named(&'static str),
+    Pair { reader: Id, writer: Id },
+}
+
 #[derive(Clone)]
 pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
     BufferedFile(Id),
     BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
+    Pair(rwpair::Pair),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
@@ -266,6 +274,11 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         buffered,
         native_writer::METHODS,
     );
+    let pair = class(ctx, module, "BufferedRWPair", buffered, rwpair::METHODS);
+    let Value::Class { io_kind, .. } = ctx.heap.get_mut(pair) else {
+        unreachable!()
+    };
+    *io_kind = Some(NativeClass::Pair { reader, writer });
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
     let text = class(
         ctx,
@@ -354,7 +367,7 @@ fn class(
     let Value::Class { io_kind, .. } = ctx.heap.get_mut(owner) else {
         unreachable!()
     };
-    *io_kind = Some(name.trim_start_matches('_'));
+    *io_kind = Some(NativeClass::Named(name.trim_start_matches('_')));
     if let Some(doc) = docstrings::base(name) {
         let doc = ctx.text(doc);
         ctx.bind(scope, "__doc__", doc);
@@ -371,6 +384,7 @@ fn class(
         "TextIOWrapper" => "_io.TextIOWrapper",
         "BufferedReader" => "_io.BufferedReader",
         "BufferedWriter" => "_io.BufferedWriter",
+        "BufferedRWPair" => "_io.BufferedRWPair",
         "BytesIO" => "_io.BytesIO",
         _ => "_io._IOBase",
     };
@@ -671,7 +685,10 @@ pub(in super::super) fn call(
         Some("_BufferedIOBase")
     } else if text {
         Some("_TextIOBase")
-    } else if matches!(owner_kind, Some("BufferedReader" | "BufferedWriter")) {
+    } else if matches!(
+        owner_kind,
+        Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair")
+    ) {
         owner_kind
     } else if bytes_io {
         Some("BytesIO")
@@ -680,7 +697,10 @@ pub(in super::super) fn call(
     };
     let Some((&receiver, rest)) = args.split_first() else {
         let message = match (descriptor, name) {
-            (Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter")), "__init__") => {
+            (
+                Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair")),
+                "__init__",
+            ) => {
                 format!("descriptor '__init__' of '_io.{class}' object needs an argument")
             }
             (Some(class), _) => format!("unbound method {class}.{name}() needs an argument"),
@@ -698,7 +718,10 @@ pub(in super::super) fn call(
     else {
         let actual = ctx.type_name(receiver);
         let message = match (descriptor, name) {
-            (Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter")), "__init__") => {
+            (
+                Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair")),
+                "__init__",
+            ) => {
                 format!(
                     "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
                 )
@@ -712,6 +735,7 @@ pub(in super::super) fn call(
     };
     match owner_kind {
         Some("BufferedReader") => return native_reader::call(ctx, receiver, name, rest, kwargs),
+        Some("BufferedRWPair") => return rwpair::call(ctx, owner, receiver, name, rest, kwargs),
         Some("BufferedWriter") => return native_writer::call(ctx, receiver, name, rest, kwargs),
         _ => {}
     }
@@ -782,8 +806,12 @@ pub(in super::super) fn call(
                     | "StringIO"
                     | "BufferedReader"
                     | "BufferedWriter"
+                    | "BufferedRWPair"
             )
         });
+    if layout == Some("BufferedRWPair") && matches!(name, "__enter__" | "__exit__") {
+        return rwpair::call(ctx, owner, receiver, name, rest, kwargs);
+    }
     if layout == Some("BufferedReader") && matches!(name, "__enter__" | "__exit__" | "writable") {
         return native_reader::call(ctx, receiver, name, rest, kwargs);
     }
