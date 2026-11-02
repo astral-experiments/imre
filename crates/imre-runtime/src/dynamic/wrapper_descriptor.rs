@@ -524,7 +524,10 @@ impl BuiltinDescriptor {
                     ("__bytes__", "__doc__") => "Convert this value to exact type bytes.",
                     ("__complex__", "__doc__") => "Convert this value to exact type complex.",
                     ("__bytes__" | "__complex__", _) => "($self, /)",
-                    ("count" | "find", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
+                    ("index", "__doc__") if self.owner == "bytes" => {
+                        "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nRaise ValueError if the subsection is not found."
+                    }
+                    ("count" | "find" | "index", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
                     }

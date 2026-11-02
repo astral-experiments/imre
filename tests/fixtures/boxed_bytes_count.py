@@ -22,6 +22,16 @@ def current():
     assert bytes.find(data, Needle(b"aa")) == 0 and data.rfind(b"aa") == 3
     assert data.find(255) == 6 and data.find(memoryview(b"x")) == -1
     assert data.find(b"", len(data)) == len(data) and data.find(b"", len(data) + 1) == -1
+    assert data.index(memoryview(b"aa"), 1, -2) == 1
+    assert bytes.index(data, Needle(b"aa")) == 0 and data.index(255) == 6
+    assert data.index(b"", len(data)) == len(data)
+    for needle, start in ((b"x", 0), (b"", len(data) + 1)):
+        try:
+            data.index(needle, start)
+        except ValueError as exc:
+            assert str(exc) == "subsection not found"
+        else:
+            raise AssertionError((needle, start))
     for invalid, error in ((256, ValueError), ("a", TypeError)):
         try:
             data.count(invalid)

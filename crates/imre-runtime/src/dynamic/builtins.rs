@@ -423,6 +423,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "decode",
     "endswith",
     "find",
+    "index",
     "join",
     "lstrip",
     "rfind",

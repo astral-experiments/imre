@@ -886,6 +886,7 @@ impl Context {
                             | "bytes.count"
                             | "bytes.decode"
                             | "bytes.find"
+                            | "bytes.index"
                             | "bytes.rfind"
                             | "bytes.rsplit"
                             | "bytes.rstrip"
