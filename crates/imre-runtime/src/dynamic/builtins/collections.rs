@@ -1451,7 +1451,7 @@ pub(super) fn builtin_slot(
     }
     let storage = ctx.scalar_value(object);
     let set_op = set_operator(method);
-    if matches!(method, "__add__" | "__iadd__") || set_op.is_some() {
+    if matches!(method, "__add__" | "__iadd__" | "__contains__") || set_op.is_some() {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
@@ -1463,6 +1463,9 @@ pub(super) fn builtin_slot(
                 rest.len()
             )));
         };
+        if method == "__contains__" {
+            return Ok(boolean(ctx.contains(*value, object)?));
+        }
         if owner == "int" {
             return integer::add(ctx, storage, *value);
         }

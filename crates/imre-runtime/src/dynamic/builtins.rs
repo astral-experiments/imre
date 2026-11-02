@@ -1652,6 +1652,9 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "mappingproxy" if method == "__contains__" => {
+                collections::builtin_slot(ctx, name, args, kwargs)
+            }
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }

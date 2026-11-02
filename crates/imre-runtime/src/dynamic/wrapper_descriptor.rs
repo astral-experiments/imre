@@ -257,6 +257,7 @@ impl BuiltinDescriptor {
             "mappingproxy.__hash__" => ("mappingproxy", "__hash__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
             "mappingproxy.__str__" => ("mappingproxy", "__str__"),
+            "mappingproxy.__contains__" => ("mappingproxy", "__contains__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "set.__repr__" => ("set", "__repr__"),
             "frozenset.__repr__" => ("frozenset", "__repr__"),

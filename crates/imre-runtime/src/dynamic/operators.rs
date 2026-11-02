@@ -3220,7 +3220,14 @@ impl Context {
         Ok(())
     }
     pub(super) fn contains(&mut self, item: Id, container: Id) -> Result<bool> {
+        let container = self.mapping_proxy_target(container);
         if let Some(hook) = self.bound_slot(container, "__contains__")? {
+            if hook == NONE {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("'{}' object is not a container", self.type_name(container)),
+                ));
+            }
             let result = self.call(hook, vec![item], Vec::new())?;
             return self.truth(result);
         }
