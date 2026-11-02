@@ -49,7 +49,13 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
         "datetime.timedelta" => (
             "datetime.timedelta",
             &["days", "seconds", "microseconds"],
-            &["__bool__", "__neg__", "__repr__", "__str__", "total_seconds"],
+            &[
+                "__bool__",
+                "__neg__",
+                "__repr__",
+                "__str__",
+                "total_seconds",
+            ],
         ),
         _ => return None,
     };
