@@ -21,8 +21,8 @@ Each row exercises original methods in isolation and retains the stock ordinals.
 | --- | --- | --- | --- |
 | 123–127 | The five ConcatenateTests methods | `71e902fc`, ordinary O0/O3 and boxed O0/O3 | 5 pass in every mode, 0 skip |
 | 485 | RevealTypeTests.test_reveal_type | `16d16baf`, ordinary O0/O3 and boxed O0/O3 | 1 pass in every mode, 0 skip |
-| 515–524 | The five TypeGuardTests and five TypeIsTests methods | `1d74cc36`, boxed O0/O3 | 10 pass in both modes, 0 skip |
+| 515–524 | The five TypeGuardTests and five TypeIsTests methods | `3ebdd019`, ordinary O0/O3 and boxed O0/O3 | 10 pass in every mode, 0 skip |
 
-[Concatenate IDs, outputs and controls](concatenate-all-71e902fc.tgz) · [Final Concatenate conflict checks](concatenate-overlap-68556273.tgz) · [RevealTypeTests original method](reveal-type-original-485.json) · [Independent reveal_type controls](reveal-type-native-controls.json) · [TypeGuard and TypeIs original IDs](type-predicates-1d74cc36.tgz)
+[Concatenate IDs, outputs and controls](concatenate-all-71e902fc.tgz) · [Final Concatenate conflict checks](concatenate-overlap-68556273.tgz) · [RevealTypeTests original method](reveal-type-original-485.json) · [Independent reveal_type controls](reveal-type-native-controls.json) · [TypeGuard and TypeIs original IDs and four final-head modes](type-predicates-3ebdd019.tgz)
 
 The direct static compiler and filesystem unittest discovery are separate entry points. A synthetic unittest import-failure case cannot establish an original callback. The eager-alias and metaclass controls import dependency modules and do not count as tests from the typing suite.
