@@ -91,3 +91,18 @@ def current():
     size = object.__sizeof__(child)
     child.member = bytearray(20000)
     assert object.__sizeof__(child) == size
+
+    # Imre's native chain constructor owns private slots in an opaque attribute
+    # table. Shadowing their descriptors does not turn them into user attributes.
+    from itertools import chain
+    class ShadowedChain(chain):
+        _active = _sources = property(lambda self: None)
+
+    class Plain:
+        pass
+
+    plain = Plain()
+    plain._sources = plain._active = 1
+    assert getsizeof(plain, fallback) is not fallback
+    if sys.implementation.name == "imre":
+        assert getsizeof(ShadowedChain("ab"), fallback) is fallback

@@ -16,6 +16,23 @@ pub(super) fn descriptor(owner: &str) -> Option<&'static str> {
     })
 }
 impl Context {
+    /// A native constructor can store slots in the attribute map even when a subclass
+    /// shadows their descriptors, and its capacity can survive deletion.
+    fn has_declared_storage_slots(&self, class: Id) -> bool {
+        self.find_in_mro(class, |base| {
+            let Value::Class { scope, .. } = self.heap.get(base) else {
+                return None;
+            };
+            let layout = self.scope_data(*scope).class_namespace.as_ref()?;
+            let slots = layout.slot_names.as_ref()?;
+            slots
+                .iter()
+                .any(|name| !matches!(name.as_str(), "__dict__" | "__weakref__"))
+                .then_some(())
+        })
+        .is_some()
+    }
+
     /// An instance's addressable attribute dictionary is a separate Python object.
     fn object_body_size(&self, obj: Id) -> Result<usize> {
         let extra = match self.heap.get(obj) {
@@ -30,9 +47,7 @@ impl Context {
                 // attributes. Its two independently reserved buffers are unavailable.
                 if fields.capacity() != 0
                     && (!self.class_instances_have_dict(*class)
-                        || fields
-                            .keys()
-                            .any(|name| self.is_inline_instance_slot(*class, name)))
+                        || self.has_declared_storage_slots(*class))
                 {
                     return Err(self.unsupported_size(obj));
                 }
