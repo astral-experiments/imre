@@ -291,6 +291,13 @@ struct Started {
 /// Both public launch paths use the same bootstrap, count guard and native startup handshake.
 fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -> Result<Started> {
     let (ready, finished) = mpsc::sync_channel(0);
+    let (operand_bound, wait_for_operand) = match &operation {
+        Operation::Python(callback) if callback.awaits_receiver() => {
+            let (tx, rx) = mpsc::channel();
+            (Some(tx), Some(rx))
+        }
+        _ => (None, None),
+    };
     let count = Arc::clone(&ctx.threads.count);
     let active = Arc::new(AtomicBool::new(true));
     let worker_active = Arc::clone(&active);
@@ -309,6 +316,7 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
                             .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
                         worker.threads.count = Arc::clone(&count);
                         worker.threads.private_context = true;
+                        worker.threads.acquire_bound = operand_bound;
                         (Some((worker, function, arguments)), None)
                     }
                     Err(error) => {
@@ -375,6 +383,11 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
             return Err(Error::new("RuntimeError", reason));
         }
     };
+    if let Some(received) = wait_for_operand {
+        // The caller is the only Python evaluator that can change this cell. An
+        // early worker error also ends the wait and follows the usual reporting path.
+        let _ = received.recv();
+    }
     Ok(Started {
         handle: Rc::new(Handle {
             thread: RefCell::new(Some(thread)),

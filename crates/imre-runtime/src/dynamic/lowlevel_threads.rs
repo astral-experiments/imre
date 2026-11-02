@@ -27,6 +27,8 @@ pub(super) fn doc(function: &str) -> &'static str {
 pub(super) struct Workers {
     pub(super) count: Arc<AtomicUsize>,
     pub(super) private_context: bool,
+    // Startup may resume once the Python frame has bound its only captured receiver.
+    pub(super) acquire_bound: Option<std::sync::mpsc::Sender<()>>,
     // Thread errors use the original sys module when its registry entry changes.
     pub(super) system_module: Option<Id>,
     pub(super) default_stderr: Option<Id>,
