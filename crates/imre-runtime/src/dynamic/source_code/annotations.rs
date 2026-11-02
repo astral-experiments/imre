@@ -269,7 +269,11 @@ impl Context {
     }
 
     /// Implicit annotation bytecode uses LOAD_NAME even for a declared global.
-    pub(super) fn module_annotation_name(&mut self, scope: Id, name: &str) -> Result<Id> {
+    pub(in crate::dynamic) fn module_annotation_name(
+        &mut self,
+        scope: Id,
+        name: &str,
+    ) -> Result<Id> {
         let locals = self.frame_locals(scope)?;
         match self.load_exec_name(locals, name) {
             Err(error) if self.is_builtin_error(&error, "KeyError") => {
@@ -296,11 +300,20 @@ impl Context {
             let annotate = self.source_annotator(provider, owner, globals)?;
             self.bind_source_name(scope, "__annotate__", annotate)?;
         }
+        self.setup_module_annotations(scope, code.string_annotations())
+    }
+
+    /// Initialize an annotated module's storage before executing its suite.
+    pub(in crate::dynamic) fn setup_module_annotations(
+        &mut self,
+        scope: Id,
+        string_annotations: bool,
+    ) -> Result<()> {
         let active = self.op("set", NONE, NONE, NONE)?;
         let locals = self.frame_locals(scope)?;
         let key = self.heap.code_name("__conditional_annotations__");
         self.put_item(locals, key, active)?;
-        if code.string_annotations() {
+        if string_annotations {
             match self.load_exec_name(locals, "__annotations__") {
                 Err(error) if self.is_builtin_error(&error, "KeyError") => {
                     let annotations = self.dict(Vec::new());

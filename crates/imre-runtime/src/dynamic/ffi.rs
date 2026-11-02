@@ -446,9 +446,16 @@ impl Context {
                 code.coroutine = true;
                 Ok(a)
             }
+            "setup_module_string_annotations" => {
+                self.setup_module_annotations(a, true)?;
+                Ok(NONE)
+            }
             "annotate" => {
                 if self.scope_data(a).class_body.is_some() {
                     let mapping = self.lookup_class_local(a, "__annotations__")?;
+                    self.put_item(mapping, b, c)?;
+                } else if c != NONE {
+                    let mapping = self.module_annotation_name(a, "__annotations__")?;
                     self.put_item(mapping, b, c)?;
                 } else if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
                     self.put_item(mapping, b, c)?;
