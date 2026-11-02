@@ -1676,7 +1676,13 @@ mod tests {
         ctx.alloc(Value::AttrGetter(value));
         ctx.heap.release_temporaries_since(mark);
 
-        let encoded = ctx.call(encode, vec![query, TRUE], Vec::new()).unwrap();
+        // The key and decimal values need no escaping.
+        let template = ctx.text("{0}");
+        let quote_via = ctx.lookup_attr(template, "format").unwrap();
+        let safe = ctx.text("");
+        let encoded = ctx
+            .call(encode, vec![query, TRUE, safe, NONE, NONE, quote_via], Vec::new())
+            .unwrap();
         let encoded = ctx.str_value(encoded).unwrap();
         assert!(encoded.starts_with("k=0&k=1&"));
         assert!(encoded.ends_with("k=16383"));

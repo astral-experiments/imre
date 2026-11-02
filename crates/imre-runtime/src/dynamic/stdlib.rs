@@ -114,6 +114,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "builtins"
             | "errno"
             | "genericpath"
+            | "urllib.parse"
             | "io"
             | "itertools"
     ) || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
@@ -211,7 +212,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "socket"
             | "_socket"
             | "urllib"
-            | "urllib.parse"
     )
 }
 
@@ -435,7 +435,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan") => {
+        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan" | "isqrt") => {
             ctx.builtin(&format!("math.{name}"))
         }
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -766,11 +766,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("gc", "collect")
         | ("marshal", "loads")
         | ("pickle", "dumps")
-        | (
-            "urllib.parse",
-            "unquote" | "quote"
-            | "quote_plus" | "quote_from_bytes" | "urlencode",
-        )
         | ("hashlib", "file_digest")
         | ("hmac", "new" | "HMAC" | "compare_digest")
         | (

@@ -2240,6 +2240,7 @@ impl IntrinsicModule {
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Math, "isqrt") => Intrinsic::ObjectRuntimeExport("math.isqrt"),
             (Self::Math, "prod") => Intrinsic::MathProd,
             (Self::Copy, "copy") => Intrinsic::ShallowCopy,
             (Self::Copy, "deepcopy") => Intrinsic::DeepCopy,
@@ -2540,6 +2541,9 @@ impl IntrinsicModule {
             }
             (Self::UrllibParse, "DefragResultBytes") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.DefragResultBytes")
+            }
+            (Self::UrllibParse, "clear_cache") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.clear_cache")
             }
             (Self::UrllibParse, "urlparse") => Intrinsic::ObjectRuntimeExport("urllib.parse.urlparse"),
             (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
