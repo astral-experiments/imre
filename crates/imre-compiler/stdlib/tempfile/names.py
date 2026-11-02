@@ -405,7 +405,8 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
     prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
     if not isinstance(mode, str):
         raise TypeError("mode must be a string")
-    if len(mode) != 3 or set(mode) not in ({"b", "+", "w"}, {"b", "+", "r"}):
+    write_only = mode in ("wb", "bw")
+    if not write_only and (len(mode) != 3 or set(mode) not in ({"b", "+", "w"}, {"b", "+", "r"})):
         if len(set(mode)) != len(mode) or any(c not in "xrwabt+" for c in mode):
             raise ValueError(f"invalid mode: {mode!r}")
         if "b" in mode and "t" in mode:
@@ -415,7 +416,7 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
             raise ValueError("Must have exactly one of create/read/write/append mode and at most one plus")
         if kinds != 1:
             raise ValueError("must have exactly one of create/read/write/append mode")
-        raise NotImplementedError("NamedTemporaryFile supports binary update mode")
+        raise NotImplementedError("NamedTemporaryFile supports binary write and update modes")
     if buffering != -1:
         raise NotImplementedError("NamedTemporaryFile supports default buffering")
     if encoding is not None:
@@ -424,6 +425,16 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
         raise ValueError("binary mode doesn't take an errors argument")
     if newline is not None:
         raise ValueError("binary mode doesn't take a newline argument")
+    if write_only:
+        file, name = _create_file(dir, prefix, suffix, output_type, _open_named, delete_on_close, True)
+        try:
+            return _TemporaryFileWrapper(file, name, delete, delete_on_close)
+        except BaseException:
+            try:
+                file.close()
+            finally:
+                _os.unlink(name)
+            raise
     (file, closer), name = _create_file(dir, prefix, suffix, output_type, _open_named, delete_on_close)
     try:
         keep = not delete
