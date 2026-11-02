@@ -17,6 +17,7 @@ use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 use std::rc::Rc;
 
+pub(crate) use imre_ast::exceptions::Kind;
 use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
@@ -66,380 +67,8 @@ impl NamedDescriptor {
     }
 }
 
-/// Stable ABI identifiers for the supported builtin exception hierarchy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
-pub(crate) enum Kind {
-    BaseException = 0,
-    Exception = 1,
-    ArithmeticError = 2,
-    ZeroDivisionError = 3,
-    OverflowError = 4,
-    LookupError = 5,
-    IndexError = 6,
-    KeyError = 7,
-    ValueError = 8,
-    AssertionError = 9,
-    RuntimeError = 10,
-    EOFError = 11,
-    OSError = 12,
-    // Module-specific OSError subclasses have stable, separately assigned ABI IDs.
-    ShutilError = 64,
-    SameFileError = 65,
-    SpecialFileError = 66,
-    CsvError = 67,
-    GaiError = 68,
-    BinasciiError = 69,
-    BinasciiIncomplete = 70,
-    PackageNotFoundError = 71,
-    TypeError = 13,
-    AttributeError = 14,
-    MemoryError = 15,
-    SystemError = 16,
-    UnicodeError = 17,
-    UnicodeDecodeError = 18,
-    UnsupportedOperation = 19,
-    FileNotFoundError = 20,
-    PermissionError = 21,
-    IsADirectoryError = 22,
-    NotADirectoryError = 23,
-    FileExistsError = 24,
-    SubprocessError = 25,
-    CalledProcessError = 26,
-    TimeoutExpired = 27,
-    BadGzipFile = 28,
-    ZlibError = 29,
-    TomlDecodeError = 30,
-    JsonDecodeError = 31,
-    SystemExit = 32,
-    CancelledError = 33,
-    ExceptionGroup = 34,
-    StopIteration = 35,
-    BadZipFile = 36,
-    NotImplementedError = 37,
-    UnicodeEncodeError = 38,
-    NameError = 39,
-    UnboundLocalError = 40,
-    ImportError = 41,
-    ModuleNotFoundError = 42,
-    RecursionError = 43,
-    BlockingIOError = 44,
-    ConnectionError = 45,
-    BrokenPipeError = 46,
-    ConnectionAbortedError = 47,
-    ConnectionRefusedError = 48,
-    ConnectionResetError = 49,
-    InterruptedError = 50,
-    ChildProcessError = 57,
-    ProcessLookupError = 58,
-    GeneratorExit = 59,
-    StopAsyncIteration = 60,
-    KeyboardInterrupt = 61,
-    TimeoutError = 51,
-    // Warning exception identities use a separate block from module errors and filter categories.
-    UnidiffParseError = 52,
-    ReferenceError = 53,
-    BufferError = 54,
-    SyntaxError = 55,
-    IndentationError = 56,
-    Warning = 80,
-    RuntimeWarning = 81,
-    DeprecationWarning = 82,
-    EncodingWarning = 83,
-    UserWarning = 84,
-    PendingDeprecationWarning = 85,
-    SyntaxWarning = 86,
-    FutureWarning = 87,
-    ImportWarning = 88,
-    UnicodeWarning = 89,
-    BytesWarning = 90,
-    ResourceWarning = 91,
-}
-
-impl Kind {
-    fn from_raw(kind: u32) -> Self {
-        Self::try_from_raw(kind).unwrap_or_else(|| fail("SystemError", "invalid exception kind"))
-    }
-
-    fn try_from_raw(kind: u32) -> Option<Self> {
-        Some(match kind {
-            0 => Self::BaseException,
-            1 => Self::Exception,
-            2 => Self::ArithmeticError,
-            3 => Self::ZeroDivisionError,
-            4 => Self::OverflowError,
-            5 => Self::LookupError,
-            6 => Self::IndexError,
-            7 => Self::KeyError,
-            8 => Self::ValueError,
-            9 => Self::AssertionError,
-            10 => Self::RuntimeError,
-            11 => Self::EOFError,
-            12 => Self::OSError,
-            64 => Self::ShutilError,
-            65 => Self::SameFileError,
-            66 => Self::SpecialFileError,
-            67 => Self::CsvError,
-            68 => Self::GaiError,
-            69 => Self::BinasciiError,
-            70 => Self::BinasciiIncomplete,
-            71 => Self::PackageNotFoundError,
-            13 => Self::TypeError,
-            14 => Self::AttributeError,
-            15 => Self::MemoryError,
-            16 => Self::SystemError,
-            17 => Self::UnicodeError,
-            18 => Self::UnicodeDecodeError,
-            19 => Self::UnsupportedOperation,
-            20 => Self::FileNotFoundError,
-            21 => Self::PermissionError,
-            22 => Self::IsADirectoryError,
-            23 => Self::NotADirectoryError,
-            24 => Self::FileExistsError,
-            25 => Self::SubprocessError,
-            26 => Self::CalledProcessError,
-            27 => Self::TimeoutExpired,
-            28 => Self::BadGzipFile,
-            29 => Self::ZlibError,
-            30 => Self::TomlDecodeError,
-            31 => Self::JsonDecodeError,
-            32 => Self::SystemExit,
-            33 => Self::CancelledError,
-            34 => Self::ExceptionGroup,
-            35 => Self::StopIteration,
-            36 => Self::BadZipFile,
-            37 => Self::NotImplementedError,
-            38 => Self::UnicodeEncodeError,
-            39 => Self::NameError,
-            40 => Self::UnboundLocalError,
-            41 => Self::ImportError,
-            42 => Self::ModuleNotFoundError,
-            43 => Self::RecursionError,
-            44 => Self::BlockingIOError,
-            45 => Self::ConnectionError,
-            46 => Self::BrokenPipeError,
-            47 => Self::ConnectionAbortedError,
-            48 => Self::ConnectionRefusedError,
-            49 => Self::ConnectionResetError,
-            50 => Self::InterruptedError,
-            57 => Self::ChildProcessError,
-            58 => Self::ProcessLookupError,
-            59 => Self::GeneratorExit,
-            60 => Self::StopAsyncIteration,
-            61 => Self::KeyboardInterrupt,
-            51 => Self::TimeoutError,
-            52 => Self::UnidiffParseError,
-            53 => Self::ReferenceError,
-            54 => Self::BufferError,
-            55 => Self::SyntaxError,
-            56 => Self::IndentationError,
-            80 => Self::Warning,
-            81 => Self::RuntimeWarning,
-            82 => Self::DeprecationWarning,
-            83 => Self::EncodingWarning,
-            84 => Self::UserWarning,
-            85 => Self::PendingDeprecationWarning,
-            86 => Self::SyntaxWarning,
-            87 => Self::FutureWarning,
-            88 => Self::ImportWarning,
-            89 => Self::UnicodeWarning,
-            90 => Self::BytesWarning,
-            91 => Self::ResourceWarning,
-            _ => return None,
-        })
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::BaseException => "BaseException",
-            Self::Exception => "Exception",
-            Self::ArithmeticError => "ArithmeticError",
-            Self::ZeroDivisionError => "ZeroDivisionError",
-            Self::OverflowError => "OverflowError",
-            Self::LookupError => "LookupError",
-            Self::IndexError => "IndexError",
-            Self::KeyError => "KeyError",
-            Self::ValueError => "ValueError",
-            Self::AssertionError => "AssertionError",
-            Self::RuntimeError => "RuntimeError",
-            Self::ReferenceError => "ReferenceError",
-            Self::BufferError => "BufferError",
-            Self::SyntaxError => "SyntaxError",
-            Self::IndentationError => "IndentationError",
-            Self::EOFError => "EOFError",
-            Self::OSError => "OSError",
-            Self::ShutilError => "Error",
-            Self::SameFileError => "SameFileError",
-            Self::SpecialFileError => "SpecialFileError",
-            Self::TypeError => "TypeError",
-            Self::AttributeError => "AttributeError",
-            Self::MemoryError => "MemoryError",
-            Self::SystemError => "SystemError",
-            Self::UnicodeError => "UnicodeError",
-            Self::UnicodeDecodeError => "UnicodeDecodeError",
-            Self::UnicodeEncodeError => "UnicodeEncodeError",
-            Self::UnsupportedOperation => "UnsupportedOperation",
-            Self::FileNotFoundError => "FileNotFoundError",
-            Self::PermissionError => "PermissionError",
-            Self::IsADirectoryError => "IsADirectoryError",
-            Self::NotADirectoryError => "NotADirectoryError",
-            Self::FileExistsError => "FileExistsError",
-            Self::SubprocessError => "SubprocessError",
-            Self::CalledProcessError => "CalledProcessError",
-            Self::TimeoutExpired => "TimeoutExpired",
-            Self::BadGzipFile => "BadGzipFile",
-            Self::CsvError => "_csv.Error",
-            Self::BinasciiError => "binascii.Error",
-            Self::BinasciiIncomplete => "binascii.Incomplete",
-            Self::GaiError => "socket.gaierror",
-            Self::ZlibError => "error",
-            Self::TomlDecodeError => "TOMLDecodeError",
-            Self::JsonDecodeError => "JSONDecodeError",
-            Self::SystemExit => "SystemExit",
-            Self::CancelledError => "CancelledError",
-            Self::ExceptionGroup => "ExceptionGroup",
-            Self::StopIteration => "StopIteration",
-            Self::BadZipFile => "BadZipFile",
-            Self::NotImplementedError => "NotImplementedError",
-            Self::NameError => "NameError",
-            Self::UnboundLocalError => "UnboundLocalError",
-            Self::ImportError => "ImportError",
-            Self::ModuleNotFoundError => "ModuleNotFoundError",
-            Self::PackageNotFoundError => "PackageNotFoundError",
-            Self::RecursionError => "RecursionError",
-            Self::BlockingIOError => "BlockingIOError",
-            Self::ConnectionError => "ConnectionError",
-            Self::BrokenPipeError => "BrokenPipeError",
-            Self::ConnectionAbortedError => "ConnectionAbortedError",
-            Self::ConnectionRefusedError => "ConnectionRefusedError",
-            Self::ConnectionResetError => "ConnectionResetError",
-            Self::InterruptedError => "InterruptedError",
-            Self::ChildProcessError => "ChildProcessError",
-            Self::ProcessLookupError => "ProcessLookupError",
-            Self::GeneratorExit => "GeneratorExit",
-            Self::StopAsyncIteration => "StopAsyncIteration",
-            Self::KeyboardInterrupt => "KeyboardInterrupt",
-            Self::TimeoutError => "TimeoutError",
-            Self::Warning => "Warning",
-            Self::RuntimeWarning => "RuntimeWarning",
-            Self::DeprecationWarning => "DeprecationWarning",
-            Self::EncodingWarning => "EncodingWarning",
-            Self::UserWarning => "UserWarning",
-            Self::PendingDeprecationWarning => "PendingDeprecationWarning",
-            Self::SyntaxWarning => "SyntaxWarning",
-            Self::FutureWarning => "FutureWarning",
-            Self::ImportWarning => "ImportWarning",
-            Self::UnicodeWarning => "UnicodeWarning",
-            Self::BytesWarning => "BytesWarning",
-            Self::ResourceWarning => "ResourceWarning",
-            Self::UnidiffParseError => "UnidiffParseError",
-        }
-    }
-
-    fn matches(self, expected: Self) -> bool {
-        match expected {
-            Self::BaseException => true,
-            Self::Warning => matches!(
-                self,
-                Self::Warning
-                    | Self::RuntimeWarning
-                    | Self::DeprecationWarning
-                    | Self::EncodingWarning
-                    | Self::UserWarning
-                    | Self::PendingDeprecationWarning
-                    | Self::SyntaxWarning
-                    | Self::FutureWarning
-                    | Self::ImportWarning
-                    | Self::UnicodeWarning
-                    | Self::BytesWarning
-                    | Self::ResourceWarning
-            ),
-            Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
-            Self::SyntaxError => matches!(self, Self::SyntaxError | Self::IndentationError),
-            Self::Exception => !matches!(
-                self,
-                Self::BaseException
-                    | Self::SystemExit
-                    | Self::GeneratorExit
-                    | Self::KeyboardInterrupt
-                    | Self::CancelledError
-            ),
-            Self::ArithmeticError => matches!(
-                self,
-                Self::ArithmeticError | Self::ZeroDivisionError | Self::OverflowError
-            ),
-            Self::LookupError => {
-                matches!(self, Self::LookupError | Self::IndexError | Self::KeyError)
-            }
-            Self::ValueError => matches!(
-                self,
-                Self::ValueError
-                    | Self::JsonDecodeError
-                    | Self::TomlDecodeError
-                    | Self::BinasciiError
-                    | Self::UnicodeError
-                    | Self::UnicodeDecodeError
-                    | Self::UnicodeEncodeError
-                    | Self::UnsupportedOperation
-            ),
-            Self::UnicodeError => matches!(
-                self,
-                Self::UnicodeError | Self::UnicodeDecodeError | Self::UnicodeEncodeError
-            ),
-            Self::ImportError => matches!(
-                self,
-                Self::ImportError | Self::ModuleNotFoundError | Self::PackageNotFoundError
-            ),
-            Self::ModuleNotFoundError => {
-                matches!(self, Self::ModuleNotFoundError | Self::PackageNotFoundError)
-            }
-            Self::SubprocessError => {
-                matches!(
-                    self,
-                    Self::SubprocessError | Self::CalledProcessError | Self::TimeoutExpired
-                )
-            }
-            Self::RuntimeError => matches!(
-                self,
-                Self::RuntimeError | Self::NotImplementedError | Self::RecursionError
-            ),
-            Self::ShutilError => matches!(self, Self::ShutilError | Self::SameFileError),
-            Self::ConnectionError => matches!(
-                self,
-                Self::ConnectionError
-                    | Self::BrokenPipeError
-                    | Self::ConnectionAbortedError
-                    | Self::ConnectionRefusedError
-                    | Self::ConnectionResetError
-            ),
-            Self::OSError => matches!(
-                self,
-                Self::OSError
-                    | Self::UnsupportedOperation
-                    | Self::FileNotFoundError
-                    | Self::BlockingIOError
-                    | Self::PermissionError
-                    | Self::IsADirectoryError
-                    | Self::NotADirectoryError
-                    | Self::FileExistsError
-                    | Self::ConnectionError
-                    | Self::BrokenPipeError
-                    | Self::ConnectionAbortedError
-                    | Self::ConnectionRefusedError
-                    | Self::ConnectionResetError
-                    | Self::InterruptedError
-                    | Self::ChildProcessError
-                    | Self::ProcessLookupError
-                    | Self::TimeoutError
-                    | Self::GaiError
-                    | Self::BadGzipFile
-                    | Self::ShutilError
-                    | Self::SameFileError
-                    | Self::SpecialFileError
-            ),
-            _ => self == expected,
-        }
-    }
+fn kind_from_raw(kind: u32) -> Kind {
+    Kind::try_from_raw(kind).unwrap_or_else(|| fail("SystemError", "invalid exception kind"))
 }
 
 #[derive(Clone)]
@@ -2315,7 +1944,7 @@ pub unsafe extern "C" fn imre_exception_argument(
     // SAFETY: the caller roots the argument until this error owns its reference.
     unsafe {
         let named = descriptor.as_ref();
-        let kind = Kind::from_raw(named.map_or(kind, |d| d.base));
+        let kind = kind_from_raw(named.map_or(kind, |d| d.base));
         let value = new_exception(
             kind,
             Payload::Key(WordKind::new(representation).acquire(word)),
@@ -2523,7 +2152,7 @@ pub unsafe extern "C" fn imre_exception_repr(value: *const Object) -> *const Str
 /// `kind` is a supported builtin kind. `message` is a rooted string or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_exception_new(kind: u32, message: *const Str) -> *const Object {
-    let kind = Kind::from_raw(kind);
+    let kind = kind_from_raw(kind);
     let payload = if message.is_null() {
         Payload::Empty
     } else if kind == Kind::KeyError {
@@ -2555,7 +2184,7 @@ pub unsafe extern "C" fn imre_exception_release(value: *const Object) {
 /// The compiler emits only known builtin IDs. Use the same hierarchy as a catch.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_builtin_exception_subclass(child: u32, parent: u32) -> bool {
-    Kind::from_raw(child).matches(Kind::from_raw(parent))
+    kind_from_raw(child).matches(kind_from_raw(parent))
 }
 
 /// # Safety
@@ -2571,7 +2200,7 @@ pub unsafe extern "C" fn imre_exception_matches(value: *const Object, expected_k
             {
                 return 1;
             }
-            u32::from(expected_kind < 256 && e.kind.matches(Kind::from_raw(expected_kind)))
+            u32::from(expected_kind < 256 && e.kind.matches(kind_from_raw(expected_kind)))
         })
     }
 }

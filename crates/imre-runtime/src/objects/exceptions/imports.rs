@@ -238,7 +238,7 @@ pub unsafe extern "C" fn imre_import_error_new(
             }),
         };
         let err = new_exception(
-            Kind::from_raw(named.map_or(kind, |d| d.base)),
+            super::kind_from_raw(named.map_or(kind, |d| d.base)),
             Payload::Import(Box::new(payload)),
         );
         if let Some(named) = named {
