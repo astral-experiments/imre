@@ -75,11 +75,8 @@ pub(super) fn construct(
             let number = match value.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
                 Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
-                Some(Value::Bytes(b)) if b.is_ascii() => {
-                    crate::integer_text::parse_radix(std::str::from_utf8(b).unwrap(), radix as u32)?
-                }
-                Some(Value::Bytes(_)) => {
-                    return Err(Error::new("ValueError", "invalid byte literal for int()"));
+                Some(Value::Bytes(b) | Value::ByteArray(b)) => {
+                    crate::integer_text::parse_bytes_radix(b, radix as u32)?
                 }
                 _ if base.is_some() => {
                     return Err(type_error(
@@ -1344,6 +1341,7 @@ pub(super) fn method(
     }
     let predicate: Option<fn(&str) -> bool> = match name {
         "isalnum" => Some(crate::objects::python_alnum),
+        "isascii" => Some(str::is_ascii),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
         "isupper" => Some(crate::objects::python_isupper),
@@ -1360,6 +1358,15 @@ pub(super) fn method(
                 "str.{name}() takes no arguments ({} given)",
                 args.len()
             )));
+        }
+        if name == "isascii"
+            && matches!(
+                ctx.heap.get(ctx.scalar_value(receiver)),
+                Value::SurrogateStr(_)
+            )
+        {
+            // This representation always contains at least one non-ASCII surrogate.
+            return Ok(boolean(false));
         }
         if name == "islower"
             && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))

@@ -43,6 +43,7 @@ impl Context {
         self.bind(scope, ".iterator", iter);
         Ok(self.alloc(Value::Generator {
             owner: FrameOwner::Function(function),
+            frame: None,
             code,
             scope,
             iterators: Vec::new(),
@@ -55,7 +56,6 @@ impl Context {
     /// Runs the compiled body until it yields one item, returns, or raises.
     pub(super) fn next_generator_item(&mut self, generator: Id) -> Result<Option<Id>> {
         let Value::Generator {
-            owner,
             code,
             scope,
             running,
@@ -72,9 +72,9 @@ impl Context {
             return Ok(None);
         }
         *running = true;
-        let (code, scope, owner) = (*code, *scope, *owner);
+        let (code, scope) = (*code, *scope);
         let result = self
-            .execute(code, scope, owner)
+            .execute(code, scope, FrameOwner::Generator(generator))
             .map(|id| match self.heap.get(id) {
                 Value::None => None,
                 Value::Yielded(item) => Some(*item),
@@ -84,6 +84,7 @@ impl Context {
             running,
             offset,
             owner,
+            frame,
             ..
         } = self.heap.get_mut(generator)
         else {
@@ -95,18 +96,24 @@ impl Context {
             *offset = Some(1);
         } else {
             *offset = None;
+            *frame = None;
             *owner = FrameOwner::Module(NONE);
         }
-        result.map_err(|error| self.generator_error(error))
+        result.map_err(|error| self.frame_error(error, code))
     }
 
-    /// Preserve an escaping StopIteration as the cause and context of the generator's RuntimeError.
-    pub(super) fn generator_error(&mut self, error: Error) -> Error {
+    /// Preserve an escaping StopIteration as the cause and context of the frame's RuntimeError.
+    pub(super) fn frame_error(&mut self, error: Error, code: Id) -> Error {
         if !self.is_stop_iteration(&error) {
             return error;
         }
         let cause = self.raised_instance(error);
-        let mut error = Error::new("RuntimeError", "generator raised StopIteration");
+        let message = if self.code_object(code).coroutine {
+            "coroutine raised StopIteration"
+        } else {
+            "generator raised StopIteration"
+        };
+        let mut error = Error::new("RuntimeError", message);
         error.tracing().cause = Some(cause);
         error.context = cause;
         error

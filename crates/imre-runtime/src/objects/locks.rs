@@ -1,7 +1,7 @@
 //! Primitive Python locks can be released by any thread.
 use super::exceptions::Result;
 use super::{Error, Int, Kind};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 /// The unsigned pthread identifier exposed by Python's get_ident.
@@ -24,13 +24,34 @@ pub(crate) fn native_thread_id() -> u64 {
     id
 }
 
-#[derive(Default)]
 pub(crate) struct PrimitiveLock {
+    // A child cannot acquire Rust synchronization left locked by a vanished thread.
+    creator_pid: u32,
     held: Mutex<bool>,
     available: Condvar,
 }
 
+impl Default for PrimitiveLock {
+    fn default() -> Self {
+        Self {
+            creator_pid: std::process::id(),
+            held: Mutex::new(false),
+            available: Condvar::new(),
+        }
+    }
+}
+
 impl PrimitiveLock {
+    #[cfg(unix)]
+    pub(crate) fn at_fork_reinit(lock: &mut Arc<Self>) {
+        if lock.creator_pid == std::process::id() {
+            // Keep the state shared by existing native holders of this Python lock.
+            *lock.held.lock().unwrap() = false;
+        } else {
+            *lock = Arc::default();
+        }
+    }
+
     pub(crate) fn locked(&self) -> bool {
         *self.held.lock().unwrap()
     }

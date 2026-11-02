@@ -4,6 +4,10 @@ class Derived(RuntimeWarning):
     pass
 
 
+class DerivedEncoding(EncodingWarning):
+    pass
+
+
 class ClientWarning(UserWarning):
     pass
 
@@ -21,6 +25,14 @@ def check() -> None:
         raise AssertionError("RuntimeWarning is not RuntimeError")
     except Warning as problem:
         print(repr(problem))
+    try:
+        raise EncodingWarning("encoding")
+    except Warning as problem:
+        print(repr(problem))
+    try:
+        raise DerivedEncoding("encoding subclass")
+    except Warning as problem:
+        print(str(problem))
     try:
         raise Derived("subclass")
     except RuntimeWarning as problem:

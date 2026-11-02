@@ -50,8 +50,8 @@ impl Context {
                         | "array.array"
                         | "collections.defaultdict"
                         | "collections.deque"
-                        | "contextvars.Context"
-                        | "contextvars.Token"
+                        | "_contextvars.Context"
+                        | "_contextvars.Token"
                         | "types.SimpleNamespace"
                         | "weakref.ProxyType"
                         | "weakref.CallableProxyType" => Some(false),

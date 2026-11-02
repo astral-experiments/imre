@@ -52,8 +52,15 @@ def current():
         def __repr__(self):
             raise LookupError("rendered")
 
+    broken = Broken()
+    slot = object.__repr__
+    bound = slot.__get__(broken, Broken)
+    expected = f"<{Broken.__module__}.{Broken.__qualname__} object at {id(broken):#x}>"
+    assert slot(broken) == bound() == expected
+    assert slot([]).startswith("<list object at 0x")
+
     try:
-        repr([Broken()])
+        repr([broken])
     except LookupError as exc:
         print(exc.args)
 

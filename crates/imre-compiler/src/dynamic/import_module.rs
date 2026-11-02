@@ -27,6 +27,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
+                        section("def ismodule(object):", "def isclass(object):"),
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),
@@ -36,6 +37,10 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "urllib.parse" => Some((
+            "urllib/parse.py",
+            include_str!("../../stdlib/urllib/parse.py"),
+        )),
         "annotationlib" => Some((
             "annotationlib.py",
             include_str!("../../stdlib/annotationlib.py"),
@@ -43,8 +48,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "functools" => Some(("functools.py", include_str!("../../stdlib/functools.py"))),
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
         "shutil" => Some(("shutil.py", include_str!("../../stdlib/shutil.py"))),
-        #[cfg(target_os = "linux")]
-        "signal" => Some(("signal.py", include_str!("../../stdlib/signal.py"))),
         "socket" => Some(("socket.py", include_str!("../../stdlib/socket.py"))),
         "tempfile" => Some((
             "tempfile.py",
@@ -68,6 +71,16 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/unittest/boxed_skip.py"),
                 "\n",
                 include_str!("../../stdlib/unittest/boxed_runner.py"),
+            ),
+        )),
+        "unittest.mock" => Some((
+            "unittest/mock.py",
+            concat!(
+                include_str!("../../stdlib/unittest/mock.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_mock.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_patch.py"),
             ),
         )),
         "unittest.loader" => Some((

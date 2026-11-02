@@ -268,6 +268,16 @@ pub unsafe extern "C" fn imre_str_isspace(value: *const Str) -> u32 {
     u32::from(python_isspace(value))
 }
 
+/// Returns whether every byte in the string is ASCII, including for empty strings.
+///
+/// # Safety
+/// The caller roots the immutable UTF-8 string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_is_ascii(value: *const Str) -> u32 {
+    // SAFETY: the caller supplies a rooted string.
+    u32::from(unsafe { &*value }.is_ascii())
+}
+
 /// Tests a native string with Python's lowercase predicate.
 ///
 /// # Safety

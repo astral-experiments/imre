@@ -61,6 +61,12 @@ INVALID_OBJECT_BASES = {
 
 
 REJECTED = {
+    "nested_class_bad_return": "class Outer:\n    class Inner:\n        def label(self) -> str:\n            return 42\n",
+    "nested_class_with_invalid_sibling": "class Outer:\n    class Inner: pass\n    x: int\n    x: str\n",
+    "nested_class_with_type_params": "class Outer[T]:\n    class Inner: pass\n",
+    "nested_class_duplicate_name": "class Outer:\n    class Inner: pass\n    class Inner: pass\n",
+    "nested_class_before_invalid_class": "class Outer:\n    class Inner: pass\nclass Bad:\n    x: int\n    x: str\n",
+    "nested_class_after_invalid_class": "class Bad:\n    x: int\n    x: str\nclass Outer:\n    class Inner: pass\n",
     **INVALID_OBJECT_BASES,
     "weak_proxy_callback": "import weakref\nclass Target:\n    pass\ndef callback(proxy: Target) -> None:\n    pass\ntarget = Target()\nweakref.proxy(target, callback)\n",
     "inferred_field_reads_itself": FORMAT_INIT.replace("v=1", "v=self.path"),
@@ -145,6 +151,13 @@ REJECTED = {
     "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
+    "unrelated_abc_meta": "class ABCMeta: pass\nclass C(metaclass=ABCMeta): pass\n",
+    "abc_meta_with_keywords": "import abc\nclass C(metaclass=abc.ABCMeta, option=True): pass\n",
+    "abc_meta_late_import": "class C(metaclass=ABCMeta): pass\nfrom abc import ABCMeta\n",
+    "abc_meta_dataclass_generated": "import abc\nfrom dataclasses import dataclass\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def __init__(self): pass\n@dataclass\nclass B(A):\n    n: int\n",
+    "abc_meta_eager_default": "import abc\ndef init() -> int: return 42\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def f(self, *, n: int = init()): pass\n",
+    "abc_meta_registry_collision": "import abc\nclass Parent: _abc_impl = 42\nclass B(Parent, metaclass=abc.ABCMeta): pass\n",
+    "abc_meta_enum_conflict": "import abc\nfrom enum import Enum\nclass C(Enum, metaclass=abc.ABCMeta): pass\n",
     "magic_method": CELL + '    def __bytes__(self) -> bytes:\n        return b"Cell"\n',
     "str_extra_parameter": CELL + '    def __str__(self, detail: bool = False) -> str:\n        return "Cell"\n',
     "str_static_method": CELL + '    @staticmethod\n    def __str__() -> str:\n        return "Cell"\n',
@@ -283,7 +296,7 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

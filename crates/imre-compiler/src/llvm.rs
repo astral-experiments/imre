@@ -1891,7 +1891,7 @@ impl Emitter<'_, '_> {
             ));
             self.prepare_directory_frame(&value);
         }
-        let command_flags = self.module.command_flags;
+        let command_flags = self.module.command_flags.as_ref();
         let ignore_env = command_flags.is_some_and(|flags| flags.ignore_environment);
         if entry {
             let startup = if self.uses_orig_argv {
@@ -1912,15 +1912,30 @@ impl Emitter<'_, '_> {
                 command_flags.map_or(-1, |flags| i32::from(flags.context_aware_warnings))
             ));
             self.line("call void @imre_record_error_init()");
-            if let Some(flags) = command_flags {
+            if let Some(utf8_mode) = command_flags.and_then(|flags| flags.utf8_mode) {
                 self.line(format!(
                     "call void @imre_stdio_command_init(i32 {}, i32 {})",
                     u32::from(ignore_env),
-                    u32::from(flags.utf8_mode)
+                    u32::from(utf8_mode)
                 ));
+            } else if ignore_env {
+                self.line("call void @imre_stdio_isolated_init()");
             } else {
                 self.line("call void @imre_stdio_init()");
             }
+            let warnoptions = command_flags.map_or(&[][..], |flags| flags.warnoptions.as_slice());
+            let options = if warnoptions.is_empty() {
+                "null".to_owned()
+            } else {
+                let mut json =
+                    serde_json::to_vec(warnoptions).expect("serializable Python -W options");
+                json.push(0);
+                format!("@{}", self.byte_array(json))
+            };
+            self.line(format!(
+                "call void @imre_warning_options_init(i32 {}, ptr {options})",
+                u32::from(ignore_env),
+            ));
             self.line("call void @imre_init_literals()");
         }
         if entry && self.uses_cache_paths {
@@ -5424,6 +5439,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
+            Builtin::OsLinesep => self.call("imre_os_linesep", returns, &[]),
             Builtin::OsPathsep => self.call("imre_os_pathsep", returns, &[]),
             Builtin::OsSeparator { alternate } => {
                 let operand = self.checked_instruction(format!(
@@ -7706,16 +7722,6 @@ impl Emitter<'_, '_> {
                     Type::Str | Type::StrLiteral(_) => {
                         self.void_call("imre_print_str", &[&args[0].value])
                     }
-                    Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_) => {
-                        let text = if matches!(args[0].value.ty, Type::Enum(_)) {
-                            self.call("imre_enum_string", Type::Str, &[&args[0].value])
-                        } else {
-                            self.enum_text(&args[0].value, false)
-                        };
-                        let text = self.owned(text);
-                        self.void_call("imre_print_str", &[&text]);
-                        self.release(&text);
-                    }
                     Type::Bytes => self.void_call("imre_print_bytes", &[&args[0].value]),
                     Type::Bool => {
                         let byte =
@@ -7723,99 +7729,7 @@ impl Emitter<'_, '_> {
                         self.checked_line(format!("call void @imre_print_bool(i32 {byte})"));
                     }
                     Type::None => self.void_call("imre_print_none", &[]),
-                    Type::ListInt
-                    | Type::ForwardRef(_)
-                    | Type::FunctionRef
-                    | Type::AnnotationValue(_)
-                    | Type::CmpKey(..)
-                    | Type::BuiltinClass
-                    | Type::Class(_)
-                    | Type::List(_)
-                    | Type::Dict(_)
-                    | Type::ChainMap(_)
-                    | Type::Set(_)
-                    | Type::Deque(_)
-                    | Type::FrozenStrings
-                    | Type::StringKeys
-                    | Type::Iterator
-                    | Type::Cursor(_)
-                    | Type::ByteOutput
-                    | Type::TupleBuffer
-                    | Type::Exception
-                    | Type::NamedException(_)
-                    | Type::ObjectValue
-                    | Type::ReadOnlyObjectMapping
-                    | Type::ImportException
-                    | Type::TimeoutExpired
-                    | Type::Path
-                    | Type::PurePath(_)
-                    | Type::TextIO
-                    | Type::StringIO
-                    | Type::HandlerLock
-                    | Type::EventLoop
-                    | Type::Coroutine(_)
-                    | Type::Task(_)
-                    | Type::TaskGroup
-                    | Type::Document(_)
-                    | Type::GeneratorContext
-                    | Type::DirectoryContext(_)
-                    | Type::Semaphore
-                    | Type::Popen(..)
-                    | Type::ActivePopen
-                    | Type::AsyncProcess(_)
-                    | Type::NativeModule
-                    | Type::ModuleNamespace
-                    | Type::LogFormatter
-                    | Type::LogRecord
-                    | Type::Logger
-                    | Type::LogManager
-                    | Type::TimedFileHandler
-                    | Type::CacheState(_)
-                    | Type::ProcessSelectorClass
-                    | Type::ClockTime
-                    | Type::Calendar(_)
-                    | Type::StrDescriptor(_)
-                    | Type::Placeholder(_)
-                    | Type::OverloadStub
-                    | Type::PlainObject
-                    | Type::SimpleNamespace(_)
-                    | Type::PathInfo
-                    | Type::CodecInfo
-                    | Type::Poll
-                    | Type::Socket
-                    | Type::CodecWriterClass
-                    | Type::CodecWriter
-                    | Type::TextOutput
-                    | Type::Hash
-                    | Type::JsonDecoder
-                    | Type::ZipFile
-                    | Type::ZipInfo
-                    | Type::Context
-                    | Type::ContextMissing
-                    | Type::WeakProxy(_)
-                    | Type::ContextVar(_)
-                    | Type::ContextToken(_)
-                    | Type::CsvReader
-                    | Type::Patch(_)
-                    | Type::RegexPattern
-                    | Type::JsonRoot
-                    | Type::JsonValue
-                    | Type::JsonObject
-                    | Type::RegexMatch
-                    | Type::SourceModule
-                    | Type::BytesIO
-                    | Type::BinaryIO
-                    | Type::ModuleSpec(_)
-                    | Type::SysImplementation
-                    | Type::CompletedProcess(..)
-                    | Type::Tuple(_)
-                    | Type::VarTuple(_)
-                    | Type::Optional(_)
-                    | Type::Callable(_)
-                    | Type::Union(_)
-                    | Type::StringIterable => {
-                        unreachable!("container printing is rejected")
-                    }
+                    _ => unreachable!("print expects a scalar operand"),
                 }
                 none()
             }
@@ -8459,84 +8373,17 @@ fn read_only_integer(expression: &Expr) -> bool {
 /// and expression scopes are each visited once, so nested scopes do not cause
 /// repeated recursive walks of their bodies.
 fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> bool {
-    fn expression_writes(expression: &Expr, written: &mut [bool]) {
-        match &expression.kind {
-            ExprKind::Scope { body, value, clear } => {
-                crate::list_specialization::mark_writes(body, written);
-                for &slot in clear {
-                    written[slot] = true;
-                }
-                crate::ir::walk_expressions(body, &mut |value| match &value.kind {
-                    ExprKind::Scope { body, clear, .. } => {
-                        crate::list_specialization::mark_writes(body, written);
-                        for &slot in clear {
-                            written[slot] = true;
-                        }
-                    }
-                    ExprKind::Bind(slot, _) => written[*slot] = true,
-                    _ => {}
-                });
-                expression_writes(value, written);
-            }
-            ExprKind::Bind(slot, value) => {
-                written[*slot] = true;
-                expression_writes(value, written);
-            }
-            ExprKind::List(values)
-            | ExprKind::Tuple(values)
-            | ExprKind::Set { values, .. }
-            | ExprKind::Compare(values, _)
-            | ExprKind::Boolean(_, values)
-            | ExprKind::Builtin(_, values) => {
-                for value in values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-                for value in &args.values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Callable {
-                receiver: Some(receiver),
-                ..
-            } => expression_writes(receiver, written),
-            ExprKind::Invoke { callable, args } => {
-                expression_writes(callable, written);
-                for value in &args.values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    expression_writes(key, written);
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-                expression_writes(left, written);
-                expression_writes(right, written);
-            }
-            ExprKind::Conditional(test, yes, no) => {
-                expression_writes(test, written);
-                expression_writes(yes, written);
-                expression_writes(no, written);
-            }
-            ExprKind::Present(value)
-            | ExprKind::Absent(value)
-            | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
-            | ExprKind::Field(value, _) => expression_writes(value, written),
-            ExprKind::Exception {
-                message: Some(message),
-                ..
-            } => expression_writes(message, written),
-            _ => {}
-        }
-    }
     let mut written = vec![false; locals];
-    expression_writes(expression, &mut written);
+    crate::ir::walk_expression(expression, &mut |value| match &value.kind {
+        ExprKind::Scope { body, clear, .. } => {
+            crate::list_specialization::mark_writes(body, &mut written);
+            for &slot in clear {
+                written[slot] = true;
+            }
+        }
+        ExprKind::Bind(slot, _) => written[*slot] = true,
+        _ => {}
+    });
     !written[slot]
 }
 
@@ -9355,6 +9202,8 @@ declare void @imre_context_warnings_init(i32)
 declare i64 @imre_sys_context_aware_warnings()
 declare void @imre_record_error_init()
 declare void @imre_stdio_init()
+declare void @imre_stdio_isolated_init()
+declare void @imre_warning_options_init(i32, ptr)
 declare i64 @imre_tuple_index(i64, i64)
 declare void @imre_stdio_command_init(i32, i32)
 declare ptr @imre_sys_stream_text(i32, i32)
@@ -9770,6 +9619,7 @@ declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
 declare ptr @imre_sys_stdlib_module_names()
+declare i32 @imre_str_is_ascii(ptr)
 declare i32 @imre_str_is_lower(ptr)
 declare i32 @imre_str_is_upper(ptr)
 declare ptr @imre_errno_module()
@@ -9784,6 +9634,7 @@ declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
 declare i32 @imre_errno_member_contains(ptr,ptr)
 declare ptr @imre_sys_thread_text(i32)
 declare ptr @imre_os_name()
+declare ptr @imre_os_linesep()
 declare ptr @imre_os_pathsep()
 declare ptr @imre_os_separator(i32)
 declare void @imre_doctest_capture_start()

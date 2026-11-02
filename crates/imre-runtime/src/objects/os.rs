@@ -34,6 +34,14 @@ pub extern "C" fn imre_os_separator(alternate: u32) -> *const Str {
     separator_string(sep)
 }
 
+pub(crate) const LINE_SEPARATOR: &str = if cfg!(windows) { "\r\n" } else { "\n" };
+
+/// Return the target operating system's text line separator.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_os_linesep() -> *const Str {
+    separator_string(LINE_SEPARATOR)
+}
+
 /// Return the target search-path separator as an interned one-character string.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_os_pathsep() -> *const Str {

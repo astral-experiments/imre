@@ -51,6 +51,8 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
     bind_numbers(ctx, scope);
     let nsig = ctx.int(i64::from(libc::SIGRTMAX() + 1));
     ctx.bind(scope, "NSIG", nsig);
+    let alarm = ctx.builtin("_signal.alarm");
+    ctx.bind(scope, "alarm", alarm);
     let pending = ctx.builtin("_signal.sigpending");
     ctx.bind(scope, "sigpending", pending);
 }

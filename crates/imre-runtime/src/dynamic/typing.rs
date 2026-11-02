@@ -424,7 +424,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
             AliasKind::AbcCallable
         }
         Value::Native(n) if n == "typing.Callable" => AliasKind::Callable,
-        Value::Native(n) if matches!(n.as_str(), "dict" | "list" | "tuple" | "set") => {
+        Value::Native(n) if matches!(n.as_str(), "dict" | "list" | "tuple" | "set" | "type") => {
             AliasKind::Builtin
         }
         Value::Class { ancestors, .. } => {
@@ -974,6 +974,49 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if operation == "_new_typeddict" {
+        let [name_id, root] = args else {
+            return Err(Error::new(
+                "TypeError",
+                "expected TypedDict name and root flag",
+            ));
+        };
+        if ctx.string_storage(*name_id).is_none() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "type.__new__() argument 1 must be str, not {}",
+                    ctx.type_name(*name_id)
+                ),
+            ));
+        }
+        let name = ctx.str_value(*name_id)?.to_owned();
+        let (module, base) = if *root == TRUE {
+            (ctx.text("typing"), ctx.builtin("object"))
+        } else {
+            let caller = ctx.heap.caller_module_at(1).unwrap_or(NONE);
+            let module = if ctx.truth(caller)? {
+                caller
+            } else {
+                ctx.text("__main__")
+            };
+            (module, ctx.builtin("dict"))
+        };
+        let module_name = ctx.str_value(module).unwrap_or("builtins").to_owned();
+        let scope = ctx.scope(&module_name, None);
+        ctx.bind(scope, "__module__", module);
+        ctx.bind(scope, "__qualname__", *name_id);
+        let class = ctx.allocate_class(name, scope, vec![base])?;
+        ctx.set_attr(class, "__name__", *name_id)?;
+        let meta = ctx
+            .module_value("typing", "_TypedDictMeta")
+            .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict metaclass"))?;
+        let Value::Class { metaclass, .. } = ctx.heap.get_mut(class) else {
+            unreachable!()
+        };
+        *metaclass = Some(meta);
+        return Ok(class);
+    }
     if operation == "TypeVarTuple" {
         let [name, default] = super::builtins::bind_method_arguments(
             "typevartuple",
@@ -1394,7 +1437,8 @@ impl Context {
                 ));
             }
             if let Value::Native(name) = self.heap.get(base)
-                && (crate::objects::HashState::is_provider_class(name)
+                && (super::stdlib::fixed_structseq::fixed_type(name).is_some()
+                    || crate::objects::HashState::is_provider_class(name)
                     || matches!(
                         name.as_str(),
                         "typing.TypeVar"
@@ -1426,6 +1470,7 @@ impl Context {
         let slot_names = self.declared_slot_names(scope)?;
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
         let class = self.alloc(Value::Class {
+            metaclass: None,
             namedtuple_fields,
             name,
             scope,

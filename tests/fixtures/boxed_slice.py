@@ -60,6 +60,13 @@ def current():
     visits = []
     s = slice(Index("start", -6, visits), Index("stop", 12, visits), Index("step", 2, visits))
     print(s.indices(Index("length", 8, visits)), visits)
+    text = "aé中🙂" * 16
+    visits.clear()
+    assert text[Index("scalar", -1, visits)] == "🙂"
+    assert text[Index("start", 1, visits):Index("stop", 4, visits):Index("step", 2, visits)] == "é🙂"
+    assert visits == ["scalar", "step", "start", "stop"]
+    assert text[len(text):2] == "" and text[-4:-1] == "aé中"
+    assert "\ud800🙂z"[::-1] == "z🙂\ud800"
     huge = 10 ** 65
     print(slice(-huge, None, -huge).indices(2 * huge))
     print(list(range(-(2 ** 63), 2 ** 63 - 1)[-3:]))

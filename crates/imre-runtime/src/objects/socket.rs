@@ -32,14 +32,17 @@ impl Socket {
         if fd == -1 {
             return Ok(());
         }
-        // SAFETY: the object relinquishes the descriptor before close. Do not retry
-        // on EINTR: the kernel may have reused the number. Python can also have
-        // explicitly closed fileno() via os.close; EBADF is an ordinary socket error.
-        match checked(unsafe { libc::close(fd) }) {
-            Ok(_) => Ok(()),
-            Err(e) if e.raw_os_error() == Some(libc::ECONNRESET) => Ok(()),
-            Err(e) => Err(e),
-        }
+        close_fd(fd)
+    }
+}
+
+/// Close a raw socket descriptor once, including when close reports EINTR.
+pub(crate) fn close_fd(fd: RawFd) -> io::Result<()> {
+    // SAFETY: close takes only a descriptor number. Retrying could close a reused fd.
+    match checked(unsafe { libc::close(fd) }) {
+        Ok(_) => Ok(()),
+        Err(e) if e.raw_os_error() == Some(libc::ECONNRESET) => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -1115,25 +1118,32 @@ pub extern "C" fn imre_socket_setsockopt_bytes(
     );
 }
 
+pub(crate) fn get_option_into(
+    s: &Object,
+    level: i32,
+    name: i32,
+    buffer: &mut [u8],
+) -> Result<usize> {
+    let mut len = libc::socklen_t::try_from(buffer.len())
+        .map_err(|_| Error::new(Kind::OverflowError, "getsockopt buffer too large"))?;
+    // SAFETY: the buffer is writable for the supplied capacity; the kernel returns its used length.
+    checked(unsafe {
+        libc::getsockopt(fd(s), level, name, buffer.as_mut_ptr().cast(), &raw mut len)
+    })
+    .map_err(errno_error)?;
+    Ok(len as usize)
+}
+
+pub(crate) fn get_option(s: &Object, level: i32, name: i32) -> Result<i32> {
+    let mut bytes = [0; size_of::<i32>()];
+    get_option_into(s, level, name, &mut bytes)?;
+    Ok(i32::from_ne_bytes(bytes))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_getsockopt(s: &Object, level: usize, name: usize) -> usize {
     finish(
-        (|| {
-            let mut value: i32 = 0;
-            let mut len = size_of_val(&value) as libc::socklen_t;
-            // SAFETY: the caller requests a scalar option; the kernel may write at most sizeof(int).
-            checked(unsafe {
-                libc::getsockopt(
-                    fd(s),
-                    c_int(level)?,
-                    c_int(name)?,
-                    (&raw mut value).cast(),
-                    &raw mut len,
-                )
-            })
-            .map_err(errno_error)?;
-            Ok(word(value))
-        })(),
+        (|| get_option(s, c_int(level)?, c_int(name)?).map(word))(),
         word(0),
     )
 }

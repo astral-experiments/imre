@@ -73,12 +73,49 @@ def check_arguments(owner, witness):
     assert events == ["weak"]
 
 
+class Receiver:
+    def check(self, witness):
+        assert witness() is None and self.owner is None
+        assert events == ["weak", "finalize"], events
+
+
+def bound_method(receivers):
+    receiver = Receiver()
+    receiver.owner = Owner()
+    receivers.append(ref(receiver))
+    return receiver.check
+
+
+def detach_owner(receivers, depth):
+    if depth:
+        return detach_owner(receivers, depth - 1)
+    witness = clear_weak_target()
+    receivers[0]().owner = None
+    assert events == ["weak", "finalize"], events
+    return witness
+
+
 def current():
+    # Keep another pending finalizer reachable while cyclic and acyclic owners die.
+    held = [Owner()]
+    witness = ref(held[0])
     exercise(True, False)
     exercise(True, True)
     exercise(False, False)
+    assert witness() is held[0]
+    held.clear()
+    assert events == ["finalize"] and witness() is saved[0]
+    saved.clear()
+    assert witness() is None
+    events.clear()
     # The first argument stays live while the second releases an unrelated target.
     check_arguments(Owner(), clear_weak_target())
     assert events == ["weak", "finalize"]
+    saved.clear()
+    events.clear()
+    # The receiver stays live as a bound method while its owner is detached.
+    receivers = []
+    bound_method(receivers)(detach_owner(receivers, 3))
+    assert receivers[0]() is None and events == ["weak", "finalize"]
     saved.clear()
     events.clear()

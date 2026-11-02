@@ -270,6 +270,7 @@ impl Checker<'_> {
             } else {
                 let predicate = match name {
                     "isalnum" => ir::TextPredicate::Alnum,
+                    "isascii" => ir::TextPredicate::Ascii,
                     "isspace" => ir::TextPredicate::Space,
                     "islower" => ir::TextPredicate::Lower,
                     "isupper" => ir::TextPredicate::Upper,

@@ -45,9 +45,11 @@ pub(super) fn parse(
     let mut isolated = false;
     let mut ignore_environment = false;
     let mut context_option = None;
+    let mut warn_default_encoding = false;
     let mut optimize: i32 = 0;
     let mut dont_write_bytecode = false;
     let mut utf8 = None;
+    let mut warnoptions = Vec::new();
     let input = 'options: loop {
         if arg == "--" {
             break Input::Script(args.next().ok_or("expected a script after --")?.into());
@@ -70,19 +72,28 @@ pub(super) fn parse(
                 'O' => optimize = optimize.checked_add(1).ok_or("too many -O options")?,
                 'B' => dont_write_bytecode = true,
                 'c' => break 'options Input::Command(operand(flags.as_str(), args, "-c")?),
+                'W' => {
+                    warnoptions.push(operand(flags.as_str(), args, "-W")?);
+                    break;
+                }
                 'X' => {
                     let option = operand(flags.as_str(), args, "-X")?;
-                    if option.split('=').next() == Some("context_aware_warnings") {
-                        context_option.get_or_insert(option);
-                        break;
-                    }
-                    let value = match option.as_str() {
-                        "utf8" | "utf8=1" => true,
-                        "utf8=0" => false,
+                    match option.split_once('=').unwrap_or((&option, "")) {
+                        ("context_aware_warnings", _) => {
+                            context_option.get_or_insert(option);
+                        }
+                        ("warn_default_encoding", _) => warn_default_encoding = true,
+                        ("utf8", _) => {
+                            let value = match option.as_str() {
+                                "utf8" | "utf8=1" => true,
+                                "utf8=0" => false,
+                                _ => return Err(format!("unsupported -X option: {option}").into()),
+                            };
+                            // CPython's preconfiguration uses the first matching -X option.
+                            utf8.get_or_insert(value);
+                        }
                         _ => return Err(format!("unsupported -X option: {option}").into()),
-                    };
-                    // CPython's preconfiguration uses the first matching -X option.
-                    utf8.get_or_insert(value);
+                    }
                     break;
                 }
                 _ => return Err(format!("unknown interpreter option: -{flag}").into()),
@@ -91,19 +102,15 @@ pub(super) fn parse(
         arg = args.next().ok_or("expected -c and a command string")?;
     };
     let utf8_mode = match utf8 {
-        Some(value) => value,
+        Some(value) => Some(value),
         None => match (!ignore_environment)
             .then(|| env::var_os("PYTHONUTF8"))
             .flatten()
         {
-            Some(value) if value == "1" => true,
-            Some(value) if value == "0" => false,
+            Some(value) if value == "1" => Some(true),
+            Some(value) if value == "0" => Some(false),
             Some(value) if !value.is_empty() => return Err("PYTHONUTF8 must be 0 or 1".into()),
-            _ => ["LC_ALL", "LC_CTYPE", "LANG"]
-                .iter()
-                .filter_map(env::var_os)
-                .find(|value| !value.is_empty())
-                .is_none_or(|locale| locale == "C" || locale == "POSIX"),
+            _ => None,
         },
     };
     let env_flag = |key| {
@@ -142,17 +149,19 @@ pub(super) fn parse(
                 "-X context_aware_warnings=n: n is missing or invalid",
             ))?;
     }
+    let env_present =
+        |key| !ignore_environment && env::var_os(key).is_some_and(|value| !value.is_empty());
     let flags = CommandFlags {
         isolated,
         ignore_environment,
         context_aware_warnings,
         optimize: optimize.max(env_flag("PYTHONOPTIMIZE")),
-        safe_path: isolated
-            || (!ignore_environment
-                && env::var_os("PYTHONSAFEPATH").is_some_and(|s| !s.is_empty())),
+        safe_path: isolated || env_present("PYTHONSAFEPATH"),
         no_user_site: isolated || env_flag("PYTHONNOUSERSITE") != 0,
         dont_write_bytecode: dont_write_bytecode || env_flag("PYTHONDONTWRITEBYTECODE") != 0,
         utf8_mode,
+        warn_default_encoding: warn_default_encoding || env_present("PYTHONWARNDEFAULTENCODING"),
+        warnoptions,
     };
     let executable = env::current_exe()
         .map_err(|e| e.to_string())?
