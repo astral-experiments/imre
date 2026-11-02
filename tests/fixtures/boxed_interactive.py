@@ -26,6 +26,29 @@ def current():
         sys.displayhook = original_hook
     assert output.getvalue() == "3\n(0, 3)\n(1, 3)\n'answer'\n'answer'\n(2+1j)\ndone\n"
 
+    class Unencodable:
+        def __repr__(self):
+            return chr(0xd800)
+
+    class AsciiStream:
+        encoding = "ascii"
+
+        def __init__(self):
+            self.buffer = io.BytesIO()
+
+        def write(self, text):
+            if text != "\n":
+                raise UnicodeEncodeError("ascii", text, 0, 1, "unencodable")
+            self.buffer.write(b"\n")
+
+    stream = AsciiStream()
+    sys.stdout = stream
+    try:
+        sys.__displayhook__(Unencodable())
+    finally:
+        sys.stdout = original
+    assert stream.buffer.getvalue() == b"\\ud800\n"
+
     events = []
     sys.displayhook = events.append
     try:

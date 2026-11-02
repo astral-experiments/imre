@@ -273,6 +273,13 @@ pub(in crate::dynamic) fn encode_text(
         StrEncoder::Registered(Codec::Utf8 { signature }) => {
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
+        StrEncoder::Registered(codec) if errors == "backslashreplace" => {
+            // Escape lone surrogates first, then encode the remaining scalars and the
+            // replacements in the target code page.
+            let escaped = ctx.encode_utf8_codepoints(id, false, "backslashreplace")?;
+            let text = std::str::from_utf8(&escaped).expect("backslash replacement is scalar text");
+            Ok(Codec::encode_str(text, codec.name(), "backslashreplace")?)
+        }
         _ => Err(Error::new(
             "NotImplementedError",
             "encoding non-scalar strings with this codec is unsupported",
