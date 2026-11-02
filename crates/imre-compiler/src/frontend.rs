@@ -8052,6 +8052,11 @@ impl<'a> Checker<'a> {
                         Type::None,
                     ));
                 }
+                if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
+                    && self.types.mapping(receiver.ty).is_some()
+                {
+                    return Err(self.scoped_builtin_error("bound dictionary view method", attribute));
+                }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);
                 }
@@ -10444,6 +10449,11 @@ impl<'a> Checker<'a> {
                 {
                     *view = true;
                     return Ok(receiver);
+                }
+                if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
+                    && call.arguments.is_empty()
+                {
+                    return Err(self.scoped_builtin_error("dictionary view", call));
                 }
                 let pop = attribute.attr.as_str() == "pop";
                 if (!pop && attribute.attr.as_str() != "get")

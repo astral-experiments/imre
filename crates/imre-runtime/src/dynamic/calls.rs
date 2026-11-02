@@ -1174,6 +1174,26 @@ impl Context {
         })
     }
 
+    /// The getset belongs to the dict view base even when an OrderedDict made the view.
+    pub(super) fn dict_view_owner(name: &str) -> Option<&'static str> {
+        match Self::native_base(name).unwrap_or(name) {
+            "dict_keys" => Some("dict_keys"),
+            "dict_items" => Some("dict_items"),
+            "dict_values" => Some("dict_values"),
+            _ => None,
+        }
+    }
+
+    fn dict_view_mapping_member(&mut self, obj: Id) -> Option<Id> {
+        let class = match self.heap.get(obj) {
+            Value::Native(class) => class.as_str(),
+            Value::DictView { .. } => self.type_name(obj),
+            _ => return None,
+        };
+        let owner = self.builtin(Self::dict_view_owner(class)?);
+        self.own_class_attr(owner, "mapping")
+    }
+
     fn equal_class(&self, a: Id, b: Id) -> bool {
         a == b
             || matches!((self.heap.get(a),self.heap.get(b)),(Value::Native(x),Value::Native(y)) if x==y)
@@ -1916,6 +1936,15 @@ impl Context {
             && let Some(value) = self.enum_base_attribute(obj, scope, name)?
         {
             return Ok(value);
+        }
+        if name == "mapping"
+            && let Some(descriptor) = self.dict_view_mapping_member(obj)
+        {
+            if matches!(self.heap.get(obj), Value::Native(_)) {
+                return Ok(descriptor);
+            }
+            let class = self.exact_type(obj)?;
+            return self.bind_attribute(descriptor, obj, class);
         }
         if matches!(name, "numerator" | "denominator") {
             let receiver = match self.heap.get(obj) {
@@ -2957,6 +2986,7 @@ impl Context {
                     | stdlib::hashlib::md5::CLASS
                     | stdlib::datetime::isocalendar::CLASS
             ) || HashState::is_provider_class(owner)
+                || Self::dict_view_owner(owner).is_some()
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
             {
@@ -2968,6 +2998,8 @@ impl Context {
                         return Ok(self.builtin(owner));
                     }
                     "__name__" => return Ok(self.text(field)),
+                    "__doc__" if Self::dict_view_owner(owner).is_some() =>
+                        return Ok(self.text("dictionary that this view refers to")),
                     "__doc__" if owner == stdlib::datetime::isocalendar::CLASS => return Ok(NONE),
                     "__doc__" if owner == super::deque::CLASS => return Ok(self.text("maximum size of a deque or None if unbounded")),
                     "__doc__" if owner == "int" => {
@@ -2990,7 +3022,8 @@ impl Context {
                                     | stdlib::hashlib::md5::CLASS
                                     | stdlib::datetime::isocalendar::CLASS
                             )
-                            || HashState::is_provider_class(owner) =>
+                            || HashState::is_provider_class(owner)
+                            || Self::dict_view_owner(owner).is_some() =>
                     {
                         let symbol = format!("getset_descriptor.{name}");
                         let get = self.builtin(&symbol);
@@ -4560,6 +4593,9 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
+        if name == "mapping" && matches!(self.heap.get(obj), Value::DictView { .. }) {
+            return self.dict_view_mapping_member(obj);
+        }
         if matches!(name, "numerator" | "denominator")
             && matches!(self.heap.get(obj), Value::Int(_) | Value::Bool(_))
         {
@@ -5816,6 +5852,7 @@ impl Context {
                                 | "set"
                                 | "int"
                                 | "_int_getset"
+                                | "_dictview_mapping"
                                 | "frozenset"
                                 | "tuple"
                                 | "bytes"
