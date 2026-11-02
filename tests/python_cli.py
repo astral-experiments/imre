@@ -1860,6 +1860,15 @@ def main():
             "token",
         )
         compare("-IB", "-c", "import sys; print(__import__(sys.argv[1]).SelectorKey('f', 7, 1, 'd'))", "selectors")
+        compare(
+            "-IB", "-c",
+            "import sys\n"
+            "module = __import__(sys.argv[1])\n"
+            "print(module.PycInvalidationMode.CHECKED_HASH.name)\n"
+            "try:\n    module.compile('missing.py', '.', doraise=True)\n"
+            "except FileExistsError as error:\n    print(str(error))",
+            "py_compile", native_timeout=300,
+        )
         compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
         compare(
             "-IB", "-c",
