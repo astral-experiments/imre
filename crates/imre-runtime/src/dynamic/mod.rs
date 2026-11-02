@@ -274,6 +274,9 @@ impl Context {
                 true
             }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
+            (_, Value::DictView { .. }) => {
+                Self::dict_view_owner(self.type_name(object)) == Some(owner)
+            }
             ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
@@ -2108,6 +2111,20 @@ impl Context {
         }
         if name == deque::CLASS {
             deque::install(self);
+        }
+        if let Some(owner) = Self::dict_view_owner(name)
+            && owner == name
+        {
+            let get = self.builtin(&format!("_dictview_mapping.{owner}"));
+            let mapping = self.alloc(Value::GetSetDescriptor {
+                owner,
+                name: "mapping",
+                get,
+                set: None,
+            });
+            let key = self.heap.code_name("mapping");
+            let namespace = self.dict(vec![(key, mapping)]);
+            self.native_type_dicts.insert(value, namespace);
         }
         if let Some(owner) = stdlib::itertools::cursor_type(name) {
             stdlib::itertools::install_namespace(self, value, owner);
