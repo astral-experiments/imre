@@ -3,41 +3,24 @@
 import sys
 
 from _imre_importlib import (
+    _zip_path_importers,
     cache_name as _cache_name,
     get_code as _registered_code,
     loader_fields as _loader_fields,
     path_stats as _path_stats,
     source_name as _source_name,
+    warn_debug_override as _warn_debug_override,
+    warn_loader_deprecation as _warn_loader_deprecation,
 )
 from os import fspath as _fspath, sep
 
 
-if __name__ == "_frozen_importlib_external":
+_is_frozen = __name__ == "_frozen_importlib_external"
+if _is_frozen:
     import _frozen_importlib as _bootstrap
-    from _imre_importlib import (
-        warn_debug_override as _warn_debug_override,
-        warn_loader_deprecation as _warn_loader_deprecation,
-    )
 else:
     # The package connects the selected core after this module has executed.
     _bootstrap = None
-
-    def _warn_debug_override():
-        import warnings
-        warnings.warn(
-            "the debug_override parameter is deprecated; use 'optimization' instead",
-            DeprecationWarning, stacklevel=2,
-        )
-
-    def _warn_loader_deprecation(module_globals, mismatch):
-        import warnings
-        message = ("Module globals; __loader__ != __spec__.loader" if mismatch
-                   else "Module globals is missing a __spec__.loader")
-        warnings.warn(message, DeprecationWarning, stacklevel=2)
-
-
-# Boxed source directories are searched directly; only ZIP path finders are cached.
-_zip_path_importers = {}
 
 
 def _invalidate_default_path_caches():
@@ -69,11 +52,11 @@ def _bless_my_loader(module_globals):
             if spec_loader is missing:
                 raise AttributeError("Module globals is missing a __spec__.loader")
             raise ValueError("Module globals is missing a __spec__.loader")
-        _warn_loader_deprecation(globals(), False)
+        _warn_loader_deprecation(globals(), False, _is_frozen)
         spec_loader = loader
 
     if loader is not None and loader != spec_loader:
-        _warn_loader_deprecation(globals(), True)
+        _warn_loader_deprecation(globals(), True, _is_frozen)
         return loader
     return spec_loader
 
@@ -88,7 +71,7 @@ def _cache_path(path):
 
 def cache_from_source(path, debug_override=None, *, optimization=None):
     if debug_override is not None:
-        _warn_debug_override()
+        _warn_debug_override(None if _is_frozen else globals())
         if optimization is not None:
             raise TypeError("debug_override or optimization must be set to None")
         optimization = "" if debug_override else 1

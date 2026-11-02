@@ -1,5 +1,5 @@
 """Source package imports for the native module registry."""
-from _frozen_importlib_external import _zip_path_importers as _path_importers
+from _imre_importlib import _zip_path_importers as _path_importers
 
 _ENCODING_NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
 

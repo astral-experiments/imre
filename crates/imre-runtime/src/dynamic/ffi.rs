@@ -702,6 +702,7 @@ pub(super) fn new_context<S: Into<String>>(
         native_code_objects: HashMap::new(),
         source_builtins: None,
         zip_directories: HashMap::new(),
+        zip_path_importers: NONE,
         codec_entries: Default::default(),
         frozen_override: 0,
         modules: NONE,
@@ -1467,6 +1468,7 @@ impl Context {
                 .chain([
                     self.argv,
                     self.sys_path,
+                    self.zip_path_importers,
                     self.modules,
                     self.import_missing,
                     self.bootstrap_globals,

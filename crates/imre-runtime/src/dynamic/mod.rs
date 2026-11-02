@@ -128,6 +128,7 @@ pub(crate) struct Context {
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
+    zip_path_importers: Id,
     codec_entries: stdlib::codecs::Registry,
     frozen_override: i32,
     // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
@@ -2387,6 +2388,13 @@ impl Context {
             self.bind(scope, "BlockingIOError", error);
         }
         match name {
+            "_imre_importlib" => {
+                // All bootstrap instances invalidate the finders used by the native path search.
+                if self.zip_path_importers == NONE {
+                    self.zip_path_importers = self.dict(Vec::new());
+                }
+                self.bind(scope, "_zip_path_importers", self.zip_path_importers);
+            }
             "itertools" => {
                 for attr in [
                     "count",

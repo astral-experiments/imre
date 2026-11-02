@@ -3,7 +3,11 @@ use super::{Context, Error, Id, NONE, Result, Value};
 enum Origin {
     Caller(i32),
     FrozenImport(u32),
-    FrozenExternal { globals: Id, line: u32 },
+    Bootstrap {
+        globals: Id,
+        line: u32,
+        frozen_external: bool,
+    },
 }
 
 impl Context {
@@ -17,25 +21,32 @@ impl Context {
         )
     }
 
-    pub(in crate::dynamic) fn warn_legacy_load(&mut self) -> Result<()> {
+    pub(in crate::dynamic) fn warn_legacy_load(&mut self, source_globals: Id) -> Result<()> {
         self.emit_warning(
             crate::objects::exceptions::Kind::DeprecationWarning,
             "the load_module() method is deprecated and slated for removal in Python 3.15; use exec_module() instead",
-            Origin::FrozenImport(533),
+            if source_globals == NONE { Origin::FrozenImport(533) } else {
+                Origin::Bootstrap { globals: source_globals, line: 533, frozen_external: false }
+            },
             NONE,
         )
     }
 
-    pub(in crate::dynamic) fn warn_external_loader(
+    pub(in crate::dynamic) fn warn_bootstrap_loader(
         &mut self,
         globals: Id,
         line: u32,
         message: &str,
+        frozen_external: bool,
     ) -> Result<()> {
         self.emit_warning(
             crate::objects::exceptions::Kind::DeprecationWarning,
             message,
-            Origin::FrozenExternal { globals, line },
+            Origin::Bootstrap {
+                globals,
+                line,
+                frozen_external,
+            },
             NONE,
         )
     }
@@ -82,7 +93,11 @@ impl Context {
                 line,
                 "importlib._bootstrap".to_owned(),
             ),
-            Origin::FrozenExternal { globals, line } => {
+            Origin::Bootstrap {
+                globals,
+                line,
+                frozen_external,
+            } => {
                 let module = self.dict_named_item(globals, "__name__");
                 if module == Some(NONE) {
                     return Ok(());
@@ -91,7 +106,16 @@ impl Context {
                     .and_then(|id| self.str_value(id).ok())
                     .unwrap_or("<string>")
                     .to_owned();
-                ("<frozen importlib._bootstrap_external>".into(), line, module)
+                let filename = if frozen_external {
+                    "<frozen importlib._bootstrap_external>".into()
+                } else {
+                    // Sliced source keeps the code filename but uses the pinned warning call site.
+                    self.heap
+                        .current_location()
+                        .map(|loc| loc.file)
+                        .unwrap_or("<sys>".into())
+                };
+                (filename, line, module)
             }
             Origin::Caller(level) => {
                 if let Some((loc, scope)) = self.heap.warning_frame(level) {
@@ -125,7 +149,7 @@ impl Context {
                     globals,
                     match origin {
                         Origin::Caller(_) => "warn",
-                        Origin::FrozenImport(_) | Origin::FrozenExternal { .. } => "warn_explicit",
+                        Origin::FrozenImport(_) | Origin::Bootstrap { .. } => "warn_explicit",
                     },
                 )
             {
@@ -140,8 +164,8 @@ impl Context {
                         }
                         args
                     }
-                    Origin::FrozenImport(_) | Origin::FrozenExternal { .. } => {
-                        let globals = if let Origin::FrozenExternal { globals, .. } = origin {
+                    Origin::FrozenImport(_) | Origin::Bootstrap { .. } => {
+                        let globals = if let Origin::Bootstrap { globals, .. } = origin {
                             globals
                         } else {
                             // Some closed graphs run the native bootstrap without importing its module.

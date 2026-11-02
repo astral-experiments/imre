@@ -1723,21 +1723,31 @@ pub(super) fn call(
                 let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
                 return Ok(ctx.text(path.to_string()));
             }
-            ("warn_legacy_load", [], []) => {
-                ctx.warn_legacy_load()?;
+            ("warn_legacy_load", [source_globals], []) => {
+                ctx.warn_legacy_load(*source_globals)?;
                 return Ok(NONE);
             }
-            ("warn_loader_deprecation", [globals, mismatch], []) => {
+            ("warn_loader_deprecation", [globals, mismatch, frozen], []) => {
                 let (line, message) = if ctx.truth(*mismatch)? {
                     (670, "Module globals; __loader__ != __spec__.loader")
                 } else {
                     (663, "Module globals is missing a __spec__.loader")
                 };
-                ctx.warn_external_loader(*globals, line, message)?;
+                let frozen = ctx.truth(*frozen)?;
+                ctx.warn_bootstrap_loader(*globals, line, message, frozen)?;
                 return Ok(NONE);
             }
-            ("warn_debug_override", [], []) => {
-                crate::objects::cache_paths::warn_debug_override()?;
+            ("warn_debug_override", [source_globals], []) => {
+                if *source_globals == NONE {
+                    crate::objects::cache_paths::warn_debug_override()?;
+                } else {
+                    ctx.warn_bootstrap_loader(
+                        *source_globals,
+                        258,
+                        crate::objects::cache_paths::DEBUG_OVERRIDE_WARNING,
+                        false,
+                    )?;
+                }
                 return Ok(NONE);
             }
             ("import_module", [name], []) => {
