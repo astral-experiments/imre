@@ -2,6 +2,18 @@ import re
 
 
 def current():
+    from string import Template
+
+    for flags in (re.I, re.I | re.X):
+        pattern = re.compile(r"(?P<ascii>(?a:[a-z]))(?P<unicode>[a-z])", flags)
+        assert pattern.fullmatch("KK").groups() == ("K", "K")
+        for letter in "Kſİı":
+            assert pattern.fullmatch(letter + "K") is None
+        assert re.fullmatch(r"(?a:.[^a-z])", "éK", flags)
+        assert re.fullmatch(r"(?a:\w(?u:\w)\w)\w", "AéZé", flags)
+    assert Template("$User ${Count} $$").substitute(User="Ann", Count=2) == "Ann 2 $"
+    assert not Template("$K").is_valid()
+
     ascii_digits = re.compile(r"-?\d+", flags=re.ASCII)
     unicode_digits = re.compile(r"-?\d+")
     from re import Pattern

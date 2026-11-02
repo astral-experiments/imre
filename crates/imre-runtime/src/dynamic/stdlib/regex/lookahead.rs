@@ -6,9 +6,7 @@ use regex_automata::util::captures::{Captures, GroupInfo};
 use regex_automata::util::primitives::NonMaxUsize;
 use regex_automata::{Anchored, Input, PatternID};
 
-use super::{
-    ASCII, DOTALL, IGNORECASE, MULTILINE, Matcher, VERBOSE, alphabet, casefold, group_names,
-};
+use super::{ASCII, DOTALL, IGNORECASE, MULTILINE, Matcher, VERBOSE, alphabet, group_names};
 
 /// Compile only grammar accepted by the Python lexer. Flags apply to assertions and their suffix.
 pub(super) fn compile(
@@ -16,7 +14,11 @@ pub(super) fn compile(
     flags: i64,
     original: String,
 ) -> Result<(String, Matcher), String> {
-    if !(pattern.contains("(?=") || pattern.contains("(?!")) {
+    if !(pattern.contains("(?=")
+        || pattern.contains("(?!")
+        || pattern.contains(r"\b")
+        || pattern.contains(r"\B"))
+    {
         return Err(original);
     }
     let ascii = flags & ASCII != 0;
@@ -27,18 +29,6 @@ pub(super) fn compile(
         flags & DOTALL != 0,
     )
     .map_err(|_| original)?;
-    if flags & IGNORECASE != 0 {
-        if source.contains(r"\k<") || source.contains("(?(") {
-            return Err("case-insensitive lookahead group references are unsupported".into());
-        }
-        // Normalized literal punctuation is escaped. Substituting same-width group
-        // openers lets the normal case folder read literals at their original offsets.
-        let syntax = source
-            .replace("(?=", "(?:")
-            .replace("(?!", "(?:")
-            .replace("(?>", "(?:");
-        source = casefold::expand_with_syntax(&source, &syntax, ascii)?;
-    }
     let dollar = if flags & MULTILINE != 0 {
         r"(?=\n|\z)"
     } else {
