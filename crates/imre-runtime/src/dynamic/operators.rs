@@ -1608,6 +1608,17 @@ impl Context {
             .flatten()
             .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS));
         let slice_budget = stack_words.map(|words| words / SLICE_FRAME_WORDS);
+        // A Python repr hook can start another renderer while its caller's
+        // container frames are suspended on this iterative worklist.
+        let sequence_stack_words = stack_words.map(|budget| {
+            ctx.repr_ancestors.iter().fold(budget, |remaining, &id| {
+                remaining.saturating_sub(match ctx.heap.get(id) {
+                    Value::Deque(_) => SEQUENCE_FRAME_WORDS + EXTRA_DEQUE_FRAME_WORDS,
+                    Value::List(_) | Value::Tuple(_) => SEQUENCE_FRAME_WORDS,
+                    _ => 0,
+                })
+            })
+        });
         let mut extra_deque_words = 0usize;
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
@@ -2205,9 +2216,9 @@ impl Context {
                     if matches!(
                         ctx.heap.get(storage),
                         Value::List(_) | Value::Tuple(_) | Value::Deque(_)
-                    ) && stack_words.is_some_and(|limit|
+                    ) && sequence_stack_words.is_some_and(|limit| {
                         active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words >= limit
-                    )
+                    })
                     {
                         return Err(Error::new(
                             "RecursionError",
