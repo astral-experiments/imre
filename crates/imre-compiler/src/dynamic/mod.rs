@@ -260,7 +260,9 @@ impl<'a> Visitor<'a> for Imports {
                     }
                 }
             }
-            Stmt::ClassDef(class) if class.type_params.is_some() => {
+            Stmt::ClassDef(class)
+                if class.type_params.is_some() || crate::classes::defines_pickle_reducer(class) =>
+            {
                 self.runtime_imports = true;
             }
             Stmt::Assign(a) if a.targets.iter().any(|t| self.sys_path(t)) => {
@@ -324,7 +326,8 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.runtime_imports = true;
         }
-        if matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
+        if matches!(e, Expr::Attribute(a) if matches!(a.attr.as_str(), "__reduce__" | "__reduce_ex__"))
+            || matches!(e, Expr::Name(n) if n.id.as_str() == "SystemExit")
             || matches!(e, Expr::Attribute(a) if boxed_sys_export(a.attr.as_str()) && matches!(&*a.value, Expr::Name(n) if self.sys_names.contains(n.id.as_str())))
         {
             self.runtime_imports = true;
@@ -420,6 +423,7 @@ pub(crate) fn compile(
             "unittest",
             "SystemExit",
             "__import__",
+            "__reduce",
             "templatelib",
         ]
         .iter()

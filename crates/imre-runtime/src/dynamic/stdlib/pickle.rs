@@ -28,6 +28,69 @@ fn pickling_error(ctx: &Context, message: impl Into<String>) -> Error {
     error
 }
 
+fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
+    Error::new(
+        "NotImplementedError",
+        format!("native pickle has no reducer for {}", ctx.type_name(obj)),
+    )
+}
+
+/// Delegate to the instance hook only when its class overrides object's reducer.
+pub(in crate::dynamic) fn object_reduce(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method object.{name}() needs an argument"),
+        ));
+    };
+    let class = ctx.type_name(receiver);
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{class}.{name}() takes no keyword arguments"),
+        ));
+    }
+    if name == "__reduce__" {
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{class}.{name}() takes no arguments ({} given)", rest.len()),
+            ));
+        }
+        return Err(unsupported_reducer(ctx, receiver));
+    }
+    let [protocol] = rest else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{class}.{name}() takes exactly one argument ({} given)",
+                rest.len()
+            ),
+        ));
+    };
+    ctx.index_integer(*protocol)?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))?;
+    let reducer = match ctx.lookup_attr(receiver, "__reduce__") {
+        Ok(reducer) => reducer,
+        Err(error) if ctx.is_attribute_error(&error) => {
+            return Err(unsupported_reducer(ctx, receiver));
+        }
+        Err(error) => return Err(error),
+    };
+    let class = ctx.exact_type(receiver)?;
+    if ctx.lookup_attr(class, "__reduce__")? == ctx.builtin("object.__reduce__") {
+        return Err(unsupported_reducer(ctx, receiver));
+    }
+    ctx.call(reducer, Vec::new(), Vec::new())
+}
+
 struct Pickler {
     protocol: u8,
     fix_imports: bool,
@@ -270,10 +333,7 @@ impl Pickler {
             Err(e) if ctx.is_attribute_error(&e) => match ctx.lookup_attr(obj, "__reduce__") {
                 Ok(hook) => ctx.call(hook, Vec::new(), Vec::new())?,
                 Err(e) if ctx.is_attribute_error(&e) => {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        format!("native pickle has no reducer for {}", ctx.type_name(obj)),
-                    ));
+                    return Err(unsupported_reducer(ctx, obj));
                 }
                 Err(e) => return Err(e),
             },
