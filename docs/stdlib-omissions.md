@@ -39,6 +39,15 @@ Stock passed the original. Both native runs reported its upstream CPython-specif
 | --- | ---: | --- | --- |
 | `test.test_pathlib.test_pathlib.LazyImportTest.test_lazy_import` | 1 | A fresh interpreter started with `-S` must keep shutil out of `sys.modules` before and after importing pathlib. That assertion fixes CPython’s startup import order. Imre may load shutil earlier while providing the same path and file operations. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_pathlib/test_pathlib.py#L86-L87) | `PathSubclassTest.test_copy_error_handling` |
 
+### `tempfile`
+
+Stock passed both originals. The ordinary and boxed native runs reported the upstream CPython-specific skip at both optimization levels. The related cleanup originals passed in all four native runs. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/0d7959f15485a6cda6da1f73c4a8ef873d506d6a)
+
+| Original CPython test | Occurrence | Decision and reason | Related paired original |
+| --- | ---: | --- | --- |
+| `test.test_tempfile.TestTemporaryDirectory.test_del_on_collection` | 1 | This test deletes the last reference and immediately requires the directory to be gone. Its source explicitly relies on CPython reference counting. Imre supports finalization when collection runs. The paired warning test requests collection and verifies that the directory disappears. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_tempfile.py#L1846-L1857) | `TestTemporaryDirectory.test_warnings_on_cleanup` |
+| `test.test_tempfile.TestTemporaryDirectory.test_del_on_collection_ignore_errors` | 1 | This test deletes the last reference while a file is open and immediately checks the directory contents and platform-specific unlink result. The paired explicit-cleanup test exercises those same open-file and error-handling rules. Only the timing of finalization after deleting the reference is omitted. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_tempfile.py#L1859-L1878) | `TestTemporaryDirectory.test_explicit_cleanup_ignore_errors` |
+
 ## Reviewed cases still in scope
 
 ### `collections`
