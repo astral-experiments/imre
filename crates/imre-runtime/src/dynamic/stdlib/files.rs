@@ -23,7 +23,12 @@ pub(in crate::dynamic) enum BinaryFile {
 
 impl BinaryFile {
     /// Opens the documented read, truncate, append, or exclusive-create mode.
-    pub(in crate::dynamic) fn open(path: &str, name: Id, mode: &str) -> Result<Self> {
+    pub(in crate::dynamic) fn open(
+        path: &str,
+        name: Id,
+        mode: &str,
+        writer_capacity: Option<usize>,
+    ) -> Result<Self> {
         let (flags, mode) = match mode {
             "rb" => {
                 let (file, _) = crate::objects::open_file(path, 0)?;
@@ -32,9 +37,9 @@ impl BinaryFile {
                     Some(name),
                 ));
             }
-            "wb" => (1, "wb"),
-            "ab" => (2, "ab"),
-            "xb" => (3, "xb"),
+            "wb" | "bw" => (1, "wb"),
+            "ab" | "ba" => (2, "ab"),
+            "xb" | "bx" => (3, "xb"),
             _ => {
                 return Err(Error::new(
                     "ValueError",
@@ -43,7 +48,11 @@ impl BinaryFile {
             }
         };
         Ok(Self::Writer {
-            file: RefCell::new(crate::objects::FileState::binary_writer(path, flags)?),
+            file: RefCell::new(crate::objects::FileState::binary_writer(
+                path,
+                flags,
+                writer_capacity,
+            )?),
             path: name,
             mode,
         })
