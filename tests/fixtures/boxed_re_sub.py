@@ -1,5 +1,6 @@
 import gc
 import re
+from array import array
 
 
 def current():
@@ -104,7 +105,7 @@ def current():
         else:
             raise AssertionError("incomplete trailing escape ignored")
     try:
-        re.compile(b"(x)").sub(memoryview(bytearray(rb"\1")), b"y")
+        re.compile(b"(x)").sub(memoryview(array('B', [92, 49])), b"y")
     except ValueError as exc:
         assert str(exc) == "cannot hash writable memoryview object"
     else:
