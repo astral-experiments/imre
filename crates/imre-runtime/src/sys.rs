@@ -10,7 +10,10 @@ pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
 mod encoding;
 mod warnoptions;
-pub(crate) use encoding::{file_encoding, imre_sys_utf8_mode, set_locale, with_process_locale};
+pub(crate) use encoding::{
+    file_encoding, imre_sys_utf8_mode, set_locale, strerror, with_errno_message,
+    with_process_locale,
+};
 pub(crate) use warnoptions::startup_warning_options;
 mod input;
 pub(super) use input::read_input_line;
