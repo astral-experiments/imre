@@ -240,6 +240,7 @@ impl Context {
                     "dict"
                         | "list"
                         | "tuple"
+                        | "bool"
                         | "int"
                         | "float"
                         | "bytes"
@@ -2970,6 +2971,7 @@ impl Context {
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
+                    || (name == "__repr__" && matches!(class.as_str(), "bool" | "int" | "float"))
                     || (class == "int" && matches!(name, "__add__" | "bit_length" | "to_bytes"))
                     || (class == "float" && name == "as_integer_ratio")
                     || (class == "str"
@@ -4657,6 +4659,8 @@ impl Context {
                             | "StopIteration.__init__"
                             | "float.__format__"
                             | "float.__getformat__"
+                            | "bool.__repr__"
+                            | "float.__repr__"
                             | "float.as_integer_ratio"
                     )
                     || !name.contains('.')

@@ -88,6 +88,9 @@ impl BuiltinDescriptor {
             "object.__format__" => ("object", "__format__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__add__" => ("int", "__add__"),
+            "bool.__repr__" => ("bool", "__repr__"),
+            "int.__repr__" => ("int", "__repr__"),
+            "float.__repr__" => ("float", "__repr__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
             "str.isascii" => ("str", "isascii"),
@@ -209,7 +212,7 @@ impl BuiltinDescriptor {
             "dict" => ctx.dict_storage(receiver).is_some(),
             deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
-            "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"
+            "bool" | "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"
             | "frozenset" => ctx.builtin_slot_accepts(receiver, self.owner),
             _ => matches!(ctx.heap.get(receiver), Value::ThreadLocal(_)),
         };
