@@ -1481,6 +1481,12 @@ impl IntrinsicModule {
             (Self::ImportlibMetadata, "Distribution") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.Distribution")
             }
+            (Self::ImportlibMetadata, "DistributionFinder") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.DistributionFinder")
+            }
+            (Self::ImportlibMetadata, "MetadataPathFinder") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.MetadataPathFinder")
+            }
             (Self::ImportlibMetadata, "PackagePath") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.PackagePath")
             }

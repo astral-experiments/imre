@@ -1,5 +1,6 @@
 from _imre_metadata import dedent, filenames as _filenames, zip_names as _zip_names, zip_open as _zip_open, zip_read as _zip_read
 import abc
+from importlib.abc import MetaPathFinder
 from os import fspath
 from os.path import basename, isfile as _is_file, join as _join
 import sys
@@ -69,7 +70,7 @@ class Distribution(DeprecatedNonAbstract):
     def discover(cls, *, context=None, **kwargs):
         if context and kwargs:
             raise ValueError('cannot accept context and kwargs')
-        return _discover(context or _Context(**kwargs))
+        return _discover(context or DistributionFinder.Context(**kwargs))
 
     @property
     def metadata(self):
@@ -186,15 +187,24 @@ class _ZipDistribution(PathDistribution):
         return None
 
 
-class _Context:
-    name = None
+class DistributionFinder(MetaPathFinder):
+    """A meta path finder that can discover installed distributions."""
 
-    def __init__(self, **kwargs):
-        vars(self).update(kwargs)
+    class Context:
+        """Parameters supplied to distribution finders for one search."""
 
-    @property
-    def path(self):
-        return vars(self).get('path', sys.path)
+        name = None
+
+        def __init__(self, **kwargs):
+            vars(self).update(kwargs)
+
+        @property
+        def path(self):
+            return vars(self).get('path', sys.path)
+
+    @abc.abstractmethod
+    def find_distributions(self, context=Context()):
+        """Return the distributions that match the search context."""
 
 
 def _discover(context):
@@ -204,7 +214,7 @@ def _discover(context):
             yield from resolver(context)
 
 
-def _path_distributions(context=_Context()):
+def _path_distributions(context):
     name = context.name
     normalized = _normalize(name) if name else ''
     legacy = name.lower().replace('-', '_') if name else ''
@@ -227,8 +237,10 @@ def _path_distributions(context=_Context()):
                 yield Distribution.at(_join(directory, entry))
 
 
-class MetadataPathFinder:
-    find_distributions = staticmethod(_path_distributions)
+class MetadataPathFinder(DistributionFinder):
+    @classmethod
+    def find_distributions(cls, context=DistributionFinder.Context()):
+        return _path_distributions(context)
 
     @staticmethod
     def invalidate_caches():
