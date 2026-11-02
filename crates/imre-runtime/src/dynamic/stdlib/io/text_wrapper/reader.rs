@@ -12,8 +12,21 @@ pub(super) struct Reader {
     // Keep only positions at which those sizes differ or the newline decoder has state.
     boundaries: Vec<Boundary>,
     mapped: bool,
-    // Iteration reads ahead without saving a new position for tell().
-    pub(super) has_snapshot: bool,
+    chunk_start: usize,
+    snapshot: Snapshot,
+}
+
+enum Snapshot {
+    None,
+    Current { bytes: usize, tail: usize },
+    // Iteration has replaced the decoded chunk but tell() still uses the last saved input.
+    Previous(Option<ChunkOffsets>),
+}
+
+struct ChunkOffsets {
+    bytes: usize,
+    chars: usize,
+    extra: Vec<(usize, usize)>,
 }
 
 struct Boundary {
@@ -39,7 +52,8 @@ impl Reader {
             seen: 0,
             boundaries: Vec::new(),
             mapped: true,
-            has_snapshot: false,
+            chunk_start: 0,
+            snapshot: Snapshot::None,
         }
     }
     pub(super) fn discard(&mut self) {
@@ -49,11 +63,82 @@ impl Reader {
         self.cr = false;
         self.boundaries.clear();
         self.mapped = true;
-        self.has_snapshot = false;
+        self.chunk_start = 0;
+        self.clear_snapshot();
+    }
+    pub(super) fn clear_snapshot(&mut self) {
+        self.snapshot = Snapshot::None;
+    }
+    pub(super) fn after_seek(beginning: bool, absolute: bool) -> Self {
+        let mut reader = Self::at(beginning);
+        if absolute {
+            reader.snapshot = Snapshot::Current { bytes: 0, tail: 0 };
+        }
+        reader
+    }
+    /// Save the old chunk's byte offsets only if iteration reads ahead past it.
+    fn save_offsets(&self, bytes: usize, tail: usize) -> Result<Option<ChunkOffsets>> {
+        if !self.mapped || self.cr {
+            return Ok(None);
+        }
+        let mut extra = Vec::new();
+        let mut raw = 0;
+        let mut chars = 0;
+        let mut bounds = self
+            .boundaries
+            .iter()
+            .filter(|b| b.end > self.chunk_start)
+            .peekable();
+        for (i, c) in self.text[self.chunk_start..].char_indices() {
+            chars += 1;
+            let mut width = c.len_utf8();
+            if let Some(b) = bounds.next_if(|b| b.end == self.chunk_start + i + width) {
+                if b.decoder_state {
+                    return Ok(None);
+                }
+                width = width
+                    .checked_add_signed(isize::from(b.extra_bytes))
+                    .unwrap();
+            }
+            raw += width;
+            if width > 1 {
+                extra
+                    .try_reserve(1)
+                    .map_err(|_| crate::Error::allocation())?;
+                extra.push((chars, width - 1));
+            }
+        }
+        Ok((raw + tail == bytes).then_some(ChunkOffsets {
+            bytes,
+            chars,
+            extra,
+        }))
     }
     pub(super) fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
-        if !self.has_snapshot {
-            return Ok(end);
+        match &self.snapshot {
+            Snapshot::None => return Ok(end),
+            Snapshot::Previous(previous) => {
+                let used = self.text[self.chunk_start..self.cursor.max(self.chunk_start)]
+                    .chars()
+                    .count();
+                if let Some(chunk) = previous
+                    && used <= chunk.chars
+                {
+                    let extra: usize = chunk
+                        .extra
+                        .iter()
+                        .take_while(|(n, _)| *n <= used)
+                        .map(|(_, extra)| extra)
+                        .sum();
+                    let start = ctx.as_integer(end)? - chunk.bytes as i64;
+                    return Ok(ctx.int(start + (used + extra) as i64));
+                }
+                return Err(super::Error::new(
+                    "NotImplementedError",
+                    "native text position needs a decoder snapshot",
+                ));
+            }
+            Snapshot::Current { .. } => {}
         }
         let rest = &self.text[self.cursor..];
         if self
@@ -131,7 +216,11 @@ impl Reader {
         codec: Codec,
         newline: Option<&str>,
         end: bool,
+        telling: bool,
     ) -> Result<()> {
+        if !telling && let Snapshot::Current { bytes, tail } = self.snapshot {
+            self.snapshot = Snapshot::Previous(self.save_offsets(bytes, tail)?);
+        }
         if self.cursor != 0 {
             self.text.drain(..self.cursor);
             self.boundaries.retain_mut(|b| {
@@ -146,6 +235,7 @@ impl Reader {
         if self.text.is_empty() {
             self.mapped = true;
         }
+        self.chunk_start = self.text.len();
         let aligned = raw == decoded.as_bytes()
             || matches!(codec, Codec::Utf8 { signature: true })
                 && raw.strip_prefix(b"\xef\xbb\xbf") == Some(decoded.as_bytes());
@@ -213,6 +303,12 @@ impl Reader {
             }
         } else {
             self.text.push_str(decoded);
+        }
+        if telling {
+            self.snapshot = Snapshot::Current {
+                bytes: raw.len() + self.tail.len(),
+                tail: self.tail.len(),
+            };
         }
         Ok(())
     }

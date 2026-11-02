@@ -141,6 +141,11 @@ def current():
         assert next(text) == "b\n"
         text.flush()
         assert text.tell() == 4  # The earlier readline retained a decoder position.
+        text.seek(0)
+        text._CHUNK_SIZE = 4
+        assert text.readline() == "a\n" and next(text) == "b\n" and next(text) == "c\n"
+        text.flush()
+        assert text.buffer.tell() == 6 and text.tell() == 4
 
     raw = io.BytesIO()
     text = io.TextIOWrapper(raw, encoding="ascii")

@@ -424,8 +424,8 @@ impl Wrapper {
                 codec,
                 w.newline.as_deref(),
                 end,
+                !all && w.telling.get(),
             )?;
-            input.has_snapshot |= !all && w.telling.get();
             if end {
                 let part = input
                     .take(limit, line, w.newline.as_deref(), true)?
@@ -481,7 +481,7 @@ pub(super) fn next(
         return Ok(line);
     }
     let w = Wrapper::from_receiver(ctx, receiver)?;
-    w.input.borrow_mut().has_snapshot = false;
+    w.input.borrow_mut().clear_snapshot();
     w.telling.set(w.seekable);
     Err(Error::new("StopIteration", ""))
 }
@@ -673,7 +673,7 @@ pub(super) fn call(
             let position = Wrapper::invoke_buffer(ctx, receiver, "seek", vec![off, dir])?;
             let beginning = !ctx.truth(position)?;
             let w = Wrapper::from_receiver(ctx, receiver)?;
-            w.input.replace(Reader::at(beginning));
+            w.input.replace(Reader::after_seek(beginning, whence == 0));
             w.write_start.set(beginning);
             Ok(position)
         }
