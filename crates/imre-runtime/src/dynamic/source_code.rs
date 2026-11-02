@@ -1013,7 +1013,7 @@ impl Program {
                         && (args
                             .keywords
                             .iter()
-                            .any(|kw| kw.arg.as_deref() != Some("total"))
+                            .any(|kw| !matches!(kw.arg.as_deref(), Some("total" | "metaclass")))
                             || args.keywords.len() > 1
                             || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))))
                     {
@@ -2920,19 +2920,24 @@ impl Context {
             DefinitionKind::Class(args) => {
                 let mut values = Vec::new();
                 let mut total = None;
+                let mut metaclass = None;
                 if let Some(args) = args {
                     for expression in &args.args {
                         let base = eval(self, expression)?;
                         self.heap.keep(base);
                         values.push(base);
                     }
-                    if let Some(keyword) = args.find_keyword("total") {
+                    if let Some(keyword) = args.keywords.first() {
                         let value = eval(self, &keyword.value)?;
                         self.heap.keep(value);
-                        total = Some(value);
+                        match keyword.arg.as_deref() {
+                            Some("total") => total = Some(value),
+                            Some("metaclass") => metaclass = Some(value),
+                            _ => unreachable!("validated class keyword"),
+                        }
                     }
                 }
-                bases = Some((self.alloc(Value::List(values)), total));
+                bases = Some((self.alloc(Value::List(values)), metaclass, total));
                 serde_json::json!({})
             }
             DefinitionKind::Function(p) => {
@@ -3002,8 +3007,8 @@ impl Context {
             scope
         };
         let mut value = self.source_function(code, defining_scope, defaults);
-        if let Some((bases, total)) = bases {
-            value = self.class(bases, value, total, false)?;
+        if let Some((bases, metaclass, total)) = bases {
+            value = self.class(bases, value, metaclass, total, false)?;
         }
         for decorator in decorators.into_iter().rev() {
             value = self.call(decorator, vec![value], Vec::new())?;

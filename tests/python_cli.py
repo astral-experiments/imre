@@ -1756,6 +1756,7 @@ def report(text):
             "boxed_threading_lock.py",
             "boxed_import_depth.py",
             "boxed_dict_subclasses.py",
+            "boxed_abc_metaclass.py",
             "boxed_mapping_abc.py",
             "boxed_user_containers.py",
             "boxed_dict_pop.py",
