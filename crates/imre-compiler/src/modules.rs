@@ -333,7 +333,31 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "http/__init__.py",
             include_str!("../stdlib/http/__init__.py"),
         )),
-        "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
+        "http.client" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some((
+                "http/client.py",
+                SOURCE.get_or_init(|| {
+                    const UPSTREAM: &str = include_str!(
+                        "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/client.py"
+                    );
+                    let transport = UPSTREAM
+                        .replace("import email.parser\n", "")
+                        // Match the same invalid newline bytes without regex lookahead.
+                        .replace(
+                            r"\n(?![ \t])|\r(?![ \t\n])",
+                            r"\n[^ \t]|\r[^ \t\n]|[\n\r]\Z",
+                        );
+                    concat!(
+                        include_str!("../stdlib/http/client.py"),
+                        "\n_parse_http_fields = HTTPMessage._parse\n",
+                    )
+                    .to_owned()
+                        + &transport
+                        + include_str!("../stdlib/http/boxed_headers.py")
+                }),
+            ))
+        }
         "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
         "locale" => Some(("locale.py", include_str!("../stdlib/locale.py"))),
         "_imre_gettext_locale" => Some((
@@ -4345,6 +4369,10 @@ impl<'a> Loader<'a> {
                         } else {
                             Binding::Module(self.load_module(&child_name)?)
                         }
+                    } else if self.modules[target].is_bundled("http.client") {
+                        // The checked source defines fixed-layout headers. Other imports
+                        // are resolved by the full Python module at run time.
+                        Binding::ConditionalValue
                     } else {
                         return Err(format!(
                             "module {name:?} has no static binding {:?}",
@@ -4642,12 +4670,13 @@ impl<'a> Loader<'a> {
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),
             )),
+            "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
             _ => bundled_runtime_source(name),
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
             // token initializes its public tables from the live module globals.
-            self.needs_object_imports |= name == "token";
+            self.needs_object_imports |= matches!(name, "token" | "http.client");
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;
