@@ -3854,7 +3854,7 @@ impl Context {
                         .ok_or_else(|| unsupported("keyword unpack"))?;
                     kwargs.push((key.to_string(), eval(self, &item.value)?));
                 }
-                let result = self.call(f, args, kwargs)?;
+                let result = self.call_in_scope(scope, f, args, kwargs)?;
                 self.finish_call_operands(mark, result);
                 Ok(result)
             }
