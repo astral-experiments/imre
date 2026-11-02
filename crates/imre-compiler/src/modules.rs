@@ -1548,6 +1548,9 @@ impl IntrinsicModule {
             (Self::ImportlibUtil, "MAGIC_NUMBER") => {
                 Intrinsic::ObjectRuntimeExport("importlib.util.MAGIC_NUMBER")
             }
+            (Self::ImportlibUtil, "resolve_name") => {
+                Intrinsic::ObjectRuntimeExport("importlib.util.resolve_name")
+            }
             (Self::ImportlibUtil, "module_from_spec") => {
                 Intrinsic::ObjectRuntimeExport("importlib.util.module_from_spec")
             }
