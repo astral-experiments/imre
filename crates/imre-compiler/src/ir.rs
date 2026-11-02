@@ -2304,6 +2304,9 @@ pub(crate) enum ProcessOperation {
         bytes: bool,
     },
     EnvironGet,
+    EnvironSet {
+        bytes: bool,
+    },
     GetCwd,
     Fd(FdOperation),
     Credential(&'static str),

@@ -366,6 +366,7 @@ impl Builtin {
                 | ProcessOperation::Semaphore
                 | ProcessOperation::Release
                 | ProcessOperation::EnvironCopy { .. }
+                | ProcessOperation::EnvironSet { .. }
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
