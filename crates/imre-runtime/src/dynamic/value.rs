@@ -2073,7 +2073,7 @@ impl Heap {
     }
 
     pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
-        let Value::Cell(contents) = self.get_mut(cell) else {
+        let (Value::Cell(contents) | Value::ClassCell(contents)) = self.get_mut(cell) else {
             unreachable!("compiled closure cell")
         };
         let previous = std::mem::replace(contents, value);
