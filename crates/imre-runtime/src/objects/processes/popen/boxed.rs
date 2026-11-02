@@ -28,7 +28,6 @@ impl From<Error> for BoxedLaunchError {
 pub(crate) struct BoxedCommunication {
     pub(crate) streams: [Option<Vec<u8>>; 2],
     pub(crate) timed_out: bool,
-    pub(crate) wait_budget: Option<f64>,
 }
 
 impl PreparedHandles {
@@ -224,7 +223,7 @@ impl BoxedPopen {
         pending: communicate::PendingExchange,
         check: impl FnMut() -> std::result::Result<(), E>,
     ) -> std::result::Result<BoxedCommunication, E> {
-        let exchange = pending.finish(
+        let exchange = pending.drain(
             |timeout, select| {
                 self.0
                     .borrow_mut()
@@ -233,22 +232,17 @@ impl BoxedPopen {
             check,
         )?;
         let process = self.0.borrow();
-        let (streams, timed_out, wait_budget) = match exchange {
+        let (streams, timed_out) = match exchange {
             communicate::Exchange::Done([out, err]) => (
                 [
                     process.pipes[1].as_ref().map(|_| out),
                     process.pipes[2].as_ref().map(|_| err),
                 ],
                 false,
-                None,
             ),
-            communicate::Exchange::Timeout(streams, budget) => (streams, true, budget),
+            communicate::Exchange::Timeout(streams, _) => (streams, true),
         };
-        Ok(BoxedCommunication {
-            streams,
-            timed_out,
-            wait_budget,
-        })
+        Ok(BoxedCommunication { streams, timed_out })
     }
 }
 

@@ -27,14 +27,13 @@ pub(super) enum PipeProgress {
 /// and resume from the saved input offset and output, on the same deadline.
 pub(crate) struct PendingExchange {
     progress: PipeProgress,
-    control: Arc<ChildControl>,
     start: Instant,
     timeout: Option<f64>,
     select: bool,
 }
 
 impl PendingExchange {
-    pub(super) fn finish<E: From<Error>>(
+    pub(super) fn drain<E: From<Error>>(
         self,
         mut resume: impl FnMut(Option<f64>, bool) -> Result<PipeProgress>,
         mut check: impl FnMut() -> std::result::Result<(), E>,
@@ -51,15 +50,6 @@ impl PendingExchange {
                 }
             }
         };
-        let budget = remaining();
-        if self
-            .control
-            .wait_with(budget.map(Deadline::Float).as_ref(), check)?
-            .is_none()
-        {
-            // A timeout raised by the final wait has no captured streams.
-            return Ok(Exchange::Timeout([None, None], budget));
-        }
         Ok(Exchange::Done(streams))
     }
 }
@@ -232,16 +222,27 @@ impl Popen {
         text: bool,
         select: bool,
     ) -> Result<Exchange> {
-        self.begin_exchange(
-            input,
-            deadline.map(Deadline::seconds).transpose()?,
-            text,
-            select,
-        )?
-        .finish(
+        let timeout = deadline.map(Deadline::seconds).transpose()?;
+        let pending = self.begin_exchange(input, timeout, text, select)?;
+        let start = pending.start;
+        let exchange = pending.drain(
             |timeout, select| self.exchange_pipes(&[], timeout, false, select),
             crate::objects::stdlib::check_interrupt,
-        )
+        )?;
+        if matches!(exchange, Exchange::Done(_)) {
+            let budget = timeout.map(|t| t - start.elapsed().as_secs_f64());
+            if self
+                .control
+                .wait_with(
+                    budget.map(Deadline::Float).as_ref(),
+                    crate::objects::stdlib::check_interrupt,
+                )?
+                .is_none()
+            {
+                return Ok(Exchange::Timeout([None, None], budget));
+            }
+        }
+        Ok(exchange)
     }
 
     pub(super) fn begin_exchange(
@@ -254,7 +255,6 @@ impl Popen {
         let start = Instant::now();
         Ok(PendingExchange {
             progress: self.exchange_pipes(input, timeout, text, select)?,
-            control: self.control.clone(),
             start,
             timeout,
             select,

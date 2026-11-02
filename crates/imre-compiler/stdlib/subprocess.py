@@ -245,12 +245,14 @@ class Popen:
                 elif not isinstance(input, (bytes, bytearray)):
                     input = memoryview(input)
         timeout = None if endtime is None else endtime - _time()
-        out, err, expired, remaining = _process.communicate(self._handle, input, timeout, use_select)
+        out, err, expired = _process.communicate(self._handle, input, timeout, use_select)
         if expired:
-            error = TimeoutExpired(self.args, orig_timeout if remaining is None else remaining,
-                                   output=out, stderr=err)
-            error.timeout = orig_timeout
-            raise error
+            raise TimeoutExpired(self.args, orig_timeout, output=out, stderr=err)
+        try:
+            self.wait(timeout=None if endtime is None else endtime - _time())
+        except TimeoutExpired as exc:
+            exc.timeout = orig_timeout
+            raise
         if self.text_mode:
             out, err = _decode(out, self.stdout), _decode(err, self.stderr)
         return out, err

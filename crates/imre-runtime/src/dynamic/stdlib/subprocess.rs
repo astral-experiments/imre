@@ -369,14 +369,10 @@ pub(super) fn call(
             let [stdout, stderr] = exchange
                 .streams
                 .map(|stream| stream.map_or(NONE, |data| ctx.alloc(Value::Bytes(data))));
-            let budget = exchange
-                .wait_budget
-                .map_or(NONE, |n| ctx.alloc(Value::Float(n)));
             Ok(ctx.alloc(Value::Tuple(vec![
                 stdout,
                 stderr,
                 builtins::boolean(exchange.timed_out),
-                budget,
             ])))
         }
         ("close_wait", []) => {
