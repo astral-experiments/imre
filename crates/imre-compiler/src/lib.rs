@@ -237,6 +237,47 @@ fn check_file_with(
     object_fallback(path, module_root, options, filesystem, typed, |_| ())
 }
 
+fn named_bytecode(path: &Path) -> bool {
+    path.as_os_str().as_encoded_bytes().ends_with(b".pyc")
+}
+
+/// Inspect only the required prefix of a named bytecode operand, which may be a pipe.
+fn read_bytecode_prefix(mut file: std::fs::File) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut prefix = Vec::with_capacity(37);
+    file.by_ref().take(4).read_to_end(&mut prefix)?;
+    if prefix == imre_ast::PYC_MAGIC_NUMBER_TOKEN.to_le_bytes() {
+        file.by_ref().take(13).read_to_end(&mut prefix)?;
+        if prefix.get(16).is_some_and(|tag| tag & 0x7f == b'c') {
+            file.take(20).read_to_end(&mut prefix)?;
+        }
+    }
+    Ok(prefix)
+}
+
+/// Classify a direct interpreter operand before decoding its contents as Python source.
+fn bytecode_script_error(path: &Path, bytes: &[u8]) -> Option<&'static str> {
+    let magic = imre_ast::PYC_MAGIC_NUMBER_TOKEN.to_le_bytes();
+    if !named_bytecode(path) && !bytes.starts_with(&magic[..2]) {
+        return None;
+    }
+    if bytes.len() < 4 {
+        return Some("EOFError: EOF read where not expected");
+    }
+    if bytes[..4] != magic {
+        return Some("RuntimeError: Bad magic number in .pyc file");
+    }
+    if bytes.len() < 16 {
+        return Some("EOFError: EOF read where not expected");
+    }
+    // The interpreter skips three header words, then expects a marshalled code record.
+    // Its first fields are five 32-bit integers, and the tag may carry the reference bit.
+    if bytes.len() < 16 + 1 + 5 * 4 || bytes[16] & 0x7f != b'c' {
+        return Some("RuntimeError: Bad code object in .pyc file");
+    }
+    Some("NotImplementedError: native marshal cannot load CPython code objects")
+}
+
 /// Compile runtime import paths with native object operations when static lowering cannot resolve them.
 fn object_fallback<T>(
     path: &Path,
