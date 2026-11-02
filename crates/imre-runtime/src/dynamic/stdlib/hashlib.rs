@@ -5,7 +5,7 @@ mod blake2;
 
 /// Borrows the bytes of a boxed hash input, including mutable buffers.
 pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
-    match ctx.heap.get(ctx.scalar_value(id)) {
+    match ctx.buffer_storage(id)? {
         Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
         Value::Array(array) => Ok(array.as_bytes()),
         Value::Str(_) => Err(Error::new(
@@ -52,15 +52,22 @@ pub(super) fn hash(
     if matches!(name, "blake2b" | "blake2s") {
         return blake2::new(ctx, name, args, kwargs);
     }
+    let class = HashState::public_constructor(name);
+    // The six SHA-3 types share CPython's sha3_224 Argument Clinic entry point.
+    let constructor = if class.is_some_and(|c| c.starts_with("_sha3.")) {
+        "sha3_224"
+    } else {
+        name
+    };
     let [data, flag, string] = builtins::bind_method_arguments(
-        name,
+        constructor,
         args,
         kwargs,
         ["data", "usedforsecurity", "string"],
         1,
     )?;
     let input = hash_input(ctx, data, flag, string)?;
-    let state = (HashState::provider(name)?.create)(input);
+    let state = HashState::provider(name)?.create(class, input);
     Ok(ctx.alloc(Value::Hash(SharedHash::new(state))))
 }
 
@@ -97,9 +104,10 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
             format!("new() argument 'name' must be str, not {ty}"),
         )
     })?;
+    let class = HashState::public_constructor(name);
     let provider = HashState::provider(name);
     let data = hash_input(ctx, data, flag, string)?;
-    let state = (provider?.create)(data);
+    let state = provider?.create(class, data);
     Ok(ctx.alloc(Value::Hash(SharedHash::new(state))))
 }
 
@@ -370,7 +378,11 @@ pub(super) fn provider_method(
             ),
         ));
     }
-    if let Some(attr @ ("name" | "block_size" | "digest_size")) = method_name.strip_prefix("get_") {
+    if let Some(
+        attr
+        @ ("name" | "block_size" | "digest_size" | "_rate_bits" | "_capacity_bits" | "_suffix"),
+    ) = method_name.strip_prefix("get_")
+    {
         return ctx.lookup_attr(receiver, attr);
     }
     match method_name {

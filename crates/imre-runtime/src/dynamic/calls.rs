@@ -2585,7 +2585,11 @@ impl Context {
                             self.text(format!("{}.{field}", owner.rsplit('.').next().unwrap()))
                         );
                     }
-                    "__get__" | "__set__" | "__delete__" if name == "__get__" || owner == "int" => {
+                    "__get__" | "__set__" | "__delete__"
+                        if name == "__get__"
+                            || owner == "int"
+                            || HashState::is_provider_class(owner) =>
+                    {
                         let symbol = format!("getset_descriptor.{name}");
                         let get = self.builtin(&symbol);
                         return Ok(self.alloc(Value::Method {
@@ -2600,16 +2604,11 @@ impl Context {
             Value::Native(ref class) if let Some(owner) = HashState::provider_class(class) => {
                 let (module, short) = owner.rsplit_once('.').unwrap();
                 match name {
-                    "name" | "block_size" | "digest_size" => {
+                    attr if let Some(field) = HashState::descriptor_name(owner, attr) => {
                         let key = format!("{owner}.{name}");
                         if let Some(&descriptor) = self.builtins.get(&key) {
                             return Ok(descriptor);
                         }
-                        let field = match name {
-                            "name" => "name",
-                            "block_size" => "block_size",
-                            _ => "digest_size",
-                        };
                         let get = self.builtin(&format!("{owner}.get_{field}"));
                         let descriptor = self.alloc(Value::GetSetDescriptor {
                             get,
@@ -2864,11 +2863,14 @@ impl Context {
                 });
             }
             Value::Native(ref symbol)
-                if matches!(name, "__self__" | "__qualname__" | "__module__")
-                    && let Some(owner) = builtins::constructor_owner(symbol) =>
+                if matches!(
+                    name,
+                    "__self__" | "__name__" | "__qualname__" | "__module__"
+                ) && let Some(owner) = builtins::constructor_owner(symbol) =>
             {
                 return Ok(match name {
                     "__self__" => self.builtin(&owner.to_owned()),
+                    "__name__" => self.text("__new__"),
                     "__qualname__" => {
                         let class = owner.rsplit('.').next().unwrap_or(owner);
                         self.text(format!("{class}.__new__"))
@@ -3094,6 +3096,9 @@ impl Context {
             Value::Hash(ref hash) => {
                 let owner = hash.lock().class_name();
                 match name {
+                    "__new__" if HashState::is_provider_class(owner) => {
+                        return Ok(self.builtin(&format!("{owner}.__new__")));
+                    }
                     "__init__" if HashState::is_provider_class(owner) => {
                         let init = self.builtin("object.__init__");
                         return Ok(self.alloc(Value::Method {
@@ -3108,6 +3113,19 @@ impl Context {
                     "name" => {
                         let name = hash.lock().name();
                         return Ok(self.text(name));
+                    }
+                    "_rate_bits" | "_capacity_bits" if owner.starts_with("_sha3.") => {
+                        let rate = hash.lock().block_size() * 8;
+                        let bits = if name == "_rate_bits" {
+                            rate
+                        } else {
+                            1600 - rate
+                        };
+                        return Ok(self.int(bits as i64));
+                    }
+                    "_suffix" if owner.starts_with("_sha3.") => {
+                        let suffix = if hash.lock().is_xof() { 0x1f } else { 0x06 };
+                        return Ok(self.alloc(Value::Bytes(vec![suffix])));
                     }
                     "digest_size" => {
                         let size = hash.lock().digest_size();
@@ -5208,7 +5226,8 @@ impl Context {
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
                 if builtins::is_builtin(&name)
-                    || builtins::constructor_owner(&name).is_some()
+                    || builtins::constructor_owner(&name)
+                        .is_some_and(|owner| !HashState::is_provider_class(owner))
                     || matches!(
                         name.as_str(),
                         "BaseException.__init__"

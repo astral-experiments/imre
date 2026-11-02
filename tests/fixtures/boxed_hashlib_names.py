@@ -31,12 +31,16 @@ def current():
             raise AssertionError("hash class unexpectedly allowed mutation")
         assert h.name in repr(h) and cls.__module__ + "." + cls.__name__ in repr(h)
         assert f"0x{id(h):x}" in repr(alias) and repr(h) != repr(copied)
-        try:
-            cls()
-        except TypeError:
-            pass
+        if cls is getattr(hashlib, h.name):
+            assert cls.__module__ == "_sha3" and name == h.name
+            assert cls().name == name
         else:
-            raise AssertionError("hash class unexpectedly accepted direct construction")
+            try:
+                cls()
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("hash class unexpectedly accepted direct construction")
         print(hashlib.new(name, string=b"abc").digest() == h.digest())
         print(h.name in hashlib.algorithms_available, h.name in hashlib.algorithms_guaranteed)
     # A provider may use its own native spelling for the constructor.

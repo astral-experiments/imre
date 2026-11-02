@@ -2698,6 +2698,12 @@ impl Context {
             {
                 format!("<built-in function {function}>")
             }
+            Value::Native(name)
+                if let Some(owner) = builtins::constructor_owner(name)
+                    && let Some(target) = self.builtins.get(owner) =>
+            {
+                format!("<built-in method __new__ of type object at {target:#x}>")
+            }
             Value::Native(name) => super::wrapper_descriptor::BuiltinDescriptor::lookup(name)
                 .map(|slot| slot.repr())
                 .unwrap_or_else(|| format!("<class '{name}'>")),
