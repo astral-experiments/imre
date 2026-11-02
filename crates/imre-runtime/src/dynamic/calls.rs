@@ -2807,7 +2807,10 @@ impl Context {
                     }
                     "__get__" | "__set__" | "__delete__"
                         if name == "__get__"
-                            || matches!(owner, "int" | "typing.Union" | stdlib::hashlib::md5::CLASS)
+                            || matches!(
+                                owner,
+                                "int" | "typing.Union" | stdlib::hashlib::md5::CLASS
+                            )
                             || HashState::is_provider_class(owner) =>
                     {
                         let symbol = format!("getset_descriptor.{name}");
@@ -3140,7 +3143,8 @@ impl Context {
                 });
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "int" | "float" | "function") && name == "__new__" =>
+                if matches!(class.as_str(), "int" | "float" | "function" | "type")
+                    && name == "__new__" =>
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
             }
@@ -5257,7 +5261,10 @@ impl Context {
         let object = self.builtin("object");
         if let Value::Native(name) = self.heap.get(class)
             && (nonconstructible_result_type(name)
-                || matches!(name.as_str(), stdlib::os::scandir::ENTRY | "_io._BytesIOBuffer"))
+                || matches!(
+                    name.as_str(),
+                    stdlib::os::scandir::ENTRY | "_io._BytesIOBuffer"
+                ))
         {
             return Err(Error::new(
                 "TypeError",
@@ -5601,6 +5608,7 @@ impl Context {
             {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
+            Value::Native(name) if name == "type.__new__" => self.type_new(&args, &kwargs),
             Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
             Value::Native(ref name)
                 if let Some((owner, "__new__")) = name.rsplit_once('.')
@@ -6507,8 +6515,8 @@ impl Context {
         self.abc_new_from_namespace(*meta, *name, *bases, *namespace, keywords.to_vec())
     }
 
-    /// Pass the actual namespace through the winning ABC metaclass before allocating the class.
-    pub(super) fn call_abc_new(
+    /// Call the winning metaclass constructor with the actual prepared namespace.
+    pub(super) fn call_metaclass_new(
         &mut self,
         meta: Id,
         name: Id,
@@ -6602,15 +6610,12 @@ impl Context {
                 "custom TypedDict metaclass construction is unsupported",
             ));
         }
-        // User metaclasses can customize their instances' calls and attributes while
-        // inheriting type's namespace preparation and MRO. ABCMeta subclasses can also
-        // override __new__ and delegate allocation to ABCMeta.__new__.
+        // Metaclasses can define __new__ while inheriting namespace preparation and MRO.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && ((!self.is_abc_metaclass(winner) && self.class_attr(winner, "__new__").is_some())
-                || ["__prepare__", "__init__"]
-                    .iter()
-                    .any(|name| self.class_attr(winner, name).is_some())
+            && (["__prepare__", "__init__"]
+                .iter()
+                .any(|name| self.class_attr(winner, name).is_some())
                 || self
                     .class_attr(winner, "mro")
                     .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
@@ -6750,8 +6755,9 @@ impl Context {
             self.bind(scope, "__static_attributes__", attrs);
         }
         if let Some(meta) = class_meta
-            && self.is_abc_metaclass(meta)
+            && Some(meta) != typed_dict_meta
             && self.builtins.get("abc.ABCMeta") != Some(&meta)
+            && self.class_attr(meta, "__new__").is_some()
         {
             let namespace = self.active_class_namespace(scope);
             // A deferred class annotator owns these fields. Its scratch entries are placeholders.
@@ -6781,7 +6787,7 @@ impl Context {
             }
             let class_name = self.text(&name);
             let bases = self.alloc(Value::Tuple(bases));
-            let class = self.call_abc_new(meta, class_name, bases, namespace, keywords)?;
+            let class = self.call_metaclass_new(meta, class_name, bases, namespace, keywords)?;
             if bindings.needs_class_cell && matches!(self.heap.get(class), Value::Class { .. }) {
                 match self.heap.get(cell) {
                     Value::Cell(Some(contents)) if *contents == class => {}
