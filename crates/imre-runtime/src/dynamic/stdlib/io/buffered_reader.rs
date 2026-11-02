@@ -245,7 +245,6 @@ impl Reader {
     }
 
     fn read_raw(&self, ctx: &mut Context, amount: usize) -> Result<Option<Vec<u8>>> {
-        self.sync_update(ctx)?;
         self.reset();
         let mark = ctx.heap.temporary_mark();
         let buffer = ctx.alloc(Value::ByteArray(super::zeroed_bytes(amount as i64)?));
@@ -260,7 +259,6 @@ impl Reader {
     }
 
     fn fill(&self, ctx: &mut Context, continuing: bool) -> Result<bool> {
-        self.sync_update(ctx)?;
         let start = if continuing && self.end.get() < self.size {
             self.end.get()
         } else {
@@ -304,6 +302,7 @@ impl Reader {
         self.with_lock(|| {
             let mut written = 0;
             let mut continuing = false;
+            let mut rewind = true;
             loop {
                 let n = (size - written).min(self.unread());
                 if n != 0 {
@@ -330,8 +329,11 @@ impl Reader {
                 if remaining == 0 {
                     break;
                 }
-                if remaining > self.size {
+                if rewind {
                     self.sync_update(ctx)?;
+                    rewind = false;
+                }
+                if remaining > self.size {
                     self.reset();
                     match self.raw_into(ctx, target, range.start + written, remaining)? {
                         Some(n) => {
@@ -364,6 +366,7 @@ impl Reader {
         let mut out = Vec::new();
         match name {
             "peek" => {
+                self.sync_update(ctx)?;
                 if self.unread() == 0 {
                     self.fill(ctx, false)?;
                 }
@@ -373,16 +376,22 @@ impl Reader {
                 )?;
             }
             "read1" if self.unread() == 0 && n != 0 => {
+                self.sync_update(ctx)?;
                 out = self.read_raw(ctx, n)?.unwrap_or_default();
             }
             _ => {
                 let line = name == "readline";
                 let mut continuing = false;
+                let mut rewind = true;
                 loop {
                     let remaining = n - out.len();
                     self.consume(ctx, &mut out, remaining, line)?;
                     if out.len() == n || name == "read1" || line && out.last() == Some(&b'\n') {
                         break;
+                    }
+                    if rewind {
+                        self.sync_update(ctx)?;
+                        rewind = false;
                     }
                     let remaining = n - out.len();
                     if !line && remaining >= self.size {

@@ -16,8 +16,8 @@ impl Reader {
             .map_or(self.end.get(), |u| u.raw_offset.get())
     }
 
-    fn move_raw(&self, ctx: &mut Context, update: &Update, to: usize) -> Result<()> {
-        if update.raw_offset.get() == to {
+    fn move_raw(&self, ctx: &mut Context, update: &Update, to: usize, force: bool) -> Result<()> {
+        if !force && update.raw_offset.get() == to {
             return Ok(());
         }
         let offset = ctx.int(to as i64 - update.raw_offset.get() as i64);
@@ -42,7 +42,7 @@ impl Reader {
         let Some((mut start, end)) = update.dirty.get() else {
             return Ok(());
         };
-        self.move_raw(ctx, update, start)?;
+        self.move_raw(ctx, update, start, false)?;
         while start < end {
             let data = bytes_io::copy_bytes(&ctx.bytes_like(self.buffer)?[start..end])?;
             let Some(n) = bytes_writer::raw_write(ctx, self.raw()?, &data)? else {
@@ -60,7 +60,10 @@ impl Reader {
     pub(super) fn sync_update(&self, ctx: &mut Context) -> Result<()> {
         if let Some(update) = &self.update {
             self.write_back(ctx)?;
-            self.move_raw(ctx, update, self.pos.get())?;
+            // BufferedRandom rewinds even at offset zero. Raw callbacks observe this seek.
+            let result = self.move_raw(ctx, update, self.pos.get(), true);
+            self.reset();
+            result?;
         }
         Ok(())
     }
@@ -94,7 +97,7 @@ impl Reader {
 
     fn write_input(&self, ctx: &mut Context, input: Id, update: &Update) -> Result<Id> {
         let size = ctx.native_buffer_bytes(input)?.len();
-        if size <= self.size - self.pos.get() {
+        if size < self.size && size <= self.size - self.pos.get() {
             self.buffer_input(ctx, input, 0, size, update)?;
             return Ok(ctx.int(size as i64));
         }
@@ -121,20 +124,26 @@ impl Reader {
                 .raw_offset
                 .set(update.raw_offset.get().saturating_sub(start));
             update.dirty.set(Some((0, end - start)));
+            let logical = self.pos.get();
+            self.pos.set(end - start);
             let accepted = size.min(self.size - self.pos.get());
             self.buffer_input(ctx, input, 0, accepted, update)?;
+            self.pos.set(logical + accepted);
             return if accepted == size {
                 Ok(ctx.int(size as i64))
             } else {
                 Err(descriptor_buffer::blocking_error(ctx, 0, accepted))
             };
         }
-        self.move_raw(ctx, update, self.pos.get())?;
+        self.move_raw(ctx, update, self.pos.get(), false)?;
         self.reset();
         let mut written = 0;
-        while size - written > self.size {
+        while size - written >= self.size {
             let data = bytes_io::copy_bytes(&ctx.native_buffer_bytes(input)?[written..])?;
             let Some(n) = bytes_writer::raw_write(ctx, self.raw()?, &data)? else {
+                if size - written == self.size {
+                    break;
+                }
                 self.buffer_input(ctx, input, written, self.size, update)?;
                 return Err(descriptor_buffer::blocking_error(
                     ctx,
@@ -163,7 +172,6 @@ impl Reader {
                 return self.write_input(ctx, args[0], self.update.as_ref().unwrap());
             }
             self.sync_update(ctx)?;
-            self.reset();
             if op == "truncate" {
                 let raw = self.raw()?;
                 let result = invoke(ctx, raw, op, vec![args.first().copied().unwrap_or(NONE)])?;

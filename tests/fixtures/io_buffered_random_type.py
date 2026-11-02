@@ -147,3 +147,14 @@ with ShortRaw(b"abcdefgh") as raw:
     assert raw.tell() == 4 and raw.getvalue() == b"a123efgh"
     assert f.detach() is raw and not raw.closed
 print("BufferedRandom raw callbacks checked")
+with io.BytesIO(b"abcdef") as raw:
+    f = io.BufferedRandom(raw, 3)
+    assert f.read(1) == b"a"
+    raw.seek(1)
+    raw.write(b"X")
+    raw.seek(3)
+    assert f.peek() == b"Xcd"
+    f.seek(0)
+    assert f.write(b"ABC") == 3
+    assert raw.getvalue() == b"ABCdef"
+    f.close()
