@@ -61,6 +61,15 @@ def check_inheritance():
 def check_required_keys():
     from typing import NotRequired, Required, get_args, get_origin
 
+    nested = "(" * 200 + "T" + ")" * 200
+    assert Required[nested].__args__[0].__forward_arg__ == nested
+    try:
+        Required["(" + nested + ")"]
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("accepted 201 nested delimiters in a forward reference")
+
     for form in (Required, NotRequired):
         alias = form[int]
         assert alias is form[int] and get_origin(alias) is form
