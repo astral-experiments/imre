@@ -7,7 +7,7 @@ use std::rc::Rc;
 use super::super::codecs;
 use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
 use crate::dynamic::builtins::boolean;
-use crate::objects::{Codec, DecodeIssue, FixedUnicode, Utf16Order};
+use crate::objects::{Codec, DecodeIssue, FixedUnicode};
 
 mod reader;
 mod reconfigure;
@@ -65,23 +65,20 @@ pub(super) fn property(name: &str) -> bool {
 #[derive(Clone, Copy)]
 pub(in crate::dynamic::stdlib) enum StreamCodec {
     Registered(Codec),
-    Utf16(i32),
-    Utf32 { little: bool },
+    Wide { format: FixedUnicode, bom: bool },
 }
 
 impl StreamCodec {
     fn lookup(encoding: &str) -> Result<Self> {
         let key = crate::objects::normalize_codec(encoding)?;
-        if matches!(key.as_str(), "utf16" | "u16" | "utf_16") {
-            return Ok(Self::Utf16(0));
-        }
-        Ok(match FixedUnicode::by_key(&key) {
-            Some(FixedUnicode::Utf16(Utf16Order::Little)) => Self::Utf16(-1),
-            Some(FixedUnicode::Utf16(Utf16Order::Big)) => Self::Utf16(1),
-            Some(FixedUnicode::Utf32Le) => Self::Utf32 { little: true },
-            Some(FixedUnicode::Utf32Be) => Self::Utf32 { little: false },
+        Ok(match FixedUnicode::encoding(&key) {
+            Some((format, bom)) => Self::Wide { format, bom },
             None => Self::Registered(Codec::by_key(&key, encoding)?),
         })
+    }
+
+    fn detects_bom(self) -> bool {
+        matches!(self, Self::Wide { bom: true, .. })
     }
 }
 
@@ -358,12 +355,11 @@ impl Wrapper {
     fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
         let input = self.input.borrow();
         let width = match self.decoder.get().codec {
-            StreamCodec::Utf16(_) => 2,
-            StreamCodec::Utf32 { .. } => 4,
+            StreamCodec::Wide { format, .. } => format.width(),
             StreamCodec::Registered(_) => 1,
         };
         let offset = input.position(ctx, end, width)?;
-        if !matches!(self.decoder.get().codec, StreamCodec::Utf16(0)) || !input.wide_snapshot {
+        if !self.decoder.get().codec.detects_bom() || !input.wide_snapshot {
             return Ok(offset);
         }
         let flag = match input.order {
@@ -435,28 +431,11 @@ impl Wrapper {
             value
         };
         let encoder = self.encoder.get();
-        let signature = matches!(encoder.codec, StreamCodec::Utf16(0))
-            && self.seekable
-            && self.write_start.get();
         let encoded = match encoder.codec {
-            StreamCodec::Utf16(order) => {
+            StreamCodec::Wide { format, bom } => {
                 let errors = ctx.str_value(encoder.errors)?.to_owned();
-                codecs::encode_fixed(
-                    ctx,
-                    translated,
-                    FixedUnicode::Utf16(Utf16Order::from_sign(order)),
-                    &errors,
-                    signature,
-                )
-            }
-            StreamCodec::Utf32 { little } => {
-                let errors = ctx.str_value(encoder.errors)?.to_owned();
-                let format = if little {
-                    FixedUnicode::Utf32Le
-                } else {
-                    FixedUnicode::Utf32Be
-                };
-                codecs::encode_fixed(ctx, translated, format, &errors, false)
+                let signature = bom && self.seekable && self.write_start.get();
+                codecs::encode_fixed(ctx, translated, format, &errors, signature)
             }
             StreamCodec::Registered(codec) => {
                 let encoding = if matches!(codec, Codec::Utf8 { signature: true })
@@ -558,32 +537,18 @@ impl Wrapper {
                     0,
                     codec,
                 ),
-                StreamCodec::Utf32 { little } => {
+                StreamCodec::Wide { format, bom } => {
                     let errors = ctx.str_value(errors)?.to_owned();
-                    let (decoded, consumed) =
-                        codecs::utf32_chunk(ctx, raw, &errors, little, 0, end)?;
+                    let requested = if bom { 0 } else { format.byte_order() };
+                    let (decoded, consumed, order) =
+                        codecs::decode_wide_chunk(ctx, raw, &errors, format, requested, end)?;
                     let data = ctx.bytes_like(raw)?;
-                    let consumed = consumed.min(data.len());
-                    let mut input = w.input.borrow_mut();
-                    input.save_tail(&data[consumed..])?;
-                    (decoded, consumed, 0, codec)
-                }
-                StreamCodec::Utf16(requested) => {
-                    let order = ctx.int(i64::from(requested));
-                    let result =
-                        codecs::utf16_extended(ctx, &[raw, errors, order, boolean(end)], &[])?;
-                    let Value::Tuple(parts) = ctx.heap.get(result) else {
-                        unreachable!()
-                    };
-                    let decoded = parts[0];
-                    let consumed = ctx.as_integer(parts[1])? as usize;
-                    let order = ctx.as_integer(parts[2])? as i32;
-                    let data = ctx.bytes_like(raw)?;
-                    if requested == 0 && order == 0 && consumed >= 2 {
+                    let width = format.width();
+                    if bom && order == 0 && consumed >= width {
                         let err = DecodeIssue {
-                            encoding: "utf-16",
+                            encoding: format.codec_name(true),
                             start: 0,
-                            end: 2,
+                            end: width,
                             reason: "Stream does not start with BOM",
                         }
                         .error(data);
@@ -592,7 +557,7 @@ impl Wrapper {
                     let consumed = consumed.min(data.len());
                     let mut reader = w.input.borrow_mut();
                     reader.save_tail(&data[consumed..])?;
-                    let signature = if requested == 0 && order != 0 { 2 } else { 0 };
+                    let signature = if bom && order != 0 { width } else { 0 };
                     reader.order = order;
                     if order != 0 {
                         reader.beginning = false;
@@ -600,7 +565,11 @@ impl Wrapper {
                     if !all && w.telling.get() {
                         reader.wide_snapshot = true;
                     }
-                    (decoded, consumed, signature, StreamCodec::Utf16(order))
+                    let resolved = StreamCodec::Wide {
+                        format: format.with_order(order),
+                        bom: false,
+                    };
+                    (decoded, consumed, signature, resolved)
                 }
             };
             let mut input = w.input.borrow_mut();
@@ -854,7 +823,7 @@ pub(super) fn call(
                     .borrow_mut()
                     .discard();
             }
-            let wide_cookie = if matches!(w.decoder.get().codec, StreamCodec::Utf16(0)) {
+            let wide_cookie = if w.decoder.get().codec.detects_bom() {
                 offset.big().to_u128().filter(|n| n >> 64 > 0)
             } else {
                 None

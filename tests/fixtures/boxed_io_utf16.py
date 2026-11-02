@@ -80,5 +80,55 @@ def current():
     assert output.getvalue() == expected[2:4]
 
 
+def native_utf32():
+    for enc in ('utf-32-le', 'utf-32-be'):
+        raw = '\ufeffA😀\r\n\ufeffZ'.encode(enc)
+        stream = io.TextIOWrapper(io.BytesIO(raw), encoding='UTF32')
+        stream._CHUNK_SIZE = 1
+        assert stream.read(1) == 'A'
+        cookie = stream.tell()
+        assert stream.readline() == '😀\n'
+        assert stream.seek(cookie) == cookie and stream.read() == '😀\n\ufeffZ'
+        assert stream.seek(0) == 0 and stream.read() == 'A😀\n\ufeffZ'
+
+    assert io.TextIOWrapper(io.BytesIO(), encoding='u32').read() == ''
+    for data, expected in ((b'\0' * 4, 'Stream does not start with BOM'),
+                           (b'\0', 'truncated data')):
+        stream = io.TextIOWrapper(io.BytesIO(data), encoding='utf-32')
+        stream._CHUNK_SIZE = 1
+        try:
+            stream.read(1)
+        except UnicodeDecodeError as exc:
+            assert (exc.start, exc.end, exc.reason) == (0, len(data), expected)
+        else:
+            raise AssertionError('bad UTF-32 input accepted')
+
+    class Pipe(io.BytesIO):
+        def seekable(self):
+            return False
+
+    for raw, bom in ((io.BytesIO(), True), (Pipe(), False)):
+        stream = io.TextIOWrapper(raw, encoding='utf-32')
+        assert stream.write('') == 0
+        stream.flush()
+        assert raw.getvalue() == (''.encode('utf-32') if bom else b'')
+        stream.write('A')
+        stream.reconfigure(encoding='utf-32')
+        stream.write('B')
+        stream.flush()
+        expected = 'AB'.encode('utf-32')
+        assert raw.getvalue() == (expected if bom else expected[4:])
+        if bom:
+            stream = io.TextIOWrapper(stream.detach(), encoding='utf-32')
+            stream.write('C')
+            stream.flush()
+            assert raw.getvalue() == 'ABC'.encode('utf-32')
+            stream.seek(0)
+            stream.write('Z')
+            stream.flush()
+            assert raw.getvalue() == 'ZBC'.encode('utf-32')
+
+
 if __name__ == '__main__':
     current()
+    native_utf32()
