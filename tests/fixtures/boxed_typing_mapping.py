@@ -1,12 +1,14 @@
 from collections import defaultdict
-from collections.abc import Mapping as MappingABC, MutableMapping as MutableMappingABC
-from typing import DefaultDict, Dict, Generic, Mapping, MutableMapping, TypeVar, get_args, get_origin
+from collections.abc import Mapping as MappingABC, MutableMapping as MutableMappingABC, Sequence as SequenceABC
+from typing import DefaultDict, Dict, Generic, Mapping, MutableMapping, Sequence, TypeVar, get_args, get_origin
 
 
 def current():
     assert get_origin(Dict) is dict
     assert get_origin(DefaultDict) is defaultdict
     assert DefaultDict.__doc__ == "Deprecated alias to collections.defaultdict."
+    assert get_origin(Sequence) is get_origin(Sequence[int]) is SequenceABC
+    assert issubclass(tuple, Sequence) and not issubclass(dict, Sequence)
     assert get_origin(Mapping) is MappingABC
     assert issubclass(MutableMapping, Mapping) and not issubclass(Mapping, MutableMapping)
     assert get_origin(MutableMapping) is MutableMappingABC

@@ -722,7 +722,6 @@ pub(crate) enum Intrinsic {
     Union,
     Literal,
     Callable,
-    Sequence,
     Mapping,
     Iterable,
     Iterator,
@@ -893,6 +892,7 @@ impl Intrinsic {
     pub(crate) const TEXT_IO_BASE: Self = Self::ObjectRuntimeExport("io.TextIOBase");
     pub(crate) const TYPING_PROTOCOL: Self = Self::ObjectRuntimeExport("typing.Protocol");
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
+    pub(crate) const TYPING_SEQUENCE: Self = Self::ObjectRuntimeExport("typing.Sequence");
 
     /// Subclasses of these immutable types keep their calendar value in the object runtime.
     pub(crate) fn is_subclassable_calendar(self) -> bool {
@@ -1789,7 +1789,7 @@ impl IntrinsicModule {
             (Self::Typing, "assert_type") => Intrinsic::ObjectRuntimeExport("typing.assert_type"),
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
-            (Self::Typing, "Sequence") => Intrinsic::Sequence,
+            (Self::Typing, "Sequence") => Intrinsic::TYPING_SEQUENCE,
             (Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping,
             (Self::Typing | Self::CollectionsAbc, "Iterable") => Intrinsic::Iterable,
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
@@ -4388,6 +4388,7 @@ impl<'a> Loader<'a> {
                         };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
+                        // A Sequence annotation keeps its typed list contract; value uses request boxing.
                         self.needs_object_imports |= !matches!(
                             module,
                             IntrinsicModule::Marshal
@@ -4399,8 +4400,8 @@ impl<'a> Loader<'a> {
                         ) && matches!(
                             binding,
                             Binding::Intrinsic(
-                                Intrinsic::ObjectRuntimeExport(_) | Intrinsic::Awaitable
-                            )
+                                export @ (Intrinsic::ObjectRuntimeExport(_) | Intrinsic::Awaitable)
+                            ) if export != Intrinsic::TYPING_SEQUENCE
                         );
                         if module == IntrinsicModule::Collections
                             && binding == Binding::Intrinsic(Intrinsic::CountElements)
