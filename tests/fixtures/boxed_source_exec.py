@@ -263,6 +263,43 @@ def current():
     print(supplied["exec_probe"], separate["exec_probe"], supplied["__builtins__"]["any"] is any)
     exec(remove_global.__code__, supplied, separate)
     print("exec_probe" in supplied, separate["exec_probe"])
+    globals_ = {"__name__": "source_globals", "value": 3}
+    locals_ = {"value": 99}
+    exec("""observed = value
+def update():
+    global value
+    value += 1
+class Reader:
+    value = 7
+    def read(self):
+        global value
+        return value
+    def no_class_cell(self):
+        global __class__
+        return super()
+class Clear:
+    global value, callback, Exported
+    before = value
+    del value
+    def callback():
+        return 4
+    class Exported:
+        pass
+""", globals_, locals_)
+    assert locals_["observed"] == locals_["Clear"].before == 3
+    assert "value" not in globals_ and locals_["value"] == 99
+    assert globals_["callback"].__qualname__ == "callback" and globals_["callback"]() == 4
+    assert globals_["Exported"].__qualname__ == "Exported"
+    globals_["value"] = 11
+    locals_["update"]()
+    reader = locals_["Reader"]()
+    assert reader.value == 7 and reader.read() == 12
+    try:
+        reader.no_class_cell()
+    except RuntimeError as error:
+        assert str(error) == "super(): __class__ cell not found"
+    else:
+        raise AssertionError("a global __class__ does not create a closure cell")
     other = {}
     exec(module, {"default": 2}, other)
     print(other["root"] is not root, other["root"].__code__ is root.__code__)

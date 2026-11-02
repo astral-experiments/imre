@@ -14,6 +14,7 @@ pub(super) struct Program {
     pub filename: Rc<str>,
     pub name: String,
     qualname: String,
+    module_definition: bool,
     class_attributes: Option<BTreeSet<String>>,
     class_cell: bool,
     doc: Option<ruff_text_size::TextRange>,
@@ -22,6 +23,7 @@ pub(super) struct Program {
     first_line: u32,
     generator: bool,
     locals: HashSet<String>,
+    globals: HashSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
     private_names: Option<Rc<imre_ast::Names>>,
     instructions: Vec<(u32, Instruction)>,
@@ -31,6 +33,7 @@ enum Instruction {
     Eval(ast::Expr),
     AugAssign(ast::StmtAugAssign),
     DeleteItem(ast::ExprSubscript),
+    DeleteGlobal(String),
     Assign(Vec<ast::Expr>, ast::Expr),
     Import {
         module: String,
@@ -390,6 +393,9 @@ impl Program {
                         strings.visit_expr(target);
                     }
                 }
+                Instruction::DeleteGlobal(name) => {
+                    strings.heap.code_name(name);
+                }
                 Instruction::DeleteItem(item) => {
                     strings.visit_expr(&item.value);
                     strings.visit_expr(&item.slice);
@@ -476,7 +482,9 @@ impl Program {
                 | Instruction::Delegate => {}
             }
         }
-        (self.string_roots, self.class_cell) = strings.finish()?;
+        let (roots, class_cell) = strings.finish()?;
+        self.string_roots = roots;
+        self.class_cell = class_cell && !self.globals.contains("__class__");
         Ok(self.string_roots)
     }
 
@@ -485,6 +493,7 @@ impl Program {
             filename,
             name: name.to_owned(),
             qualname: name.to_owned(),
+            module_definition: true,
             class_attributes: None,
             class_cell: false,
             doc: None,
@@ -493,6 +502,7 @@ impl Program {
             first_line: 1,
             generator: false,
             locals: HashSet::new(),
+            globals: HashSet::new(),
             method_imports: Rc::default(),
             private_names: None,
             instructions: Vec::new(),
@@ -534,7 +544,8 @@ impl Program {
             .as_ref()
             .map_or(name.as_str(), |p| p.definition(name));
         let mut child = Self::new(self.filename.clone(), original);
-        if self.name != "<module>" {
+        child.module_definition = self.name == "<module>";
+        if !child.module_definition && !self.globals.contains(name.as_str()) {
             let separator = if self.class_attributes.is_some() {
                 "."
             } else {
@@ -548,6 +559,57 @@ impl Program {
             lines.partition_point(|n| *n <= d.start().to_usize()) as u32
         });
         child
+    }
+
+    /// Consume declarations at the start of this lexical block independently of its branches.
+    fn lower_scope(
+        &mut self,
+        mut body: ast::Suite,
+        lines: &[usize],
+        parameters: Option<&ast::Parameters>,
+    ) -> Result<()> {
+        let first = usize::from(matches!(body.first(), Some(ast::Stmt::Expr(s))
+            if matches!(&*s.value, ast::Expr::StringLiteral(_))));
+        let mut end = first;
+        while let Some(ast::Stmt::Global(declaration)) = body.get(end) {
+            for id in &declaration.names {
+                let name = id.as_str();
+                if parameters.is_some_and(|p| p.iter().any(|item| item.name().as_str() == name)) {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        format!("name '{name}' is parameter and global"),
+                    ));
+                }
+                if name == "__debug__"
+                    || (self.class_attributes.is_some()
+                        && name.starts_with("__")
+                        && name.ends_with("__"))
+                {
+                    return Err(unsupported("global declaration of a reserved name"));
+                }
+                self.globals.insert(name.to_string());
+            }
+            end += 1;
+        }
+        body.drain(first..end);
+        self.lower(body, lines, parameters.is_some(), None)?;
+        self.locals.retain(|name| !self.globals.contains(name));
+        Ok(())
+    }
+
+    /// A global declaration in any nested block also selects global opcodes in module code.
+    fn promote_module_globals(&mut self) {
+        let mut globals = HashSet::new();
+        let mut blocks = vec![&*self];
+        while let Some(block) = blocks.pop() {
+            globals.extend(block.globals.iter().cloned());
+            for (_, instruction) in &block.instructions {
+                if let Instruction::Define(definition) = instruction {
+                    blocks.push(&definition.body);
+                }
+            }
+        }
+        self.globals = globals;
     }
 
     fn lower(
@@ -597,6 +659,12 @@ impl Program {
                     let ast::Expr::Name(name) = &*s.target else {
                         return Err(unsupported("annotated assignment target"));
                     };
+                    if self.globals.contains(name.id.as_str()) {
+                        return Err(Error::new(
+                            "SyntaxError",
+                            format!("annotated name '{}' can't be global", name.id),
+                        ));
+                    }
                     self.locals.insert(name.id.to_string());
                     // Local annotations establish the binding without evaluating the annotation.
                     let Some(value) = s.value else { continue };
@@ -605,9 +673,22 @@ impl Program {
                         None => Instruction::BindSent(vec![*s.target]),
                     }
                 }
+                Stmt::Nonlocal(s) => {
+                    if let Some(name) = s.names.iter().find(|n| self.globals.contains(n.as_str())) {
+                        return Err(Error::new(
+                            "SyntaxError",
+                            format!("name '{name}' is nonlocal and global"),
+                        ));
+                    }
+                    return Err(unsupported("StmtNonlocal"));
+                }
                 Stmt::Delete(s) => {
                     for target in s.targets {
                         match target {
+                            ast::Expr::Name(n) if self.globals.contains(n.id.as_str()) => {
+                                self.instructions
+                                    .push((line, Instruction::DeleteGlobal(n.id.to_string())));
+                            }
                             ast::Expr::Subscript(item)
                                 if !matches!(*item.slice, ast::Expr::Slice(_)) =>
                             {
@@ -675,7 +756,7 @@ impl Program {
                         return Err(unsupported("annotated method definition"));
                     }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
-                    child.lower(s.body, lines, true, None)?;
+                    child.lower_scope(s.body, lines, Some(&s.parameters))?;
                     self.locals.insert(s.name.to_string());
                     Instruction::Define(Definition {
                         binding: s.name.to_string(),
@@ -706,7 +787,7 @@ impl Program {
                         child.doc = Some(doc.range());
                     }
                     child.instructions.push((line, Instruction::ClassStart));
-                    child.lower(s.body, lines, false, None)?;
+                    child.lower_scope(s.body, lines, None)?;
                     child.instructions.push((line, Instruction::ClassEnd));
                     self.locals.insert(s.name.to_string());
                     Instruction::Define(Definition {
@@ -1038,7 +1119,8 @@ impl Context {
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut code = Program::new(Rc::from(filename), "<module>");
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
-        code.lower(parsed.into_syntax().body, &lines, false, None)?;
+        code.lower_scope(parsed.into_syntax().body, &lines, None)?;
+        code.promote_module_globals();
         code.prepare_strings(&mut self.heap, &mut HashMap::new())?;
         Ok(self.box_source_code(Rc::new(code), None))
     }
@@ -1119,7 +1201,7 @@ impl Context {
             doc,
             filename,
             first_line: program.first_line,
-            module_definition: program.name == program.qualname,
+            module_definition: program.module_definition,
             body: Body::Source(program),
             coroutine: false,
             flags: None,
@@ -1530,7 +1612,7 @@ impl Context {
         program.private_names = private_names;
         program.first_line = code.first_line;
         program.generator = true;
-        program.lower(std::mem::take(&mut def.body), &lines, true, None)?;
+        program.lower_scope(std::mem::take(&mut def.body), &lines, Some(&def.parameters))?;
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }
@@ -1804,6 +1886,12 @@ impl Context {
         let Body::Source(code) = self.code_object(owner).body.clone() else {
             unreachable!("source frame")
         };
+        if cursor.ip == 0 && !code.globals.is_empty() {
+            let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                unreachable!()
+            };
+            frame.globals.clone_from(&code.globals);
+        }
         if cursor.advanced.is_none() {
             self.heap.reserve_temporaries(2)?;
             self.heap.keep(owner);
@@ -1964,9 +2052,9 @@ impl Context {
 
     /// Publish a binding and report whether its previous value could own a buffered writer.
     pub(super) fn store_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<bool> {
+        let scope = self.binding_scope(scope, name);
         let value = self.enum_assignment(scope, name, value)?;
         let replaced = self.replacing_finalizer(scope, name, value);
-        let scope = self.binding_scope(scope, name);
         if let Some(locals) = self.scope_data(scope).exec_locals {
             if matches!(self.heap.get(locals), Value::List(_)) {
                 return Err(Error::new(
@@ -2140,6 +2228,10 @@ impl Context {
                 for target in targets {
                     self.bind_target(code, scope, target, value)?;
                 }
+            }
+            Instruction::DeleteGlobal(name) => {
+                let key = self.heap.code_name(name);
+                self.op("delname", scope, key, NONE)?;
             }
             Instruction::DeleteItem(item) => {
                 let object = eval(self, &item.value)?;
