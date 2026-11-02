@@ -248,3 +248,31 @@ for invalid in (lambda: type(applied)(Child), lambda: type(applied)(origin=Child
         invalid()
     except TypeError as error:
         print(str(error))
+
+
+class Pair(t.Generic[K, V]):
+    pass
+
+
+repeat = Pair[K, K]
+nested = repeat[t.Tuple[V, K]]
+assert nested.__parameters__ == (V, K)
+assert nested[int, str] == Pair[t.Tuple[int, str], t.Tuple[int, str]]
+assert nested[int, str] is nested[int, str]
+assert Pair[V, K][K, V].__args__ == (K, V)
+assert Pair[Pair, list[K]][bytes].__args__ == (Pair, list[bytes])
+assert Pair[K | int, V][str, None].__args__ == (str | int, type(None))
+
+for alias, args, message in (
+    (t.Generic[K], int, f"Cannot subscript already-subscripted {t.Generic[K]}"),
+    (t.Protocol[K], int, f"Cannot subscript already-subscripted {t.Protocol[K]}"),
+    (Pair[K, V], (), f"Too few arguments for {Pair[K, V]}; actual 0, expected at least 1"),
+    (repeat, (int, t.Generic), f"Too many arguments for {repeat}; actual 2, expected 1"),
+    (Pair[int, str], bytes, f"{Pair[int, str]} is not a generic class"),
+):
+    try:
+        alias[args]
+    except TypeError as error:
+        assert str(error) == message
+    else:
+        raise AssertionError("invalid specialization accepted")
