@@ -117,16 +117,32 @@ impl Context {
         use num_bigint::BigInt;
         use num_traits::{One, Signed, Zero};
 
-        let names = self
-            .class_attr(class, "_member_map_")
-            .expect("enum name map");
-        let Value::Dict(entries) = self.heap.get(names) else {
-            unreachable!()
+        let names = self.lookup_attr(class, "_member_map_")?;
+        if !self.truth(names)? {
+            let name = self.class_name(class);
+            return Err(Error::new(
+                "TypeError",
+                format!("<flag '{name}'> has no members; specify `names=()` if you meant to create a new, empty, enum"),
+            ));
+        }
+        let entries = match self.heap.get(names) {
+            Value::Dict(entries) => entries.iter().copied().collect(),
+            _ => {
+                // A formatter can install a mapping with its own items() protocol.
+                let items = self.lookup_attr(names, "items")?;
+                let pairs = self.call(items, Vec::new(), Vec::new())?;
+                let mut entries = Vec::new();
+                for pair in self.items(pairs)? {
+                    let pair = self.unpack_items(pair, 2, None)?;
+                    entries.push((pair[0], pair[1]));
+                }
+                entries
+            }
         };
         let mut singles = Vec::new();
         let mut composites = Vec::new();
         let mut mask = BigInt::zero();
-        for &(key, member) in entries {
+        for (key, member) in entries {
             let Some((_, canonical, value)) = self.enum_member(member) else {
                 continue;
             };

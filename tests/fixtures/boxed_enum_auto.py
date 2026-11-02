@@ -117,3 +117,16 @@ def current():
     Flags._numeric_repr_ = staticmethod(replace_map)
     member = Flags(5)
     assert member.name == "ONE|4" and Flags(5) is member and 5 not in old_map
+
+    class BrokenNames(dict):
+        def items(self):
+            raise RuntimeError("name map items")
+
+    Flags._value2member_map_ = old_map
+    Flags._member_map_ = BrokenNames(Flags._member_map_)
+    try:
+        Flags(9)
+    except RuntimeError as exc:
+        assert exc.args == ("name map items",)
+    else:
+        raise AssertionError("expected the name mapping's exception")
