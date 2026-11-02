@@ -5,7 +5,7 @@ use super::value::{Error, Id, NONE, NOT_IMPLEMENTED, Result, Value};
 pub(super) const REFERENCE_HASH: &str = "weakref.ReferenceType.__hash__";
 pub(super) const REFERENCE_TYPE: &str = "weakref.ReferenceType";
 pub(super) const REFERENCE_METHODS: &[&str] = &[
-    "__new__", "__init__", "__call__", "__eq__", "__ne__", "__hash__",
+    "__new__", "__init__", "__call__", "__eq__", "__ne__", "__hash__", "__repr__",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -76,6 +76,50 @@ impl Reference {
             ));
         }
         Ok(self.target.unwrap_or(NONE))
+    }
+
+    fn repr(self, ctx: &mut Context, owner: Id) -> Result<Id> {
+        let Some(target) = self.target else {
+            return Ok(ctx.text(format!("<weakref at {owner:#x}; dead>")));
+        };
+        ctx.with_weak_target(target, |ctx| {
+            let class = ctx.exact_type(target)?;
+            // Resolve the optional name on the type, bypassing instance-level attribute hooks.
+            let name = if let Some(slot) = ctx.class_attr(class, "__name__") {
+                Some(ctx.bind_attribute(slot, target, class)?)
+            } else {
+                match ctx.heap.get(target) {
+                    Value::Class { name, .. } => Some(ctx.text(name.to_owned())),
+                    Value::Function { .. }
+                    | Value::TypeVar(_)
+                    | Value::ParamSpec(_)
+                    | Value::TypeVarTuple { .. } => Some(ctx.lookup_attr(target, "__name__")?),
+                    _ if matches!(
+                        ctx.builtin_type_name(target),
+                        Some("type" | "builtin_function_or_method")
+                    ) =>
+                    {
+                        Some(ctx.lookup_attr(target, "__name__")?)
+                    }
+                    _ => None,
+                }
+            };
+            let class_name = super::stdlib::qualified_type(ctx, class)?;
+            let prefix = ctx.text(format!("<weakref at {owner:#x}; to '"));
+            let mut text = ctx.concat_strings(prefix, class_name)?;
+            let address = ctx.text(format!("' at {target:#x}"));
+            text = ctx.concat_strings(text, address)?;
+            let end = if let Some(name) = name.and_then(|name| ctx.string_storage(name)) {
+                let opening = ctx.text(" (");
+                text = ctx.concat_strings(text, opening)?;
+                text = ctx.concat_strings(text, name)?;
+                ")>"
+            } else {
+                ">"
+            };
+            let end = ctx.text(end);
+            ctx.concat_strings(text, end)
+        })
     }
 
     pub fn upgrade(self) -> Result<Id> {
@@ -411,6 +455,7 @@ pub(super) fn call(
             )
         }
         "weakref.ReferenceType.__call__"
+        | "weakref.ReferenceType.__repr__"
         | "weakref.ReferenceType.__init__"
         | "weakref.ReferenceType.__eq__"
         | "weakref.ReferenceType.__ne__" => {
@@ -451,6 +496,15 @@ pub(super) fn call(
                 ));
             }
             match name {
+                "__repr__" => {
+                    if !rest.is_empty() {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!("expected 0 arguments, got {}", rest.len()),
+                        ));
+                    }
+                    reference.repr(ctx, owner)
+                }
                 "__init__" => {
                     reference_args(name, rest)?;
                     Ok(NONE)

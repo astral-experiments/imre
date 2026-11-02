@@ -28,6 +28,7 @@ def current():
     equal_weak_value_keys(equal, Key("first"))
     weak_key_constructor()
     generic_alias_weakref()
+    reference_repr()
 
 
 def equal_weak_value_keys(first, other):
@@ -79,3 +80,24 @@ def weak_key_constructor():
     del key
     collect()
     assert observed() is None and len(mapping) == 0
+
+
+def reference_repr():
+    from gc import collect
+
+    class Named:
+        @property
+        def __name__(self):
+            return "custom"
+
+        def __getattr__(self, name):
+            raise AssertionError(name)
+
+    obj = Named()
+    obj.cycle = obj
+    wr = ref(obj)
+    assert "Named'" in repr(wr) and "(custom)>" in str(wr)
+    assert wr.__repr__() == repr(wr) and repr([wr]) == "[" + repr(wr) + "]"
+    del obj
+    collect()
+    assert str(wr).endswith("; dead>")
