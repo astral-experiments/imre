@@ -184,3 +184,10 @@ with Reenter() as raw:
     f.flush()
     assert raw.getvalue() == b"A"
     f.close()
+for method in ("readinto", "readinto1"):
+    with io.BytesIO() as raw:
+        f = io.BufferedRandom(raw, 4)
+        assert f.write(b"XY") == 2 and raw.getvalue() == b""
+        assert getattr(f, method)(bytearray(0)) == 0
+        assert raw.getvalue() == b"XY"
+        f.close()

@@ -300,6 +300,9 @@ impl Reader {
         let size = range.len();
         self.check_open(ctx, "readinto of closed file")?;
         self.with_lock(|| {
+            if size == 0 && self.unread() == 0 {
+                self.sync_update(ctx)?;
+            }
             let mut written = 0;
             let mut continuing = false;
             let mut rewind = true;
