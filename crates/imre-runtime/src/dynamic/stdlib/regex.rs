@@ -1015,9 +1015,12 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
         ctx.check_buffer_exporter(id)?;
     }
     match value {
-        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { owner: Some(_), .. } => {
+        Value::Bytes(_)
+        | Value::ByteArray(_)
+        | Value::Array(_)
+        | Value::MemoryView { owner: Some(_), .. } => {
             if bytes {
-                return ctx.bytes_like(id);
+                return ctx.native_buffer_bytes(id);
             }
             Err(Error::new(
                 "TypeError",
@@ -1120,7 +1123,7 @@ pub(super) fn search(
     if matches!(method, "scanner" | "finditer") {
         let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
             // Keep the export alive for the scanner's lifetime. A Match keeps only the subject.
-            Value::ByteArray(_) => Some(ctx.new_memoryview(string)?),
+            Value::ByteArray(_) | Value::Array(_) => Some(ctx.new_memoryview(string)?),
             Value::MemoryView { .. } => {
                 return Err(Error::new(
                     "NotImplementedError",

@@ -1,4 +1,5 @@
 import re
+from array import array
 
 
 def current():
@@ -62,6 +63,30 @@ def current():
         raise AssertionError("an exhausted scanner must keep the buffer exported")
     del cursor
     data.extend(b"y")
+
+    numbers = array("i", [513, -1])
+    raw = numbers.tobytes()
+    match = re.compile(b"(?s)(..)").search(numbers, 1, 3)
+    assert match.string is numbers and match.span(1) == (1, 3)
+    assert match.group(1) == raw[1:3]
+    try:
+        re.search("x", numbers)
+    except TypeError as exc:
+        assert str(exc) == "cannot use a string pattern on a bytes-like object"
+    else:
+        raise AssertionError("text pattern accepted a numeric array")
+
+    matches = re.finditer(b"(?s).", numbers)
+    first = next(matches)
+    try:
+        numbers.append(0)
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("a scanner must hold the array export")
+    assert [m.group() for m in matches] == [raw[i : i + 1] for i in range(1, len(raw))]
+    numbers.append(0)
+    assert first.group() == raw[:1]
 
     calls = []
 
