@@ -457,6 +457,7 @@ pub(crate) struct Module {
     pub ignore_python_environment: bool,
     /// Effective UTF-8 mode of an interpreter-style command.
     pub command_utf8_mode: Option<bool>,
+    pub command_warnoptions: Vec<String>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.

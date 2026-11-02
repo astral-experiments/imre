@@ -145,6 +145,7 @@ pub(crate) enum Kind {
     Warning = 80,
     RuntimeWarning = 81,
     DeprecationWarning = 82,
+    EncodingWarning = 83,
 }
 
 impl Kind {
@@ -227,6 +228,7 @@ impl Kind {
             80 => Self::Warning,
             81 => Self::RuntimeWarning,
             82 => Self::DeprecationWarning,
+            83 => Self::EncodingWarning,
             _ => return None,
         })
     }
@@ -305,6 +307,7 @@ impl Kind {
             Self::Warning => "Warning",
             Self::RuntimeWarning => "RuntimeWarning",
             Self::DeprecationWarning => "DeprecationWarning",
+            Self::EncodingWarning => "EncodingWarning",
             Self::UnidiffParseError => "UnidiffParseError",
         }
     }
@@ -314,7 +317,10 @@ impl Kind {
             Self::BaseException => true,
             Self::Warning => matches!(
                 self,
-                Self::Warning | Self::RuntimeWarning | Self::DeprecationWarning
+                Self::Warning
+                    | Self::RuntimeWarning
+                    | Self::DeprecationWarning
+                    | Self::EncodingWarning
             ),
             Self::NameError => matches!(self, Self::NameError | Self::UnboundLocalError),
             Self::SyntaxError => matches!(self, Self::SyntaxError | Self::IndentationError),

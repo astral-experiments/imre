@@ -485,6 +485,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
+        ("sys", "warnoptions") => {
+            let options: Vec<String> = serde_json::from_value(ctx.config["warnoptions"].clone())
+                .expect("startup warning options");
+            let items = options.into_iter().map(|option| ctx.text(option)).collect();
+            ctx.alloc(Value::List(items))
+        }
         ("zlib", "adler32") => ctx.builtin("zlib.adler32"),
         (
             "binascii",
@@ -533,8 +539,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             }
         }
         ("sys", "flags") => {
-            let isolated_flag = ctx.config["isolated"].as_bool().unwrap_or(false);
-            let isolated = ctx.int(i64::from(isolated_flag));
+            let flag = |ctx: &mut Context, name: &str| {
+                ctx.int(i64::from(ctx.config[name].as_bool().unwrap_or(false)))
+            };
+            let isolated = flag(ctx, "isolated");
+            let ignore_environment = flag(ctx, "ignore_environment");
+            let utf8_mode = flag(ctx, "utf8_mode");
+            let warn_default_encoding = flag(ctx, "warn_default_encoding");
             let no_user_site = ctx.int(i64::from(
                 ctx.config["no_user_site"].as_bool().unwrap_or(false),
             ));
@@ -552,7 +563,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
                 &[
                     ("optimize", optimize),
                     ("isolated", isolated),
-                    ("ignore_environment", isolated),
+                    ("ignore_environment", ignore_environment),
+                    ("utf8_mode", utf8_mode),
+                    ("warn_default_encoding", warn_default_encoding),
                     ("no_user_site", no_user_site),
                     ("safe_path", safe_path),
                     ("dont_write_bytecode", bytecode),

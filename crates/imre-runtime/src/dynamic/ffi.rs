@@ -565,16 +565,35 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
-    if config["isolated"].as_bool() != Some(true) {
+    let ignore_environment = config["ignore_environment"].as_bool().unwrap_or(false);
+    let options: Vec<String> =
+        serde_json::from_value(config["warnoptions"].take()).unwrap_or_default();
+    config["warnoptions"] = crate::sys::startup_warning_options(ignore_environment, options).into();
+    crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
+    config["utf8_mode"] = crate::sys::imre_sys_utf8_mode().into();
+    config["warn_default_encoding"] = config["warn_default_encoding"]
+        .as_bool()
+        .unwrap_or_else(|| {
+            !ignore_environment
+                && std::env::var_os("PYTHONWARNDEFAULTENCODING")
+                    .is_some_and(|value| !value.is_empty())
+        })
+        .into();
+    if !ignore_environment {
         config["pycache_prefix"] = std::env::var("PYTHONPYCACHEPREFIX")
             .ok()
             .filter(|prefix| !prefix.is_empty())
             .into();
     }
-    crate::python_hash::initialize(config["isolated"].as_bool().unwrap_or(false));
-    crate::integer_text::imre_integer_digits_init(u32::from(
-        config["isolated"].as_bool().unwrap_or(false),
-    ));
+    crate::python_hash::initialize(ignore_environment);
+    crate::integer_text::imre_integer_digits_init(u32::from(ignore_environment));
+    if let Some(options) = config["warnoptions"].as_array() {
+        for option in options.iter().filter_map(|value| value.as_str()) {
+            if let Err(reason) = crate::objects::warnings::startup_filter(option) {
+                eprintln!("Invalid -W option ignored: {reason}");
+            }
+        }
+    }
     let executable = config["executable"]
         .as_str()
         .map(PathBuf::from)

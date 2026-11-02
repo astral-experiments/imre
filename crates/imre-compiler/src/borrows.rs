@@ -495,6 +495,7 @@ mod tests {
             list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_utf8_mode: None,
+            command_warnoptions: vec![],
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),

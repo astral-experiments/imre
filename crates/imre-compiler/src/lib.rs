@@ -43,15 +43,20 @@ pub const IMPLEMENTATION_NAME: &str = "imre";
 pub const NATIVE_ARCHIVE_EXTENSION: &str = "imre.a";
 
 /// Startup choices made before a native Python command executes.
-#[derive(Clone, Copy, serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub struct CommandFlags {
     pub isolated: bool,
+    pub ignore_environment: bool,
     /// Python's language optimization level; independent of LLVM optimization.
     pub optimize: i32,
     pub safe_path: bool,
     pub no_user_site: bool,
     pub dont_write_bytecode: bool,
-    pub utf8_mode: bool,
+    /// A missing override lets the runtime select the mode from the startup locale.
+    pub utf8_mode: Option<bool>,
+    pub warn_default_encoding: bool,
+    /// Warning options supplied on the command line.
+    pub warnoptions: Vec<String>,
 }
 
 /// The in-memory entry and launcher used by a Python-style `-c` invocation.
@@ -81,14 +86,14 @@ pub struct CompileOptions {
 
 impl CompileOptions {
     /// Return the launcher's flags and path for a Python command or a script.
-    pub fn python_startup(&self) -> Option<(CommandFlags, &str)> {
+    pub fn python_startup(&self) -> Option<(&CommandFlags, &str)> {
         self.command
             .as_ref()
-            .map(|command| (command.flags, command.executable.as_str()))
+            .map(|command| (&command.flags, command.executable.as_str()))
             .or_else(|| {
                 self.script_startup
                     .as_ref()
-                    .map(|(flags, executable)| (*flags, executable.as_str()))
+                    .map(|(flags, executable)| (flags, executable.as_str()))
             })
     }
 
@@ -102,7 +107,7 @@ impl CompileOptions {
             return modules::SourceGraph::command(command, self, filesystem);
         }
         if let Some((flags, executable)) = &self.script_startup {
-            return modules::SourceGraph::script(path, *flags, executable, self, filesystem);
+            return modules::SourceGraph::script(path, flags, executable, self, filesystem);
         }
         modules::SourceGraph::load_with(
             path,
