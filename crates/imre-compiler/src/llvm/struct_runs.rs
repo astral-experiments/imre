@@ -153,6 +153,7 @@ impl Emitter<'_, '_> {
         self.start(&cycle);
         self.periodic_struct_sum(&plan, body, &view.length.operand, &index_mask, ordinary);
         self.start(&condition);
+        self.check_interrupt();
         let more = self.while_condition(test, false);
         self.branch(&more, &visit, exhausted);
         self.start(&visit);
@@ -172,6 +173,16 @@ impl Emitter<'_, '_> {
 
         let sum = self.borrow_slot(plan.accumulator);
         let term = self.expr(plan.term);
+        // The exact bulk path is constant time. Bound only the scalar fallback
+        // so a long uniform run returns regularly to a Python loop checkpoint.
+        let exact = self.instruction(format!(
+            "call i1 @imre_exact_fadd_bound(double {}, double {}, i64 {count})",
+            sum.operand, term.operand
+        ));
+        let short = self.instruction(format!("icmp ule i64 {count}, 65536"));
+        let whole = self.instruction(format!("or i1 {exact}, {short}"));
+        let count = self.instruction(format!("select i1 {whole}, i64 {count}, i64 65536"));
+        let end = self.instruction(format!("add i64 {at}, {count}"));
         let result = self.instruction(format!(
             "call double @imre_repeat_fadd(double {}, double {}, i64 {count})",
             sum.operand, term.operand
@@ -197,6 +208,7 @@ impl Emitter<'_, '_> {
         ordered: &str,
         ordinary: &str,
     ) {
+        self.check_interrupt();
         let rows = self.entry_alloca("{ [2 x ptr], ptr, i64 }");
         let ones = self.instruction(format!(
             "call i64 @imre_struct_binary_prefix(ptr {list}, ptr {rows})"
@@ -227,26 +239,46 @@ impl Emitter<'_, '_> {
             let product = self.instruction(format!("fmul double {term}, {n}"));
             sum = self.instruction(format!("fadd double {sum}, {product}"));
         }
-        let (slow, advance) = (self.label(), self.label());
-        self.line(format!(
-            "store double {sum}, ptr %local{}",
-            plan.accumulator
-        ));
-        self.branch(&exact, &advance, &slow);
+        let (fast, slow, advance) = (self.label(), self.label(), self.label());
+        self.branch(&exact, &fast, &slow);
+        self.start(&fast);
+        self.jump(&advance);
         self.start(&slow);
-        let sequential = self.instruction(format!(
-            "call double @imre_struct_binary_ordered(ptr {rows}, i64 {prefix}, double {}, double {}, double {})",
-            initial.operand, terms[0], terms[1]
-        ));
-        self.line(format!(
-            "store double {sequential}, ptr %local{}",
-            plan.accumulator
+        // Ordered additions can run for arbitrarily many rows. Publish the
+        // loop state at the same checkpoint interval as a uniform scalar run.
+        let cursor = self.borrow_slot(plan.cursor);
+        let at = self.instruction(format!("lshr i64 {}, 1", cursor.operand));
+        let remaining = self.instruction(format!("sub i64 {prefix}, {at}"));
+        let short = self.instruction(format!("icmp ule i64 {remaining}, 65536"));
+        let count = self.instruction(format!("select i1 {short}, i64 {remaining}, i64 65536"));
+        let end = self.instruction(format!("add i64 {at}, {count}"));
+        let subtotal = self.borrow_slot(plan.accumulator);
+        let ordered_sum = self.instruction(format!(
+            "call double @imre_struct_binary_ordered(ptr {rows}, i64 {at}, i64 {end}, double {}, double {}, double {})",
+            subtotal.operand, terms[0], terms[1]
         ));
         self.jump(&advance);
         self.start(&advance);
-        let last = self.instruction(format!("sub i64 {length}, 2"));
-        self.line(format!("store i64 {last}, ptr %local{}", plan.cursor));
-        self.jump(ordinary);
+        let end = self.instruction(format!("phi i64 [{prefix}, %{fast}], [{end}, %{slow}]"));
+        let result = self.instruction(format!(
+            "phi double [{sum}, %{fast}], [{ordered_sum}, %{slow}]"
+        ));
+        self.line(format!(
+            "store double {result}, ptr %local{}",
+            plan.accumulator
+        ));
+        let last = self.instruction(format!("sub i64 {end}, 1"));
+        let row = self.instruction(format!("call ptr @imre_struct_row(ptr {list}, i64 {last})"));
+        self.line(format!("store ptr {row}, ptr %local{}", plan.row));
+        let shifted = self.instruction(format!("shl i64 {end}, 1"));
+        let tagged = self.instruction(format!("or i64 {shifted}, 1"));
+        self.line(format!("store i64 {tagged}, ptr %local{}", plan.cursor));
+        let complete = self.instruction(format!("icmp eq i64 {end}, {prefix}"));
+        let resume = self.label();
+        self.branch(&complete, ordinary, &resume);
+        self.start(&resume);
+        self.check_interrupt();
+        self.jump(&slow);
     }
 
     /// Execute the first cycle in source order. Each projected term must satisfy
@@ -281,6 +313,7 @@ impl Emitter<'_, '_> {
         self.line(format!("store i1 true, ptr {exact}"));
         self.jump(&visit);
         self.start(&visit);
+        self.check_interrupt();
         self.block(&body[..2]);
         let sum = self.borrow_slot(plan.accumulator);
         let term = self.expr(plan.term);
@@ -372,6 +405,6 @@ print(fallible(rows))
             llvm.matches("call i64 @imre_struct_binary_prefix(").count(),
             1
         );
-        assert_eq!(llvm.matches("call i1 @imre_exact_fadd_bound(").count(), 4);
+        assert_eq!(llvm.matches("call i1 @imre_exact_fadd_bound(").count(), 5);
     }
 }

@@ -888,6 +888,23 @@ impl Emitter<'_, '_> {
         self.check_failed(&pending);
     }
 
+    /// SIGINT can arrive during optimized native loops. The ordinary path
+    /// reads one atomic byte; only the slow path enters the exception runtime.
+    fn check_interrupt(&mut self) {
+        let tripped =
+            self.instruction("load atomic i8, ptr @imre_signal_tripped monotonic, align 1");
+        let pending = self.instruction(format!("icmp ne i8 {tripped}, 0"));
+        let (slow, next) = (self.label(), self.label());
+        self.line(format!(
+            "br i1 {pending}, label %{slow}, label %{next}, !prof !0"
+        ));
+        self.start(&slow);
+        let raised = self.instruction("call i1 @imre_typed_interrupt()");
+        self.check_failed(&raised);
+        self.jump(&next);
+        self.start(&next);
+    }
+
     /// Both error-detection ABIs share exactly the same ownership routing. The
     /// error edge consumes only owners produced before the failed call; success
     /// restores those SSA owners before inspecting a result or out-parameter.
@@ -2380,6 +2397,7 @@ impl Emitter<'_, '_> {
                     self.jump(&condition);
                 }
                 self.start(&condition);
+                self.check_interrupt();
                 let test = self.while_condition(test, raw_subtotal.is_some());
                 self.branch(&test, &body_label, &exhausted);
                 self.start(&body_label);
@@ -2446,6 +2464,7 @@ impl Emitter<'_, '_> {
                 self.checked_line("call void @imre_range_step_zero()");
                 self.line("unreachable");
                 self.start(&condition);
+                self.check_interrupt();
                 let mut current = self.borrow_slot(*cursor);
                 current.small_integer |= small_cursor;
                 let mut stop_value = self.borrow_slot(*stop);
@@ -9085,6 +9104,8 @@ declare ptr @imre_binary_readline(ptr)
 declare ptr @imre_gzip_open(ptr, i32)
 declare i64 @imre_binary_write(ptr, ptr)
 
+@imre_signal_tripped = external global i8
+declare i1 @imre_typed_interrupt()
 declare i32 @imre_error_pending()
 declare ptr @imre_error_take()
 declare void @imre_error_set(ptr)
@@ -9220,7 +9241,7 @@ declare i1 @imre_struct_try_fill_empty(ptr, ptr, ptr, i64)
 declare i64 @imre_struct_cycle_prefix(ptr, i64, i64)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
 declare i64 @imre_struct_binary_prefix(ptr, ptr) nounwind
-declare double @imre_struct_binary_ordered(ptr, i64, double, double, double) nounwind
+declare double @imre_struct_binary_ordered(ptr, i64, i64, double, double, double) nounwind
 declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare ptr @imre_struct_row(ptr, i64) nounwind
 declare ptr @imre_struct_row_checked(ptr, i64)

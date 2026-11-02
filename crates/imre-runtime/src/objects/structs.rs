@@ -537,7 +537,8 @@ pub unsafe extern "C" fn imre_struct_binary_prefix(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_struct_binary_ordered(
     view: *const BinaryRead,
-    len: usize,
+    mut at: usize,
+    end: usize,
     mut sum: f64,
     default: f64,
     alternate: f64,
@@ -546,13 +547,16 @@ pub unsafe extern "C" fn imre_struct_binary_ordered(
     let bits = unsafe { std::slice::from_raw_parts((*view).bits, (*view).words) };
     let terms = [default, alternate];
     let width = u64::BITS as usize;
-    for (block, start) in (0..len).step_by(width).enumerate() {
+    while at < end {
         // Appending default rows need not extend the bitmap.
-        let mut tags = bits.get(block).copied().unwrap_or(0);
-        for _ in 0..width.min(len - start) {
+        let offset = at % width;
+        let mut tags = bits.get(at / width).copied().unwrap_or(0) >> offset;
+        let count = (width - offset).min(end - at);
+        for _ in 0..count {
             sum += terms[(tags & 1) as usize];
             tags >>= 1;
         }
+        at += count;
     }
     sum
 }

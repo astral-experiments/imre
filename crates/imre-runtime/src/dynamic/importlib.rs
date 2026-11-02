@@ -30,14 +30,12 @@ impl Context {
     /// Receive the launcher's argument vector before imports can run Python code.
     pub(super) fn startup_sys(&mut self) -> Result<Id> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        let arguments = if self.config["module_entry"].is_string()
-            || (self.config["executable"].is_string()
-                && self.config["faulthandler"].as_bool() == Some(true))
-        {
-            crate::run_start::wait_for_cleanup(true).map_err(crate::objects::errno_error)?
-        } else {
-            None
-        };
+        let arguments =
+            if self.config["module_entry"].is_string() || self.config["executable"].is_string() {
+                crate::run_start::wait_for_cleanup(true).map_err(crate::objects::errno_error)?
+            } else {
+                None
+            };
         let sys = self.module("sys")?;
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(bytes) = arguments {

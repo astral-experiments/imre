@@ -1,7 +1,7 @@
 """Iterator tools for runtime-loaded Python."""
 
 
-import itertools as _itertools
+import _imre_itertools as _itertools
 from operator import index as _index
 from sys import maxsize as _maxsize
 
@@ -166,6 +166,7 @@ def _make_filterfalse(_allocate, _state):
 
 
 filterfalse = _make_filterfalse(_itertools._filterfalse_allocate, _itertools._filterfalse_state)
+del _itertools
 
 
 class _Combination:

@@ -188,7 +188,7 @@ impl Reader {
     ) -> Result<Option<usize>> {
         let mark = ctx.heap.temporary_mark();
         let raw = self.raw()?;
-        let dest = ctx.ownerless_byte_view(backing, start, length)?;
+        let dest = ctx.ownerless_byte_view(backing, start, length, false)?;
         let retry = ctx.heap.temporary_mark();
         let value = loop {
             match invoke(ctx, raw, "readinto", vec![dest]) {
