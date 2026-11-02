@@ -2490,6 +2490,7 @@ def report(text):
             "boxed_temporary_file.py",
             "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
+            "boxed_sys_finalizing.py",
             "boxed_named_temporary_writer.py",
             "boxed_temporary_directory.py",
             "boxed_tempfile_default_directory.py",

@@ -744,6 +744,7 @@ pub(super) fn new_context<S: Into<String>>(
         audit_hooks: Vec::new(),
         fault_file: None,
         exit_callbacks: Vec::new(),
+        finalizing: Default::default(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
@@ -887,6 +888,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     };
     ctx.workers.join_before_exit_callbacks();
     atexit::run(&mut ctx);
+    // Exit callbacks run before Python enters its finalization phase.
+    ctx.finalizing
+        .store(true, std::sync::atomic::Ordering::Release);
     if let Err(error) = ctx.finalize_shutdown_resources() {
         super::unraisable::report(
             &mut ctx,
