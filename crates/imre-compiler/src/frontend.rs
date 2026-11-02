@@ -6219,6 +6219,12 @@ impl<'a> Checker<'a> {
         self.scoped_builtin_error(name, node)
     }
 
+    fn boxed_builtin_callable(&self, expression: &ast::Expr) -> Option<&'static str> {
+        ["exec", "hex"]
+            .into_iter()
+            .find(|name| self.unshadowed_builtin(expression, name))
+    }
+
     /// Select the object provider only when this precise diagnostic reaches the driver.
     fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> String {
         let error = self.object_export_error(name, node);
@@ -6266,8 +6272,8 @@ impl<'a> Checker<'a> {
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        if self.unshadowed_builtin(expression, "hex") {
-            return Err(self.scoped_builtin_error("hex", expression));
+        if let Some(name) = self.boxed_builtin_callable(expression) {
+            return Err(self.scoped_builtin_error(name, expression));
         }
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
@@ -8470,8 +8476,8 @@ impl<'a> Checker<'a> {
             return Ok(method);
         }
 
-        if self.unshadowed_builtin(&call.func, "hex") {
-            return Err(self.scoped_builtin_error("hex", call));
+        if let Some(name) = self.boxed_builtin_callable(&call.func) {
+            return Err(self.scoped_builtin_error(name, call));
         }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);

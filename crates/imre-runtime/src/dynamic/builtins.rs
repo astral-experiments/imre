@@ -1060,7 +1060,8 @@ impl Context {
             && let Value::Native(name) = self.heap.get(callable)
         {
             match name.as_str() {
-                "eval" => return self.eval_source(scope, &args, &kwargs),
+                "eval" => return self.call_eval_exec(scope, "eval", &args, &kwargs),
+                "exec" => return self.call_eval_exec(scope, "exec", &args, &kwargs),
                 "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
                     return self.frame_locals(scope);
                 }
@@ -1758,12 +1759,7 @@ pub(super) fn call(
             arity(name, args, 3, 3)?;
             ctx.compile_source(args[0], args[1], args[2], false)
         }
-        "eval" => ctx.eval_source(ctx.heap.current_scope(), args, kwargs),
-        "exec" => {
-            positional(name, kwargs)?;
-            arity(name, args, 2, 3)?;
-            ctx.exec_source(args[0], args[1], args.get(2).copied(), None)
-        }
+        "eval" | "exec" => ctx.call_eval_exec(ctx.heap.current_scope(), name, args, kwargs),
         "hex" => {
             let value = one_positional_arg("hex", args, kwargs)?;
             let number = ctx.index_integer(value)?;
