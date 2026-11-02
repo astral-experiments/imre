@@ -103,7 +103,31 @@ def current():
     except TypeError as error:
         print(str(error))
 
+    check_mro()
     check_subclass_hooks()
+
+
+def check_mro():
+    original = D.mro()
+    assert original == [D, C, B, A, object] and D.__mro__ == tuple(original)
+    original.clear()
+    assert D.mro() == type.mro(D) == [D, C, B, A, object]
+    assert bool.mro() == type.mro(bool) == [bool, int, object]
+    assert D.mro.__self__ is D and not hasattr(super(D, D()), "mro")
+
+    class Meta(type): pass
+    class ViaMeta(metaclass=Meta): pass
+    class Shadow(D): mro = None
+    assert ViaMeta.mro() == [ViaMeta, object] and Meta.mro is type.mro
+    assert type.mro(Meta) == [Meta, type, object]
+    assert Shadow.mro is None and type.mro(Shadow)[1:] == D.mro()
+    for invalid in (lambda: type.mro(D()), lambda: D.mro(1), lambda: Meta.mro()):
+        try:
+            invalid()
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invalid mro call succeeded")
 
 
 def check_subclass_hooks():

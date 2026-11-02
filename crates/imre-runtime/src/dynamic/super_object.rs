@@ -65,6 +65,45 @@ impl Context {
         lineage
     }
 
+    pub(super) fn type_mro(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some((&class, args)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "unbound method type.mro() needs an argument",
+            ));
+        };
+        if !self.is_type_object(class) {
+            let kind = self
+                .builtin_type_name(class)
+                .unwrap_or_else(|| self.type_name(class));
+            return Err(Error::new(
+                "TypeError",
+                format!("descriptor 'mro' for 'type' objects doesn't apply to a '{kind}' object"),
+            ));
+        }
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{}.mro() takes no keyword arguments",
+                    self.class_name(class)
+                ),
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{}.mro() takes no arguments ({} given)",
+                    self.class_name(class),
+                    args.len()
+                ),
+            ));
+        }
+        let mro = self.base_lineage(class, true);
+        Ok(self.alloc(Value::List(mro)))
+    }
+
     /// Type metadata lives on the metaclass, outside the class's instance attributes.
     pub(super) fn builtin_hierarchy_tuple(&mut self, class: Id, name: &str) -> Id {
         let key = format!("{name}:{}", self.class_name(class));
@@ -245,7 +284,10 @@ impl Context {
                 }
                 // Resolve inherited object methods at their real position, after any Python mixin.
                 if let Value::Native(kind) = self.heap.get(class)
-                    && !matches!(name, "__init_subclass__" | "__getstate__" | "__reduce_ex__")
+                    && !matches!(
+                        name,
+                        "__init_subclass__" | "__getstate__" | "__reduce_ex__" | "mro"
+                    )
                     && !(exception_method && builtins::is_exception(kind))
                 {
                     match self.lookup_attr(class, name) {

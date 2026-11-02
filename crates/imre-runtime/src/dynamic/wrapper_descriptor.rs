@@ -47,6 +47,7 @@ impl BuiltinDescriptor {
                 Some((class, attr, DictIterator::methods(class)))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
@@ -196,6 +197,7 @@ impl BuiltinDescriptor {
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
             "object" => true,
+            "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
@@ -348,6 +350,8 @@ impl BuiltinDescriptor {
                         | "swapcase",
                         _,
                     ) => "($self, /)",
+                    ("mro", "__doc__") => "Return a type's method resolution order.",
+                    ("mro", _) => "($self, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."
