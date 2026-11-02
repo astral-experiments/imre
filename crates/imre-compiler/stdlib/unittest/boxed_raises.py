@@ -1,4 +1,4 @@
-# Exception classes and callable arguments use the boxed Python object protocol.
+# Exception and warning classes and callable arguments use the boxed Python object protocol.
 def _boxed_format_message(self, msg, standardMsg):
     # In short-message mode the original message object becomes the exception argument.
     if not self.longMessage:
@@ -8,18 +8,37 @@ def _boxed_format_message(self, msg, standardMsg):
     return standardMsg + " : " + str(msg)
 
 
-def _is_exception_type(expected):
+def _is_assertion_subtype(expected, base):
     if isinstance(expected, tuple):
-        return all(_is_exception_type(item) for item in expected)
-    return isinstance(expected, type) and issubclass(expected, BaseException)
+        return all(_is_assertion_subtype(item, base) for item in expected)
+    return isinstance(expected, type) and issubclass(expected, base)
 
 
-class _BoxedRaisesContext:
-    def __init__(self, case, expected, msg, regex, callable_name=None):
+class _BoxedAssertionContext:
+    def __init__(self, case, expected):
         self.test_case = case
         self.expected = expected
-        self.msg = msg
-        self.callable_name = callable_name
+        self.msg = None
+        self.callable_name = None
+
+    def handle(self, args, kwargs):
+        if not args:
+            self.msg = kwargs.pop("msg", None)
+            if kwargs:
+                raise TypeError(repr(next(iter(kwargs))) + " is an invalid keyword argument for this function")
+            return self
+        callback = args[0]
+        try:
+            self.callable_name = callback.__name__
+        except AttributeError:
+            self.callable_name = str(callback)
+        with self:
+            callback(*args[1:], **kwargs)
+
+
+class _BoxedRaisesContext(_BoxedAssertionContext):
+    def __init__(self, case, expected, regex):
+        super().__init__(case, expected)
         self.expected_regex = regex
 
     def __enter__(self):
@@ -32,7 +51,7 @@ class _BoxedRaisesContext:
                 name = str(self.expected)
             message = name + " not raised"
             if self.callable_name:
-                message += " by " + self.callable_name
+                message += " by {}".format(self.callable_name)
             raise self.test_case.failureException(self.test_case._formatMessage(self.msg, message))
         import traceback
         traceback.clear_frames(tb)
@@ -46,20 +65,46 @@ class _BoxedRaisesContext:
         return True
 
 
+class _BoxedWarnsContext(_BoxedAssertionContext):
+    def __enter__(self):
+        import warnings
+
+        # Reusing a test in the same process must not hide a previously emitted warning.
+        for module in list(sys.modules.values()):
+            if getattr(module, "__warningregistry__", None):
+                module.__warningregistry__ = {}
+        self.warnings_manager = warnings.catch_warnings(record=True)
+        self.warnings = self.warnings_manager.__enter__()
+        warnings.simplefilter("always", self.expected)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.warnings_manager.__exit__(exc_type, exc, tb)
+        if exc_type is not None:
+            return
+        for record in self.warnings:
+            if isinstance(record.message, self.expected):
+                self.warning = record.message
+                self.filename = record.filename
+                self.lineno = record.lineno
+                return
+        name = getattr(self.expected, "__name__", None)
+        message = (str(self.expected) if name is None else name) + " not triggered"
+        if self.callable_name:
+            message += " by {}".format(self.callable_name)
+        raise self.test_case.failureException(self.test_case._formatMessage(self.msg, message))
+
+
 def _boxedRaises(self, method, expected_exception, regex, args, kwargs):
-    if not _is_exception_type(expected_exception):
+    if not _is_assertion_subtype(expected_exception, BaseException):
         raise TypeError(method + "() arg 1 must be an exception type or tuple of exception types")
-    if not args:
-        msg = kwargs.pop("msg", None)
-        if kwargs:
-            raise TypeError(repr(next(iter(kwargs))) + " is an invalid keyword argument for this function")
-        return _BoxedRaisesContext(self, expected_exception, msg, regex)
-    callback = args[0]
-    name = getattr(callback, "__name__", None)
-    if name is None:
-        name = str(callback)
-    with _BoxedRaisesContext(self, expected_exception, None, regex, name):
-        callback(*args[1:], **kwargs)
+    return _BoxedRaisesContext(self, expected_exception, regex).handle(args, kwargs)
+
+
+def assertWarns(self, expected_warning, *args, **kwargs):
+    if not _is_assertion_subtype(expected_warning, Warning):
+        raise TypeError("assertWarns() arg 1 must be a warning type or tuple of warning types")
+    return _BoxedWarnsContext(self, expected_warning).handle(args, kwargs)
 
 
 def assertRaises(self, expected_exception, *args, **kwargs):
@@ -87,4 +132,5 @@ TestCase.assertRegex = assertRegex
 TestCase.assertRaisesRegex = assertRaisesRegex
 TestCase._formatMessage = _boxed_format_message
 TestCase.assertRaises = assertRaises
-del assertRegex, assertRaises, assertRaisesRegex
+TestCase.assertWarns = assertWarns
+del assertRegex, assertRaises, assertRaisesRegex, assertWarns
