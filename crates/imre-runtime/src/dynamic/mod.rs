@@ -712,6 +712,11 @@ impl Context {
             Value::GenericAlias(ref alias) if alias.is_builtin_alias() => {
                 return Ok(self.alloc(Value::GenericAliasIterator(Some(id))));
             }
+            Value::GenericAlias(ref alias) if alias.kind.iterates_unpack() => {
+                let class = self.builtin(alias.kind.class());
+                let method = self.lookup_attr(class, "__iter__")?;
+                return self.call(method, vec![id], Vec::new());
+            }
             Value::TypeVarTuple { .. } => {
                 let unpacked = typing::unpack_parameter(self, id)?;
                 (self.alloc(Value::Tuple(vec![unpacked])), "tuple_iterator")
@@ -1410,7 +1415,7 @@ impl Context {
                 | Value::Count { .. }
                 | Value::Repeat(_)
                 | Value::Enumerate { .. }
-        ) || matches!(self.heap.get(id), Value::GenericAlias(alias) if alias.is_builtin_alias())
+        ) || matches!(self.heap.get(id), Value::GenericAlias(alias) if alias.is_builtin_alias() || alias.kind.iterates_unpack())
             || self.slot(id, "__iter__").is_some()
             || self.slot(id, "__getitem__").is_some()
         {

@@ -1784,6 +1784,10 @@ def _paramspec_prepare_subst(self, alias, args):
     return args
 
 
+def _iter_generic_alias(self):
+    yield Unpack[self]
+
+
 def _concatenate_copy_with(self, params):
     if isinstance(params[-1], (list, tuple)):
         return (*params[:-1], *params[-1])

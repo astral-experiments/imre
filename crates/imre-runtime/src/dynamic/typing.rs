@@ -71,6 +71,14 @@ impl AliasKind {
         )
     }
 
+    /// Alias classes that inherit _GenericAlias.__iter__ without _NotIterable.
+    pub(super) fn iterates_unpack(self) -> bool {
+        matches!(
+            self,
+            Self::Generic | Self::Literal(_) | Self::Concatenate | Self::Unpack
+        )
+    }
+
     pub(super) fn type_name(self) -> &'static str {
         self.class().rsplit_once('.').unwrap().1
     }
@@ -1219,13 +1227,13 @@ pub(super) fn install_alias_class(ctx: &mut Context, owner: &str, class: Id) {
     ctx.native_type_dicts.insert(class, dictionary);
 }
 
-/// These two functions are defined by the source typing module after its native classes exist.
+/// Attach the methods defined by the source typing module after its native classes exist.
 pub(super) fn include_generic_alias_methods(
     ctx: &mut Context,
     class: Id,
     dictionary: Id,
 ) -> Result<()> {
-    for name in ["copy_with", "__reduce__"] {
+    for name in ["copy_with", "__reduce__", "__iter__"] {
         if ctx.own_class_attr(class, name).is_none()
             && let Some(method) = generic_alias_method(ctx, name)
         {
@@ -1240,6 +1248,7 @@ fn generic_alias_method(ctx: &Context, name: &str) -> Option<Id> {
     match name {
         "copy_with" => ctx.class_attr(ctx.module_value("typing", "_SpecialGenericAlias")?, name),
         "__reduce__" => ctx.module_value("typing", "_reduce_generic_alias"),
+        "__iter__" => ctx.module_value("typing", "_iter_generic_alias"),
         _ => None,
     }
 }
@@ -1253,6 +1262,31 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         return Some(Ok(member));
     }
     let attr = match ctx.heap.get(value) {
+        Value::Native(class)
+            if name == "__iter__"
+                && matches!(
+                    class.as_str(),
+                    "typing._GenericAlias"
+                        | "typing._LiteralGenericAlias"
+                        | "typing._ConcatenateGenericAlias"
+                        | "typing._UnpackGenericAlias"
+                ) =>
+        {
+            generic_alias_method(ctx, name)?
+        }
+        Value::Native(class) if name == "__iter__" && class == "typing._CallableGenericAlias" => {
+            NONE
+        }
+        Value::GenericAlias(alias) if name == "__iter__" && alias.kind == AliasKind::Callable => {
+            NONE
+        }
+        Value::GenericAlias(alias) if name == "__iter__" && alias.kind.iterates_unpack() => {
+            let class = ctx.builtin(alias.kind.class());
+            return Some(
+                ctx.lookup_attr(class, name)
+                    .and_then(|method| ctx.bind_attribute(method, value, class)),
+            );
+        }
         Value::Native(class) if class == "collections.abc._CallableGenericAlias"
             && matches!(name, "__base__" | "__bases__" | "__mro__") =>
         {

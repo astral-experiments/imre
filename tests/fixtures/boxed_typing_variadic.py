@@ -108,6 +108,25 @@ def current():
 
     from typing import Generic
     class Pack(Generic[*ts]): pass
+
+    import typing
+    from types import GeneratorType
+    from typing import Concatenate, Literal
+
+    for alias in (Pack[int, str], List[int], Literal[1], Concatenate[int, p], unpacked):
+        it = alias.__iter__()
+        assert type(it) is GeneratorType and iter(it) is it
+        assert next(it) is Unpack[alias] and next(it, None) is None
+        assert (*alias,) == (Unpack[alias],)
+    assert vararg_annotation(Pack[int, str]) is Unpack[Pack[int, str]]
+    assert Callable[[int], str].__iter__ is None
+    it = iter(Pack[int, str])
+    try:
+        typing.Unpack = {Pack[int, str]: "late lookup"}
+        assert next(it) == "late lookup"
+    finally:
+        typing.Unpack = Unpack
+
     u = TypeVar("U")
     class Mixed(Generic[t, *ts, u]): pass
     class Fixed(Generic[t, u]): pass
