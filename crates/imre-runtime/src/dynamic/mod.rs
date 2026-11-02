@@ -123,6 +123,7 @@ pub(crate) struct Context {
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
     codec_entries: stdlib::codecs::Registry,
     frozen_override: i32,
+    // The interpreter keeps its original dictionary even when Python reassigns sys.modules.
     modules: Id,
     classes: HashMap<String, Id>,
     typing: typing::Registry,
@@ -1904,9 +1905,28 @@ impl Context {
         Ok(index.map(|i| self.stored_entries(self.modules)[i].1))
     }
 
+    fn public_modules(&mut self) -> Result<Id> {
+        match self.threads.system_module {
+            Some(sys) => self.lookup_attr(sys, "modules"),
+            None => Ok(self.modules),
+        }
+    }
+
+    fn public_registered_module(&mut self, name: Id) -> Result<Option<Id>> {
+        let modules = self.public_modules()?;
+        if matches!(self.heap.get(modules), Value::Dict(_)) {
+            let (_, index) = self.find_dictionary_key(modules, name, None)?;
+            return Ok(index.map(|i| self.stored_entries(modules)[i].1));
+        }
+        let get = self.lookup_attr(modules, "get")?;
+        let missing = self.alloc(Value::List(Vec::new()));
+        let value = self.call(get, vec![name, missing], Vec::new())?;
+        Ok((value != missing).then_some(value))
+    }
+
     fn cached_import(&mut self, name: &str) -> Result<Option<Id>> {
         let key = self.text(name);
-        match self.registered_module(key)? {
+        match self.public_registered_module(key)? {
             Some(NONE) => Err(Error::new(
                 "ModuleNotFoundError",
                 format!("import of {name} halted; None in sys.modules"),
@@ -1918,10 +1938,17 @@ impl Context {
 
     fn publish_module(&mut self, name: &str, module: Id) -> Result<()> {
         let key = self.text(name);
-        self.put_item(self.modules, key, module)
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, module)
     }
 
     fn module(&mut self, name: &str) -> Result<Id> {
+        let key = self.text(name);
+        if let Some(module) = self.registered_module(key)?
+            && module != NONE
+        {
+            return Ok(module);
+        }
         self.find_module(name)?
             .ok_or_else(|| Self::missing_module(name))
     }
@@ -2070,14 +2097,22 @@ impl Context {
             constructor: None,
         });
         let key = self.text(name);
-        self.put_item(self.modules, key, module)?;
-        if let Err(e) = self.run_initializer(name, module, scope, name_id, origin, source) {
-            // The executing script remains importable during interpreter shutdown,
-            // including after SystemExit or an uncaught exception.
-            if name != "__main__" {
-                builtins::remove_dict_item(self, self.modules, key)?;
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, module)?;
+        if let Err(error) = self.run_initializer(name, module, scope, name_id, origin, source) {
+            // The executing script remains importable during interpreter shutdown.
+            if name == "__main__" {
+                return Err(error);
             }
-            return Err(e);
+            let exception = self.raised_instance(error);
+            self.with_import_exception(exception, |ctx| {
+                let modules = ctx.public_modules()?;
+                match ctx.delete_item(modules, key) {
+                    Err(error) if ctx.is_builtin_error(&error, "KeyError") => Ok(()),
+                    result => result,
+                }
+            })?;
+            return self.op("reraise", exception, NONE, NONE).map(Some);
         }
         // A script can delete its own __main__ binding. Its exit status is determined by the script.
         if name == "__main__" {
@@ -2085,13 +2120,56 @@ impl Context {
         }
         // An initializer can replace its own registry entry. The successful import
         // returns that value and moves its binding after the dependencies it imported.
-        let loaded = self.get_item(self.modules, key)?;
-        self.delete_item(self.modules, key)?;
-        self.put_item(self.modules, key, loaded)?;
-        if let Some((parent, child)) = parent {
-            self.set_attr(parent, child, loaded)?;
+        let modules = self.public_modules()?;
+        let pop = self.lookup_attr(modules, "pop")?;
+        let loaded = self.call(pop, vec![key], Vec::new())?;
+        self.heap.keep(loaded);
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, loaded)?;
+        if let Some((parent_name, child)) = name.rsplit_once('.') {
+            let modules = self.public_modules()?;
+            let parent_key = self.text(parent_name);
+            let parent = self.get_item(modules, parent_key)?;
+            if let Err(error) = self.set_attr(parent, child, loaded) {
+                if !self.is_attribute_error(&error) {
+                    return Err(error);
+                }
+                let exception = self.raised_instance(error);
+                self.with_import_exception(exception, |ctx| {
+                    ctx.emit_builtin_warning(
+                        crate::objects::exceptions::Kind::ImportWarning,
+                        &format!(
+                            "Cannot set an attribute on {} for child module {}",
+                            string_repr(parent_name),
+                            string_repr(child)
+                        ),
+                        1,
+                    )
+                })?;
+            }
         }
         Ok(Some(loaded))
+    }
+
+    /// Run an importlib exception handler with its caught exception visible to Python callbacks.
+    fn with_import_exception(
+        &mut self,
+        exception: Id,
+        handler: impl FnOnce(&mut Self) -> Result<()>,
+    ) -> Result<()> {
+        self.heap.reserve_temporaries(1)?;
+        let previous = self.heap.replace_active(exception);
+        self.heap.keep(previous);
+        let result = handler(self);
+        self.heap.replace_active(previous);
+        result.map_err(|mut error| {
+            if error.context == NONE
+                && error.trace.as_ref().and_then(|t| t.instance) != Some(exception)
+            {
+                error.context = exception;
+            }
+            error
+        })
     }
 
     fn run_initializer(
@@ -2224,7 +2302,9 @@ impl Context {
                 stdlib::readiness::initialize(self, scope)?;
             }
             "sys" => {
-                self.bind(scope, "modules", self.modules);
+                if self.threads.system_module.is_none() {
+                    self.bind(scope, "modules", self.modules);
+                }
                 for name in [
                     "audit",
                     "addaudithook",
