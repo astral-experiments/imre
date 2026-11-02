@@ -16,7 +16,17 @@ from _imre_importlib import (
 from os import fspath as _fspath, sep
 
 
-SOURCE_SUFFIXES = [".py", ".pyw"] if sys.platform == "win32" else [".py"]
+_MS_WINDOWS = sys.platform == "win32"
+if _MS_WINDOWS:
+    import nt as _os
+    path_separators = "\\/"
+else:
+    import posix as _os
+    path_separators = "/"
+path_sep = path_separators[0]
+path_sep_tuple = tuple(path_separators)
+
+SOURCE_SUFFIXES = [".py", ".pyw"] if _MS_WINDOWS else [".py"]
 BYTECODE_SUFFIXES = [".pyc"]
 EXTENSION_SUFFIXES = _imp.extension_suffixes()
 
@@ -196,3 +206,12 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
             return code
         source = self.get_data(path)
         return self.source_to_code(source, path)
+
+
+def _file_loader_defaults(location):
+    """Choose a default loader when a FileFinder factory returns None."""
+    if location.endswith(tuple(_imp.extension_suffixes())):
+        raise NotImplementedError("default extension file loaders are unsupported")
+    yield SourceFileLoader, SOURCE_SUFFIXES
+    if location.endswith(tuple(BYTECODE_SUFFIXES)):
+        raise NotImplementedError("default bytecode file loaders are unsupported")
