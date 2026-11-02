@@ -436,7 +436,7 @@ pub(super) fn module_call(
     let string = string.ok_or_else(|| missing("string"))?;
     let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
     if name == "re.search" {
-        return search(ctx, &[pattern, string], &[]);
+        return search(ctx, "search", &[pattern, string], &[]);
     }
     call(ctx, name, &[pattern, string])
 }
@@ -530,10 +530,15 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
 }
 
 /// Convert the Python character bounds before searching the original UTF-8 text.
-pub(super) fn search(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+pub(super) fn search(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
     let receiver = argument(args, 0)?;
     let [string, pos, endpos] = crate::dynamic::builtins::bind_method_arguments(
-        "search",
+        method,
         &args[1..],
         kwargs,
         ["string", "pos", "endpos"],
@@ -542,7 +547,7 @@ pub(super) fn search(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
     let string = string.ok_or_else(|| {
         Error::new(
             "TypeError",
-            "search() missing required argument 'string' (pos 1)",
+            format!("{method}() missing required argument 'string' (pos 1)"),
         )
     })?;
     let mut index = |arg| -> Result<usize> {
@@ -585,10 +590,32 @@ pub(super) fn search(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
     };
     let (start, end) = (byte(start), byte(end));
     if start > end {
+        // CPython can still match an empty alternative past endpos, while a
+        // zero-minimum repeat can fail there. An empty slice loses that distinction.
+        if method == "match"
+            && !regex_automata::util::syntax::parse_with(
+                &pattern.engine_source,
+                &syntax(pattern.bytes, pattern.flags),
+            )
+            .is_ok_and(|hir| hir.properties().minimum_len() != Some(0))
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "zero-width matching with pos past endpos is unsupported",
+            ));
+        }
         return Ok(NONE);
     }
-    capture(ctx, &pattern.regex, pattern.bytes, string, |text| {
-        Input::new(&text[..end]).range(start..end)
+    let matcher = pattern
+        .matcher(method == "fullmatch")
+        .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?;
+    let anchored = if method == "search" {
+        Anchored::No
+    } else {
+        Anchored::Yes
+    };
+    capture(ctx, matcher, pattern.bytes, string, |text| {
+        Input::new(&text[..end]).range(start..end).anchored(anchored)
     })
 }
 
@@ -626,11 +653,11 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     };
     let pattern = Rc::clone(pattern);
     let regex = pattern
-        .matcher(matches!(name, "pattern.fullmatch" | "re.fullmatch"))
+        .matcher(name == "re.fullmatch")
         .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?;
     let subject = argument(args, 1)?;
     match name {
-        "re.match" | "pattern.match" | "re.fullmatch" | "pattern.fullmatch" => {
+        "re.match" | "re.fullmatch" => {
             capture(ctx, regex, pattern.bytes, subject, |text| {
                 Input::new(text).anchored(Anchored::Yes)
             })
