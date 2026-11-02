@@ -1975,7 +1975,7 @@ def report(text):
                 compare("-IOOB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_interactive.py":
                 for stdio in ("utf-8:strict", "utf-8:surrogateescape", "ascii:surrogateescape",
-                              "cp1251:surrogateescape", "utf-8-sig:strict"):
+                              "cp1251:surrogateescape", "utf-8-sig:strict", "ascii:replace", "ascii:ignore"):
                     compare("-B", "-c", imports + "arithmetic.original_stream()",
                             extra={"PYTHONIOENCODING": stdio})
                 for hook in (False, True):

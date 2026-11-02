@@ -279,12 +279,13 @@ pub(in crate::dynamic) fn encode_text(
         {
             ctx.encode_single_byte_codepoints(id, codec, errors == "surrogateescape")
         }
-        StrEncoder::Registered(codec) if errors == "backslashreplace" => {
-            // Escape lone surrogates first, then encode the remaining scalars and the
-            // replacements in the target code page.
-            let escaped = ctx.encode_utf8_codepoints(id, false, "backslashreplace")?;
-            let text = std::str::from_utf8(&escaped).expect("backslash replacement is scalar text");
-            Ok(Codec::encode_str(text, codec.name(), "backslashreplace")?)
+        StrEncoder::Registered(codec)
+            if matches!(errors.as_str(), "ignore" | "replace" | "backslashreplace") =>
+        {
+            // Apply the built-in handler to lone surrogates, then encode the scalar result.
+            let replaced = ctx.encode_utf8_codepoints(id, false, &errors)?;
+            let text = std::str::from_utf8(&replaced).expect("these handlers produce scalar text");
+            Ok(StrEncoder::Registered(codec).encode_str(text, &errors)?)
         }
         _ => Err(Error::new(
             "NotImplementedError",
