@@ -101,6 +101,9 @@ impl BuiltinDescriptor {
                 Some((defaultdict::CLASS, attr, defaultdict::METHODS))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("anext_awaitable", attr)) => {
+                Some(("anext_awaitable", attr, generator_protocol::ANEXT_METHODS))
+            }
             Some(("mappingproxy", attr)) => {
                 Some(("mappingproxy", attr, builtins::MAPPING_PROXY_METHODS))
             }
@@ -349,6 +352,7 @@ impl BuiltinDescriptor {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
+            "anext_awaitable" => matches!(ctx.heap.get(receiver), Value::ANextAwaitable { .. }),
             owner if typing::ParameterClass::lookup(owner).is_some() => {
                 ctx.builtin_type_name(receiver) == Some(owner)
             }

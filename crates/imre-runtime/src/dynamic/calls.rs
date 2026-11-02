@@ -13,6 +13,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | HashState::XOF_CLASS
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
+            | "anext_awaitable"
             | value::REGEX_PATTERN_TYPE
             | value::REGEX_MATCH_TYPE
             | value::REGEX_SCANNER_TYPE
@@ -5960,6 +5961,10 @@ impl Context {
             {
                 stdlib::pickle::object_reduce(self, &name["object.".len()..], &args, &kwargs)
             }
+            Value::Native(name) if nonconstructible_result_type(&name) => Err(Error::new(
+                "TypeError",
+                format!("cannot create '{name}' instances"),
+            )),
             Value::Native(name)
                 if builtins::is_builtin(&name)
                     || builtins::constructor_owner(&name)
@@ -5996,6 +6001,7 @@ impl Context {
                                 | "generator"
                                 | "coroutine"
                                 | "coroutine_wrapper"
+                                | "anext_awaitable"
                                 | "dict"
                                 | "list"
                                 | "map"
@@ -6025,10 +6031,6 @@ impl Context {
             {
                 builtins::call(self, &name, &args, &kwargs)
             }
-            Value::Native(name) if nonconstructible_result_type(&name) => Err(Error::new(
-                "TypeError",
-                format!("cannot create '{name}' instances"),
-            )),
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs)
                 .map_err(|error| stdlib::io::qualify_error(self, error, None)),
             Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),

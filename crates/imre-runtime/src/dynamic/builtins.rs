@@ -114,6 +114,7 @@ const FUNCTIONS: &[&str] = &[
     "eval",
     "iter",
     "next",
+    "anext",
 ];
 
 const TYPES: &[&str] = &[
@@ -322,6 +323,7 @@ pub(super) fn is_final_iterator_type(name: &str) -> bool {
         "iterator"
             | "generator"
             | "coroutine_wrapper"
+            | "anext_awaitable"
             | "list_iterator"
             | "list_reverseiterator"
             | "tuple_iterator"
@@ -592,6 +594,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             if super::generator_protocol::coroutine_method("coroutine_wrapper", attr) =>
         {
             "coroutine_wrapper"
+        }
+        Value::ANextAwaitable { .. }
+            if super::generator_protocol::coroutine_method("anext_awaitable", attr) =>
+        {
+            "anext_awaitable"
         }
         Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
@@ -1488,6 +1495,16 @@ pub(super) fn call(
                     _ => Err(type_error("type.__init__() takes 1 or 3 arguments")),
                 }
             }
+            "anext_awaitable" => {
+                positional(name, kwargs)?;
+                let (min, max) = match method {
+                    "send" => (2, 2),
+                    "throw" => (1, usize::MAX),
+                    _ => (1, 1),
+                };
+                arity(name, args, min, max)?;
+                ctx.call_anext_method(method, args)
+            }
             "coroutine" | "coroutine_wrapper" => {
                 positional(name, kwargs)?;
                 let (min, max) = match method {
@@ -2019,7 +2036,7 @@ pub(super) fn call(
             };
             Ok(ctx.int(i64::from(code)))
         }
-        "iter" | "next" => {
+        "iter" | "next" | "anext" => {
             if !kwargs.is_empty() {
                 return Err(type_error(format!("{name}() takes no keyword arguments")));
             }
@@ -2027,6 +2044,19 @@ pub(super) fn call(
                 [] => Err(type_error(format!(
                     "{name} expected at least 1 argument, got 0"
                 ))),
+                [iterator, ..] if name == "anext" && args.len() <= 2 => {
+                    let Some(method) = ctx.bound_slot(*iterator, "__anext__")? else {
+                        return Err(type_error(format!(
+                            "'{:.200}' object is not an async iterator",
+                            ctx.type_name(*iterator)
+                        )));
+                    };
+                    let wrapped = ctx.call(method, Vec::new(), Vec::new())?;
+                    match args.get(1) {
+                        Some(&default) => Ok(ctx.alloc(Value::ANextAwaitable { wrapped, default })),
+                        None => Ok(wrapped),
+                    }
+                }
                 [iterable] if name == "iter" => ctx.iterator(*iterable),
                 [iterator] => ctx
                     .next_result(*iterator)?

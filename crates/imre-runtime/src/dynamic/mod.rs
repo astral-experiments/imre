@@ -670,6 +670,7 @@ impl Context {
                 | Value::FormatIterator { .. }
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
+                | Value::ANextAwaitable { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -832,6 +833,7 @@ impl Context {
                 | Value::Zip { .. }
                 | Value::Generator { .. }
                 | Value::CoroutineWrapper(_)
+                | Value::ANextAwaitable { .. }
                 | Value::BufferedRandom(..)
                 | Value::File(_)
                 | Value::TextFile(_)
@@ -1135,6 +1137,9 @@ impl Context {
             }
             return self.with_weak_target(target, |ctx| ctx.next_item(target));
         }
+        if matches!(self.heap.get(id), Value::ANextAwaitable { .. }) {
+            return self.call_anext_method("__next__", &[id]).map(Some);
+        }
         if matches!(self.heap.get(id), Value::CoroutineWrapper(_)) {
             return self
                 .call_coroutine_method("coroutine_wrapper", "__next__", &[id])
@@ -1420,6 +1425,7 @@ impl Context {
             self.heap.get(id),
             Value::AstWalk { .. }
                 | Value::Template { .. }
+                | Value::ANextAwaitable { .. }
                 | Value::TemplateIter { .. }
                 | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
