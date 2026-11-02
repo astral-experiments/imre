@@ -1702,6 +1702,14 @@ impl Context {
                 self.builtins.insert(format!("{name}.{field}"), id);
             }
         }
+        if name == "datetime.timezone" {
+            stdlib::datetime::utc(self);
+            for (field, max) in [("min", false), ("max", true)] {
+                let value = crate::objects::Calendar::zone_limit(max);
+                let id = stdlib::datetime::store(self, value, NONE);
+                self.builtins.insert(format!("{name}.{field}"), id);
+            }
+        }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
             self.builtin(builtins::exception_initializer(name));

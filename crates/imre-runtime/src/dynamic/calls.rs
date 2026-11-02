@@ -253,6 +253,7 @@ impl Context {
                         | weakref::REFERENCE_TYPE
                 ) || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
+                    || (kind == "datetime.timezone" && matches!(name, "utc" | "min" | "max"))
                     || (kind == "function" && name == "__call__")
                     || (kind == "set" && name == "update")
                     || (matches!(name, "__repr__" | "__reduce__" | "issubset")
@@ -1067,6 +1068,7 @@ impl Context {
                             | "datetime.datetime"
                             | "datetime.time"
                             | "datetime.timedelta"
+                            | "datetime.timezone"
                             | "collections.defaultdict"
                             | "_contextvars.Context"
                             | "_contextvars.ContextVar"
@@ -1627,7 +1629,7 @@ impl Context {
             return self.bind_attribute(member, obj, meta);
         }
         if let Value::Native(kind) = self.heap.get(obj)
-            && stdlib::datetime::members(kind).is_some()
+            && (kind == "datetime.timezone" || stdlib::datetime::members(kind).is_some())
             && let Some(value) = self.class_attr(obj, name)
         {
             return Ok(value);
@@ -2561,9 +2563,6 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::Native(ref class) if class == "datetime.timezone" && name == "utc" => {
-                return Ok(stdlib::datetime::utc(self));
-            }
             Value::MappingProxy(_)
                 if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
             {
@@ -3295,6 +3294,18 @@ impl Context {
         }
     }
 
+    fn check_zone_constant_write(&self, obj: Id, name: &str) -> Result<()> {
+        if matches!(name, "utc" | "min" | "max")
+            && matches!(self.heap.get(obj), Value::Calendar { value, .. } if value.class() == "timezone")
+        {
+            return Err(Error::new(
+                "AttributeError",
+                format!("'datetime.timezone' object attribute '{name}' is read-only"),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         if let Value::Native(class) = self.heap.get(obj)
             && HashState::is_provider_class(class)
@@ -3315,6 +3326,7 @@ impl Context {
         name: &str,
         original: Option<Id>,
     ) -> Result<()> {
+        self.check_zone_constant_write(obj, name)?;
         let obj = self.weak_proxy_target(obj)?;
         if matches!(self.heap.get(obj), Value::DirEntry(_)) && matches!(name, "name" | "path") {
             return Err(Error::new("AttributeError", "readonly attribute"));
@@ -3826,6 +3838,7 @@ impl Context {
         original: Option<Id>,
         value: Id,
     ) -> Result<()> {
+        self.check_zone_constant_write(obj, name)?;
         let obj = self.weak_proxy_target(obj)?;
         if matches!(self.heap.get(obj), Value::DirEntry(_)) && matches!(name, "name" | "path") {
             return Err(Error::new("AttributeError", "readonly attribute"));

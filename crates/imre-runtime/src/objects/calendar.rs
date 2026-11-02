@@ -48,15 +48,19 @@ pub unsafe extern "C" fn imre_calendar_zoneoffset(z: *const Object) -> *const Ob
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_calendar_zone_limit(max: bool) -> *const Object {
+    crate::ObjectOwner::into_raw(zone_limit(max))
+}
+
+fn zone_limit(max: bool) -> crate::ObjectOwner {
     thread_local! {
         static MIN:crate::ObjectOwner=owner(Value::Zone{offset:owner(Value::Delta(-86_340_000_000)),name:None});
         static MAX:crate::ObjectOwner=owner(Value::Zone{offset:owner(Value::Delta(86_340_000_000)),name:None});
     }
-    crate::ObjectOwner::into_raw(if max {
+    if max {
         MAX.with(crate::ObjectOwner::clone)
     } else {
         MIN.with(crate::ObjectOwner::clone)
-    })
+    }
 }
 /// # Safety
 /// The rooted objects have the same exact calendar class. Naive/aware ordering raises.

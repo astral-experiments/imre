@@ -320,6 +320,9 @@ impl Checker<'_> {
         a: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = a.attr.as_str();
+        if kind == C::Zone && matches!(name, "min" | "max" | "utc") {
+            return Err(self.object_runtime_export("timezone instance constant", a));
+        }
         if kind == C::DateTime && name == "tzinfo" {
             let ty = self.types.optional(Type::Calendar(C::Zone));
             return Ok(op(Op::TzInfo, ty, vec![recv]));
