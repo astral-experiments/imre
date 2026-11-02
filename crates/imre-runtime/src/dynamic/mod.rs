@@ -2722,7 +2722,7 @@ impl Context {
                     "_filterfalse_allocate",
                     "_filterfalse_state",
                     "_chain_allocate",
-                    "_chain_get",
+                    "_chain_next",
                     "_chain_set",
                 ] {
                     let value = self.builtin(&format!("{name}.{attr}"));
