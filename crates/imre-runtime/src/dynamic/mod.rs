@@ -269,8 +269,8 @@ impl Context {
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
             (weakref::PROXY_TYPE, Value::Weak(wr)) => wr.kind == weakref::Kind::Proxy,
-            ("builtin_function_or_method", _) => {
-                self.builtin_type_name(object) == Some("builtin_function_or_method")
+            ("builtin_function_or_method" | "method", _) => {
+                self.builtin_type_name(object) == Some(owner)
             }
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
                 true
@@ -2203,7 +2203,7 @@ impl Context {
             ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
-            "builtin_function_or_method" => &["__reduce__"],
+            "builtin_function_or_method" | "method" => &["__reduce__"],
             defaultdict::CLASS => {
                 self.builtin("dict");
                 defaultdict::METHODS

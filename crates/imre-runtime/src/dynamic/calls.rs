@@ -377,7 +377,7 @@ impl Context {
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")
-                    || (kind == "builtin_function_or_method" && name == "__reduce__") =>
+                    || (matches!(kind.as_str(), "builtin_function_or_method" | "method") && name == "__reduce__") =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -2178,18 +2178,22 @@ impl Context {
         if let Some(value) = self.os_attribute(obj, name)? {
             return Ok(value);
         }
-        match *self.heap.get(obj) {
-            Value::Method { .. } | Value::Native(_)
-                if matches!(name, "__reduce__" | "__reduce_ex__")
-                    && (self.builtin_type_name(obj) == Some("builtin_function_or_method")
-                        || matches!(self.heap.get(obj), Value::Native(class) if class == "builtin_function_or_method")) =>
-            {
-                let class = self.builtin("builtin_function_or_method");
-                if let Some(member) = self.class_attr(class, name) {
-                    let receiver = if obj == class { NONE } else { obj };
-                    return self.bind_attribute(member, receiver, class);
+        if matches!(name, "__reduce__" | "__reduce_ex__") {
+            let class = match self.heap.get(obj) {
+                Value::Native(kind) if matches!(kind.as_str(), "method" | "builtin_function_or_method") => Some(obj),
+                Value::Method { .. } | Value::Native(_)
+                    if matches!(self.builtin_type_name(obj), Some("method" | "builtin_function_or_method")) =>
+                {
+                    Some(self.exact_type(obj)?)
                 }
+                _ => None,
+            };
+            if let Some(class) = class && let Some(member) = self.class_attr(class, name) {
+                let receiver = if obj == class { NONE } else { obj };
+                return self.bind_attribute(member, receiver, class);
             }
+        }
+        match *self.heap.get(obj) {
             Value::Complex(z) if matches!(name, "real" | "imag") => {
                 return Ok(self.alloc(Value::Float(if name == "real" { z.real } else { z.imag })));
             }
@@ -6059,6 +6063,7 @@ impl Context {
                     || matches!(
                         name.as_str(),
                         "builtin_function_or_method.__reduce__"
+                            | "method.__reduce__"
                             | "type.__init__"
                             | "BaseException.__init__"
                             | "BaseException.add_note"
