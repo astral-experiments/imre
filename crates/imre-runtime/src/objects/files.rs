@@ -365,7 +365,7 @@ impl FileState {
     }
 
     /// BufferedWriter.read converts its count to a C int before rejecting the access mode.
-    pub(crate) fn check_writer_read_size(value: &Int) -> Result<()> {
+    fn check_writer_read_size(value: &Int) -> Result<()> {
         value
             .to_i64()
             .and_then(|value| i32::try_from(value).ok())
