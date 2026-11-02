@@ -623,6 +623,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     argv: *const *const c_char,
     config: *const c_char,
 ) -> *mut Context {
+    crate::initialize_io();
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
