@@ -1127,20 +1127,6 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     finish_at(ctx, result, unsafe { span.as_ref() })
 }
 
-/// Accept calls from native objects generated before lexical call scopes were passed.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_call_at(
-    ctx: *mut Context,
-    callable: Id,
-    args: Id,
-    kwargs: Id,
-    mark: usize,
-    span: *const [u32; 4],
-) -> Id {
-    // SAFETY: both entry points accept the same context, operands, mark and optional position.
-    unsafe { imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, NONE) }
-}
-
 /// Invoke a compiled call using the root mark taken before its operands were evaluated.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
