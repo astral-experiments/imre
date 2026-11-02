@@ -1693,8 +1693,8 @@ pub(super) fn call(
         return os::stat::construct(ctx, layout, args, kwargs);
     }
     #[cfg(target_os = "linux")]
-    if name == "posix.pipe2" {
-        return os::descriptor(ctx, "pipe2", args, kwargs);
+    if let Some(op @ ("pipe2" | "ptsname")) = name.strip_prefix("posix.") {
+        return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if let Some(op @ ("statvfs" | "fstatvfs")) = name.strip_prefix("posix.") {

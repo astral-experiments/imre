@@ -1043,6 +1043,23 @@ pub(super) fn descriptor(
         ));
     }
     #[cfg(target_os = "linux")]
+    if name == "ptsname" {
+        let [fd] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.ptsname() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        stat::warn_bool_fd(ctx, *fd)?;
+        let fd = super::select::fd(ctx, *fd)?;
+        let bytes = native::ptsname(fd).map_err(super::os_error)?;
+        let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        return Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?));
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix_fadvise" {
         let [fd, offset, length, advice] = args else {
             return Err(Error::new(
