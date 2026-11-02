@@ -1,3 +1,5 @@
+import gc
+import weakref
 from threading import local
 
 
@@ -53,4 +55,16 @@ def current():
     marker = object()
     active = Child(marker, token=marker)
     assert active.values[0] is active.values[1] is marker
-    assert local.__new__(Child, marker, token=marker).__dict__ == {}
+    class Token:
+        pass
+
+    first, second = Token(), Token()
+    first_ref, second_ref = weakref.ref(first), weakref.ref(second)
+    raw = local.__new__(Child, first, token=second)
+    assert raw.__dict__ == {}
+    del first, second
+    gc.collect()
+    assert first_ref() is not None and second_ref() is not None
+    del raw
+    gc.collect()
+    assert first_ref() is None and second_ref() is None

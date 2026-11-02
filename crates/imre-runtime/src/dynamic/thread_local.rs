@@ -66,6 +66,17 @@ impl<'a> Name<'a> {
     }
 }
 
+fn copy_keywords(keywords: &[(String, Id)]) -> Result<Vec<(String, Id)>> {
+    let mut copied = Vec::new();
+    copied
+        .try_reserve_exact(keywords.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for (name, value) in keywords {
+        copied.push((super::copy_label(name)?, *value));
+    }
+    Ok(copied)
+}
+
 /// Allocate a local with its real subclass and a distinct dictionary for the creating thread.
 pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let Some((&class, args)) = args.split_first() else {
@@ -86,11 +97,11 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
     }
     // The normal class call runs the creator's __init__ after __new__ returns.
     let mut local = Dictionaries {
-        args: args.to_vec(),
-        kwargs: kwargs.to_vec(),
+        args: super::copy_ids(args)?,
+        kwargs: copy_keywords(kwargs)?,
         ..Default::default()
     };
-    local.insert(ctx.dict(Vec::new()));
+    local.insert(ctx.dict(Vec::new()))?;
     let storage = ctx.alloc(Value::ThreadLocal(local));
     if class == base {
         return Ok(storage);
@@ -175,9 +186,13 @@ impl Dictionaries {
         })
     }
 
-    fn insert(&mut self, dict: Id) {
+    fn insert(&mut self, dict: Id) -> Result<()> {
         self.threads.retain(|(owner, _)| owner.strong_count() != 0);
+        self.threads
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
         self.threads.push((THREAD.with(Arc::downgrade), dict));
+        Ok(())
     }
 
     pub(super) fn live(&self) -> impl Iterator<Item = Id> {
@@ -205,27 +220,32 @@ impl Context {
         if let Some(dict) = local.current() {
             return Ok(dict);
         }
+        let initializer = if let Some(class) = self.heap.get(obj).instance_class()
+            && let Some(init) = self.local_initializer(class)
+        {
+            Some((
+                class,
+                init,
+                super::copy_ids(&local.args)?,
+                copy_keywords(&local.kwargs)?,
+            ))
+        } else {
+            None
+        };
         let dict = self.dict(Vec::new());
         let Value::ThreadLocal(local) = self.heap.get_mut(storage) else {
             unreachable!()
         };
         // Recursive access in __init__ must see this thread's in-progress dictionary.
-        local.insert(dict);
-        if let Some(class) = self.heap.get(obj).instance_class()
-            && let Some(init) = self.local_initializer(class)
+        local.insert(dict)?;
+        if let Some((class, init, args, kwargs)) = initializer
+            && let Err(error) = self.call_initializer(init, obj, class, args, kwargs)
         {
-            let Value::ThreadLocal(local) = self.heap.get(storage) else {
+            let Value::ThreadLocal(local) = self.heap.get_mut(storage) else {
                 unreachable!()
             };
-            let args = local.args.clone();
-            let kwargs = local.kwargs.clone();
-            if let Err(error) = self.call_initializer(init, obj, class, args, kwargs) {
-                let Value::ThreadLocal(local) = self.heap.get_mut(storage) else {
-                    unreachable!()
-                };
-                local.threads.retain(|&(_, id)| id != dict);
-                return Err(error);
-            }
+            local.threads.retain(|&(_, id)| id != dict);
+            return Err(error);
         }
         Ok(dict)
     }
@@ -390,13 +410,13 @@ mod tests {
         let (worker, worker_probe) = dictionary();
         let local = Mutex::new(Dictionaries::default());
         let ready = Barrier::new(2);
-        local.lock().unwrap().insert(parent);
+        local.lock().unwrap().insert(parent).unwrap();
         std::thread::scope(|scope| {
             let handle = scope.spawn(|| {
                 {
                     let mut local = local.lock().unwrap();
                     assert_eq!(local.current(), None);
-                    local.insert(worker);
+                    local.insert(worker).unwrap();
                 }
                 ready.wait();
                 assert_eq!(local.lock().unwrap().current(), Some(worker));
