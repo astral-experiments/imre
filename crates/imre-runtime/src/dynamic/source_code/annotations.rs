@@ -90,7 +90,11 @@ impl Program {
                 .into();
             }
         }
-        let mut provider = Program::new(self.filename.clone(), "__annotate__");
+        let mut provider = Program::new(
+            self.filename.clone(),
+            "__annotate__",
+            self.has_named_bindings,
+        );
         provider.qualname = format!("{}.__annotate__", body.qualname);
         provider.first_line = line;
         provider.method_imports = self.method_imports.clone();
