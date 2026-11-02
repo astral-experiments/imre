@@ -1,5 +1,25 @@
 # User codec registry and the intact CTextIOWrapperTest
 
+## Final class replay
+
+**45 of the 82 originals passed cleanly at both native O0 and O3** on public 0c9885cf2953271a30a7a40b7ac2f5a8bf4f76db. Linux CPython 3.14.5 at 5607950ef232dad16d75c0cf53101d9649d89115 passed all 82. Both native runs registered the intact class and reached the 180-second silence bound at module ordinal 510. The other 44 positive cases were independently confirmed in clean subsets. The slow original subsequently passed in a fresh process at both levels, taking 544.780 seconds at O0 and 275.903 seconds at O3.
+
+| Verified outcome | O0 | O3 |
+|---|---:|---:|
+| Stock-matched success | 45 | 45 |
+| Error in the original body | 28 | 28 |
+| Assertion failure in the original body | 8 | 8 |
+| Original with six subtest errors | 1 | 1 |
+| Skip or unattempted original | 0 | 0 |
+
+The registry fix in #4010 and public build repair in #4033 enabled the 82 bodies. The separately verified #4034 preserves a live read-only view for direct bytearray decoder input. The custom decoder provider works, but module ordinal 511 still reaches a body error opening a real file with that registered codec. Its exact reproduction was delivered to the owner of #3956.
+
+- [Full 82-row crosswalk](imre-codec-intact-cwrapper-0c9885cf-extended.tsv). SHA-256 `ad492efc0bb66961ebab855335d2a260a970d41a1dfb5bc001ca4dd032e8fb8f`.
+- [Portable evidence bundle](imre-codec-public-0c9885cf.tar.gz), 815,770 bytes. SHA-256 `217a60b947f5c7bab8eee6b35ce24cb16efbbb05297e2529ccf80a385e4e5de7`.
+- [Independent compact crosswalk and verification](imre-cwrapper-summary-0c9885cf-extended.tar.gz), 11,838 bytes. SHA-256 `22c1febee783701b930b7c1bc5ec1d0a59c061392b807d631bc4ce7763d0ef40`.
+
+## Checkpoints
+
 The stock reference is Linux CPython 3.14.5 at 5607950ef232dad16d75c0cf53101d9649d89115. The source-pinned native public baseline 36c4f334e96c3bb5a8270ff8f8c85808715fec6d appears in the earlier buffered-rw-pair class packet. It registered all 82, then errored on the missing codecs.register during every setUp.
 
 Development revision 9d54510b5601917481fc2a6c228cdccd2e11eba0 adds the first codec search path on public parent a23a577bcd59a7322af266ff9ec4e8f569f2f929. Its focused archive preserves the 3.14.5 reference and both native optimization levels. It separates the accepted four-tuple path, callback lifetime and cache behavior from the enabled original lookupTestDecoder callback, which still raised AttributeError on the missing CodecInfo constructor at that revision. Supplemental controls do not count as original class cases.
