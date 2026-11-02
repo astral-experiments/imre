@@ -444,6 +444,10 @@ impl Context {
                 let cursor = deque::iterator(id, ring, false);
                 return Ok(self.alloc(cursor));
             }
+            Value::TypeVarTuple { .. } => {
+                let unpacked = typing::unpack_parameter(self, id)?;
+                (self.alloc(Value::Tuple(vec![unpacked])), "tuple_iterator")
+            }
             Value::Array(_) => (id, "array.arrayiterator"),
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),
@@ -1076,6 +1080,9 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
+        if matches!(self.heap.get(id), Value::TypeVarTuple { .. }) {
+            return Ok(vec![typing::unpack_parameter(self, id)?]);
+        }
         if matches!(self.heap.get(id), Value::Generator { .. }) {
             let buffer = self.collect_generator(id, false)?;
             let Value::List(items) = self.heap.get_mut(buffer) else {
