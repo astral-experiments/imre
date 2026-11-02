@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 pub(crate) use imre_ast::exceptions::builtin_id as exception_kind;
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::classes::Classes;
 use crate::ir::{self, Binary, Builtin, Compare, Expr, ExprKind, RegexCapture, Statement, Type};
@@ -504,6 +504,18 @@ fn pattern_elements(target: &ast::Expr) -> Option<&[ast::Expr]> {
     }
 }
 
+fn fault_frame_statement(file: String, name: &str, line: u32) -> Statement {
+    let frame = Builtin::FaultFrame {
+        file,
+        name: name.to_owned(),
+        line,
+    };
+    Statement::Expr(Expr {
+        ty: Type::None,
+        kind: ExprKind::Builtin(frame, vec![]),
+    })
+}
+
 /// Resolves the project-wide call graph without changing source-level namespaces.
 #[cfg(test)]
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
@@ -966,6 +978,7 @@ pub(crate) fn lower_with_caller_cache(
                     })
                 })
                 .collect::<Vec<_>>();
+            checker.fault_frame(&mut startup, "<module>", TextSize::default());
             startup.append(&mut body);
             entry = Some(ir::Function {
                 params: Vec::new(),
@@ -978,6 +991,10 @@ pub(crate) fn lower_with_caller_cache(
     if let Some(error) = graph.deferred_object_error.take() {
         return Err(error);
     }
+    let fault_enabled = graph
+        .command_startup
+        .as_ref()
+        .is_some_and(|(flags, _)| flags.faulthandler);
     for initialization in &initializations {
         let module = &graph.modules[initialization.module];
         let mut body = initialization.function.body.clone();
@@ -993,6 +1010,19 @@ pub(crate) fn lower_with_caller_cache(
                         vec![],
                     ),
                 }),
+            );
+        }
+        if fault_enabled && initialization.module != graph.entry && module.archive.is_none() {
+            body.insert(
+                0,
+                fault_frame_statement(
+                    graph
+                        .module_filename(initialization.module)
+                        .to_string_lossy()
+                        .into_owned(),
+                    "<module>",
+                    1,
+                ),
             );
         }
         owners.push(initialization.module);
@@ -1065,27 +1095,28 @@ pub(crate) fn lower_with_caller_cache(
     }
     // The native call graph is acyclic. Programs that cannot inspect frames,
     // lower their limit, or reach the default depth need no tracking at all.
-    let source_frames = if names || count || source_functions + generator_sites > 1000 {
-        python_frames
-            .into_iter()
-            .zip(owners.iter().copied().chain([graph.entry]))
-            .map(|(frame, module)| {
-                frame.then(|| {
-                    if names {
-                        ir::SourceFrame::Module(if module == graph.entry {
-                            "__main__".to_owned()
+    let source_frames =
+        if fault_enabled || names || count || source_functions + generator_sites > 1000 {
+            python_frames
+                .into_iter()
+                .zip(owners.iter().copied().chain([graph.entry]))
+                .map(|(frame, module)| {
+                    frame.then(|| {
+                        if names {
+                            ir::SourceFrame::Module(if module == graph.entry {
+                                "__main__".to_owned()
+                            } else {
+                                graph.modules[module].name.clone()
+                            })
                         } else {
-                            graph.modules[module].name.clone()
-                        })
-                    } else {
-                        ir::SourceFrame::Depth
-                    }
+                            ir::SourceFrame::Depth
+                        }
+                    })
                 })
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+                .collect()
+        } else {
+            Vec::new()
+        };
     if generator_sites != 0 && source_frames.is_empty() {
         for function in functions.iter_mut().chain([&mut entry]) {
             ir::walk_expressions_mut(&mut function.body, &mut |value| {
@@ -1259,6 +1290,9 @@ fn lower_body(
     }
     if classes.generators.contains(&signature.id) {
         body = checker.generator_body(body);
+    }
+    if module.archive.is_none() {
+        checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
     }
     Ok((
         LoweredBody {
@@ -4472,6 +4506,9 @@ impl<'a> Checker<'a> {
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
+            if self.fault_enabled() && !lowered.is_empty() {
+                body.push(self.fault_line(statement));
+            }
             body.extend(lowered);
             falls_through &= continues;
         }
@@ -5355,28 +5392,53 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn exception_origin(&self, exception: Expr, site: &impl Ranged) -> Expr {
-        if self.graph.command_startup.is_none() && !self.graph.handled_tracebacks {
-            return exception;
-        }
-        let filename = if self.graph.virtual_command && self.module == self.graph.entry {
+    fn fault_enabled(&self) -> bool {
+        self.graph
+            .command_startup
+            .as_ref()
+            .is_some_and(|(flags, _)| flags.faulthandler)
+    }
+
+    fn source_filename(&self) -> String {
+        if self.graph.virtual_command && self.module == self.graph.entry {
             "<string>".to_owned()
         } else {
             self.graph
                 .module_filename(self.module)
                 .to_string_lossy()
                 .into_owned()
-        };
-        let line = self.source[..usize::from(site.start())]
-            .bytes()
-            .filter(|&byte| byte == b'\n')
-            .count() as u64
-            + 1;
+        }
+    }
+
+    fn source_line(&self, start: TextSize) -> u32 {
+        self.graph.session.source_line(self.module, start)
+    }
+
+    fn fault_line(&self, site: &impl Ranged) -> Statement {
+        Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::FaultLine(self.source_line(site.start())), vec![]),
+        })
+    }
+
+    fn fault_frame(&self, body: &mut Vec<Statement>, name: &str, start: TextSize) {
+        if self.fault_enabled() {
+            body.insert(
+                0,
+                fault_frame_statement(self.source_filename(), name, self.source_line(start)),
+            );
+        }
+    }
+
+    fn exception_origin(&self, exception: Expr, site: &impl Ranged) -> Expr {
+        if self.graph.command_startup.is_none() && !self.graph.handled_tracebacks {
+            return exception;
+        }
         Expr {
             ty: Type::Exception,
             kind: ExprKind::Builtin(
-                Builtin::ExceptionOrigin(line),
-                vec![exception, unpacking::string(filename)],
+                Builtin::ExceptionOrigin(self.source_line(site.start()).into()),
+                vec![exception, unpacking::string(self.source_filename())],
             ),
         }
     }

@@ -376,6 +376,13 @@ impl Session {
             .load(&self.db)
     }
 
+    /// Resolve a source offset with the cached line index for the defining module.
+    pub(crate) fn source_line(&self, module: usize, offset: TextSize) -> u32 {
+        ruff_db::source::line_index(&self.db, self.files[module])
+            .line_index(offset)
+            .get() as u32
+    }
+
     /// Refresh the semantic AST after a source rewrite that preserves byte offsets.
     pub(crate) fn replace_source(&mut self, module: usize, source: String) -> ParsedModuleRef {
         let file = self.files[module];

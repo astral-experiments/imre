@@ -34,6 +34,7 @@
 
 mod dynamic;
 mod extensions;
+mod fault_handler;
 mod floats;
 mod format_grammar;
 mod shared;

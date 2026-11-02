@@ -56,6 +56,8 @@ pub(super) fn parse(
     let mut dont_write_bytecode = false;
     let mut utf8 = None;
     let mut warnoptions = Vec::new();
+    let mut xoptions = Vec::new();
+    let mut faulthandler = false;
     let input = 'options: loop {
         if arg == "--" {
             break Input::Script(args.next().ok_or("expected a script after --")?.into());
@@ -86,8 +88,9 @@ pub(super) fn parse(
                 'X' => {
                     let option = operand(flags.as_str(), args, "-X")?;
                     match option.split_once('=').unwrap_or((&option, "")) {
+                        ("faulthandler", _) => faulthandler = true,
                         ("context_aware_warnings", _) => {
-                            context_option.get_or_insert(option);
+                            context_option.get_or_insert_with(|| option.clone());
                         }
                         ("warn_default_encoding", _) => warn_default_encoding = true,
                         ("utf8", _) => {
@@ -101,6 +104,7 @@ pub(super) fn parse(
                         }
                         _ => return Err(format!("unsupported -X option: {option}").into()),
                     }
+                    xoptions.push(option);
                     break;
                 }
                 _ => return Err(format!("unknown interpreter option: -{flag}").into()),
@@ -169,6 +173,8 @@ pub(super) fn parse(
         utf8_mode,
         warn_default_encoding: warn_default_encoding || env_present("PYTHONWARNDEFAULTENCODING"),
         warnoptions,
+        xoptions,
+        faulthandler: faulthandler || env_present("PYTHONFAULTHANDLER"),
     };
     let executable = env::current_exe()
         .map_err(|e| e.to_string())?
