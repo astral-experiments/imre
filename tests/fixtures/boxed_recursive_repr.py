@@ -48,6 +48,18 @@ def current():
     word = Word("text")
     print(repr([word, (word,), {word: word}]), [word])
 
+    class Plain:
+        pass
+
+    plain = Plain()
+    expected = f"<{Plain.__module__}.{Plain.__qualname__} object at {id(plain):#x}>"
+    assert repr(plain) == str(plain) == object.__repr__(plain) == expected
+    assert repr([plain]) == f"[{expected}]"
+    Plain.__name__ = "Renamed"
+    Plain.__module__ = "builtins"
+    assert repr(plain) == f"<Renamed object at {id(plain):#x}>"
+    assert repr(Plain) == "<class 'Renamed'>"
+
     class Broken:
         def __repr__(self):
             raise LookupError("rendered")
