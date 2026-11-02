@@ -1,0 +1,945 @@
+diff --git a/crates/imre-compiler/src/classes/inheritance.rs b/crates/imre-compiler/src/classes/inheritance.rs
+index eb543c80c2d5ca803797bd435c12964bef74a5dc..5f7b9e6095ba2d9ced3eadb44f2922ebdaa95576 100644
+--- a/crates/imre-compiler/src/classes/inheritance.rs
++++ b/crates/imre-compiler/src/classes/inheritance.rs
+@@ -62,7 +62,9 @@ pub(super) fn resolve(
+                         | Intrinsic::BUFFERED_IO_BASE
+                         | Intrinsic::TEXT_IO_BASE
+                         | Intrinsic::ObjectRuntimeExport(
+-                            "_io._IOBase"
++                            "io.BufferedReader"
++                            | "_io.BufferedReader"
++                            | "_io._IOBase"
+                             | "_io._RawIOBase"
+                             | "_io._BufferedIOBase"
+                             | "_io._TextIOBase",
+diff --git a/crates/imre-compiler/src/modules.rs b/crates/imre-compiler/src/modules.rs
+index c69537e205eb3ecee9fd9e1c4a9d7aab1b9a2a52..91fdf0e52c871c51927d415e72b8a56413646db2 100644
+--- a/crates/imre-compiler/src/modules.rs
++++ b/crates/imre-compiler/src/modules.rs
+@@ -1864,9 +1864,15 @@ impl IntrinsicModule {
+             (Self::IoNative, "TextIOWrapper") => {
+                 Intrinsic::ObjectRuntimeExport("_io.TextIOWrapper")
+             }
++            (Self::Io, "open") => Intrinsic::ObjectRuntimeExport("io.open"),
++            (Self::IoNative, "open") => Intrinsic::ObjectRuntimeExport("_io.open"),
+             (Self::Io | Self::IoNative, "open_code") => {
+                 Intrinsic::ObjectRuntimeExport("io.open_code")
+             }
++            (Self::Io, "BufferedReader") => Intrinsic::ObjectRuntimeExport("io.BufferedReader"),
++            (Self::IoNative, "BufferedReader") => {
++                Intrinsic::ObjectRuntimeExport("_io.BufferedReader")
++            }
+             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
+             (Self::Io, "FileIO") => Intrinsic::ObjectRuntimeExport("io.FileIO"),
+             (Self::IoNative, "FileIO") => Intrinsic::ObjectRuntimeExport("_io.FileIO"),
+diff --git a/crates/imre-compiler/stdlib/io.py b/crates/imre-compiler/stdlib/io.py
+index 703bfa24a4c4b9226915b3a24fcfe14940cfd14c..f03ef7c253826b4cefdc7d647fe98338f1d3fcff 100644
+--- a/crates/imre-compiler/stdlib/io.py
++++ b/crates/imre-compiler/stdlib/io.py
+@@ -1,7 +1,7 @@
+ # Public I/O ABCs and protocols from CPython 3.14.5, Lib/io.py. See stdlib/docstrings/LICENSE.
+ import _io
+ import abc
+-from _io import (BytesIO, DEFAULT_BUFFER_SIZE, FileIO, StringIO, TextIOWrapper,
++from _io import (BufferedReader, BytesIO, DEFAULT_BUFFER_SIZE, FileIO, StringIO, TextIOWrapper,
+                  UnsupportedOperation, open, open_code, text_encoding)
+ from _collections_abc import _check_methods
+ 
+@@ -19,7 +19,7 @@ class TextIOBase(_io._TextIOBase, IOBase):
+ 
+ RawIOBase.register(FileIO)
+ 
+-for klass in (BytesIO, *_buffered_types):
++for klass in (BytesIO, BufferedReader, *_buffered_types):
+     BufferedIOBase.register(klass)
+ 
+ for klass in (StringIO, TextIOWrapper):
+diff --git a/crates/imre-runtime/src/dynamic/calls.rs b/crates/imre-runtime/src/dynamic/calls.rs
+index ae2079b130e2eeae73268f045fcddb915f766f60..a4d04feb30fbee1a66464f16da1c8938748ef597 100644
+--- a/crates/imre-runtime/src/dynamic/calls.rs
++++ b/crates/imre-runtime/src/dynamic/calls.rs
+@@ -1131,12 +1131,16 @@ impl Context {
+ 
+     /// Return the actual class independently of an instance's Python-level __class__ attribute.
+     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
++        if let Some(name) = self.heap.get(obj).native_io_class_name() {
++            if !self.builtins.contains_key("_io._IOBase") {
++                self.module("_io")?;
++            }
++            return self.builtins.get(name).copied().ok_or_else(|| {
++                Error::new("ImportError", format!("native class {name} is unavailable"))
++            });
++        }
+         match self.heap.get(obj) {
+             Value::Union(_) => Ok(super::union::class(self)),
+-            Value::TextFile(_) => {
+-                self.module("io")?;
+-                Ok(self.builtins["_io.TextIOWrapper"])
+-            }
+             Value::Instance { class, .. }
+             | Value::Class {
+                 metaclass: Some(class),
+@@ -1203,8 +1207,8 @@ impl Context {
+         if let Value::Tuple(classes) = self.heap.get(class) {
+             return classes.iter().any(|&c| self.instance_of(value, c));
+         }
+-        if matches!(self.heap.get(value), Value::TextFile(_)) {
+-            if let Some(&actual) = self.builtins.get("_io.TextIOWrapper")
++        if let Some(name) = self.heap.get(value).native_io_class_name() {
++            if let Some(&actual) = self.builtins.get(name)
+                 && self.subclass(actual, class)
+             {
+                 return true;
+@@ -1627,6 +1631,17 @@ impl Context {
+ 
+     /// Keep non-data wrapper receiver checks at call time for direct method calls.
+     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
++        if self.heap.get(obj).native_io_class_name() == Some("_io.BufferedReader") {
++            let class = self.exact_type(obj)?;
++            if let Some(member) = self.class_attr(class, name)
++                && matches!(
++                    self.heap.get(member),
++                    Value::IoMethod { .. } | Value::GetSetDescriptor { .. }
++                )
++            {
++                return self.bind_attribute(member, obj, class);
++            }
++        }
+         let metaclass_member = match *self.heap.get(obj) {
+             Value::Class {
+                 metaclass: Some(meta),
+@@ -2237,6 +2252,14 @@ impl Context {
+                 explicit,
+             } => match name {
+                 "__self__" => return Ok(receiver),
++                _ if matches!(
++                    self.heap.get(callable),
++                    Value::IoMethod { name: "open", .. }
++                ) =>
++                {
++                    let original = self.builtin("open");
++                    return self.lookup_attr(original, name);
++                }
+                 "__func__"
+                     if explicit || matches!(self.heap.get(callable), Value::Function { .. }) =>
+                 {
+@@ -2601,6 +2624,14 @@ impl Context {
+             {
+                 return self.lookup_attr(self.mapping_proxy_target(obj), name);
+             }
++            Value::Native(ref symbol) if symbol == "open" && name == "__self__" => {
++                if !self.builtins.contains_key("_io.open.__self__") {
++                    self.module("_io")?;
++                }
++                return self.builtins.get("_io.open.__self__").copied().ok_or_else(|| {
++                    Error::new("ImportError", "native _io module is unavailable")
++                });
++            }
+             Value::Native(ref symbol)
+                 if name == "__self__"
+                     && let Some(owner) = builtins::constructor_owner(symbol) =>
+@@ -3405,6 +3436,7 @@ impl Context {
+     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
+         self.check_template_write(obj, name)?;
+         super::namespace::check_class_write(self, obj, name)?;
++        stdlib::io::check_class_write(self, obj, name)?;
+         self.check_thread_reporting_binding(obj, name)?;
+         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
+             return super::namedtuple::set_document(self, obj, None).map(|_| ());
+@@ -4005,6 +4037,7 @@ impl Context {
+         }
+         self.check_template_write(obj, name)?;
+         super::namespace::check_class_write(self, obj, name)?;
++        stdlib::io::check_class_write(self, obj, name)?;
+         if let Value::Native(class) = self.heap.get(obj)
+             && (builtins::is_static_gc_type(class)
+                 || HashState::is_provider_class(class)
+diff --git a/crates/imre-runtime/src/dynamic/mod.rs b/crates/imre-runtime/src/dynamic/mod.rs
+index defcf61d6adf784af2c7a8c63b1e8485a67c56e0..327184f5b619cecaf889f12775ff0a4f0294a444 100644
+--- a/crates/imre-runtime/src/dynamic/mod.rs
++++ b/crates/imre-runtime/src/dynamic/mod.rs
+@@ -2220,7 +2220,7 @@ impl Context {
+             "_locale" => stdlib::locale::install(self, module, scope)?,
+             "pickle" => stdlib::pickle::install(self, scope)?,
+             "urllib.parse" => stdlib::urllib::initialize(self, scope),
+-            "_io" => stdlib::io::install_native(self, scope),
++            "_io" => stdlib::io::install_native(self, scope, module),
+             "ast" => stdlib::ast::install(self, scope),
+             "selectors" => {
+                 stdlib::readiness::initialize(self, scope)?;
+diff --git a/crates/imre-runtime/src/dynamic/stdlib/io.rs b/crates/imre-runtime/src/dynamic/stdlib/io.rs
+index 8c0057f25b1d817c8313d2e32a57635b8e034979..36968dd3fafba814a73349ac7fe9107f190c25b4 100644
+--- a/crates/imre-runtime/src/dynamic/stdlib/io.rs
++++ b/crates/imre-runtime/src/dynamic/stdlib/io.rs
+@@ -5,6 +5,7 @@ use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+ 
+ mod buffered_io;
+ mod descriptor_buffer;
++mod native_reader;
+ pub(in crate::dynamic) use descriptor_buffer::BufferedFd;
+ mod bytes_io;
+ mod docstrings;
+@@ -15,6 +16,7 @@ mod text_wrapper;
+ #[derive(Clone)]
+ pub(in crate::dynamic) enum MemoryStream {
+     Text(crate::objects::TextFile),
++    BufferedReader(Id),
+     Bytes(std::rc::Rc<bytes_io::BytesIo>),
+     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
+     Raw(std::rc::Rc<file_io::RawFile>),
+@@ -200,22 +202,16 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
+         ctx.bind(module, name, value);
+     }
+     // Register the actual types of buffered files returned by the native open().
+-    let types = [
+-        "_io.BufferedReader",
+-        "_io.BufferedWriter",
+-        "_io.BufferedRandom",
+-    ]
+-    .iter()
+-    .map(|name| ctx.builtin(name))
+-    .collect();
++    let types = ["_io.BufferedWriter", "_io.BufferedRandom"]
++        .iter()
++        .map(|name| ctx.builtin(name))
++        .collect();
+     let types = ctx.alloc(Value::Tuple(types));
+     ctx.bind(module, "_buffered_types", types);
+ }
+ 
+ /// Construct a low-level module's native I/O classes before io.py declares its ABCs.
+-pub(in super::super) fn install_native(ctx: &mut Context, module: Id) {
+-    let open = ctx.builtin("open");
+-    ctx.bind(module, "open", open);
++pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_object: Id) {
+     let text_encoding = ctx.builtin("_io.text_encoding");
+     ctx.bind(module, "text_encoding", text_encoding);
+     let unsupported = ctx.builtin("UnsupportedOperation");
+@@ -253,6 +249,13 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id) {
+     );
+     let file = class(ctx, module, "FileIO", raw, file_io::METHODS);
+     let buffered = class(ctx, module, "_BufferedIOBase", io, buffered_io::METHODS);
++    let reader = class(
++        ctx,
++        module,
++        "BufferedReader",
++        buffered,
++        native_reader::METHODS,
++    );
+     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
+     let text = class(
+         ctx,
+@@ -284,12 +287,30 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id) {
+         ],
+     );
+     // Native open and intrinsic file objects retain their initial _io classes.
+-    if !ctx.builtins.contains_key("_io._IOBase") {
++    let initial = !ctx.builtins.contains_key("_io._IOBase");
++    let opener = if initial {
++        ctx.builtins
++            .insert("_io.open.__self__".into(), module_object);
++        ctx.builtin("open")
++    } else {
++        let callable = ctx.alloc(Value::IoMethod {
++            owner: reader,
++            name: "open",
++        });
++        ctx.alloc(Value::Method {
++            callable,
++            receiver: module_object,
++            explicit: false,
++        })
++    };
++    ctx.bind(module, "open", opener);
++    if initial {
+         for (name, class) in [
+             ("_io._IOBase", io),
+             ("_io._RawIOBase", raw),
+             ("_io._BufferedIOBase", buffered),
+             ("_io._TextIOBase", text),
++            ("_io.BufferedReader", reader),
+             ("_io.FileIO", file),
+             ("_io.BytesIO", bytes_io),
+             ("_io.TextIOWrapper", wrapper),
+@@ -300,6 +321,17 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id) {
+     }
+ }
+ 
++/// The native classes are immutable; Python I/O ABCs and user subclasses remain mutable.
++pub(in super::super) fn check_class_write(ctx: &Context, object: Id, attr: &str) -> Result<()> {
++    if let Value::Class { io_kind: Some(_), name, .. } = ctx.heap.get(object) {
++        return Err(Error::new(
++            "TypeError",
++            format!("cannot set '{attr}' attribute of immutable type '_io.{name}'"),
++        ));
++    }
++    Ok(())
++}
++
+ fn class(
+     ctx: &mut Context,
+     module: Id,
+@@ -329,6 +361,7 @@ fn class(
+         "StringIO" => "_io.StringIO",
+         "FileIO" => "_io.FileIO",
+         "TextIOWrapper" => "_io.TextIOWrapper",
++        "BufferedReader" => "_io.BufferedReader",
+         "BytesIO" => "_io.BytesIO",
+         _ => "_io._IOBase",
+     };
+@@ -339,6 +372,7 @@ fn class(
+             "closed" | "encoding" | "errors" | "line_buffering" | "newlines"
+         ) || descriptor_owner == "_io.FileIO"
+             && matches!(name, "mode" | "closefd" | "_blksize")
++            || descriptor_owner == "_io.BufferedReader" && matches!(name, "raw" | "mode" | "name")
+             || wrapper && text_wrapper::property(name)
+         {
+             let set = (wrapper && name == "_CHUNK_SIZE").then(|| {
+@@ -525,6 +559,24 @@ pub(in super::super) fn call(
+     args: &[Id],
+     kwargs: &[(String, Id)],
+ ) -> Result<Id> {
++    if name == "open" {
++        let Some((_, arguments)) = args.split_first() else {
++            return Err(Error::new("TypeError", "_io.open needs its module"));
++        };
++        let file = open(ctx, arguments, kwargs)?;
++        if ctx.heap.get(file).native_io_class_name() == Some("_io.BufferedReader")
++            && Some(&owner) != ctx.builtins.get("_io.BufferedReader")
++        {
++            // Keep the original file cursor, but use the class captured by this _io.open.
++            let reader = ctx.instance(owner, None);
++            let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(reader) else {
++                unreachable!()
++            };
++            *memory_stream = Some(MemoryStream::BufferedReader(file));
++            return Ok(reader);
++        }
++        return Ok(file);
++    }
+     let owner_kind = ctx.heap.get(owner).io_kind();
+     let raw = owner_kind == Some("RawIOBase");
+     let buffered = owner_kind == Some("BufferedIOBase");
+@@ -536,6 +588,8 @@ pub(in super::super) fn call(
+         Some("_BufferedIOBase")
+     } else if text {
+         Some("_TextIOBase")
++    } else if owner_kind == Some("BufferedReader") {
++        Some("BufferedReader")
+     } else if bytes_io {
+         Some("BytesIO")
+     } else {
+@@ -543,8 +597,8 @@ pub(in super::super) fn call(
+     };
+     let Some((&receiver, rest)) = args.split_first() else {
+         let message = match (descriptor, name) {
+-            (Some("BytesIO"), "__init__") => {
+-                "descriptor '__init__' of '_io.BytesIO' object needs an argument".into()
++            (Some(class @ ("BytesIO" | "BufferedReader")), "__init__") => {
++                format!("descriptor '__init__' of '_io.{class}' object needs an argument")
+             }
+             (Some(class), _) => format!("unbound method {class}.{name}() needs an argument"),
+             _ => format!("unbound I/O method {name} needs a receiver"),
+@@ -553,15 +607,16 @@ pub(in super::super) fn call(
+     };
+     let receiver_class = match ctx.heap.get(receiver) {
+         Value::Instance { class, .. } => Some(*class),
+-        Value::TextFile(_) => ctx.builtins.get("_io.TextIOWrapper").copied(),
+-        _ => None,
++        value => value
++            .native_io_class_name()
++            .and_then(|name| ctx.builtins.get(name).copied()),
+     };
+     let Some(receiver_class) = receiver_class.filter(|&class| ctx.direct_subclass(class, owner))
+     else {
+         let actual = ctx.type_name(receiver);
+         let message = match (descriptor, name) {
+-            (Some("BytesIO"), "__init__") => format!(
+-                "descriptor '__init__' requires a '_io.BytesIO' object but received a '{actual}'"
++            (Some(class @ ("BytesIO" | "BufferedReader")), "__init__") => format!(
++                "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
+             ),
+             (Some(class), _) => format!(
+                 "descriptor '{name}' for '_io.{class}' objects doesn't apply to a '{actual}' object"
+@@ -570,6 +625,9 @@ pub(in super::super) fn call(
+         };
+         return Err(Error::new("TypeError", message));
+     };
++    if owner_kind == Some("BufferedReader") {
++        return native_reader::call(ctx, receiver, name, rest, kwargs);
++    }
+     if raw && matches!(name, "write" | "readinto") {
+         if !kwargs.is_empty() {
+             return Err(Error::new(
+@@ -626,7 +684,15 @@ pub(in super::super) fn call(
+     let layout = std::iter::once(&receiver_class)
+         .chain(ancestors)
+         .filter_map(|&class| ctx.heap.get(class).io_kind())
+-        .find(|kind| matches!(*kind, "TextIOWrapper" | "FileIO" | "BytesIO" | "StringIO"));
++        .find(|kind| {
++            matches!(
++                *kind,
++                "TextIOWrapper" | "FileIO" | "BytesIO" | "StringIO" | "BufferedReader"
++            )
++        });
++    if layout == Some("BufferedReader") && matches!(name, "__enter__" | "__exit__" | "writable") {
++        return native_reader::call(ctx, receiver, name, rest, kwargs);
++    }
+     if layout == Some("TextIOWrapper") {
+         if matches!(ctx.heap.get(receiver), Value::TextFile(_)) {
+             return super::files::text_method(ctx, name, args, kwargs);
+diff --git a/crates/imre-runtime/src/dynamic/stdlib/io/descriptor_buffer.rs b/crates/imre-runtime/src/dynamic/stdlib/io/descriptor_buffer.rs
+index dca972c68dcfac6f4fa81c91b5eecb6d95eefb33..df470dd8465ee64b4b4a403aa045cf9baee71534 100644
+--- a/crates/imre-runtime/src/dynamic/stdlib/io/descriptor_buffer.rs
++++ b/crates/imre-runtime/src/dynamic/stdlib/io/descriptor_buffer.rs
+@@ -73,7 +73,7 @@ impl Seek for Descriptor {
+ }
+ 
+ /// Return buffered bytes first, or perform one raw read without reading ahead.
+-fn read_once(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Vec<u8>> {
++pub(super) fn read_once(reader: &mut BufReader<impl Read>, size: i64) -> Result<Vec<u8>> {
+     let size = usize::try_from(size).unwrap_or(reader.capacity());
+     let buffered = reader.buffer();
+     if !buffered.is_empty() {
+@@ -98,6 +98,56 @@ fn read_once(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Vec<u8>> {
+     Ok(bytes)
+ }
+ 
++/// RawFile.tell() exposes read-ahead. Read whole blocks directly and fill one
++/// complete buffer for a final partial block, as CPython's BufferedReader does.
++fn read_bytes(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Option<Vec<u8>>> {
++    let mut data = Vec::new();
++    let result = (|| -> io::Result<()> {
++        if size < 0 {
++            reader.read_to_end(&mut data)?;
++            return Ok(());
++        }
++        while data.len() < size as usize {
++            let remaining = size as usize - data.len();
++            if reader.buffer().is_empty() && remaining >= reader.capacity() {
++                let direct = remaining - remaining % reader.capacity();
++                if reader
++                    .get_mut()
++                    .take(direct as u64)
++                    .read_to_end(&mut data)?
++                    < direct
++                {
++                    break;
++                }
++            } else {
++                let buffered = match reader.fill_buf() {
++                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
++                    result => result?,
++                };
++                let count = remaining.min(buffered.len());
++                if count == 0 {
++                    break;
++                }
++                data.try_reserve(count)
++                    .map_err(|_| io::ErrorKind::OutOfMemory)?;
++                data.extend_from_slice(&buffered[..count]);
++                reader.consume(count);
++            }
++        }
++        Ok(())
++    })();
++    match result {
++        Ok(()) => Ok(Some(data)),
++        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
++            Ok((!data.is_empty()).then_some(data))
++        }
++        Err(error) if error.kind() == io::ErrorKind::OutOfMemory => {
++            Err(Error::new("MemoryError", ""))
++        }
++        Err(error) => Err(os_error(error)),
++    }
++}
++
+ enum Buffer {
+     Reader(BufReader<Descriptor>),
+     Writer(BufWriter<Descriptor>),
+@@ -186,6 +236,10 @@ impl BufferedFd {
+         }
+     }
+ 
++    pub(super) fn uses_raw(&self, raw: &Rc<RawFile>) -> bool {
++        Rc::ptr_eq(raw, &self.handle)
++    }
++
+     pub(in crate::dynamic) fn closed(&self) -> bool {
+         self.handle.live_fd().is_none()
+     }
+@@ -217,10 +271,23 @@ impl BufferedFd {
+     ) -> Result<Id> {
+         let name = name.strip_prefix("file.").unwrap_or(name);
+         if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
++            super::native_reader::check_raw(ctx, receiver, self, name)?;
+             self.close()?;
+             return Ok(NONE);
+         }
+-        let closed = || Error::new("ValueError", "I/O operation on closed file.");
++        let closed = || {
++            Error::new(
++                "ValueError",
++                match name {
++                    "read" | "read1" => "read of closed file",
++                    "readline" => "readline of closed file",
++                    "readinto" => "readinto of closed file",
++                    "seek" => "seek of closed file",
++                    "flush" | "__enter__" => "I/O operation on closed file.",
++                    _ => "I/O operation on closed file",
++                },
++            )
++        };
+         let size = if let ("read1", [n]) = (name, args) {
+             Some(ctx.index_integer(*n)?.to_i64().ok_or_else(|| {
+                 Error::new(
+@@ -256,6 +323,7 @@ impl BufferedFd {
+         } else {
+             None
+         };
++        super::native_reader::check_raw(ctx, receiver, self, name)?;
+         let fd = self.handle.live_fd().ok_or_else(closed)?;
+         let mut slot = self.buffer.borrow_mut();
+         let buffer = slot.as_mut().ok_or_else(closed)?;
+@@ -313,14 +381,14 @@ impl BufferedFd {
+                 let Buffer::Reader(r) = buffer else {
+                     unreachable!()
+                 };
++                if name == "read" {
++                    return Ok(
++                        read_bytes(r, size)?.map_or(NONE, |data| ctx.alloc(Value::Bytes(data)))
++                    );
++                }
+                 let mut reader = r.take(if size < 0 { u64::MAX } else { size as u64 });
+                 let mut data = Vec::new();
+-                if name == "readline" {
+-                    reader.read_until(b'\n', &mut data)
+-                } else {
+-                    reader.read_to_end(&mut data)
+-                }
+-                .map_err(os_error)?;
++                reader.read_until(b'\n', &mut data).map_err(os_error)?;
+                 Ok(ctx.alloc(Value::Bytes(data)))
+             }
+             "readinto" if args.len() == 1 => {
+diff --git a/crates/imre-runtime/src/dynamic/stdlib/io/file_io.rs b/crates/imre-runtime/src/dynamic/stdlib/io/file_io.rs
+index cb518dc0f407e61cddb34a6faef912dfe3d88e7c..9fdc399e4ce95db21396d400b62e0203d4dc7573 100644
+--- a/crates/imre-runtime/src/dynamic/stdlib/io/file_io.rs
++++ b/crates/imre-runtime/src/dynamic/stdlib/io/file_io.rs
+@@ -97,7 +97,7 @@ impl RawFile {
+     }
+ }
+ 
+-fn state(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
++pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<RawFile>> {
+     match ctx.heap.get(receiver) {
+         Value::Instance {
+             memory_stream: Some(MemoryStream::Raw(raw)),
+diff --git a/crates/imre-runtime/src/dynamic/stdlib/io/native_reader.rs b/crates/imre-runtime/src/dynamic/stdlib/io/native_reader.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..19b62d633c0f299e186a3e1a52b7a4a1438eb703
+--- /dev/null
++++ b/crates/imre-runtime/src/dynamic/stdlib/io/native_reader.rs
+@@ -0,0 +1,281 @@
++//! BufferedReader over a native FileIO retains that raw object and its descriptor.
++
++use super::super::{builtins, files, os_error};
++use super::{BufferedFd, Context, Error, FALSE, Id, MemoryStream, NONE, Result, TRUE, Value};
++use super::{descriptor_buffer, file_io};
++use files::{BinaryFile, ReadSource};
++
++pub(super) const METHODS: &[&str] = &[
++    "__init__", "raw", "closed", "name", "mode", "readable", "seekable", "isatty", "fileno",
++    "flush", "close", "tell", "seek", "read", "read1", "readinto", "readline",
++];
++
++fn backing(ctx: &Context, receiver: Id) -> Option<Id> {
++    match ctx.heap.get(receiver) {
++        Value::File(_) => Some(receiver),
++        Value::Instance {
++            memory_stream: Some(MemoryStream::BufferedReader(buffer)),
++            ..
++        } => Some(*buffer),
++        _ => None,
++    }
++}
++
++fn native_raw(ctx: &Context, raw: Id, methods: &[&str]) -> Result<std::rc::Rc<file_io::RawFile>> {
++    // Going straight to the descriptor is valid only while the Python raw methods
++    // are native. The instance dictionary can change after the buffer is created.
++    if ctx
++        .heap
++        .get(raw)
++        .instance_class()
++        .and_then(|class| ctx.heap.get(class).io_kind())
++        == Some("FileIO")
++        && !methods
++            .iter()
++            .any(|method| ctx.raw_instance_field(raw, method).is_some())
++        && let Some(handle) = file_io::state(ctx, raw)
++    {
++        return Ok(handle);
++    }
++    Err(Error::new(
++        "NotImplementedError",
++        "BufferedReader with Python raw methods is unsupported",
++    ))
++}
++
++/// Verify the native fast path after any argument conversion that can run Python.
++pub(super) fn check_raw(ctx: &Context, receiver: Id, fd: &BufferedFd, name: &str) -> Result<()> {
++    if matches!(ctx.heap.get(receiver), Value::File(_)) {
++        return Ok(());
++    }
++    let methods: &[&str] = match name {
++        "read" => &["read", "readall", "readinto"],
++        "read1" | "readline" | "readinto" => &["readinto"],
++        "seek" => &["seek", "seekable", "tell"],
++        "close" => &["flush", "close"],
++        _ => std::slice::from_ref(&name),
++    };
++    if fd.uses_raw(&native_raw(ctx, fd.raw, methods)?) {
++        Ok(())
++    } else {
++        Err(Error::new(
++            "NotImplementedError",
++            "reinitialized BufferedReader raw FileIO is unsupported",
++        ))
++    }
++}
++
++fn ssize(ctx: &mut Context, value: Id) -> Result<i64> {
++    ctx.index_integer(value)?.to_i64().ok_or_else(|| {
++        Error::new(
++            "OverflowError",
++            "Python int too large to convert to C ssize_t",
++        )
++    })
++}
++
++fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
++    let [raw, capacity] = builtins::bind_builtin_arguments(
++        "BufferedReader",
++        args,
++        kwargs,
++        ["raw", "buffer_size"],
++        1,
++    )?;
++    let raw = raw.expect("required argument");
++    let capacity = capacity
++        .map(|n| ssize(ctx, n))
++        .transpose()?
++        .unwrap_or(super::DEFAULT_BUFFER_SIZE);
++
++    let readable = ctx.lookup_attr(raw, "readable")?;
++    if ctx.call(readable, vec![], Vec::new())? != TRUE {
++        return Err(Error::new(
++            "UnsupportedOperation",
++            "File or stream is not readable.",
++        ));
++    }
++    if capacity <= 0 {
++        return Err(Error::new(
++            "ValueError",
++            "buffer size must be strictly positive",
++        ));
++    }
++    let raw_handle = native_raw(
++        ctx,
++        raw,
++        &[
++            "close", "flush", "readable", "seekable", "isatty", "fileno", "tell", "seek", "read",
++            "readall", "readinto",
++        ],
++    )?;
++    if backing(ctx, receiver).is_some() {
++        return Err(Error::new(
++            "NotImplementedError",
++            "BufferedReader reinitialization is unsupported",
++        ));
++    }
++    // BufReader::with_capacity allocates infallibly. Bound user-controlled sizes
++    // to the same maximum that open() passes to the native buffer.
++    if capacity as u64 > crate::text_output::binary_capacity(i128::MAX) as u64 {
++        return Err(Error::new(
++            "NotImplementedError",
++            "explicit BufferedReader buffers above 8 MiB are unsupported",
++        ));
++    }
++    let buffer = BufferedFd::new(raw, raw_handle, true, capacity as usize);
++    let buffer = ctx.alloc(BinaryFile::Descriptor(buffer).into_value()?);
++    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
++        unreachable!("uninitialized BufferedReader instance")
++    };
++    *memory_stream = Some(MemoryStream::BufferedReader(buffer));
++    Ok(NONE)
++}
++
++fn validate(name: &str, count: usize, kwargs: &[(String, Id)]) -> Result<()> {
++    if !kwargs.is_empty() {
++        return Err(Error::new(
++            "TypeError",
++            format!("BufferedReader.{name}() takes no keyword arguments"),
++        ));
++    }
++    let message = match name {
++        "read" | "read1" | "readline" if count > 1 => {
++            format!("{name} expected at most 1 argument, got {count}")
++        }
++        "readinto" if count != 1 => {
++            format!("BufferedReader.{name}() takes exactly one argument ({count} given)")
++        }
++        "seek" if count == 0 => "seek expected at least 1 argument, got 0".into(),
++        "seek" if count > 2 => format!("seek expected at most 2 arguments, got {count}"),
++        "read" | "read1" | "readline" | "readinto" | "seek" | "__exit__" => return Ok(()),
++        _ if count != 0 => format!("BufferedReader.{name}() takes no arguments ({count} given)"),
++        _ => return Ok(()),
++    };
++    Err(Error::new("TypeError", message))
++}
++
++pub(super) fn call(
++    ctx: &mut Context,
++    receiver: Id,
++    name: &str,
++    args: &[Id],
++    kwargs: &[(String, Id)],
++) -> Result<Id> {
++    if name == "__init__" {
++        return initialize(ctx, receiver, args, kwargs);
++    }
++    validate(name, args.len(), kwargs)?;
++    let target = if name == "readinto" {
++        let id = ctx.scalar_value(args[0]);
++        if !matches!(ctx.heap.get(id), Value::ByteArray(_)) {
++            let kind = if args[0] == NONE {
++                "None"
++            } else {
++                ctx.type_name(args[0])
++            };
++            return Err(Error::new(
++                "TypeError",
++                format!("readinto() argument must be read-write bytes-like object, not {kind}"),
++            ));
++        }
++        Some(id)
++    } else {
++        None
++    };
++    let args = target.as_ref().map_or(args, std::slice::from_ref);
++    if name == "writable" {
++        return Ok(FALSE);
++    }
++    if name == "__exit__" {
++        let close = ctx.lookup_attr(receiver, "close")?;
++        return ctx.call(close, Vec::new(), Vec::new());
++    }
++    let Some(buffer) = backing(ctx, receiver) else {
++        return if name == "raw" {
++            Ok(NONE)
++        } else {
++            Err(Error::new(
++                "ValueError",
++                "I/O operation on uninitialized object",
++            ))
++        };
++    };
++    let Value::File(handle) = ctx.heap.get(buffer) else {
++        unreachable!("BufferedReader backing must be a binary file")
++    };
++    let handle = handle.clone();
++    if name == "closed" {
++        return Ok(builtins::boolean(handle.closed()));
++    }
++    if let BinaryFile::Descriptor(fd) = handle.as_ref() {
++        if name == "raw" {
++            return Ok(fd.raw);
++        }
++        if matches!(name, "name" | "mode") {
++            return ctx.lookup_attr(fd.raw, name);
++        }
++        if receiver != buffer && name == "close" && !fd.closed() {
++            let flushed = ctx
++                .lookup_attr(receiver, "flush")
++                .and_then(|flush| ctx.call(flush, vec![], Vec::new()));
++            fd.call(ctx, receiver, name, args, kwargs)?;
++            return flushed.map(|_| NONE);
++        }
++        return fd.call(ctx, receiver, name, args, kwargs);
++    }
++    if matches!(name, "name" | "mode" | "raw") {
++        if let Some((path, mode)) = handle.path_metadata() {
++            match name {
++                "name" => return Ok(path),
++                "mode" => return Ok(ctx.text(mode)),
++                _ => {}
++            }
++        } else if name == "name"
++            && let Some(fd) = handle.socket_reader_name()
++        {
++            return Ok(ctx.int(i64::from(fd)));
++        }
++        return Err(Error::new(
++            "AttributeError",
++            format!(
++                "'{}' object has no attribute '{name}'",
++                ctx.type_name(receiver)
++            ),
++        ));
++    }
++    if name == "read1" {
++        let size = args
++            .first()
++            .copied()
++            .map(|n| ssize(ctx, n))
++            .transpose()?
++            .filter(|&n| n >= 0)
++            .unwrap_or(super::DEFAULT_BUFFER_SIZE);
++        let BinaryFile::Reader { slot, .. } = handle.as_ref() else {
++            unreachable!("readable receiver")
++        };
++        let mut slot = slot.borrow_mut();
++        let source = slot
++            .as_mut()
++            .ok_or_else(|| Error::new("ValueError", "read of closed file"))?;
++        let data = match source {
++            ReadSource::File(reader) => descriptor_buffer::read_once(reader, size)?,
++            ReadSource::Socket(socket) => {
++                let mut data = builtins::zeroed_bytes(size)?;
++                let n = socket.read1(&mut data).map_err(os_error)?;
++                data.truncate(n);
++                data
++            }
++        };
++        return Ok(ctx.alloc(Value::Bytes(data)));
++    }
++    let mut operands = vec![buffer];
++    operands.extend_from_slice(args);
++    let result = files::call(ctx, &format!("file.{name}"), &operands, kwargs)?;
++    Ok(if name == "__enter__" {
++        receiver
++    } else {
++        result
++    })
++}
+diff --git a/crates/imre-runtime/src/dynamic/value.rs b/crates/imre-runtime/src/dynamic/value.rs
+index afff93e28f1e998b9b654ccc9ad2011e120527bd..15c705cd3115c01f7dad9d80ad4b718059423ce6 100644
+--- a/crates/imre-runtime/src/dynamic/value.rs
++++ b/crates/imre-runtime/src/dynamic/value.rs
+@@ -1048,6 +1048,17 @@ pub(super) struct CachedCall {
+ }
+ 
+ impl Value {
++    /// Class of a native file whose Python descriptors are installed by _io.
++    pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
++        match self {
++            Self::TextFile(_) => Some("_io.TextIOWrapper"),
++            Self::File(_) if self.intrinsic_type_name() == Some("_io.BufferedReader") => {
++                Some("_io.BufferedReader")
++            }
++            _ => None,
++        }
++    }
++
+     /// Returns the name used for both builtin class lookup and diagnostic messages.
+     pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
+         Some(match self {
+@@ -1444,6 +1455,9 @@ impl Value {
+                     cycle.children(visit);
+                 }
+                 match memory_stream {
++                    Some(super::stdlib::io::MemoryStream::BufferedReader(file)) => {
++                        visit.push(*file)
++                    }
+                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
+                         visit.extend(stream.snapshot.get())
+                     }
+diff --git a/crates/imre-runtime/src/objects/socket.rs b/crates/imre-runtime/src/objects/socket.rs
+index 812b5caaf5d0d5055efc600ede839bb620da0eea..dfacc92972d0cfd1333b7a51fbe6a8b82a4e34de 100644
+--- a/crates/imre-runtime/src/objects/socket.rs
++++ b/crates/imre-runtime/src/objects/socket.rs
+@@ -77,6 +77,18 @@ impl SocketInput {
+         })
+     }
+ 
++    /// Consume buffered input first, otherwise receive at most the requested bytes once.
++    pub(crate) fn read1(&mut self, target: &mut [u8]) -> io::Result<usize> {
++        if self.buffer.position() < self.buffer.get_ref().len() as u64 {
++            return io::Read::read(&mut self.buffer, target);
++        }
++        // SAFETY: target is writable for its length, and receive does not retain it.
++        match unsafe { receive(self.as_raw_fd(), target.as_mut_ptr(), target.len(), 0) } {
++            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(0),
++            result => result,
++        }
++    }
++
+     pub(crate) fn close(&mut self) -> io::Result<()> {
+         let Some(socket) = self.socket.take() else {
+             return Ok(());
+diff --git a/tests/fixtures/io_buffered_reader_type.py b/tests/fixtures/io_buffered_reader_type.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..bc45198fdc42254c914e6242a2c4738d56af18f8
+--- /dev/null
++++ b/tests/fixtures/io_buffered_reader_type.py
+@@ -0,0 +1,45 @@
++import io
++from _io import BufferedReader as NativeReader
++
++
++class ReaderCase:
++    tp = io.BufferedReader
++
++
++class PublicReader(io.BufferedReader):
++    pass
++
++
++class PrivateReader(NativeReader):
++    pass
++
++
++assert ReaderCase.tp is NativeReader
++with io.open(__file__, "rb") as source:
++    assert source.__iter__() is source
++    assert type(source) is ReaderCase.tp
++    assert isinstance(source, io.BufferedIOBase)
++    assert source.read(1) == b"i"
++    assert NativeReader.read(source, 5) == b"mport"
++
++try:
++    NativeReader.read(object(), 1)
++except TypeError as exc:
++    print(exc)
++else:
++    raise AssertionError("BufferedReader.read accepted an unrelated receiver")
++
++for cls in (PublicReader, PrivateReader):
++    with io.FileIO(__file__, "r") as raw, cls(raw, 4) as reader:
++        assert type(reader) is cls
++        assert isinstance(reader, NativeReader)
++        assert reader.raw is raw
++        assert NativeReader.read(reader, 1) == b"i"
++        assert reader.read(5) == b"mport"
++
++try:
++    NativeReader.__init__(object())
++except TypeError as exc:
++    assert str(exc) == "descriptor '__init__' requires a '_io.BufferedReader' object but received a 'object'"
++else:
++    raise AssertionError("BufferedReader.__init__ accepted an unrelated receiver")
+diff --git a/tests/python_cli.py b/tests/python_cli.py
+index 2d60a39fa3c041c82f3602c3c1d172e48d061544..57ca4ebd14475ba0f2efb5e0c2abe96c3cbba35d 100644
+--- a/tests/python_cli.py
++++ b/tests/python_cli.py
+@@ -1772,6 +1772,8 @@ def report(text):
+         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
+         io_registration = fixtures / "io_abc_registration.py"
+         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
++        reader_fixture = fixtures / "io_buffered_reader_type.py"
++        compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+         io_fixture = fixtures / "boxed_io_indirect_import.py"
+         compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
+         builtins_fixture = fixtures / "boxed_builtins_module.py"
