@@ -401,6 +401,37 @@ pub(super) fn bytearray_method(
         return Ok(NONE);
     }
     let argument = one_positional_arg(name, args, kwargs)?;
+    if method == "resize" {
+        let size = crate::signed_index(&ctx.index_integer(argument)?).ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+        let size = usize::try_from(size).map_err(|_| {
+            Error::new(
+                "ValueError",
+                format!("Can only resize to positive sizes, got {size}"),
+            )
+        })?;
+        // __index__ may have resized the receiver or changed its active exports.
+        let storage = ctx.scalar_value(receiver);
+        let current = ctx.bytes_like(storage)?.len();
+        if size != current {
+            ctx.check_bytearray_resize(storage)?;
+            // CPython also needs room for the trailing NUL.
+            if size == isize::MAX as usize {
+                return Err(Error::new("MemoryError", ""));
+            }
+            let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            data.try_reserve_exact(size.saturating_sub(current))
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            data.resize(size, 0);
+        }
+        return Ok(NONE);
+    }
     let byte;
     let extra = if method == "append" {
         byte = [ctx.byte_value(argument)?];

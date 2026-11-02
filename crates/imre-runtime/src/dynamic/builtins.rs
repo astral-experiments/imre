@@ -422,6 +422,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "hex",
     "ljust",
     "lstrip",
+    "resize",
     "reverse",
     "rstrip",
     "split",
