@@ -42,6 +42,7 @@ impl BoxedPopen {
         env: Option<ByteEnvironment>,
         bufsize: Int,
         pipesize: Int,
+        shell: bool,
         warn_line_buffering: &mut dyn FnMut() -> Result<()>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
@@ -55,8 +56,9 @@ impl BoxedPopen {
                 .values
                 .push(crate::BytesOwner::into_raw(owner) as usize);
         }
-        let argv = crate::ObjectOwner::try_new(Object(crate::StorageCell::new(words.into_storage())))
-            .map_err(|_| Error::allocation())?;
+        let argv =
+            crate::ObjectOwner::try_new(Object(crate::StorageCell::new(words.into_storage())))
+                .map_err(|_| Error::allocation())?;
         let cwd = cwd
             .map(crate::BytesOwner::try_new)
             .transpose()
@@ -70,6 +72,7 @@ impl BoxedPopen {
             bufsize.0,
         );
         config.close_fds = close_fds;
+        config.shell = shell;
         if let Some(path) = &cwd {
             config.cwd = crate::BytesOwner::as_ptr(path).cast();
             config.cwd_kind = 8;
@@ -106,7 +109,9 @@ impl BoxedPopen {
         })?;
         owner.write(RefCell::new(process));
         // SAFETY: write initialized the unique allocation; sharing it performs no allocation.
-        Ok(Self(unsafe { triomphe::UniqueArc::assume_init(owner) }.shareable()))
+        Ok(Self(
+            unsafe { triomphe::UniqueArc::assume_init(owner) }.shareable(),
+        ))
     }
 
     pub(crate) fn pipe(&self, index: usize) -> Option<crate::ObjectOwner> {
