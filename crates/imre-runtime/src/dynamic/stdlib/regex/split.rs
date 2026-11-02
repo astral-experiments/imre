@@ -219,9 +219,7 @@ pub(super) fn search_nfa(
                 State::Capture { slot, next, .. } => {
                     let slot = match assertions.get(slot.as_usize()) {
                         Some(AssertionSlot::Guard(guard)) => {
-                            let suffix =
-                                input.clone().span(at..input.end()).anchored(Anchored::Yes);
-                            if guard.is_match(suffix) {
+                            if guard.matches(&input, at) {
                                 stack.push((*next, slots));
                             }
                             continue;
