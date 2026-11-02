@@ -3,6 +3,56 @@ from abc import ABCMeta as Meta
 
 
 def current():
+    from collections.abc import ByteString
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        assert issubclass(bytes, ByteString) and issubclass(bytearray, ByteString)
+        assert not issubclass(memoryview, ByteString)
+        try:
+            isinstance(b"", ByteString)
+        except DeprecationWarning as warning:
+            assert "collections.abc.ByteString" in str(warning)
+        else:
+            raise AssertionError("ByteString skipped its metaclass warning")
+
+    checked = []
+    class CheckMeta(Meta):
+        def __subclasscheck__(cls, child):
+            checked.append(child)
+            return super().__subclasscheck__(child)
+
+        def __instancecheck__(cls, obj):
+            seen.append(obj)
+            return super().__instancecheck__(obj)
+
+    class Target(metaclass=CheckMeta):
+        pass
+
+    seen = []
+    exact = Target()
+    assert isinstance(exact, Target) and not seen
+
+    class ClaimsTarget:
+        @property
+        def __class__(self):
+            return Target
+
+    assert not issubclass(ClaimsTarget, Target) and checked == [ClaimsTarget]
+    assert Meta.__subclasscheck__(Target, Target)
+
+    claim = ClaimsTarget()
+    assert isinstance(claim, Target) and seen == [claim]
+
+    class ActualChild(Target):
+        @property
+        def __class__(self):
+            return str
+
+    child = ActualChild()
+    assert isinstance(child, Target) and seen == [claim, child]
+
     events = []
 
     def metaclass():
@@ -107,3 +157,43 @@ def current():
         pass
     else:
         raise AssertionError("recursive metaclass call returned")
+
+
+    check_namespace_constructor()
+
+
+def check_namespace_constructor():
+    def make_cell(value):
+        return (lambda: value).__closure__[0]
+
+    cell = make_cell("previous")
+    dict_cell = make_cell(None)
+    events = []
+
+    class Member:
+        def __set_name__(self, owner, key):
+            assert cell.cell_contents is owner
+            assert dict_cell.cell_contents[key] is self
+            assert "__classcell__" not in owner.__dict__
+            assert "__classdictcell__" not in owner.__dict__
+            events.append(key)
+
+    class Base(metaclass=Meta):
+        def __init_subclass__(cls, *, mark):
+            events.append(mark)
+
+    ns = {"a": Member(), "__classcell__": cell, "b": Member(), "__classdictcell__": dict_cell}
+    child = Meta.__new__(Meta, "Child", (Base,), ns, mark="hook")
+    assert events == ["a", "b", "hook"]
+    assert cell.cell_contents is child and child.__module__ == "abc"
+    assert child.a is ns["a"] and child.b is ns["b"]
+    ns["a"] = None
+    assert child.a is not None
+
+    try:
+        Meta.__new__(Meta, "Bad", (), {"x": Member(), "__classcell__": None})
+    except TypeError as error:
+        assert "__classcell__ must be a nonlocal cell" in str(error)
+    else:
+        raise AssertionError("invalid class cell reached a descriptor callback")
+    assert events == ["a", "b", "hook"]

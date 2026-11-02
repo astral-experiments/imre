@@ -1192,6 +1192,9 @@ impl IntrinsicModule {
             (Self::CollectionsAbc, "AsyncGenerator") => {
                 Intrinsic::ObjectRuntimeExport("collections.abc.AsyncGenerator")
             }
+            (Self::CollectionsAbc, "ByteString") => {
+                Intrinsic::ObjectRuntimeExport("collections.abc.ByteString")
+            }
             (Self::CollectionsAbc, "Buffer") => {
                 Intrinsic::ObjectRuntimeExport("collections.abc.Buffer")
             }

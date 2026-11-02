@@ -19,6 +19,8 @@ pub(super) struct Program {
     class_attributes: Option<BTreeSet<String>>,
     class_cell: bool,
     class_nonlocal: bool,
+    needs_class_cell: bool,
+    needs_dict_cell: bool,
     has_named_bindings: bool,
     doc: Option<ruff_text_size::TextRange>,
     strip_docstrings: bool,
@@ -363,69 +365,6 @@ impl NamedBindings {
         }
         Ok(())
     }
-}
-
-/// CPython records self.X stores from code units immediately enclosed by a class.
-fn class_attributes(body: &[ast::Stmt], spellings: &imre_ast::Names) -> BTreeSet<String> {
-    use ast::visitor::{self, Visitor};
-    struct Attributes<'a> {
-        spellings: &'a imre_ast::Names,
-        names: BTreeSet<String>,
-        collect: bool,
-        in_nested_class: bool,
-    }
-    impl<'a> Visitor<'a> for Attributes<'_> {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            let (body, nested_class) = match stmt {
-                // Augmented assignments use their own store instruction; CPython only
-                // registers attributes stored by ordinary assignment targets.
-                ast::Stmt::AugAssign(update)
-                    if matches!(update.target.as_ref(), ast::Expr::Attribute(_)) =>
-                {
-                    let ast::Expr::Attribute(target) = update.target.as_ref() else {
-                        unreachable!()
-                    };
-                    self.visit_expr(&target.value);
-                    self.visit_expr(&update.value);
-                    return;
-                }
-                ast::Stmt::AnnAssign(update) if update.value.is_none() => return,
-                ast::Stmt::FunctionDef(def) => (&def.body, false),
-                ast::Stmt::ClassDef(def) => (&def.body, true),
-                _ => return visitor::walk_stmt(self, stmt),
-            };
-            if !self.in_nested_class {
-                let collect = self.collect;
-                self.collect = true;
-                self.in_nested_class = nested_class;
-                self.visit_body(body);
-                self.collect = collect;
-                self.in_nested_class = false;
-            }
-        }
-        fn visit_expr(&mut self, expr: &'a ast::Expr) {
-            if self.collect {
-                if let ast::Expr::Attribute(a) = expr
-                    && a.ctx == ast::ExprContext::Store
-                    && matches!(&*a.value, ast::Expr::Name(n) if n.id.as_str() == "self")
-                {
-                    self.names
-                        .insert(self.spellings.definition(&a.attr).to_owned());
-                }
-                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                    visitor::walk_expr(self, expr)
-                });
-            }
-        }
-    }
-    let mut attributes = Attributes {
-        spellings,
-        names: BTreeSet::new(),
-        collect: false,
-        in_nested_class: false,
-    };
-    attributes.visit_body(body);
-    attributes.names
 }
 
 /// Pending exits of the innermost loop body being lowered.
@@ -1482,6 +1421,8 @@ impl Program {
             class_attributes: None,
             class_cell: false,
             class_nonlocal: false,
+            needs_class_cell: false,
+            needs_dict_cell: false,
             has_named_bindings,
             doc: None,
             strip_docstrings: false,
@@ -1587,6 +1528,9 @@ impl Program {
         }
         let mut fields = Vec::new();
         let class = self.class_attributes.is_some();
+        self.needs_class_cell =
+            class && imre_ast::class_cell::needed(&body, self.string_annotations());
+        self.needs_dict_cell = class && imre_ast::class_cell::dict_needed(&body, self.string_annotations());
         self.lower_with_fields(body, lines, function, None, class.then_some(&mut fields))?;
         if !fields.is_empty() {
             let provider = self.annotation_provider(fields, &self.qualname, self.first_line);
@@ -1815,7 +1759,7 @@ impl Program {
                     let spellings = child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
                     });
-                    child.class_attributes = Some(class_attributes(&s.body, spellings));
+                    child.class_attributes = Some(imre_ast::class_attributes::static_attributes(&s.body, spellings));
                     child.instructions.push((line, Instruction::ClassStart));
                     child.lower_namespace(s.body, lines, false)?;
                     child.instructions.push((line, Instruction::ClassEnd));
@@ -4248,7 +4192,7 @@ impl Context {
                     }
                 }
                 bases = Some((self.alloc(Value::List(values)), keywords));
-                serde_json::json!({})
+                serde_json::json!({"needs_class_cell": child.needs_class_cell, "needs_dict_cell": child.needs_dict_cell})
             }
             DefinitionKind::Function(p) => {
                 let mut sig = serde_json::json!({"posonly":[],"positional":[],"kwonly":[],"varargs":p.vararg.as_ref().map(|x|x.name.as_str()),"kwargs":p.kwarg.as_ref().map(|x|x.name.as_str())});

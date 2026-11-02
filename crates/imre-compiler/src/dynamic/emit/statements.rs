@@ -391,7 +391,7 @@ impl Function<'_, '_> {
                         self.op("append", &[&bases, &generic]);
                     }
                     let init = self.define(
-                        v.start(),
+                        v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
                         None,
                         None,
@@ -698,6 +698,14 @@ impl Function<'_, '_> {
             json!({"posonly":[],"positional":[],"kwonly":[],"varargs":null,"kwargs":null});
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
+        }
+        if let Body::Namespace(stmts) = &body {
+            signature["needs_class_cell"] =
+                json!(imre_ast::class_cell::needed(stmts, self.source.string_annotations));
+            signature["needs_dict_cell"] =
+                json!(imre_ast::class_cell::dict_needed(stmts, self.source.string_annotations));
+            signature["static_attributes"] =
+                json!(imre_ast::class_attributes::static_attributes(stmts, &self.source.private_names));
         }
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
