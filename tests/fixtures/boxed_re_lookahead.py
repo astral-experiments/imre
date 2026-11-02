@@ -2,6 +2,26 @@ import re
 
 
 def current():
+    # A successful atomic choice cannot be retried to satisfy its suffix.
+    for expr, text, expected in (
+        (r"(a|ab)c", "abc", ("ab",)), (r"(?>(a|ab))c", "abc", None),
+        (r"(a*+)(b)", "aaab", ("aaa", "b")), (r"a*+a", "aaa", None),
+        (r"a{1,2}+a", "aa", None), (r"a{1,2}a", "aa", ()),
+        (r"(?>a?b){2}", "abb", ()), (r"(?:.(?!D))++C", "ABC", None),
+        (br"(?>(a+))b", b"aab", (b"aa",)), (br".++", b"\xff\x80", ()),
+        (r"[+?]++", "+?", ()), (r"\++a", "++a", ()), (r"\}+a", "}}a", ()),
+        ("(?x:(?> a | ab ) c)", "abc", None),
+    ):
+        m = re.fullmatch(expr, text)
+        assert (None if m is None else m.groups()) == expected, (expr, text)
+    assert [m.span() for m in re.finditer(r"a?+", "a-")] == [(0, 1), (1, 1), (2, 2)]
+    for bad in ("a*++", "a{1,2}+?", "(?>a)**", "(?x:(?>a)* +)"):
+        try:
+            re.compile(bad)
+        except re.PatternError:
+            pass
+        else:
+            raise AssertionError(bad)
     for flags in (0, re.L):
         ahead = re.compile(b"a(?!b).", flags)
         assert ahead.search(b"abad").span() == (2, 4)

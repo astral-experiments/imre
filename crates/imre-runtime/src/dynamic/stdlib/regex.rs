@@ -360,13 +360,26 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
                     prefer_translation |= prefer_python_flags;
                 }
             }
+            // The regular backend reads a possessive modifier as another repetition.
+            // Let the Python tokenizer bind it to its operand before compiling.
+            if !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+') {
+                return None;
+            }
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
                     prefer_translation = true;
-                } else if chars.peek() == Some(&',') {
-                    // Python treats an omitted lower bound as zero, including in {,}.
-                    result.push_str("{0");
-                    continue;
+                } else {
+                    let mut suffix = chars
+                        .clone()
+                        .skip_while(|c| c.is_ascii_digit() || *c == ',');
+                    if suffix.next() == Some('}') && suffix.next() == Some('+') {
+                        return None;
+                    }
+                    if chars.peek() == Some(&',') {
+                        // Python treats an omitted lower bound as zero, including in {,}.
+                        result.push_str("{0");
+                        continue;
+                    }
                 }
             }
             if c == '$' && !in_class && flags & MULTILINE == 0 && chars.peek().is_none() {
