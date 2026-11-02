@@ -1763,6 +1763,7 @@ def report(text):
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
+            "boxed_class_annotation_sites.py",
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",

@@ -640,6 +640,10 @@ pub(super) struct ClassNamespace {
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
+    /// Scratch field dictionary used only while an ordinary class body is executing.
+    pub annotation_scratch: Option<Id>,
+    /// Executed deferred sites in source order, including repeated field names.
+    pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
     /// TypedDict installs a class-wide annotation function in place of its field thunks.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
@@ -1295,6 +1299,12 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_thunks);
+                    visit.extend(class.annotation_scratch);
+                    if let Some(sites) = &class.annotation_sites {
+                        for &(name, thunk) in sites.values() {
+                            visit.extend([name, thunk]);
+                        }
+                    }
                     visit.extend(class.dictionary);
                 }
                 visit.extend(scope.parent);
