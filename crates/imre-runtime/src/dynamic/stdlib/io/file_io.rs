@@ -297,6 +297,15 @@ fn descriptor_from_argument(ctx: &mut Context, file: Id) -> Option<RawFd> {
         .and_then(|n| RawFd::try_from(n).ok())
 }
 
+/// Pass FileIO only its operation and optional update marker, in that order.
+fn raw_open_mode(mode: &str) -> String {
+    let mut raw: String = mode.chars().filter(|c| "rwax".contains(*c)).collect();
+    if mode.contains('+') {
+        raw.push('+');
+    }
+    raw
+}
+
 /// Resolve the public open() arguments before opening the underlying file.
 pub(in crate::dynamic) fn open(
     ctx: &mut Context,
@@ -362,7 +371,7 @@ pub(in crate::dynamic) fn open(
     }
     let opener = opener.filter(|&v| v != NONE);
     if buffering == 0 {
-        let raw_mode = mode_text.replace('t', "");
+        let raw_mode = raw_open_mode(mode_text);
         return open_raw(ctx, raw_arg, raw_mode, binary, owns, opener);
     }
     let update = mode_text.contains('+');
@@ -394,14 +403,8 @@ pub(in crate::dynamic) fn open(
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
         let mode_text = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
-        if fd.is_some() && update && !binary {
-            return Err(Error::new(
-                "NotImplementedError",
-                "buffered update descriptors are unsupported",
-            ));
-        }
         let reading = mode_text.contains('r');
-        let raw_mode = mode_text.replace('t', "");
+        let raw_mode = raw_open_mode(mode_text);
         ctx.module("io")?;
         let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
         initialize_file(
@@ -446,9 +449,13 @@ pub(in crate::dynamic) fn open(
                 Vec::new(),
             )
             .map_err(|error| close_on_error(ctx, buffer, error))?;
-        let mode = mode
-            .map(|id| ctx.scalar_value(id))
-            .unwrap_or_else(|| ctx.text("r"));
+        // open() gives TextIOWrapper a new exact str preserving the caller's spelling.
+        let spelling = mode
+            .map(|id| ctx.str_value(id))
+            .transpose()?
+            .unwrap_or("r")
+            .to_owned();
+        let mode = ctx.text(spelling);
         ctx.set_attr(stream, "mode", mode)
             .map_err(|error| close_on_error(ctx, stream, error))?;
         return Ok(stream);

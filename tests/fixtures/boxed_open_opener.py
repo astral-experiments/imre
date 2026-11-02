@@ -48,6 +48,25 @@ def main():
             assert text.buffer.raw.name == spelling and text.read() == "abc"
         closed(descriptors[-1])
 
+    audit_modes = []
+    def audit(event, args):
+        if event == "open" and args[0] == spelling:
+            audit_modes.append(args[1])
+    sys.addaudithook(audit)
+    with io.open(spelling, "+br", opener=acquire) as f:
+        assert audit_modes == ["r+"] and f.read() == b"abc"
+    with open(spelling, "br", buffering=0, opener=acquire) as f:
+        assert audit_modes == ["r+", "r"] and f.read() == b"abc"
+    text_mode = "".join(["r", "+", "t"])
+    fd = os.open(target, os.O_RDWR)
+    try:
+        with io.open(fd, text_mode, closefd=False, opener=object()) as f:
+            assert f.mode == text_mode and f.mode is not text_mode
+            assert f.read() == "abc"
+        os.fstat(fd)
+    finally:
+        os.close(fd)
+
     old_count = len(descriptors)
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
