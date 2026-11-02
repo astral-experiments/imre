@@ -766,6 +766,10 @@ impl Function<'_, '_> {
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
         }
+        if matches!(body, Body::Generator(..)) {
+            // generator() binds the implicit .0 argument without calling the step function.
+            signature["co_argcount"] = json!(1);
+        }
         if let Body::Namespace(stmts) = &body {
             signature["postponed_annotations"] = json!(
                 self.source.string_annotations
