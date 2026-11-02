@@ -53,34 +53,40 @@ fn buffer_span(ctx: &Context, id: Id, writable: bool) -> Result<(Id, Range<usize
     }
 }
 
-// The large-file interface keeps the Python offset intact on 32-bit GNU targets.
-type Preadv2 = unsafe extern "C" fn(i32, *const libc::iovec, i32, i64, i32) -> isize;
-
+// The large-file interfaces keep the Python offset intact on 32-bit GNU targets.
 #[cfg(not(target_env = "gnu"))]
-use libc::{off_t as FileOffset, preadv as read_at};
+use libc::{off_t as FileOffset, preadv as read_at, pwritev as write_at};
 #[cfg(target_env = "gnu")]
-use libc::{off64_t as FileOffset, preadv64 as read_at};
+use libc::{off64_t as FileOffset, preadv64 as read_at, pwritev64 as write_at};
 
-fn preadv2() -> Option<Preadv2> {
-    static CALL: std::sync::OnceLock<Option<Preadv2>> = std::sync::OnceLock::new();
-    *CALL.get_or_init(|| {
-        // glibc added preadv64v2 in 2.26. Other Linux libcs may provide preadv2
-        // with a 64-bit off_t, or only the original flags-free preadv.
-        #[cfg(target_env = "gnu")]
-        let name = c"preadv64v2";
-        #[cfg(not(target_env = "gnu"))]
-        let name = {
-            if size_of::<libc::off_t>() != size_of::<i64>() {
-                return None;
-            }
-            c"preadv2"
+type Positioned = unsafe extern "C" fn(i32, *const libc::iovec, i32, FileOffset) -> isize;
+type PositionedV2 = unsafe extern "C" fn(i32, *const libc::iovec, i32, i64, i32) -> isize;
+
+fn positioned_v2(write: bool) -> Option<PositionedV2> {
+    use std::sync::OnceLock;
+    static READ: OnceLock<Option<PositionedV2>> = OnceLock::new();
+    static WRITE: OnceLock<Option<PositionedV2>> = OnceLock::new();
+    let (cache, large_file, regular) = if write {
+        (&WRITE, c"pwritev64v2", c"pwritev2")
+    } else {
+        (&READ, c"preadv64v2", c"preadv2")
+    };
+    *cache.get_or_init(|| {
+        // glibc added the v2 large-file interfaces in 2.26. Other Linux libcs
+        // may provide the regular v2 symbols with a 64-bit off_t.
+        let name = if cfg!(target_env = "gnu") {
+            large_file
+        } else if size_of::<libc::off_t>() == size_of::<i64>() {
+            regular
+        } else {
+            return None;
         };
-        // SAFETY: both names above have the declared C ABI with a 64-bit offset.
+        // SAFETY: each of the selected libc symbols has the declared C ABI.
         let symbol = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) };
         if symbol.is_null() {
             None
         } else {
-            Some(unsafe { std::mem::transmute::<*mut libc::c_void, Preadv2>(symbol) })
+            Some(unsafe { std::mem::transmute::<*mut libc::c_void, PositionedV2>(symbol) })
         }
     })
 }
@@ -88,8 +94,8 @@ fn preadv2() -> Option<Preadv2> {
 enum Transfer {
     Read,
     Write,
-    Positioned(FileOffset),
-    PositionedWithFlags(Preadv2, i64, i32),
+    Positioned(Positioned, FileOffset),
+    PositionedWithFlags(PositionedV2, i64, i32),
 }
 
 fn transfer_exported(
@@ -97,6 +103,7 @@ fn transfer_exported(
     fd: i32,
     spans: &[(Id, Range<usize>)],
     transfer: Transfer,
+    write: bool,
 ) -> Result<Id> {
     let mut vectors = Vec::new();
     vectors.try_reserve_exact(spans.len()).map_err(no_memory)?;
@@ -111,7 +118,7 @@ fn transfer_exported(
             let (base, length) = match bases.entry(*storage) {
                 Entry::Occupied(entry) => *entry.get(),
                 Entry::Vacant(entry) => {
-                    let backing = if matches!(transfer, Transfer::Write) {
+                    let backing = if write {
                         let bytes = ctx.owner_bytes(*storage)?;
                         (bytes.as_ptr().cast_mut(), bytes.len())
                     } else {
@@ -139,9 +146,9 @@ fn transfer_exported(
         let n = unsafe {
             match transfer {
                 Transfer::Read => libc::readv(fd, iov, count),
-                // writev only reads iov_base, including for immutable bytes.
+                // Gather writes only read iov_base, including for immutable bytes.
                 Transfer::Write => libc::writev(fd, iov, count),
-                Transfer::Positioned(offset) => read_at(fd, iov, count, offset),
+                Transfer::Positioned(call, offset) => call(fd, iov, count, offset),
                 Transfer::PositionedWithFlags(call, offset, flags) => {
                     call(fd, iov, count, offset, flags)
                 }
@@ -158,58 +165,44 @@ fn transfer_exported(
     }
 }
 
-pub(super) fn readv(
-    ctx: &mut Context,
-    fd: i32,
-    buffers: Id,
-    position: Option<(i64, i32)>,
-) -> Result<Id> {
-    let name = if position.is_some() {
-        "preadv2"
-    } else {
-        "readv"
-    };
-    with_vectors(ctx, fd, buffers, name, || {
-        Ok(match position {
-            None => Transfer::Read,
-            Some((offset, flags)) => match preadv2() {
-                Some(call) => Transfer::PositionedWithFlags(call, offset, flags),
-                None if flags == 0 => Transfer::Positioned(
-                    FileOffset::try_from(offset)
-                        .map_err(|_| Error::new("OverflowError", "offset does not fit in off_t"))?,
-                ),
-                None => {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "preadv2: flags unavailable on this platform",
-                    ));
-                }
-            },
-        })
-    })
-}
-
-pub(super) fn writev(ctx: &mut Context, fd: i32, buffers: Id) -> Result<Id> {
-    crate::initialize_io();
-    with_vectors(ctx, fd, buffers, "writev", || Ok(Transfer::Write))
-}
-
-fn with_vectors(
+pub(super) fn transfer(
     ctx: &mut Context,
     fd: i32,
     buffers: Id,
     name: &str,
-    select: impl FnOnce() -> Result<Transfer>,
+    position: Option<(i64, i32)>,
 ) -> Result<Id> {
+    let write = matches!(name, "writev" | "pwritev");
+    if write {
+        crate::initialize_io();
+    }
     if !is_sequence(ctx, buffers) {
+        // CPython uses the v2 spelling only for preadv's sequence check.
+        let name = if name == "preadv" { "preadv2" } else { name };
         return Err(Error::new(
             "TypeError",
             format!("{name}() arg 2 must be a sequence"),
         ));
     }
     let count = ctx.sequence_len(buffers)?;
-    let transfer = select()?;
-    let writable = !matches!(transfer, Transfer::Write);
+    let transfer = match position {
+        None if write => Transfer::Write,
+        None => Transfer::Read,
+        Some((offset, flags)) => match positioned_v2(write) {
+            Some(call) => Transfer::PositionedWithFlags(call, offset, flags),
+            None if flags == 0 => Transfer::Positioned(
+                if write { write_at } else { read_at },
+                FileOffset::try_from(offset)
+                    .map_err(|_| Error::new("OverflowError", "offset does not fit in off_t"))?,
+            ),
+            None => {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    format!("{name}2: flags unavailable on this platform"),
+                ));
+            }
+        },
+    };
     let mut spans = Vec::new();
     spans.try_reserve_exact(count).map_err(no_memory)?;
     let mark = ctx.buffer_exports.len();
@@ -217,13 +210,13 @@ fn with_vectors(
         for index in 0..count {
             let key = ctx.int(index as i64);
             let item = ctx.get_item(buffers, key)?;
-            let (storage, range) = buffer_span(ctx, item, writable)?;
+            let (storage, range) = buffer_span(ctx, item, !write)?;
             // Pin this view and backing before the next __getitem__ runs Python.
             ctx.buffer_exports.try_reserve(2).map_err(no_memory)?;
             ctx.buffer_exports.extend([item, storage]);
             spans.push((storage, range));
         }
-        transfer_exported(ctx, fd, &spans, transfer)
+        transfer_exported(ctx, fd, &spans, transfer, write)
     })();
     ctx.buffer_exports.truncate(mark);
     result

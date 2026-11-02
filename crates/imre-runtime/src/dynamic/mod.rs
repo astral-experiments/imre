@@ -2889,6 +2889,7 @@ impl Context {
                     "posix_fadvise",
                     "ptsname",
                     "preadv",
+                    "pwritev",
                     "readv",
                     "writev",
                     "splice",
@@ -2905,6 +2906,9 @@ impl Context {
                     self.bind(scope, attr, value);
                 }
                 for (attr, flag) in [
+                    ("RWF_APPEND", libc::RWF_APPEND),
+                    ("RWF_DSYNC", libc::RWF_DSYNC),
+                    ("RWF_SYNC", libc::RWF_SYNC),
                     ("RWF_HIPRI", libc::RWF_HIPRI),
                     ("RWF_NOWAIT", libc::RWF_NOWAIT),
                     ("O_PATH", libc::O_PATH),
@@ -2992,8 +2996,12 @@ impl Context {
                         "get_terminal_size",
                         "ptsname",
                         "preadv",
+                        "pwritev",
                         "readv",
                         "writev",
+                        "RWF_APPEND",
+                        "RWF_DSYNC",
+                        "RWF_SYNC",
                         "RWF_HIPRI",
                         "RWF_NOWAIT",
                         "O_NOCTTY",
