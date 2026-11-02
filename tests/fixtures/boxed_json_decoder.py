@@ -43,3 +43,29 @@ def current():
     else:
         raise AssertionError('lost decoder error after package mutation')
     print('fresh JSON decoder classes and errors')
+
+    class Source:
+        def __init__(self):
+            self.calls = 0
+
+        def read(self):
+            self.calls += 1
+            return b'{"key": 1, "key": 2.00}'
+
+    def rejected(item):
+        raise AssertionError("object_hook must yield to object_pairs_hook")
+
+    stream = Source()
+    result = json.load(stream, parse_float=str, parse_int=str,
+                       object_pairs_hook=list, object_hook=rejected)
+    assert result == [('key', '1'), ('key', '2.00')]
+    assert stream.calls == 1
+
+    class Decoder:
+        def __init__(self, *, label):
+            self.label = label
+
+        def decode(self, text):
+            return self.label, text
+
+    assert json.loads(b'123', cls=Decoder, label='document') == ('document', '123')
