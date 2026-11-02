@@ -43,7 +43,8 @@ pub(in crate::dynamic) fn tzinfo(ctx: &mut Context) -> Id {
 
 pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
     let (owner, fields, methods): (_, &[_], &[_]) = match class {
-        TZINFO => (TZINFO, &[], &["tzname", "utcoffset", "dst"]),
+        TZINFO => (TZINFO, &[], &["__reduce__", "tzname", "utcoffset", "dst"]),
+        "datetime.timezone" => ("datetime.timezone", &[], &["__getinitargs__"]),
         "datetime.date" => (
             "datetime.date",
             &FIELDS[..3],
@@ -154,9 +155,14 @@ pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
 }
 
 pub(in crate::dynamic) fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
+    // A native-created zone (UTC or a parsed mail date) already owns its timedelta.
+    let tzoffset = value
+        .zone_offset()
+        .map_or(NONE, |offset| store(ctx, offset, NONE));
     ctx.alloc(Value::Calendar {
         value,
         tzinfo,
+        tzoffset,
         tzname: NONE,
     })
 }
@@ -465,6 +471,14 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some((kind, operation)) = method.split_once('.')
+        && matches!(
+            (kind, operation),
+            ("tzinfo", "__reduce__") | ("timezone", "__getinitargs__")
+        )
+    {
+        return reduction::reduce_zone(ctx, kind, operation, args, kwargs);
+    }
     if let Some((kind, operation @ ("__reduce__" | "__reduce_ex__"))) = method.split_once('.') {
         return reduction::reduce(ctx, kind, operation, args, kwargs);
     }
@@ -658,6 +672,7 @@ pub(super) fn call(
                 ctx.alloc(Value::Calendar {
                     value: zone,
                     tzinfo: NONE,
+                    tzoffset: id,
                     tzname,
                 })
             })

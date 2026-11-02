@@ -739,7 +739,8 @@ pub(super) enum Value {
     Calendar {
         value: crate::objects::Calendar,
         tzinfo: Id,
-        // Preserve the fixed timezone name and its Python str subclass methods.
+        // Preserve a fixed zone's Python constructor objects, including subclasses.
+        tzoffset: Id,
         tzname: Id,
     },
     Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
@@ -1344,7 +1345,12 @@ impl Value {
             Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
-            Self::Calendar { tzinfo, tzname, .. } => visit.extend([*tzinfo, *tzname]),
+            Self::Calendar {
+                tzinfo,
+                tzoffset,
+                tzname,
+                ..
+            } => visit.extend([*tzinfo, *tzoffset, *tzname]),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
                 for (key, value) in entries {

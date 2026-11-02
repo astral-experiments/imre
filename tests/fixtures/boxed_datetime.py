@@ -450,6 +450,40 @@ def test_calendar_reduction():
     assert super(Mixed, item).__reduce_ex__(4) == 4
 
 
+def test_tzinfo_reduction():
+    from datetime import tzinfo
+
+    assert timezone.__reduce__ is tzinfo.__reduce__
+    assert tzinfo().__reduce__() == (tzinfo, (), None)
+    assert UTC.__reduce__() == (timezone, (timedelta(0),), None)
+    offset = timedelta(minutes=7)
+    name = "east"
+    fixed = timezone(offset, name)
+    cls, args, state = fixed.__reduce__()
+    assert cls is timezone and args[0] is offset and args[1] is name and state is None
+
+    class Zone(tzinfo):
+        def __getinitargs__(self):
+            return self.arguments
+
+        def __getstate__(self):
+            return self.state
+
+    zone = Zone()
+    zone.arguments = []
+    zone.state = {}
+    cls, args, state = zone.__reduce_ex__(4)
+    assert cls is Zone and args is zone.arguments and state is zone.state
+
+    class Stateful(tzinfo):
+        pass
+
+    obj = Stateful()
+    obj.name = "east"
+    assert obj.__reduce__() == (Stateful, (), {"name": "east"})
+    assert obj.__reduce__()[2] is obj.__dict__
+
+
 def test_calendar_strftime():
     calls = []
 
@@ -488,6 +522,7 @@ def test_calendar_strftime():
 def current():
     test_calendar_strftime()
     test_calendar_reduction()
+    test_tzinfo_reduction()
     test_calendar_format()
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
