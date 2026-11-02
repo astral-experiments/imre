@@ -18,6 +18,7 @@ mod surrogate;
 
 pub(super) use scanner::scanner_next;
 
+use assertions::{Guard, Kind};
 use progress::Matcher;
 pub(super) use split::pattern_split;
 use split::split;
@@ -92,7 +93,7 @@ pub(in crate::dynamic) struct Pattern {
     bytes: bool,
     engine_source: String,
     regex: Matcher,
-    assertions: Vec<(String, Regex)>,
+    assertions: Vec<(String, Guard)>,
     full: OnceCell<std::result::Result<Matcher, String>>,
     split_retry: OnceCell<std::result::Result<regex_automata::nfa::thompson::NFA, String>>,
 }
@@ -218,7 +219,7 @@ fn build_regex(
     source: &str,
     bytes: bool,
     flags: i64,
-    assertions: &[(String, Regex)],
+    assertions: &[(String, Guard)],
 ) -> std::result::Result<Matcher, String> {
     let syntax = syntax(bytes, flags);
     let mut builder = Regex::builder();
@@ -648,40 +649,96 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let mut assertions = Vec::new();
     let (engine_source, regex) = prepared
         .or_else(|original| {
-            let Some(extracted) = assertions::extract(&source, flags & VERBOSE != 0)? else {
+            let Some(extracted) = assertions::extract(&source, flags & VERBOSE != 0, bytes)? else {
                 return Err(original);
+            };
+            let expected_groups = if extracted
+                .guards
+                .iter()
+                .any(|(_, kind, _)| *kind != Kind::Ahead)
+            {
+                // Validate Python widths before HIR simplification can discard an impossible branch.
+                let (_, groups) = imre_regex::lookahead_source(
+                    &source,
+                    flags & VERBOSE != 0,
+                    alphabet(bytes, ascii, flags),
+                    flags & DOTALL != 0,
+                )?;
+                if flags & LOCALE != 0
+                    && (flags & IGNORECASE != 0
+                        || source
+                            .as_bytes()
+                            .windows(2)
+                            .any(|pair| matches!(pair, br"\w" | br"\W" | br"\b" | br"\B")))
+                {
+                    return Err(original);
+                }
+                Some(groups)
+            } else {
+                None
             };
             let syntax = syntax(bytes, flags);
             let mut guards = Vec::new();
-            for (name, body) in extracted.guards {
+            for (name, kind, body) in extracted.guards {
                 let mut translated = translate(&body)?;
                 // Matching the guard only needs a boolean. A terminal dollar still admits a
                 // final newline, but its private capture is unnecessary in this submatcher.
                 if translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
+                    if kind != Kind::Ahead {
+                        // The optional consumed newline is not part of Python's lookbehind width.
+                        return Err("terminal dollar in a bytes lookbehind is unsupported".into());
+                    }
                     translated.truncate(translated.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
                     translated.push_str(r"(?:\n)?\z");
                 }
                 let hir = regex_automata::util::syntax::parse_with(&translated, &syntax)
                     .map_err(|err| err.to_string())?;
                 // Bound the work done each time the main NFA visits a zero-width assertion.
-                if hir
-                    .properties()
+                let properties = hir.properties();
+                let invalid = if kind == Kind::Ahead {
+                    "lookahead requires a capture-free pattern of at most 256 bytes"
+                } else {
+                    "lookbehind requires a fixed-width pattern of at most 256 bytes"
+                };
+                let width = properties
                     .maximum_len()
-                    .is_none_or(|width| width > 256)
-                    || hir.properties().explicit_captures_len() != 0
-                {
-                    return Err(
-                        "lookahead requires a capture-free pattern of at most 256 bytes".into(),
-                    );
+                    .filter(|width| *width <= 256)
+                    .ok_or(invalid)?;
+                if kind != Kind::Ahead && properties.minimum_len() != Some(width) {
+                    return Err("look-behind requires fixed-width pattern".into());
+                }
+                if kind != Kind::NegativeBehind && properties.explicit_captures_len() != 0 {
+                    return Err(if kind == Kind::Ahead {
+                        invalid
+                    } else {
+                        "positive lookbehind requires a capture-free pattern"
+                    }
+                    .into());
                 }
                 let guard = Regex::builder()
                     .configure(Regex::config().utf8_empty(!bytes))
                     .build_from_hir(&hir)
                     .map_err(|err| err.to_string())?;
-                guards.push((name, guard));
+                guards.push((
+                    name,
+                    Guard {
+                        regex: guard,
+                        kind,
+                        width,
+                    },
+                ));
             }
             let source = translate(&extracted.source)?;
             let matcher = build_regex(&source, bytes, flags, &guards)?;
+            if let Some(expected) = expected_groups
+                && !matcher
+                    .group_info()
+                    .pattern_names(PatternID::ZERO)
+                    .filter(|name| *name != Some("imre.eol"))
+                    .eq(expected.iter().map(Option::as_deref))
+            {
+                return Err("lookbehind would change the Python capture groups".into());
+            }
             assertions = guards;
             Ok((source, matcher))
         })
