@@ -914,6 +914,16 @@ def test_fixed_timezone_methods():
 
 
 def test_custom_tzinfo():
+    bare = tzinfo()
+    for name in ("extra", "utcoffset"):
+        for change in (lambda: setattr(bare, name, 1), lambda: delattr(bare, name)):
+            try:
+                change()
+            except AttributeError:
+                pass
+            else:
+                raise AssertionError(name)
+
     offset = timedelta(seconds=29, microseconds=7)
     calls = []
 
@@ -923,6 +933,10 @@ def test_custom_tzinfo():
             return offset
 
     zone = Zone()
+    zone.extra = 7
+    assert vars(zone)["extra"] == 7
+    del zone.extra
+    assert "extra" not in vars(zone)
     day = date(2000, 1, 2)
     clock = time(0, 0, 29, 7, zone)
     local = dt.combine(day, clock)
