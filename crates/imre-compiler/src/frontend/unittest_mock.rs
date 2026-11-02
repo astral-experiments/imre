@@ -32,29 +32,37 @@ impl Checker<'_> {
     pub(super) fn boxed_mock_keywords(&mut self, call: &ast::ExprCall) -> Result<bool, String> {
         let mut boxed = false;
         for keyword in &call.arguments.keywords {
-            let value = self.evaluated_argument(&keyword.value)?;
-            boxed |= match keyword.arg.as_deref() {
-                Some("name") => false,
-                Some("side_effect") => matches!(value.ty, Type::Callable(_) | Type::FunctionRef),
-                _ => true,
-            };
+            match keyword.arg.as_deref() {
+                Some("name") => {
+                    self.expr_expected(&keyword.value, self.types.optional(Type::Str))?;
+                }
+                Some("side_effect") => {
+                    let value = self.evaluated_argument(&keyword.value)?;
+                    boxed |= self
+                        .coerce(value, self.types.optional(Type::Exception), &keyword.value)
+                        .is_err();
+                }
+                _ => {
+                    self.evaluated_argument(&keyword.value)?;
+                    boxed = true;
+                }
+            }
         }
         Ok(boxed)
     }
 
-    pub(super) fn mock_side_effect_target(
-        &self,
-        receiver: Type,
-        attr: &ast::ExprAttribute,
-    ) -> bool {
-        attr.attr.as_str() == "side_effect"
-            && matches!(receiver, Type::Class(class) if self.native_mock(class))
+    pub(super) fn native_mock_instance(&self, ty: Type) -> bool {
+        matches!(ty, Type::Class(class) if self.native_mock(class))
     }
 
     pub(super) fn bundled_mock_class(&self, class: usize, name: &str) -> bool {
         let record = &self.classes.declarations.definitions[class];
         let module = &self.graph.modules[record.definition.module];
         module.bundled && module.name == "unittest.mock" && record.name == name
+    }
+
+    pub(super) fn mock_call_record(&self, ty: Type) -> bool {
+        matches!(self.types.payload(ty).unwrap_or(ty), Type::Class(class) if self.bundled_mock_class(class, "_Call"))
     }
 
     /// A recorded call has Python's tuple representation, including ordered keywords.
@@ -161,7 +169,7 @@ impl Checker<'_> {
     }
 
     fn mock_argument(&mut self, node: &ast::Expr, argument: usize) -> Result<Expr, String> {
-        let mut value = self.expr(node)?;
+        let mut value = self.evaluated_argument(node)?;
         let kind = match value.ty {
             Type::Int => "int",
             Type::Bool => "bool",
@@ -173,11 +181,7 @@ impl Checker<'_> {
             Type::Bytes => "bytes",
             Type::None => "None",
             _ => {
-                return Err(error(
-                    self.source,
-                    node,
-                    "native mock call arguments require None, bool, int, str or bytes",
-                ));
+                return Err(self.object_runtime_export("unittest.mock object arguments", node));
             }
         };
         let constructor = self.classes.methods[argument]["__init__"].id;
