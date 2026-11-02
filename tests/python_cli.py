@@ -1264,6 +1264,16 @@ def main():
         (later / "__init__.py").write_text("invalid syntax!\n")
         compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
 
+        helper = root / "request_support.py"
+        helper.write_text("from importlib.machinery import ModuleSpec\nspec = ModuleSpec('sample', None)\n")
+        request_script = root / "request_entry.py"
+        request_script.write_text(
+            "from urllib import request\n"
+            "from request_support import spec\n"
+            "print(request.Request('data:,ok').type, spec.name)\n"
+        )
+        compare("-B", request_script)
+
         decorated = root / "method_decorators.py"
         decorated.write_text(
             "def prefix(tag):\n"
