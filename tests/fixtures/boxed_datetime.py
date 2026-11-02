@@ -579,6 +579,7 @@ def current():
         raise AssertionError("invalid timezone accepted")
     test_calendar_ordering()
     test_calendar_day_methods()
+    test_timestamp()
 
 
 def test_calendar_ordering():
@@ -640,6 +641,35 @@ def test_calendar_day_methods():
     assert date.ctime(value) == "Tue Dec 31 00:00:00 0030"
     assert date(1, 1, 1).ctime() == "Mon Jan  1 00:00:00 0001"
     assert value.isoweekday() == 2 and date(2024, 3, 3).isoweekday() == 7
+
+
+def test_timestamp():
+    import os
+    import time as clock
+
+    class Stamp(dt):
+        pass
+
+    offset = timezone(timedelta(microseconds=1))
+    assert Stamp(1970, 1, 1, tzinfo=offset).timestamp() == -0.000001
+    assert dt.timestamp(dt(1970, 1, 1, tzinfo=UTC)) == 0.0
+    if hasattr(clock, "tzset"):
+        saved = os.environ.get("TZ")
+        try:
+            os.environ["TZ"] = "UTC0"
+            clock.tzset()
+            assert dt(1969, 12, 31, 23, 59, 59, 999999).timestamp() == -1 + 999999 / 1000000
+            os.environ["TZ"] = "EST+05EDT,M3.2.0,M11.1.0"
+            clock.tzset()
+            for fold, gap, repeat in ((0, 1331451000, 1352007000), (1, 1331447400, 1352010600)):
+                assert dt(2012, 3, 11, 2, 30, fold=fold).timestamp() == gap
+                assert dt(2012, 11, 4, 1, 30, fold=fold).timestamp() == repeat
+        finally:
+            if saved is None:
+                del os.environ["TZ"]
+            else:
+                os.environ["TZ"] = saved
+            clock.tzset()
 
 
 if __name__ == "__main__":
