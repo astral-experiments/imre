@@ -1634,6 +1634,18 @@ impl IntrinsicModule {
             (Self::GenericPath | Self::PosixPath, "commonprefix") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
             }
+            (Self::GenericPath | Self::PosixPath, "getatime") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.getatime")
+            }
+            (Self::GenericPath | Self::PosixPath, "getctime") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.getctime")
+            }
+            (Self::GenericPath | Self::PosixPath, "getmtime") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.getmtime")
+            }
+            (Self::GenericPath | Self::PosixPath, "lexists") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.lexists")
+            }
             (Self::GenericPath | Self::PosixPath, "getsize") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.getsize")
             }
