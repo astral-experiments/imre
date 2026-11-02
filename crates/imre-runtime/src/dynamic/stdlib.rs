@@ -761,7 +761,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
         | ("_json", "_imre_encode_one_shot")
-        | ("random", "random" | "choice")
+        | ("random", "random" | "choice" | "shuffle")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
@@ -1366,6 +1366,9 @@ pub(super) fn call(
             ));
         }
         return Ok(ctx.alloc(Value::Float(crate::objects::imre_random_float())));
+    }
+    if name == "random.shuffle" {
+        return random::shuffle(ctx, args, kwargs);
     }
     if name == "random.randrange" {
         return random::randrange(ctx, args, kwargs);

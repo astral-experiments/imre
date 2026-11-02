@@ -85,7 +85,7 @@ pub(crate) mod posixpath;
 mod processes;
 pub(crate) use processes::{BoxedPipe, BoxedPopen, initial_environment};
 mod random;
-pub(crate) use random::{choice_index, imre_random_float, random_below};
+pub(crate) use random::{choice_index, imre_random_float, random_below, shuffle_swaps};
 pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;
