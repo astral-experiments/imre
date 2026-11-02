@@ -1478,6 +1478,7 @@ impl IntrinsicModule {
                 "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
                 "IPV6_V6ONLY" => "_socket.IPV6_V6ONLY",
                 "SO_REUSEADDR" => "_socket.SO_REUSEADDR",
+                "SO_REUSEPORT" => "_socket.SO_REUSEPORT",
                 "SO_SNDBUF" => "_socket.SO_SNDBUF",
                 "TCP_NODELAY" => "_socket.TCP_NODELAY",
                 "SHUT_RD" => "_socket.SHUT_RD",
@@ -1490,6 +1491,8 @@ impl IntrinsicModule {
                 _ => return None,
             }),
             (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
+            (Self::Socket, "create_server") => Intrinsic::ObjectRuntimeExport("socket.create_server"),
+            (Self::Socket, "SO_REUSEPORT") => Intrinsic::ObjectRuntimeExport("socket.SO_REUSEPORT"),
             (Self::Socket, "has_dualstack_ipv6") => {
                 Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")
             }
