@@ -161,17 +161,20 @@ fn get_clock_info(ctx: &mut Context, args: &[Id]) -> Result<Id> {
             ),
         ));
     };
-    let text = ctx.string_storage(*arg).ok_or_else(|| {
+    let Some(text) = ctx.string_storage(*arg) else {
         let kind = if *arg == NONE {
             "None"
         } else {
             ctx.type_name(*arg)
         };
-        Error::new(
-            "TypeError",
-            format!("get_clock_info() argument 1 must be str, not {kind}"),
-        )
-    })?;
+        // PyArg formats at most 50 bytes of tp_name, then decodes the full diagnostic.
+        let mut message = b"get_clock_info() argument 1 must be str, not ".to_vec();
+        message.extend_from_slice(&kind.as_bytes()[..kind.len().min(50)]);
+        let text = crate::objects::Codec::Utf8 { signature: false }
+            .decode(&message, None)
+            .map_err(|error| ctx.decode_error(error))?;
+        return Err(Error::new("TypeError", text));
+    };
     // PyArg's 's' format encodes the entire string strictly before checking for NUL.
     let encoded;
     let name = match ctx.heap.get(text) {
