@@ -153,17 +153,6 @@ impl AsRawFd for ReadSource {
     }
 }
 
-fn join(left: &str, right: &str) -> String {
-    if right.starts_with('/') || left.is_empty() {
-        return right.to_owned();
-    }
-    if left.ends_with('/') {
-        format!("{left}{right}")
-    } else {
-        format!("{left}/{right}")
-    }
-}
-
 fn dirname(path: &str) -> &str {
     let head = path.rfind('/').map_or("", |i| &path[..=i]);
     if head.trim_start_matches('/').is_empty() {
@@ -286,15 +275,6 @@ pub(super) fn call(
 ) -> Result<Id> {
     let first = argument(args, 0)?;
     match name {
-        "os.path.join" => {
-            let first = super::posixpath::fspath(ctx, first)?;
-            let mut path = ctx.str_value(first)?.to_owned();
-            for &part in &args[1..] {
-                let part = super::posixpath::fspath(ctx, part)?;
-                path = join(&path, ctx.str_value(part)?);
-            }
-            return Ok(ctx.text(path));
-        }
         "os.path.dirname" => return Ok(ctx.text(dirname(ctx.str_value(first)?).to_owned())),
         "subprocess.run" => return run_process(ctx, args, kwargs),
         _ => {}
