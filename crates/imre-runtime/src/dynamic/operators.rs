@@ -3775,7 +3775,7 @@ impl Context {
                     return Ok(truth(self.dictionary_equal(left, right)? == (op == "==")));
                 }
                 let equal = self.checked_equal_impl(a, b, false)?
-                    && !matches!(self.heap.get(a), Value::Float(n) if n.is_nan())
+                    && !matches!(self.heap.get(self.scalar_value(a)), Value::Float(n) if n.is_nan())
                     && !matches!(self.heap.get(a), Value::Complex(z) if z.real.is_nan() || z.imag.is_nan());
                 return Ok(truth(equal == (op == "==")));
             }

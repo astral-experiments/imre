@@ -1676,6 +1676,9 @@ pub(super) fn call(
                 }
                 Value::Class { .. } => {
                     let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;
+                    if let Some(names) = ctx.float_enum_names(args[0]) {
+                        return call(ctx, "len", &[names], &[]);
+                    }
                     collections::entries(ctx, values)?.len()
                 }
                 Value::Deque(ring) => ring.items.len(),

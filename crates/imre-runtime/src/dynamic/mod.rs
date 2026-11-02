@@ -1244,6 +1244,12 @@ impl Context {
             return self.items(iterator);
         }
         if let Some(values) = self.enum_values(id) {
+            if let Some(ordered) = self.float_enum_names(id) {
+                let names = self.lookup_attr(id, "_member_map_")?;
+                return self.items(ordered)?.into_iter()
+                    .map(|key| self.get_item(names, key))
+                    .collect();
+            }
             let Value::Dict(entries) = self.heap.get(values) else {
                 unreachable!()
             };
