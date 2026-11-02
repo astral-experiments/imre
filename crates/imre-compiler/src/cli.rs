@@ -7,6 +7,12 @@ use imre_compiler::CompileOptions;
 use super::build_output::Verbosity;
 use super::{Allocator, USAGE};
 
+const DEFAULT_NATIVE_OPT_LEVEL: &str = match option_env!("IMRE_DEFAULT_NATIVE_OPT_LEVEL") {
+    None => "3",
+    Some(level) if matches!(level.as_bytes(), [b'0'..=b'3']) => level,
+    Some(_) => panic!("IMRE_DEFAULT_NATIVE_OPT_LEVEL expects 0, 1, 2, or 3"),
+};
+
 #[derive(Default)]
 pub(super) struct BuildOptions {
     pub source_path: Option<PathBuf>,
@@ -48,7 +54,7 @@ impl BuildOptions {
     fn initial() -> Self {
         Self {
             clang: cfg!(target_os = "macos").then(|| OsString::from("clang")),
-            optimization: "3".into(),
+            optimization: DEFAULT_NATIVE_OPT_LEVEL.into(),
             ..Self::default()
         }
     }
