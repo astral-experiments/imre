@@ -36,7 +36,9 @@ class RaisesEquality(EqualSeventeen):
 
 def current():
     import gc
-    from typing import Dict, ForwardRef
+    from typing import Dict, ForwardRef, GenericAlias
+
+    assert GenericAlias is type(list[int])
 
     class Symlink(str):
         pass

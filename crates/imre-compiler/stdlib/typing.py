@@ -19,6 +19,7 @@ from annotationlib import ForwardRef, _make_forward_ref
 from annotationlib import annotations_to_string as _annotation_strings, type_repr as _annotation_type_repr
 from functools import lru_cache
 from _typing import _idfunc
+from types import GenericAlias
 from typing import Any, Callable, Generic, Protocol, TypeVar, Union
 from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
