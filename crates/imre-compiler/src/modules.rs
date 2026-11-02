@@ -3656,14 +3656,18 @@ impl<'a> Loader<'a> {
                                     && value_name(stmt).is_some()
                                     && module_value(stmt).is_some_and(literal_export))
                         });
+                        let nested_source = module.name.contains('.') && !module.bundled;
                         let ordered = !module.is_package
-                            && module.name.contains('.')
-                            && !module.bundled
                             && module.archive.is_none()
                             && prefix.clone().all(|stmt| {
                                 module_name_guard(stmt)
-                                    || value_name(stmt).is_some() && module_value(stmt).is_some()
-                                    || matches!(stmt, ast::Stmt::Expr(_))
+                                    || value_name(stmt).is_some()
+                                        && module_value(stmt).is_some_and(|value| {
+                                            nested_source
+                                                || literal_export(value)
+                                                    && module.rebound_target(id, stmt).is_none()
+                                        })
+                                    || nested_source && matches!(stmt, ast::Stmt::Expr(_))
                             });
                         if id == 0 || !simple && !ordered {
                             return Err(self.modules[id].error(
