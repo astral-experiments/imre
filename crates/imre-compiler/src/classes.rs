@@ -433,6 +433,13 @@ pub(crate) fn defines_pickle_reducer(node: &ast::StmtClassDef) -> bool {
     })
 }
 
+// Keep a decorator error local to its class until we know how that class is built.
+#[derive(Default)]
+struct DeferredMethodDecorators {
+    has_runtime_method: bool,
+    unsupported: Option<String>,
+}
+
 fn collect_class(
     graph: &SourceGraph,
     module: &SourceModule,
@@ -441,6 +448,7 @@ fn collect_class(
     parents: [Option<(usize, &Class)>; 2],
     exception_layout: bool,
     exceptions: &HashMap<DefinitionId, u32>,
+    decorators: &mut DeferredMethodDecorators,
 ) -> Result<Class, String> {
     let base = parents[0];
     if defines_pickle_reducer(node) {
@@ -810,9 +818,25 @@ fn collect_class(
                     );
                     graph.class_body_error.borrow_mut().get_or_insert(error);
                     graph.check_decorated_method_calls.set(true);
+                    decorators.has_runtime_method = true;
                     MethodKind::Instance
                 } else {
-                    method_kind(graph, definition.module, method, &class_bindings)?
+                    match method_kind(graph, definition.module, method, &class_bindings) {
+                        Err(error)
+                            if graph.command_startup.is_none() && !name.starts_with("__") =>
+                        {
+                            // An arbitrary decorator may bind a descriptor or a non-callable.
+                            // Preserve the class name without inventing a fixed method slot.
+                            decorators.unsupported.get_or_insert(error);
+                            if !names.insert(name.to_owned()) {
+                                return Err(module
+                                    .error(method, &format!("duplicate class member {name:?}")));
+                            }
+                            class_bindings.insert(name.to_owned());
+                            continue;
+                        }
+                        kind => kind?,
+                    }
                 };
                 if name == "__call__" && kind != MethodKind::Instance {
                     return Err(module.error(

@@ -154,7 +154,8 @@ pub(super) fn resolve(
                 }
             }
         }
-        let mut class = collect_class(
+        let mut decorators = DeferredMethodDecorators::default();
+        let class = collect_class(
             graph,
             module,
             definition,
@@ -162,7 +163,14 @@ pub(super) fn resolve(
             [base, mixin].map(|parent| parent.map(|id| (id, classes[id].as_ref().unwrap()))),
             exceptions.layouts.contains(&definition),
             &exceptions.ids,
-        )?;
+            &mut decorators,
+        );
+        if !decorators.has_runtime_method
+            && let Some(error) = decorators.unsupported
+        {
+            return Err(error);
+        }
+        let mut class = class?;
         if exceptions.layouts.contains(&definition) {
             let index = (exceptions.ids[&definition] - exceptions::FIRST_USER_EXCEPTION) as usize;
             let mro = &exceptions.named[index].ancestors;
