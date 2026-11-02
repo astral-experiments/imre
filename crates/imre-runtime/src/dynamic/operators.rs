@@ -2094,6 +2094,9 @@ impl Context {
                             } else {
                                 work.push(match alias.kind {
                                     AliasKind::Callable => Part::Text("typing.Callable"),
+                                    AliasKind::AbcCallable if callable => {
+                                        Part::Text("collections.abc.Callable")
+                                    }
                                     AliasKind::Literal(_) => Part::Text("typing.Literal"),
                                     _ => Part::TypeArgument(alias.origin, false),
                                 });

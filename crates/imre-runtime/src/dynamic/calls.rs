@@ -140,7 +140,7 @@ fn excess_positional_error(
     )
 }
 
-fn missing_arguments_error(name: &str, kind: &str, missing: &[&str]) -> Error {
+pub(super) fn missing_arguments_error(name: &str, kind: &str, missing: &[&str]) -> Error {
     let count = missing.len();
     let unit = if count == 1 { "argument" } else { "arguments" };
     let names = match missing {
@@ -1100,6 +1100,7 @@ impl Context {
     pub(super) fn native_base(class: &str) -> Option<&'static str> {
         Some(match class {
             "bool" => "int",
+            "collections.abc._CallableGenericAlias" => "types.GenericAlias",
             "datetime.datetime" => "datetime.date",
             "datetime.timezone" => stdlib::datetime::TZINFO,
             stdlib::flags::TYPE | stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS => "tuple",
@@ -1524,6 +1525,7 @@ impl Context {
             | (value::TEMPLATE_ITER_TYPE, Value::TemplateIter { .. })
             | (value::INTERPOLATION_TYPE, Value::Interpolation { .. })
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
+            ("types.GenericAlias", Value::GenericAlias(alias)) => alias.is_builtin_alias(),
             ("typing._GenericAlias", Value::GenericAlias(alias))
                 if matches!(
                     alias.kind,

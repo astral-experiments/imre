@@ -67,8 +67,12 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     if name == "Mapping" {
         ctx.bind(scope, "__reversed__", NONE);
     }
-    if matches!(name, "Iterable" | "Container") {
-        let alias = ctx.builtin("types.GenericAlias");
+    if matches!(name, "Callable" | "Iterable" | "Container") {
+        let alias = ctx.builtin(if name == "Callable" {
+            "collections.abc._CallableGenericAlias"
+        } else {
+            "types.GenericAlias"
+        });
         let method = super::method_decorator::class_method(ctx, alias)?;
         ctx.bind(scope, "__class_getitem__", method);
     }
