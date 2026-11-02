@@ -672,22 +672,6 @@ impl<'a> CompiledStrings<'a, '_> {
                     }
                     self.heap.code_name(name.id.as_str());
                 }
-                ast::Expr::Call(call) if call.arguments.keywords.len() > 1 => {
-                    let mut seen = HashSet::new();
-                    for name in call
-                        .arguments
-                        .keywords
-                        .iter()
-                        .filter_map(|kw| kw.arg.as_ref())
-                    {
-                        if !seen.insert(name.as_str()) {
-                            return Err(Error::new(
-                                "SyntaxError",
-                                format!("keyword argument repeated: {name}"),
-                            ));
-                        }
-                    }
-                }
                 ast::Expr::Attribute(attr) => {
                     self.heap.code_name(attr.attr.as_str());
                 }
@@ -799,6 +783,41 @@ pub(super) fn line_starts(offsets: impl Iterator<Item = usize> + Clone) -> Resul
     starts.push(0);
     starts.extend(offsets);
     Ok(starts)
+}
+
+/// Check explicit keyword names before lowering can mangle class-private names.
+fn repeated_keyword(module: &ast::Mod) -> Option<&ast::Keyword> {
+    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
+
+    struct Children<'a>(Vec<ast::AnyNodeRef<'a>>);
+    impl<'a> SourceOrderVisitor<'a> for Children<'a> {
+        fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
+            self.0.push(node);
+            TraversalSignal::Skip
+        }
+    }
+
+    let mut pending = Children(vec![module.into()]);
+    while let Some(node) = pending.0.pop() {
+        if let ast::AnyNodeRef::Arguments(args) = node {
+            for (index, keyword) in args.keywords.iter().enumerate() {
+                if let Some(name) = &keyword.arg
+                    && let Some(repeated) = args.keywords[index + 1..].iter().find(|other| {
+                        other
+                            .arg
+                            .as_ref()
+                            .is_some_and(|id| id.as_str() == name.as_str())
+                    })
+                {
+                    return Some(repeated);
+                }
+            }
+        }
+        let start = pending.0.len();
+        node.visit_source_order(&mut pending);
+        pending.0[start..].reverse();
+    }
+    None
 }
 
 /// Interactive input accepts one compound statement or one logical line of simple statements.
@@ -2003,6 +2022,7 @@ impl Context {
             }
             _ => Cow::Borrowed(self.str_value(source)?),
         };
+        let filename_id = filename;
         let filename = filename_text;
         let source = if strip_indent {
             source.trim_start_matches([' ', '\t'])
@@ -2016,6 +2036,32 @@ impl Context {
         }
         let spellings = check_runtime_strings(source, parsed.tokens())?;
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
+        if let Some(keyword) = repeated_keyword(parsed.syntax()) {
+            let message = format!(
+                "keyword argument repeated: {}",
+                keyword.arg.as_ref().unwrap()
+            );
+            let position = |offset: usize| {
+                let line = lines.partition_point(|&start| start <= offset);
+                (line, offset - lines[line - 1] + 1)
+            };
+            let (line, column) = position(keyword.start().to_usize());
+            let (end_line, end_column) = position(keyword.end().to_usize());
+            let msg = self.text(&message);
+            let details = vec![
+                filename_id,
+                self.int(line as i64),
+                self.int(column as i64),
+                NONE,
+                self.int(end_line as i64),
+                self.int(end_column as i64),
+            ];
+            let location = self.alloc(Value::Tuple(details));
+            let args = [msg, location];
+            let mut error = self.exception("SyntaxError", &args);
+            self.retain_syntax_fields(&mut error, self.syntax_fields(&args))?;
+            return Err(error);
+        }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
         code.interactive = interactive;
         code.template_expressions = Rc::new(imre_ast::strings::template_expressions(

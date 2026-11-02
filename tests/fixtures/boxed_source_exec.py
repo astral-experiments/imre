@@ -551,7 +551,10 @@ def starred_calls():
         try:
             exec("mark(0)\n" + source, scope)
         except SyntaxError as error:
-            assert "keyword argument repeated: label" in str(error) and not events
+            assert error.msg == "keyword argument repeated: label" and not events
+            assert error.filename == "<string>" and (error.lineno, error.end_lineno) == (2, 2)
+            assert error.offset == source.rindex("label=2") + 1
+            assert error.end_offset == error.offset + len("label=2")
         else:
             raise AssertionError("duplicate explicit keyword compiled")
 
