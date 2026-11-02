@@ -540,6 +540,10 @@ class _TypedDictSymbol:
     def __getattr__(self, name):
         return self.__derived__((*self.__operand__(self, 20), ".", name))
 
+    def __iter__(self):
+        # ast.unparse uses bitwise-or precedence for the operand of a star.
+        yield self.__derived__(("*", *self.__operand__(self, 6)))
+
     def __getitem__(self, index):
         tokens = [*self.__operand__(self, 20), "["]
         items = index if isinstance(index, tuple) and index else (index,)
