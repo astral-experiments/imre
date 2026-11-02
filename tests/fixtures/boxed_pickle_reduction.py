@@ -90,9 +90,70 @@ def check_floats(protocol):
             assert data.endswith(b"G" + bytes.fromhex(bits) + b".")
 
 
+class LabeledTuple(tuple):
+    def __setstate__(self, state):
+        self.label = state["label"]
+        self.restored = True
+
+
+def consume(streams):
+    for stream in streams:
+        obj, label = pickle.loads(stream)
+        assert type(obj) is LabeledTuple and obj == (3, 4)
+        assert obj.restored and obj.label is label and label["back"] is obj
+    for bad in (b".", b"!", b"h\x07.", b"N]b.", b"cbuiltins\nlist\n]\x81."):
+        try:
+            pickle.loads(bad)
+        except pickle.UnpicklingError:
+            pass
+        else:
+            raise AssertionError("accepted invalid pickle")
+
+
+def check_object_reducer():
+    class Child(WithoutProtocol):
+        def reduce_from_super(self):
+            return super().__reduce_ex__(4)
+
+    class Mutable(set):
+        pass
+
+    class Frozen(frozenset):
+        pass
+
+    assert Mutable.__reduce__ is set.__reduce__
+    assert Frozen.__reduce__ is frozenset.__reduce__
+    obj = Child()
+    assert Child.__reduce_ex__ is object.__reduce_ex__
+    assert obj.reduce_from_super() == (str, (37,))
+    obj.__reduce__ = lambda: (int, (12,))
+    assert object.__reduce_ex__(obj, 2) == (int, (12,))
+
+    events = []
+    class Reducer:
+        def __get__(self, instance, owner):
+            events.append(instance is None)
+            if instance is None:
+                raise LookupError("class reducer lookup")
+            return lambda: (str, (37,))
+
+    class WithDescriptor:
+        __reduce__ = Reducer()
+
+    try:
+        WithDescriptor().__reduce_ex__(5)
+    except LookupError as error:
+        assert str(error) == "class reducer lookup"
+    else:
+        raise AssertionError("ignored an error inspecting the class reducer")
+    assert events == [False, True]
+
+
 def produce():
+    check_object_reducer()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        check_reduction_state(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
             try:
@@ -113,3 +174,27 @@ def produce():
         value = (shared, shared, reduced, reduced, WithoutProtocol(), (), dictionary_cases(protocol),
                  (b"", payload[:-1], payload, payload, ReducedBytes(b"x")))
         print(list(pickle.dumps(value, protocol)))
+
+
+class Stateful:
+    def __init__(self, links):
+        self.links = links
+        self.restorations = 0
+
+    def __reduce__(self):
+        return type(self), (self.links,), self.state
+
+    def __setstate__(self, state):
+        self.state = state
+        self.restorations += 1
+
+
+def check_reduction_state(protocol):
+    links = {}
+    obj = Stateful(links)
+    links["owner"] = obj
+    obj.state = {"links": links, "owner": obj}
+    restored, state = pickle.loads(pickle.dumps((obj, obj.state), protocol))
+    assert restored.state is state and restored.restorations == 1
+    assert state["owner"] is restored and state["links"] is restored.links
+    assert restored.links["owner"] is restored

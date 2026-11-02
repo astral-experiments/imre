@@ -167,6 +167,69 @@ class Case(Base):
     assert namespace["Broken"] is old and events[-2:] == ["decorated", "Broken"]
 
 
+def source_annotations():
+    from types import FunctionType
+
+    ns = {"__name__": "annotations", "format": bytes, "Alias": bytes}
+    exec("""def factory(outer, Alias, Global):
+    class C:
+        global Global
+        def uses_global(self, x: Global): ...
+        def method(self, first: Late, /, normal: outer, *args: format,
+                   named: Alias, **kw: int) -> None: ...
+        Alias = str
+        def sibling(self, arg: Alias): ...
+    return C
+""", ns)
+    cls = ns["factory"](bool, int, int)
+    cls.Global = float
+    ns["Global"] = complex
+    assert cls.uses_global.__annotations__ == {"x": complex}
+    assert cls.uses_global.__annotate__.__code__.co_freevars == ("__classdict__",)
+    provider = cls.method.__annotate__
+    assert provider.__code__.co_freevars == ("__classdict__", "outer")
+    assert provider.__closure__[0] is cls.sibling.__annotate__.__closure__[0]
+    assert provider.__globals__ is ns
+    try:
+        cls.method.__annotations__
+    except NameError as exc:
+        assert exc.name == "Late"
+    else:
+        raise AssertionError("unresolved annotation was evaluated")
+    for unsupported in (3, 4):
+        try:
+            provider(unsupported)
+        except NotImplementedError as exc:
+            assert exc.args == ()
+        else:
+            raise AssertionError("raw provider accepted a public replay format")
+    # Replay with replacement globals, as annotationlib does for missing names.
+    clone = FunctionType(provider.__code__, {"Late": complex, "format": list},
+                         closure=provider.__closure__)
+    cls.Alias = float
+    replayed = clone(2)
+    assert list(replayed) == ["normal", "first", "args", "named", "kw", "return"]
+    assert replayed == {"normal": bool, "first": complex, "args": list, "named": float,
+                        "kw": int, "return": None}
+    del cls.Alias
+    ns["Late"] = tuple
+    values = cls.method.__annotations__
+    assert values["first"] is tuple and values["args"] is bytes
+    assert values["named"] is bytes
+    assert cls.method.__annotations__ is values
+    exec("from __future__ import annotations\nclass F:\n    def f(self, n: Missing, obj: 'A') -> tuple[int]: ...", ns)
+    future = ns["F"].f
+    assert future.__annotate__.__closure__ is None
+    assert future.__annotations__ == {"n": "Missing", "obj": "'A'", "return": "tuple[int]"}
+    for expr in ("(tmp := int)", "(yield int)", "(await T)"):
+        try:
+            compile("def f(arg: " + expr + "): pass", "<annotations>", "exec")
+        except SyntaxError:
+            pass
+        else:
+            raise AssertionError("invalid annotation expression compiled")
+
+
 def source_test_cases():
     import types
     import unittest
@@ -353,7 +416,71 @@ def make(events):
     assert events == ["outer", 1, 3]
 
 
+def named_bindings():
+    namespace = {}
+    exec("""def recipe(values):
+    source = iter(values)
+    while batch := next(source, None):
+        yield batch
+    yield batch
+
+def outer(value):
+    state = []
+    def update():
+        nonlocal cell
+        state.append((cell, (cell := value), cell))
+    def read():
+        return cell
+    (cell := [])
+    update()
+    return state, read
+
+def shadow():
+    if False:
+        (shadowed := 1)
+    return shadowed
+
+def use_global(value):
+    global global_target
+    return (global_target := value)
+
+def annotated(arg: (lambda: (shadowed, (shadowed := 4)))):
+    pass
+""", namespace)
+    marker = []
+    assert list(namespace["recipe"]([1, 2, marker])) == [1, 2, marker]
+    stored, read = namespace["outer"](marker)
+    assert stored[0][0] is not marker
+    assert stored[0][1] is stored[0][2] is read() is marker
+    namespace["shadowed"] = 9
+    for read_local in (namespace["shadow"], namespace["annotated"].__annotations__["arg"]):
+        try:
+            read_local()
+        except UnboundLocalError:
+            pass
+        else:
+            raise AssertionError("walrus target was not a local")
+    assert namespace["use_global"](marker) is namespace["global_target"] is marker
+    exec("x = lambda a=(from_default := 3): (inside := a)", namespace)
+    assert namespace["x"]() == namespace["from_default"] == 3
+    assert "inside" not in namespace
+    for text in (
+        "def f():\n    (x := 1)\n    global x",
+        "def f():\n    global x\n    if True: (x := 1)\n    global x",
+        "(i for i in (items := [1]))",
+        "(__debug__ := True)",
+    ):
+        try:
+            compile(text, "walrus.py", "exec")
+        except SyntaxError:
+            pass
+        else:
+            raise AssertionError(text)
+
+
 def current():
+    named_bindings()
+    source_annotations()
     source_genexpr()
     source_match()
     check_scope_directives()

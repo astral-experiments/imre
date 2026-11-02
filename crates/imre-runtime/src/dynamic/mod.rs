@@ -3,12 +3,14 @@
 
 mod abstract_class;
 mod array;
+mod atexit;
 mod builtins;
 mod calls;
 mod class_annotations;
 mod complex;
 mod deque;
 mod dictionary;
+mod displayhook;
 mod enums;
 mod ffi;
 mod finalizers;
@@ -105,6 +107,7 @@ pub(crate) struct Context {
     sys_path: Id,
     default_encoding: Id,
     audit_hooks: Vec<Id>,
+    exit_callbacks: Vec<Id>,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
@@ -357,7 +360,7 @@ impl Context {
         let input = self.scalar_value(input);
         if !matches!(
             self.heap.get(input),
-            Value::ByteArray(_) | Value::MemoryView { .. }
+            Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. }
         ) {
             return convert(self);
         }
@@ -1589,10 +1592,10 @@ impl Context {
         }
     }
     /// Describe a missing binding in the scope that owns it.
-    fn missing_binding(&self, origin: Id, scope: Id, name: &str) -> Error {
+    fn missing_binding(&mut self, origin: Id, scope: Id, name: &str) -> Error {
         let frame = self.scope_data(scope);
         let declared = frame.class_body.is_none() && frame.closure.declared.contains(name);
-        if declared && origin == scope {
+        let mut error = if declared && origin == scope {
             Error::new(
                 "UnboundLocalError",
                 format!(
@@ -1608,7 +1611,11 @@ impl Context {
             )
         } else {
             Error::new("NameError", format!("name '{name}' is not defined"))
+        };
+        if error.kind == "NameError" {
+            error.tracing().name_error_name = Some(self.heap.code_name(name));
         }
+        error
     }
 
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
@@ -1698,10 +1705,17 @@ impl Context {
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
             self.builtin(builtins::exception_initializer(name));
+            self.builtin("BaseException.add_note");
             self.builtin("BaseException.with_traceback");
         }
         let methods = match name {
-            "object" => &["__hash__", "__format__", "__init_subclass__"],
+            "object" => &[
+                "__hash__",
+                "__format__",
+                "__init_subclass__",
+                "__reduce__",
+                "__reduce_ex__",
+            ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
             "collections.defaultdict" => {
@@ -1718,14 +1732,15 @@ impl Context {
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__"],
-            "set" | "frozenset" => &["__repr__", "issubset"],
+            "set" => &["__repr__", "__reduce__", "issubset", "update"],
+            "frozenset" => &["__repr__", "__reduce__", "issubset"],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
-            "int" => &["bit_length", "from_bytes", "to_bytes", "__format__"],
+            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__"],
             "float" => &["__format__", "__getformat__", "as_integer_ratio"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
@@ -1867,6 +1882,18 @@ impl Context {
         .with_import(Some(name), None, None)
     }
 
+    /// Read the interpreter's original sys dictionary even if its import-cache entry changed.
+    fn sys_binding(&mut self, name: &str) -> Result<Option<Id>> {
+        let sys = match self.threads.system_module {
+            Some(sys) => sys,
+            None => self.module("sys")?,
+        };
+        let Value::Module { scope, .. } = *self.heap.get(sys) else {
+            unreachable!()
+        };
+        Ok(self.scope_name(scope, name))
+    }
+
     fn registered_module(&mut self, name: Id) -> Result<Option<Id>> {
         let (_, index) = self.find_dictionary_key(self.modules, name, None)?;
         Ok(index.map(|i| self.stored_entries(self.modules)[i].1))
@@ -1931,7 +1958,7 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
         } else if stdlib::is_module(name) || self.is_frozen(name) {
-            if matches!(name, "email" | "importlib" | "urllib") {
+            if matches!(name, "email" | "importlib" | "json" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {
                 locations.push(stdlib::package_path(self, name)?);
@@ -2040,7 +2067,11 @@ impl Context {
         let key = self.text(name);
         self.put_item(self.modules, key, module)?;
         if let Err(e) = self.run_initializer(name, module, scope, name_id, origin, source) {
-            builtins::remove_dict_item(self, self.modules, key)?;
+            // The executing script remains importable during interpreter shutdown,
+            // including after SystemExit or an uncaught exception.
+            if name != "__main__" {
+                builtins::remove_dict_item(self, self.modules, key)?;
+            }
             return Err(e);
         }
         // A script can delete its own __main__ binding. Its exit status is determined by the script.
@@ -2082,6 +2113,8 @@ impl Context {
                     "repeat",
                     "_cycle_allocate",
                     "_cycle_next",
+                    "_filterfalse_allocate",
+                    "_filterfalse_state",
                     "_chain_allocate",
                     "_chain_get",
                     "_chain_set",
@@ -2155,6 +2188,7 @@ impl Context {
                 self.bind(scope, "pi", pi);
             }
             "errno" => stdlib::install_errno(self, scope)?,
+            "atexit" => atexit::install(self, scope),
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
             "socket"
                 if source.is_none()
@@ -2179,17 +2213,7 @@ impl Context {
             "io" => stdlib::io::install(self, scope),
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
-            "_io" => {
-                self.module("io")?;
-                let open = self.builtin("open");
-                self.bind(scope, "open", open);
-                let text_encoding = self.builtin("_io.text_encoding");
-                self.bind(scope, "text_encoding", text_encoding);
-                for name in ["BytesIO", "StringIO", "TextIOWrapper", "FileIO"] {
-                    let class = self.builtins[&format!("_io.{name}")];
-                    self.bind(scope, name, class);
-                }
-            }
+            "_io" => stdlib::io::install_native(self, scope),
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => {
                 stdlib::readiness::initialize(self, scope)?;
@@ -2201,6 +2225,7 @@ impl Context {
                     "addaudithook",
                     "_getframe",
                     "_getframemodulename",
+                    "displayhook",
                     "unraisablehook",
                 ] {
                     let callable = self.builtin(&format!("sys.{name}"));
@@ -2210,7 +2235,9 @@ impl Context {
                         explicit: false,
                     });
                     self.bind(scope, name, function);
-                    if name == "unraisablehook" {
+                    if name == "displayhook" {
+                        self.bind(scope, "__displayhook__", function);
+                    } else if name == "unraisablehook" {
                         self.bind(scope, "__unraisablehook__", function);
                         if self.threads.system_module.is_none() {
                             self.threads.default_unraisable_hook = Some(function);
@@ -2313,6 +2340,14 @@ impl Context {
                 && let Some(external) = self.scope_name(scope, "_bootstrap_external")
             {
                 self.publish_module("importlib._bootstrap_external", external)?;
+            }
+            if name == "itertools"
+                && let Some(owner) = self.scope_name(scope, "batched")
+            {
+                // Keep the iterator state outside Python attribute lookup, even on subclasses.
+                let name = self.text("_batched_state");
+                let member = self.alloc(Value::SlotMember { owner, name });
+                self.bind(scope, "_batched_state", member);
             }
             if name == "re"
                 && let Some(class) = self.scope_name(scope, "PatternError")

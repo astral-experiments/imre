@@ -22,6 +22,11 @@ REJECTED = {
     "class_wildcard": ({
         "main.py": "class Invalid:\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
+    "configured_mock_checks_arguments": ({
+        "main.py": "from unittest.mock import Mock\n"
+                   "def identity(value: int) -> int: return value\n"
+                   "m = Mock(custom=identity('wrong'))\n",
+    }, "expected int, got str"),
     "wildcard_keeps_return_check": ({
         "main.py": "from helper import *\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
         "helper.py": HELPER,
@@ -207,6 +212,27 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "atexit_in_dependency": {
+        "main.py": "from cleanup import prepare\nprepare()\n",
+        "cleanup.py": (
+            "from atexit import register, unregister\n"
+            "def removed(): print('unexpected')\n"
+            "def prepare():\n"
+            "    register(print, 'shutdown')\n"
+            "    register(removed)\n"
+            "    unregister(removed)\n"
+        ),
+    },
+    "weakref_finalize_import": {
+        "main.py": (
+            "from weakref import finalize\n"
+            "class Owner: pass\n"
+            "owner = Owner()\n"
+            "cleanup = finalize(owner, print, 'finalized')\n"
+            "cleanup()\n"
+            "assert not cleanup.alive\n"
+        ),
+    },
     "patch_object_as_value": {
         "main.py": (
             "from unittest.mock import patch\nclass Owner:\n    value = 1\n"

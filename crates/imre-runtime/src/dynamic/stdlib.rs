@@ -26,6 +26,7 @@ mod hashlib;
 mod hmac;
 mod inspect;
 pub(super) mod itertools;
+mod locale;
 pub(super) mod tempfile;
 mod time;
 mod tokenize;
@@ -79,7 +80,7 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    matches!(name, "builtins" | "errno" | "genericpath" | "itertools")
+    matches!(name, "atexit" | "builtins" | "errno" | "genericpath" | "itertools")
         || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }
@@ -120,6 +121,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "posixpath"
             | "_imre_posixpath"
             | "_imre_metadata"
+            | "_imre_json"
             | "_imre_linecache"
             | "_imre_csv"
             | "_imre_tokenize"
@@ -136,6 +138,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "math"
             | "unicodedata"
             | "json"
+            | "_json"
             | "_imre_logging"
             | "_imre_subprocess"
             | "_imre_dataclasses"
@@ -392,7 +395,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
-        ("codecs" | "_codecs", "encode") => ctx.builtin("codecs.encode"),
+        ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -406,10 +409,18 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "default_directory"
             | "open_named" | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
-        ("locale" | "_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
+        ("_locale", "getencoding" | "setlocale") => ctx.builtin(&format!("_locale.{name}")),
+        ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
+        ("_locale", "LC_COLLATE") => ctx.int(libc::LC_COLLATE.into()),
+        ("_locale", "LC_CTYPE") => ctx.int(libc::LC_CTYPE.into()),
+        ("_locale", "LC_MONETARY") => ctx.int(libc::LC_MONETARY.into()),
+        ("_locale", "LC_NUMERIC") => ctx.int(libc::LC_NUMERIC.into()),
+        ("_locale", "LC_TIME") => ctx.int(libc::LC_TIME.into()),
+        ("_locale", "LC_MESSAGES") => ctx.int(libc::LC_MESSAGES.into()),
         ("tempfile", "TemporaryFile") | ("_imre_tempfile", "open_file") => {
             ctx.builtin("tempfile.TemporaryFile")
         }
+        ("gc", "enable" | "disable" | "isenabled") => ctx.builtin(&format!("gc.{name}")),
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
         (
             "_imp",
@@ -437,6 +448,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "loaded_module"
             | "members"
             | "metadata"
+            | "native_iterator"
+            | "slot_bases"
             | "slotted_type"
             | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
@@ -605,7 +618,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
-        ("posixpath", "join" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("posixpath", "dirname") => ctx.builtin("os.path.dirname"),
         ("os" | "posix", "getcwd" | "getcwdb") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -683,8 +696,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
+        | ("_imre_json", "loads")
         | ("_imre_linecache", "source_lines")
-        | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
+        | (
+            "_imre_metadata",
+            "filenames" | "dedent" | "exists" | "read_text" | "zip_names" | "zip_open" | "zip_read",
+        )
         | (
             "_imre_posixpath",
             "exists" | "extension_start" | "isdir" | "isfile" | "islink" | "relative_parts"
@@ -696,6 +713,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
+        | ("_json", "encode_basestring" | "encode_basestring_ascii")
         | ("random", "random" | "choice")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
@@ -864,6 +882,13 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(method) = name.strip_prefix("atexit.") {
+        return super::atexit::call(ctx, method, args, kwargs);
+    }
+
+    if name == "_locale.setlocale" {
+        return locale::setlocale(ctx, args, kwargs);
+    }
     if name == "_imre_linecache.source_lines" {
         let ([data], []) = (args, kwargs) else {
             return Err(Error::new(
@@ -1092,6 +1117,10 @@ pub(super) fn call(
             .heap
             .caller_module_at(depth.max(0) as usize)
             .unwrap_or(NONE));
+    }
+    if name == "sys.displayhook" {
+        let value = builtins::one_positional_arg(name, &args[1..], kwargs)?;
+        return super::displayhook::default_hook(ctx, value);
     }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
@@ -1451,6 +1480,12 @@ pub(super) fn call(
     if name == "itertools._cycle_next" {
         return itertools::cycle_next(ctx, args, kwargs);
     }
+    if name == "itertools._filterfalse_allocate" {
+        return itertools::filterfalse_allocate(ctx, args, kwargs);
+    }
+    if name == "itertools._filterfalse_state" {
+        return itertools::filterfalse_state(ctx, args, kwargs);
+    }
     if name == "itertools._chain_allocate" {
         let [base, class, source] = args else {
             return Err(Error::new(
@@ -1647,7 +1682,7 @@ pub(super) fn call(
                 let bases = ctx
                     .tuple_items(*bases)?
                     .ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
-                return ctx.dataclass_from_namespace(name, bases, *members, "types", false, true);
+                return ctx.make_dataclass_type(name, bases, *members);
             }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
@@ -1690,6 +1725,10 @@ pub(super) fn call(
                 }
                 return Ok(FALSE);
             }
+            ("native_iterator", [obj], []) => {
+                return Ok(if ctx.is_native_iterator(*obj) { TRUE } else { FALSE });
+            }
+            ("slot_bases", [class], []) => return ctx.dataclass_slot_bases(*class),
             ("slotted_type", [old, namespace], []) => {
                 return ctx.slotted_dataclass(*old, *namespace);
             }
@@ -1817,6 +1856,7 @@ pub(super) fn call(
     if let Some(function) = name.strip_prefix("codecs.") {
         return match function {
             "encode" | "decode" => codecs::transform(ctx, function, args, kwargs),
+            "escape_decode" => codecs::escape_decode(ctx, args, kwargs),
             "lookup" => codecs::lookup(ctx, args, kwargs),
             "register_error" | "lookup_error" => {
                 codecs::error_registry(ctx, function, args, kwargs)
@@ -1826,6 +1866,9 @@ pub(super) fn call(
     }
     if name == "_socket.getaddrinfo" {
         return socket::getaddrinfo(ctx, args, kwargs);
+    }
+    if name == "_socket.socketpair" {
+        return socket::socketpair(ctx, args, kwargs);
     }
     if name == "_socket.close" {
         return socket::close(ctx, args, kwargs);
@@ -1860,6 +1903,28 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("TextIOWrapper.") {
         return files::text_method(ctx, method, args, kwargs);
+    }
+    if matches!(name, "gc.enable" | "gc.disable" | "gc.isenabled") {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no keyword arguments"),
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        let enabled = &ctx.heap.automatic_gc;
+        if name == "gc.isenabled" {
+            return Ok(builtins::boolean(
+                enabled.load(std::sync::atomic::Ordering::Relaxed),
+            ));
+        }
+        enabled.store(name == "gc.enable", std::sync::atomic::Ordering::Relaxed);
+        return Ok(NONE);
     }
     if name == "gc.collect" {
         if !args.is_empty() || !kwargs.is_empty() {
@@ -1964,7 +2029,7 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer")) =
+    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer" | "findall")) =
         name.strip_prefix("pattern.")
     {
         return regex::search(ctx, method, args, kwargs);
@@ -2008,7 +2073,11 @@ pub(super) fn call(
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
+        "_json.encode_basestring" | "_json.encode_basestring_ascii" => {
+            return json::encode_basestring(ctx, name, args, kwargs);
+        }
         "json.loads" => (1, &["s"]),
+        "_imre_json.loads" => (2, &[]),
         "json.dump" => (2, JSON_DUMP_KEYWORDS),
         "json.dumps" => (1, &JSON_DUMP_KEYWORDS[1..]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
@@ -2019,9 +2088,9 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "pattern.findall" | "file.read" | "file.read1" | "file.readline"
+        "struct.unpack" | "file.read" | "file.read1" | "file.readline"
         | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
-        "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "match.group" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" | "match.groupdict" => (2, &["default"]),
         "match.start" | "match.end" | "match.span" => (2, &[]),
@@ -2248,6 +2317,7 @@ pub(super) fn call(
             let (_, layout) = structure::parse(ctx, argument(args, 0)?)?;
             structure::unpack(ctx, &layout, argument(args, 1)?)?
         }
+        "_imre_json.loads" => json::loads(ctx, argument(args, 0)?, Some(argument(args, 1)?))?,
         "json.loads" => {
             let input = option(args, 0, kwargs, "s")?.ok_or_else(|| {
                 Error::new(
@@ -2255,7 +2325,7 @@ pub(super) fn call(
                     "loads() missing 1 required positional argument: 's'",
                 )
             })?;
-            json::loads(ctx, input)?
+            json::loads(ctx, input, None)?
         }
         "json.dump" | "json.dumps" => {
             let function = name.strip_prefix("json.").unwrap();

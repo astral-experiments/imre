@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TextIO
 from logging import Logger as _AdapterLogger
 
-_default_formatter = Formatter()
+_defaultFormatter = Formatter()
 _config_lock = _Lock()
 
 
@@ -289,7 +289,7 @@ class BufferingFormatter:
     linefmt: Formatter
 
     def __init__(self, linefmt: Formatter | None = None) -> None:
-        self.linefmt = _default_formatter if linefmt is None else linefmt
+        self.linefmt = _defaultFormatter if linefmt is None else linefmt
 
     def formatHeader(self, records: list[LogRecord]) -> str:
         return ""

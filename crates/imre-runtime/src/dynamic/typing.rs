@@ -1663,6 +1663,7 @@ impl Context {
                             | super::value::TEMPLATE_TYPE
                             | super::value::INTERPOLATION_TYPE
                             | super::namedtuple::GETTER
+                            | super::thread_lock::CLASS
                             | "functools.KeyWrapper"
                             | "member_descriptor"
                     ))
@@ -1676,11 +1677,19 @@ impl Context {
         if bases.is_empty() {
             bases.push(self.builtin("object"));
         }
-        let ancestors = self.linearized_bases(&bases)?;
+        let ancestors = self.linearized_bases(&bases, false)?;
         self.check_member_slot_bases(&bases, &ancestors)?;
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
-        mro.extend_from_slice(&ancestors);
+        // Keep allocation and special-slot dispatch on their existing native layout.
+        // The published MRO includes the declaring classes of inherited exception methods.
+        if ancestors.iter().any(|&base| {
+            matches!(self.heap.get(base), Value::Native(name) if super::builtins::is_exception(name))
+        }) {
+            mro.extend(self.linearized_bases(&bases, true)?);
+        } else {
+            mro.extend_from_slice(&ancestors);
+        }
         let slot_names = self.declared_slot_names(scope)?;
         let members = if self
             .scope_data(scope)
@@ -1699,6 +1708,7 @@ impl Context {
         };
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
         let class = self.alloc(Value::Class {
+            io_kind: None,
             metaclass: None,
             namedtuple_fields,
             name,

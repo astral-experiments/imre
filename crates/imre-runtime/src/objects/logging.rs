@@ -17,7 +17,6 @@ pub(super) mod formatter;
 pub(super) mod record;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::ffi::CString;
 use std::rc::Rc;
 
 use super::exceptions::Result;
@@ -231,36 +230,16 @@ thread_local! { static LOGGERS: RefCell<Registry> = RefCell::new(Registry::new()
 /// Format the time captured by a LogRecord.
 fn format_timestamp(format: Option<&str>, local: &libc::tm, now: std::time::Duration) -> String {
     let custom = format.filter(|value| !value.is_empty());
-    let mut text = String::new();
-    for (index, part) in custom
+    let pattern: Vec<u32> = custom
         .unwrap_or("%Y-%m-%d %H:%M:%S")
-        .split('\0')
-        .enumerate()
-    {
-        if index != 0 {
-            text.push('\0');
-        }
-        if part.is_empty() {
-            continue;
-        }
-        // strftime takes a C string. Format each NUL-free segment at the same instant.
-        // The sentinel distinguishes an empty expansion from an undersized buffer.
-        let fmt = CString::new(format!("{part}!")).expect("the segment contains no NUL");
-        let mut buf = vec![0u8; fmt.as_bytes().len().max(64)];
-        loop {
-            // SAFETY: the calendar time and format are valid and the buffer is writable.
-            let len =
-                unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), fmt.as_ptr(), local) };
-            if len > 0 {
-                text.push_str(&String::from_utf8_lossy(&buf[..len - 1]));
-                break;
-            }
-            if buf.len() > fmt.as_bytes().len().saturating_mul(256).max(4096) {
-                return String::new();
-            }
-            buf.resize(buf.len() * 2, 0);
-        }
-    }
+        .chars()
+        .map(u32::from)
+        .collect();
+    let points = crate::sys::with_process_locale(|| super::time::format_clock(&pattern, local));
+    let mut text: String = points
+        .into_iter()
+        .map(|point| char::from_u32(point).unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect();
     if custom.is_none() {
         text.push_str(&format!(",{:03}", now.subsec_millis()));
     }

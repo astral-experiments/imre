@@ -1,3 +1,6 @@
+mod notes;
+use notes::Location;
+
 use std::collections::{HashMap, HashSet};
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
@@ -7,13 +10,14 @@ use crate::objects::{
 };
 use crate::{Str, StrOwner};
 
-pub(super) fn loads(ctx: &mut Context, input: Id) -> Result<Id> {
-    match ctx.heap.get(input) {
+pub(super) fn loads(ctx: &mut Context, input: Id, raise_error: Option<Id>) -> Result<Id> {
+    let result = match ctx.heap.get(input) {
         Value::Str(text) => {
             let text = Str::try_new(text).map_err(|_| crate::Error::allocation())?;
             if text.starts_with('\u{feff}') {
                 let document = StrOwner::try_new(text).map_err(|_| crate::Error::allocation())?;
-                return Err(crate::objects::json_bom_error(document).into());
+                let error = crate::objects::json_bom_error(document);
+                return Err(decode_error(ctx, input, raise_error, true, error));
             }
             parse(ctx, &text)
         }
@@ -21,19 +25,48 @@ pub(super) fn loads(ctx: &mut Context, input: Id) -> Result<Id> {
             let owner = owned_bytes_input(bytes)?;
             parse(ctx, &decode_json_bytes(&owner)?)
         }
-        _ => Err(Error::new(
-            "TypeError",
-            format!(
-                "the JSON object must be str, bytes or bytearray, not {}",
-                ctx.type_name(input)
-            ),
-        )),
-    }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "the JSON object must be str, bytes or bytearray, not {}",
+                    ctx.type_name(input)
+                ),
+            ));
+        }
+    };
+    result.map_err(|error| decode_error(ctx, input, raise_error, false, error))
 }
 
-fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
+/// Raise the class owned by the calling package, retaining the Python document's identity.
+fn decode_error(
+    ctx: &mut Context,
+    input: Id,
+    raise_error: Option<Id>,
+    bom: bool,
+    error: crate::Error,
+) -> Error {
+    let (Some(callback), Some((message, document, position))) =
+        (raise_error, error.json_decode_fields())
+    else {
+        return error.into();
+    };
+    let message = ctx.text(message);
+    let document = if matches!(ctx.heap.get(input), Value::Str(_)) {
+        input
+    } else {
+        ctx.text(document)
+    };
+    let position = ctx.int(position as i64);
+    let bom = if bom { TRUE } else { FALSE };
+    ctx.call(callback, vec![message, document, position, bom], Vec::new())
+        .err()
+        .unwrap_or_else(|| Error::new("SystemError", "JSON error callback returned"))
+}
+
+fn parse(ctx: &mut Context, text: &str) -> std::result::Result<Id, crate::Error> {
     let mut keys = HashMap::new();
-    Ok(decode_json(
+    decode_json(
         text,
         || Str::try_new(text).ok().map(StrOwner::new),
         |value| {
@@ -67,7 +100,7 @@ fn parse(ctx: &mut Context, text: &str) -> Result<Id> {
                 }
             })
         },
-    )?)
+    )
 }
 
 #[derive(Default)]
@@ -78,6 +111,17 @@ struct Output {
 }
 
 impl Output {
+    fn quote(&mut self, value: &Value, ascii: bool) -> Result<()> {
+        match value {
+            Value::Str(text) => write_json_string(&mut self.text, text, ascii)?,
+            Value::SurrogateStr(points) => {
+                write_json_codepoints(&mut self.text, &mut self.surrogates, points, ascii)?;
+            }
+            _ => unreachable!("validated string storage"),
+        }
+        Ok(())
+    }
+
     fn finish(self, ctx: &mut Context) -> Result<Id> {
         if self.surrogates.is_empty() {
             return Ok(ctx.text(self.text));
@@ -102,6 +146,38 @@ impl Output {
     }
 }
 
+/// Quote a Python string with the native JSON encoder's escaping rules.
+pub(super) fn encode_basestring(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes no keyword arguments"),
+        ));
+    }
+    let [input] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes exactly one argument ({} given)", args.len()),
+        ));
+    };
+    let storage = ctx.string_storage(*input).ok_or_else(|| {
+        let name = ctx.type_name(*input);
+        let name = &name[..name.floor_char_boundary(80)];
+        Error::new("TypeError", format!("first argument must be a string, not {name}"))
+    })?;
+    let mut output = Output::default();
+    output.quote(
+        ctx.heap.get(storage),
+        name == "_json.encode_basestring_ascii",
+    )?;
+    output.finish(ctx)
+}
+
 struct Encoder {
     ascii: bool,
     allow_nan: Id,
@@ -112,6 +188,7 @@ struct Encoder {
     key_separator: String,
     default: Option<Id>,
     stream: Option<Id>,
+    write_failed: bool,
     active: HashSet<Id>,
     output: Output,
 }
@@ -195,6 +272,7 @@ pub(super) fn encode(
         key_separator,
         default: option("default").filter(|v| *v != NONE),
         stream,
+        write_failed: false,
         active: HashSet::new(),
         output: Output::default(),
     };
@@ -214,8 +292,13 @@ impl Encoder {
         {
             let roots = ctx.heap.temporary_mark();
             let chunk = std::mem::take(&mut self.output).finish(ctx)?;
-            let write = ctx.lookup_attr(stream, "write")?;
-            ctx.call(write, super::super::copy_ids(&[chunk])?, Vec::new())?;
+            let result = ctx
+                .lookup_attr(stream, "write")
+                .and_then(|write| ctx.call(write, super::super::copy_ids(&[chunk])?, Vec::new()));
+            if let Err(error) = result {
+                self.write_failed = true;
+                return Err(error);
+            }
             ctx.heap.release_temporaries_since(roots);
         }
         Ok(())
@@ -241,13 +324,9 @@ impl Encoder {
                 &mut self.output.text,
                 &float_text(ctx, id, *value, self.allow_nan)?,
             )?,
-            Value::Str(value) => write_json_string(&mut self.output.text, value, self.ascii)?,
-            Value::SurrogateStr(points) => write_json_codepoints(
-                &mut self.output.text,
-                &mut self.output.surrogates,
-                points,
-                self.ascii,
-            )?,
+            value @ (Value::Str(_) | Value::SurrogateStr(_)) => {
+                self.output.quote(value, self.ascii)?
+            }
             _ => {
                 if self.active.len() >= 512 {
                     return Err(Error::new(
@@ -306,13 +385,14 @@ impl Encoder {
                         {
                             let Some(&item) = items.get(i) else { break };
                             self.separator(i != 0, depth + 1)?;
-                            self.value(ctx, item, depth + 1)?;
+                            self.value(ctx, item, depth + 1)
+                                .map_err(|e| self.noted(ctx, e, id, Location::Index(i)))?;
                             i += 1;
                         }
                         self.close(ctx, "]", i != 0, depth)?;
                     }
                     Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
-                        self.object(ctx, super::super::copy_ids(entries)?, depth)?;
+                        self.object(ctx, id, super::super::copy_ids(entries)?, depth)?;
                     }
                     Value::Instance {
                         dictionary: Some(_),
@@ -330,7 +410,8 @@ impl Encoder {
                         })?;
                         let result =
                             ctx.call(default, super::super::copy_ids(&[id])?, Vec::new())?;
-                        self.value(ctx, result, depth)?;
+                        self.value(ctx, result, depth)
+                            .map_err(|e| self.noted(ctx, e, id, Location::Object))?;
                     }
                 }
                 self.active.remove(&id);
@@ -374,6 +455,7 @@ impl Encoder {
     fn object(
         &mut self,
         ctx: &mut Context,
+        id: Id,
         mut entries: Vec<(Id, Id)>,
         depth: usize,
     ) -> Result<()> {
@@ -390,7 +472,7 @@ impl Encoder {
         write_json_fragment(&mut self.output.text, "{")?;
         let mut nonempty = false;
         for (key, value) in entries {
-            self.member(ctx, &mut nonempty, key, value, depth + 1)?;
+            self.member(ctx, id, &mut nonempty, key, value, depth + 1)?;
         }
         self.close(ctx, "}", nonempty, depth)
     }
@@ -426,7 +508,13 @@ impl Encoder {
             let Some(&[key, value]) = values.as_deref() else {
                 return Err(Error::new("ValueError", "items must return 2-tuples"));
             };
-            self.member(ctx, &mut nonempty, key, value, depth + 1)?;
+            // The callback may remove its pair from the list returned by items().
+            let mark = ctx.heap.temporary_mark();
+            ctx.heap.reserve_temporaries(2)?;
+            ctx.heap.keep(key);
+            ctx.heap.keep(value);
+            self.member(ctx, id, &mut nonempty, key, value, depth + 1)?;
+            ctx.heap.release_temporaries_since(mark);
             i += 1;
         }
         self.close(ctx, "}", nonempty, depth)
@@ -445,7 +533,8 @@ impl Encoder {
             ctx.heap.reserve_temporaries(1)?;
             ctx.heap.keep(item);
             self.separator(i != 0, depth + 1)?;
-            self.value(ctx, item, depth + 1)?;
+            self.value(ctx, item, depth + 1)
+                .map_err(|e| self.noted(ctx, e, id, Location::Index(i)))?;
             ctx.heap.release_temporaries_since(roots);
             i += 1;
         }
@@ -474,7 +563,7 @@ impl Encoder {
             ctx.heap.release_temporaries_since(roots);
             ctx.heap.keep(values[0]);
             ctx.heap.keep(values[1]);
-            self.member(ctx, &mut nonempty, values[0], values[1], depth + 1)?;
+            self.member(ctx, id, &mut nonempty, values[0], values[1], depth + 1)?;
         }
         self.close(ctx, "}", nonempty, depth)?;
         self.emit(ctx)
@@ -484,6 +573,7 @@ impl Encoder {
     fn member(
         &mut self,
         ctx: &mut Context,
+        owner: Id,
         nonempty: &mut bool,
         key: Id,
         value: Id,
@@ -492,22 +582,16 @@ impl Encoder {
         enum Key<'a> {
             Text(&'a str),
             Codepoints(&'a [u32]),
+            Converted(Str),
         }
-        let number;
         let text = match ctx.heap.get(ctx.scalar_value(key)) {
             Value::Str(text) => Key::Text(text),
             Value::SurrogateStr(points) => Key::Codepoints(points),
-            Value::Int(n) => {
-                number = crate::integer_text::decimal_string(n)?;
-                Key::Text(&number)
-            }
-            Value::Float(n) => {
-                number = float_text(ctx, key, *n, self.allow_nan)?;
-                Key::Text(&number)
-            }
-            Value::None => Key::Text("null"),
-            Value::Bool(true) => Key::Text("true"),
-            Value::Bool(false) => Key::Text("false"),
+            Value::Int(n) => Key::Converted(crate::integer_text::decimal_string(n)?),
+            Value::Float(n) => Key::Converted(float_text(ctx, key, *n, self.allow_nan)?),
+            Value::None => Key::Converted("null".into()),
+            Value::Bool(true) => Key::Converted("true".into()),
+            Value::Bool(false) => Key::Converted("false".into()),
             _ => {
                 if ctx.truth(self.skipkeys)? {
                     return Ok(());
@@ -533,15 +617,25 @@ impl Encoder {
             .stream
             .is_some()
             .then(|| std::mem::take(&mut self.output));
-        match text {
-            Key::Text(text) => write_json_string(&mut self.output.text, text, self.ascii)?,
-            Key::Codepoints(points) => write_json_codepoints(
-                &mut self.output.text,
-                &mut self.output.surrogates,
-                points,
-                self.ascii,
-            )?,
-        }
+        let normalized = match text {
+            Key::Text(text) => {
+                write_json_string(&mut self.output.text, text, self.ascii)?;
+                None
+            }
+            Key::Codepoints(points) => {
+                write_json_codepoints(
+                    &mut self.output.text,
+                    &mut self.output.surrogates,
+                    points,
+                    self.ascii,
+                )?;
+                None
+            }
+            Key::Converted(text) => {
+                write_json_string(&mut self.output.text, &text, self.ascii)?;
+                self.stream.is_some().then_some(text)
+            }
+        };
         if let Some(separator) = separator {
             // A rejected key doesn't write the pending separator.
             let encoded = std::mem::replace(&mut self.output, separator);
@@ -552,6 +646,7 @@ impl Encoder {
         write_json_fragment(&mut self.output.text, &self.key_separator)?;
         self.emit(ctx)?;
         self.value(ctx, value, depth)
+            .map_err(|e| self.noted(ctx, e, owner, Location::Key(key, normalized.as_deref())))
     }
 }
 

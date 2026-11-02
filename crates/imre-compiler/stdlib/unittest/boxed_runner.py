@@ -50,6 +50,15 @@ def _resultSubTest(self, test, subtest, error):
         problems.append((subtest, _boxedResultDetail(error)))
 
 
+def _textSubTest(self, test, subtest, error):
+    if error is not None:
+        if issubclass(error[0], subtest.failureException):
+            self._markSubTest(subtest._subDescription(), "F", "FAIL")
+        else:
+            self._markSubTest(subtest._subDescription(), "E", "ERROR")
+    _resultSubTest(self, test, subtest, error)
+
+
 def _textExpectedFailure(self, test, error):
     _resultExpectedFailure(self, test, error)
     self._mark("x", "expected failure")
@@ -218,6 +227,7 @@ TestResult.addFailure = _addFailure
 TestResult._recordException = _recordBoxedException
 TestResult.printErrors = _printErrors
 TextTestResult.__init__ = _boxedTextResultInit
+TextTestResult.addSubTest = _textSubTest
 TextTestResult.addExpectedFailure = _textExpectedFailure
 TextTestResult.addUnexpectedSuccess = _textUnexpectedSuccess
 TextTestResult.addError = _textError

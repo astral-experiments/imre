@@ -4,6 +4,23 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "json" => Some((
+            "json/__init__.py",
+            concat!(
+                "r\"\"\"",
+                include_str!("../../stdlib/docstrings/json.txt"),
+                "\"\"\"\n",
+                include_str!("../../stdlib/json/boxed_init.py"),
+            ),
+        )),
+        "json.decoder" => Some((
+            "json/decoder.py",
+            include_str!("../../stdlib/json/decoder.py"),
+        )),
+        "json.scanner" => Some((
+            "json/scanner.py",
+            include_str!("../../stdlib/json/scanner.py"),
+        )),
         "traceback" => Some((
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),
@@ -48,7 +65,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
                         section("def ismodule(object):", "def isclass(object):"),
-                        section("def formatannotation(", "def formatannotationrelativeto("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),
                         &classes,
@@ -57,6 +73,18 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "urllib.error" => Some((
+            "urllib/error.py",
+            include_str!("../../stdlib/urllib/error.py"),
+        )),
+        "urllib.request" => Some((
+            "urllib/request.py",
+            include_str!("../../stdlib/urllib/request.py"),
+        )),
+        "urllib.response" => Some((
+            "urllib/response.py",
+            include_str!("../../stdlib/urllib/response.py"),
+        )),
         "urllib.parse" => Some((
             "urllib/parse.py",
             include_str!("../../stdlib/urllib/parse.py"),

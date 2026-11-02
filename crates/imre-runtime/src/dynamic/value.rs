@@ -3,6 +3,8 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::Context;
 use crate::objects::exceptions::ExitStatus;
@@ -640,6 +642,8 @@ pub(super) struct ClassNamespace {
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
+    /// Closure cell shared by runtime-source method annotation providers.
+    pub annotation_dict_cell: Option<Id>,
     /// Scratch field dictionary used only while an ordinary class body is executing.
     pub annotation_scratch: Option<Id>,
     /// Executed deferred sites in source order, including repeated field names.
@@ -704,6 +708,8 @@ pub(super) enum Value {
     Calendar {
         value: crate::objects::Calendar,
         tzinfo: Id,
+        // Preserve the fixed timezone name and its Python str subclass methods.
+        tzname: Id,
     },
     Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
     Scandir(std::rc::Rc<super::stdlib::os::scandir::Scan>),
@@ -750,6 +756,7 @@ pub(super) enum Value {
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
     LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
+    MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
@@ -831,6 +838,8 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        /// Private layout tag for native I/O class generations.
+        io_kind: Option<&'static str>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -1069,6 +1078,7 @@ impl Value {
                 super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
+            Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
@@ -1091,15 +1101,7 @@ impl Value {
             Self::RangeIterator(iter) => iter.kind,
             Self::Enumerate { .. } => "enumerate",
             Self::Iterator { kind, .. } => kind,
-            Self::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
-                (Some(_), _, _) => "odict_iterator",
-                (_, false, DictViewKind::Keys) => "dict_keyiterator",
-                (_, false, DictViewKind::Values) => "dict_valueiterator",
-                (_, false, DictViewKind::Items) => "dict_itemiterator",
-                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
-                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
-                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
-            },
+            Self::DictIterator(iter) => iter.class_name(),
             Self::Set { frozen: true, .. } => "frozenset",
             Self::Set { frozen: false, .. } => "set",
             Self::Dict(_) => "dict",
@@ -1110,7 +1112,7 @@ impl Value {
             }
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
-            Self::Cell(_) => "cell",
+            Self::Cell(_) | Self::ClassCell(_) => "cell",
             Self::Generator { .. } => "generator",
             Self::Coroutine(_) => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
@@ -1140,6 +1142,13 @@ impl Value {
             Self::PythonFrame { .. } => "frame",
             _ => return None,
         })
+    }
+
+    pub(super) fn io_kind(&self) -> Option<&'static str> {
+        match self {
+            Self::Class { io_kind, .. } => *io_kind,
+            _ => None,
+        }
     }
 
     pub(super) fn instance_class(&self) -> Option<Id> {
@@ -1279,7 +1288,7 @@ impl Value {
             Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
-            Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
+            Self::Calendar { tzinfo, tzname, .. } => visit.extend([*tzinfo, *tzname]),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
                 for (key, value) in entries {
@@ -1303,6 +1312,7 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_thunks);
+                    visit.extend(class.annotation_dict_cell);
                     visit.extend(class.annotation_scratch);
                     if let Some(sites) = &class.annotation_sites {
                         for &(name, thunk) in sites.values() {
@@ -1530,6 +1540,7 @@ impl Value {
             | Self::Struct { .. }
             | Self::Hash(_)
             | Self::LoggerHandle(_)
+            | Self::MetadataArchive(_)
             | Self::HandlerLock(_)
             | Self::ThreadHandle(_)
             | Self::PrimitiveLock(_)
@@ -1569,6 +1580,33 @@ pub(super) struct DictIterator {
 }
 
 impl DictIterator {
+    const KEYS: [&str; 2] = ["dict_keyiterator", "dict_reversekeyiterator"];
+    const VALUES: [&str; 2] = ["dict_valueiterator", "dict_reversevalueiterator"];
+    const ITEMS: [&str; 2] = ["dict_itemiterator", "dict_reverseitemiterator"];
+    const ORDERED: &str = "odict_iterator";
+    pub(super) const METHODS: &[&str] = &["__iter__", "__next__"];
+
+    pub(super) fn class_name(&self) -> &'static str {
+        if self.order_state.is_some() {
+            return Self::ORDERED;
+        }
+        let classes = match self.kind {
+            DictViewKind::Keys => Self::KEYS,
+            DictViewKind::Values => Self::VALUES,
+            DictViewKind::Items => Self::ITEMS,
+        };
+        classes[usize::from(self.reverse)]
+    }
+
+    pub(super) fn class(name: &str) -> Option<&'static str> {
+        Self::KEYS
+            .into_iter()
+            .chain(Self::VALUES)
+            .chain(Self::ITEMS)
+            .chain([Self::ORDERED])
+            .find(|&class| class == name)
+    }
+
     /// Capture the original size while keeping the entries live.
     pub(super) fn new(
         dict: Id,
@@ -1901,6 +1939,8 @@ pub(super) struct Heap {
     pub(super) mock_call_lists: HashSet<Id>,
     frames: Vec<Frame>,
     next_collection: usize,
+    // Worker heaps share the interpreter’s automatic cyclic collection setting.
+    pub(super) automatic_gc: Arc<AtomicBool>,
     weak: HashMap<Id, Vec<Id>>,
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
@@ -1987,6 +2027,7 @@ impl Heap {
             mock_call_lists: HashSet::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             next_collection: 4096,
+            automatic_gc: Arc::new(AtomicBool::new(true)),
             weak: HashMap::new(),
             has_weak_values: false,
             collect_next_statement: false,
@@ -2129,12 +2170,17 @@ impl Heap {
         previous
     }
 
+    /// An interpreter root (such as packed callback operands) can own weak targets indirectly.
+    pub(super) fn observes_released_roots(&self) -> bool {
+        self.has_weak_values || self.tracks_finalizers()
+    }
+
     pub fn weak_edge_removed(&mut self, value: Id) {
         if self.has_weak_values
             && (self.weak_edge(value)
                 || matches!(
                     self.get(value),
-                    Value::Function { .. } | Value::Cell(Some(_))
+                    Value::Function { .. } | Value::Cell(Some(_)) | Value::ClassCell(Some(_))
                 ))
             && !self.bound_in_active_frame(value)
         {
@@ -2875,7 +2921,7 @@ impl Heap {
         caught: Id,
     ) -> Option<WeakCallbacks> {
         self.publish_statement(live, location, caught);
-        self.collect_if_due(globals)
+        self.collect_if_due(globals, self.automatic_gc.load(Ordering::Relaxed))
     }
 
     pub(super) fn publish_statement(&mut self, live: &[Id], location: Location, caught: Id) {
@@ -2913,12 +2959,13 @@ impl Heap {
     pub(super) fn collect_if_due(
         &mut self,
         globals: impl Iterator<Item = Id>,
+        automatic_gc: bool,
     ) -> Option<WeakCallbacks> {
         let cycles_due = self.cycles_due();
         if !std::mem::take(&mut self.collect_next_statement) && !cycles_due {
             return None;
         }
-        if cycles_due {
+        if cycles_due && automatic_gc {
             self.mark(globals);
             self.sweep()
         } else {

@@ -1061,6 +1061,39 @@ def present_after_exhaustion(value: int | None) -> int:
     }
 
     #[test]
+    fn handler_flow_requires_a_direct_unconditional_raise() {
+        let source = r#"
+class Policy:
+    def stop(self, value: str) -> None:
+        "Report a rejected value."
+        raise ValueError(value)
+
+def parse(policy: Policy, text: str) -> int:
+    try:
+        parsed = int(text)
+    except ValueError:
+        policy.stop(text)
+    return parsed
+"#;
+        super::check(source).unwrap();
+
+        let conditional = source.replace(
+            "        raise ValueError(value)",
+            "        if value:\n            raise ValueError(value)",
+        );
+        let overridden = format!(
+            "{source}\nclass Continue(Policy):\n    def stop(self, value: str) -> None:\n        pass\n"
+        );
+        for unproven in [conditional, overridden] {
+            let error = super::check(&unproven).unwrap_err();
+            assert!(
+                error.contains("local may be uninitialized on this path"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn loop_break_does_not_restore_a_deleted_exception_target() {
         let deleted = r#"
 def invalid(values: list[int]) -> str:
