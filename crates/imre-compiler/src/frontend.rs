@@ -2628,6 +2628,7 @@ impl<'a> Checker<'a> {
             _ if operation => "set binary operator",
             "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
             "union" => "set.union",
+            "symmetric_difference" => "set.symmetric_difference",
             "difference_update" => "set.difference_update",
             "symmetric_difference_update" => "set.symmetric_difference_update",
             "clear" => "set.clear",
@@ -2642,13 +2643,14 @@ impl<'a> Checker<'a> {
         {
             return Some(name);
         }
-        if (operation || matches!(attribute.attr.as_str(), "issubset" | "union"))
+        if (operation || matches!(attribute.attr.as_str(), "issubset" | "symmetric_difference" | "union"))
             && (receiver == Some(Type::FrozenStrings)
                 || self.unshadowed_builtin(&attribute.value, "frozenset"))
         {
             return Some(match attribute.attr.as_str() {
                 "issubset" => "frozenset.issubset",
                 "union" => "frozenset.union",
+                "symmetric_difference" => "frozenset.symmetric_difference",
                 _ => name,
             });
         }
