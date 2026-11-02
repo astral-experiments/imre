@@ -11356,9 +11356,13 @@ impl<'a> Checker<'a> {
             && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
             && let Some(size) = args.find_argument_value("buffering", 2)
             && paths::is_raw_binary_mode(mode.value.to_str())
-            && (matches!(mode.value.to_str(), "wb" | "bw" | "ab" | "ba" | "xb" | "bx")
+            && (matches!(mode.value.to_str(), "rb" | "br" | "wb" | "bw" | "ab" | "ba" | "xb" | "bx")
                 || matches!(size, ast::Expr::NumberLiteral(size) if matches!(&size.value, ast::Number::Int(n) if n.as_i64() == Some(0))))
-            && self.expr(path)?.ty == Type::Str
+            && matches!(
+                (self.expr(path)?.ty, mode.value.to_str()),
+                (Type::Str, _)
+                    | (Type::Bytes | Type::Int | Type::Path | Type::PurePath(_), "rb" | "br")
+            )
         {
             return Err(self.object_builtin_error("binary open with buffering", call));
         }

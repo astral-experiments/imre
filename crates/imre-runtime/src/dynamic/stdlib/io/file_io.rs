@@ -388,6 +388,7 @@ pub(in crate::dynamic) fn open(
     let update = mode_text.contains('+');
     let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
     let text_input = buffering < 0 && matches!(mode_text, "r" | "rt" | "tr");
+    let sized_binary_reader = buffering > 1 && matches!(mode_text, "rb" | "br");
     if binary && buffering == 1 {
         ctx.emit_builtin_warning(
             crate::objects::exceptions::Kind::RuntimeWarning,
@@ -403,6 +404,7 @@ pub(in crate::dynamic) fn open(
         || update
         || (binary && buffering == 1)
         || (binary && !numeric && needs_encoded_path(ctx, raw_arg)?)
+        || sized_binary_reader
     {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
