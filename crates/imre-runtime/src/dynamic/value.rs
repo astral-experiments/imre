@@ -640,6 +640,8 @@ pub(super) struct ClassNamespace {
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
+    /// Closure cell shared by runtime-source method annotation providers.
+    pub annotation_dict_cell: Option<Id>,
     /// Scratch field dictionary used only while an ordinary class body is executing.
     pub annotation_scratch: Option<Id>,
     /// Executed deferred sites in source order, including repeated field names.
@@ -1312,6 +1314,7 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_thunks);
+                    visit.extend(class.annotation_dict_cell);
                     visit.extend(class.annotation_scratch);
                     if let Some(sites) = &class.annotation_sites {
                         for &(name, thunk) in sites.values() {

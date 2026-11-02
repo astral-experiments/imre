@@ -1721,7 +1721,8 @@ impl Context {
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__"],
-            "set" | "frozenset" => &["__repr__", "issubset"],
+            "set" => &["__repr__", "issubset", "update"],
+            "frozenset" => &["__repr__", "issubset"],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS
@@ -2089,6 +2090,8 @@ impl Context {
                     "repeat",
                     "_cycle_allocate",
                     "_cycle_next",
+                    "_filterfalse_allocate",
+                    "_filterfalse_state",
                     "_chain_allocate",
                     "_chain_get",
                     "_chain_set",
@@ -2321,6 +2324,14 @@ impl Context {
                 && let Some(external) = self.scope_name(scope, "_bootstrap_external")
             {
                 self.publish_module("importlib._bootstrap_external", external)?;
+            }
+            if name == "itertools"
+                && let Some(owner) = self.scope_name(scope, "batched")
+            {
+                // Keep the iterator state outside Python attribute lookup, even on subclasses.
+                let name = self.text("_batched_state");
+                let member = self.alloc(Value::SlotMember { owner, name });
+                self.bind(scope, "_batched_state", member);
             }
             if name == "re"
                 && let Some(class) = self.scope_name(scope, "PatternError")

@@ -8,6 +8,7 @@ from types import GenericAlias
 
 
 curdir = path.curdir
+extsep = path.extsep
 
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.

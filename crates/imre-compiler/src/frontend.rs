@@ -2550,6 +2550,7 @@ impl<'a> Checker<'a> {
     ) -> Option<&'static str> {
         let name = match attribute.attr.as_str() {
             "difference_update" => "set.difference_update",
+            "update" => "set.update",
             "issubset" => "set.issubset",
             _ => return None,
         };
@@ -6340,12 +6341,7 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::OsSeparator { alternate }, vec![]),
                     });
                 }
-                Intrinsic::OsDevnull => {
-                    return Ok(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str("/dev/null".into()),
-                    });
-                }
+                Intrinsic::StringConstant(value) => return Ok(unpacking::string(value)),
                 Intrinsic::LogRecordFlag(mask) => {
                     return Ok(logging_records::op(
                         ir::LogRecordOperation::Flag,

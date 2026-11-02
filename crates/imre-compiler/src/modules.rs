@@ -98,6 +98,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/importlib/metadata_boxed.py"),
                 "\n",
                 include_str!("../stdlib/importlib/metadata_version.py"),
+                "\n",
+                include_str!("../stdlib/importlib/metadata_entrypoints.py"),
             ),
         )),
         // CPython 3.14.5 Lib/queue.py with condition variables backed by native locks.
@@ -593,7 +595,7 @@ pub(crate) enum Intrinsic {
     ModuleType,
     GetSysconfigPath,
     OsPathExists,
-    OsDevnull,
+    StringConstant(&'static str),
     SysExit,
     ShlexSplit,
     ShlexQuote,
@@ -1115,9 +1117,30 @@ impl IntrinsicModule {
             (Self::ImportlibResources, "read_text") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.read_text")
             }
+            (Self::ImportlibMetadata, "Distribution") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.Distribution")
+            }
+            (Self::ImportlibMetadata, "PathDistribution") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.PathDistribution")
+            }
+            (Self::ImportlibMetadata, "distributions") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.distributions")
+            }
+            (Self::ImportlibMetadata, "distribution") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.distribution")
+            }
+            (Self::ImportlibMetadata, "_unique") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata._unique")
+            }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
+            (Self::ImportlibMetadata, "EntryPoint") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.EntryPoint")
+            }
+            (Self::ImportlibMetadata, "EntryPoints") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.EntryPoints")
+            }
             (Self::ImportlibMetadata, "entry_points") => {
-                Intrinsic::Declaration("importlib.metadata.entry_points")
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.entry_points")
             }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
@@ -1798,7 +1821,11 @@ impl IntrinsicModule {
             (Self::Itertools, "combinations_with_replacement") => {
                 Intrinsic::Combinatorial(crate::ir::Combinatorial::CombinationsWithReplacement)
             }
+            (Self::Itertools, "batched") => Intrinsic::ObjectRuntimeExport("itertools.batched"),
             (Self::Itertools, "count") => Intrinsic::Count,
+            (Self::Itertools, "filterfalse") => {
+                Intrinsic::ObjectRuntimeExport("itertools.filterfalse")
+            }
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
             (Self::Itertools, "cycle") => Intrinsic::Cycle,
@@ -1913,7 +1940,8 @@ impl IntrinsicModule {
             (Self::Os, "fsdecode") => Intrinsic::FsDecode,
             (Self::Os, "fsencode") => Intrinsic::FsEncode,
             (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
-            (Self::Os, "devnull") => Intrinsic::OsDevnull,
+            (Self::Os, "devnull") => Intrinsic::StringConstant("/dev/null"),
+            (Self::Os | Self::OsPath | Self::PosixPath, "extsep") => Intrinsic::StringConstant("."),
             (Self::GenericPath | Self::PosixPath, "commonprefix") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
             }

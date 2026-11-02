@@ -248,6 +248,7 @@ impl Context {
                 ) || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
                     || (kind == "function" && name == "__call__")
+                    || (kind == "set" && name == "update")
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
@@ -2930,7 +2931,7 @@ impl Context {
                 return Ok(self.builtin("set.copy"));
             }
             Value::Native(ref class)
-                if class == "set" && matches!(name, "discard" | "difference_update") =>
+                if class == "set" && matches!(name, "discard" | "difference_update" | "update") =>
             {
                 return Ok(self.builtin(&format!("set.{name}")));
             }
@@ -3568,6 +3569,10 @@ impl Context {
                 ),
             )),
         }
+    }
+
+    pub(super) fn class_instances_have_dict(&self, class: Id) -> bool {
+        self.instance_layout(class, "").dictionary
     }
 
     /// Whether instances have a dictionary and whether this particular name addresses a slot.
@@ -4887,6 +4892,7 @@ impl Context {
                 name,
                 scope,
                 ancestors,
+                metaclass,
                 ..
             } => {
                 if self.builtins.get("abc.ABCMeta") == Some(&callable) {
@@ -4895,8 +4901,16 @@ impl Context {
                         "direct ABCMeta construction is unsupported",
                     ));
                 }
-                if let Some(call) = self.bound_slot(callable, "__call__")? {
-                    return self.call(call, args, kwargs);
+                if let Some(meta) = metaclass
+                    && let Some(slot) = self.class_attr(meta, "__call__")
+                {
+                    return self.with_slot_depth(
+                        "maximum recursion depth exceeded while calling a Python object",
+                        |ctx| {
+                            let call = ctx.bind_attribute(slot, callable, meta)?;
+                            ctx.call(call, args, kwargs)
+                        },
+                    );
                 }
                 let (mut args, mut kwargs) = (args, kwargs);
                 if let Some(&decimal) = self.classes.get("decimal.Decimal")
@@ -4988,6 +5002,11 @@ impl Context {
                         return Ok(instance);
                     }
                     instance
+                } else if self.has_base(callable, "type") {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "direct metaclass construction is unsupported",
+                    ));
                 } else if self.has_base(callable, "module") {
                     self.allocate_module(callable)
                 } else if let Some(kind) = string_base {
@@ -5364,6 +5383,106 @@ impl Context {
         Ok(())
     }
 
+    /// Select the most derived compatible metaclass before executing a boxed class body.
+    fn select_class_metaclass(
+        &mut self,
+        bases: &[Id],
+        explicit: Option<Id>,
+        typed_dict_meta: Option<Id>,
+        enum_base: bool,
+    ) -> Result<Option<Id>> {
+        if explicit.is_none()
+            && !bases.iter().any(|&base| {
+                self.is_bundled_abc(base)
+                    || matches!(self.heap.get(base), Value::Class { metaclass: Some(meta), .. }
+                        if Some(*meta) != typed_dict_meta)
+            })
+        {
+            return Ok(typed_dict_meta);
+        }
+        let type_class = self.builtin("type");
+        let mut winner = explicit.unwrap_or(type_class);
+        if !self.direct_subclass(winner, type_class) {
+            return Err(Error::new(
+                "NotImplementedError",
+                "non-type metaclasses are unsupported",
+            ));
+        }
+        let conflict = || {
+            Error::new(
+                "TypeError",
+                "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases",
+            )
+        };
+        for &base in bases {
+            let meta = if self.is_bundled_abc(base) {
+                self.abc_meta()
+            } else {
+                self.exact_type(base)?
+            };
+            if !self.direct_subclass(winner, meta) {
+                if !self.direct_subclass(meta, winner) {
+                    return Err(conflict());
+                }
+                winner = meta;
+            }
+        }
+        if winner == type_class {
+            return Ok(None);
+        }
+        if enum_base {
+            return Err(conflict());
+        }
+        let is_abc = self.builtins.get("abc.ABCMeta") == Some(&winner);
+        if self
+            .classes
+            .get("typing.Protocol")
+            .is_some_and(|&protocol| {
+                bases
+                    .iter()
+                    .any(|&base| self.direct_subclass(base, protocol))
+            })
+        {
+            if !is_abc {
+                return Err(conflict());
+            }
+            if explicit == Some(winner) {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "the Protocol metaclass is unsupported with ABCMeta",
+                ));
+            }
+            // Protocol uses a synthetic layout and wins over an inherited ABCMeta.
+            return Ok(None);
+        }
+        if let Some(meta) = self.module_value("typing", "_TypedDictMeta")
+            && self.direct_subclass(winner, meta)
+            && Some(winner) != typed_dict_meta
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "custom TypedDict metaclass construction is unsupported",
+            ));
+        }
+        // User metaclasses can customize their instances' calls and attributes while
+        // inheriting type's normal namespace preparation, allocation, and MRO.
+        if !is_abc
+            && Some(winner) != typed_dict_meta
+            && (["__prepare__", "__new__", "__init__", "mro"]
+                .iter()
+                .any(|name| self.class_attr(winner, name).is_some())
+                || ["__call__", "__getattr__", "__getattribute__"]
+                    .iter()
+                    .any(|name| self.slot(winner, name).is_some()))
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "custom metaclass construction is unsupported",
+            ));
+        }
+        Ok(Some(winner))
+    }
+
     pub(super) fn class(
         &mut self,
         bases: Id,
@@ -5395,49 +5514,12 @@ impl Context {
         } else {
             self.enum_namespace(&bases)
         };
-        let abc_meta = if explicit_metaclass.is_some()
-            || bases.iter().any(|&base| self.is_bundled_abc(base))
-        {
-            let meta = self.abc_meta();
-            if explicit_metaclass.is_some_and(|candidate| candidate != meta) {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "only the ABCMeta metaclass is supported",
-                ));
-            }
-            let type_class = self.builtin("type");
-            for &base in &bases {
-                let parent_meta = self.exact_type(base)?;
-                if enum_namespace.is_some() || (parent_meta != type_class && parent_meta != meta) {
-                    return Err(Error::new(
-                        "TypeError",
-                        "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases",
-                    ));
-                }
-            }
-            if self
-                .classes
-                .get("typing.Protocol")
-                .is_some_and(|&protocol| {
-                    bases
-                        .iter()
-                        .any(|&base| self.direct_subclass(base, protocol))
-                })
-            {
-                if explicit_metaclass.is_some() {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "the Protocol metaclass is unsupported with ABCMeta",
-                    ));
-                }
-                // Keep the existing Protocol layout when it wins over an inherited ABCMeta.
-                None
-            } else {
-                Some(meta)
-            }
-        } else {
-            None
-        };
+        let class_meta = self.select_class_metaclass(
+            &bases,
+            explicit_metaclass,
+            typed_dict_meta,
+            enum_namespace.is_some(),
+        )?;
         let Value::Function {
             scope: parent,
             code,
@@ -5574,7 +5656,7 @@ impl Context {
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
             unreachable!()
         };
-        *metaclass = abc_meta.or(typed_dict_meta);
+        *metaclass = class_meta;
         self.install_weakref_descriptor(class, scope);
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {

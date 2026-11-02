@@ -666,6 +666,7 @@ name = "imre-ast"
 version = "0.1.5"
 dependencies = [
  "ruff_python_ast",
+ "ruff_python_codegen",
  "ruff_python_stdlib",
  "ruff_text_size",
  "stacker",
