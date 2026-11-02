@@ -508,7 +508,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
     if name == "_exit" {
         return cfg!(unix);
     }
-    if matches!(name, "device_encoding" | "pread" | "pwrite" | "readinto") {
+    if matches!(name, "device_encoding" | "fchdir" | "pread" | "pwrite" | "readinto") {
         return cfg!(unix);
     }
     matches!(
@@ -1000,6 +1000,26 @@ pub(super) fn descriptor(
     }
     if name == "utime" {
         return utime::call(ctx, args, kwargs);
+    }
+    if name == "fchdir" {
+        let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
+            unreachable!("fchdir requires a descriptor");
+        };
+        stat::warn_bool_fd(ctx, fd)?;
+        let fd = super::select::fd(ctx, fd)?;
+        let audit_fd = ctx.int(i64::from(fd));
+        super::audit::event(ctx, "os.chdir", &[audit_fd])?;
+        loop {
+            // SAFETY: fchdir borrows the descriptor and checks it in the kernel.
+            if unsafe { libc::fchdir(fd) } == 0 {
+                return Ok(NONE);
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(super::os_error(error));
+            }
+            ctx.dispatch_signals()?;
+        }
     }
     if name == "chdir" {
         return chdir(ctx, args, kwargs);

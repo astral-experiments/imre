@@ -27,6 +27,32 @@ def expect_errno(operation, args, number):
         raise AssertionError("descriptor operation unexpectedly succeeded")
 
 
+def check_fchdir():
+    from os import fchdir
+
+    assert fchdir is posix.fchdir and fchdir is os.fchdir
+    previous = os.getcwd()
+    with tempfile.TemporaryDirectory() as directory:
+        parent = os.open(".", os.O_RDONLY)
+        try:
+            child = os.open(directory, os.O_RDONLY)
+            try:
+                assert fchdir(fd=child) is None
+                assert os.path.samestat(os.stat("."), os.fstat(child))
+                with tempfile.TemporaryFile() as file:
+                    expect_errno(fchdir, (file,), errno.ENOTDIR)
+                assert os.path.samestat(os.stat("."), os.fstat(child))
+            finally:
+                try:
+                    fchdir(parent)
+                finally:
+                    os.close(child)
+            expect_errno(fchdir, (child,), errno.EBADF)
+        finally:
+            os.close(parent)
+    assert os.getcwd() == previous
+
+
 def check_sendfile():
     from os import sendfile
 
@@ -224,6 +250,7 @@ def check_splice():
 
 
 def current():
+    check_fchdir()
     if sys.platform == "linux":
         check_tmpfile()
         check_copy_file_range()
