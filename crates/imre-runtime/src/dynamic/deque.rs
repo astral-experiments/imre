@@ -131,6 +131,11 @@ const MEMBERS: &[Member] = &[
         "($self, /)",
     ),
     Member::new("reverse", "Reverse *IN PLACE*.", "($self, /)"),
+    Member::new(
+        "rotate",
+        "Rotate the deque n steps to the right.  If n is negative, rotates left.",
+        "($self, n=1, /)",
+    ),
 ];
 
 pub(super) fn member(name: &str) -> Option<&'static Member> {
@@ -1024,6 +1029,24 @@ pub(super) fn method(
     }
     if name == "index" {
         return index(ctx, storage, rest);
+    }
+    if name == "rotate" {
+        let count = match rest {
+            [] => crate::Int::from(1),
+            [count] => ctx.index_integer(*count)?,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("rotate expected at most 1 argument, got {}", rest.len()),
+                ));
+            }
+        };
+        // __index__ can change the deque before the rotation.
+        let Value::Deque(ring) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        ring.rotate(&count)?;
+        return Ok(NONE);
     }
     if let Some(op) = comparison {
         let [other] = rest else {

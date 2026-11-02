@@ -20,7 +20,8 @@ fn initialize(ty: Type, receiver: Option<Expr>, bound: Expr) -> Expr {
 fn boxed_method(name: &str) -> bool {
     matches!(
         name,
-        "__repr__"
+        "rotate"
+            | "__repr__"
             | "__add__"
             | "__mul__"
             | "__rmul__"
@@ -400,6 +401,26 @@ impl Checker<'_> {
         element: Type,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if name == "rotate" {
+            let count = match call.arguments.args.as_ref() {
+                [] if call.arguments.keywords.is_empty() => Expr::integer(1),
+                [arg]
+                    if call.arguments.keywords.is_empty()
+                        && !matches!(arg, ast::Expr::Starred(_)) =>
+                {
+                    let value = self.expr(arg)?;
+                    if !matches!(value.ty, Type::Int | Type::Bool | Type::IntEnum(_)) {
+                        return Err(self.scoped_builtin_error("collections.deque.rotate", call));
+                    }
+                    self.index_value(value, arg)?
+                }
+                _ => return self.boxed_deque_call(name, call),
+            };
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::DequeRotate, vec![receiver, count]),
+            });
+        }
         if boxed_method(name) {
             return self.boxed_deque_call(name, call);
         }
