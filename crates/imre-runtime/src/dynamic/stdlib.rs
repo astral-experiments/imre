@@ -9,6 +9,7 @@ use super::{
 use crate::objects::interpreter_stdlib as system;
 
 pub(super) mod ast;
+mod asyncgen_hooks;
 pub(super) mod audit;
 mod binascii;
 pub(super) mod codecs;
@@ -133,6 +134,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "genericpath"
             | "hmac"
             | "urllib.parse"
+            | "re._constants"
             | "io"
             | "itertools"
             | "json"
@@ -526,7 +528,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
         (
             "traceback",
-            "clear_frames" | "format_exc" | "format_exception" | "print_exc" | "print_exception",
+            "_frame_locals" | "clear_frames" | "format_exc" | "format_exception" | "print_exc"
+            | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
         ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
         ("types", "ModuleType") => ctx.builtin("module"),
@@ -1013,6 +1016,10 @@ pub(super) fn call(
         return super::atexit::call(ctx, method, args, kwargs);
     }
 
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    if name == "_locale.nl_langinfo" {
+        return locale::nl_langinfo(ctx, args, kwargs);
+    }
     if name == "_locale.setlocale" {
         return locale::setlocale(ctx, args, kwargs);
     }
@@ -1168,6 +1175,10 @@ pub(super) fn call(
         ctx.heap.clear_frame(frame)?;
         return Ok(NONE);
     }
+    if name == "traceback._frame_locals" {
+        let frame = single_argument("_frame_locals", "frame", args, kwargs)?;
+        return traceback::frame_locals(ctx, frame);
+    }
     if name == "traceback.clear_frames" {
         let tb = single_argument("clear_frames", "tb", args, kwargs)?;
         return traceback::clear_frames(ctx, tb);
@@ -1322,7 +1333,13 @@ pub(super) fn call(
     if name == "sys.getsizeof" {
         return system_size::getsizeof(ctx, &args[1..], kwargs);
     }
-    if matches!(name, "sys.getrecursionlimit" | "sys.is_finalizing") {
+    if name == "sys.set_asyncgen_hooks" {
+        return asyncgen_hooks::set(ctx, &args[1..], kwargs);
+    }
+    if matches!(
+        name,
+        "sys.getrecursionlimit" | "sys.is_finalizing" | "sys.get_asyncgen_hooks"
+    ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -1333,6 +1350,13 @@ pub(super) fn call(
             return Err(Error::new(
                 "TypeError",
                 format!("{name}() takes no arguments ({} given)", args.len() - 1),
+            ));
+        }
+        if name == "sys.get_asyncgen_hooks" {
+            return Ok(fixed_structseq::record(
+                ctx,
+                fixed_structseq::ASYNCGEN_HOOKS,
+                ctx.threads.asyncgen_hooks.to_vec(),
             ));
         }
         if name == "sys.is_finalizing" {
@@ -1434,6 +1458,7 @@ pub(super) fn call(
             | "posix.geteuid"
             | "posix.getgid"
             | "posix.getgroups"
+            | "posix.cpu_count"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
             | "sys._jit.is_active"
@@ -1484,6 +1509,10 @@ pub(super) fn call(
                     .map(|group| ctx.alloc(Value::Int(group)))
                     .collect();
                 ctx.alloc(Value::List(groups))
+            }
+            #[cfg(target_os = "linux")]
+            "posix.cpu_count" => {
+                crate::sys::cpu_count::online().map_or(NONE, |n| ctx.int(i64::from(n)))
             }
             "sys.getdefaultencoding" => ctx.default_encoding,
             "sys.get_int_max_str_digits" => {
@@ -1811,11 +1840,14 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("collections._tuplegetter.") {
         return super::namedtuple::getter_method(ctx, method, args, kwargs);
     }
-    if name == "_collections._make" {
-        return super::namedtuple::make(ctx, args, kwargs);
-    }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._accumulate_allocate" {
+        return itertools::accumulate_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._accumulate_state" {
+        return itertools::accumulate_state(ctx, args, kwargs);
     }
     if name == "_imre_itertools._cycle_allocate" {
         return itertools::cycle_allocate(ctx, args, kwargs);

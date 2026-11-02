@@ -11,6 +11,31 @@ def current():
     for make, reverse in ((_collections._deque_iterator, False),
                           (_collections._deque_reverse_iterator, True)):
         d = deque([10, 20])
+        namespace = vars(make)
+        assert tuple(namespace) == (
+            "__new__", "__getattribute__", "__iter__", "__next__", "__length_hint__",
+            "__reduce__", "__doc__", "__module__",
+        )
+        assert all(namespace[key] is getattr(make, key) for key in namespace)
+        fresh = namespace["__new__"](make, d)
+        assert set(namespace) <= set(dir(fresh))
+        read = namespace["__getattribute__"]
+        assert read(fresh, "__class__") is make
+        for attr in ("__module__", "__doc__", "__new__"):
+            assert getattr(fresh, attr) is read(fresh, attr) is namespace[attr]
+        try:
+            delattr(make, "__next__")
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("iterator class accepted deletion")
+        assert make.__next__ is namespace["__next__"]
+        try:
+            namespace["__getattribute__"](d, "__class__")
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("iterator descriptor accepted a deque")
 
         class Index:
             def __index__(self):

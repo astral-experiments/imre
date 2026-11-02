@@ -337,6 +337,17 @@ pub(super) fn shutdown(ctx: &mut Context) {
     ctx.heap.release_temporaries_since(mark);
 }
 
+/// Reject new work before binding or moving its Python callback operands.
+pub(super) fn check_start(ctx: &Context) -> Result<()> {
+    if ctx.finalizing.load(Ordering::Acquire) {
+        return Err(Error::new(
+            "PythonFinalizationError",
+            "can't create new thread at interpreter shutdown",
+        ));
+    }
+    Ok(())
+}
+
 /// Both public launch paths use the same bootstrap, count guard and native startup handshake.
 fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -> Result<Started> {
     let (ready, finished) = mpsc::sync_channel(0);
@@ -547,13 +558,20 @@ pub(super) fn call(
     }
     ctx.reap_thread_operands();
     match (name, args) {
-        ("start", &[owner, daemon]) => {
+        ("start", &[owner, daemon] | &[owner, daemon, _]) => {
             // The independent worker cannot publish CPython's actual Python bootstrap
             // callable and handle to an audit hook. Reject before consuming the handle.
             if !ctx.audit_hooks.is_empty() {
                 return Err(Error::new(
                     "NotImplementedError",
                     "audited joinable thread startup requires the boxed Python bootstrap",
+                ));
+            }
+            check_start(ctx)?;
+            if args.get(2).is_some_and(|&has_context| has_context != super::FALSE) {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "native workers cannot enter a Python context",
                 ));
             }
             let [target, pos, kw] = ctx.thread_operands(owner)?;
@@ -615,6 +633,17 @@ pub(super) fn call(
             let Value::ThreadHandle(worker) = ctx.heap.get(handle) else {
                 return Err(Error::new("TypeError", "expected a thread handle"));
             };
+            if ctx.finalizing.load(Ordering::Acquire)
+                && ctx
+                    .workers
+                    .live()
+                    .any(|entry| Rc::ptr_eq(&entry.handle, worker))
+            {
+                return Err(Error::new(
+                    "PythonFinalizationError",
+                    "cannot join thread at interpreter shutdown",
+                ));
+            }
             worker.join(limit)?;
             ctx.reap_thread_operands();
             Ok(NONE)

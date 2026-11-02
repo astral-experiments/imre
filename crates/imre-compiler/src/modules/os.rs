@@ -88,6 +88,13 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
         #[cfg(target_os = "linux")]
         "MFD_CLOEXEC" => Intrinsic::IntConstant(i64::from(libc::MFD_CLOEXEC)),
+        #[cfg(target_os = "linux")]
+        "SPLICE_F_MOVE" => Intrinsic::IntConstant(i64::from(libc::SPLICE_F_MOVE)),
+        #[cfg(target_os = "linux")]
+        "SPLICE_F_NONBLOCK" => Intrinsic::IntConstant(i64::from(libc::SPLICE_F_NONBLOCK)),
+        #[cfg(target_os = "linux")]
+        "SPLICE_F_MORE" => Intrinsic::IntConstant(i64::from(libc::SPLICE_F_MORE)),
+        "splice" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.splice"),
         "memfd_create" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.memfd_create")
         }
@@ -145,6 +152,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
         "getgroups" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getgroups"),
+        "cpu_count" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.cpu_count")
+        }
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
         "scandir" if cfg!(any(target_os = "linux", target_os = "macos")) => {
             Intrinsic::ObjectRuntimeExport("posix.scandir")
@@ -184,6 +194,13 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "close" => Intrinsic::Fd(FdOperation::Close),
         "closerange" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.closerange"),
         "read" => Intrinsic::Fd(FdOperation::Read),
+        "preadv" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.preadv"),
+        #[cfg(target_os = "linux")]
+        "RWF_HIPRI" => Intrinsic::IntConstant(i64::from(libc::RWF_HIPRI)),
+        #[cfg(target_os = "linux")]
+        "RWF_NOWAIT" => Intrinsic::IntConstant(i64::from(libc::RWF_NOWAIT)),
+        "writev" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.writev"),
+        "readv" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.readv"),
         "readinto" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readinto"),
         "lockf" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.lockf"),
         "pread" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.pread"),
@@ -221,6 +238,9 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "dup2" => Intrinsic::Fd(FdOperation::Dup2),
         "ptsname" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::PtsName),
         "O_NOCTTY" if cfg!(target_os = "linux") => Intrinsic::DescriptorConstant("o_noctty"),
+        "get_terminal_size" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("posix.get_terminal_size")
+        }
         "openpty" => Intrinsic::Fd(FdOperation::OpenPty),
         "pipe" => Intrinsic::Fd(FdOperation::Pipe),
         "pipe2" if cfg!(target_os = "linux") => Intrinsic::Fd(FdOperation::Pipe2),

@@ -2,6 +2,8 @@
 pub(in crate::dynamic) mod device;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
+#[cfg(target_os = "linux")]
+mod vectored;
 pub(in crate::dynamic) mod scandir;
 #[cfg(target_os = "linux")]
 mod spawn_child;
@@ -555,6 +557,11 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             && matches!(
                 name,
                 "copy_file_range"
+                    | "get_terminal_size"
+                    | "preadv"
+                    | "readv"
+                    | "writev"
+                    | "splice"
                     | "lockf"
                     | "mknod"
                     | "posix_fadvise"
@@ -576,6 +583,22 @@ fn posix_file_call(ctx: &mut Context, mut call: impl FnMut() -> i32) -> Result<I
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
+#[cfg(target_os = "linux")]
+fn unsigned(ctx: &mut Context, id: Id, max: u64, kind: &str) -> Result<u64> {
+    use num_traits::{Signed, ToPrimitive};
+    let integer = ctx.index_integer(id)?;
+    let n = integer.big();
+    if n.is_negative() {
+        return Err(Error::new("ValueError", "Cannot convert negative int"));
+    }
+    n.to_u64().filter(|&n| n <= max).ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            format!("Python int too large for C unsigned {kind}"),
+        )
+    })
+}
+
 pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
@@ -1035,21 +1058,49 @@ pub(super) fn descriptor(
         return open(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
-    if name == "copy_file_range" {
-        let [Some(src), Some(dst), Some(count), offset_src, offset_dst] =
+    if matches!(name, "copy_file_range" | "splice") {
+        let [
+            Some(src),
+            Some(dst),
+            Some(count),
+            offset_src,
+            offset_dst,
+            flags,
+        ] = (if name == "splice" {
             builtins::bind_builtin_arguments(
+                name,
+                args,
+                kwargs,
+                ["src", "dst", "count", "offset_src", "offset_dst", "flags"],
+                3,
+            )?
+        } else {
+            let [src, dst, count, offset_src, offset_dst] = builtins::bind_builtin_arguments(
                 name,
                 args,
                 kwargs,
                 ["src", "dst", "count", "offset_src", "offset_dst"],
                 3,
-            )?
+            )?;
+            [src, dst, count, offset_src, offset_dst, None]
+        })
         else {
-            unreachable!("copy_file_range requires both descriptors and count")
+            unreachable!("both descriptors and a count are required")
         };
         let src = c_int(ctx, src)?;
         let dst = c_int(ctx, dst)?;
-        let count = usize::try_from(ssize_t(ctx, count)?)
+        let count = ssize_t(ctx, count)?;
+        // Argument Clinic converts flags before splice checks count or converts offsets.
+        let operation = if name == "splice" {
+            let flags = flags
+                .map(|id| unsigned(ctx, id, u64::from(u32::MAX), "int"))
+                .transpose()?
+                .unwrap_or(0);
+            native::RangeTransfer::Splice(flags as u32)
+        } else {
+            native::RangeTransfer::CopyFileRange
+        };
+        let count = usize::try_from(count)
             .map_err(|_| Error::new("ValueError", "negative value for 'count' not allowed"))?;
         let mut offset = |value| match value {
             None | Some(NONE) => Ok(None),
@@ -1057,7 +1108,7 @@ pub(super) fn descriptor(
         };
         let offset_src = offset(offset_src)?;
         let offset_dst = offset(offset_dst)?;
-        let copied = native::copy_file_range(src, dst, count, offset_src, offset_dst, || {
+        let copied = operation.run(src, dst, count, offset_src, offset_dst, || {
             ctx.dispatch_signals()
         })?;
         return Ok(ctx.int(copied as i64));
@@ -1158,6 +1209,36 @@ pub(super) fn descriptor(
         return Err(Error::new(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "get_terminal_size" {
+        let fd = match args {
+            [] => libc::STDOUT_FILENO,
+            [fd] => c_int(ctx, *fd)?,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "get_terminal_size expected at most 1 argument, got {}",
+                        args.len()
+                    ),
+                ));
+            }
+        };
+        let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+        // SAFETY: TIOCGWINSZ writes a winsize on success. The kernel validates the borrowed fd.
+        if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, size.as_mut_ptr()) } < 0 {
+            return Err(super::os_error(std::io::Error::last_os_error()));
+        }
+        // SAFETY: the successful ioctl initialized size.
+        let size = unsafe { size.assume_init() };
+        let columns = ctx.int(i64::from(size.ws_col));
+        let lines = ctx.int(i64::from(size.ws_row));
+        return Ok(super::fixed_structseq::record(
+            ctx,
+            super::fixed_structseq::TERMINAL_SIZE,
+            vec![columns, lines],
         ));
     }
     #[cfg(target_os = "linux")]
@@ -1297,6 +1378,25 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
+    #[cfg(target_os = "linux")]
+    if name == "preadv" {
+        let [fd, buffers, offset, rest @ ..] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("preadv expected at least 3 arguments, got {}", args.len()),
+            ));
+        };
+        if rest.len() > 1 {
+            return Err(Error::new(
+                "TypeError",
+                format!("preadv expected at most 4 arguments, got {}", args.len()),
+            ));
+        }
+        let fd = c_int(ctx, *fd)?;
+        let offset = file_offset(ctx, *offset)?;
+        let flags = rest.first().map(|id| c_int(ctx, *id)).transpose()?.unwrap_or(0);
+        return vectored::readv(ctx, fd, *buffers, Some((offset, flags)));
+    }
     if matches!(name, "pread" | "pwrite") {
         let [fd, data, offset] = args else {
             return Err(Error::new(
@@ -1313,7 +1413,7 @@ pub(super) fn descriptor(
         let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
-    if matches!(name, "read" | "readinto" | "write") {
+    if matches!(name, "read" | "readinto" | "write") || (cfg!(target_os = "linux") && matches!(name, "readv" | "writev")) {
         let [fd, data] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -1321,6 +1421,14 @@ pub(super) fn descriptor(
             ));
         };
         let fd = c_int(ctx, *fd)?;
+        #[cfg(target_os = "linux")]
+        if name == "readv" {
+            return vectored::readv(ctx, fd, *data, None);
+        }
+        #[cfg(target_os = "linux")]
+        if name == "writev" {
+            return vectored::writev(ctx, fd, *data);
+        }
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
             let bytes = native::read(fd, length, None, || ctx.dispatch_signals())?;

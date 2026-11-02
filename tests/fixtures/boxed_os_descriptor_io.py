@@ -79,11 +79,132 @@ def check_copy_file_range():
             raise AssertionError("negative count was accepted")
 
 
+def check_readv():
+    from os import readv
+
+    assert readv is os.readv is posix.readv
+    with tempfile.TemporaryFile() as source:
+        fd = source.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        first, last = bytearray(b".."), bytearray(b"....")
+        assert readv(fd, [first, last]) == 5
+        assert (first, last) == (b"bc", b"def.")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 6
+        assert readv(fd, [last]) == 0
+        assert readv(fd, []) == 0
+        os.lseek(fd, 0, os.SEEK_SET)
+        storage = bytearray(b"......")
+        view = memoryview(storage)
+        assert readv(fd, (view[:3], view[1:4])) == 6
+        assert storage == b"adef.."
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            readv(fd, [first, b"readonly"])
+        except BufferError:
+            pass
+        else:
+            raise AssertionError("readv accepted a read-only buffer")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 0
+        first.append(0)
+    expect_errno(readv, (fd, [first]), errno.EBADF)
+
+
+def check_preadv():
+    from os import preadv
+
+    assert preadv is os.preadv is posix.preadv
+    assert os.RWF_HIPRI == posix.RWF_HIPRI
+    assert os.RWF_NOWAIT == posix.RWF_NOWAIT
+    with tempfile.TemporaryFile() as source:
+        fd = source.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        head, tail = bytearray(b".."), bytearray(b"...")
+        assert preadv(fd, [head, tail], 2) == 4
+        assert (head, tail) == (b"cd", b"ef.")
+        assert preadv(fd, [head], 6, 0) == 0
+        expect_errno(preadv, (fd, [head], -2), errno.EINVAL)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+        try:
+            preadv(fd, [head], 0, 1 << 30)
+        except NotImplementedError:
+            pass  # libc supplies only the flags-free preadv.
+        except OSError as error:
+            assert error.errno in (errno.EINVAL, errno.EOPNOTSUPP)
+        else:
+            raise AssertionError("unsupported preadv flag succeeded")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+    expect_errno(preadv, (fd, [head], 0), errno.EBADF)
+
+
+def check_writev():
+    from os import writev
+
+    assert writev is os.writev is posix.writev
+    data = bytearray(b"abc")
+    with tempfile.TemporaryFile() as target:
+        fd = target.fileno()
+        parts = (b"<", data, memoryview(data)[1:], memoryview(b"|>"))
+        assert writev(fd, parts) == 8
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 8
+        assert os.pread(fd, 8, 0) == b"<abcbc|>"
+        assert writev(fd, []) == 0
+        probe = bytearray(b"unchanged")
+        try:
+            writev(fd, [probe, object()])
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("writev accepted a non-buffer")
+        probe.append(0)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 8
+    expect_errno(writev, (fd, [b"x"]), errno.EBADF)
+
+    reader, writer = os.pipe()
+    os.close(reader)
+    try:
+        expect_errno(writev, (writer, [b"x", b"y"]), errno.EPIPE)
+    finally:
+        os.close(writer)
+
+
+def check_splice():
+    from os import splice
+
+    assert splice is os.splice is posix.splice
+    for name in ("SPLICE_F_MOVE", "SPLICE_F_MORE", "SPLICE_F_NONBLOCK"):
+        assert vars(os)[name] == vars(posix)[name]
+    with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as destination:
+        src, dst = source.fileno(), destination.fileno()
+        os.write(src, b"abcdef")
+        reader, writer = os.pipe()
+        try:
+            flags = os.SPLICE_F_MOVE | os.SPLICE_F_MORE
+            assert splice(src=Index(src), dst=Index(writer), count=Index(4),
+                          flags=Index(flags), offset_src=Index(1)) == 4
+            assert os.lseek(src, 0, os.SEEK_CUR) == 6
+            assert splice(reader, dst, 2, offset_dst=3) == 2
+            assert os.read(reader, 2) == b"de"
+            assert os.lseek(dst, 0, os.SEEK_CUR) == 0
+            assert os.read(dst, 5) == b"\x00\x00\x00bc"
+            expect_errno(splice, (reader, dst, 1, None, None, os.SPLICE_F_NONBLOCK), errno.EAGAIN)
+            expect_errno(splice, (reader, dst, 1, 0), errno.ESPIPE)
+            assert splice(-1, -1, 0) == 0
+        finally:
+            os.close(reader)
+            os.close(writer)
+
+
 def current():
     if sys.platform == "linux":
         check_tmpfile()
         check_copy_file_range()
         check_sendfile()
+        check_splice()
+        check_readv()
+        check_preadv()
+        check_writev()
     assert os.strerror is posix.strerror
     try:
         os.fstat(-1)

@@ -21,6 +21,21 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Res
     *module_state = Some(NativeModuleState::LocaleError(class));
     ctx.bind(scope, "Error", class);
 
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        for item in crate::sys::langinfo::items() {
+            let value = ctx.int(item.value.into());
+            ctx.bind(scope, item.name(), value);
+        }
+        let callable = ctx.builtin("_locale.nl_langinfo");
+        let function = ctx.alloc(Value::Method {
+            callable,
+            receiver: module,
+            explicit: false,
+        });
+        ctx.bind(scope, "nl_langinfo", function);
+    }
+
     let callable = ctx.builtin("_locale.setlocale");
     let function = ctx.alloc(Value::Method {
         callable,
@@ -101,4 +116,30 @@ pub(super) fn setlocale(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     );
     error.class = class;
     Err(error)
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub(super) fn nl_langinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "_locale.nl_langinfo() takes no keyword arguments",
+        ));
+    }
+    let [_, key] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "_locale.nl_langinfo() takes exactly one argument ({} given)",
+                args.len().saturating_sub(1)
+            ),
+        ));
+    };
+    let key = super::os::c_int(ctx, *key)?;
+    let item = crate::sys::langinfo::items()
+        .iter()
+        .find(|item| item.value == key)
+        .ok_or_else(|| Error::new("ValueError", "unsupported langinfo constant"))?;
+    let text = item.read().map_err(|err| ctx.decode_error(err))?;
+    Ok(ctx.text(text))
 }

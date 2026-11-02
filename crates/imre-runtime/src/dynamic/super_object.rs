@@ -182,8 +182,108 @@ impl Context {
         Ok(order)
     }
 
-    /// Read arg[0] from the active native frame and __class__ from its lexical class cell.
+    /// Allocate an uninitialized super object, retaining a Python subclass's own identity.
+    pub(super) fn super_new(&mut self, args: &[Id], _kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some(&class) = args.first() else {
+            return Err(Error::new(
+                "TypeError",
+                "super.__new__(): not enough arguments",
+            ));
+        };
+        let base = self.builtin("super");
+        if !self.super_subtype(class, base) {
+            return Err(self.invalid_new_subtype("super", class));
+        }
+        let storage = self.alloc(Value::Super {
+            start: NONE,
+            receiver: NONE,
+            owner: NONE,
+        });
+        if class == base {
+            return Ok(storage);
+        }
+        let instance = self.instance(class, None);
+        let Value::Instance { scalar, .. } = self.heap.get_mut(instance) else {
+            unreachable!()
+        };
+        *scalar = Some(storage);
+        Ok(instance)
+    }
+
+    /// Validation can invoke user code. Replace the binding only after it succeeds.
+    pub(super) fn super_init(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some((&proxy, args)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "descriptor '__init__' of 'super' object needs an argument",
+            ));
+        };
+        let storage = self.scalar_value(proxy);
+        if !matches!(self.heap.get(storage), Value::Super { .. }) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__init__' requires a 'super' object but received a '{}'",
+                    self.type_name(proxy)
+                ),
+            ));
+        }
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "super() takes no keyword arguments",
+            ));
+        }
+        if args.len() > 2 {
+            return Err(Error::new(
+                "TypeError",
+                format!("super() takes at most 2 arguments ({} given)", args.len()),
+            ));
+        }
+        if let Some(&start) = args.first()
+            && !self.is_type_object(start)
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "super() argument 1 must be type, not {}",
+                    self.type_name(start)
+                ),
+            ));
+        }
+        let state = self.super_state(args)?;
+        let Value::Super {
+            start,
+            receiver,
+            owner,
+        } = std::mem::replace(self.heap.get_mut(storage), state)
+        else {
+            unreachable!()
+        };
+        for old in [start, receiver, owner] {
+            self.heap.weak_edge_removed(old);
+        }
+        Ok(NONE)
+    }
+
     pub(super) fn make_super(&mut self, args: &[Id]) -> Result<Id> {
+        let state = self.super_state(args)?;
+        Ok(self.alloc(state))
+    }
+
+    /// supercheck uses the real MRO, never an ABC registration or a metaclass hook.
+    fn super_subtype(&mut self, class: Id, base: Id) -> bool {
+        self.is_type_object(class)
+            && (class == base
+                || if let Some(mro) = self.published_mro(class) {
+                    mro.contains(&base)
+                } else {
+                    self.base_lineage(class, true).contains(&base)
+                })
+    }
+
+    /// Read arg[0] from the active native frame and __class__ from its lexical class cell.
+    fn super_state(&mut self, args: &[Id]) -> Result<Value> {
         let (start, receiver) = match args {
             [] => {
                 let scope = self.heap.current_scope();
@@ -203,7 +303,7 @@ impl Context {
                 let Value::Cell(Some(class)) = self.heap.get(cell) else {
                     return Err(Error::new("RuntimeError", "super(): empty __class__ cell"));
                 };
-                if self.builtin_type_name(*class) != Some("type") {
+                if !self.is_type_object(*class) {
                     return Err(Error::new(
                         "RuntimeError",
                         format!(
@@ -223,7 +323,7 @@ impl Context {
                 ));
             }
         };
-        if self.builtin_type_name(start) != Some("type") {
+        if !self.is_type_object(start) {
             return Err(Error::new(
                 "TypeError",
                 format!(
@@ -232,47 +332,120 @@ impl Context {
                 ),
             ));
         }
-        let owner = if receiver == NONE {
-            NONE
-        } else if matches!(
-            self.heap.get(receiver),
-            Value::Class { .. } | Value::Native(_)
-        ) && self.subclass(receiver, start)
-        {
-            receiver
-        } else if let Some(class) = self.heap.get(receiver).instance_class()
-            && self.subclass(class, start)
-        {
-            class
-        } else if self.instance_of(receiver, start) {
-            self.exact_type(receiver)?
-        } else {
-            // Python proxies can report the wrapped class through a descriptor.
-            match self.lookup_attr(receiver, "__class__") {
-                Ok(reported) if self.subclass(reported, start) => reported,
-                Err(error) if error.kind != "AttributeError" => return Err(error),
-                _ => {
-                    let actual = match self.heap.get(receiver) {
-                        Value::Class { .. } | Value::Native(_) => {
-                            format!("type {}", self.class_name(receiver))
-                        }
-                        _ => format!("instance of {}", self.type_name(receiver)),
-                    };
-                    return Err(Error::new(
-                        "TypeError",
-                        format!(
-                            "super(type, obj): obj ({actual}) is not an instance or subtype of type ({}).",
-                            self.class_name(start)
-                        ),
-                    ));
-                }
-            }
-        };
-        Ok(self.alloc(Value::Super {
+        let owner = self.super_owner(start, receiver)?;
+        Ok(Value::Super {
             start,
             receiver,
             owner,
-        }))
+        })
+    }
+
+    fn super_owner(&mut self, start: Id, receiver: Id) -> Result<Id> {
+        if receiver == NONE || self.super_subtype(receiver, start) {
+            return Ok(receiver);
+        }
+        let actual = self.exact_type(receiver)?;
+        if self.super_subtype(actual, start) {
+            return Ok(actual);
+        }
+        // A proxy may report its wrapped type without changing the bound receiver.
+        match self.lookup_attr(receiver, "__class__") {
+            Ok(reported) if reported != actual && self.super_subtype(reported, start) => {
+                return Ok(reported);
+            }
+            Err(error) if !self.is_attribute_error(&error) => return Err(error),
+            _ => {}
+        }
+        let actual = if self.is_type_object(receiver) {
+            format!("type {}", self.class_name(receiver))
+        } else {
+            format!("instance of {}", self.type_name(receiver))
+        };
+        Err(Error::new(
+            "TypeError",
+            format!(
+                "super(type, obj): obj ({actual}) is not an instance or subtype of type ({}).",
+                self.class_name(start)
+            ),
+        ))
+    }
+
+    /// Members of a super proxy read its binding without visiting the delegated MRO.
+    pub(super) fn super_field(&self, proxy: Id, field: &str) -> Result<Id> {
+        let Value::Super {
+            start,
+            receiver,
+            owner,
+        } = *self.heap.get(self.scalar_value(proxy))
+        else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{field}' for 'super' objects doesn't apply to a '{}' object",
+                    self.type_name(proxy)
+                ),
+            ));
+        };
+        Ok(match field {
+            "__thisclass__" => start,
+            "__self__" => receiver,
+            "__self_class__" => owner,
+            _ => unreachable!(),
+        })
+    }
+
+    pub(super) fn super_repr(&self, proxy: Id) -> String {
+        let Value::Super { start, owner, .. } = *self.heap.get(self.scalar_value(proxy)) else {
+            unreachable!()
+        };
+        let start = if start == NONE {
+            "NULL"
+        } else {
+            self.class_name(start)
+        };
+        if owner == NONE {
+            format!("<super: <class '{start}'>, NULL>")
+        } else {
+            format!(
+                "<super: <class '{start}'>, <{} object>>",
+                self.class_name(owner)
+            )
+        }
+    }
+
+    /// Use the proxy's own attributes only after its target MRO misses the name.
+    pub(super) fn super_getattribute(&mut self, proxy: Id, name: &str) -> Result<Id> {
+        let Value::Super {
+            start,
+            receiver,
+            owner,
+        } = *self.heap.get(self.scalar_value(proxy))
+        else {
+            unreachable!()
+        };
+        if name != "__class__"
+            && let Some(member) = self.lookup_super_member(start, receiver, owner, name)?
+        {
+            return Ok(member);
+        }
+        self.default_get_attr(proxy, name)
+    }
+
+    /// Bind an unbound super descriptor using the descriptor's own type.
+    pub(super) fn bind_super(
+        &mut self,
+        descriptor: Id,
+        instance: Id,
+        start: Id,
+        bound_receiver: Id,
+    ) -> Result<Id> {
+        if instance == NONE || bound_receiver != NONE {
+            return Ok(descriptor);
+        }
+        if let Some(class) = self.heap.get(descriptor).instance_class() {
+            return self.call(class, vec![start, instance], Vec::new());
+        }
+        self.make_super(&[start, instance])
     }
 
     pub(super) fn super_attribute(
@@ -282,13 +455,23 @@ impl Context {
         owner: Id,
         name: &str,
     ) -> Result<Id> {
-        match name {
-            "__thisclass__" => return Ok(start),
-            "__self__" => return Ok(receiver),
-            "__self_class__" => return Ok(owner),
-            "__class__" => return Ok(self.builtin("super")),
-            _ => {}
-        }
+        self.lookup_super_member(start, receiver, owner, name)?
+            .ok_or_else(|| {
+                Error::new(
+                    "AttributeError",
+                    format!("'super' object has no attribute '{name}'"),
+                )
+            })
+    }
+
+    /// Search the delegated MRO, preserving exceptions raised by descriptors.
+    pub(super) fn lookup_super_member(
+        &mut self,
+        start: Id,
+        receiver: Id,
+        owner: Id,
+        name: &str,
+    ) -> Result<Option<Id>> {
         if owner != NONE {
             let exception_method = builtins::base_exception_method(name).is_some();
             let lineage = self.base_lineage(owner, exception_method);
@@ -296,7 +479,7 @@ impl Context {
             let instance = if owner == receiver { NONE } else { receiver };
             for &class in after {
                 if let Some(value) = self.own_class_attr(class, name) {
-                    return self.bind_attribute(value, instance, owner);
+                    return self.bind_attribute(value, instance, owner).map(Some);
                 }
                 // Resolve inherited object methods at their real position, after any Python mixin.
                 if let Value::Native(kind) = self.heap.get(class)
@@ -326,13 +509,10 @@ impl Context {
                         }
                         member = callable;
                     }
-                    return self.bind_attribute(member, instance, owner);
+                    return self.bind_attribute(member, instance, owner).map(Some);
                 }
             }
         }
-        Err(Error::new(
-            "AttributeError",
-            format!("'super' object has no attribute '{name}'"),
-        ))
+        Ok(None)
     }
 }

@@ -55,6 +55,8 @@ pub struct CommandFlags {
     pub isolated: bool,
     pub ignore_environment: bool,
     pub context_aware_warnings: bool,
+    /// A positive CPU-count override; zero selects the operating system.
+    pub cpu_count: i32,
     /// Python's language optimization level; independent of LLVM optimization.
     pub optimize: i32,
     pub safe_path: bool,
@@ -987,7 +989,7 @@ def first(stream: Stream) -> str:
         let llvm = compile(source, &CompileOptions::default()).unwrap();
         assert!(llvm.contains("define i32 @main(i32 %argc, ptr %argv)"));
         assert!(llvm.contains("call void @imre_args_init(i32 %argc, ptr %argv)"));
-        assert_eq!(llvm.matches("call void @imre_args_clear()").count(), 2);
+        assert_eq!(llvm.matches("call void @imre_args_clear()").count(), 1);
     }
 
     #[test]

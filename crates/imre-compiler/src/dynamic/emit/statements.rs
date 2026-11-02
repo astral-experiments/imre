@@ -335,28 +335,9 @@ impl Function<'_, '_> {
                     {
                         let key = self.code_name(name.id.as_str());
                         if self.class_locals.is_some() && !self.source.string_annotations {
-                            // Class annotations may refer to a name bound after the class body.
-                            let value = self.output.code(
-                                self.source,
-                                String::new(),
-                                Body::AnnotationValue(&v.annotation),
-                                false,
-                            );
-                            let code = self.output.definition(
-                                self.source,
-                                String::new(),
-                                Body::AnnotationThunk(value.clone(), v.annotation.range()),
-                                v.annotation.start(),
-                                false,
-                                None,
-                            );
-                            self.remember_annotation(v, name.id.as_str(), &value);
-                            let name = self.text("__annotate__");
-                            let sig = self.text("{}");
-                            let defaults = self.op("dict", &[]);
-                            let thunk = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
+                            self.remember_annotation(v, name.id.as_str());
                             let offset = v.start().to_u32();
-                            self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
+                            self.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
                         } else if let Some(sites) = &mut self.module_annotation_sites {
                             let index = sites.len();
                             sites.push((name.id.to_string(), (*v.annotation).clone()));
@@ -386,7 +367,7 @@ impl Function<'_, '_> {
                         .collect::<Vec<_>>();
                     let generator = imre_ast::code_flags::is_generator(&v.body);
                     let body = if v.is_async && generator {
-                        Body::Unsupported(stmt, "async function")
+                        Body::UnsupportedAsyncGenerator(v)
                     } else if v.is_async || generator {
                         Body::GeneratorFunction((&v.body, v.is_async))
                     } else {
@@ -680,19 +661,13 @@ impl Function<'_, '_> {
             {
                 self.source.docstring(&qualname, stmts)
             }
-            Body::Unsupported(ast::Stmt::FunctionDef(f), _) if self.output.keep_docstrings => {
+            Body::UnsupportedAsyncGenerator(f) if self.output.keep_docstrings => {
                 self.source.docstring(&qualname, &f.body)
             }
             _ => None,
         };
-        let flags = match (&body, params) {
-            (
-                Body::Namespace(_)
-                | Body::Annotations(..)
-                | Body::ModuleAnnotations(..)
-                | Body::ClassAnnotations(..),
-                _,
-            ) => None,
+        let flags = match &body {
+            Body::Namespace(_) => None,
             _ => {
                 use imre_ast::code_flags::*;
                 let mut flags = OPTIMIZED | NEWLOCALS;
@@ -723,13 +698,7 @@ impl Function<'_, '_> {
                     | Body::Generator(..)
                     | Body::YieldingLambda(_) => GENERATOR,
                     Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
-                    Body::Unsupported(ast::Stmt::FunctionDef(f), _) if f.is_async => {
-                        if is_generator(&f.body) {
-                            ASYNC_GENERATOR
-                        } else {
-                            COROUTINE
-                        }
-                    }
+                    Body::UnsupportedAsyncGenerator(_) => ASYNC_GENERATOR,
                     _ => 0,
                 };
                 Some(flags | kind)
@@ -796,6 +765,10 @@ impl Function<'_, '_> {
             json!({"posonly":[],"positional":[],"kwonly":[],"varargs":null,"kwargs":null});
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
+        }
+        if matches!(body, Body::Generator(..)) {
+            // generator() binds the implicit .0 argument without calling the step function.
+            signature["co_argcount"] = json!(1);
         }
         if let Body::Namespace(stmts) = &body {
             signature["postponed_annotations"] = json!(
@@ -1492,27 +1465,8 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     let mut captures = ClassCell(false);
     match body {
         Body::Statements(stmts) | Body::GeneratorFunction((stmts, _)) => captures.visit_body(stmts),
-        Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
-            captures.visit_expr(expr)
-        }
-        Body::Generator(generators, element) => {
-            for (index, generator) in generators.iter().enumerate() {
-                if index != 0 {
-                    captures.visit_expr(&generator.iter);
-                }
-                for filter in &generator.ifs {
-                    captures.visit_expr(filter);
-                }
-            }
-            captures.visit_expr(element);
-        }
-        Body::Namespace(_)
-        | Body::Annotations(..)
-        | Body::ModuleAnnotations(..)
-        | Body::ClassAnnotations(..)
-        | Body::AnnotationThunk(..)
-        | Body::AnnotationValue(_)
-        | Body::Unsupported(..) => {}
+        Body::Expression(expr) | Body::YieldingLambda(expr) => captures.visit_expr(expr),
+        _ => return false,
     }
     captures.0
 }

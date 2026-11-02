@@ -274,9 +274,14 @@ impl Context {
                 true
             }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
+            (_, Value::DictView { .. }) => {
+                Self::dict_view_owner(self.type_name(object)) == Some(owner)
+            }
             ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | ("mappingproxy", Value::MappingProxy(_))
+            | ("super", Value::Super { .. })
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
@@ -919,7 +924,7 @@ impl Context {
         self.raised_error_matches(error, stop)
     }
 
-    fn reverse_sequence_len(&mut self, source: Id) -> Result<usize> {
+    fn sequence_len(&mut self, source: Id) -> Result<usize> {
         let size = builtins::call(self, "len", &[source], &[])?;
         self.as_int(size)?
             .to_i64()
@@ -2092,8 +2097,35 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if name == "super" {
+            let mut entries = Vec::new();
+            for name in ["__new__", "__repr__", "__getattribute__", "__init__", "__get__"] {
+                let method = self.builtin(&format!("super.{name}"));
+                entries.push((self.heap.code_name(name), method));
+            }
+            for name in ["__thisclass__", "__self__", "__self_class__"] {
+                let field = self.readonly_member("super", name);
+                entries.push((self.heap.code_name(name), field));
+            }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == deque::CLASS {
             deque::install(self);
+        }
+        if let Some(owner) = Self::dict_view_owner(name)
+            && owner == name
+        {
+            let get = self.builtin(&format!("_dictview_mapping.{owner}"));
+            let mapping = self.alloc(Value::GetSetDescriptor {
+                owner,
+                name: "mapping",
+                get,
+                set: None,
+            });
+            let key = self.heap.code_name("mapping");
+            let namespace = self.dict(vec![(key, mapping)]);
+            self.native_type_dicts.insert(value, namespace);
         }
         if let Some(owner) = stdlib::itertools::cursor_type(name) {
             stdlib::itertools::install_namespace(self, value, owner);
@@ -2205,7 +2237,10 @@ impl Context {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
-            deque::ITERATOR | deque::REVERSE_ITERATOR => deque::ITERATOR_METHODS,
+            deque::ITERATOR | deque::REVERSE_ITERATOR => {
+                deque::install_iterator_namespace(self, value, name);
+                &[]
+            }
             thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             stdlib::fixed_structseq::SCHED_PARAM => &["__new__", "__reduce__", "__replace__"],
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
@@ -2523,7 +2558,7 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
         } else if stdlib::is_module(name) || self.is_frozen(name) {
-            if matches!(name, "email" | "importlib" | "json" | "urllib") {
+            if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {
                 locations.push(stdlib::package_path(self, name)?);
@@ -2787,6 +2822,8 @@ impl Context {
             }
             "_imre_itertools" => {
                 for attr in [
+                    "_accumulate_allocate",
+                    "_accumulate_state",
                     "_cycle_allocate",
                     "_cycle_next",
                     "_pairwise_allocate",
@@ -2836,13 +2873,34 @@ impl Context {
             }
             #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
+                let cpu_count = self.builtin("posix.cpu_count");
+                self.bind(scope, "cpu_count", cpu_count);
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
-                for name in ["lockf", "posix_fadvise", "ptsname"] {
+                for name in [
+                    "get_terminal_size",
+                    "lockf",
+                    "posix_fadvise",
+                    "ptsname",
+                    "preadv",
+                    "readv",
+                    "writev",
+                    "splice",
+                ] {
                     let function = self.builtin(&format!("posix.{name}"));
                     self.bind(scope, name, function);
                 }
                 for (attr, flag) in [
+                    ("SPLICE_F_MOVE", libc::SPLICE_F_MOVE),
+                    ("SPLICE_F_NONBLOCK", libc::SPLICE_F_NONBLOCK),
+                    ("SPLICE_F_MORE", libc::SPLICE_F_MORE),
+                ] {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, attr, value);
+                }
+                for (attr, flag) in [
+                    ("RWF_HIPRI", libc::RWF_HIPRI),
+                    ("RWF_NOWAIT", libc::RWF_NOWAIT),
                     ("O_PATH", libc::O_PATH),
                     ("O_NOCTTY", libc::O_NOCTTY),
                     ("O_TMPFILE", libc::O_TMPFILE),
@@ -2908,6 +2966,8 @@ impl Context {
             }
             "threading" if source.is_none() => {
                 let thread = self.module("_thread")?;
+                let error = self.lookup_attr(thread, "error")?;
+                self.bind(scope, "ThreadError", error);
                 let limit = self.lookup_attr(thread, "TIMEOUT_MAX")?;
                 self.bind(scope, "TIMEOUT_MAX", limit);
             }
@@ -2916,9 +2976,25 @@ impl Context {
                 if source.is_none() {
                     let posix = self.module("posix")?;
                     for attr in [
-                        "ptsname", "O_NOCTTY",
-                        "getxattr", "setxattr", "listxattr", "removexattr",
-                        "XATTR_CREATE", "XATTR_REPLACE", "XATTR_SIZE_MAX",
+                        "get_terminal_size",
+                        "ptsname",
+                        "preadv",
+                        "readv",
+                        "writev",
+                        "RWF_HIPRI",
+                        "RWF_NOWAIT",
+                        "O_NOCTTY",
+                        "splice",
+                        "SPLICE_F_MOVE",
+                        "SPLICE_F_NONBLOCK",
+                        "SPLICE_F_MORE",
+                        "getxattr",
+                        "setxattr",
+                        "listxattr",
+                        "removexattr",
+                        "XATTR_CREATE",
+                        "XATTR_REPLACE",
+                        "XATTR_SIZE_MAX",
                     ] {
                         let value = self.lookup_attr(posix, attr)?;
                         self.bind(scope, attr, value);
@@ -3141,6 +3217,8 @@ impl Context {
                     "addaudithook",
                     "getsizeof",
                     "getrecursionlimit",
+                    "get_asyncgen_hooks",
+                    "set_asyncgen_hooks",
                     "is_finalizing",
                     "setrecursionlimit",
                     "_getframe",
@@ -3188,6 +3266,10 @@ impl Context {
                     self.bind(scope, "monitoring", monitoring);
                 }
             }
+            "re._constants" => {
+                let limit = self.int(i64::from(imre_regex::MAX_GROUPS));
+                self.bind(scope, "MAXGROUPS", limit);
+            }
             "re" => {
                 let pattern = self.builtin(value::REGEX_PATTERN_TYPE);
                 self.bind(scope, "Pattern", pattern);
@@ -3225,6 +3307,8 @@ impl Context {
             _ => {}
         }
         if name == "_thread" && source.is_none() {
+            let error = self.builtin("RuntimeError");
+            self.bind(scope, "error", error);
             #[cfg(unix)]
             {
                 let interrupt = self.builtin("_thread.interrupt_main");
@@ -3305,6 +3389,7 @@ impl Context {
             {
                 self.freeze_itertools_types(scope);
                 for (name, owner) in [
+                    ("accumulate", "itertools.accumulate"),
                     ("pairwise", "itertools.pairwise"),
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),

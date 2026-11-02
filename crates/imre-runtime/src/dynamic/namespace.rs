@@ -13,10 +13,12 @@ pub(super) fn class(ctx: &mut Context) -> Result<Id> {
     ctx.bind(scope, "__module__", module);
     let name = ctx.text("SimpleNamespace");
     ctx.bind(scope, "__qualname__", name);
-    for slot in ["__init__", "__repr__", "__eq__", "__ne__"] {
+    for slot in ["__init__", "__repr__", "__eq__", "__ne__", "__replace__"] {
         let method = ctx.builtin(&format!("{CLASS}.{slot}"));
         ctx.bind(scope, slot, method);
     }
+    let new = ctx.builtin("types.SimpleNamespace.__new__");
+    ctx.bind(scope, "__new__", new);
     let get = ctx.builtin("types.SimpleNamespace.__dict__");
     let set = ctx.builtin("types.SimpleNamespace.readonly_dict");
     let descriptor = ctx.alloc(Value::GetSetDescriptor {
@@ -48,6 +50,14 @@ pub(super) fn check_class_write(ctx: &Context, obj: Id, name: &str) -> Result<()
     Ok(())
 }
 
+/// A namespace descriptor requires real namespace storage, including on a subclass.
+pub(super) fn instance_class(ctx: &Context, object: Id) -> Option<Id> {
+    match *ctx.heap.get(object) {
+        Value::Instance { class, .. } if ctx.direct_subclass(class, ctx.classes[CLASS]) => Some(class),
+        _ => None,
+    }
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     name: &str,
@@ -60,8 +70,7 @@ pub(super) fn method(
             format!("descriptor '{name}' of '{CLASS}' object needs an argument"),
         )
     })?;
-    let class = ctx.classes[CLASS];
-    if !ctx.instance_of(object, class) {
+    let Some(class) = instance_class(ctx, object) else {
         return Err(Error::new(
             "TypeError",
             format!(
@@ -69,9 +78,18 @@ pub(super) fn method(
                 ctx.type_name(object)
             ),
         ));
-    }
+    };
     if name == "__init__" {
         return super::namespace_init::initialize(ctx, object, rest, kwargs);
+    }
+    if name == "__replace__" {
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "__replace__() takes no positional arguments",
+            ));
+        }
+        return super::namespace_init::replace(ctx, object, class, kwargs);
     }
     if name == "readonly_dict" {
         return Err(Error::new("AttributeError", "readonly attribute"));
@@ -87,10 +105,7 @@ pub(super) fn method(
         ("__eq__" | "__ne__", [other]) => {
             super::namespace_init::equal(ctx, object, *other, name == "__ne__")
         }
-        ("__dict__", []) => {
-            let actual = ctx.exact_type(object)?;
-            Ok(ctx.instance_dictionary(object, actual))
-        }
+        ("__dict__", []) => Ok(ctx.instance_dictionary(object, class)),
         _ => {
             let expected = usize::from(matches!(name, "__eq__" | "__ne__"));
             Err(Error::new(

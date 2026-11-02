@@ -333,3 +333,44 @@ def current():
             assert compiled is re.compile(spelling)
             assert compiled.findall(data) == [data[:1], data[1:2], data[3:]]
             assert len(seen) == 1 and seen[0].filename == __file__
+
+    pattern = re.compile(r"(?P<dots>\N{FULL STOP}+)[\N{LESS-THAN SIGN}-\N{GREATER-THAN SIGN}]")
+    assert pattern.fullmatch("..=").group("dots") == ".."
+    assert pattern.fullmatch("ab=") is None and pattern.fullmatch("..;") is None
+    assert re.fullmatch(r"\\N\{SNAKE\}", r"\N{SNAKE}")
+    assert re.fullmatch(r"(?x)[\N{HYPHEN-MINUS}\N{LINE FEED}]+", "-\n")
+    assert re.fullmatch(r"(\N{LATIN SMALL LETTER A})\1", "aa").group(1) == "a"
+    for name, point in (("lf", 10), ("cjk unified ideograph-4e00", 0x4E00),
+                        ("hangul syllable ga", 0xAC00), ("TANGUT IDEOGRAPH-18D08", 0x18D08),
+                        ("MENDE KIKAKUI SYLLABLE M174 MBOO", 0x1E89A)):
+        assert re.fullmatch(r"\N{" + name + "}", chr(point))
+    for spelling in (
+        r"\N{CJK UNIFIED IDEOGRAPH-04E00}", r"\N{CJK UNIFIED IDEOGRAPH-+4E00}",
+        r"\N{TANGUT IDEOGRAPH-18D09}", r"\N{OIL DRUMXXX}",
+        r"\N{KEYCAP NUMBER SIGN}", br"\N{SNAKE}", br"[\N{LF}]",
+    ):
+        try:
+            re.compile(spelling)
+        except re.PatternError:
+            pass
+        else:
+            raise AssertionError(spelling)
+
+    for spelling, message, pos, line, column in (
+        ("β\n" + r"[\N{UNKNOWN}]", "undefined character name 'UNKNOWN'", 3, 2, 2),
+        (r"\N{LF}\N", "missing {", 8, 1, 9),
+        (r"[\N{}]", "missing character name", 4, 1, 5),
+        (r"\N{a\}", "missing }, unterminated name", 3, 1, 4),
+        (br"[\N{LF}]", r"bad escape \N", 1, 1, 2),
+        (r"\N{SNAKE}(", "missing ), unterminated subpattern", 9, 1, 10),
+        (r"\N{LF}**", "multiple repeat", 7, 1, 8),
+        (r"a**\N{BAD}", "multiple repeat", 2, 1, 3),
+        (r"(?:\N{LF})\9", "invalid group reference 9", 11, 1, 12),
+    ):
+        try:
+            re.compile(spelling)
+        except re.PatternError as exc:
+            assert exc.pattern == spelling and exc.msg == message
+            assert (exc.pos, exc.lineno, exc.colno) == (pos, line, column)
+        else:
+            raise AssertionError(spelling)

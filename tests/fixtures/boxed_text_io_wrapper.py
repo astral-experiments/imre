@@ -17,6 +17,8 @@ class Wrapper(io.TextIOWrapper):
 
 def current():
     assert original_type is type(sys.stdout) is io.TextIOWrapper is _io.TextIOWrapper
+    assert sys.stdout.truncate.__self__ is sys.stdout
+    assert sys.stderr.truncate.__self__ is sys.stderr
     assert repr(original_type) == "<class '_io.TextIOWrapper'>"
     assert repr(Wrapper) == f"<class '{Wrapper.__module__}.{Wrapper.__qualname__}'>"
     assert isinstance(sys.stderr, io.TextIOBase) and isinstance(sys.stdout, (bytes, io.TextIOWrapper))
@@ -296,6 +298,27 @@ def current():
             assert str(error) == "underlying buffer has been detached"
         else:
             raise AssertionError("read from a detached buffer")
+
+    for args, expected in (
+        ((), "unbound method TextIOWrapper.truncate() needs an argument"),
+        ((1,), "descriptor 'truncate' for '_io.TextIOWrapper' objects doesn't apply to a 'int' object"),
+    ):
+        try:
+            io.TextIOWrapper.truncate(*args)
+        except TypeError as error:
+            assert str(error) == expected
+        else:
+            raise AssertionError("truncate accepted an invalid receiver")
+
+    class TruncatingBuffer(io.BytesIO):
+        def truncate(self, pos):
+            return (self.getvalue(), pos)
+
+    marker = object()
+    with io.TextIOWrapper(TruncatingBuffer(), encoding="utf-8") as stream:
+        stream.write("é")
+        assert stream.truncate() == (b"\xc3\xa9", None)
+        assert stream.truncate(marker)[1] is marker
 
     print("wrapped binary streams")
 

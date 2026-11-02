@@ -6498,6 +6498,9 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::GetEnv if cfg!(unix) && self.graph.command_startup.is_some() => {
+                    return Err(self.scoped_builtin_error("os.getenv", expression));
+                }
                 Intrinsic::UrlSplit => {
                     return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
                 }
@@ -6537,6 +6540,11 @@ impl<'a> Checker<'a> {
                         ty: Type::Bytes,
                         kind: ExprKind::Bytes(bytes.to_vec()),
                     });
+                }
+                // Specialized lookups and mutations are handled at their call sites.
+                // When the mapping itself escapes, preserve its identity and live views.
+                Intrinsic::Environ | Intrinsic::EnvironBytes => {
+                    return Err(self.scoped_builtin_error("environment mapping", expression));
                 }
                 Intrinsic::Stdin => return Err(self.object_runtime_export("sys.stdin", expression)),
                 Intrinsic::Stdout => return Ok(self.stdout_value()),
@@ -8052,6 +8060,11 @@ impl<'a> Checker<'a> {
                         Type::None,
                     ));
                 }
+                if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
+                    && self.types.mapping(receiver.ty).is_some()
+                {
+                    return Err(self.scoped_builtin_error("bound dictionary view method", attribute));
+                }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);
                 }
@@ -9401,7 +9414,14 @@ impl<'a> Checker<'a> {
                     "groupby requires direct for iteration with an immediate list(group)",
                 ));
             }
-            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => {
+                // An ordinary POSIX environment can contain surrogate-escaped text
+                // and getenv returns its default by identity, regardless of its type.
+                if cfg!(unix) && self.graph.command_startup.is_some() {
+                    return Err(self.scoped_builtin_error("os.getenv", call));
+                }
+                return self.environ_get(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Strerror)) => {
                 self.reject_builtin_keywords(call)?;
                 let [code] = call.arguments.args.as_ref() else {
@@ -10444,6 +10464,11 @@ impl<'a> Checker<'a> {
                 {
                     *view = true;
                     return Ok(receiver);
+                }
+                if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
+                    && call.arguments.is_empty()
+                {
+                    return Err(self.scoped_builtin_error("dictionary view", call));
                 }
                 let pop = attribute.attr.as_str() == "pop";
                 if (!pop && attribute.attr.as_str() != "get")

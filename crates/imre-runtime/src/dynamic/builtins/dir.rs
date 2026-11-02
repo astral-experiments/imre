@@ -109,6 +109,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         Value::Class { .. } | Value::Native(_) => object,
         Value::Count { .. }
         | Value::Repeat(_)
+        | Value::DequeIterator { .. }
         | Value::Union(_)
         | Value::Dict(_)
         | Value::Tuple(_)
@@ -514,13 +515,6 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     .is_none_or(|entries| !entries.is_empty())
             {
                 names.insert("__annotations__".to_owned());
-            }
-            if scope
-                .class_namespace
-                .as_ref()
-                .is_some_and(|ns| ns.annotation_sites.is_some())
-            {
-                names.insert("__annotate_func__".to_owned());
             }
             if let Some(slots) = ctx.namespace_binding(ctx.scope_data(scope_id), "__slots__") {
                 match ctx.heap.get(slots) {

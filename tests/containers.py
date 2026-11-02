@@ -39,6 +39,16 @@ ACCEPTED = {
     "set_iterable_constructor": "values: set[int] = set([1, 2])\nprint(type(values) is set, sorted(values))\n",
     "set_literal_expansion": "values = {1}\nexpanded = {*values}\nexpanded.add(2)\nprint(len(values))\nprint(1 in expanded)\nprint(2 in expanded)\n",
     "dict_literal_expansion": 'values = {"one": 1}\ncopy = {**values}\ncopy["one"] = 2\nprint(values["one"])\nprint(copy["one"])\n',
+    "dict_keys_view_escape": 'values = {"one": 1}\nview = values.keys()\nvalues["one"] = 2\nprint(view.mapping["one"])\n',
+    "dict_items_escapes": 'values = {"one": 1}\nproxy = values.items().mapping\nvalues["one"] = 2\nprint(proxy["one"])\n',
+    "dict_values_view_escape": 'values = {"one": 1}\nview = values.values()\nvalues["one"] = 2\nprint(view.mapping["one"])\n',
+    "dict_keys_view": 'values = {"one": 1}\nfor key in values.keys():\n    pass\n',
+    "saved_dict_view_method": """
+owner = {"one": 1}
+items = owner.items
+owner = {"two": 2}
+print(items().mapping["one"])
+""",
     "dict_keys_list": """
 class Custom:
     def keys(self) -> list[str]:
@@ -411,7 +421,6 @@ print(point(), value("wrong"))
     "set_remove_method": "values = {1}\nvalues.remove(1)\n",
     "set_union_mismatched_keys": 'values = {1} | {"two"}\n',
     "dict_keys_union_mismatched": 'values = {"one": 1}.keys() | {2: "two"}.keys()\n',
-    "dict_keys_view_escape": 'values = {"one": 1}\nview = values.keys()\n',
     "defaultdict_requires_factory": "from collections import defaultdict\na: defaultdict[str, list[int]] = defaultdict()\n",
     "defaultdict_other_factory": "from collections import defaultdict\na: defaultdict[str, list[int]] = defaultdict(set)\n",
     "defaultdict_wrong_value": "from collections import defaultdict\na: defaultdict[str, int] = defaultdict(list)\n",
@@ -480,10 +489,7 @@ print(point(), value("wrong"))
     "dict_optional_element_without_narrowing": 'values: dict[str, int | None] = {"one": 1}\nrequired: int = values["one"]\n',
     "dict_optional_receiver": "def show(values: dict[int, int] | None) -> None:\n    print(values[1])\n",
     "dict_string_augmented_assignment": 'values = {1: "one"}\nvalues[1] += "two"\n',
-    "dict_items_escapes": 'values = {"one": 1}\nview = values.items()\n',
     "dict_items_arguments": 'values = {"one": 1}\nfor key, value in values.items(1):\n    pass\n',
-    "dict_keys_view": 'values = {"one": 1}\nfor key in values.keys():\n    pass\n',
-    "dict_values_view_escape": 'values = {"one": 1}\nview = values.values()\n',
     "dict_first_class_iterator": 'values = {"one": 1}\niterator = iter(values)\n',
     "dict_wrong_items_target": 'values = {"one": 1}\nfor key, value, extra in values.items():\n    pass\n',
     "dict_invariant_values": """

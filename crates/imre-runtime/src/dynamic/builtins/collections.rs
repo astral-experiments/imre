@@ -388,7 +388,11 @@ pub(in super::super) fn remove_dict_item_hashed(
     Ok(Some(remove_table_entry(ctx, dict, index)?.1))
 }
 
-fn remove_table_entry(ctx: &mut Context, receiver: Id, index: usize) -> Result<(Id, Id)> {
+pub(in super::super) fn remove_table_entry(
+    ctx: &mut Context,
+    receiver: Id,
+    index: usize,
+) -> Result<(Id, Id)> {
     let (Value::Dict(entries) | Value::DefaultDict { entries, .. } | Value::Set { entries, .. }) =
         ctx.heap.get_mut(receiver)
     else {

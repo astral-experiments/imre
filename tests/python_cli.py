@@ -1601,6 +1601,33 @@ def main():
             )
             compare("-IB", arithmetic, native_args=("run", arithmetic, "--quiet"))
 
+        accessors = Path(__file__).resolve().parent / "fixtures" / "tempfile_accessors.py"
+        compare("-IB", accessors, native_args=("run", accessors, "--quiet"))
+        if sys.platform == "linux":
+            compare("-B", accessors, extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
+
+        if sys.platform == "linux" and sys.version_info >= (3, 13):
+            count = Path(__file__).resolve().parent / "fixtures" / "os_cpu_count.py"
+            compare("-IB", count)
+            compare("-B", count, extra={"PYTHON_CPU_COUNT": "7"})
+            compare("-B", "-X", "cpu_count=2", "-X", "cpu_count=3", count,
+                    extra={"PYTHON_CPU_COUNT": "7"})
+            compare("-E", "-B", "-X", "cpu_count=default", count,
+                    extra={"PYTHON_CPU_COUNT": "invalid"})
+            for options, extra in (
+                (("-B", "-X", "cpu_count=2"), {"PYTHON_CPU_COUNT": "invalid"}),
+                (("-IB", "-X", "cpu_count"), {}),
+                (("-B",), {"PYTHON_CPU_COUNT": "bad", "PYTHONHASHSEED": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "bad", "PYTHONINTMAXSTRDIGITS": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "bad", "PYTHON_CONTEXT_AWARE_WARNINGS": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "2", "PYTHONHASHSEED": "bad", "PYTHON_CONTEXT_AWARE_WARNINGS": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "2", "PYTHONINTMAXSTRDIGITS": "bad", "PYTHON_CONTEXT_AWARE_WARNINGS": "bad"}),
+            ):
+                expected = run(sys.executable, *options, "-c", "pass", extra=extra)
+                actual = run(imre, *options, "-c", "pass", extra=extra)
+                assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", expected.stderr)
+                assert expected.returncode == 1
+
         names = root / "calendar_type_names.py"
         names.write_text(
             "from datetime import date, datetime, timedelta\n"
@@ -2436,6 +2463,7 @@ def report(text):
             "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
             "boxed_thread_bound_lock.py",
             "boxed_thread_captured_acquire.py",
+            "boxed_thread_finalization.py",
             "boxed_thread_hash_update.py",
         ):
             thread_fixture = fixtures / name
@@ -2642,6 +2670,7 @@ for name in ("md4", "ripemd160"):
             "boxed_sys_getframe.py",
             "boxed_sys_getsizeof.py",
             "boxed_sys_audit.py",
+            "boxed_sys_asyncgen_hooks.py",
             "boxed_sys_audit_recursion.py",
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
@@ -2708,6 +2737,7 @@ for name in ("md4", "ripemd160"):
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
+            "boxed_typing_exports.py",
             "boxed_typing_type_predicates.py",
             "boxed_typing_bytestring.py",
             "boxed_typing_new_type.py",
@@ -2756,6 +2786,7 @@ for name in ("md4", "ripemd160"):
             "boxed_dataclasses.py",
             "boxed_mapping_proxy_type.py",
             "boxed_types_new_class.py",
+            "boxed_dynamic_class_attribute.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
@@ -2945,6 +2976,7 @@ for name in ("md4", "ripemd160"):
             "boxed_itertools_chain.py",
             "boxed_pairwise.py",
             "boxed_itertools_cycle.py",
+            "boxed_itertools_accumulate.py",
             "boxed_itertools_batched.py",
             "boxed_itertools_zip_longest.py",
             "boxed_itertools_tee.py",
@@ -3071,6 +3103,24 @@ for name in ("md4", "ripemd160"):
                         extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
                     )
         if os.name == "posix":
+            raw_environment = {b"RAW_\xff": b"value_\xff", "LC_ALL": "C"}
+            compare("-B", "-c", r"import os; print(ascii(os.getenv('RAW_\udcff')))", extra=raw_environment)
+            compare("-B", "-c", r"from os import getenvb as read; print(read(b'RAW_\xff'))", extra=raw_environment)
+            compare("-B", "-c", "import os; print('PATH' in list(os.environ.keys()))")
+            compare("-B", "-c", """from os import environb as env
+keys = env.keys()
+key = b'IMRE_KEYS_VIEW_\\xff'
+env[key] = b'\\xfe'
+assert key in keys
+del env[key]
+assert key not in keys
+try:
+    env.keys(1)
+except TypeError:
+    pass
+else:
+    raise AssertionError("keys accepted an argument")
+""")
             check_boxed_unittest_main_reporting(imre, root, run)
             check_unittest_main_names(imre, root, run)
             check_unittest_file_discovery(imre, root, run)

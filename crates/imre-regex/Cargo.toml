@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 regex.workspace = true
 regex-syntax.workspace = true
+unicode_names2 = "=1.3.0"
 
 [lints]
 workspace = true

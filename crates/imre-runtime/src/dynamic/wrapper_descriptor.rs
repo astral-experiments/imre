@@ -154,6 +154,7 @@ impl BuiltinDescriptor {
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 Some((layout.class, attr, &["__reduce__"][..]))
             }
+            Some((namespace::CLASS, attr)) => Some((namespace::CLASS, attr, &["__replace__"][..])),
             Some(("typing.TypeAliasType", attr)) => {
                 Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
             }
@@ -192,6 +193,10 @@ impl BuiltinDescriptor {
         }
         let (owner, name) = match symbol {
             "type.__init__" => ("type", "__init__"),
+            "super.__getattribute__" => ("super", "__getattribute__"),
+            "super.__init__" => ("super", "__init__"),
+            "super.__get__" => ("super", "__get__"),
+            "super.__repr__" => ("super", "__repr__"),
             "object.__format__" => ("object", "__format__"),
             "object.__sizeof__" => ("object", "__sizeof__"),
             "dict.__sizeof__" => ("dict", "__sizeof__"),
@@ -245,6 +250,8 @@ impl BuiltinDescriptor {
             "dict.__ior__" => ("dict", "__ior__"),
             "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "mappingproxy.__getitem__" => ("mappingproxy", "__getitem__"),
+            "mappingproxy.__hash__" => ("mappingproxy", "__hash__"),
             "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
             "mappingproxy.__str__" => ("mappingproxy", "__str__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
@@ -351,9 +358,7 @@ impl BuiltinDescriptor {
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod { .. }),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
-            super::namespace::CLASS => {
-                ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
-            }
+            super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
             "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
             class @ (stdlib::fixed_structseq::SCHED_PARAM
@@ -411,6 +416,22 @@ impl BuiltinDescriptor {
             "__doc__" | "__text_signature__" if self.owner == deque::CLASS => {
                 let member = deque::member(self.name)?;
                 ctx.text(if name == "__doc__" { member.doc } else { member.signature })
+            }
+            "__doc__" | "__text_signature__"
+                if deque::iterator_class(self.owner).is_some()
+                    && matches!(self.name, "__length_hint__" | "__reduce__") =>
+            {
+                ctx.text(match (self.name, name) {
+                    (_, "__text_signature__") => "($self, /)",
+                    ("__length_hint__", _) => "Private method returning an estimate of len(list(it)).",
+                    _ => "Return state information for pickling.",
+                })
+            }
+            "__doc__" if self.owner == namespace::CLASS && self.name == "__replace__" => ctx.text(
+                "Return a copy of the namespace object with new values for the specified attributes.",
+            ),
+            "__text_signature__" if self.owner == namespace::CLASS && self.name == "__replace__" => {
+                ctx.text("($self, /, **changes)")
             }
             "__doc__" | "__text_signature__" if self.owner == defaultdict::CLASS => {
                 let (doc, signature) = defaultdict::metadata(self.name)?;
@@ -492,10 +513,17 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__call__" => {
                 ctx.text("($self, /, *args, **kwargs)")
             }
+            "__doc__" if self.name == "__getitem__" && self.owner == "mappingproxy" => {
+                ctx.text("Return self[key].")
+            }
+            "__text_signature__" if self.name == "__getitem__" && self.owner == "mappingproxy" => {
+                ctx.text("($self, key, /)")
+            }
+            "__doc__" if self.name == "__hash__" => ctx.text("Return hash(self)."),
             "__doc__" if self.name == "__repr__" => ctx.text("Return repr(self)."),
             "__doc__" if self.name == "__iter__" => ctx.text("Implement iter(self)."),
             "__doc__" if self.name == "__next__" => ctx.text("Implement next(self)."),
-            "__text_signature__" if matches!(self.name, "__iter__" | "__next__" | "__repr__") => {
+            "__text_signature__" if matches!(self.name, "__hash__" | "__iter__" | "__next__" | "__repr__") => {
                 ctx.text("($self, /)")
             }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
@@ -662,7 +690,13 @@ pub(super) fn descriptor_get(
             format!("descriptor '__get__' of '{class}' object needs an argument"),
         ));
     };
-    let slot = match ctx.heap.get(descriptor) {
+    let payload = if class == "super" {
+        ctx.scalar_value(descriptor)
+    } else {
+        descriptor
+    };
+    let slot = match ctx.heap.get(payload) {
+        Value::Super { .. } if class == "super" => None,
         Value::ClassMethod { .. } if class == "classmethod" => None,
         Value::HeapTypeMethod { name, .. }
             if class
@@ -704,6 +738,14 @@ pub(super) fn descriptor_get(
         )),
         [NONE] | [NONE, NONE] => Err(Error::new("TypeError", "__get__(None, None) is invalid")),
         [receiver] | [receiver, _] => {
+            if let Value::Super {
+                start,
+                receiver: bound,
+                ..
+            } = *ctx.heap.get(payload)
+            {
+                return ctx.bind_super(descriptor, receiver, start, bound);
+            }
             if let Some(slot) = slot
                 && !matches!(ctx.heap.get(descriptor), Value::Native(symbol) if stdlib::datetime::clock_classmethod(symbol))
             {

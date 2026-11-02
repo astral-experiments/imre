@@ -135,20 +135,12 @@ pub extern "C" fn imre_integer_digits_init(isolated: u32) {
     let configured = if isolated != 0 {
         DEFAULT_DIGITS
     } else {
-        std::env::var_os("PYTHONINTMAXSTRDIGITS")
-            .filter(|raw| !raw.is_empty())
-            .map_or(DEFAULT_DIGITS, |raw| {
-                raw.to_str()
-                    .and_then(|s| s.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']).parse::<i32>().ok())
-                    .filter(|&n| n == 0 || n >= 640)
-                    .map_or_else(
-                        || {
-                            eprintln!("Fatal Python error: config_init_int_max_str_digits: PYTHONINTMAXSTRDIGITS: invalid limit; must be >= 640 or 0 for unlimited.\nPython runtime state: preinitialized\n");
-                            std::process::exit(1);
-                        },
-                        |n| n as u32,
-                    )
+        imre_ast::startup::environment_digit_limit()
+            .unwrap_or_else(|message| {
+                eprintln!("{message}");
+                std::process::exit(1)
             })
+            .unwrap_or(DEFAULT_DIGITS)
     };
     let _ = DIGITS.set(AtomicU32::new(configured));
 }

@@ -9,6 +9,7 @@ pub(in crate::dynamic) const HASH_INFO: &str = "sys.hash_info";
 pub(in crate::dynamic) const THREAD_INFO: &str = "sys.thread_info";
 pub(in crate::dynamic) const SCHED_PARAM: &str = "posix.sched_param";
 pub(in crate::dynamic) const TERMINAL_SIZE: &str = "os.terminal_size";
+pub(in crate::dynamic) const ASYNCGEN_HOOKS: &str = "asyncgen_hooks";
 pub(in crate::dynamic) const UNRAISABLE_ARGS: &str = "UnraisableHookArgs";
 const HASH_FIELDS: [&str; 9] = [
     "width",
@@ -28,6 +29,7 @@ pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
         PASSWD if cfg!(any(target_os = "linux", target_os = "macos")) => Some(PASSWD),
         HASH_INFO => Some(HASH_INFO),
         THREAD_INFO => Some(THREAD_INFO),
+        ASYNCGEN_HOOKS => Some(ASYNCGEN_HOOKS),
         UNRAISABLE_ARGS => Some(UNRAISABLE_ARGS),
         TERMINAL_SIZE => Some(TERMINAL_SIZE),
         SCHED_PARAM if cfg!(target_os = "linux") => Some(SCHED_PARAM),
@@ -49,6 +51,7 @@ pub(in crate::dynamic) fn fields(class: &str) -> &'static [&'static str] {
         ],
         HASH_INFO => &HASH_FIELDS,
         THREAD_INFO => &["name", "lock", "version"],
+        ASYNCGEN_HOOKS => &["firstiter", "finalizer"],
         UNRAISABLE_ARGS => &[
             "exc_type",
             "exc_value",
@@ -288,6 +291,10 @@ pub(in crate::dynamic) fn type_attribute(
         "__doc__" if class == SCHED_PARAM => {
             ctx.text("Currently has only one field: sched_priority")
         }
+        "__doc__" if class == ASYNCGEN_HOOKS => ctx.text(concat!(
+            "asyncgen_hooks\n\nA named tuple providing information about asynchronous\n",
+            "generators hooks.  The attributes are read only."
+        )),
         "__doc__" if class == UNRAISABLE_ARGS => {
             ctx.text("UnraisableHookArgs\n\nType used to pass arguments to sys.unraisablehook.")
         }

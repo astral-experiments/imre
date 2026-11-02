@@ -109,3 +109,72 @@ except RuntimeError as exc:
     assert str(exc) == 'Set changed size during iteration'
 else:
     raise AssertionError('the live set iterator should detect its mutation')
+
+
+def current():
+    import gc
+    import weakref
+    from collections import OrderedDict
+    from collections.abc import KeysView
+    from types import MappingProxyType
+
+    class HookedDict(dict):
+        def __getitem__(self, key):
+            return ('hook', super().__getitem__(key))
+
+    def rejects(error, operation, *args):
+        try:
+            operation(*args)
+        except error:
+            return
+        raise AssertionError(operation)
+
+    assert not hasattr(KeysView({}), 'mapping')
+    for make in (dict, HookedDict, OrderedDict):
+        for name in ('keys', 'values', 'items'):
+            owner = make()
+            view = getattr(owner, name)()
+            base = type(getattr({}, name)())
+            descriptor = base.__dict__['mapping']
+            assert type(view).mapping is descriptor and descriptor.__objclass__ is base
+            assert descriptor.__get__(None, base) is descriptor
+            proxy = view.mapping
+            assert type(proxy) is MappingProxyType and proxy is not view.mapping
+            assert len(proxy) == 0
+            owner['x'] = 1
+            assert proxy['x'] == owner['x']
+            assert descriptor.__get__(view)['x'] == owner['x']
+            del owner['x']
+            assert 'x' not in proxy
+            rejects(AttributeError, setattr, view, 'mapping', None)
+            rejects(AttributeError, delattr, view, 'mapping')
+            rejects(AttributeError, descriptor.__set__, view, None)
+            rejects(AttributeError, descriptor.__delete__, view)
+            wrong_kind = {}.items() if name == 'keys' else {}.keys()
+            rejects(TypeError, descriptor.__get__, wrong_kind)
+            rejects(TypeError, descriptor.__set__, wrong_kind, None)
+            rejects(TypeError, descriptor.__delete__, wrong_kind)
+    owner = HookedDict(x=3)
+    ref = weakref.ref(owner)
+    view = owner.keys()
+    proxy = view.mapping
+    del view, owner
+    gc.collect()
+    assert ref() is not None and proxy['x'] == ('hook', 3)
+    try:
+        proxy['x'] = 4
+    except TypeError:
+        pass
+    else:
+        raise AssertionError('mappingproxy accepted item assignment')
+    try:
+        del proxy['x']
+    except TypeError:
+        pass
+    else:
+        raise AssertionError('mappingproxy accepted item deletion')
+    assert ref()['x'] == ('hook', 3)
+    del proxy
+    gc.collect()
+    assert ref() is None
+    print('dictionary view mapping')

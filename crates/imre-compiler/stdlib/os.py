@@ -21,13 +21,15 @@ except ImportError:
 if sys.platform == "linux":
     from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
+    from posix import RWF_HIPRI, RWF_NOWAIT, preadv
+    from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice
     import posix as _posix
-    from posix import O_NOCTTY, pipe2, ptsname
+    from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv, writev
     for _name in vars(_posix):
         if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in ("posix_spawn", "posix_spawnp"):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
-    from posix import O_PATH, O_TMPFILE, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
+    from posix import O_PATH, O_TMPFILE, cpu_count, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
     from posix import (
         POSIX_FADV_DONTNEED, POSIX_FADV_NOREUSE, POSIX_FADV_NORMAL, POSIX_FADV_RANDOM,
         POSIX_FADV_SEQUENTIAL, POSIX_FADV_WILLNEED, posix_fadvise, posix_fallocate,

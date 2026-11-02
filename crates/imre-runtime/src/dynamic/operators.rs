@@ -1772,7 +1772,7 @@ impl Context {
                     append_rendered_text(&mut output, "(")?;
                     // Snapshot both operands before a Python repr hook can advance the cursor.
                     let first = match ctx.heap.get(ctx.scalar_value(id)) {
-                        Value::Count { current, step } => {
+                        Value::Count { current, step, .. } => {
                             if stdlib::itertools::machine_integer(&ctx, *step) != Some(1) {
                                 push_frame(&mut work, Part::Value(*step, true))?;
                                 push_frame(&mut work, Part::Text(", "))?;
@@ -2560,6 +2560,9 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if matches!(self.heap.get(self.scalar_value(id)), Value::Super { .. }) {
+            return self.super_repr(id);
+        }
         if matches!(
             self.heap.get(self.scalar_value(id)),
             Value::Count { .. } | Value::Repeat(_)

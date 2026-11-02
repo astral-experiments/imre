@@ -51,6 +51,12 @@ Stock passed both originals. The ordinary and boxed native runs reported the ups
 | `test.test_tempfile.TestTemporaryDirectory.test_del_on_collection` | 1 | This test deletes the last reference and immediately requires the directory to be gone. Its source explicitly relies on CPython reference counting. Imre supports finalization when collection runs. The paired warning test requests collection and verifies that the directory disappears. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_tempfile.py#L1846-L1857) | `TestTemporaryDirectory.test_warnings_on_cleanup` |
 | `test.test_tempfile.TestTemporaryDirectory.test_del_on_collection_ignore_errors` | 1 | This test deletes the last reference while a file is open and immediately checks the directory contents and platform-specific unlink result. The paired explicit-cleanup test exercises those same open-file and error-handling rules. Only the timing of finalization after deleting the reference is omitted. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_tempfile.py#L1859-L1878) | `TestTemporaryDirectory.test_explicit_cleanup_ignore_errors` |
 
+### `threading`
+
+| Original CPython test | Occurrence | Decision and reason | Related paired original |
+| --- | ---: | --- | --- |
+| `test.test_threading.ThreadTests.test_main_thread_during_shutdown` | 1 | The test requires a module-global cycle to run its destructor when the interpreter exits. Python permits that object to remain unfinalized. Imre ran the destructor after explicit collection, and a separate shutdown callback observed the same main-thread identity and enumeration as CPython. [Source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py#L856-L883) · [Finalizer guarantee](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Doc/reference/datamodel.rst#L2030-L2031) | `test.test_threading.ThreadingExceptionTests.test_joining_current_thread` |
+
 ## Reviewed cases still in scope
 
 ### `collections`

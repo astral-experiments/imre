@@ -1,4 +1,7 @@
 //! Filesystem and standard stream settings captured before user code runs.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub(crate) mod langinfo;
+
 use crate::objects::Codec;
 use std::borrow::Cow;
 use std::ffi::{CStr, CString, OsStr, OsString};

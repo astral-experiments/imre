@@ -1,8 +1,17 @@
 import typing
+import warnings
 
 
 def current():
     collect = typing._collect_type_parameters
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert typing._collect_parameters is collect
+        assert typing._collect_parameters is collect
+    assert len(caught) == 1 and caught[0].category is DeprecationWarning
+    assert caught[0].filename == __file__
+    del typing._collect_parameters
+
     T = typing.TypeVar("T")
     P = typing.ParamSpec("P", default=[int])
     Ts = typing.TypeVarTuple("Ts")
