@@ -46,6 +46,8 @@ pub const NATIVE_ARCHIVE_EXTENSION: &str = "imre.a";
 #[derive(Clone, Copy, serde::Serialize)]
 pub struct CommandFlags {
     pub isolated: bool,
+    pub ignore_environment: bool,
+    pub context_aware_warnings: bool,
     /// Python's language optimization level; independent of LLVM optimization.
     pub optimize: i32,
     pub safe_path: bool,
@@ -241,13 +243,21 @@ fn object_fallback<T>(
     {
         return Err(error);
     }
+    let operation = graph.as_ref().and_then(|g| {
+        if g.conditional_method_error.borrow().as_ref() == Some(&error) {
+            Some(dynamic::ObjectOperation::ConditionalMethods(g))
+        } else {
+            g.object_builtin_errors
+                .borrow()
+                .contains(&error)
+                .then_some(dynamic::ObjectOperation::Builtin)
+        }
+    });
     let runtime_imports = options.runtime_imports
+        || operation.is_some()
         || graph
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
-    let object_builtin = graph
-        .as_ref()
-        .is_some_and(|g| g.object_builtin_errors.borrow().contains(&error));
     let registered_imports = graph
         .as_ref()
         .filter(|_| runtime_imports)
@@ -268,7 +278,7 @@ fn object_fallback<T>(
         module_root,
         options,
         runtime_imports,
-        object_builtin,
+        operation,
         registered_imports,
         check_returns,
     )? {

@@ -1,4 +1,5 @@
 mod class_metadata;
+mod worker;
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
@@ -330,7 +331,12 @@ impl Function<'_, '_> {
                         Body::Namespace(&v.body),
                     );
                     let name = self.code_name(self.source.private_names.definition(&v.name));
-                    let class = self.op("class", &[&name, &bases, &init]);
+                    let operation = if v.type_params.is_some() {
+                        "parameterized_class"
+                    } else {
+                        "class"
+                    };
+                    let class = self.op(operation, &[&name, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);
                 }
                 ast::Stmt::Return(v) => {
@@ -627,6 +633,14 @@ impl Function<'_, '_> {
             }
             Body::Expression(expr) => closure_names.visit_expr(expr),
             _ => closure_names.incomplete = true,
+        }
+        if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns)
+            && let Some((names, lock_only)) = worker::parameters(stmts, params)
+        {
+            signature["thread_parameters"] = json!(names);
+            if lock_only {
+                signature["thread_worker_locks"] = json!(names);
+            }
         }
         let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);

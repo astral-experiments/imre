@@ -303,6 +303,19 @@ impl Checker<'_> {
             return self.descriptor_call_error(call, method, vec![callable], &[], message);
         };
         let receiver = self.expr(instance)?;
+        self.apply_str_descriptor(call, callable, method, receiver, instance, tail)
+    }
+
+    /// Apply a builtin str descriptor to a receiver and the remaining call arguments.
+    pub(super) fn apply_str_descriptor(
+        &mut self,
+        call: &ast::ExprCall,
+        callable: Expr,
+        method: ir::StrDescriptor,
+        receiver: Expr,
+        instance: &impl Ranged,
+        tail: &[ast::Expr],
+    ) -> Result<Expr, String> {
         if !matches!(receiver.ty, Type::Str | Type::StrLiteral(_)) {
             let name = self.exact_argument_type_name(receiver.ty).ok_or_else(|| {
                 error(
@@ -328,7 +341,9 @@ impl Checker<'_> {
         bound.arguments.args = tail.iter().cloned().collect();
         let receiver = Self::string_value(receiver);
         let result = match method {
-            ir::StrDescriptor::IsAlnum => {
+            ir::StrDescriptor::IsAlnum
+            | ir::StrDescriptor::IsAscii
+            | ir::StrDescriptor::IsLower => {
                 self.splitlines_or_predicate(receiver, method.name(), &bound)?
             }
             _ => self.text_method(receiver, method.name(), &bound)?,
@@ -360,7 +375,10 @@ impl Checker<'_> {
             self.module,
             call.arguments.keywords.iter().map(Ranged::range),
         );
-        let ty = if method == ir::StrDescriptor::IsAlnum {
+        let ty = if matches!(
+            method,
+            ir::StrDescriptor::IsAlnum | ir::StrDescriptor::IsAscii | ir::StrDescriptor::IsLower
+        ) {
             Type::Bool
         } else {
             Type::Str

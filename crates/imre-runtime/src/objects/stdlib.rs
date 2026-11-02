@@ -789,17 +789,57 @@ pub unsafe extern "C" fn imre_str_replace(
     old: *const Str,
     new: *const Str,
 ) -> *const Str {
-    // SAFETY: inputs remain immutable and rooted through both sizing and copying.
-    let (value, old, new) = unsafe { (&*value, &*old, &*new) };
-    match replace_text(value, old, new, usize::MAX, old == new, |len| {
+    // SAFETY: the three rooted string allocations have the required lifetime.
+    unsafe { replace_string(value, old, new, usize::MAX) }
+}
+
+/// # Safety
+/// The caller roots all three immutable strings and the tagged integer count.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_replace_count(
+    value: *const Str,
+    old: *const Str,
+    new: *const Str,
+    count: usize,
+) -> *const Str {
+    // SAFETY: the tagged integer stays rooted during conversion.
+    let count = unsafe { crate::Int::borrow(count) };
+    let Some(count) = crate::signed_index(&count) else {
+        Error::new(
+            Kind::OverflowError,
+            "Python int too large to convert to C ssize_t",
+        )
+        .raise();
+        return std::ptr::null();
+    };
+    // SAFETY: the three string operands remain rooted for the call.
+    unsafe {
+        replace_string(
+            value,
+            old,
+            new,
+            usize::try_from(count).unwrap_or(usize::MAX),
+        )
+    }
+}
+
+/// The raw receiver keeps the provenance of the allocation containing its strong count.
+unsafe fn replace_string(
+    value: *const Str,
+    old: *const Str,
+    new: *const Str,
+    limit: usize,
+) -> *const Str {
+    // SAFETY: all input strings stay rooted until replacement completes.
+    let (text, old, new) = unsafe { (&*value, &*old, &*new) };
+    match replace_text(text, old, new, limit, old == new, |len| {
         Str::try_with_capacity(len).ok()
     }) {
         Ok(Some(result)) => StrOwner::into_raw(StrOwner::new(result)),
         Ok(None) => {
-            // SAFETY: the original string is rooted and the result takes its own owner.
-            StrOwner::into_raw(unsafe {
-                StrOwner::acquire_word(std::ptr::from_ref(value) as usize)
-            })
+            // SAFETY: transfer one additional strong count from the original allocation.
+            unsafe { StrOwner::increment_strong_count(value) };
+            value
         }
         Err(_) => {
             super::exceptions::sequence_allocation_failed();

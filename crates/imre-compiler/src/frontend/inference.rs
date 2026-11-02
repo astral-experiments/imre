@@ -657,18 +657,6 @@ impl Inference {
 }
 
 impl Checker<'_> {
-    /// Binds a speculative call in source order while recording missing formal types.
-    /// No value from this pass reaches LLVM; final calls use arguments() normally.
-    pub(super) fn infer_call(
-        &mut self,
-        call: &ast::ExprCall,
-        signature: &Signature,
-        receiver: Option<Expr>,
-        skip: usize,
-    ) -> Result<(Type, ir::CallArgs), String> {
-        self.bind_source(call, signature, receiver, skip, None)
-    }
-
     pub(super) fn source_call(
         &mut self,
         call: &ast::ExprCall,

@@ -453,10 +453,8 @@ pub(crate) enum SourceFrame {
 }
 
 pub(crate) struct Module {
-    /// Interpreter-style -I commands ignore Python process environment variables at startup.
-    pub ignore_python_environment: bool,
-    /// Effective UTF-8 mode of an interpreter-style command.
-    pub command_utf8_mode: Option<bool>,
+    /// Interpreter settings already selected by the Python-style launcher.
+    pub command_flags: Option<crate::CommandFlags>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -1073,6 +1071,7 @@ pub(crate) enum Builtin {
     SysIntern,
     SysIsInterned,
     OsName,
+    OsLinesep,
     OsPathsep,
     OsSeparator {
         alternate: bool,
@@ -1228,6 +1227,8 @@ pub(crate) enum Builtin {
     ListAllI32,
     /// Best-effort bounded capacity hint for one empty loop output list.
     ListReserveRange,
+    /// Extend a proven periodic packed prefix and return the ordinal where normal iteration resumes.
+    StructCyclePrefix,
     /// The guarded loop proves all elements fit i32 and cannot be replaced.
     ListGetI32,
     /// Every call site and intervening operation preserve these exact element
@@ -1372,6 +1373,7 @@ pub(crate) enum Builtin {
     CanElideMapperFrames([usize; 2]),
     SysGetFrameModuleName,
     SysGetRecursionLimit,
+    SysContextAwareWarnings,
     GeneratorFrameEnter(String),
     GeneratorFrameLeave,
     SysSetRecursionLimit,
@@ -1733,6 +1735,8 @@ pub(crate) enum StrDescriptor {
     LStrip,
     RStrip,
     IsAlnum,
+    IsLower,
+    IsAscii,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
@@ -1742,6 +1746,8 @@ impl StrDescriptor {
             "lstrip" => Self::LStrip,
             "rstrip" => Self::RStrip,
             "isalnum" => Self::IsAlnum,
+            "isascii" => Self::IsAscii,
+            "islower" => Self::IsLower,
             _ => return None,
         })
     }
@@ -1752,6 +1758,8 @@ impl StrDescriptor {
             Self::LStrip => "lstrip",
             Self::RStrip => "rstrip",
             Self::IsAlnum => "isalnum",
+            Self::IsAscii => "isascii",
+            Self::IsLower => "islower",
         }
     }
 }
@@ -1824,7 +1832,9 @@ pub(crate) enum UrlProperty {
 #[derive(Clone, Copy)]
 pub(crate) enum TextPredicate {
     Alnum,
+    Ascii,
     Space,
+    Lower,
     Upper,
 }
 
@@ -2416,100 +2426,31 @@ pub(crate) enum Statement {
 /// Visits expression trees, including statements embedded in eager expressions.
 /// Analyses must include every checked branch, even when it never executes.
 pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
-    fn expression<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
-        visit(value);
-        match &value.kind {
-            ExprKind::List(values)
-            | ExprKind::Tuple(values)
-            | ExprKind::Set { values, .. }
-            | ExprKind::Compare(values, _)
-            | ExprKind::Boolean(_, values)
-            | ExprKind::Builtin(_, values) => {
-                for value in values {
-                    expression(value, visit);
-                }
-            }
-            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-                for value in &args.values {
-                    expression(value, visit);
-                }
-            }
-            ExprKind::Callable { receiver, .. } => {
-                if let Some(receiver) = receiver {
-                    expression(receiver, visit);
-                }
-            }
-            ExprKind::Invoke { callable, args } => {
-                expression(callable, visit);
-                for value in &args.values {
-                    expression(value, visit);
-                }
-            }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    expression(key, visit);
-                    expression(value, visit);
-                }
-            }
-            ExprKind::Bind(_, value)
-            | ExprKind::Present(value)
-            | ExprKind::Absent(value)
-            | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
-            | ExprKind::Field(value, _) => expression(value, visit),
-            ExprKind::Scope { body, value, .. } => {
-                walk_expressions(body, visit);
-                expression(value, visit);
-            }
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-                expression(left, visit);
-                expression(right, visit);
-            }
-            ExprKind::Conditional(test, yes, no) => {
-                expression(test, visit);
-                expression(yes, visit);
-                expression(no, visit);
-            }
-            ExprKind::Exception { message, .. } => {
-                if let Some(message) = message {
-                    expression(message, visit);
-                }
-            }
-            ExprKind::Int(_)
-            | ExprKind::Float(_)
-            | ExprKind::Bool(_)
-            | ExprKind::Str(_)
-            | ExprKind::Bytes(_)
-            | ExprKind::None
-            | ExprKind::Local(_) => {}
-        }
-    }
     for statement in body {
         match statement {
             Statement::Assign(_, value)
             | Statement::Expr(value)
             | Statement::Return(value)
-            | Statement::Assert(value) => expression(value, visit),
+            | Statement::Assert(value) => walk_expression(value, visit),
             Statement::SetItem(receiver, index, value)
             | Statement::AugmentItem(receiver, index, _, value) => {
-                expression(receiver, visit);
-                expression(index, visit);
-                expression(value, visit);
+                walk_expression(receiver, visit);
+                walk_expression(index, visit);
+                walk_expression(value, visit);
             }
             Statement::SetField(receiver, _, value)
             | Statement::AugmentField(receiver, _, _, value) => {
-                expression(receiver, visit);
-                expression(value, visit);
+                walk_expression(receiver, visit);
+                walk_expression(value, visit);
             }
             Statement::Scope { body, .. } => walk_expressions(body, visit),
             Statement::If(test, yes, no) => {
-                expression(test, visit);
+                walk_expression(test, visit);
                 walk_expressions(yes, visit);
                 walk_expressions(no, visit);
             }
             Statement::While(test, body, orelse) => {
-                expression(test, visit);
+                walk_expression(test, visit);
                 walk_expressions(body, visit);
                 walk_expressions(orelse, visit);
             }
@@ -2517,7 +2458,7 @@ pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut
                 args, body, orelse, ..
             } => {
                 for arg in args {
-                    expression(arg, visit);
+                    walk_expression(arg, visit);
                 }
                 walk_expressions(body, visit);
                 walk_expressions(orelse, visit);
@@ -2537,7 +2478,7 @@ pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut
             }
             Statement::Raise(value) => {
                 if let Some(value) = value {
-                    expression(value, visit);
+                    walk_expression(value, visit);
                 }
             }
             Statement::Move(..)
@@ -2547,6 +2488,86 @@ pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut
             | Statement::Continue
             | Statement::Exhaust => {}
         }
+    }
+}
+
+/// Visits a checked expression and every expression in its eager scopes.
+pub(crate) fn walk_expression<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
+    visit(value);
+    if let ExprKind::Scope { body, value, .. } = &value.kind {
+        walk_expressions(body, visit);
+        walk_expression(value, visit);
+    } else {
+        children(value, |child| walk_expression(child, visit));
+    }
+}
+
+/// Visits one expression's operands. Scoped statements are handled by the caller.
+pub(crate) fn children<'a>(expression: &'a Expr, mut visit: impl FnMut(&'a Expr)) {
+    match &expression.kind {
+        ExprKind::Exception { message, .. } => {
+            if let Some(message) = message {
+                visit(message);
+            }
+        }
+        ExprKind::Dict { entries, .. } => {
+            for (key, value) in entries {
+                visit(key);
+                visit(value);
+            }
+        }
+        ExprKind::List(values)
+        | ExprKind::Set { values, .. }
+        | ExprKind::Tuple(values)
+        | ExprKind::Compare(values, _)
+        | ExprKind::Boolean(_, values)
+        | ExprKind::Builtin(_, values) => {
+            for value in values {
+                visit(value);
+            }
+        }
+        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+            for value in &args.values {
+                visit(value);
+            }
+        }
+        ExprKind::Callable { receiver, .. } => {
+            if let Some(receiver) = receiver {
+                visit(receiver);
+            }
+        }
+        ExprKind::Invoke { callable, args } => {
+            visit(callable);
+            for value in &args.values {
+                visit(value);
+            }
+        }
+        ExprKind::Scope { .. } => {
+            unreachable!("scoped statements require the full inspection or rewrite pass")
+        }
+        ExprKind::Bind(_, value)
+        | ExprKind::Present(value)
+        | ExprKind::Absent(value)
+        | ExprKind::Unwrap(value)
+        | ExprKind::Not(value)
+        | ExprKind::Negate(value)
+        | ExprKind::Field(value, _) => visit(value),
+        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
+            visit(left);
+            visit(right);
+        }
+        ExprKind::Conditional(test, yes, no) => {
+            visit(test);
+            visit(yes);
+            visit(no);
+        }
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Str(_)
+        | ExprKind::Bytes(_)
+        | ExprKind::None
+        | ExprKind::Local(_) => {}
     }
 }
 

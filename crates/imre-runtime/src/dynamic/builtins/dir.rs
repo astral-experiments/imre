@@ -39,7 +39,7 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
                 "dir() cannot enumerate lazy native module exports",
             ));
         } else {
-            ctx.module_globals(scope)
+            ctx.module_globals(scope)?
         }
     } else {
         object_names(ctx, object)?
@@ -54,9 +54,12 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let class = match ctx.heap.get(object) {
         Value::Class { .. } | Value::Native(_) => object,
         Value::NamedTuple {
-            class: Some(crate::dynamic::stdlib::os::stat::CLASS),
-            ..
-        } => ctx.builtin(crate::dynamic::stdlib::os::stat::CLASS),
+            class: Some(class), ..
+        } if *class == crate::dynamic::stdlib::os::stat::CLASS
+            || crate::dynamic::stdlib::fixed_structseq::fixed_type(class).is_some() =>
+        {
+            ctx.builtin(class)
+        }
         Value::Instance {
             class,
             fields,
@@ -181,12 +184,54 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             }
         }
         Value::Native(name) if name == crate::dynamic::stdlib::os::stat::CLASS => {
-            names.extend(crate::dynamic::stdlib::os::stat::attribute_names().map(str::to_owned));
+            struct_sequence_names(names, crate::dynamic::stdlib::os::stat::field_names());
+        }
+        Value::Native(name)
+            if let Some(class) = crate::dynamic::stdlib::fixed_structseq::fixed_type(name) =>
+        {
+            struct_sequence_names(
+                names,
+                crate::dynamic::stdlib::fixed_structseq::fields(class)
+                    .iter()
+                    .copied(),
+            );
         }
         Value::Native(name) => return Err(missing_namespace(name)),
         _ => return Err(missing_namespace(ctx.type_name(class))),
     }
     Ok(())
+}
+
+/// Both the type and its instances expose the struct sequence and inherited tuple slots.
+fn struct_sequence_names(names: &mut BTreeSet<String>, fields: impl Iterator<Item = &'static str>) {
+    names.extend(
+        crate::objects::OBJECT_METHODS
+            .iter()
+            .copied()
+            .chain(fields)
+            .chain([
+                "__class__",
+                "__doc__",
+                "__module__",
+                "__match_args__",
+                "__replace__",
+                "n_fields",
+                "n_sequence_fields",
+                "n_unnamed_fields",
+                "__class_getitem__",
+                "__add__",
+                "count",
+                "__rmul__",
+                "__contains__",
+                "__mul__",
+                "__getitem__",
+                "__len__",
+                "__iter__",
+                "__getnewargs__",
+                "index",
+            ])
+            .map(str::to_owned),
+    );
 }
 
 /// Python installs a private slot under its declaring class's mangled name.

@@ -48,6 +48,49 @@ def assertNotIsInstance(self, obj, cls, msg=None):
         self.fail(self._formatMessage(msg, standardMsg))
 
 
+def assertIsSubclass(self, cls, superclass, msg=None):
+    try:
+        if issubclass(cls, superclass):
+            return
+    except TypeError:
+        if not isinstance(cls, type):
+            self.fail(self._formatMessage(msg, f'{cls!r} is not a class'))
+        raise
+    if isinstance(superclass, tuple):
+        standardMsg = f'{cls!r} is not a subclass of any of {superclass!r}'
+    else:
+        standardMsg = f'{cls!r} is not a subclass of {superclass!r}'
+    self.fail(self._formatMessage(msg, standardMsg))
+
+
+def assertNotIsSubclass(self, cls, superclass, msg=None):
+    try:
+        if not issubclass(cls, superclass):
+            return
+    except TypeError:
+        if not isinstance(cls, type):
+            self.fail(self._formatMessage(msg, f'{cls!r} is not a class'))
+        raise
+    if isinstance(superclass, tuple):
+        for x in superclass:
+            if issubclass(cls, x):
+                superclass = x
+                break
+    standardMsg = f'{cls!r} is a subclass of {superclass!r}'
+    self.fail(self._formatMessage(msg, standardMsg))
+
+
+def assertNotHasAttr(self, obj, name, msg=None):
+    if hasattr(obj, name):
+        if isinstance(obj, ModuleType):
+            standardMsg = f'module {obj.__name__!r} has unexpected attribute {name!r}'
+        elif isinstance(obj, type):
+            standardMsg = f'type object {obj.__name__!r} has unexpected attribute {name!r}'
+        else:
+            standardMsg = f'{type(obj).__name__!r} object has unexpected attribute {name!r}'
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
 def assertIs(self, expr1, expr2, msg=None):
     if expr1 is not expr2:
         _raise_identity_failure(self, _safe_repr(expr1), _safe_repr(expr2), msg)
@@ -63,6 +106,9 @@ TestCase.assertEqual = assertEqual
 TestCase.assertNotEqual = assertNotEqual
 TestCase.assertIsInstance = assertIsInstance
 TestCase.assertNotIsInstance = assertNotIsInstance
+TestCase.assertIsSubclass = assertIsSubclass
+TestCase.assertNotIsSubclass = assertNotIsSubclass
+TestCase.assertNotHasAttr = assertNotHasAttr
 TestCase.assertIs = assertIs
 TestCase.assertIsNot = assertIsNot
 

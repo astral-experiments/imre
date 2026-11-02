@@ -15,6 +15,7 @@ mod function_fields;
 mod generator_protocol;
 mod importlib;
 mod iterators;
+mod lowlevel_threads;
 mod mapping_abc;
 mod module_type;
 mod namedtuple;
@@ -30,8 +31,10 @@ mod source_code;
 mod static_method;
 mod stdlib;
 mod super_object;
+mod thread_callback;
 mod thread_local;
 mod thread_lock;
+mod thread_worker;
 mod typing;
 mod union;
 mod value;
@@ -87,6 +90,8 @@ impl IteratorSlice<'_> {
 }
 
 pub(crate) struct Context {
+    threads: lowlevel_threads::Workers,
+    workers: thread_worker::Registry,
     heap: Heap,
     config: serde_json::Value,
     executable: PathBuf,
@@ -1385,16 +1390,17 @@ impl Context {
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
-    fn module_globals(&mut self, scope: Id) -> Id {
+    fn module_globals(&mut self, scope: Id) -> Result<Id> {
         let scope = self.root_scope(scope);
+        self.check_thread_reporting_namespace(scope)?;
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
         if let Some(globals) = frame.exec_globals {
-            return globals.dict;
+            return Ok(globals.dict);
         }
         if let Some(dict) = frame.namespace {
-            return dict;
+            return Ok(dict);
         }
         let names = std::mem::take(&mut frame.names);
         let entries = names
@@ -1406,7 +1412,7 @@ impl Context {
             unreachable!()
         };
         frame.namespace = Some(dict);
-        dict
+        Ok(dict)
     }
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
@@ -1822,19 +1828,19 @@ impl Context {
     }
 
     fn module(&mut self, name: &str) -> Result<Id> {
-        self.find_module(name, true)?
+        self.find_module(name)?
             .ok_or_else(|| Self::missing_module(name))
     }
 
     /// Resolve registered and filesystem modules against the current import path.
-    fn find_module(&mut self, mut name: &str, filesystem: bool) -> Result<Option<Id>> {
+    fn find_module(&mut self, mut name: &str) -> Result<Option<Id>> {
         let mut parents = Vec::new();
         let mut module = loop {
             if let Some(id) = self.cached_import(name)? {
                 break Some(id);
             }
             let Some((parent, child)) = name.rsplit_once('.') else {
-                break self.load_module(name, filesystem, None)?;
+                break self.load_module(name, None)?;
             };
             // Each unresolved parent consumes three importlib frames.
             self.check_call_depth(3 * (parents.len() + 1))?;
@@ -1846,18 +1852,13 @@ impl Context {
         };
         for (name, parent, child) in parents.into_iter().rev() {
             let id = module.ok_or_else(|| Self::missing_module(parent))?;
-            module = self.load_module(name, filesystem, Some((id, child)))?;
+            module = self.load_module(name, Some((id, child)))?;
         }
         Ok(module)
     }
 
     /// Run a module initializer after its parent has been resolved.
-    fn load_module(
-        &mut self,
-        name: &str,
-        filesystem: bool,
-        parent: Option<(Id, &str)>,
-    ) -> Result<Option<Id>> {
+    fn load_module(&mut self, name: &str, parent: Option<(Id, &str)>) -> Result<Option<Id>> {
         if let Some(id) = self.cached_import(name)? {
             return Ok(Some(id));
         }
@@ -1906,14 +1907,7 @@ impl Context {
             } else {
                 (self.sys_path, name)
             };
-            self.source_on_path(
-                name,
-                child,
-                search,
-                parent.is_none(),
-                filesystem,
-                &mut locations,
-            )?
+            self.source_on_path(name, child, search, parent.is_none(), &mut locations)?
         };
         if source.is_none() && !stdlib::is_module(name) {
             return Ok(None);
@@ -1946,7 +1940,7 @@ impl Context {
         };
         self.bind(scope, "__package__", package);
         if name == "builtins" {
-            self.install_builtins(scope);
+            self.install_builtins(scope)?;
         } else if source.is_some() {
             let builtins = if name == "__main__" {
                 self.module("builtins")?
@@ -2033,6 +2027,8 @@ impl Context {
                     let value = self.lookup_attr(path, name)?;
                     self.bind(scope, name, value);
                 }
+                let linesep = self.text(crate::objects::os::LINE_SEPARATOR);
+                self.bind(scope, "linesep", linesep);
                 self.bind(scope, "path", path);
                 self.publish_module("os.path", path)?;
             }
@@ -2043,6 +2039,7 @@ impl Context {
                 self.bind(scope, "devnull", devnull);
             }
             "errno" => stdlib::install_errno(self, scope)?,
+            "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
@@ -2088,6 +2085,10 @@ impl Context {
                         self.alloc(Value::TextFile(crate::objects::TextFile::standard(stderr)));
                     self.bind(scope, name, stream);
                     self.bind(scope, original, stream);
+                    if stderr && self.threads.system_module.is_none() {
+                        self.threads.system_module = Some(module);
+                        self.threads.default_stderr = Some(stream);
+                    }
                 }
                 let jit = stdlib::jit_module(self)?;
                 self.bind(scope, "_jit", jit);
@@ -2110,6 +2111,17 @@ impl Context {
                 self.publish_module("collections.abc", abc)?;
             }
             _ => {}
+        }
+        if name == "_thread" && source.is_none() {
+            for function in ["start_new_thread", "_count", "get_ident"] {
+                let value = self.builtin(&format!("_thread.{function}"));
+                self.bind(scope, function, value);
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                let id = self.builtin("_thread.get_native_id");
+                self.bind(scope, "get_native_id", id);
+            }
         }
         if let Some((path, body)) = source {
             let result = match body {
@@ -2157,6 +2169,17 @@ impl Context {
                 && let Some(class) = self.scope_name(scope, "PatternError")
             {
                 self.classes.insert("re.PatternError".into(), class);
+            }
+            if name == "threading"
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("threading.py"))
+                && let (Some(class), Some(main)) = (
+                    self.scope_name(scope, "Thread"),
+                    self.scope_name(scope, "_main_thread"),
+                )
+            {
+                self.register_thread_run(class, main);
             }
             if name == "decimal"
                 && self.config["bundled_root"]

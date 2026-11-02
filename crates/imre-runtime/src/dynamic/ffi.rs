@@ -16,15 +16,12 @@ impl Context {
         callable: Id,
         arguments: Id,
         keywords: Id,
-        mark: Option<usize>,
+        mark: usize,
     ) -> Result<Id> {
         let args = self.items(arguments)?;
         let kwargs = self.keyword_args(keywords)?;
         let result = self.call(callable, args, kwargs)?;
-        // Older compiled modules identify the boundary by their fresh argument list.
-        if let Some(mark) = mark.or_else(|| self.heap.argument_mark(arguments)) {
-            self.finish_call_operands(mark, result);
-        }
+        self.finish_call_operands(mark, result);
         Ok(result)
     }
 
@@ -165,9 +162,9 @@ impl Context {
                 }
                 self.lookup(a, &name)
             }
-            "assign" | "assign_expr" | "assign_target" | "assign_named_target" => {
+            "assign" | "assign_target" | "assign_named_target" => {
                 let mut scope = a;
-                if matches!(op, "assign_expr" | "assign_named_target") {
+                if op == "assign_named_target" {
                     while self.scope_data(scope).comprehension.is_some() {
                         scope = self
                             .scope_data(scope)
@@ -326,8 +323,7 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
-            "call" => self.call_packed(a, b, c, None),
-            "class" => self.class(a, b, c),
+            "class" | "parameterized_class" => self.class(a, b, c, op == "parameterized_class"),
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
                     return Err(Error::new("SystemError", "invalid coroutine definition"));
@@ -454,13 +450,7 @@ impl Context {
                     Ok(FALSE)
                 }
             }
-            "type" => {
-                if !matches!(self.heap.get(a), Value::Raised(_)) {
-                    return Err(Error::new("TypeError", "expected exception"));
-                }
-                self.exact_type(a)
-            }
-            "exit_context" | "exit_exception" => {
+            "exit_context" => {
                 let (class, traceback, active) = if b == NONE {
                     (NONE, NONE, self.heap.caught_exception(c))
                 } else {
@@ -565,16 +555,34 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
-    if config["isolated"].as_bool() != Some(true) {
+    let ignore_environment = config["ignore_environment"].as_bool().unwrap_or(false)
+        || config["isolated"].as_bool().unwrap_or(false);
+    crate::sys::context_warnings::imre_context_warnings_init(
+        config["context_aware_warnings"]
+            .as_bool()
+            .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
+    );
+    if !ignore_environment {
         config["pycache_prefix"] = std::env::var("PYTHONPYCACHEPREFIX")
             .ok()
             .filter(|prefix| !prefix.is_empty())
             .into();
     }
-    crate::python_hash::initialize(config["isolated"].as_bool().unwrap_or(false));
-    crate::integer_text::imre_integer_digits_init(u32::from(
-        config["isolated"].as_bool().unwrap_or(false),
-    ));
+    crate::python_hash::initialize(ignore_environment);
+    crate::integer_text::imre_integer_digits_init(u32::from(ignore_environment));
+    crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
+    // SAFETY: main supplies argc pointers to NUL-terminated strings that remain
+    // valid while the constructor consumes this iterator.
+    let args = unsafe { slice::from_raw_parts(argv, argc as usize) }
+        .iter()
+        .map(|&s| unsafe { CStr::from_ptr(s) }.to_string_lossy());
+    Box::into_raw(Box::new(new_context(config, args)))
+}
+
+pub(super) fn new_context<S: Into<String>>(
+    config: serde_json::Value,
+    args: impl IntoIterator<Item = S>,
+) -> Context {
     let executable = config["executable"]
         .as_str()
         .map(PathBuf::from)
@@ -582,6 +590,8 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         .unwrap_or_default();
     let mut ctx = Context {
         heap: Heap::new(),
+        threads: Default::default(),
+        workers: Default::default(),
         config,
         executable,
         argv: NONE,
@@ -610,14 +620,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         slot_depth: 0,
     };
     ctx.modules = ctx.dict(Vec::new());
-    // SAFETY: ABI main supplies argc pointers, valid to the end of the call.
-    let args = unsafe { slice::from_raw_parts(argv, argc as usize) }
-        .iter()
-        .map(|&s| {
-            // SAFETY: native argv entries are valid NUL-terminated strings.
-            ctx.text(unsafe { CStr::from_ptr(s) }.to_string_lossy())
-        })
-        .collect();
+    let args = args.into_iter().map(|s| ctx.text(s)).collect();
     ctx.argv = ctx.alloc(Value::List(args));
     let paths: Vec<String> =
         serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
@@ -629,7 +632,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
     // Resolving the handler after an allocation failure must not grow the builtin cache.
     ctx.builtin("MemoryError");
-    Box::into_raw(Box::new(ctx))
+    ctx
 }
 
 #[unsafe(no_mangle)]
@@ -868,7 +871,7 @@ pub(super) unsafe extern "C" fn imre_dyn_call_at(
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = ctx.call_packed(callable, args, kwargs, Some(mark));
+    let result = ctx.call_packed(callable, args, kwargs, mark);
     finish_at(ctx, result, span)
 }
 
@@ -952,7 +955,39 @@ pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
 }
 
 impl Context {
-    fn prelinked_code(
+    /// Resolve a code object's lexical reads against its enclosing function scopes.
+    pub(super) fn enclosing_freevars<'a>(
+        &self,
+        scope: Id,
+        reads: impl Iterator<Item = &'a str>,
+    ) -> Option<Vec<String>> {
+        let mut freevars = Vec::new();
+        for name in reads {
+            let mut cursor = Some(scope);
+            while let Some(frame_id) = cursor {
+                let frame = self.scope_data(frame_id);
+                if frame.parent.is_none()
+                    || (frame.class_body.is_none() && frame.globals.contains(name))
+                {
+                    break;
+                }
+                if frame.class_body.is_none()
+                    && (frame.closure.declared.contains(name)
+                        || frame.closure.cells.contains_key(name))
+                {
+                    freevars.push(name.to_owned());
+                    break;
+                }
+                if !frame.closure.declared_complete {
+                    return None;
+                }
+                cursor = frame.parent;
+            }
+        }
+        Some(freevars)
+    }
+
+    pub(super) fn prelinked_code(
         &mut self,
         entry: Code,
         scope: Id,
@@ -969,43 +1004,17 @@ impl Context {
             .ok()
             .and_then(|v| serde_json::from_str(v).ok())
             .unwrap_or_default();
-        let mut closure_supported = metadata["scope_complete"].as_bool().unwrap_or(false)
-            && !metadata["class_cell"].as_bool().unwrap_or(false);
-        let mut freevars = Vec::new();
-        if closure_supported {
-            for name in metadata["scope_reads"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|v| v.as_str())
-            {
-                let mut cursor = Some(scope);
-                while let Some(frame_id) = cursor {
-                    let frame = self.scope_data(frame_id);
-                    if frame.parent.is_none()
-                        || (frame.class_body.is_none() && frame.globals.contains(name))
-                    {
-                        break;
-                    }
-                    if frame.class_body.is_none()
-                        && (frame.closure.declared.contains(name)
-                            || frame.closure.cells.contains_key(name))
-                    {
-                        freevars.push(name.to_owned());
-                        break;
-                    }
-                    if !frame.closure.declared_complete {
-                        closure_supported = false;
-                        freevars.clear();
-                        break;
-                    }
-                    cursor = frame.parent;
-                }
-                if !closure_supported {
-                    break;
-                }
-            }
-        }
+        let reads = metadata["scope_reads"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str());
+        let freevars = (metadata["scope_complete"].as_bool() == Some(true)
+            && metadata["class_cell"].as_bool() != Some(true))
+        .then(|| self.enclosing_freevars(scope, reads))
+        .flatten();
+        let closure_supported = freevars.is_some();
+        let freevars = freevars.unwrap_or_default();
         self.alloc(Value::Code(value::CodeObject {
             body: value::Body::Native(entry),
             name,
@@ -1261,6 +1270,8 @@ impl Context {
     }
 
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
+        self.threads.reap(&mut self.heap);
+        self.reap_thread_operands();
         (
             &mut self.heap,
             self.classes
@@ -1272,6 +1283,8 @@ impl Context {
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
                 .copied()
+                .chain(self.workers.roots().copied())
+                .chain(self.threads.roots())
                 .chain(self.contexts.iter().copied())
                 .chain(self.bytearray_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))

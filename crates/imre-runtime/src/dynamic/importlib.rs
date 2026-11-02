@@ -99,7 +99,6 @@ impl Context {
         child: &str,
         search: Id,
         top_level: bool,
-        filesystem: bool,
         locations: &mut Vec<PathBuf>,
     ) -> Result<Option<(PathBuf, SourceBody)>> {
         let mut namespace = None;
@@ -125,8 +124,7 @@ impl Context {
             let Ok(root) = root else { continue };
             let stem = root.join(child);
             let choices = self.sources.get(name).map_or(&[][..], Vec::as_slice);
-            let disk = filesystem
-                && !bundle.as_ref().is_some_and(|dir| root.starts_with(dir))
+            let disk = !bundle.as_ref().is_some_and(|dir| root.starts_with(dir))
                 && Path::new(child).file_name() == Some(std::ffi::OsStr::new(child));
             for path in [stem.join("__init__.py"), stem.with_extension("py")] {
                 let entry = choices.iter().find(|m| m.path == path).map(|m| m.code);
@@ -303,7 +301,7 @@ impl Context {
         let (child, search, top_level) =
             if let Some((parent_name, child)) = fullname.rsplit_once('.') {
                 let parent = self
-                    .find_module(parent_name, true)?
+                    .find_module(parent_name)?
                     .ok_or_else(|| Self::missing_module(parent_name))?;
                 let path = match self.lookup_attr(parent, "__path__") {
                     Err(cause) if self.is_attribute_error(&cause) => {
@@ -338,7 +336,7 @@ impl Context {
         }
         let mut locations = Vec::new();
         let Some((path, body)) =
-            self.source_on_path(fullname, child, search, top_level, true, &mut locations)?
+            self.source_on_path(fullname, child, search, top_level, &mut locations)?
         else {
             return Ok(NONE);
         };

@@ -85,3 +85,34 @@ def check():
         hmac.new(key, digestmod=Factory())
     except ValueError as exc:
         print(str(exc))
+
+    # RFC 4231 section 4.3, Test Case 2 (HMAC-SHA-256).
+    key = b"Jefe"
+    message = b"what do ya want for nothing?"
+    expected_sha256 = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+    for constructor in (hmac.new, hmac.HMAC):
+        mac = constructor(key, message[:12], "SHA-256")
+        copy = mac.copy()
+        mac.update(message[12:])
+        copy.update(message[12:])
+        assert mac.hexdigest() == expected_sha256
+        assert copy.hexdigest() == expected_sha256
+        assert constructor(b"k", b"abc", "sHa3_256").digest() == hmac.new(b"k", b"abc", "SHA3-256").digest()
+        for invalid in ("BLAKE2B", "Blake2s", "UnknownDigestName"):
+            try:
+                constructor(b"k", b"abc", invalid)
+            except ValueError as exc:
+                if invalid == "UnknownDigestName":
+                    assert str(exc) == "unsupported hash type UnknownDigestName"
+            else:
+                raise AssertionError("unsupported HMAC digest name accepted")
+        for name in ("blake2b", "blake2s"):
+            if name in hashlib.algorithms_available:
+                factory = getattr(hashlib, name)
+                # CPython test_hmac.BuiltinMiscellaneousTests uses an independent
+                # HMAC computation for BLAKE2. Apply the pads from RFC 2104 §2.
+                padded = key + b"\x00" * (factory().block_size - len(key))
+                inner = factory(bytes(x ^ 0x36 for x in padded) + message).digest()
+                expected = factory(bytes(x ^ 0x5c for x in padded) + inner).digest()
+                assert constructor(key, message, name).digest() == expected
+                assert constructor(key, message, factory).digest() == expected

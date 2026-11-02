@@ -33,19 +33,7 @@ impl Format {
         let mut out = [0; 8];
         match self {
             Self::Int => {
-                let long = ctx.index_integer(item)?.to_i64().ok_or_else(|| {
-                    Error::new("OverflowError", "Python int too large to convert to C long")
-                })?;
-                let n = i32::try_from(long).map_err(|_| {
-                    Error::new(
-                        "OverflowError",
-                        if long < 0 {
-                            "signed integer is less than minimum"
-                        } else {
-                            "signed integer is greater than maximum"
-                        },
-                    )
-                })?;
+                let n = ctx.index_c_int(item)?;
                 out[..4].copy_from_slice(&n.to_ne_bytes());
             }
             Self::Float | Self::Double => {

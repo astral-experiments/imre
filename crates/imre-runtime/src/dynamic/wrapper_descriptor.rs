@@ -10,6 +10,18 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
+        if let Some((class, attr)) = symbol.rsplit_once('.')
+            && let Some(owner) = crate::objects::HashState::provider_class(class)
+            && let Some(&name) = ["copy", "update", "digest", "hexdigest"]
+                .iter()
+                .find(|&&name| name == attr)
+        {
+            return Some(Self {
+                owner,
+                name,
+                method: true,
+            });
+        }
         let slots = match symbol.rsplit_once('.') {
             Some((stdlib::os::scandir::ENTRY, attr)) => Some((
                 stdlib::os::scandir::ENTRY,
@@ -55,8 +67,11 @@ impl BuiltinDescriptor {
             "object.__format__" => ("object", "__format__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
+            "str.isascii" => ("str", "isascii"),
+            "str.islower" => ("str", "islower"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
+            "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
@@ -79,7 +94,7 @@ impl BuiltinDescriptor {
         Some(Self {
             owner,
             name,
-            method: name == "__format__",
+            method: matches!(name, "__format__" | "isascii" | "islower"),
         })
     }
 
@@ -106,7 +121,11 @@ impl BuiltinDescriptor {
             return Ok(descriptor);
         }
         let accepts = match self.owner {
+            class if crate::objects::HashState::is_provider_class(class) => {
+                ctx.type_name(receiver) == class
+            }
             "object" => true,
+            "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => {
                 ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
@@ -178,6 +197,13 @@ impl BuiltinDescriptor {
             }
             "__doc__" | "__text_signature__" if self.method => {
                 let value = match (self.name, name) {
+                    ("isascii", "__doc__") => {
+                        "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
+                    }
+                    ("islower", "__doc__") => {
+                        "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
+                    }
+                    ("isascii" | "islower", _) => "($self, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."
@@ -206,20 +232,24 @@ pub(super) fn descriptor_get(
         ));
     };
     let slot = match ctx.heap.get(descriptor) {
-        Value::Native(symbol) => BuiltinDescriptor::lookup(symbol),
-        _ => None,
-    }
-    .filter(|slot| slot.class() == class)
-    .ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            format!(
-                "descriptor '__get__' requires a '{class}' object but received a '{}'",
-                ctx.builtin_type_name(descriptor)
-                    .unwrap_or_else(|| ctx.type_name(descriptor))
-            ),
-        )
-    })?;
+        Value::ClassMethod(_) if class == "classmethod" => None,
+        Value::Native(symbol)
+            if let Some(slot) = BuiltinDescriptor::lookup(symbol)
+                && slot.class() == class =>
+        {
+            Some(slot)
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__get__' requires a '{class}' object but received a '{}'",
+                    ctx.builtin_type_name(descriptor)
+                        .unwrap_or_else(|| ctx.type_name(descriptor))
+                ),
+            ));
+        }
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -232,7 +262,16 @@ pub(super) fn descriptor_get(
             "__get__ expected at least 1 argument, got 0",
         )),
         [NONE] | [NONE, NONE] => Err(Error::new("TypeError", "__get__(None, None) is invalid")),
-        [receiver] | [receiver, _] => slot.bind(ctx, descriptor, receiver),
+        [receiver] | [receiver, _] => {
+            if let Some(slot) = slot {
+                return slot.bind(ctx, descriptor, receiver);
+            }
+            let owner = match arguments.get(1) {
+                None | Some(&NONE) => ctx.exact_type(receiver)?,
+                Some(&owner) => owner,
+            };
+            ctx.bind_attribute(descriptor, receiver, owner)
+        }
         _ => Err(Error::new(
             "TypeError",
             format!(

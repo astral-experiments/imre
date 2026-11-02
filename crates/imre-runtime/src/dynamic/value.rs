@@ -68,6 +68,7 @@ pub(super) struct Trace {
     /// Live members belong to the exception instance across traceback clones.
     pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
     pub import_names: Option<[Id; 3]>,
+    pub name_error_name: Option<Id>,
     pub dictionary: Option<Id>,
     stop_value: Id,
     cached: Option<(usize, Id)>,
@@ -199,6 +200,7 @@ impl Error {
                             .flat_map(|fields| fields.iter().map(std::cell::Cell::get)),
                     )
                     .chain(trace.import_names.into_iter().flatten())
+                    .chain(trace.name_error_name)
                     .chain(trace.dictionary)
                     .chain(trace.cached.map(|(_, head)| head))
             }))
@@ -348,108 +350,30 @@ impl Context {
 
     pub(super) fn type_name(&self, value: Id) -> &str {
         match self.heap.get(value) {
-            Value::None => "NoneType",
-            Value::Weak(wr) => wr.kind.class(),
-            Value::Ellipsis => "ellipsis",
-            Value::NotImplemented => "NotImplementedType",
-            Value::Bool(_) => "bool",
-            Value::Int(_) => "int",
-            Value::Float(_) => "float",
-            Value::Complex(_) => "complex",
             Value::Calendar { value, .. } => value.class(),
-            Value::Str(_) | Value::SurrogateStr(_) => "str",
-            Value::Map { .. } => "map",
-            Value::Filter { .. } => "filter",
-            Value::Hash(state) => state.borrow().class_name(),
             Value::Poll(_) => "select.poll",
-            Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
-            Value::Array(_) => "array.array",
-            Value::Bytes(_) => "bytes",
-            Value::ByteArray(_) => "bytearray",
-            Value::File(file) => match file.as_ref() {
-                super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
-                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
-            },
-            Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(_) => "_io.BufferedRandom",
-            Value::SequenceIterator { .. } => "iterator",
-            Value::ReverseSequence { .. } => "reversed",
-            Value::Deque(_) => super::deque::CLASS,
-            Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
-            Value::DequeIterator { .. } => super::deque::ITERATOR,
-            Value::List(_) => "list",
-            Value::CallableIterator(_) => "callable_iterator",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
-            Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
-            Value::Slice(_) => "slice",
-            Value::Range(_) => "range",
-            Value::Scandir(_) => super::stdlib::os::scandir::ITER,
-            Value::DirEntry(_) => super::stdlib::os::scandir::ENTRY,
-            Value::RangeIterator(iter) => iter.kind,
-            Value::Enumerate { .. } => "enumerate",
-            Value::Iterator { kind, .. } => kind,
-            Value::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
-                (Some(_), _, _) => "odict_iterator",
-                (_, false, DictViewKind::Keys) => "dict_keyiterator",
-                (_, false, DictViewKind::Values) => "dict_valueiterator",
-                (_, false, DictViewKind::Items) => "dict_itemiterator",
-                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
-                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
-                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
-            },
-            Value::Set { frozen: true, .. } => "frozenset",
-            Value::Set { frozen: false, .. } => "set",
-            Value::Dict(_) => "dict",
-            Value::MappingProxy(_) => "mappingproxy",
+            Value::NamedTuple { .. } => "tuple",
             Value::DefaultDict { .. } => "defaultdict",
-            Value::Function { .. } => "function",
             Value::TupleGetter { .. } => "_tuplegetter",
-            Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) => "member_descriptor",
-            Value::ItemGetter(_) => "operator.itemgetter",
-            Value::Code(_) => "code",
-            Value::Cell(_) => "cell",
-            Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::TypeVarTuple { .. } => "TypeVarTuple",
-            Value::NoDefault => "NoDefaultType",
             Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Union(_) => "Union",
-            Value::Class { .. } => "type",
-            Value::DictView { kind, ordered, .. } => match (kind, ordered) {
-                (DictViewKind::Keys, false) => "dict_keys",
-                (DictViewKind::Items, false) => "dict_items",
-                (DictViewKind::Values, false) => "dict_values",
-                (DictViewKind::Keys, true) => "odict_keys",
-                (DictViewKind::Items, true) => "odict_items",
-                (DictViewKind::Values, true) => "odict_values",
-            },
             Value::Method { .. } => "method",
-            Value::ClassMethod(_) => "classmethod",
-            Value::ThreadLocal(_) => super::thread_local::CLASS,
-            Value::PrimitiveLock(_) => super::thread_lock::CLASS,
-            Value::FormatIterator { kind, .. } => match kind {
-                FormatKind::Markup => "formatteriterator",
-                FormatKind::Field => "fieldnameiterator",
-            },
             Value::Cached { .. } => "_lru_cache_wrapper",
             Value::Partial { .. } => "partial",
             Value::PartialPlaceholder => "_PlaceholderType",
             Value::KeyWrapper { .. } => "functools.KeyWrapper",
-            Value::StaticMethod { .. } => "staticmethod",
-            Value::Property(_) => "property",
-            Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
             Value::Raised(error) => &error.kind,
-            Value::Traceback { .. } => "traceback",
-            Value::PythonFrame { .. } => "frame",
             Value::Module {
                 constructor: None, ..
             } => "module",
@@ -466,7 +390,7 @@ impl Context {
                 Value::Class { .. } | Value::Native(_) => self.class_name(*class),
                 _ => "object",
             },
-            _ => "object",
+            value => value.intrinsic_type_name().unwrap_or("object"),
         }
     }
 
@@ -774,6 +698,7 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        metaclass: Option<Id>,
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
@@ -812,6 +737,7 @@ pub(super) enum Value {
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
+    ThreadHandle(std::rc::Rc<super::thread_worker::Handle>),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
     Traceback {
@@ -847,7 +773,7 @@ pub(super) enum Value {
         function: Id,
         args: Id,
         keywords: Id,
-        coroutine_marker: Option<Id>,
+        dictionary: Option<Id>,
     },
     PartialPlaceholder,
     KeyWrapper {
@@ -961,9 +887,97 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    /// Returns the name used for both builtin class lookup and diagnostic messages.
+    pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
+        Some(match self {
+            Self::None => "NoneType",
+            Self::Weak(wr) => wr.kind.class(),
+            Self::Ellipsis => "ellipsis",
+            Self::NotImplemented => "NotImplementedType",
+            Self::Bool(_) => "bool",
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::Complex(_) => "complex",
+            Self::Str(_) | Self::SurrogateStr(_) => "str",
+            Self::Map { .. } => "map",
+            Self::Filter { .. } => "filter",
+            Self::Hash(state) => state.borrow().class_name(),
+            Self::Zip { .. } => "zip",
+            Self::Array(_) => "array.array",
+            Self::Bytes(_) => "bytes",
+            Self::ByteArray(_) => "bytearray",
+            Self::File(file) => match file.as_ref() {
+                super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
+            },
+            Self::TextFile(_) => "_io.TextIOWrapper",
+            Self::SequenceIterator { .. } => "iterator",
+            Self::ReverseSequence { .. } => "reversed",
+            Self::Deque(_) => super::deque::CLASS,
+            Self::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
+            Self::DequeIterator { .. } => super::deque::ITERATOR,
+            Self::List(_) => "list",
+            Self::CallableIterator(_) => "callable_iterator",
+            Self::Tuple(_) => "tuple",
+            Self::Slice(_) => "slice",
+            Self::Range(_) => "range",
+            Self::Scandir(_) => super::stdlib::os::scandir::ITER,
+            Self::DirEntry(_) => super::stdlib::os::scandir::ENTRY,
+            Self::RangeIterator(iter) => iter.kind,
+            Self::Enumerate { .. } => "enumerate",
+            Self::Iterator { kind, .. } => kind,
+            Self::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
+                (Some(_), _, _) => "odict_iterator",
+                (_, false, DictViewKind::Keys) => "dict_keyiterator",
+                (_, false, DictViewKind::Values) => "dict_valueiterator",
+                (_, false, DictViewKind::Items) => "dict_itemiterator",
+                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
+                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
+                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
+            },
+            Self::Set { frozen: true, .. } => "frozenset",
+            Self::Set { frozen: false, .. } => "set",
+            Self::Dict(_) => "dict",
+            Self::MappingProxy(_) => "mappingproxy",
+            Self::Function { .. } => "function",
+            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) => "member_descriptor",
+            Self::ItemGetter(_) => "operator.itemgetter",
+            Self::Code(_) => "code",
+            Self::Cell(_) => "cell",
+            Self::Generator { .. } => "generator",
+            Self::NoDefault => "NoDefaultType",
+            Self::Class { .. } => "type",
+            Self::DictView { kind, ordered, .. } => match (kind, ordered) {
+                (DictViewKind::Keys, false) => "dict_keys",
+                (DictViewKind::Items, false) => "dict_items",
+                (DictViewKind::Values, false) => "dict_values",
+                (DictViewKind::Keys, true) => "odict_keys",
+                (DictViewKind::Items, true) => "odict_items",
+                (DictViewKind::Values, true) => "odict_values",
+            },
+            Self::ClassMethod(_) => "classmethod",
+            Self::ThreadLocal(_) => super::thread_local::CLASS,
+            Self::ThreadHandle(_) => "_thread._ThreadHandle",
+            Self::PrimitiveLock(_) => super::thread_lock::CLASS,
+            Self::FormatIterator { kind, .. } => match kind {
+                FormatKind::Markup => "formatteriterator",
+                FormatKind::Field => "fieldnameiterator",
+            },
+            Self::StaticMethod { .. } => "staticmethod",
+            Self::Property(_) => "property",
+            Self::GetSetDescriptor { .. } | Self::WeakrefDescriptor(_) => "getset_descriptor",
+            Self::Traceback { .. } => "traceback",
+            Self::PythonFrame { .. } => "frame",
+            _ => return None,
+        })
+    }
+
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } => Some(*class),
+            Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
             _ => None,
@@ -1175,8 +1189,12 @@ impl Value {
                 );
             }
             Self::Class {
-                scope, ancestors, ..
+                scope,
+                ancestors,
+                metaclass,
+                ..
             } => {
+                visit.extend(*metaclass);
                 visit.push(*scope);
                 visit.extend(ancestors);
             }
@@ -1246,10 +1264,10 @@ impl Value {
                 function,
                 args,
                 keywords,
-                coroutine_marker,
+                dictionary,
             } => {
                 visit.extend([*function, *args, *keywords]);
-                visit.extend(coroutine_marker);
+                visit.extend(dictionary);
             }
             Self::CacheDecorator { maxsize, typed } | Self::CacheParameters { maxsize, typed } => {
                 visit.extend([*maxsize, *typed]);
@@ -1294,6 +1312,7 @@ impl Value {
             | Self::Hash(_)
             | Self::LoggerHandle(_)
             | Self::HandlerLock(_)
+            | Self::ThreadHandle(_)
             | Self::PrimitiveLock(_)
             | Self::Poll(_)
             | Self::Socket(_)
@@ -2131,18 +2150,6 @@ impl Heap {
         self.frames.last().unwrap().live.len()
     }
 
-    /// Compiled calls root their fresh argument list before evaluating its operands.
-    pub(super) fn argument_mark(&self, arguments: Id) -> Option<usize> {
-        if !self.tracks_finalizers() {
-            return None;
-        }
-        self.frames
-            .last()?
-            .live
-            .iter()
-            .position(|&id| id == arguments)
-    }
-
     /// A scalar and a container of scalars cannot hold an output file.
     pub(super) fn could_own_finalizer(&self, id: Id, skip_bound: bool) -> bool {
         let scalar = |id| {
@@ -2300,7 +2307,11 @@ impl Heap {
     }
 
     pub fn caller_module(&self) -> Id {
-        match self.frames.last().unwrap().owner {
+        self.caller_module_at(0).expect("current frame")
+    }
+
+    pub fn caller_module_at(&self, depth: usize) -> Option<Id> {
+        Some(match self.frames.iter().rev().nth(depth)?.owner {
             FrameOwner::Module(module) => module,
             FrameOwner::Function(function) => {
                 let Value::Function { fields, .. } = self.get(function) else {
@@ -2308,7 +2319,7 @@ impl Heap {
                 };
                 fields.module
             }
-        }
+        })
     }
 
     pub fn current_scope(&self) -> Id {
@@ -2436,13 +2447,42 @@ impl Heap {
         {
             return Ok(None);
         }
-        let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark(roots);
-        let next = self.identify_cycles(&mut cycles);
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        // If the roots keep every pending finalizer alive, no finalizer can run.
+        // Keep the visited links until the search ends so resetting a partial
+        // trace costs only the slots it touched, even after a large heap peak.
+        let mut remaining = self.ordinary_finalizers.len();
+        let mut visited = END;
+        let mut pending = MarkQueue {
+            slots: &self.slots,
+            next: END,
+            ordered: None,
+        };
+        self.mark_roots(roots, &mut pending);
+        while remaining != 0
+            && let Some(id) = pending.pop()
+        {
+            let slot = &self.slots[id as usize];
+            slot.trace.set(visited);
+            visited = id as usize;
+            if slot.finalization == Finalization::Pending {
+                remaining -= 1;
+            }
+            if remaining != 0 {
+                self.get(id).children(&mut pending);
+            }
         }
-        Ok(next)
+        let next = if remaining == 0 {
+            Ok(None)
+        } else {
+            CycleSet::new(self.slots.len()).map(|mut cycles| self.identify_cycles(&mut cycles))
+        };
+        while let Some(id) = pending.pop() {
+            self.slots[id as usize].trace.set(UNMARKED);
+        }
+        while visited != END {
+            visited = self.slots[visited].trace.replace(UNMARKED);
+        }
+        next
     }
 
     /// Track a disk writer in the activation whose locals or return value may own it.

@@ -50,6 +50,34 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         constructor: Intrinsic,
     ) -> Result<Expr, String> {
+        if matches!(
+            constructor,
+            Intrinsic::NamedHash("blake2b" | "blake2s") | Intrinsic::HashNew
+        ) && call.arguments.keywords.iter().any(|kw| {
+            matches!(
+                kw.arg.as_deref(),
+                Some(
+                    "digest_size"
+                        | "key"
+                        | "salt"
+                        | "person"
+                        | "fanout"
+                        | "depth"
+                        | "leaf_size"
+                        | "node_offset"
+                        | "node_depth"
+                        | "inner_size"
+                        | "last_node"
+                )
+            )
+        }) {
+            self.graph.needs_object_runtime.set(true);
+            return Err(self.classified_error(
+                FailureKind::ObjectOperation,
+                call,
+                "BLAKE2 parameter conversion requires native object dispatch",
+            ));
+        }
         let mut params = vec![
             parameter(
                 "data",
