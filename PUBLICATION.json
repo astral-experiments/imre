@@ -1,0 +1,48 @@
+{
+  "signer": "receipt-specific one-use Ed25519",
+  "spki_der_sha256": "7a5048ef4648c26d4bd00be297379d2bc2b2e3b52e063a7afd8f21a85c903a2f",
+  "covered_manifest": "SHA256SUMS",
+  "detached_signature": "SHA256SUMS.sig",
+  "archive": "io-buffer-writer-receipts.tar.gz",
+  "fresh_extraction_verified_payloads": 2174,
+  "files_to_publish": [
+    "PUBLICATION.json",
+    "SHA256SUMS",
+    "SHA256SUMS.sig",
+    "SIGNING.md",
+    "io-buffer-writer-receipts.tar.gz",
+    "receipt-archive.sha256",
+    "signer-ed25519.pem",
+    "verify-io-writer.py"
+  ],
+  "publish_files": {
+    "SHA256SUMS": {
+      "bytes": 272130,
+      "sha256": "dbf00b7032f5014671a53abb20a6bbca6f0166692be60c9b19052b5a89e0285f"
+    },
+    "SHA256SUMS.sig": {
+      "bytes": 64,
+      "sha256": "a8d89669ea638ce3d0beb741e119d0a96e10fc25b09f87df3d2465726b21b19c"
+    },
+    "SIGNING.md": {
+      "bytes": 843,
+      "sha256": "2135905d1f72d985da1089f5b99e21dae0a50def46e0b43d373a3a29c3276a93"
+    },
+    "io-buffer-writer-receipts.tar.gz": {
+      "bytes": 303857,
+      "sha256": "e9fcc37df271973efbebd745c606f5e75d22a65a0e2960b4e6d9aa4b2a04ad91"
+    },
+    "receipt-archive.sha256": {
+      "bytes": 99,
+      "sha256": "ec7f627769a3ce45e4a9fb620bfda426d18de280152b3668b2b0547ff9e7bbeb"
+    },
+    "signer-ed25519.pem": {
+      "bytes": 113,
+      "sha256": "60b8ed0e8ca8d48234d928b2eccbbc6e7103cc2de453f6385834b5be73fd2e2e"
+    },
+    "verify-io-writer.py": {
+      "bytes": 5473,
+      "sha256": "2c59a2ad7ab02a453631223a61feb046e484cd03b1543d9c129b65f73c598b9b"
+    }
+  }
+}
