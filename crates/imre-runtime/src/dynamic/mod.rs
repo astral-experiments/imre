@@ -125,6 +125,7 @@ pub(crate) struct Context {
     // The fatal handler borrows its descriptor while Python retains the destination.
     fault_file: Option<Id>,
     exit_callbacks: Vec<Id>,
+    finalizing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // The active stack roots suspended contexts while Context.run executes native code.
     contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
@@ -3020,6 +3021,7 @@ impl Context {
                     "addaudithook",
                     "getsizeof",
                     "getrecursionlimit",
+                    "is_finalizing",
                     "setrecursionlimit",
                     "_getframe",
                     "_getframemodulename",
