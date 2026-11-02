@@ -170,7 +170,7 @@ fn integer_field(ctx: &mut Context, id: Id, code: u8, width: usize) -> Result<u6
     let value = ctx
         .index_value(id)
         .and_then(|value| value.ok_or_else(|| format_error("required argument is not an integer")));
-    if matches!(code, b'i' | b'l') {
+    if matches!(code, b'b' | b'i' | b'l') {
         let max = i64::MAX >> ((8 - width) * 8);
         let min = !max;
         let number = match value {
