@@ -69,10 +69,12 @@ pub(in crate::dynamic::stdlib) enum StreamCodec {
 impl StreamCodec {
     fn lookup(encoding: &str) -> Result<Self> {
         let key = crate::objects::normalize_codec(encoding)?;
-        Ok(match key.as_str() {
-            "utf16" | "u16" | "utf_16" => Self::Utf16(0),
-            "utf_16_le" | "utf_16le" | "unicodelittleunmarked" => Self::Utf16(-1),
-            "utf_16_be" | "utf_16be" | "unicodebigunmarked" => Self::Utf16(1),
+        if matches!(key.as_str(), "utf16" | "u16" | "utf_16") {
+            return Ok(Self::Utf16(0));
+        }
+        Ok(match FixedUnicode::by_key(&key) {
+            Some(FixedUnicode::Utf16(Utf16Order::Little)) => Self::Utf16(-1),
+            Some(FixedUnicode::Utf16(Utf16Order::Big)) => Self::Utf16(1),
             _ => Self::Registered(Codec::by_key(&key, encoding)?),
         })
     }
