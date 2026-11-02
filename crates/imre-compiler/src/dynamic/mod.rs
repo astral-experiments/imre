@@ -626,6 +626,7 @@ pub(crate) fn compile(
         "genericpath",
         "platform",
         "re",
+        "signal",
         "stat",
         "zipimport",
     ] {

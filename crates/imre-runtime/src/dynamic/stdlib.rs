@@ -844,7 +844,7 @@ pub(super) fn call(
         let seconds = os::c_int(ctx, seconds)?;
         // SAFETY: alarm takes a value only. POSIX interprets the C int as unsigned.
         let remaining = unsafe { libc::alarm(seconds as libc::c_uint) };
-        return Ok(ctx.int(i64::from(remaining)));
+        return Ok(ctx.int(i64::from(remaining as libc::c_long)));
     }
     if name == "io.open_code" {
         return io::open_code(ctx, args, kwargs);

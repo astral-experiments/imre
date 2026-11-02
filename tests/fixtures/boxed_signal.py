@@ -1,5 +1,7 @@
 import _signal
-import signal
+import struct
+
+signal = __import__("".join(("sig", "nal")))
 
 
 class Delay:
@@ -25,3 +27,10 @@ finally:
     remaining = signal.alarm(0)
 assert 0 < remaining <= 300
 assert signal.alarm(0) == 0
+
+assert signal.alarm(-1) == 0
+remaining = signal.alarm(0)
+if struct.calcsize("l") == 4:
+    assert -(1 << 31) <= remaining < 0
+else:
+    assert (1 << 31) <= remaining <= (1 << 32) - 1
