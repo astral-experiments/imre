@@ -310,6 +310,27 @@ def check_object_reducer():
         else:
             raise AssertionError("legacy reduction accepted slots without a custom state hook")
 
+    from collections import UserString
+    text = UserString("saved")
+    text.items = [text]
+    copy_of_text = copy.deepcopy(text)
+    assert type(copy_of_text) is UserString and copy_of_text == text
+    assert copy_of_text.items is not text.items and copy_of_text.items[0] is copy_of_text
+
+    class Extended:
+        def __getnewargs__(self):
+            raise AssertionError("ordinary hook took precedence")
+
+        def __getnewargs_ex__(self):
+            return ("first",), {"keyword": "second"}
+
+    value = Extended()
+    value.__getnewargs_ex__ = lambda: ((), {})
+    constructor, args, state, listitems, dictitems = value.__reduce_ex__(4)
+    assert constructor is copyreg.__newobj_ex__
+    assert args == (Extended, ("first",), {"keyword": "second"})
+    assert state is value.__dict__ and listitems is None and dictitems is None
+
     plain = Plain({})
     for protocol in (2, 3, 4, 5):
         constructor, args, state, listitems, dictitems = plain.__reduce_ex__(protocol)
