@@ -57,12 +57,44 @@ class Distribution:
         return self.metadata['Name']
 
     @property
+    def files(self):
+        from importlib.metadata._files import distribution_files
+        return distribution_files(self)
+
+    @property
     def _normalized_name(self):
         return _normalize(self.name)
 
     @property
     def entry_points(self):
         return _dist_entry_points(self)
+
+    @property
+    def requires(self):
+        requirements = self.metadata.get_all('Requires-Dist')
+        if requirements:
+            return list(requirements)
+        text = self.read_text('requires.txt')
+        return None if text is None else list(self._deps_from_requires_text(text))
+
+    @staticmethod
+    def _deps_from_requires_text(text):
+        # Setuptools stores extras and environment markers in section headers.
+        marker = ''
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith('[') and line.endswith(']'):
+                extra, _, condition = line.strip('[]').partition(':')
+                if extra and condition:
+                    condition = '(' + condition + ')'
+                extra_marker = f'extra == "{extra}"' if extra else ''
+                conditions = ' and '.join(filter(None, (condition, extra_marker)))
+                marker = '; ' + conditions if conditions else ''
+            else:
+                # PEP 508 requires whitespace after a URL requirement.
+                yield line + (' ' if '@' in line else '') + marker
 
 
 class PathDistribution(Distribution):
@@ -89,12 +121,24 @@ class PathDistribution(Distribution):
 
 
 class _ZipDistribution(PathDistribution):
-    def __init__(self, archive, entry):
+    def __init__(self, archive, filename, entry):
         super().__init__(entry)
         self._archive = archive
+        self._filename = filename
+        self._members = None
 
     def locate_file(self, path):
-        raise NotImplementedError('distribution archive member paths')
+        from importlib.metadata._files import _ArchiveMember
+        if self._members is None:
+            # ZIP directories can be implied by their children.
+            names = set(_zip_names(self._archive))
+            for member in list(names):
+                parent = member.rstrip('/').rpartition('/')[0]
+                while parent and parent + '/' not in names:
+                    names.add(parent + '/')
+                    parent = parent.rpartition('/')[0]
+            self._members = names
+        return _ArchiveMember(self, _join('', path))
 
     def read_text(self, filename):
         key = _join(self._path, fspath(filename)) if filename else self._path
@@ -140,7 +184,7 @@ def _discover(context):
             continue
         for entry in _matching_entries(directory, entries, normalized, legacy):
             if archive is not None:
-                yield _ZipDistribution(archive, entry)
+                yield _ZipDistribution(archive, directory, entry)
             else:
                 yield Distribution.at(_join(directory, entry))
 
@@ -166,5 +210,21 @@ def metadata(distribution_name):
     return distribution(distribution_name).metadata
 
 
+def requires(distribution_name):
+    return distribution(distribution_name).requires
+
+
 def version(distribution_name):
     return distribution(distribution_name).version
+
+
+def files(distribution_name):
+    return distribution(distribution_name).files
+
+
+def __getattr__(name):
+    # Loading pathlib is only necessary for callers using installed file paths.
+    if name in ('PackagePath', 'FileHash'):
+        from importlib.metadata import _files
+        return getattr(_files, name)
+    raise AttributeError(f"module 'importlib.metadata' has no attribute {name!r}")

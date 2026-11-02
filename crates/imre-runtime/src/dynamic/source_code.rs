@@ -2537,7 +2537,7 @@ impl Context {
             ));
         }
         for &cell in cells {
-            if !matches!(self.heap.get(cell), Value::Cell(_) | Value::ClassCell(_)) {
+            if !matches!(self.heap.get(cell), Value::Cell(_)) {
                 return Err(Error::new(
                     "TypeError",
                     format!(

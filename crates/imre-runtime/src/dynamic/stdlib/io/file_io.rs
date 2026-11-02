@@ -399,7 +399,9 @@ pub(in crate::dynamic) fn open(
     let writing = mode.contains(['w', 'a', 'x']);
     let file = match mode {
         "r" | "rt" | "tr" => crate::objects::TextFile::open(path, 0)
-            .map(Value::TextFile)
+            .map(|file| {
+                Value::TextFile(crate::dynamic::value::BoxedTextFile { file, buffer: None })
+            })
             .map_err(Error::from),
         _ => files::BinaryFile::open(path, filename, mode, writer_capacity)
             .and_then(files::BinaryFile::into_value),

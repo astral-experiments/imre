@@ -201,7 +201,10 @@ impl Context {
         {
             return Ok(());
         }
-        let mut names: BTreeSet<String> = self.scope_data(scope).names.keys().cloned().collect();
+        let mut names: BTreeSet<String> = self
+            .scope_bindings(scope)
+            .map(|(name, _)| name.to_owned())
+            .collect();
         let bases = self
             .scope_data(scope)
             .class_namespace

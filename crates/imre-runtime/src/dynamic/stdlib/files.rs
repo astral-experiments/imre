@@ -10,6 +10,11 @@ use super::{
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
     Descriptor(super::io::BufferedFd),
+    // The original sys stream owns its encoder and the shared process binary buffer.
+    Standard {
+        file: crate::objects::TextFile,
+        path: Id,
+    },
     Reader {
         slot: RefCell<Option<ReadSource>>,
         path: Option<Id>,
@@ -73,6 +78,7 @@ impl BinaryFile {
                 path: Some(path), ..
             } => Some((*path, "rb")),
             Self::Writer { path, mode, .. } => Some((*path, mode)),
+            Self::Standard { path, .. } => Some((*path, "wb")),
             _ => None,
         }
     }
@@ -98,6 +104,7 @@ impl BinaryFile {
     pub(in crate::dynamic) fn closed(&self) -> bool {
         match self {
             Self::Descriptor(fd) => fd.closed(),
+            Self::Standard { file, .. } => file.closed(),
             Self::Reader { slot, .. } => slot.borrow().is_none(),
             Self::Writer { file, .. } => file.borrow().closed(),
         }
@@ -297,6 +304,9 @@ pub(super) fn call(
     let handle = handle.clone();
     let (slot, socket) = match handle.as_ref() {
         BinaryFile::Descriptor(file) => return file.call(ctx, first, name, &args[1..], kwargs),
+        BinaryFile::Standard { file, .. } => {
+            return standard_buffer_method(ctx, file, first, name, &args[1..], kwargs);
+        }
         BinaryFile::Reader { slot, path } => (slot, path.is_none()),
         BinaryFile::Writer { file, .. } => {
             if name == "file.seek" {
@@ -384,25 +394,7 @@ pub(super) fn call(
     if name == "file.seek" {
         let target = argument(args, 1)?;
         let value = option(args, 2, kwargs, "whence")?;
-        let whence = match value {
-            None => 0,
-            Some(value) => ctx
-                .index_integer(value)?
-                .to_i64()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new("OverflowError", "Python int too large to convert to C int")
-                })?,
-        };
-        if !matches!(
-            whence,
-            libc::SEEK_SET | libc::SEEK_CUR | libc::SEEK_END | libc::SEEK_DATA | libc::SEEK_HOLE
-        ) {
-            return Err(Error::new(
-                "ValueError",
-                format!("whence value {whence} unsupported"),
-            ));
-        }
+        let whence = buffered_whence(ctx, value)?;
         {
             let mut slot = slot.borrow_mut();
             let reader = slot
@@ -416,15 +408,7 @@ pub(super) fn call(
             }
         }
         // An offset conversion may advance or close this same stream.
-        let offset = ctx.index_integer(target)?.to_i64().ok_or_else(|| {
-            Error::new(
-                "ValueError",
-                format!(
-                    "cannot fit '{}' into an offset-sized integer",
-                    ctx.type_name(target)
-                ),
-            )
-        })?;
+        let offset = buffered_offset(ctx, target)?;
         let mut slot = slot.borrow_mut();
         let reader = slot
             .as_mut()
@@ -558,6 +542,129 @@ pub(super) fn call(
     }
 }
 
+fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
+    let whence = match value {
+        None => 0,
+        Some(value) => ctx
+            .index_integer(value)?
+            .to_i64()
+            .and_then(|n| i32::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new("OverflowError", "Python int too large to convert to C int")
+            })?,
+    };
+    if !matches!(
+        whence,
+        libc::SEEK_SET | libc::SEEK_CUR | libc::SEEK_END | libc::SEEK_DATA | libc::SEEK_HOLE
+    ) {
+        return Err(Error::new(
+            "ValueError",
+            format!("whence value {whence} unsupported"),
+        ));
+    }
+    Ok(whence)
+}
+
+fn buffered_offset(ctx: &mut Context, target: Id) -> Result<i64> {
+    ctx.index_integer(target)?.to_i64().ok_or_else(|| {
+        Error::new(
+            "ValueError",
+            format!(
+                "cannot fit '{}' into an offset-sized integer",
+                ctx.type_name(target)
+            ),
+        )
+    })
+}
+
+fn standard_buffer_method(
+    ctx: &mut Context,
+    file: &crate::objects::TextFile,
+    receiver: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if matches!(
+        (name, args),
+        ("file.close", []) | ("file.__exit__", [_, _, _])
+    ) {
+        if !file.closed() {
+            if file.standard_writer()? {
+                ctx.check_thread_reporter_mutable()?;
+            }
+            file.close_standard_buffer()?;
+        }
+        return Ok(NONE);
+    }
+    match (name, args) {
+        ("file.write", [value]) => {
+            let data = ctx.bytes_like(*value)?;
+            if file.closed() {
+                return Err(Error::new("ValueError", "write to closed file"));
+            }
+            crate::sys::write_standard_buffer(file.standard_writer()?, data)?;
+            Ok(ctx.int(data.len() as i64))
+        }
+        ("file.flush", []) => {
+            if file.closed() {
+                return Err(Error::new("ValueError", "flush of closed file"));
+            }
+            crate::sys::flush_standard_buffer(file.standard_writer()?).map_err(os_error)?;
+            Ok(NONE)
+        }
+        ("file.tell" | "file.seekable", []) => {
+            let position = crate::sys::standard_buffer_position(file.standard_writer()?, None);
+            if name == "file.seekable" {
+                Ok(crate::dynamic::builtins::boolean(position.is_ok()))
+            } else {
+                Ok(ctx.int(position?))
+            }
+        }
+        ("file.seek", [target] | [target, _]) => {
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "BufferedWriter.seek() takes no keyword arguments",
+                ));
+            }
+            let whence = buffered_whence(ctx, args.get(1).copied())?;
+            if file.closed() {
+                return Err(Error::new("ValueError", "seek of closed file"));
+            }
+            if crate::sys::standard_buffer_position(file.standard_writer()?, None).is_err() {
+                return Err(Error::new(
+                    "UnsupportedOperation",
+                    "File or stream is not seekable.",
+                ));
+            }
+            let offset = buffered_offset(ctx, *target)?;
+            let pos = crate::sys::standard_buffer_position(
+                file.standard_writer()?,
+                Some((offset, whence)),
+            )?;
+            Ok(ctx.int(pos))
+        }
+        ("file.fileno", []) => Ok(ctx.int(if file.standard_writer()? { 2 } else { 1 })),
+        ("file.writable" | "file.readable", []) => {
+            file.standard_writer()?;
+            Ok(crate::dynamic::builtins::boolean(name == "file.writable"))
+        }
+        ("file.isatty", []) => Ok(crate::dynamic::builtins::boolean(file.isatty()?)),
+        ("file.__enter__", []) => {
+            file.standard_writer()?;
+            Ok(receiver)
+        }
+        ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
+            Err(Error::new("UnsupportedOperation", "read"))
+        }
+        _ => Err(Error::new(
+            "TypeError",
+            format!("invalid arguments to {name}"),
+        )),
+    }
+}
+
 pub(super) fn text_method(
     ctx: &mut Context,
     name: &str,
@@ -629,7 +736,8 @@ pub(super) fn text_method(
             };
             Ok(ctx.int(count as i64))
         }
-        "isatty" => Ok(if file.isatty()? { TRUE } else { FALSE }),
+        "fileno" => Ok(ctx.int(i64::from(file.fileno()?))),
+        "isatty" => Ok(crate::dynamic::builtins::boolean(file.isatty()?)),
         "flush" => {
             file.flush()?;
             Ok(NONE)

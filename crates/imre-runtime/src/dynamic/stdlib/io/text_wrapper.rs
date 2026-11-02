@@ -480,6 +480,7 @@ pub(super) fn call(
     match name {
         "_CHUNK_SIZE" => return Ok(ctx.int(w.chunk_size.get() as i64)),
         "closed" | "name" => return ctx.lookup_attr(buffer, name),
+        "fileno" => return invoke(ctx, buffer, name, vec![]),
         "newlines" => return Ok(w.input.borrow().newlines(ctx)),
         "close" => {
             let closed = ctx.lookup_attr(buffer, "closed")?;
@@ -520,7 +521,7 @@ pub(super) fn call(
             w.drain(ctx, receiver)?;
             Wrapper::invoke_buffer(ctx, receiver, "flush", vec![])
         }
-        "readable" | "writable" | "seekable" | "isatty" | "fileno" => {
+        "readable" | "writable" | "seekable" | "isatty" => {
             invoke(ctx, buffer, name, vec![])
         }
         "write" => w.write(ctx, receiver, args[0]),

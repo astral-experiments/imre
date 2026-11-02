@@ -246,6 +246,18 @@ def current():
     exec("class Loaded(TypedDict, total=False): pass", namespace)
     assert namespace["Loaded"].__total__ is False
 
+    import warnings
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always", DeprecationWarning)
+        omitted = TypedDict("Omitted")
+        explicit_none = TypedDict("ExplicitNone", None)
+        explicit_empty = TypedDict("ExplicitEmpty", {})
+    assert omitted.__annotations__ == explicit_none.__annotations__ == explicit_empty.__annotations__ == {}
+    omitted_warning, none_warning = captured
+    assert omitted_warning.category is none_warning.category is DeprecationWarning
+    assert str(omitted_warning.message).startswith("Failing to pass a value for the 'fields' parameter")
+    assert str(none_warning.message).startswith("Passing `None` as the 'fields' parameter")
+
     Draft = TypedDict("Draft", [("title", str)], total=False)
     assert is_typeddict(Film) and is_typeddict(tp=Draft)
     assert type(Film) is type(Draft) and type(Film).__name__ == "_TypedDictMeta"

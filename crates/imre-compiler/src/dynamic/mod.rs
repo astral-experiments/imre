@@ -24,6 +24,7 @@ struct Imports {
     uses_import_builtin: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
+    opcode_names: HashSet<String>,
     signal_names: HashMap<String, String>,
     unittest_names: HashSet<String>,
     boxed_mock_names: HashSet<String>,
@@ -109,6 +110,8 @@ impl Imports {
                     | "atexit"
                     | "json"
                     | "json.encoder"
+                    | "opcode"
+                    | "_opcode_metadata"
                     | "sysconfig"
                     | "platform"
                     | "keyword"
@@ -122,6 +125,15 @@ impl Imports {
             self.runtime_imports = true;
         }
     }
+}
+
+// Keep the two typed specialization constants on their existing route.
+fn boxed_opcode(name: &str) -> bool {
+    use crate::modules::{Binding, Intrinsic, IntrinsicModule};
+    matches!(
+        IntrinsicModule::Opcode.symbol(name),
+        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_)))
+    )
 }
 
 fn boxed_sys_export(name: &str) -> bool {
@@ -212,6 +224,7 @@ impl<'a> Visitor<'a> for Imports {
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
+                        "_opcode" => self.opcode_names.insert(bound.to_string()),
                         "signal" | "_signal" if cfg!(unix) => self
                             .signal_names
                             .insert(bound.to_string(), name.to_owned())
@@ -255,6 +268,7 @@ impl<'a> Visitor<'a> for Imports {
                     }
                     if imp.level == 0
                         && ((name == "operator" && boxed_operator(suffix))
+                            || (name == "_opcode" && (boxed_opcode(suffix) || suffix == "*"))
                             || (name == "sys" && boxed_sys_export(suffix))
                             || (name == "string" && suffix == "templatelib"))
                     {
@@ -336,6 +350,8 @@ impl<'a> Visitor<'a> for Imports {
             && let Expr::Name(module) = &*attr.value
             && ((boxed_operator(attr.attr.as_str())
                 && self.operator_names.contains(module.id.as_str()))
+                || (boxed_opcode(attr.attr.as_str())
+                    && self.opcode_names.contains(module.id.as_str()))
                 || self
                     .signal_names
                     .get(module.id.as_str())
@@ -439,6 +455,7 @@ pub(crate) fn compile(
             "site",
             "importlib",
             "json",
+            "opcode",
             "operator",
             "struct",
             "traceback",
@@ -534,7 +551,21 @@ pub(crate) fn compile(
     let mut seen = HashSet::new();
     let mut frozen_imports = Imports::default();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
-    while let Some((owner, package, imports)) = work.pop_front() {
+    let mut late_pprint = false;
+    let mut bundled_only = false;
+    loop {
+        let (owner, package, imports) = if let Some(next) = work.pop_front() {
+            next
+        } else if late_pprint && !seen.contains("pprint") {
+            // A computed import may request pprint. Collect its bundled dependencies
+            // after the file graph, without parsing unrelated local modules.
+            bundled_only = true;
+            let mut imports = Imports::default();
+            imports.names.push((0, "pprint".to_owned()));
+            (String::new(), false, imports)
+        } else {
+            break;
+        };
         if !options.runtime_imports
             && !registered_imports.called
             && imports.needs_typed_machinery()
@@ -551,6 +582,7 @@ pub(crate) fn compile(
         let mut names = imports.names;
         // A late import of native pickle also needs its bundled reader and dependencies.
         if imports.uses_import_builtin {
+            late_pprint = true;
             names.push((0, "pickle".to_owned()));
         }
         // Importing array registers its type with MutableSequence. A runtime
@@ -616,6 +648,9 @@ pub(crate) fn compile(
                     sources.push((prefix.clone(), path, source.to_owned()));
                     work.push_back((prefix.clone(), package, imports));
                 }
+                if bundled_only {
+                    continue;
+                }
                 for root in &roots {
                     let stem = root.join(prefix.replace('.', "/"));
                     let file = stem.with_extension("py");
@@ -676,10 +711,11 @@ pub(crate) fn compile(
         Path::new(bundled_root).join("io.py"),
         include_str!("../../stdlib/io.py").into(),
     ));
-    // The fixed list has only native dependencies and may be selected by name at runtime.
+    // These modules and their dependencies must be available when selected by name at runtime.
     for name in [
         "__future__",
         "__hello__",
+        "_opcode_metadata",
         "_tokenize",
         "abc",
         "annotationlib",
@@ -694,12 +730,14 @@ pub(crate) fn compile(
         "json.decoder",
         "json.encoder",
         "json.scanner",
+        "opcode",
         "platform",
         "re",
         "signal",
         "stat",
         "string",
         "string.templatelib",
+        "token",
         "zipimport",
     ]
     .into_iter()

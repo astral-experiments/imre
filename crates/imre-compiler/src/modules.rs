@@ -99,6 +99,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/zipimport_source.py"),
             ),
         )),
+        "importlib.metadata._files" => Some((
+            "importlib/metadata/_files.py",
+            include_str!("../stdlib/importlib/metadata_files.py"),
+        )),
         "importlib.metadata._adapters" => Some((
             "importlib/metadata/_adapters.py",
             include_str!("../stdlib/importlib/metadata_adapters.py"),
@@ -135,6 +139,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
+        "opcode" => Some(("opcode.py", include_str!("../stdlib/opcode.py"))),
+        "_opcode_metadata" => Some((
+            "_opcode_metadata.py",
+            include_str!("../stdlib/_opcode_metadata.py"),
+        )),
         "warnings" => Some((
             "warnings.py",
             include_str!(
@@ -151,7 +160,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
         "py_compile" => Some(("py_compile.py", include_str!("../stdlib/py_compile.py"))),
-        // Based on CPython 3.14.5 Lib/pprint.py. See stdlib/docstrings/LICENSE.
+        // CPython 3.14.5 Lib/pprint.py. See stdlib/docstrings/LICENSE.
         "pprint" => Some(("pprint.py", include_str!("../stdlib/pprint.py"))),
         "difflib" => Some((
             "difflib.py",
@@ -191,21 +200,31 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
+        "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
         "collections" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("collections/__init__.py", SOURCE.get_or_init(|| {
-                // The three user container classes form the tail of the pinned CPython module.
-                let (_, wrappers) = include_str!(
+                const UPSTREAM: &str = include_str!(
                     "../../../benchmarks/cpython_stdlib/full/collections/upstream/Lib/collections/__init__.py"
-                )
-                .split_once("### UserDict\n")
-                .expect("CPython 3.14.5 UserDict section");
+                );
+                let (_, wrappers) = UPSTREAM
+                    .split_once("### UserDict\n")
+                    .expect("CPython 3.14.5 UserDict section");
+                let (ordered, _) = UPSTREAM
+                    .split_once("### OrderedDict\n")
+                    .and_then(|(_, tail)| tail.split_once("### namedtuple\n"))
+                    .expect("CPython 3.14.5 OrderedDict section");
+                // Define the Python class in the fresh module's globals and let the
+                // upstream module select _collections.OrderedDict when it is available.
                 concat!(
                     include_str!("../stdlib/collections/__init__.py"),
                     "\n",
                     include_str!("../stdlib/collections/namedtuple_repr.py"),
+                    "\n",
+                    include_str!("../stdlib/collections/recursive_repr.py"),
                     "\nimport _collections_abc\nimport sys as _sys\n",
-                ).to_owned() + wrappers
+                    "from _weakref import proxy as _proxy\nfrom operator import eq as _eq\n",
+                ).to_owned() + ordered + wrappers
             })))
         }
         // CPython 3.14.5 Lib/configparser.py.
@@ -261,9 +280,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "logging/config.py",
             include_str!("../stdlib/logging/config.py"),
         )),
+        // CPython 3.14.5 Lib/logging/handlers.py.
         "logging.handlers" => Some((
             "logging/handlers.py",
-            include_str!("../stdlib/logging/buffering.py"),
+            include_str!("../stdlib/logging/boxed_handlers.py"),
         )),
         "platform" => Some((
             "platform.py",
@@ -1194,6 +1214,9 @@ impl IntrinsicModule {
             (Self::ImportlibResources, "files") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.files")
             }
+            (Self::ImportlibResources, "path") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.path")
+            }
             (Self::ImportlibResources, "read_binary") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.read_binary")
             }
@@ -1203,11 +1226,23 @@ impl IntrinsicModule {
             (Self::ImportlibMetadata, "Distribution") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.Distribution")
             }
+            (Self::ImportlibMetadata, "PackagePath") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.PackagePath")
+            }
+            (Self::ImportlibMetadata, "FileHash") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.FileHash")
+            }
+            (Self::ImportlibMetadata, "files") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.files")
+            }
             (Self::ImportlibMetadata, "PathDistribution") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.PathDistribution")
             }
             (Self::ImportlibMetadata, "distributions") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.distributions")
+            }
+            (Self::ImportlibMetadata, "requires") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.requires")
             }
             (Self::ImportlibMetadata, "metadata") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.metadata")
@@ -1359,6 +1394,33 @@ impl IntrinsicModule {
             // Native executables have no adaptive bytecode interpreter.
             (Self::Opcode, "ENABLE_SPECIALIZATION" | "ENABLE_SPECIALIZATION_FT") => {
                 Intrinsic::IntConstant(0)
+            }
+            (Self::Opcode, "stack_effect") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.stack_effect")
+            }
+            (Self::Opcode, "is_valid") => Intrinsic::ObjectRuntimeExport("_opcode.is_valid"),
+            (Self::Opcode, "has_arg") => Intrinsic::ObjectRuntimeExport("_opcode.has_arg"),
+            (Self::Opcode, "has_const") => Intrinsic::ObjectRuntimeExport("_opcode.has_const"),
+            (Self::Opcode, "has_name") => Intrinsic::ObjectRuntimeExport("_opcode.has_name"),
+            (Self::Opcode, "has_jump") => Intrinsic::ObjectRuntimeExport("_opcode.has_jump"),
+            (Self::Opcode, "has_free") => Intrinsic::ObjectRuntimeExport("_opcode.has_free"),
+            (Self::Opcode, "has_local") => Intrinsic::ObjectRuntimeExport("_opcode.has_local"),
+            (Self::Opcode, "has_exc") => Intrinsic::ObjectRuntimeExport("_opcode.has_exc"),
+            (Self::Opcode, "get_specialization_stats") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.get_specialization_stats")
+            }
+            (Self::Opcode, "get_nb_ops") => Intrinsic::ObjectRuntimeExport("_opcode.get_nb_ops"),
+            (Self::Opcode, "get_intrinsic1_descs") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.get_intrinsic1_descs")
+            }
+            (Self::Opcode, "get_intrinsic2_descs") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.get_intrinsic2_descs")
+            }
+            (Self::Opcode, "get_special_method_names") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.get_special_method_names")
+            }
+            (Self::Opcode, "get_executor") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.get_executor")
             }
             (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
             (Self::Unidiff, "PatchedFile") => Intrinsic::PatchedFile,
@@ -2313,7 +2375,10 @@ impl SearchRoots {
 
 /// These public names are supplied by the boxed unittest.mock module.
 pub(crate) fn boxed_mock_export(name: &str) -> bool {
-    matches!(name, "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal")
+    matches!(
+        name,
+        "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal" | "call" | "_Call" | "_CallList"
+    )
 }
 
 impl SourceModule {
@@ -4530,6 +4595,8 @@ impl<'a> Loader<'a> {
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
+            // token initializes its public tables from the live module globals.
+            self.needs_object_imports |= name == "token";
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;

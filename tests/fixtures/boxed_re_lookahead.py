@@ -35,3 +35,29 @@ def current():
             pass
         else:
             raise AssertionError(pattern)
+
+    assert re.fullmatch(r"(?=(a|ab))\1c", "abc") is None
+    assert re.fullmatch(r"(?=(a+))\1", "aaa").groups() == ("aaa",)
+    assert re.fullmatch(r"(?=a)(a|ab)\1c", "ababc").groups() == ("ab",)
+    assert re.fullmatch(r"(?=(?P<π>a))(?P=π)(b)\2\1", "abba").groups() == ("a", "b")
+    assert re.fullmatch(r"(?=(?P<g>a)?)(?(g)a|b)", "b").groups() == (None,)
+    assert re.fullmatch(r"(?=(a?))(?(1)b|c)", "b").groups() == ("",)
+    assert re.fullmatch(r"(a)b(?=(?(2)x|c))(c)", "abc").groups() == ("a", "c")
+    assert re.fullmatch(r"(?=b)(?:(?(1)a|b)(a)?)+", "baaa").group(1) == "a"
+    assert re.match(r"(?=(?(2)(a)|(b)))(c)?", "b").groups() == (None, "b", None)
+    for invalid in (r"(?=a)(a\1)", r"(?=a)\1(a)", r"(?=a)(?(2)x|a)(a)",
+                    r"(?=a)(?P=x)(?P<x>a)", r"(?=a)(a)(?(1)a|b|c)"):
+        try:
+            re.compile(invalid)
+        except re.PatternError:
+            pass
+        else:
+            raise AssertionError(invalid)
+
+    # Python classifies marks, connector punctuation other than _, and join controls as non-word.
+    boundary = re.compile(r"\b(?=(.))")
+    assert [(m.start(), m.group(1)) for m in boundary.finditer("é\u0301中\u203f_")] == [
+        (0, "é"), (1, "\u0301"), (2, "中"), (3, "\u203f"), (4, "_")]
+    assert boundary.search("a中", 1) is None
+    assert re.fullmatch(r"\B(?=$)", "").span() == (0, 0)
+    assert [m.start() for m in re.finditer(r"\B(?=.)", "a_\u200d!")] == [1, 3]

@@ -1,6 +1,6 @@
 //! Buffer a selected FileIO descriptor without changing its identity or ownership.
 use std::cell::RefCell;
-use std::io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::fd::RawFd;
 use std::rc::Rc;
 
@@ -8,6 +8,7 @@ use super::super::{builtins, files, os_error};
 use super::file_io::RawFile;
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{BoxedPipe, Random};
+use crate::{BinaryOutput, BlockedWrite};
 
 struct Descriptor {
     handle: Rc<RawFile>,
@@ -148,9 +149,23 @@ fn read_bytes(reader: &mut BufReader<Descriptor>, size: i64) -> Result<Option<Ve
     }
 }
 
+fn buffer_error(ctx: &mut Context, error: io::Error) -> Error {
+    let Some(blocked) = error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<BlockedWrite>())
+    else {
+        return os_error(error);
+    };
+    let errno = ctx.int(i64::from(blocked.errno));
+    let message = ctx.text(BlockedWrite::DESCRIPTION);
+    let accepted = ctx.int(blocked.accepted as i64);
+    ctx.os_exception("BlockingIOError", None, &[errno, message, accepted], None)
+        .unwrap_or_else(|error| error)
+}
+
 enum Buffer {
     Reader(BufReader<Descriptor>),
-    Writer(BufWriter<Descriptor>),
+    Writer(BinaryOutput<Descriptor>),
     Random(Random<Descriptor>),
     // The process engine allocated this buffer before launching the child.
     Pipe(BoxedPipe),
@@ -166,7 +181,7 @@ impl Buffer {
                 .get_mut()
                 .stream_position()?
                 .saturating_sub(r.buffer().len() as u64)),
-            Self::Writer(w) => Ok(w.get_mut().stream_position()? + w.buffer().len() as u64),
+            Self::Writer(w) => Ok(w.inner.stream_position()? + (w.buffer.len() - w.written) as u64),
         }
     }
 
@@ -175,7 +190,10 @@ impl Buffer {
             Self::Random(file) => return file.seek(position),
             Self::Pipe(_) => return Err(io::Error::from_raw_os_error(libc::ESPIPE)),
             Self::Reader(r) => r,
-            Self::Writer(w) => return w.seek(position),
+            Self::Writer(w) => {
+                w.flush()?;
+                return w.inner.seek(position);
+            }
         };
         let unread = reader.buffer().len() as i128;
         if unread > 0 && !matches!(position, SeekFrom::End(_)) {
@@ -221,7 +239,10 @@ impl BufferedFd {
             let _ = descriptor.stream_position();
             Buffer::Reader(BufReader::with_capacity(capacity, descriptor))
         } else {
-            Buffer::Writer(BufWriter::with_capacity(capacity, descriptor))
+            Buffer::Writer(BinaryOutput::with_buffer(
+                Vec::with_capacity(capacity),
+                descriptor,
+            ))
         };
         Self {
             raw,
@@ -269,19 +290,17 @@ impl BufferedFd {
         self.handle.live_fd().is_none()
     }
 
-    fn close(&self) -> Result<()> {
+    fn close(&self, ctx: Option<&mut Context>) -> Result<()> {
         let pending = match self.buffer.borrow_mut().take() {
             Some(Buffer::Pipe(pipe)) => pipe.close().map_err(Into::into),
             Some(Buffer::Random(mut file)) if !self.closed() => file.flush().map_err(os_error),
-            Some(Buffer::Writer(mut writer)) => {
-                let flushed = if self.closed() {
-                    Ok(())
+            Some(Buffer::Writer(mut writer)) if !self.closed() => writer.flush().map_err(|error| {
+                if let Some(ctx) = ctx {
+                    buffer_error(ctx, error)
                 } else {
-                    writer.flush().map_err(os_error)
-                };
-                let _ = writer.into_parts(); // A failed flush must not be retried by BufWriter::drop.
-                flushed
-            }
+                    os_error(error)
+                }
+            }),
             _ => Ok(()),
         };
         self.handle.close().and(pending)
@@ -298,7 +317,7 @@ impl BufferedFd {
         let name = name.strip_prefix("file.").unwrap_or(name);
         if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
             super::native_reader::check_raw(ctx, receiver, self, name)?;
-            self.close()?;
+            self.close(Some(ctx))?;
             return Ok(NONE);
         }
         let closed = || {
@@ -367,18 +386,19 @@ impl BufferedFd {
             "flush" => {
                 match buffer {
                     Buffer::Random(file) => file.flush().map_err(os_error)?,
-                    Buffer::Writer(w) => w.flush().map_err(os_error)?,
+                    Buffer::Writer(w) => w.flush().map_err(|err| buffer_error(ctx, err))?,
                     Buffer::Pipe(pipe) => pipe.flush()?,
                     Buffer::Reader(_) => {}
                 }
                 Ok(NONE)
             }
             "tell" => Ok(ctx.int(buffer.position().map_err(os_error)? as i64)),
-            "seek" => Ok(ctx.int(
-                buffer
+            "seek" => {
+                let pos = buffer
                     .seek(seek.expect("validated seek"))
-                    .map_err(os_error)? as i64,
-            )),
+                    .map_err(|err| buffer_error(ctx, err))?;
+                Ok(ctx.int(pos as i64))
+            }
             "read" | "read1" | "readline" => {
                 if !self.reading {
                     return Err(Error::new("UnsupportedOperation", "read"));
@@ -470,13 +490,14 @@ impl BufferedFd {
                     return Err(Error::new("UnsupportedOperation", "write"));
                 }
                 let data = ctx.bytes_like(args[0])?;
+                let count = data.len();
                 match buffer {
                     Buffer::Pipe(pipe) => pipe.write(data)?,
-                    Buffer::Writer(w) => w.write_all(data).map_err(os_error)?,
+                    Buffer::Writer(w) => w.write_all(data).map_err(|err| buffer_error(ctx, err))?,
                     Buffer::Random(file) => file.write(data).map_err(os_error)?,
                     Buffer::Reader(_) => unreachable!(),
                 }
-                Ok(ctx.int(data.len() as i64))
+                Ok(ctx.int(count as i64))
             }
             _ => Err(Error::new(
                 "TypeError",
@@ -488,6 +509,6 @@ impl BufferedFd {
 
 impl Drop for BufferedFd {
     fn drop(&mut self) {
-        let _ = self.close();
+        let _ = self.close(None);
     }
 }

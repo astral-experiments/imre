@@ -173,6 +173,38 @@ impl Context {
                 builtins::call(self, "len", &[a], &[])
             }
             "match_sequence_length" => Ok(NONE),
+            "builtin" => {
+                let name = copy_label(self.str_value(a)?)?;
+                Ok(self.builtin(&name))
+            }
+            "annotation_scope" => Ok(self
+                .scope_data(a)
+                .parent
+                .expect("annotation function scope")),
+            "lookup_annotation_global"
+            | "lookup_class_annotation"
+            | "lookup_class_annotation_global" => {
+                let name = copy_label(self.str_value(b)?)?;
+                if op != "lookup_annotation_global" {
+                    if let Some(&cell) = self.scope_data(a).closure.cells.get("__classdict__") {
+                        let Value::Cell(Some(mapping)) = *self.heap.get(cell) else {
+                            return Err(self.missing_binding(a, a, "__classdict__"));
+                        };
+                        match self.load_exec_name(mapping, &name) {
+                            Err(error) if self.is_builtin_error(&error, "KeyError") => {}
+                            value => return value,
+                        }
+                    } else if let Some(value) = self.scope_name(a, &name) {
+                        return Ok(value);
+                    }
+                }
+                let scope = if op == "lookup_class_annotation" {
+                    a
+                } else {
+                    self.root_scope(a)
+                };
+                self.lookup(scope, &name)
+            }
             "lookup" | "lookup_class_local" => {
                 let name = copy_label(self.str_value(b)?)?;
                 if op == "lookup_class_local" {
@@ -364,7 +396,7 @@ impl Context {
                 // body and methods close over the parameter scope without that dictionary.
                 let module = self.scope_data(a).module.clone();
                 let scope = self.scope(&module, Some(a));
-                let namespace = self.class_dictionary(b);
+                let namespace = self.class_namespace_dict(b, true);
                 let Value::Scope(frame) = self.heap.get_mut(scope) else {
                     unreachable!()
                 };
@@ -1094,15 +1126,40 @@ impl Context {
             .ok()
             .and_then(|v| serde_json::from_str(v).ok())
             .unwrap_or_default();
+        let annotation_class = metadata["annotation_class"] == true;
+        let mut read_class = false;
         let reads = metadata["scope_reads"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|v| v.as_str());
+            .filter_map(|v| v.as_str())
+            .filter(|name| {
+                if annotation_class && *name == "__class__" {
+                    read_class = true;
+                    false
+                } else {
+                    !annotation_class || *name != "__classdict__"
+                }
+            });
+        let lexical = if annotation_class {
+            self.scope_data(scope).parent.unwrap_or(scope)
+        } else {
+            scope
+        };
         let freevars = (metadata["scope_complete"].as_bool() == Some(true)
             && metadata["class_cell"].as_bool() != Some(true))
-        .then(|| self.enclosing_freevars(scope, reads))
-        .flatten();
+        .then(|| self.enclosing_freevars(lexical, reads))
+        .flatten()
+        .map(|mut freevars| {
+            if annotation_class {
+                freevars.push("__classdict__".to_owned());
+                if read_class {
+                    freevars.push("__class__".to_owned());
+                }
+                freevars.sort();
+            }
+            freevars
+        });
         let closure_supported = freevars.is_some();
         let freevars = freevars.unwrap_or_default();
         self.alloc(Value::Code(value::CodeObject {
@@ -1138,12 +1195,14 @@ impl Context {
     ) -> Id {
         let owner = self.scope_data(scope);
         let class_cell = owner.class_cell;
-        let scope =
-            if owner.exec_locals.is_some() || (owner.class_body.is_some() && !annotation_scope) {
-                owner.parent.unwrap_or(scope)
-            } else {
-                scope
-            };
+        let scope = if owner.exec_locals.is_some()
+            || ((owner.class_body.is_some() || owner.class_namespace.is_some())
+                && !annotation_scope)
+        {
+            owner.parent.unwrap_or(scope)
+        } else {
+            scope
+        };
         let fields =
             super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
         let signature = self.code_object(code).parameters;
@@ -1199,6 +1258,16 @@ impl Context {
         let names = self.code_object(code).freevars.clone();
         let mut cells = Vec::new();
         for name in &names {
+            if signature["annotation_class"] == true {
+                if name == "__classdict__" {
+                    cells.push(self.class_annotation_dict_cell(scope));
+                    continue;
+                }
+                if name == "__class__" {
+                    cells.push(class_cell.expect("class annotation scope"));
+                    continue;
+                }
+            }
             let mut cursor = scope;
             loop {
                 let frame = self.scope_data(cursor);
@@ -1223,7 +1292,7 @@ impl Context {
                 cursor = frame.parent.expect("free variable has enclosing scope");
             }
         }
-        let scope = if !annotation_scope && self.code_object(code).closure_supported {
+        let scope = if self.code_object(code).closure_supported {
             let mut globals = scope;
             while let Some(parent) = self.scope_data(globals).parent {
                 globals = parent;
