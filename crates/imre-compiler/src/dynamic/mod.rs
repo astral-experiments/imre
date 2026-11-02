@@ -111,6 +111,7 @@ impl Imports {
                 "_imp"
                     | "_hashlib"
                     | "ssl"
+                    | "_ssl"
                     | "atexit"
                     | "faulthandler"
                     | "code"
