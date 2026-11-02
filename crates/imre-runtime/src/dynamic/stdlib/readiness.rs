@@ -216,6 +216,72 @@ impl Selector {
         roots.extend([self.keys, self.mapping]);
     }
 
+    /// Resolve Python keys after the native wait releases the selector borrow; int subclasses may compare in Python.
+    fn select(ctx: &mut Context, handle: &RefCell<Self>, timeout: Option<Duration>) -> Result<Id> {
+        let keys = handle.borrow().keys;
+        if handle.borrow().poll.is_none() {
+            let mut sets = SelectFds::new();
+            for (index, &(fd, entry)) in ctx.dict_entries(keys).unwrap().iter().enumerate() {
+                let key = Registration::unpack(ctx, entry);
+                let fd = native_fd(ctx, fd)?;
+                if key.interests & READ != 0 {
+                    sets.insert(0, index, fd)?;
+                }
+                if key.interests & WRITE != 0 {
+                    sets.insert(1, index, fd)?;
+                }
+            }
+            let mut results = Vec::new();
+            if sets.wait(timeout)? {
+                for i in 0..ctx.dict_entries(keys).unwrap().len() {
+                    let (fd, entry) = ctx.dict_entries(keys).unwrap()[i];
+                    let key = Registration::unpack(ctx, entry);
+                    let fd = native_fd(ctx, fd)?;
+                    let events = (i64::from(sets.ready(0, fd)) * READ)
+                        | (i64::from(sets.ready(1, fd)) * WRITE);
+                    if events != 0 {
+                        results
+                            .try_reserve(1)
+                            .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+                        let mask = ctx.int(events);
+                        results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
+                    }
+                }
+            }
+            return Ok(ctx.alloc(Value::List(results)));
+        }
+        let events = {
+            let mut selector = handle.borrow_mut();
+            let (count, ready) = selector.poll.as_mut().unwrap().ready(timeout)?;
+            let mut events = Vec::new();
+            events
+                .try_reserve(count)
+                .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+            events.extend(ready);
+            events
+        };
+        let mut results = Vec::new();
+        results
+            .try_reserve(events.len())
+            .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+        for (fd, flags) in events {
+            let fd = ctx.int(i64::from(fd));
+            let Some(key) = registration(ctx, keys, fd)? else {
+                continue;
+            };
+            let mut ready = 0;
+            if flags & !(libc::POLLIN as u16) != 0 {
+                ready |= WRITE;
+            }
+            if flags & !(libc::POLLOUT as u16) != 0 {
+                ready |= READ;
+            }
+            let mask = ctx.int(ready & key.interests);
+            results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
+        }
+        Ok(ctx.alloc(Value::List(results)))
+    }
+
     pub(in crate::dynamic) fn class_name(&self) -> &'static str {
         if self.poll.is_some() {
             "selectors.PollSelector"
@@ -223,72 +289,6 @@ impl Selector {
             "selectors.SelectSelector"
         }
     }
-}
-
-/// Resolve Python keys after the native wait releases the selector borrow; int subclasses may compare in Python.
-fn select(ctx: &mut Context, handle: &RefCell<Selector>, timeout: Option<Duration>) -> Result<Id> {
-    let keys = handle.borrow().keys;
-    if handle.borrow().poll.is_none() {
-        let mut sets = SelectFds::new();
-        for (index, &(fd, entry)) in ctx.dict_entries(keys).unwrap().iter().enumerate() {
-            let key = Registration::unpack(ctx, entry);
-            let fd = native_fd(ctx, fd)?;
-            if key.interests & READ != 0 {
-                sets.insert(0, index, fd)?;
-            }
-            if key.interests & WRITE != 0 {
-                sets.insert(1, index, fd)?;
-            }
-        }
-        let mut results = Vec::new();
-        if sets.wait(timeout)? {
-            for i in 0..ctx.dict_entries(keys).unwrap().len() {
-                let (fd, entry) = ctx.dict_entries(keys).unwrap()[i];
-                let key = Registration::unpack(ctx, entry);
-                let fd = native_fd(ctx, fd)?;
-                let events =
-                    (i64::from(sets.ready(0, fd)) * READ) | (i64::from(sets.ready(1, fd)) * WRITE);
-                if events != 0 {
-                    results
-                        .try_reserve(1)
-                        .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-                    let mask = ctx.int(events);
-                    results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
-                }
-            }
-        }
-        return Ok(ctx.alloc(Value::List(results)));
-    }
-    let events = {
-        let mut selector = handle.borrow_mut();
-        let (count, ready) = selector.poll.as_mut().unwrap().ready(timeout)?;
-        let mut events = Vec::new();
-        events
-            .try_reserve(count)
-            .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-        events.extend(ready);
-        events
-    };
-    let mut results = Vec::new();
-    results
-        .try_reserve(events.len())
-        .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-    for (fd, flags) in events {
-        let fd = ctx.int(i64::from(fd));
-        let Some(key) = registration(ctx, keys, fd)? else {
-            continue;
-        };
-        let mut ready = 0;
-        if flags & !(libc::POLLIN as u16) != 0 {
-            ready |= WRITE;
-        }
-        if flags & !(libc::POLLOUT as u16) != 0 {
-            ready |= READ;
-        }
-        let mask = ctx.int(ready & key.interests);
-        results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
-    }
-    Ok(ctx.alloc(Value::List(results)))
 }
 
 fn close(ctx: &mut Context, handle: &RefCell<Selector>) -> Result<Id> {
@@ -505,7 +505,7 @@ pub(super) fn call(
             let [seconds] = builtins::bind(name, args, kwargs, ["timeout"])?;
             let poll = handle.borrow().poll.is_some();
             let timeout = timeout(ctx, seconds.unwrap_or(NONE), poll)?;
-            select(ctx, &handle, timeout)
+            Selector::select(ctx, &handle, timeout)
         }
         "__enter__" | "close" => {
             builtins::bind(name, args, kwargs, [])?;
