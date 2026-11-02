@@ -6806,6 +6806,11 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::StructCyclePrefix => self.call(
+                "imre_struct_cycle_prefix",
+                Type::Int,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::ListReserveRange => {
                 let count = self.index_word(&args[4].value, true);
                 let name = if args[0].value.ty == Type::ByteOutput {
@@ -9665,6 +9670,7 @@ declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
 declare ptr @imre_struct_list_new(ptr)
 declare i1 @imre_struct_try_fill_empty(ptr, ptr, ptr, i64)
+declare i64 @imre_struct_cycle_prefix(ptr, i64, i64)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
 declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare ptr @imre_struct_row(ptr, i64) nounwind

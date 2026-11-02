@@ -595,7 +595,7 @@ impl Builtin {
                 Contract::new(true, PreservesOwners)
             }
             Self::SortByComparator => Contract::new(true, Unknown),
-            Self::ListReserveRange => Contract::new(false, PreservesOwners),
+            Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)
             | Self::BinaryRead
@@ -826,6 +826,9 @@ impl Builtin {
                 &[Type::ListInt, Type::Int, Type::Int, Type::Int],
                 Type::Bool,
             ),
+            Self::StructCyclePrefix => matches!(args, [list, period, limit]
+                if types.element(list.ty).is_some_and(|ty| types.is_value_struct(ty))
+                    && period.ty == Type::Int && limit.ty == Type::Int && result == Type::Int),
             Self::ListReserveRange => {
                 signature(
                     &[Type::ListInt, Type::Int, Type::Int, Type::Int, Type::Int],

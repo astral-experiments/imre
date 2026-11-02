@@ -21,6 +21,11 @@ pub(super) fn float_key(word: usize) -> usize {
 
 enum RowStorage {
     Packed(Vec<usize>),
+    /// The initialized prefix contains mask + 1 scalar rows and can be indexed modulo its length.
+    Periodic {
+        words: Vec<usize>,
+        mask: usize,
+    },
     Repeated(OwnedWord, Overrides),
 }
 
@@ -67,6 +72,7 @@ impl Rows {
     fn direct_view(&self) -> Option<(*const usize, usize)> {
         match &self.storage {
             RowStorage::Packed(words) => Some((words.as_ptr(), usize::MAX)),
+            RowStorage::Periodic { words, mask } => Some((words.as_ptr(), *mask)),
             RowStorage::Repeated(base, edits) if edits.len == 0 => {
                 Some((base.word as *const usize, 0))
             }
@@ -77,6 +83,9 @@ impl Rows {
     /// A sort already has its permutation. Move only changed slots in a sparse
     /// list, publishing the new mapping after all allocations have succeeded.
     pub(super) fn reorder_shared(&mut self, order: &[usize]) -> Result<bool> {
+        if matches!(self.storage, RowStorage::Periodic { .. }) {
+            self.writable(self.len)?;
+        }
         let RowStorage::Repeated(_, edits) = &mut self.storage else {
             return Ok(false);
         };
@@ -110,6 +119,10 @@ impl Rows {
         let width = self.layout.length;
         match &self.storage {
             RowStorage::Packed(words) => &words[at * width..(at + 1) * width],
+            RowStorage::Periodic { words, mask } => {
+                let offset = (at & mask) * width;
+                &words[offset..offset + width]
+            }
             RowStorage::Repeated(base, edits) => edits
                 .get(at, width)
                 .unwrap_or_else(|| base_row(base, width)),
@@ -176,6 +189,17 @@ impl Rows {
     /// Reserve before replacing shared storage, so a failed write leaves the list intact.
     fn writable(&mut self, len: usize) -> Result<&mut Vec<usize>> {
         let target = self.word_count(len)?;
+        if let RowStorage::Periodic { words, .. } = &mut self.storage {
+            words
+                .try_reserve_exact(target.saturating_sub(words.len()))
+                .map_err(|_| Error::allocation())?;
+            let current = self.len * self.layout.length;
+            words.truncate(current);
+            if words.len() < current {
+                tile(words, current);
+            }
+            self.storage = RowStorage::Packed(std::mem::take(words));
+        }
         if let RowStorage::Repeated(base, edits) = &self.storage {
             let width = self.layout.length;
             let mut words = Vec::new();
@@ -263,6 +287,19 @@ impl Rows {
     fn write_shared(&mut self, at: usize, len: usize, row: &[usize]) -> Result<()> {
         self.word_count(len)?;
         let width = self.layout.length;
+        if let RowStorage::Periodic { words, mask } = &self.storage {
+            let offset = (at & mask) * width;
+            if words[offset..offset + width] != *row {
+                let append = at == self.len;
+                let dense = self.writable(len)?;
+                if append {
+                    dense.extend_from_slice(row);
+                } else {
+                    dense[at * width..(at + 1) * width].copy_from_slice(row);
+                }
+            }
+            return Ok(());
+        }
         let RowStorage::Repeated(base, edits) = &mut self.storage else {
             unreachable!()
         };
@@ -372,6 +409,13 @@ impl Rows {
                 words.extend_from_slice(source);
                 tile(words, target);
                 out.len = len;
+            } else if let RowStorage::Periodic { words: source, .. } = &self.storage {
+                let cycle = self.len * self.layout.length;
+                let words = out.writable(len)?;
+                words.extend_from_slice(&source[..source.len().min(cycle)]);
+                tile(words, cycle);
+                tile(words, target);
+                out.len = len;
             }
         }
         Words::try_from_rows(out)
@@ -391,6 +435,52 @@ impl Rows {
 pub unsafe extern "C" fn imre_struct_list_new(layout: *const RecordDescriptor) -> *const Object {
     // SAFETY: generated descriptors have program lifetime.
     crate::ObjectOwner::into_raw(Words::from_rows(Rows::new(unsafe { &*layout })).into_object())
+}
+
+/// Publish repetitions of a complete power-of-two prefix, leaving one real iteration
+/// to restore observable loop locals. A declined fast path resumes at the original prefix.
+///
+/// # Safety
+/// The caller roots a scalar struct list and proves that every skipped row repeats its prefix.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_struct_cycle_prefix(
+    list: *const Object,
+    period: i64,
+    stop: i64,
+) -> i64 {
+    if period & 1 == 0 || stop & 1 == 0 || period <= 1 || stop <= period || list.is_null() {
+        return period;
+    }
+    let count = (period >> 1) as usize;
+    let end = (stop >> 1) as usize - 1;
+    if !count.is_power_of_two() || end <= count {
+        return period;
+    }
+    // SAFETY: the emitted call keeps the list alive; publishing a prefix only moves owned scalar words.
+    unsafe {
+        object(list).0.with_mut(|storage| {
+            let Storage::Sequence(words) = storage else {
+                return period;
+            };
+            let Some(rows) = words.rows_mut() else {
+                return period;
+            };
+            if rows.len != count || rows.word_count(end).is_err() {
+                return period;
+            }
+            let RowStorage::Packed(prefix) = &mut rows.storage else {
+                return period;
+            };
+            rows.storage = RowStorage::Periodic {
+                words: std::mem::take(prefix),
+                mask: count - 1,
+            };
+            rows.len = end;
+            rows.boxed.take();
+            words.update_header();
+            stop - 2
+        })
+    }
 }
 
 /// Append a loop-invariant value to an empty scalar struct list in one step.
@@ -469,8 +559,8 @@ pub unsafe extern "C" fn imre_struct_append(
 
 /// # Safety
 /// A proven read-only loop keeps the list and storage unchanged. index_mask
-/// accepts one native word: zero selects row zero for repetitions; all ones
-/// preserves the index for packed rows. Null requires an indexed read (sparse or boxed).
+/// selects the physical row: zero broadcasts one row, a period mask wraps the
+/// index, and all ones select a dense row. Null requires an indexed read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_struct_read_view(
     list: *const Object,
@@ -489,8 +579,8 @@ pub unsafe extern "C" fn imre_struct_read_view(
     }
 }
 
-/// Private ABI shared with the compiler's imre_struct_cursor_row. A zero
-/// index mask broadcasts one immutable value; all ones expose consecutive rows.
+/// Private ABI shared with the compiler's imre_struct_cursor_row. The index
+/// within a span is masked before indexing its scalar payload.
 #[repr(C)]
 pub struct ReadSpan {
     start: usize,
@@ -513,6 +603,12 @@ pub unsafe extern "C" fn imre_struct_seek_span(list: *const Object, at: usize, o
                     RowStorage::Repeated(base, edits) => {
                         edits.span(at, rows.len, base_row(base, rows.layout.length))
                     }
+                    RowStorage::Periodic { words, mask } => ReadSpan {
+                        start: 0,
+                        len: rows.len,
+                        index_mask: *mask,
+                        data: words.as_ptr(),
+                    },
                     RowStorage::Packed(_) => ReadSpan {
                         start: at,
                         len: rows.len - at,
@@ -608,6 +704,12 @@ impl Rows {
         }
         let width = self.layout.length;
         match (&self.storage, &other.storage) {
+            (RowStorage::Periodic { mask: a, .. }, RowStorage::Periodic { mask: b, .. }) => {
+                (0..self.len.min((a | b) + 1)).all(|i| self.equal_row(self.row(i), other.row(i)))
+            }
+            (RowStorage::Periodic { .. }, _) | (_, RowStorage::Periodic { .. }) => {
+                (0..self.len).all(|i| self.equal_row(self.row(i), other.row(i)))
+            }
             (RowStorage::Packed(a), RowStorage::Packed(b)) => a
                 .chunks_exact(width)
                 .zip(b.chunks_exact(width))
@@ -640,6 +742,10 @@ impl Rows {
     fn contains(&self, needle: &[usize]) -> bool {
         let width = self.layout.length;
         match &self.storage {
+            RowStorage::Periodic { words, .. } => words
+                .chunks_exact(width)
+                .take(self.len)
+                .any(|row| self.equal_row(row, needle)),
             RowStorage::Packed(words) => words
                 .chunks_exact(width)
                 .any(|row| self.equal_row(row, needle)),
