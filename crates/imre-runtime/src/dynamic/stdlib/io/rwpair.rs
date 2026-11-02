@@ -41,6 +41,74 @@ fn store(ctx: &mut Context, receiver: Id, pair: Pair) {
     *memory_stream = Some(MemoryStream::Pair(pair));
 }
 
+fn release_child(ctx: &mut Context, child: Option<Id>) -> Result<()> {
+    if let Some(child) = child {
+        let (heap, roots) = ctx.heap_and_roots();
+        if heap.released_last_finalizer_ref(child, roots)? {
+            ctx.dispatch_finalizer(child);
+        }
+    }
+    Ok(())
+}
+
+/// CPython's exact pair deallocator clears its weakrefs, reader, then writer.
+/// Subclasses and cyclic isolates use the inherited IOBase finalizer instead.
+pub(in crate::dynamic) fn deallocate_exact_pair(ctx: &mut Context, owner: Id) -> Result<bool> {
+    let Value::Instance { class, .. } = ctx.heap.get(owner) else {
+        return Ok(false);
+    };
+    if !matches!(
+        ctx.heap.get(*class),
+        Value::Class {
+            io_kind: Some(NativeClass::Pair { .. }),
+            ..
+        }
+    ) {
+        return Ok(false);
+    }
+    ctx.heap.take_finalizer(owner, true);
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(owner);
+    let pending = ctx.pending.take();
+    if let Some(error) = &pending {
+        for root in error.roots() {
+            ctx.heap.keep(root);
+        }
+    }
+    let result = (|| {
+        let callback_roots = ctx.heap.temporary_mark();
+        let (heap, roots) = ctx.heap_and_roots();
+        let callbacks = heap.clear_dealloc_weakrefs(owner, roots)?;
+        ctx.run_weak_callbacks(callbacks);
+        ctx.heap.release_temporaries_since(callback_roots);
+
+        let pair = state(ctx, owner);
+        store(
+            ctx,
+            owner,
+            Pair {
+                reader: None,
+                ..pair
+            },
+        );
+        release_child(ctx, pair.reader)?;
+        // A reader finalizer can run Python; keep the writer and owner alive until now.
+        let pair = state(ctx, owner);
+        store(
+            ctx,
+            owner,
+            Pair {
+                writer: None,
+                ..pair
+            },
+        );
+        release_child(ctx, pair.writer)
+    })();
+    ctx.pending = pending;
+    ctx.heap.release_temporaries_since(mark);
+    result.map(|()| true)
+}
+
 fn initialize(ctx: &mut Context, owner: Id, receiver: Id, args: &[Id]) -> Result<Id> {
     if !(2..=3).contains(&args.len()) {
         let bound = if args.len() < 2 {
@@ -98,14 +166,13 @@ fn initialize(ctx: &mut Context, owner: Id, receiver: Id, args: &[Id]) -> Result
                 ctx.heap.keep(id);
             }
             let reader = pair.reader.take();
-            if let Some(reader) = reader {
-                ctx.heap.keep(reader);
-            }
             pair.writer = None;
             store(ctx, receiver, pair);
-            // Construction owns the private reader. Release its raw file before returning
-            // the writer's exception, as clearing the last reader reference does in CPython.
-            let _ = forward(ctx, reader, "close", &[]);
+            // The pair owns this private reader. Run its ordinary, once-only file
+            // finalizer just as clearing the last C reference does during rollback.
+            if let Some(reader) = reader {
+                ctx.dispatch_finalizer(reader);
+            }
             Err(error)
         }
     }
@@ -130,7 +197,12 @@ pub(super) fn call(
         name,
         "read" | "read1" | "peek" | "readinto" | "readinto1" | "write"
     );
-    if !kwargs.is_empty() {
+    if !kwargs.is_empty()
+        && !(name == "__init__"
+            && ctx
+                .slot(receiver, "__new__")
+                .is_some_and(|new| Some(&new) != ctx.builtins.get("object.__new__")))
+    {
         let prefix = if name == "__init__" {
             "BufferedRWPair".into()
         } else if transfer {
