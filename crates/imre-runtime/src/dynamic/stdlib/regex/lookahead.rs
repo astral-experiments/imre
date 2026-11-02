@@ -113,6 +113,35 @@ impl Lookahead {
         Self::new(source, self.groups.clone(), self.mode, self.fold_bytes)
     }
 
+    /// On a winning path without re-entry, participating captures close in
+    /// syntax-tree postorder, even when a lookaround crosses a sibling's span.
+    pub(super) fn close_order(&self) -> Option<Vec<usize>> {
+        use fancy_regex::Expr;
+        fn visit(expr: &Expr, count: &mut usize, order: &mut Vec<usize>) -> Option<()> {
+            let before = *count;
+            let group = matches!(expr, Expr::Group(_)).then(|| {
+                *count += 1;
+                *count
+            });
+            for child in expr.children_iter() {
+                visit(child, count, order)?;
+            }
+            if *count != before && matches!(expr, Expr::Repeat { hi, .. } if *hi > 1) {
+                return None;
+            }
+            order.extend(group);
+            Some(())
+        }
+        let tree = Expr::parse_tree(self.search.as_str()).ok()?;
+        if tree.contains_subroutines {
+            return None;
+        }
+        let mut order = Vec::new();
+        let mut count = 0;
+        visit(&tree.expr, &mut count, &mut order)?;
+        (count + 1 == self.search.captures_len()).then_some(order)
+    }
+
     /// Preserve the prefix for anchors, and make endpos the assertion's end of input.
     pub(super) fn captures(
         &self,

@@ -2715,10 +2715,8 @@ impl Context {
             Value::RegexScanner { pattern, .. } if name == "pattern" => return Ok(pattern),
             Value::RegexMatch(ref m) if name == "re" => return Ok(m.pattern),
             Value::RegexMatch(ref m) if name == "string" => return Ok(m.subject),
-            Value::RegexMatch(ref m) if name == "lastindex" => {
-                if let Some(branch) = m.lexicon_branch(self) {
-                    return Ok(self.int(branch as i64));
-                }
+            Value::RegexMatch(ref m) if matches!(name, "lastindex" | "lastgroup") => {
+                return std::rc::Rc::clone(m).last_attribute(self, name == "lastgroup");
             }
             Value::RegexPattern(ref pattern) if name == "flags" => {
                 return Ok(self.int(pattern.flags));
