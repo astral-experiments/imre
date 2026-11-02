@@ -1237,12 +1237,12 @@ impl Context {
         }
         match (name, self.heap.get(value)) {
             (HashState::CLASS, Value::Hash(state)) => {
-                !HashState::is_provider_class(state.borrow().class_name())
+                !HashState::is_provider_class(state.lock().class_name())
             }
             (class, Value::Hash(state)) if HashState::is_provider_class(class) => {
-                state.borrow().class_name() == class
+                state.lock().class_name() == class
             }
-            (HashState::XOF_CLASS, Value::Hash(state)) => state.borrow().class_name() == name,
+            (HashState::XOF_CLASS, Value::Hash(state)) => state.lock().class_name() == name,
             (_, Value::Raised(error)) => {
                 matches!(self.heap.get(class), Value::Native(name) if name == "object")
                     || self.raised_error_matches(error, class)
@@ -2809,7 +2809,7 @@ impl Context {
                 _ => {}
             },
             Value::Hash(ref hash) => {
-                let owner = hash.borrow().class_name();
+                let owner = hash.lock().class_name();
                 match name {
                     "__init__" if HashState::is_provider_class(owner) => {
                         let init = self.builtin("object.__init__");
@@ -2823,15 +2823,15 @@ impl Context {
                         return Ok(self.int(value as i64));
                     }
                     "name" => {
-                        let name = hash.borrow().name();
+                        let name = hash.lock().name();
                         return Ok(self.text(name));
                     }
                     "digest_size" => {
-                        let size = hash.borrow().digest_size();
+                        let size = hash.lock().digest_size();
                         return Ok(self.int(size as i64));
                     }
                     "block_size" => {
-                        let size = hash.borrow().block_size();
+                        let size = hash.lock().block_size();
                         return Ok(self.int(size as i64));
                     }
                     _ => {}

@@ -53,7 +53,7 @@ pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::State as HashState;
+pub(crate) use hashlib::{SharedHash, State as HashState};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
