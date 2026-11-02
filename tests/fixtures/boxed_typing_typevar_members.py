@@ -1,11 +1,41 @@
+import sys
 from inspect import getattr_static
-from types import MappingProxyType
-from typing import TypeVar, Unpack
+from types import MappingProxyType, ModuleType
+from typing import Any, Callable, List, TypeVar, Unpack
 
 
 def current():
     variable = TypeVar("T", covariant=True)
     namespace = vars(TypeVar)
+    assert namespace["__reduce__"](variable) == variable.__reduce__() == "T"
+    for args in ((), (1,), (variable, 1)):
+        try:
+            TypeVar.__reduce__(*args)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invalid TypeVar reducer call")
+    assert issubclass(type(Any), type)
+    assert type(Callable).__reduce__ is type(List).__reduce__
+    assert Callable.__reduce__() == "Callable"
+
+    class Reducer:
+        def __get__(self, obj, owner):
+            return obj, owner
+
+    parent = type(List)
+    original = parent.__reduce__
+    module = sys.modules["typing"]
+    sys.modules["typing"] = ModuleType("replacement")
+    try:
+        assert type(Callable).__reduce__ is original and Callable.__reduce__() == "Callable"
+        parent.__reduce__ = Reducer()
+        assert type(Callable).__reduce__ == (None, type(Callable))
+        assert Callable.__reduce__ == (Callable, type(Callable))
+    finally:
+        parent.__reduce__ = original
+        sys.modules["typing"] = module
+
     assert type(namespace) is MappingProxyType
     assert namespace["__module__"] == TypeVar.__module__ == "typing"
     assert namespace["__doc__"] == TypeVar.__doc__ and TypeVar.__doc__.startswith("Type variable.")

@@ -1095,7 +1095,7 @@ impl ParameterClass {
         let (owner, methods, fields, doc): (_, &[_], &[_], _) = match name {
             "typing.TypeVar" => (
                 "typing.TypeVar",
-                &["__typing_subst__", "has_default"],
+                &["__reduce__", "__typing_subst__", "has_default"],
                 &VARIANCE_FIELDS[..],
                 include_str!("../../native/typing-TypeVar-doc.txt"),
             ),
@@ -1307,6 +1307,19 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__module__" => ctx.text("typing"),
             _ => return None,
         },
+        Value::Native(class) if class == "typing.Callable" && name == "_name" => {
+            ctx.text("Callable")
+        }
+        Value::Native(class)
+            if name == "__reduce__"
+                && matches!(class.as_str(), "typing.Callable" | "typing._CallableType") =>
+        {
+            let parent = *ctx.classes.get("typing._SpecialGenericAlias")?;
+            let reducer = ctx.class_attr(parent, name)?;
+            let receiver = if class == "typing.Callable" { value } else { NONE };
+            let owner = ctx.builtin("typing._CallableType");
+            return Some(ctx.bind_attribute(reducer, receiver, owner));
+        }
         Value::Native(class) if class == "typing.Callable" && name == "__mro_entries__" => {
             let callable = ctx.builtin("typing.alias_mro_entries");
             ctx.alloc(Value::Method {
@@ -1435,7 +1448,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__constraints__" => var.constraints,
             "__default__" => var.default,
             "evaluate_default" => ctx.alloc(Value::ConstEvaluator(var.default)),
-            "__typing_subst__" | "has_default" => {
+            "__reduce__" | "__typing_subst__" | "has_default" => {
                 let callable = ctx.builtin(&format!("typing.TypeVar.{name}"));
                 ctx.alloc(Value::Method {
                     callable,
@@ -1905,7 +1918,8 @@ pub(super) fn call(
 ) -> Result<Id> {
     if matches!(
         operation,
-        "TypeVar.__typing_subst__"
+        "TypeVar.__reduce__"
+            | "TypeVar.__typing_subst__"
             | "ParamSpec.__typing_subst__"
             | "ParamSpec.__typing_prepare_subst__"
     ) {
@@ -1937,6 +1951,13 @@ pub(super) fn call(
             ));
         }
         let helper = match (method, rest.len()) {
+            ("__reduce__", 0) => return ctx.lookup_attr(parameter, "__name__"),
+            ("__reduce__", n) => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{operation}() takes no arguments ({n} given)"),
+                ));
+            }
             ("__typing_subst__", 1) if owner == "TypeVar" => "_typevar_subst",
             ("__typing_subst__", 1) => "_paramspec_subst",
             ("__typing_prepare_subst__", 2) => "_paramspec_prepare_subst",
