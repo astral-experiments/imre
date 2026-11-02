@@ -858,6 +858,17 @@ class _Unpickler:
         return self.stack.pop()
     dispatch[STOP[0]] = load_stop
 
+def _loads(s, /, *, fix_imports=True, encoding="ASCII", errors="strict",
+           buffers=None):
+    if isinstance(s, str):
+        raise TypeError("Can't load pickle from unicode string")
+    file = io.BytesIO(s)
+    return _Unpickler(file, fix_imports=fix_imports, buffers=buffers,
+                      encoding=encoding, errors=errors).load()
+
+# The accelerator entry point keeps its reader when callers replace pickle._Unpickler.
+_loads_reader = _Unpickler
+
 def loads(data, /, *, fix_imports=True, encoding="ASCII", errors="strict",
            buffers=None):
     """Read and return an object from a pickle bytes-like object."""
@@ -870,5 +881,5 @@ def loads(data, /, *, fix_imports=True, encoding="ASCII", errors="strict",
             raise TypeError(f"loads() argument '{name}' must be str")
         if "\x00" in option:
             raise ValueError("embedded null character")
-    return _Unpickler(file, fix_imports=fix_imports, buffers=buffers,
-                      encoding=encoding, errors=errors).load()
+    return _loads_reader(file, fix_imports=fix_imports, buffers=buffers,
+                         encoding=encoding, errors=errors).load()
