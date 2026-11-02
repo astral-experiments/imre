@@ -597,10 +597,9 @@ impl Checker<'_> {
                     return Some(ty);
                 }
                 let receiver = Self::weak_target(probe.expr(&attribute.value).ok()?);
-                // A mock accepts arbitrary effects. Check the RHS in its own context
-                // before choosing between fixed exception storage and the boxed setter.
-                if matches!(attribute.attr.as_str(), "side_effect" | "return_value")
-                    && matches!(receiver.ty, Type::Class(class) if self.native_mock(class))
+                // A mock accepts arbitrary effects and return values, including empty containers.
+                if self.native_mock_instance(receiver.ty)
+                    && matches!(attribute.attr.as_str(), "side_effect" | "return_value")
                 {
                     return rhs.and_then(|value| self.empty_argument_type(value));
                 }

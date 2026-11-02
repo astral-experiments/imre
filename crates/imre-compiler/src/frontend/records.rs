@@ -1010,6 +1010,9 @@ impl Checker<'_> {
         {
             return self.object_runtime_export(name, node);
         }
+        if self.native_mock(class) && !name.starts_with('_') {
+            return self.object_runtime_export("live unittest.mock.Mock attributes", node);
+        }
         if matches!(name, "loadTestsFromName" | "loadTestsFromNames")
             && self.unittest_subclass(class, "TestLoader")
         {
@@ -1593,12 +1596,7 @@ impl Checker<'_> {
         let signature = self.classes.methods[class]["__init__"].clone();
         let mut scope = calls::ArgumentScope::default();
         let normalization = self.normalized_record_input(class);
-        let args = if self.native_mock(class)
-            && (call.arguments.find_keyword("side_effect").is_some()
-                || call.arguments.find_keyword("return_value").is_some())
-        {
-            self.configured_mock_arguments(call, &signature.params[1..])?
-        } else if let Some((field, wrapper, template)) = normalization {
+        let args = if let Some((field, wrapper, template)) = normalization {
             let params = &signature.params[1..];
             self.arguments_with(call, params, None, |checker, index, value| {
                 if params[index].name == field && matches!(value, ast::Expr::Dict(_)) {

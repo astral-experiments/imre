@@ -706,6 +706,8 @@ pub(super) enum Value {
     Calendar {
         value: crate::objects::Calendar,
         tzinfo: Id,
+        // Preserve the fixed timezone name and its Python str subclass methods.
+        tzname: Id,
     },
     Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
     Scandir(std::rc::Rc<super::stdlib::os::scandir::Scan>),
@@ -752,6 +754,7 @@ pub(super) enum Value {
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
     LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
+    MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
@@ -1073,6 +1076,7 @@ impl Value {
                 super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
+            Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
@@ -1095,15 +1099,7 @@ impl Value {
             Self::RangeIterator(iter) => iter.kind,
             Self::Enumerate { .. } => "enumerate",
             Self::Iterator { kind, .. } => kind,
-            Self::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
-                (Some(_), _, _) => "odict_iterator",
-                (_, false, DictViewKind::Keys) => "dict_keyiterator",
-                (_, false, DictViewKind::Values) => "dict_valueiterator",
-                (_, false, DictViewKind::Items) => "dict_itemiterator",
-                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
-                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
-                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
-            },
+            Self::DictIterator(iter) => iter.class_name(),
             Self::Set { frozen: true, .. } => "frozenset",
             Self::Set { frozen: false, .. } => "set",
             Self::Dict(_) => "dict",
@@ -1114,7 +1110,7 @@ impl Value {
             }
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
-            Self::Cell(_) => "cell",
+            Self::Cell(_) | Self::ClassCell(_) => "cell",
             Self::Generator { .. } => "generator",
             Self::Coroutine(_) => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
@@ -1290,7 +1286,7 @@ impl Value {
             Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
-            Self::Calendar { tzinfo, .. } => visit.push(*tzinfo),
+            Self::Calendar { tzinfo, tzname, .. } => visit.extend([*tzinfo, *tzname]),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
                 for (key, value) in entries {
@@ -1542,6 +1538,7 @@ impl Value {
             | Self::Struct { .. }
             | Self::Hash(_)
             | Self::LoggerHandle(_)
+            | Self::MetadataArchive(_)
             | Self::HandlerLock(_)
             | Self::ThreadHandle(_)
             | Self::PrimitiveLock(_)
@@ -1581,6 +1578,33 @@ pub(super) struct DictIterator {
 }
 
 impl DictIterator {
+    const KEYS: [&str; 2] = ["dict_keyiterator", "dict_reversekeyiterator"];
+    const VALUES: [&str; 2] = ["dict_valueiterator", "dict_reversevalueiterator"];
+    const ITEMS: [&str; 2] = ["dict_itemiterator", "dict_reverseitemiterator"];
+    const ORDERED: &str = "odict_iterator";
+    pub(super) const METHODS: &[&str] = &["__iter__", "__next__"];
+
+    pub(super) fn class_name(&self) -> &'static str {
+        if self.order_state.is_some() {
+            return Self::ORDERED;
+        }
+        let classes = match self.kind {
+            DictViewKind::Keys => Self::KEYS,
+            DictViewKind::Values => Self::VALUES,
+            DictViewKind::Items => Self::ITEMS,
+        };
+        classes[usize::from(self.reverse)]
+    }
+
+    pub(super) fn class(name: &str) -> Option<&'static str> {
+        Self::KEYS
+            .into_iter()
+            .chain(Self::VALUES)
+            .chain(Self::ITEMS)
+            .chain([Self::ORDERED])
+            .find(|&class| class == name)
+    }
+
     /// Capture the original size while keeping the entries live.
     pub(super) fn new(
         dict: Id,
@@ -2151,7 +2175,7 @@ impl Heap {
             && (self.weak_edge(value)
                 || matches!(
                     self.get(value),
-                    Value::Function { .. } | Value::Cell(Some(_))
+                    Value::Function { .. } | Value::Cell(Some(_)) | Value::ClassCell(Some(_))
                 ))
             && !self.bound_in_active_frame(value)
         {

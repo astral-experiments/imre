@@ -84,21 +84,36 @@ pub(super) fn utc() -> Expr {
     op(Op::Utc, Type::Calendar(C::Zone), vec![])
 }
 
+pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
+    match name {
+        "min" | "max" | "resolution" | "__reduce__" | "__reduce_ex__" => {
+            matches!(
+                receiver,
+                Type::Calendar(C::Date | C::DateTime | C::Delta) | Type::ClockTime
+            )
+        }
+        "strftime" | "__format__" => matches!(
+            receiver,
+            Type::Calendar(C::Date | C::DateTime) | Type::ClockTime
+        ),
+        "ctime" | "isoweekday" => matches!(receiver, Type::Calendar(C::Date | C::DateTime)),
+        _ => false,
+    }
+}
+
 impl Checker<'_> {
     pub(super) fn calendar_class_attribute(
         &self,
         a: &ast::ExprAttribute,
     ) -> Result<Option<Expr>, String> {
         let base = self.resolve(&a.value);
-        if matches!(a.attr.as_str(), "min" | "max" | "resolution")
-            && matches!(
-                base,
-                Some(Binding::Intrinsic(
-                    Intrinsic::Calendar(C::Date | C::DateTime | C::Delta) | Intrinsic::ClockTime
-                ))
-            )
-        {
-            return Err(self.object_runtime_export("datetime class constants", a));
+        let kind = match base {
+            Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => Type::Calendar(kind),
+            Some(Binding::Intrinsic(Intrinsic::ClockTime)) => Type::ClockTime,
+            _ => return Ok(None),
+        };
+        if boxed_member(kind, a.attr.as_str()) {
+            return Err(self.object_runtime_export("datetime class member", a));
         }
         if base != Some(Binding::Intrinsic(Intrinsic::Calendar(C::Zone))) {
             return Ok(None);
@@ -113,6 +128,25 @@ impl Checker<'_> {
             _ => None,
         })
     }
+    /// A packed calendar state is the first positional argument to an alternate constructor.
+    pub(super) fn packed_calendar_error(
+        &mut self,
+        call: &ast::ExprCall,
+        max_positional: usize,
+        error: String,
+    ) -> String {
+        if let [state, ..] = call.arguments.args.as_ref()
+            && call.arguments.args.len() <= max_positional
+            && self.expr(state).is_ok_and(|value| {
+                matches!(value.ty, Type::Bytes | Type::Str | Type::StrLiteral(_))
+            })
+        {
+            self.object_builtin_error("packed datetime constructor", call)
+        } else {
+            error
+        }
+    }
+
     pub(super) fn calendar_constructor(
         &mut self,
         kind: C,
@@ -124,7 +158,9 @@ impl Checker<'_> {
         let (builtin, args) = match kind {
             C::Date => {
                 let pars = ["year", "month", "day"].map(|name| int(name, false));
-                let args = self.arguments_with(call, &pars, None, |c, _, e| c.integer_index(e))?;
+                let args = self
+                    .arguments_with(call, &pars, None, |c, _, e| c.integer_index(e))
+                    .map_err(|error| self.packed_calendar_error(call, 1, error))?;
                 (Op::Date, args)
             }
             C::Delta => {
@@ -167,12 +203,14 @@ impl Checker<'_> {
                     parameter("tzinfo", optzone, Some(Expr::absent(optzone))),
                     fold,
                 ];
-                let args = self.arguments_with(call, &pars, None, |c, i, e| {
-                    if i == 7 {
-                        return c.expr_expected(e, optzone);
-                    }
-                    c.integer_index(e)
-                })?;
+                let args = self
+                    .arguments_with(call, &pars, None, |c, i, e| {
+                        if i == 7 {
+                            return c.expr_expected(e, optzone);
+                        }
+                        c.integer_index(e)
+                    })
+                    .map_err(|error| self.packed_calendar_error(call, 2, error))?;
                 (Op::DateTime, args)
             }
             C::Zone => {

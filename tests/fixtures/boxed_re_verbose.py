@@ -45,6 +45,14 @@ def current():
                 raise AssertionError("invalid pattern compiled")
         assert re.fullmatch(r"[{}]\{a{2}}", "{{aa}", flags)
     assert re.fullmatch("(?x:a # {ignored}\n)b", "ab")
+    inline = re.compile("(?x) # one\n (?x) a (?-x: [#]) (?x: \u0085 )")
+    assert inline.flags == re.X | re.U
+    assert inline.fullmatch("a #\u0085")
+    assert inline.fullmatch("a #") is None
+    scoped = re.compile(b" a(?x: [ #] b) c")
+    assert scoped.flags == 0
+    assert scoped.fullmatch(b" a#b c")
+    assert scoped.fullmatch(b"a#bc") is None
     octets = re.compile(rb"[\x00-\x19\",;\\\x7f-\xff]", re.A)
     print(type(octets.pattern) is bytes, octets.flags, octets.groups)
     print([n for n in range(256) if octets.fullmatch(bytes([n])) is not None])

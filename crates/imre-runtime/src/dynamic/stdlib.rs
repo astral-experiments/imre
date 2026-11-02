@@ -136,6 +136,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "math"
             | "unicodedata"
             | "json"
+            | "_json"
             | "_imre_logging"
             | "_imre_subprocess"
             | "_imre_dataclasses"
@@ -392,7 +393,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
-        ("codecs" | "_codecs", "encode") => ctx.builtin("codecs.encode"),
+        ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -607,7 +608,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
-        ("posixpath", "join" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("posixpath", "dirname") => ctx.builtin("os.path.dirname"),
         ("os" | "posix", "getcwd" | "getcwdb") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -686,7 +687,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
         | ("_imre_linecache", "source_lines")
-        | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
+        | (
+            "_imre_metadata",
+            "filenames" | "dedent" | "exists" | "read_text" | "zip_names" | "zip_open" | "zip_read",
+        )
         | (
             "_imre_posixpath",
             "exists" | "extension_start" | "isdir" | "isfile" | "islink" | "relative_parts"
@@ -698,6 +702,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
+        | ("_json", "encode_basestring" | "encode_basestring_ascii")
         | ("random", "random" | "choice")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
@@ -1098,6 +1103,10 @@ pub(super) fn call(
             .heap
             .caller_module_at(depth.max(0) as usize)
             .unwrap_or(NONE));
+    }
+    if name == "sys.displayhook" {
+        let value = builtins::one_positional_arg(name, &args[1..], kwargs)?;
+        return super::displayhook::default_hook(ctx, value);
     }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
@@ -1833,6 +1842,7 @@ pub(super) fn call(
     if let Some(function) = name.strip_prefix("codecs.") {
         return match function {
             "encode" | "decode" => codecs::transform(ctx, function, args, kwargs),
+            "escape_decode" => codecs::escape_decode(ctx, args, kwargs),
             "lookup" => codecs::lookup(ctx, args, kwargs),
             "register_error" | "lookup_error" => {
                 codecs::error_registry(ctx, function, args, kwargs)
@@ -1980,7 +1990,7 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer")) =
+    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer" | "findall")) =
         name.strip_prefix("pattern.")
     {
         return regex::search(ctx, method, args, kwargs);
@@ -2024,6 +2034,9 @@ pub(super) fn call(
         "functools.update_wrapper" => (4, &["wrapper", "wrapped", "assigned", "updated"]),
         "sysconfig.get_path" => (4, &["name", "scheme", "vars", "expand"]),
         "sysconfig.get_paths" => (3, &["scheme", "vars", "expand"]),
+        "_json.encode_basestring" | "_json.encode_basestring_ascii" => {
+            return json::encode_basestring(ctx, name, args, kwargs);
+        }
         "json.loads" => (1, &["s"]),
         "json.dump" => (2, JSON_DUMP_KEYWORDS),
         "json.dumps" => (1, &JSON_DUMP_KEYWORDS[1..]),
@@ -2035,9 +2048,9 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "pattern.findall" | "file.read" | "file.read1" | "file.readline"
+        "struct.unpack" | "file.read" | "file.read1" | "file.readline"
         | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
-        "match.group" | "os.path.join" => (usize::MAX, &[]),
+        "match.group" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" | "match.groupdict" => (2, &["default"]),
         "match.start" | "match.end" | "match.span" => (2, &[]),

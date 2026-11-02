@@ -68,6 +68,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/case.py",
             include_str!("../stdlib/unittest/boxed_case.py"),
         )),
+        "pickle" => Some(("pickle.py", include_str!("../stdlib/pickle.py"))),
+        "_compat_pickle" => Some((
+            "_compat_pickle.py",
+            include_str!("../stdlib/_compat_pickle.py"),
+        )),
         "_tokenize" => Some(("_tokenize.py", include_str!("../stdlib/_tokenize.py"))),
         "__future__" => Some(("__future__.py", include_str!("../stdlib/__future__.py"))),
         "__hello__" => Some(("__hello__.py", include_str!("../stdlib/__hello__.py"))),
@@ -269,6 +274,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "string/templatelib.py",
             include_str!("../stdlib/string/templatelib.py"),
         )),
+        "email.message" => Some((
+            "email/message.py",
+            concat!(
+                include_str!("../stdlib/email/message.py"),
+                "\n",
+                include_str!("../stdlib/email/boxed_message.py"),
+            ),
+        )),
         "http" => Some((
             "http/__init__.py",
             include_str!("../stdlib/http/__init__.py"),
@@ -442,6 +455,7 @@ pub(crate) enum IntrinsicModule {
     Enum,
     Zlib,
     Json,
+    JsonNative,
     JsonEncoder,
     JsonDecoder,
     Imre,
@@ -663,7 +677,6 @@ pub(crate) enum Intrinsic {
     ZipFile,
     ZipInfo,
     BytesIo,
-    IoBase(crate::ir::IoBase),
     StringIo,
     BadZipFile,
     BadGzipFile,
@@ -788,6 +801,10 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
+    pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
+    pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
+    pub(crate) const TEXT_IO_BASE: Self = Self::ObjectRuntimeExport("io.TextIOBase");
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
 
     /// Subclasses of these immutable types keep their calendar value in the object runtime.
@@ -919,6 +936,7 @@ impl IntrinsicModule {
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
             "json" => Some(Self::Json),
+            "_json" => Some(Self::JsonNative),
             "json.encoder" => Some(Self::JsonEncoder),
             "json.decoder" => Some(Self::JsonDecoder),
             "imre" => Some(Self::Imre),
@@ -1019,8 +1037,18 @@ impl IntrinsicModule {
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
+            (Self::Codecs, "escape_decode") => {
+                Intrinsic::ObjectRuntimeExport("codecs.escape_decode")
+            }
+            (Self::CodecsNative, "escape_decode") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.escape_decode")
+            }
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
+            (Self::Pickle, "loads") => Intrinsic::ObjectRuntimeExport("pickle.loads"),
+            (Self::Pickle, "UnpicklingError") => {
+                Intrinsic::ObjectRuntimeExport("pickle.UnpicklingError")
+            }
             (Self::Struct, "Struct") => Intrinsic::ObjectRuntimeExport("struct.Struct"),
             (Self::Struct, "calcsize") => Intrinsic::ObjectRuntimeExport("struct.calcsize"),
             (Self::Struct, "pack") => Intrinsic::ObjectRuntimeExport("struct.pack"),
@@ -1748,18 +1776,26 @@ impl IntrinsicModule {
             (Self::Io | Self::IoNative, "text_encoding") => {
                 Intrinsic::ObjectRuntimeExport("_io.text_encoding")
             }
-            (Self::Io | Self::IoNative, "TextIOWrapper") => {
-                Intrinsic::ObjectRuntimeExport("io.TextIOWrapper")
+            (Self::Io, "TextIOWrapper") => Intrinsic::ObjectRuntimeExport("io.TextIOWrapper"),
+            (Self::IoNative, "TextIOWrapper") => {
+                Intrinsic::ObjectRuntimeExport("_io.TextIOWrapper")
             }
             (Self::Io | Self::IoNative, "open_code") => {
                 Intrinsic::ObjectRuntimeExport("io.open_code")
             }
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
-            (Self::Io | Self::IoNative, "FileIO") => Intrinsic::ObjectRuntimeExport("io.FileIO"),
-            (Self::Io, "IOBase") => Intrinsic::IoBase(crate::ir::IoBase::Any),
-            (Self::Io, "RawIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Raw),
-            (Self::Io, "BufferedIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Buffered),
-            (Self::Io, "TextIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Text),
+            (Self::Io, "FileIO") => Intrinsic::ObjectRuntimeExport("io.FileIO"),
+            (Self::IoNative, "FileIO") => Intrinsic::ObjectRuntimeExport("_io.FileIO"),
+            (Self::IoNative, "_IOBase") => Intrinsic::ObjectRuntimeExport("_io._IOBase"),
+            (Self::IoNative, "_RawIOBase") => Intrinsic::ObjectRuntimeExport("_io._RawIOBase"),
+            (Self::IoNative, "_BufferedIOBase") => {
+                Intrinsic::ObjectRuntimeExport("_io._BufferedIOBase")
+            }
+            (Self::IoNative, "_TextIOBase") => Intrinsic::ObjectRuntimeExport("_io._TextIOBase"),
+            (Self::Io, "IOBase") => Intrinsic::IO_BASE,
+            (Self::Io, "RawIOBase") => Intrinsic::RAW_IO_BASE,
+            (Self::Io, "BufferedIOBase") => Intrinsic::BUFFERED_IO_BASE,
+            (Self::Io, "TextIOBase") => Intrinsic::TEXT_IO_BASE,
             (Self::Io, "StringIO") => Intrinsic::StringIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
             (Self::Csv, "reader") => Intrinsic::CsvReader,
@@ -1840,6 +1876,12 @@ impl IntrinsicModule {
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
             (Self::Zlib, "crc32") => Intrinsic::ObjectRuntimeExport("zlib.crc32"),
             (Self::ImreJson, "decode") => Intrinsic::JsonDecode,
+            (Self::JsonNative, "encode_basestring") => {
+                Intrinsic::ObjectRuntimeExport("_json.encode_basestring")
+            }
+            (Self::JsonNative, "encode_basestring_ascii") => {
+                Intrinsic::ObjectRuntimeExport("_json.encode_basestring_ascii")
+            }
             (Self::Json, "loads") => Intrinsic::JsonLoads,
             (Self::Json | Self::JsonDecoder, "JSONDecoder") => Intrinsic::JsonDecoderClass,
             (Self::Json | Self::JsonEncoder, "JSONEncoder") => Intrinsic::JsonEncoderClass,
@@ -2139,7 +2181,7 @@ impl SearchRoots {
 
 /// These public names are supplied by the boxed unittest.mock module.
 pub(crate) fn boxed_mock_export(name: &str) -> bool {
-    matches!(name, "sentinel" | "DEFAULT" | "ANY" | "MagicMock")
+    matches!(name, "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal")
 }
 
 impl SourceModule {
@@ -4331,6 +4373,12 @@ impl<'a> Loader<'a> {
             "string" => Some((
                 "string/__init__.py",
                 include_str!("../stdlib/string/__init__.py"),
+            )),
+            // The boxed email package is intrinsic. Typed child modules need a package root.
+            "email" => Some(("email/__init__.py", "")),
+            "email.message" => Some((
+                "email/message.py",
+                include_str!("../stdlib/email/message.py"),
             )),
             "unittest" => Some((
                 "unittest/__init__.py",

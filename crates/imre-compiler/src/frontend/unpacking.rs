@@ -561,8 +561,8 @@ impl Checker<'_> {
                         clear: vec![],
                     });
                 }
-                let mock_effect = attribute.attr.as_str() == "side_effect"
-                    && matches!(receiver.ty, Type::Class(class) if self.native_mock(class));
+                let mock_effect = self.native_mock_instance(receiver.ty)
+                    && attribute.attr.as_str() == "side_effect";
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target).map_err(|error| {
                     if mock_effect {

@@ -10,6 +10,7 @@ mod class_annotations;
 mod complex;
 mod deque;
 mod dictionary;
+mod displayhook;
 mod enums;
 mod ffi;
 mod finalizers;
@@ -359,7 +360,7 @@ impl Context {
         let input = self.scalar_value(input);
         if !matches!(
             self.heap.get(input),
-            Value::ByteArray(_) | Value::MemoryView { .. }
+            Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. }
         ) {
             return convert(self);
         }
@@ -1591,10 +1592,10 @@ impl Context {
         }
     }
     /// Describe a missing binding in the scope that owns it.
-    fn missing_binding(&self, origin: Id, scope: Id, name: &str) -> Error {
+    fn missing_binding(&mut self, origin: Id, scope: Id, name: &str) -> Error {
         let frame = self.scope_data(scope);
         let declared = frame.class_body.is_none() && frame.closure.declared.contains(name);
-        if declared && origin == scope {
+        let mut error = if declared && origin == scope {
             Error::new(
                 "UnboundLocalError",
                 format!(
@@ -1610,7 +1611,11 @@ impl Context {
             )
         } else {
             Error::new("NameError", format!("name '{name}' is not defined"))
+        };
+        if error.kind == "NameError" {
+            error.tracing().name_error_name = Some(self.heap.code_name(name));
         }
+        error
     }
 
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
@@ -1729,7 +1734,7 @@ impl Context {
             }
             "property" => property::METHODS,
             "memoryview" => builtins::MEMORYVIEW_METHODS,
-            "int" => &["bit_length", "from_bytes", "to_bytes", "__format__"],
+            "int" => &["__add__", "bit_length", "from_bytes", "to_bytes", "__format__"],
             "float" => &["__format__", "__getformat__", "as_integer_ratio"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
@@ -1869,6 +1874,18 @@ impl Context {
             format!("No module named {}", string_repr(name)),
         )
         .with_import(Some(name), None, None)
+    }
+
+    /// Read the interpreter's original sys dictionary even if its import-cache entry changed.
+    fn sys_binding(&mut self, name: &str) -> Result<Option<Id>> {
+        let sys = match self.threads.system_module {
+            Some(sys) => sys,
+            None => self.module("sys")?,
+        };
+        let Value::Module { scope, .. } = *self.heap.get(sys) else {
+            unreachable!()
+        };
+        Ok(self.scope_name(scope, name))
     }
 
     fn registered_module(&mut self, name: Id) -> Result<Option<Id>> {
@@ -2190,17 +2207,7 @@ impl Context {
             "io" => stdlib::io::install(self, scope),
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
-            "_io" => {
-                self.module("io")?;
-                let open = self.builtin("open");
-                self.bind(scope, "open", open);
-                let text_encoding = self.builtin("_io.text_encoding");
-                self.bind(scope, "text_encoding", text_encoding);
-                for name in ["BytesIO", "StringIO", "TextIOWrapper", "FileIO"] {
-                    let class = self.builtins[&format!("_io.{name}")];
-                    self.bind(scope, name, class);
-                }
-            }
+            "_io" => stdlib::io::install_native(self, scope),
             "ast" => stdlib::ast::install(self, scope),
             "selectors" => {
                 stdlib::readiness::initialize(self, scope)?;
@@ -2212,6 +2219,7 @@ impl Context {
                     "addaudithook",
                     "_getframe",
                     "_getframemodulename",
+                    "displayhook",
                     "unraisablehook",
                 ] {
                     let callable = self.builtin(&format!("sys.{name}"));
@@ -2221,7 +2229,9 @@ impl Context {
                         explicit: false,
                     });
                     self.bind(scope, name, function);
-                    if name == "unraisablehook" {
+                    if name == "displayhook" {
+                        self.bind(scope, "__displayhook__", function);
+                    } else if name == "unraisablehook" {
                         self.bind(scope, "__unraisablehook__", function);
                         if self.threads.system_module.is_none() {
                             self.threads.default_unraisable_hook = Some(function);

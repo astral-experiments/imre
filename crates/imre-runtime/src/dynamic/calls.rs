@@ -38,11 +38,14 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "functools" if matches!(function, "cmp_to_key" | "reduce") => {
             Some(("_functools", function))
         }
-        "codecs" if function == "encode" => Some(("_codecs", function)),
+        "codecs" if matches!(function, "encode" | "escape_decode") => Some(("_codecs", function)),
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         #[cfg(target_os = "linux")]
         "_signal" if function == "sigpending" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
+        "_json" if matches!(function, "encode_basestring" | "encode_basestring_ascii") => {
+            Some((module, function))
+        }
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
         "resource" if function == "getrlimit" => Some((module, function)),
@@ -154,7 +157,15 @@ impl Context {
                 })
                 .flatten();
         }
-        self.find_in_mro(class, |base| self.own_class_attr(base, name))
+        let attr = self.find_in_mro(class, |base| self.own_class_attr(base, name));
+        if attr.is_none()
+            && name == "__reduce_ex__"
+            && (self.has_base(class, "datetime.date") || self.has_base(class, "datetime.timedelta"))
+        {
+            // These classes override __reduce__, and inherit the delegating object method.
+            return self.builtins.get("object.__reduce_ex__").copied();
+        }
+        attr
     }
 
     /// Visit the class and its bases in Python's method resolution order.
@@ -996,7 +1007,11 @@ impl Context {
                 {
                     "method-wrapper"
                 }
-                Value::Native(_) => "builtin_function_or_method",
+                Value::IoMethod {
+                    name: "__init__" | "__repr__" | "__iter__" | "__next__" | "__del__",
+                    ..
+                } => "method-wrapper",
+                Value::Native(_) | Value::IoMethod { .. } => "builtin_function_or_method",
                 _ => return None,
             },
             Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
@@ -1113,7 +1128,7 @@ impl Context {
             Value::Union(_) => Ok(super::union::class(self)),
             Value::TextFile(_) => {
                 self.module("io")?;
-                Ok(self.builtins[stdlib::io::STANDARD_STREAM_CLASS])
+                Ok(self.builtins["_io.TextIOWrapper"])
             }
             Value::Instance { class, .. }
             | Value::Class {
@@ -1182,7 +1197,7 @@ impl Context {
             return classes.iter().any(|&c| self.instance_of(value, c));
         }
         if matches!(self.heap.get(value), Value::TextFile(_)) {
-            if let Some(&actual) = self.builtins.get(stdlib::io::STANDARD_STREAM_CLASS)
+            if let Some(&actual) = self.builtins.get("_io.TextIOWrapper")
                 && self.subclass(actual, class)
             {
                 return true;
@@ -2064,7 +2079,7 @@ impl Context {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref class)
-                if class == "generator" && matches!(name, "send" | "throw" | "close") =>
+                if class == "generator" && super::generator_protocol::generator_method(name) =>
             {
                 return Ok(self.builtin(&format!("generator.{name}")));
             }
@@ -2090,6 +2105,7 @@ impl Context {
                     return Ok(self.int(i64::from(flags)));
                 }
                 "co_name" => return Ok(code.name),
+                "co_qualname" => return Ok(code.qualname),
                 "co_filename" => return Ok(code.filename),
                 "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
                 "co_freevars" => {
@@ -2109,7 +2125,7 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::Cell(contents) if name == "cell_contents" => {
+            Value::Cell(contents) | Value::ClassCell(contents) if name == "cell_contents" => {
                 return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
@@ -2870,6 +2886,9 @@ impl Context {
             {
                 return Ok(TRUE);
             }
+            Value::Native(ref class) if class == "object" && name == "__reduce_ex__" => {
+                return Ok(self.builtin("object.__reduce_ex__"));
+            }
             Value::Native(ref class)
                 if name == "__format__" && self.builtin_type_name(obj) == Some("type") =>
             {
@@ -2887,7 +2906,7 @@ impl Context {
                 return Ok(self.builtin("bytearray.maketrans"));
             }
             Value::Native(ref class)
-                if class == "bool" && matches!(name, "bit_length" | "to_bytes") =>
+                if class == "bool" && matches!(name, "__add__" | "bit_length" | "to_bytes") =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
@@ -2938,7 +2957,7 @@ impl Context {
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
-                    || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
+                    || (class == "int" && matches!(name, "__add__" | "bit_length" | "to_bytes"))
                     || (class == "float" && name == "as_integer_ratio")
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
@@ -2961,6 +2980,12 @@ impl Context {
                     ) =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
+            }
+            Value::Native(ref class)
+                if DictIterator::METHODS.contains(&name)
+                    && DictIterator::class(class).is_some() =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref class)
                 if class == "slice" && super::slice::METHODS.contains(&name) =>
@@ -3310,7 +3335,7 @@ impl Context {
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
             self.heap.replace_cell(obj, None);
             return Ok(());
         }
@@ -3438,6 +3463,9 @@ impl Context {
                 self.update_dictionary_field(obj, dictionary, name, None)
             }
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
+            Value::Code(_) if name == "co_qualname" => {
+                Err(Error::new("AttributeError", "readonly attribute"))
+            }
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
@@ -3955,7 +3983,7 @@ impl Context {
                 Some(value),
             );
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
             self.heap.replace_cell(obj, Some(value));
             return Ok(());
         }
@@ -4161,7 +4189,7 @@ impl Context {
             Value::Code(_)
                 if matches!(
                     name,
-                    "co_name" | "co_filename" | "co_firstlineno" | "co_flags"
+                    "co_name" | "co_qualname" | "co_filename" | "co_firstlineno" | "co_flags"
                 ) =>
             {
                 return Err(Error::new("AttributeError", "readonly attribute"));
@@ -4556,6 +4584,13 @@ impl Context {
             Value::Native(name) if let Some(class) = stdlib::fixed_structseq::fixed_type(&name) => {
                 stdlib::fixed_structseq::construct(self, class, &args, &kwargs)
             }
+            Value::Native(ref name)
+                if let Some((owner, slot)) = name.split_once('.')
+                    && DictIterator::METHODS.contains(&slot)
+                    && DictIterator::class(owner).is_some() =>
+            {
+                self.iterator_method(owner, slot, &args, &kwargs)
+            }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "tuple.__new__" => {
@@ -4563,6 +4598,38 @@ impl Context {
                     return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
                 }
                 super::namedtuple::allocate(self, &args, &kwargs)
+            }
+            Value::Native(name) if name == "object.__reduce_ex__" => {
+                let Some((&receiver, rest)) = args.split_first() else {
+                    return Err(Error::new(
+                        "TypeError",
+                        "unbound method object.__reduce_ex__() needs an argument",
+                    ));
+                };
+                let class = self.type_name(receiver);
+                if !kwargs.is_empty() {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("{class}.__reduce_ex__() takes no keyword arguments"),
+                    ));
+                }
+                let [protocol] = rest else {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "{class}.__reduce_ex__() takes exactly one argument ({} given)",
+                            rest.len()
+                        ),
+                    ));
+                };
+                self.index_integer(*protocol)?
+                    .to_i64()
+                    .and_then(|n| i32::try_from(n).ok())
+                    .ok_or_else(|| {
+                        Error::new("OverflowError", "Python int too large to convert to C int")
+                    })?;
+                let reducer = self.lookup_attr(receiver, "__reduce__")?;
+                self.call(reducer, Vec::new(), Vec::new())
             }
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
@@ -5596,6 +5663,16 @@ impl Context {
         } else {
             None
         };
+        if typed_dict_meta.is_none() && self.scope_name(scope, "__annotate_func__").is_some() {
+            self.enable_class_annotation_provider(scope);
+            if let Value::Scope(frame) = self.heap.get_mut(scope) {
+                frame.class_namespace.as_mut().unwrap().annotation_sites = None;
+            }
+            if self.scope_name(scope, "__annotations__") == Some(annotations) {
+                let key = self.heap.code_name("__annotations__");
+                self.remove_binding(scope, "__annotations__", key)?;
+            }
+        }
         if let Some(original) = original {
             self.bind(scope, "__orig_bases__", original);
         }

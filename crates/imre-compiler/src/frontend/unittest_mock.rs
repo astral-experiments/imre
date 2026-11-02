@@ -27,6 +27,34 @@ impl Checker<'_> {
         self.bundled_mock_class(class, "Mock")
     }
 
+    /// Check the argument expressions before selecting the boxed constructor. A
+    /// type error inside an expression is independent of how Mock stores it.
+    pub(super) fn boxed_mock_keywords(&mut self, call: &ast::ExprCall) -> Result<bool, String> {
+        let mut boxed = false;
+        for keyword in &call.arguments.keywords {
+            match keyword.arg.as_deref() {
+                Some("name") => {
+                    self.expr_expected(&keyword.value, self.types.optional(Type::Str))?;
+                }
+                Some("side_effect") => {
+                    let value = self.evaluated_argument(&keyword.value)?;
+                    boxed |= self
+                        .coerce(value, self.types.optional(Type::Exception), &keyword.value)
+                        .is_err();
+                }
+                _ => {
+                    self.evaluated_argument(&keyword.value)?;
+                    boxed = true;
+                }
+            }
+        }
+        Ok(boxed)
+    }
+
+    pub(super) fn native_mock_instance(&self, ty: Type) -> bool {
+        matches!(ty, Type::Class(class) if self.native_mock(class))
+    }
+
     pub(super) fn bundled_mock_class(&self, class: usize, name: &str) -> bool {
         let record = &self.classes.declarations.definitions[class];
         let module = &self.graph.modules[record.definition.module];
@@ -100,6 +128,9 @@ impl Checker<'_> {
         attr: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
         let name = attr.attr.as_str();
+        if name == "configure_mock" {
+            return Err(self.object_runtime_export("unittest.mock.Mock.configure_mock", attr));
+        }
         // An unimplemented real member must never become a successful child mock.
         if name.starts_with('_')
             || Self::mock_state_member(name)
@@ -110,7 +141,6 @@ impl Checker<'_> {
                     | "assert_called_once_with"
                     | "assert_called_with"
                     | "attach_mock"
-                    | "configure_mock"
                     | "mock_add_spec"
                     | "mock_calls"
                     | "method_calls"
@@ -136,44 +166,6 @@ impl Checker<'_> {
                 ir::CallArgs::positional(vec![receiver, unpacking::string(name)]),
             ),
         })
-    }
-
-    /// Bind the entire public call before selecting object storage for an effect or
-    /// return value. Invalid keywords and errors within operands keep their diagnostics.
-    pub(super) fn configured_mock_arguments(
-        &mut self,
-        call: &ast::ExprCall,
-        params: &[Parameter],
-    ) -> Result<ir::CallArgs, String> {
-        let mut params = params.to_vec();
-        let mut boxed = call.arguments.find_keyword("return_value").is_some();
-        if boxed {
-            params.push(ParameterKind::KeywordOnly.parameter(
-                "return_value",
-                Type::ObjectValue,
-                None,
-            ));
-        }
-        let args = self.arguments_with(call, &params, None, |checker, index, operand| {
-            let param = &params[index];
-            match param.name.as_str() {
-                "return_value" => checker.evaluated_argument(operand),
-                "side_effect" => {
-                    let value = checker.evaluated_argument(operand)?;
-                    if let Ok(fixed) = checker.coerce(value.clone(), param.ty, operand) {
-                        return Ok(fixed);
-                    }
-                    boxed = true;
-                    Ok(value)
-                }
-                _ => checker.direct_argument(operand, param.ty, param.sign_only),
-            }
-        })?;
-        if boxed {
-            Err(self.object_runtime_export("unittest.mock call configuration", call))
-        } else {
-            Ok(args)
-        }
     }
 
     fn mock_argument(&mut self, node: &ast::Expr, argument: usize) -> Result<Expr, String> {

@@ -310,7 +310,91 @@ def test_calendar_format():
             raise AssertionError("non-string format specifier accepted")
 
 
+def test_calendar_reduction():
+    class Moment(dt):
+        pass
+
+    class Clock(time):
+        pass
+
+    stamp = Moment(2000, 2, 29, 12, 34, 56, 0x012345, UTC, fold=1)
+    stamp.note = "not part of immutable storage"
+    for value, state, folded in (
+        (date(2000, 2, 29), b"\x07\xd0\x02\x1d", b"\x07\xd0\x02\x1d"),
+        (Clock(1, 2, 3, 4, fold=1), b"\x01\x02\x03\0\0\x04", b"\x81\x02\x03\0\0\x04"),
+        (stamp, b"\x07\xd0\x02\x1d\x0c\x22\x38\x01\x23\x45", b"\x07\xd0\x82\x1d\x0c\x22\x38\x01\x23\x45"),
+    ):
+        for protocol in range(6):
+            cls, args = value.__reduce_ex__(protocol)
+            assert cls is type(value)
+            assert args == ((folded if protocol >= 4 else state),) + ((UTC,) if value is stamp else ())
+            restored = cls(*args)
+            assert type(restored) is cls and restored == value
+            assert not hasattr(restored, "note")
+            if isinstance(value, (time, dt)):
+                assert restored.fold == (protocol >= 4)
+        assert value.__reduce__() == value.__reduce_ex__(2)
+    assert date(b"\x07\xd0\x02\x1d".decode("latin1")) == date(2000, 2, 29)
+    assert timedelta(microseconds=-1).__reduce_ex__(3) == (timedelta, (-1, 86399, 999999))
+
+    class Custom(date):
+        def __reduce__(self):
+            return "class hook"
+
+    custom = Custom(2000, 1, 1)
+    assert custom.__reduce_ex__(3) == "class hook"
+    custom.__reduce__ = lambda: "instance hook"
+    assert custom.__reduce_ex__(3) == "instance hook"
+
+    class Mixin:
+        def __reduce_ex__(self, protocol):
+            return protocol
+
+    class Mixed(date, Mixin):
+        pass
+
+    item = Mixed(2000, 1, 1)
+    assert super(Mixed, item).__reduce_ex__(4) == 4
+
+
+def test_calendar_strftime():
+    calls = []
+
+    class Name(str):
+        def replace(self, old, new):
+            calls.append((old, new))
+            return super().replace(old, new)
+
+    class Moment(dt):
+        def timetuple(self):
+            return (7, 1, 2, 3, 4, 5, 1, 2, -1)
+
+        @property
+        def microsecond(self):
+            raise AssertionError("strftime read the Python attribute")
+
+        def utcoffset(self):
+            raise AssertionError("strftime used a receiver method")
+
+        def tzname(self):
+            raise AssertionError("strftime used a receiver method")
+
+    zone = timezone(timedelta(seconds=-75, microseconds=-2), Name("west%Y"))
+    stamp = Moment(2001, 2, 3, 8, 9, 10, 123, zone)
+    assert stamp.strftime(format="%F %C %T %f") == "0007-01-02 00 03:04:05 000123"
+    assert stamp.strftime("%%Z/%:z/%z") == "%Z/-00:01:15.000002/-000115.000002"
+    assert calls == []
+    assert stamp.strftime("%Z %Z %%f") == "west%Y west%Y %f"
+    assert calls == [("%", "%%")]
+    clock = time(8, 9, 10, 456, UTC)
+    assert clock.strftime("%F %H:%M:%S.%f %z %:z %Z") == "1900-01-01 08:09:10.000456 +0000 +00:00 UTC"
+    assert date(2000, 1, 1).strftime("\ud800%f\0%Z\udcff") == "\ud800000000\0\udcff"
+    assert time().strftime("%z%:z%Z") == ""
+
+
 def current():
+    test_calendar_strftime()
+    test_calendar_reduction()
     test_calendar_format()
     test_timedelta_negation()
     test_subclass_construction()
