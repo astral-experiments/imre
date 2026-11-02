@@ -8,7 +8,7 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_text_size::{Ranged, TextSize};
 use serde_json::json;
 
-use super::{Body, Cleanup, Function, LoopTarget};
+use super::{Body, Cleanup, DefinitionScope, Function, LoopTarget};
 
 #[derive(Default)]
 struct ClosureNames {
@@ -212,6 +212,7 @@ impl Function<'_, '_> {
         let mut globals = Globals::default();
         globals.visit_body(suite);
         for name in globals.0 {
+            self.explicit_globals.insert(name.to_owned());
             let name = self.code_name(name);
             self.op("declare_global", &[&self.scope.clone(), &name]);
         }
@@ -244,13 +245,14 @@ impl Function<'_, '_> {
                 }
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
                 ast::Stmt::TypeAlias(v)
-                    if self.prefix.is_empty()
+                    if self.definition_scope.prefix.is_empty()
                         && v.type_params.is_none()
                         && let Some(name) = v.name.as_name_expr() =>
                 {
                     let evaluator = self.define(
                         v.start(),
                         name.id.as_str(),
+                        false,
                         None,
                         None,
                         Body::TypeAlias(&v.value),
@@ -305,12 +307,12 @@ impl Function<'_, '_> {
                             // Class annotations may refer to a name bound after the class body.
                             let value = self.output.code(
                                 self.source,
-                                String::new(),
+                                DefinitionScope::default(),
                                 Body::AnnotationValue(&v.annotation),
                             );
                             let code = self.output.definition(
                                 self.source,
-                                String::new(),
+                                DefinitionScope::default(),
                                 Body::AnnotationThunk(value.clone(), v.annotation.range()),
                                 v.annotation.start(),
                             );
@@ -358,6 +360,7 @@ impl Function<'_, '_> {
                     let function = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
+                        self.explicit_globals.contains(v.name.as_str()),
                         Some(&v.parameters),
                         v.returns.as_deref(),
                         body,
@@ -414,6 +417,7 @@ impl Function<'_, '_> {
                     let init = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
+                        self.explicit_globals.contains(v.name.as_str()),
                         None,
                         None,
                         Body::Namespace(&v.body),
@@ -602,11 +606,16 @@ impl Function<'_, '_> {
         &mut self,
         start: TextSize,
         name: &str,
+        global_binding: bool,
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
         body: Body<'_>,
     ) -> String {
-        let qualname = format!("{}{name}", self.prefix);
+        let qualname = if global_binding {
+            name.to_owned()
+        } else {
+            format!("{}{name}", self.definition_scope.prefix)
+        };
         let prefix = if matches!(body, Body::Namespace(_)) {
             format!("{qualname}.")
         } else {
@@ -634,10 +643,12 @@ impl Function<'_, '_> {
                 if params.is_some_and(|p| p.kwarg.is_some()) {
                     flags |= VARKEYWORDS;
                 }
-                if self.prefix.contains(".<locals>.") {
+                if self.definition_scope.inside_function {
                     flags |= NESTED;
                 }
-                if !self.prefix.is_empty() && !self.prefix.ends_with(".<locals>.") {
+                if !self.definition_scope.prefix.is_empty()
+                    && !self.definition_scope.prefix.ends_with(".<locals>.")
+                {
                     flags |= METHOD;
                 }
                 if self.source.string_annotations {
@@ -684,7 +695,7 @@ impl Function<'_, '_> {
             );
             use imre_ast::code_flags::*;
             let mut annotation_flags = OPTIMIZED | NEWLOCALS;
-            if self.prefix.contains(".<locals>.") {
+            if self.definition_scope.inside_function {
                 annotation_flags |= NESTED;
             }
             if self.source.string_annotations {
@@ -706,7 +717,7 @@ impl Function<'_, '_> {
             );
             let code = self.output.definition(
                 self.source,
-                String::new(),
+                DefinitionScope::default(),
                 Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
             );
@@ -803,7 +814,12 @@ impl Function<'_, '_> {
             let value_format = self.integer(1);
             self.op("put", &[&defaults, &format, &value_format]);
         }
-        let code = self.output.definition(self.source, prefix, body, start);
+        let scope = DefinitionScope {
+            prefix,
+            inside_function: self.definition_scope.inside_function
+                || !matches!(body, Body::Namespace(_)),
+        };
+        let code = self.output.definition(self.source, scope, body, start);
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         if generator.is_none() {

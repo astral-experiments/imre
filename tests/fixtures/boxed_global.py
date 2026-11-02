@@ -23,6 +23,21 @@ def clear():
 
 
 def current():
+    global Published, exported
+
+    class Published:
+        def method(self):
+            pass
+
+    def exported():
+        pass
+
+    class Local:
+        pass
+
+    print(Published.__qualname__, Published.method.__qualname__, exported.__qualname__, Local.__qualname__)
+    print(bool(Published.method.__code__.co_flags & 0x10))  # CO_NESTED
+
     reader, enclosing = outer()
     print(enclosing, reader() is state, state)
     clear()

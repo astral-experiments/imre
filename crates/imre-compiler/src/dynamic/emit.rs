@@ -121,7 +121,11 @@ pub(crate) fn emit(
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        let code = output.code(&location, String::new(), Body::Namespace(&body));
+        let code = output.code(
+            &location,
+            DefinitionScope::default(),
+            Body::Namespace(&body),
+        );
         writeln!(
             main,
             "  call void @imre_dyn_register(ptr %ctx, ptr {name}, ptr {file}, ptr {code})"
@@ -133,6 +137,13 @@ pub(crate) fn emit(
         "{ABI}\n{}\n{}\n{main}",
         output.constants, output.functions
     ))
+}
+
+/// Qualified-name prefixes can reset at a global definition without leaving its lexical scope.
+#[derive(Default)]
+struct DefinitionScope {
+    prefix: String,
+    inside_function: bool,
 }
 
 enum Body<'a> {
@@ -208,12 +219,12 @@ impl Output {
     fn definition(
         &mut self,
         source: &SourceMap<'_>,
-        prefix: String,
+        scope: DefinitionScope,
         body: Body<'_>,
         start: ruff_text_size::TextSize,
     ) -> String {
         let site = format!("@code_site{}", self.count);
-        let code = self.code(source, prefix, body);
+        let code = self.code(source, scope, body);
         writeln!(
             self.constants,
             "{site} = private constant {{ ptr, ptr, i32 }} {{ ptr {code}, ptr {}, i32 {} }}",
@@ -256,22 +267,23 @@ impl Output {
         format!("@pos{index}")
     }
 
-    fn code(&mut self, source: &SourceMap<'_>, prefix: String, body: Body<'_>) -> String {
+    fn code(&mut self, source: &SourceMap<'_>, scope: DefinitionScope, body: Body<'_>) -> String {
         let name = format!("@code{}", self.count);
         self.count += 1;
-        let module = matches!(body, Body::Namespace(_)) && prefix.is_empty();
+        let module = matches!(body, Body::Namespace(_)) && scope.prefix.is_empty();
         let mut f = Function {
             output: self,
             source,
             class_sites: None,
             annotation_lookup: false,
             class_locals: match &body {
-                Body::Namespace(stmts) if !prefix.is_empty() => {
+                Body::Namespace(stmts) if !scope.prefix.is_empty() => {
                     Some(statements::class_locals(stmts))
                 }
                 _ => None,
             },
-            prefix,
+            definition_scope: scope,
+            explicit_globals: BTreeSet::new(),
             ir: String::new(),
             block: "entry".into(),
             error: "failed".into(),
@@ -288,7 +300,9 @@ impl Output {
         match body {
             Body::Namespace(stmts) => {
                 if f.output.keep_docstrings
-                    && let Some(doc) = f.source.docstring(f.prefix.trim_end_matches('.'), stmts)
+                    && let Some(doc) = f
+                        .source
+                        .docstring(f.definition_scope.prefix.trim_end_matches('.'), stmts)
                 {
                     let value = f.text(&doc);
                     f.bind("__doc__", &value);
@@ -362,7 +376,8 @@ impl Output {
 struct Function<'a, 'p> {
     output: &'a mut Output,
     source: &'p SourceMap<'p>,
-    prefix: String,
+    definition_scope: DefinitionScope,
+    explicit_globals: BTreeSet<String>,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,
