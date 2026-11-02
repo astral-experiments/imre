@@ -36,6 +36,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "utime" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.utime"),
         "chmod" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.chmod"),
         "mkdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkdir"),
+        "mkfifo" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkfifo"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
         "waitpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.waitpid"),
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
