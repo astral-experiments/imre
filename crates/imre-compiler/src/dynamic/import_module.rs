@@ -8,7 +8,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     }
     match name {
         "types" => {
-            // Class construction helpers and DynamicClassAttribute only need builtins.
             const UPSTREAM: &str = include_str!(
                 "../../../../benchmarks/cpython_stdlib/full/types/upstream/Lib/types.py"
             );
@@ -21,11 +20,17 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         .split_once("def get_original_bases(")
                         .unwrap();
                     let descriptor = UPSTREAM.find("class DynamicClassAttribute:").unwrap();
-                    let end = UPSTREAM.find("class _GeneratorWrapper:").unwrap();
+                    let (definitions, _) = UPSTREAM[descriptor..].split_once("\n__all__ =").unwrap();
+                    // Keep CPython's wrapper and its callable-result protocol. Native code
+                    // owns function flags, including the flags on source-created generators.
+                    let (before_flags, rest) = definitions
+                        .split_once("    if (func.__class__ is FunctionType")
+                        .unwrap();
+                    let fallback = &rest[rest.find("    import functools").unwrap()..];
                     format!(
-                        "{helpers}{}\n{}",
+                        "{helpers}{}\nfrom types import CoroutineType, GeneratorType, _prepare_coroutine\n\
+                         {before_flags}    if _prepare_coroutine(func):\n        return func\n\n{fallback}",
                         include_str!("../../stdlib/types_original_bases.py"),
-                        &UPSTREAM[descriptor..end]
                     )
                 }),
             ))

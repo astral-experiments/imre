@@ -542,7 +542,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "ModuleType") => ctx.builtin("module"),
         ("types", "SimpleNamespace") => super::namespace::class(ctx)?,
         ("types", "TracebackType") => ctx.builtin("traceback"),
-        ("types", "coroutine") => ctx.builtin("types.coroutine"),
+        ("types", "_prepare_coroutine") => ctx.builtin("types._prepare_coroutine"),
         ("types", "GeneratorType") => ctx.builtin("generator"),
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
@@ -2003,22 +2003,21 @@ pub(super) fn call(
     {
         return itertools::method(ctx, owner, method, args, kwargs);
     }
-    if name == "types.coroutine" {
-        let func = single_argument("coroutine", "func", args, kwargs)?;
-        if !ctx.callable(func) {
-            return Err(Error::new(
-                "TypeError",
-                "types.coroutine() expects a callable",
-            ));
-        }
+    if name == "types._prepare_coroutine" {
+        let func = single_argument("_prepare_coroutine", "func", args, kwargs)?;
         if let Value::Function { code, .. } = *ctx.heap.get(func) {
             let original = ctx.code_object(code);
             use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
             if original.coroutine || original.flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {
-                return Ok(func);
+                return Ok(TRUE);
             }
-            if original.flags & GENERATOR != 0 && !matches!(original.body, super::value::Body::Native(_))
-            {
+            if original.flags & GENERATOR != 0 {
+                if matches!(original.body, super::value::Body::Native(_)) {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "types.coroutine cannot mark this native generator function",
+                    ));
+                }
                 // Other functions and existing generators retain their original code.
                 let mut marked = original.clone();
                 marked.flags |= ITERABLE_COROUTINE;
@@ -2027,13 +2026,10 @@ pub(super) fn call(
                     unreachable!()
                 };
                 *code = marked;
-                return Ok(func);
+                return Ok(TRUE);
             }
         }
-        return Err(Error::new(
-            "NotImplementedError",
-            "native types.coroutine supports compiled generator and coroutine functions",
-        ));
+        return Ok(FALSE);
     }
     if let Some(function) = name.strip_prefix("inspect.") {
         return inspect::call(ctx, function, args, kwargs);
