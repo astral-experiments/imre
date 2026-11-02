@@ -211,30 +211,64 @@ pub unsafe extern "C" fn imre_codec_decode(
 
 /// Explicit byte order never inserts a BOM. U+FEFF in the input encodes normally.
 #[derive(Clone, Copy)]
-pub(crate) enum Utf16Order {
-    Little,
-    Big,
+pub(crate) enum FixedUnicode {
+    Utf16Le,
+    Utf16Be,
+    Utf32Le,
+    Utf32Be,
 }
 
-impl Utf16Order {
+impl FixedUnicode {
+    pub(crate) fn by_key(key: &str) -> Option<Self> {
+        match key {
+            "utf_16_le" | "utf_16le" | "unicodelittleunmarked" => Some(Self::Utf16Le),
+            "utf_16_be" | "utf_16be" | "unicodebigunmarked" => Some(Self::Utf16Be),
+            "utf_32_le" | "utf_32le" => Some(Self::Utf32Le),
+            "utf_32_be" | "utf_32be" => Some(Self::Utf32Be),
+            _ => None,
+        }
+    }
+
     pub(crate) fn name(self) -> &'static str {
         match self {
-            Self::Little => "utf-16-le",
-            Self::Big => "utf-16-be",
+            Self::Utf16Le => "utf-16-le",
+            Self::Utf16Be => "utf-16-be",
+            Self::Utf32Le => "utf-32-le",
+            Self::Utf32Be => "utf-32-be",
         }
     }
 
     pub(crate) fn append(
         self,
         bytes: &mut Vec<u8>,
-        units: impl IntoIterator<Item = u16>,
+        points: impl IntoIterator<Item = u32>,
     ) -> Result<()> {
-        for unit in units {
-            bytes.try_reserve(2).map_err(|_| Error::allocation())?;
-            bytes.extend_from_slice(&match self {
-                Self::Little => unit.to_le_bytes(),
-                Self::Big => unit.to_be_bytes(),
-            });
+        let mut append_word = |word: &[u8]| -> Result<()> {
+            bytes
+                .try_reserve(word.len())
+                .map_err(|_| Error::allocation())?;
+            bytes.extend_from_slice(word);
+            Ok(())
+        };
+        for point in points {
+            match self {
+                Self::Utf32Le => append_word(&point.to_le_bytes())?,
+                Self::Utf32Be => append_word(&point.to_be_bytes())?,
+                Self::Utf16Le | Self::Utf16Be => {
+                    // A lone surrogate requested by surrogatepass is already one code unit.
+                    let mut units = [point as u16, 0];
+                    let length =
+                        char::from_u32(point).map_or(1, |ch| ch.encode_utf16(&mut units).len());
+                    for unit in &units[..length] {
+                        let word = if matches!(self, Self::Utf16Le) {
+                            unit.to_le_bytes()
+                        } else {
+                            unit.to_be_bytes()
+                        };
+                        append_word(&word)?;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -244,18 +278,16 @@ impl Utf16Order {
 #[derive(Clone, Copy)]
 pub(crate) enum StrEncoder {
     Registered(Codec),
-    Utf16(Utf16Order),
+    Fixed(FixedUnicode),
 }
 
 impl StrEncoder {
     pub(crate) fn lookup(encoding: &str, errors: &str) -> Result<Self> {
         let key = encode_key(encoding, errors)?;
-        match key.as_str() {
-            "utf_16_le" | "utf_16le" | "unicodelittleunmarked" => {
-                Ok(Self::Utf16(Utf16Order::Little))
-            }
-            "utf_16_be" | "utf_16be" | "unicodebigunmarked" => Ok(Self::Utf16(Utf16Order::Big)),
-            _ => Ok(Self::Registered(Codec::by_key(&key, encoding)?)),
+        if let Some(encoder) = FixedUnicode::by_key(&key) {
+            Ok(Self::Fixed(encoder))
+        } else {
+            Ok(Self::Registered(Codec::by_key(&key, encoding)?))
         }
     }
 
@@ -267,9 +299,9 @@ impl StrEncoder {
     ) -> Result<Cow<'a, [u8]>> {
         match self {
             Self::Registered(codec) => codec.encode(text, Some(errors), original),
-            Self::Utf16(order) => {
+            Self::Fixed(encoder) => {
                 let mut bytes = Vec::new();
-                order.append(&mut bytes, text.encode_utf16())?;
+                encoder.append(&mut bytes, text.chars().map(u32::from))?;
                 Ok(Cow::Owned(bytes))
             }
         }
