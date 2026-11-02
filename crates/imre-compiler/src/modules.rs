@@ -98,6 +98,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/importlib/metadata_boxed.py"),
                 "\n",
                 include_str!("../stdlib/importlib/metadata_version.py"),
+                "\n",
+                include_str!("../stdlib/importlib/metadata_entrypoints.py"),
             ),
         )),
         // CPython 3.14.5 Lib/queue.py with condition variables backed by native locks.
@@ -193,6 +195,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 ).to_owned() + wrappers
             })))
         }
+        // CPython 3.14.5 Lib/configparser.py.
+        "configparser" => Some(("configparser.py", include_str!("../stdlib/configparser.py"))),
         "contextlib" => Some((
             "contextlib.py",
             concat!(
@@ -232,6 +236,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "\n",
                 include_str!("../stdlib/logging/records.py"),
                 "\n",
+                include_str!("../stdlib/logging/formatters.py"),
+                "\n",
                 include_str!("../stdlib/logging/boxed.py"),
             ),
         )),
@@ -262,6 +268,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "string.templatelib" => Some((
             "string/templatelib.py",
             include_str!("../stdlib/string/templatelib.py"),
+        )),
+        "email.message" => Some((
+            "email/message.py",
+            concat!(
+                include_str!("../stdlib/email/message.py"),
+                "\n",
+                include_str!("../stdlib/email/boxed_message.py"),
+            ),
         )),
         "http" => Some((
             "http/__init__.py",
@@ -421,6 +435,7 @@ pub(crate) enum IntrinsicModule {
     Threading,
     Thread,
     Codecs,
+    CodecsNative,
     Socket,
     SocketNative,
     Hashlib,
@@ -588,7 +603,7 @@ pub(crate) enum Intrinsic {
     ModuleType,
     GetSysconfigPath,
     OsPathExists,
-    OsDevnull,
+    StringConstant(&'static str),
     SysExit,
     ShlexSplit,
     ShlexQuote,
@@ -656,7 +671,6 @@ pub(crate) enum Intrinsic {
     ZipFile,
     ZipInfo,
     BytesIo,
-    IoBase(crate::ir::IoBase),
     StringIo,
     BadZipFile,
     BadGzipFile,
@@ -781,6 +795,10 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
+    pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
+    pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
+    pub(crate) const TEXT_IO_BASE: Self = Self::ObjectRuntimeExport("io.TextIOBase");
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
 
     /// Subclasses of these immutable types keep their calendar value in the object runtime.
@@ -898,6 +916,7 @@ impl IntrinsicModule {
             "threading" => Some(Self::Threading),
             "_thread" => Some(Self::Thread),
             "codecs" => Some(Self::Codecs),
+            "_codecs" => Some(Self::CodecsNative),
             "socket" => Some(Self::Socket),
             "_socket" => Some(Self::SocketNative),
             "hashlib" => Some(Self::Hashlib),
@@ -1011,6 +1030,7 @@ impl IntrinsicModule {
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
+            (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Struct, "Struct") => Intrinsic::ObjectRuntimeExport("struct.Struct"),
             (Self::Struct, "calcsize") => Intrinsic::ObjectRuntimeExport("struct.calcsize"),
@@ -1108,9 +1128,30 @@ impl IntrinsicModule {
             (Self::ImportlibResources, "read_text") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.read_text")
             }
+            (Self::ImportlibMetadata, "Distribution") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.Distribution")
+            }
+            (Self::ImportlibMetadata, "PathDistribution") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.PathDistribution")
+            }
+            (Self::ImportlibMetadata, "distributions") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.distributions")
+            }
+            (Self::ImportlibMetadata, "distribution") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.distribution")
+            }
+            (Self::ImportlibMetadata, "_unique") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata._unique")
+            }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
+            (Self::ImportlibMetadata, "EntryPoint") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.EntryPoint")
+            }
+            (Self::ImportlibMetadata, "EntryPoints") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.EntryPoints")
+            }
             (Self::ImportlibMetadata, "entry_points") => {
-                Intrinsic::Declaration("importlib.metadata.entry_points")
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.entry_points")
             }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
@@ -1718,18 +1759,26 @@ impl IntrinsicModule {
             (Self::Io | Self::IoNative, "text_encoding") => {
                 Intrinsic::ObjectRuntimeExport("_io.text_encoding")
             }
-            (Self::Io | Self::IoNative, "TextIOWrapper") => {
-                Intrinsic::ObjectRuntimeExport("io.TextIOWrapper")
+            (Self::Io, "TextIOWrapper") => Intrinsic::ObjectRuntimeExport("io.TextIOWrapper"),
+            (Self::IoNative, "TextIOWrapper") => {
+                Intrinsic::ObjectRuntimeExport("_io.TextIOWrapper")
             }
             (Self::Io | Self::IoNative, "open_code") => {
                 Intrinsic::ObjectRuntimeExport("io.open_code")
             }
             (Self::Io, "BytesIO") => Intrinsic::BytesIo,
-            (Self::Io | Self::IoNative, "FileIO") => Intrinsic::ObjectRuntimeExport("io.FileIO"),
-            (Self::Io, "IOBase") => Intrinsic::IoBase(crate::ir::IoBase::Any),
-            (Self::Io, "RawIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Raw),
-            (Self::Io, "BufferedIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Buffered),
-            (Self::Io, "TextIOBase") => Intrinsic::IoBase(crate::ir::IoBase::Text),
+            (Self::Io, "FileIO") => Intrinsic::ObjectRuntimeExport("io.FileIO"),
+            (Self::IoNative, "FileIO") => Intrinsic::ObjectRuntimeExport("_io.FileIO"),
+            (Self::IoNative, "_IOBase") => Intrinsic::ObjectRuntimeExport("_io._IOBase"),
+            (Self::IoNative, "_RawIOBase") => Intrinsic::ObjectRuntimeExport("_io._RawIOBase"),
+            (Self::IoNative, "_BufferedIOBase") => {
+                Intrinsic::ObjectRuntimeExport("_io._BufferedIOBase")
+            }
+            (Self::IoNative, "_TextIOBase") => Intrinsic::ObjectRuntimeExport("_io._TextIOBase"),
+            (Self::Io, "IOBase") => Intrinsic::IO_BASE,
+            (Self::Io, "RawIOBase") => Intrinsic::RAW_IO_BASE,
+            (Self::Io, "BufferedIOBase") => Intrinsic::BUFFERED_IO_BASE,
+            (Self::Io, "TextIOBase") => Intrinsic::TEXT_IO_BASE,
             (Self::Io, "StringIO") => Intrinsic::StringIo,
             (Self::Zipfile, "BadZipFile") => Intrinsic::BadZipFile,
             (Self::Csv, "reader") => Intrinsic::CsvReader,
@@ -1791,7 +1840,11 @@ impl IntrinsicModule {
             (Self::Itertools, "combinations_with_replacement") => {
                 Intrinsic::Combinatorial(crate::ir::Combinatorial::CombinationsWithReplacement)
             }
+            (Self::Itertools, "batched") => Intrinsic::ObjectRuntimeExport("itertools.batched"),
             (Self::Itertools, "count") => Intrinsic::Count,
+            (Self::Itertools, "filterfalse") => {
+                Intrinsic::ObjectRuntimeExport("itertools.filterfalse")
+            }
             (Self::Itertools, "tee") => Intrinsic::Tee,
             (Self::Itertools, "islice") => Intrinsic::Islice,
             (Self::Itertools, "cycle") => Intrinsic::Cycle,
@@ -1906,7 +1959,8 @@ impl IntrinsicModule {
             (Self::Os, "fsdecode") => Intrinsic::FsDecode,
             (Self::Os, "fsencode") => Intrinsic::FsEncode,
             (Self::PosixPath, "normcase") => Intrinsic::PosixNormcase,
-            (Self::Os, "devnull") => Intrinsic::OsDevnull,
+            (Self::Os, "devnull") => Intrinsic::StringConstant("/dev/null"),
+            (Self::Os | Self::OsPath | Self::PosixPath, "extsep") => Intrinsic::StringConstant("."),
             (Self::GenericPath | Self::PosixPath, "commonprefix") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
             }
@@ -4292,6 +4346,9 @@ impl<'a> Loader<'a> {
                 "string/__init__.py",
                 include_str!("../stdlib/string/__init__.py"),
             )),
+            // The boxed email package is intrinsic. Typed child modules need a package root.
+            "email" => Some(("email/__init__.py", "")),
+            "email.message" => Some(("email/message.py", include_str!("../stdlib/email/message.py"))),
             "unittest" => Some((
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),

@@ -79,7 +79,7 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    matches!(name, "builtins" | "errno" | "genericpath" | "itertools")
+    matches!(name, "atexit" | "builtins" | "errno" | "genericpath" | "itertools")
         || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }
@@ -104,6 +104,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "array"
             | "_collections"
             | "codecs"
+            | "_codecs"
             | "types"
             | "_io"
             | "_weakref"
@@ -391,6 +392,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
+        ("codecs" | "_codecs", "encode") => ctx.builtin("codecs.encode"),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -435,6 +437,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "loaded_module"
             | "members"
             | "metadata"
+            | "native_iterator"
+            | "slot_bases"
             | "slotted_type"
             | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
@@ -695,7 +699,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
         | ("random", "random" | "choice")
-        | ("codecs", "encode" | "decode" | "lookup" | "register_error" | "lookup_error")
+        | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
         | ("pickle", "dumps")
@@ -862,6 +866,10 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(method) = name.strip_prefix("atexit.") {
+        return super::atexit::call(ctx, method, args, kwargs);
+    }
+
     if name == "_imre_linecache.source_lines" {
         let ([data], []) = (args, kwargs) else {
             return Err(Error::new(
@@ -1449,6 +1457,12 @@ pub(super) fn call(
     if name == "itertools._cycle_next" {
         return itertools::cycle_next(ctx, args, kwargs);
     }
+    if name == "itertools._filterfalse_allocate" {
+        return itertools::filterfalse_allocate(ctx, args, kwargs);
+    }
+    if name == "itertools._filterfalse_state" {
+        return itertools::filterfalse_state(ctx, args, kwargs);
+    }
     if name == "itertools._chain_allocate" {
         let [base, class, source] = args else {
             return Err(Error::new(
@@ -1645,7 +1659,7 @@ pub(super) fn call(
                 let bases = ctx
                     .tuple_items(*bases)?
                     .ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
-                return ctx.dataclass_from_namespace(name, bases, *members, "types", false, true);
+                return ctx.make_dataclass_type(name, bases, *members);
             }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
@@ -1688,6 +1702,10 @@ pub(super) fn call(
                 }
                 return Ok(FALSE);
             }
+            ("native_iterator", [obj], []) => {
+                return Ok(if ctx.is_native_iterator(*obj) { TRUE } else { FALSE });
+            }
+            ("slot_bases", [class], []) => return ctx.dataclass_slot_bases(*class),
             ("slotted_type", [old, namespace], []) => {
                 return ctx.slotted_dataclass(*old, *namespace);
             }
@@ -1962,7 +1980,7 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer")) =
+    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner" | "finditer" | "findall")) =
         name.strip_prefix("pattern.")
     {
         return regex::search(ctx, method, args, kwargs);
@@ -2017,7 +2035,7 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "pattern.findall" | "file.read" | "file.read1" | "file.readline"
+        "struct.unpack" | "file.read" | "file.read1" | "file.readline"
         | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),

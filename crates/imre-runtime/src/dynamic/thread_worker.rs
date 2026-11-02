@@ -67,6 +67,7 @@ struct Entry {
 
 #[derive(Default)]
 pub(super) struct Registry {
+    joined_at_shutdown: bool,
     entries: Vec<Entry>,
     default_run: Option<[Id; 3]>,
     main: Option<(usize, Id)>,
@@ -242,12 +243,26 @@ impl Registry {
     }
 }
 
-impl Drop for Registry {
-    fn drop(&mut self) {
+impl Registry {
+    /// Only workers present before ordinary exit callbacks participate in interpreter shutdown.
+    pub(super) fn join_before_exit_callbacks(&mut self) {
+        self.joined_at_shutdown = true;
+        self.join_non_daemon();
+    }
+
+    fn join_non_daemon(&self) {
         for worker in &self.entries {
             if !worker.daemon {
                 let _ = worker.handle.join(None);
             }
+        }
+    }
+}
+
+impl Drop for Registry {
+    fn drop(&mut self) {
+        if !self.joined_at_shutdown {
+            self.join_non_daemon();
         }
     }
 }

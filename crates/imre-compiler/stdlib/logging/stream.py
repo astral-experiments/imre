@@ -52,7 +52,7 @@ class Handler:
     def format(self, record: LogRecord) -> str:
         fmt = self.formatter
         if fmt is None:
-            return _default_formatter.format(record)
+            return _defaultFormatter.format(record)
         return fmt.format(record)
 
     def emit(self, record: LogRecord | None) -> None:

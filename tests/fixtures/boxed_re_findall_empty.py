@@ -2,6 +2,12 @@ import re
 
 
 def current():
+    bounded = re.compile("(é)|(.)")
+    assert bounded.findall(string="xé中y", pos=1, endpos=3) == [("é", ""), ("", "中")]
+    assert re.compile("^x|é$").findall("xxé!", 1, 3) == ["é"]
+    assert re.compile(rb".*?").findall(b"xyz", 1, 2) == [b"", b"y", b""]
+    assert re.compile("").findall("ab", 2, 1) == []
+
     source = b":x::"
     view = memoryview(source)
     other = memoryview(view)

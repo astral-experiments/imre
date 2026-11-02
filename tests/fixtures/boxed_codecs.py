@@ -6,8 +6,52 @@ class EchoDecoder(codecs.IncrementalDecoder):
         return self.errors, input, final
 
 
+def check_raw_unicode_escape():
+    for alias in ("raw-unicode-escape", "raw_unicode_escape", "RAW Unicode ESCAPE"):
+        assert str(b"A\xff\x00", alias) == "A\xff\x00"
+        assert br"\u20AC:\U0001f600".decode(alias) == "€:😀"
+        assert codecs.decode(br"\\u20ac\\\u20ac", alias) == "\\\\u20ac\\\\€"
+        assert bytearray(b"\\x00\\n\\\\q\\").decode(alias) == "\\x00\\n\\\\q\\"
+        assert ord(str(br"\udc80", alias)) == 0xdc80
+    for wire, start, end, reason in (
+        (br"xx\u12QZ", 2, 6, r"truncated \uXXXX escape"),
+        (br"\\\U0001", 2, 8, r"truncated \UXXXXXXXX escape"),
+        (br"\U00110000", 0, 10, r"\Uxxxxxxxx out of range"),
+    ):
+        try:
+            str(wire, "raw_unicode_escape")
+        except UnicodeDecodeError as error:
+            assert (error.encoding, error.object, error.start, error.end, error.reason) == (
+                "rawunicodeescape", wire, start, end, reason)
+        else:
+            raise AssertionError(wire)
+    assert str(br"\u0!\u20ac", "raw_unicode_escape", "ignore") == "!€"
+    assert str(br"\u0!\u20ac", "raw_unicode_escape", "replace") == "\ufffd!€"
+    assert str(br"\uQ", "raw_unicode_escape", "backslashreplace") == r"\x5c\x75Q"
+    assert str(b"ok", "raw_unicode_escape", "unknown.policy") == "ok"
+    def resume(error):
+        return "?", -1
+    codecs.register_error("test.raw_escape", resume)
+    assert codecs.decode(memoryview(br"\u00z"), "raw_unicode_escape", "test.raw_escape") == "?z"
+
+    from collections import namedtuple
+    Resume = namedtuple("Resume", "text position")
+
+    class ReplacementBytes(bytes):
+        pass
+
+    def change_input(error):
+        error.object = ReplacementBytes(br"\u00c4")
+        assert codecs.replace_errors(error) == ("\ufffd", 3)
+        return Resume("", 0)
+
+    codecs.register_error("test.raw_change_input", change_input)
+    assert br"\u3".decode("raw_unicode_escape", "test.raw_change_input") == "Ä"
+
+
 def current():
     utf16_encoders()
+    check_raw_unicode_escape()
     decoder = codecs.IncrementalDecoder(errors="replace")
     assert decoder.errors == "replace"
     assert decoder.getstate() == (b"", 0)

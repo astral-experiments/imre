@@ -1,5 +1,7 @@
 //! In-process execution of source received by the boxed Python runtime.
 
+mod annotations;
+
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
@@ -73,6 +75,10 @@ enum Instruction {
     },
     From(String, u32, Vec<(String, String)>),
     Define(Definition),
+    Annotations {
+        entries: Vec<(String, ast::Expr)>,
+        class: bool,
+    },
     ClassStart,
     ClassEnd,
     Yield(Option<ast::Expr>),
@@ -100,6 +106,13 @@ enum Instruction {
         handler: usize,
     },
     ExitWith,
+    EnterExcept {
+        handler: usize,
+        end: usize,
+    },
+    ExceptMatch(ast::Expr, usize),
+    BindException(String),
+    ClearException(String),
     StartFinally,
     EndFinally,
     Delegate,
@@ -124,6 +137,7 @@ struct Definition {
     decorators: Vec<ast::Decorator>,
     body: Rc<Program>,
     kind: DefinitionKind,
+    annotate: Option<Rc<Program>>,
 }
 
 enum DefinitionKind {
@@ -296,6 +310,13 @@ enum Transfer {
     Raise(Id),
 }
 
+#[derive(Clone, Copy)]
+enum HandlerKind {
+    Finally,
+    Except,
+    With(Id),
+}
+
 /// A protected source region survives yields, including yields in its cleanup.
 #[derive(Clone)]
 pub(super) struct FinallyBlock {
@@ -304,12 +325,16 @@ pub(super) struct FinallyBlock {
     end: usize,
     depth: usize,
     pending: Option<Transfer>,
-    exit: Option<Id>,
+    kind: HandlerKind,
 }
 
 impl FinallyBlock {
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> {
-        self.exit.into_iter().chain(match self.pending {
+        let exit = match self.kind {
+            HandlerKind::With(exit) => Some(exit),
+            _ => None,
+        };
+        exit.into_iter().chain(match self.pending {
             Some(Transfer::Raise(id) | Transfer::Return(id)) => Some(id),
             _ => None,
         })
@@ -691,6 +716,17 @@ impl Program {
         spellings: &TemplateReplacements,
         line_at: &impl Fn(usize) -> u32,
     ) -> Result<(Id, &'a BTreeSet<String>)> {
+        self.prepare_scope_strings(heap, shared, spellings, line_at, None)
+    }
+
+    fn prepare_scope_strings<'a>(
+        &'a mut self,
+        heap: &mut value::Heap,
+        shared: &mut SharedConstants<'a>,
+        spellings: &TemplateReplacements,
+        line_at: &impl Fn(usize) -> u32,
+        annotation_class: Option<&HashSet<String>>,
+    ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
         let mut nested_reads = BTreeSet::new();
         let mut strings = CompiledStrings {
@@ -709,6 +745,7 @@ impl Program {
                 Instruction::Eval(e)
                 | Instruction::Unless(e, _)
                 | Instruction::Iter(e)
+                | Instruction::ExceptMatch(e, _)
                 | Instruction::Await(e) => strings.visit_expr(e),
                 Instruction::Match { subject, cases, .. } => {
                     strings.visit_expr(subject);
@@ -730,7 +767,9 @@ impl Program {
                         strings.visit_expr(target);
                     }
                 }
-                Instruction::DeleteName(name) => {
+                Instruction::DeleteName(name)
+                | Instruction::BindException(name)
+                | Instruction::ClearException(name) => {
                     strings.heap.code_name(name);
                 }
                 Instruction::DeleteItem(item) => {
@@ -772,7 +811,37 @@ impl Program {
                         strings.heap.code_name(alias);
                     }
                 }
+                Instruction::Annotations { entries, .. } => {
+                    for (name, expression) in entries.iter() {
+                        strings.heap.code_name(name);
+                        strings.visit_expr(expression);
+                    }
+                }
                 Instruction::Define(definition) => {
+                    if let Some(provider) = &mut definition.annotate {
+                        let provider = Rc::get_mut(provider).expect("new annotation code");
+                        if self.class_attributes.is_some() {
+                            // A global declared by the class also bypasses its dictionary
+                            // when evaluated in an immediately enclosed annotation scope.
+                            for (name, (kind, _)) in &self.directives {
+                                if *kind == ScopeDirective::Global {
+                                    provider.directives.insert(name.clone(), (*kind, 0.into()));
+                                }
+                            }
+                        }
+                        let (roots, reads) = provider.prepare_scope_strings(
+                            strings.heap,
+                            strings.shared,
+                            spellings,
+                            line_at,
+                            self.class_attributes.is_some().then_some(&self.locals),
+                        )?;
+                        // The annotation scope is a sibling of the function body.
+                        nested_reads.extend(reads.iter().cloned());
+                        if roots != NONE {
+                            strings.keep(roots)?;
+                        }
+                    }
                     let child =
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
@@ -817,6 +886,7 @@ impl Program {
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
                 | Instruction::ExitWith
+                | Instruction::EnterExcept { .. }
                 | Instruction::StartFinally
                 | Instruction::EndFinally
                 | Instruction::Delegate => {}
@@ -866,6 +936,7 @@ impl Program {
                         decorators: Vec::new(),
                         body: Rc::new(child),
                         kind: DefinitionKind::Function(params),
+                        annotate: None,
                     },
                 ),
             );
@@ -884,6 +955,12 @@ impl Program {
             }
         }
         self.string_roots = strings.finish();
+        // An annotation's class-local name falls back to globals when the class
+        // dictionary lacks it. Functions nested inside the annotation skip the class.
+        if let Some(class) = annotation_class {
+            self.reads
+                .retain(|name| name == "__classdict__" || !class.contains(name));
+        }
         // Even a nonlocal that is only assigned or deleted needs an enclosing cell.
         self.reads.extend(
             self.directives
@@ -1271,18 +1348,9 @@ impl Program {
                     }
                     Instruction::From(module.to_owned(), s.level, names)
                 }
-                Stmt::FunctionDef(s) if s.type_params.is_none() => {
-                    if (function || self.class_attributes.is_some())
-                        && (s.returns.is_some()
-                            || s.parameters.iter().any(|p| p.annotation().is_some()))
-                    {
-                        return Err(unsupported(if function {
-                            "annotated nested function definition"
-                        } else {
-                            "annotated method definition"
-                        }));
-                    }
+                Stmt::FunctionDef(mut s) if s.type_params.is_none() => {
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    let annotate = self.annotation_program(&mut s, &child, line)?;
                     if s.is_async {
                         if imre_ast::code_flags::is_generator(&s.body) {
                             return Err(unsupported("async generator function"));
@@ -1306,6 +1374,7 @@ impl Program {
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
                         kind: DefinitionKind::Function(s.parameters),
+                        annotate,
                     })
                 }
                 Stmt::ClassDef(mut s) if s.type_params.is_none() => {
@@ -1338,6 +1407,7 @@ impl Program {
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
                         kind: DefinitionKind::Class(s.arguments),
+                        annotate: None,
                     })
                 }
                 Stmt::Break(_) => {
@@ -1412,16 +1482,95 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::Try(s)
-                    if s.handlers.is_empty() && s.orelse.is_empty() && !s.finalbody.is_empty() =>
-                {
+                Stmt::Try(s) if !s.is_star && !s.handlers.is_empty() && s.finalbody.is_empty() => {
+                    let entry = self.instructions.len();
+                    self.instructions
+                        .push((line, Instruction::EnterExcept { handler: 0, end: 0 }));
+                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    // On fallthrough, leave the protected body before running the else suite.
+                    self.instructions.push((line, Instruction::StartFinally));
+                    let handler = self.instructions.len();
+                    let mut handled = Vec::new();
+                    let count = s.handlers.len();
+                    for (i, ast::ExceptHandler::ExceptHandler(h)) in
+                        s.handlers.into_iter().enumerate()
+                    {
+                        if h.type_.is_none() && i + 1 < count {
+                            return Err(Error::new(
+                                "SyntaxError",
+                                "default 'except:' must be last",
+                            ));
+                        }
+                        let handler_line =
+                            lines.partition_point(|n| *n <= h.start().to_usize()) as u32;
+                        let check = h.type_.map(|class| {
+                            let i = self.instructions.len();
+                            self.instructions
+                                .push((handler_line, Instruction::ExceptMatch(*class, 0)));
+                            i
+                        });
+                        let cleanup = h.name.map(|name| {
+                            let name = name.to_string();
+                            self.locals.insert(name.clone());
+                            self.instructions
+                                .push((handler_line, Instruction::BindException(name.clone())));
+                            let entry = self.instructions.len();
+                            self.instructions.push((
+                                handler_line,
+                                Instruction::EnterFinally { handler: 0, end: 0 },
+                            ));
+                            (entry, name)
+                        });
+                        self.lower(h.body, lines, function, active.as_deref_mut())?;
+                        if let Some((entry, name)) = cleanup {
+                            // The implicit finally clears the target on fallthrough, unwind and generator close.
+                            self.instructions
+                                .push((handler_line, Instruction::StartFinally));
+                            let handler = self.instructions.len();
+                            self.instructions
+                                .push((handler_line, Instruction::ClearException(name)));
+                            self.instructions
+                                .push((handler_line, Instruction::EndFinally));
+                            let end = self.instructions.len();
+                            self.instructions[entry].1 = Instruction::EnterFinally { handler, end };
+                        }
+                        handled.push(self.instructions.len());
+                        self.instructions.push((handler_line, Instruction::Jump(0)));
+                        if let Some(i) = check {
+                            let next = self.instructions.len();
+                            let Instruction::ExceptMatch(_, next_handler) =
+                                &mut self.instructions[i].1
+                            else {
+                                unreachable!()
+                            };
+                            *next_handler = next;
+                        }
+                    }
+                    self.instructions.push((line, Instruction::EndFinally));
+                    let end = self.instructions.len();
+                    self.instructions[entry].1 = Instruction::EnterExcept { handler, end };
+                    self.lower(s.orelse, lines, function, active.as_deref_mut())?;
+                    let done = self.instructions.len();
+                    for i in handled {
+                        self.instructions[i].1 = Instruction::Jump(done);
+                    }
+                    continue;
+                }
+                Stmt::Try(mut s) if !s.is_star && !s.finalbody.is_empty() => {
+                    let finalbody = std::mem::take(&mut s.finalbody);
                     let enter = self.instructions.len();
                     self.instructions
                         .push((line, Instruction::EnterFinally { handler: 0, end: 0 }));
-                    self.lower(s.body, lines, function, active.as_deref_mut())?;
+                    // The finally surrounds the handlers and else suite as well as the try body.
+                    let protected = if s.handlers.is_empty() {
+                        s.body
+                    } else {
+                        std::iter::once(Stmt::Try(s)).collect()
+                    };
+                    self.lower(protected, lines, function, active.as_deref_mut())?;
                     self.instructions.push((line, Instruction::StartFinally));
                     let handler = self.instructions.len();
-                    self.lower(s.finalbody, lines, function, active.as_deref_mut())?;
+                    self.lower(finalbody, lines, function, active.as_deref_mut())?;
                     self.instructions.push((line, Instruction::EndFinally));
                     let end = self.instructions.len();
                     self.instructions[enter].1 = Instruction::EnterFinally { handler, end };
@@ -1717,7 +1866,15 @@ impl Context {
             parsed.tokens(),
             parsed.syntax(),
         ));
-        code.lower(parsed.into_syntax().body, &lines, false, None)?;
+        let mut body = parsed.into_syntax().body;
+        let caller = self.heap.current_code();
+        let inherited = matches!(self.heap.get(caller), Value::Code(code) if
+            code.flags.unwrap_or(0) & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0
+            || matches!(&code.body, Body::Source(p) if p.private_names.as_ref().is_some_and(|n| n.string_annotations)));
+        if inherited || imre_ast::future_annotations(&body) {
+            code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
+        }
+        code.lower(body, &lines, false, None)?;
         let mut module_globals = HashSet::new();
         code.resolve_directives(&|_| None, &mut module_globals)?;
         // A global declared by a nested block makes module assignments use the globals dictionary.
@@ -1965,7 +2122,7 @@ impl Context {
             ));
         }
         for &cell in cells {
-            if !matches!(self.heap.get(cell), Value::Cell(_)) {
+            if !matches!(self.heap.get(cell), Value::Cell(_) | Value::ClassCell(_)) {
                 return Err(Error::new(
                     "TypeError",
                     format!(
@@ -2552,7 +2709,10 @@ impl Context {
                 let iter = cursor.iterators.pop().expect("inner iterator");
                 self.release_loop_iterator(iter);
             }
-            if block.pending.is_none() {
+            if block.pending.is_none()
+                && (!matches!(block.kind, HandlerKind::Except)
+                    || matches!(transfer, Transfer::Raise(_)))
+            {
                 block.pending = Some(transfer);
                 cursor.ip = block.handler;
                 return Ok(None);
@@ -2702,14 +2862,19 @@ impl Context {
                 } else if let Some((_, op)) = op {
                     cursor.ip += 1;
                     match op {
-                        Instruction::EnterFinally { handler, end } => {
+                        Instruction::EnterFinally { handler, end }
+                        | Instruction::EnterExcept { handler, end } => {
                             cursor.protected.push(FinallyBlock {
                                 start: cursor.ip,
                                 handler: *handler,
                                 end: *end,
                                 depth: cursor.iterators.len(),
                                 pending: None,
-                                exit: None,
+                                kind: if matches!(op, Instruction::EnterExcept { .. }) {
+                                    HandlerKind::Except
+                                } else {
+                                    HandlerKind::Finally
+                                },
                             });
                             continue;
                         }
@@ -2919,6 +3084,10 @@ impl Context {
         } = cursor;
         let eval = |ctx: &mut Self, e: &ast::Expr| ctx.source_expr(code, scope, e);
         match op {
+            Instruction::Annotations { entries, class } => {
+                let values = self.source_annotations(code, scope, entries, *class)?;
+                return Ok(Some(Step::Return(values)));
+            }
             Instruction::ReturnSent => return Ok(Some(Step::Return(*sent))),
             Instruction::BindSent(targets) => {
                 for target in targets {
@@ -3089,7 +3258,7 @@ impl Context {
                     end: handler + 2,
                     depth: iterators.len(),
                     pending: None,
-                    exit: Some(exit),
+                    kind: HandlerKind::With(exit),
                 });
                 if let Some(target) = &item.optional_vars {
                     self.bind_target(code, scope, target, value)?;
@@ -3097,7 +3266,9 @@ impl Context {
             }
             Instruction::ExitWith => {
                 let block = cursor.protected.last_mut().expect("active context manager");
-                let exit = block.exit.expect("context manager exit");
+                let HandlerKind::With(exit) = block.kind else {
+                    unreachable!("context manager exit");
+                };
                 let exception = match block.pending {
                     Some(Transfer::Raise(error)) => error,
                     _ => NONE,
@@ -3111,7 +3282,41 @@ impl Context {
                     });
                 }
             }
+            Instruction::BindException(name) => {
+                self.bind_source_name(scope, name, self.heap.active_exception())?;
+            }
+            Instruction::ClearException(name) => {
+                self.bind_source_name(scope, name, NONE)?;
+                let key = self.heap.code_name(name);
+                self.op("delname", scope, key, NONE)?;
+            }
+            Instruction::ExceptMatch(class, next_handler) => {
+                let class = eval(self, class)?;
+                let base = self.builtin("BaseException");
+                let items = self.tuple_items(class)?;
+                let classes = items.as_deref().unwrap_or(std::slice::from_ref(&class));
+                if !classes
+                    .iter()
+                    .all(|&target| self.direct_subclass(target, base))
+                {
+                    return Err(Error::new(
+                        "TypeError",
+                        "catching classes that do not inherit from BaseException is not allowed",
+                    ));
+                }
+                let Value::Raised(error) = self.heap.get(self.heap.active_exception()) else {
+                    unreachable!("matching an active exception")
+                };
+                // Python except clauses use the actual inheritance chain, ignoring ABC registration.
+                if !classes.iter().any(|&target| match error.class() {
+                    Some(actual) => self.direct_subclass(actual, target),
+                    None => self.raised_error_matches(error, target),
+                }) {
+                    *ip = *next_handler;
+                }
+            }
             Instruction::EnterFinally { .. }
+            | Instruction::EnterExcept { .. }
             | Instruction::StartFinally
             | Instruction::EndFinally
             | Instruction::Jump(_)
@@ -3346,6 +3551,10 @@ impl Context {
             scope
         };
         let mut value = self.source_function(code, defining_scope, defaults);
+        if let Some(provider) = &definition.annotate {
+            let annotate = self.source_annotator(provider, code, defining_scope)?;
+            self.set_function_attr(value, "__annotate__", annotate)?;
+        }
         if let Some((bases, metaclass, total)) = bases {
             value = self.class(bases, value, metaclass, total, false)?;
         }
@@ -3709,7 +3918,7 @@ impl Context {
                         .ok_or_else(|| unsupported("keyword unpack"))?;
                     kwargs.push((key.to_string(), eval(self, &item.value)?));
                 }
-                let result = self.call(f, args, kwargs)?;
+                let result = self.call_in_scope(scope, f, args, kwargs)?;
                 self.finish_call_operands(mark, result);
                 Ok(result)
             }

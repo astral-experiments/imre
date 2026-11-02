@@ -16,6 +16,7 @@ class Stream:
 
 
 def current():
+    check_root_records()
     assert logging.StreamHandler().stream is sys.stderr
     stream = Stream()
     child = logging.getLogger("access.child")
@@ -104,3 +105,24 @@ def current():
             raise AssertionError("accepted reserved field")
     finally:
         logging.setLogRecordFactory(original)
+
+
+def check_root_records():
+    root = logging.root
+    stream = Stream()
+    handler = logging.StreamHandler(stream)
+    logging.basicConfig(handlers=[handler], format="%(levelname)s %(message)s")
+    try:
+        logging.warning("less is %(less)s", {"less": "more"})
+        assert stream.writes == ["WARNING less is more\n"]
+        try:
+            raise ValueError("root failure")
+        except ValueError:
+            logging.exception("failed")
+        assert stream.writes[-1].startswith("ERROR failed\nTraceback (most recent call last):")
+        assert stream.writes[-1].endswith("ValueError: root failure\n")
+        logging.basicConfig(handlers=[])
+        assert root.handlers == [handler]
+    finally:
+        root.removeHandler(handler)
+        handler.close()

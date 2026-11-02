@@ -1,7 +1,7 @@
 //! Native text codecs shared by the registry and text files.
 pub(super) mod writer;
 
-use super::bytes::{Utf8Issue, ascii_decode_error, owned_input};
+use super::bytes::{DecodeIssue, ascii_decode_error, owned_input};
 use super::charmaps::Charmap;
 use super::exceptions::Result;
 use super::{Bytes, Error, Kind, Object, Storage, StorageCell, Str, finish, object};
@@ -59,7 +59,7 @@ thread_local! {
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
-fn normalize(name: &str) -> Result<String> {
+pub(crate) fn normalize(name: &str) -> Result<String> {
     let mut normalized = String::new();
     normalized
         .try_reserve_exact(name.len())
@@ -335,7 +335,7 @@ impl Codec {
         StrEncoder::Registered(Self::for_encode(encoding, errors)?).encode_str(text, errors)
     }
 
-    fn by_key(key: &str, value: &str) -> Result<Self> {
+    pub(crate) fn by_key(key: &str, value: &str) -> Result<Self> {
         match key {
             "utf8" | "utf_8" | "u8" | "utf" | "utf8_ucs2" | "utf8_ucs4" | "cp65001" => {
                 Ok(Self::Utf8 { signature: false })
@@ -642,11 +642,11 @@ pub(crate) fn utf8_prefix(
     text: &mut String,
     data: &[u8],
     offset: usize,
-) -> Result<Option<Utf8Issue>> {
+) -> Result<Option<DecodeIssue>> {
     let (valid, issue) = match std::str::from_utf8(&data[offset..]) {
         Ok(valid) => (valid, None),
         Err(error) => {
-            let issue = Utf8Issue::new(data, offset, error);
+            let issue = DecodeIssue::utf8(data, offset, error);
             // The validator has already checked this prefix.
             (
                 std::str::from_utf8(&data[offset..issue.start]).unwrap(),

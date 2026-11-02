@@ -1,4 +1,5 @@
 import contextlib
+from collections import ChainMap
 import warnings
 from unittest import SkipTest, TestCase, _enterCleanupContext
 
@@ -65,6 +66,49 @@ class _ShouldStop(Exception):
     """
 
 
+_subtest_msg_sentinel = object()
+
+
+class _OrderedChainMap(ChainMap):
+    def __iter__(self):
+        seen = set()
+        for mapping in self.maps:
+            for key in mapping:
+                if key not in seen:
+                    seen.add(key)
+                    yield key
+
+
+class _SubTest(TestCase):
+    def __init__(self, test_case, message, params):
+        super().__init__()
+        self.test_case = test_case
+        self.failureException = test_case.failureException
+        self._message = message
+        self.params = params
+
+    def _subDescription(self):
+        parts = []
+        if self._message is not _subtest_msg_sentinel:
+            parts.append("[" + str(self._message) + "]")
+        if self.params:
+            items = [key + "=" + repr(self.params[key]) for key in self.params]
+            parts.append("(" + ", ".join(items) + ")")
+        return " ".join(parts) or "(<subtest>)"
+
+    def id(self):
+        return self.test_case.id() + " " + self._subDescription()
+
+    def __str__(self):
+        return str(self.test_case) + " " + self._subDescription()
+
+    def shortDescription(self):
+        return self.test_case.shortDescription()
+
+    def runTest(self):
+        raise NotImplementedError("subtests cannot be run directly")
+
+
 class _Outcome(object):
     def __init__(self, result=None):
         self.expecting_failure = False
@@ -123,7 +167,11 @@ def _addSkip(result, test_case, reason):
         addSkip(test_case, reason)
         from unittest import TextTestResult
         if isinstance(result, TextTestResult):
-            result._mark("s", "skipped " + repr(reason))
+            status = "skipped " + repr(reason)
+            if isinstance(test_case, _SubTest):
+                result._markSubTest(test_case._subDescription(), "s", status)
+            else:
+                result._mark("s", status)
     else:
         warnings.warn("TestResult has no addSkip method, skips not reported",
                       RuntimeWarning, 2)

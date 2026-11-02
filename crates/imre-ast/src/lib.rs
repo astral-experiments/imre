@@ -27,6 +27,7 @@ pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
     }
 }
 
+pub mod annotations;
 pub mod code_flags;
 
 /// Names imported by the module scope disable method binding even after reassignment.
@@ -107,13 +108,17 @@ impl Names {
     }
 }
 
-pub fn lower(body: &mut [ast::Stmt]) -> Names {
-    let string_annotations = body.iter().any(|s| {
+/// Whether source opts in to stringized annotations via a future import.
+pub fn future_annotations(body: &[ast::Stmt]) -> bool {
+    body.iter().any(|s| {
         matches!(s, ast::Stmt::ImportFrom(i) if i.level == 0
             && i.module.as_ref().is_some_and(|m| m.as_str() == "__future__")
             && i.names.iter().any(|n| n.name.as_str() == "annotations"))
-    });
-    lower_in(body, "", string_annotations)
+    })
+}
+
+pub fn lower(body: &mut [ast::Stmt]) -> Names {
+    lower_in(body, "", future_annotations(body))
 }
 
 /// Apply the same lexical names when reparsing a generator's original suite.

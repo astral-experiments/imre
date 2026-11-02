@@ -270,7 +270,96 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_calendar_format():
+    class Day(date):
+        def __str__(self):
+            return "custom day"
+
+        def strftime(self, spec):
+            return "called " + spec
+
+    class Moment(dt):
+        pass
+
+    class Clock(time):
+        def strftime(self, spec):
+            return 37
+
+    day = Day(2024, 2, 29)
+    assert dt.__format__ is date.__format__
+    assert type(date.__format__).__name__ == type(time.__format__).__name__ == "method_descriptor"
+    assert type(day.__format__).__name__ == "builtin_function_or_method"
+    assert format(day) == "custom day" and day.__format__("%Y") == "called %Y"
+    moment = Moment(2024, 2, 29)
+    moment.strftime = lambda spec: "instance " + spec
+    assert format(moment, "%m") == "instance %m"
+    assert format(date(2024, 2, 29)) == "2024-02-29"
+    assert Clock().__format__("%H") == 37
+    try:
+        format(Clock(), "%H")
+    except TypeError as exc:
+        assert str(exc) == "__format__ must return a str, not int"
+    else:
+        raise AssertionError("format accepted a non-string result")
+    for value in (day, dt(2024, 2, 29), time()):
+        try:
+            value.__format__(123)
+        except TypeError as exc:
+            assert str(exc) == "__format__() argument 1 must be str, not int"
+        else:
+            raise AssertionError("non-string format specifier accepted")
+
+
+def test_calendar_reduction():
+    class Moment(dt):
+        pass
+
+    class Clock(time):
+        pass
+
+    stamp = Moment(2000, 2, 29, 12, 34, 56, 0x012345, UTC, fold=1)
+    stamp.note = "not part of immutable storage"
+    for value, state, folded in (
+        (date(2000, 2, 29), b"\x07\xd0\x02\x1d", b"\x07\xd0\x02\x1d"),
+        (Clock(1, 2, 3, 4, fold=1), b"\x01\x02\x03\0\0\x04", b"\x81\x02\x03\0\0\x04"),
+        (stamp, b"\x07\xd0\x02\x1d\x0c\x22\x38\x01\x23\x45", b"\x07\xd0\x82\x1d\x0c\x22\x38\x01\x23\x45"),
+    ):
+        for protocol in range(6):
+            cls, args = value.__reduce_ex__(protocol)
+            assert cls is type(value)
+            assert args == ((folded if protocol >= 4 else state),) + ((UTC,) if value is stamp else ())
+            restored = cls(*args)
+            assert type(restored) is cls and restored == value
+            assert not hasattr(restored, "note")
+            if isinstance(value, (time, dt)):
+                assert restored.fold == (protocol >= 4)
+        assert value.__reduce__() == value.__reduce_ex__(2)
+    assert date(b"\x07\xd0\x02\x1d".decode("latin1")) == date(2000, 2, 29)
+    assert timedelta(microseconds=-1).__reduce_ex__(3) == (timedelta, (-1, 86399, 999999))
+
+    class Custom(date):
+        def __reduce__(self):
+            return "class hook"
+
+    custom = Custom(2000, 1, 1)
+    assert custom.__reduce_ex__(3) == "class hook"
+    custom.__reduce__ = lambda: "instance hook"
+    assert custom.__reduce_ex__(3) == "instance hook"
+
+    class Mixin:
+        def __reduce_ex__(self, protocol):
+            return protocol
+
+    class Mixed(date, Mixin):
+        pass
+
+    item = Mixed(2000, 1, 1)
+    assert super(Mixed, item).__reduce_ex__(4) == 4
+
+
 def current():
+    test_calendar_reduction()
+    test_calendar_format()
     test_timedelta_negation()
     test_subclass_construction()
     test_now()
@@ -292,6 +381,7 @@ def current():
     else:
         raise AssertionError("invalid timezone accepted")
     test_calendar_ordering()
+    test_calendar_day_methods()
 
 
 def test_calendar_ordering():
@@ -335,6 +425,24 @@ def test_calendar_ordering():
         raise AssertionError("both calendar ordering hooks declined")
     assert first < leap
     assert (first < Reflected(2000, 2, 29)) == "reflected"
+
+
+def test_calendar_day_methods():
+    class Stamp(dt):
+        def weekday(self):
+            raise AssertionError("native isoweekday called weekday")
+
+        def timetuple(self):
+            raise AssertionError("native ctime called timetuple")
+
+        def ctime(self):
+            return "custom " + super().ctime()
+
+    value = Stamp(30, 12, 31, 22, 23, 24, tzinfo=UTC)
+    assert value.ctime() == "custom Tue Dec 31 22:23:24 0030"
+    assert date.ctime(value) == "Tue Dec 31 00:00:00 0030"
+    assert date(1, 1, 1).ctime() == "Mon Jan  1 00:00:00 0001"
+    assert value.isoweekday() == 2 and date(2024, 3, 3).isoweekday() == 7
 
 
 if __name__ == "__main__":
