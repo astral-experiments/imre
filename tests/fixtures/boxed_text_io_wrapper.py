@@ -106,6 +106,20 @@ def current():
         assert text.readline() == "x\n" and text.tell() == 3
         assert text.read(1) == "é" and text.tell() == 4
         assert text.seek(3) == 3 and text.read() == "éy"
+    class WouldBlock(io.BytesIO):
+        def read(self, *args):
+            return None
+
+    with io.TextIOWrapper(WouldBlock(b"ab"), encoding="utf-8") as stream:
+        assert stream.read(1) == "a"
+        try:
+            stream.read()
+        except BlockingIOError as error:
+            assert error.args == ("Read returned None.",)
+        else:
+            raise AssertionError("read() accepted None")
+        assert stream.read(1) == "b"
+
     with io.TextIOWrapper(io.BytesIO(b"x\xff"), encoding="utf-8") as text:
         try:
             text.read()
