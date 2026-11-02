@@ -649,6 +649,7 @@ impl Context {
             Value::Iterator { .. }
                 | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
+                | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -706,6 +707,9 @@ impl Context {
             Value::Deque(ref ring) => {
                 let cursor = deque::iterator(id, ring, false);
                 return Ok(self.alloc(cursor));
+            }
+            Value::GenericAlias(ref alias) if alias.is_builtin_alias() => {
+                return Ok(self.alloc(Value::GenericAliasIterator(Some(id))));
             }
             Value::TypeVarTuple { .. } => {
                 let unpacked = typing::unpack_parameter(self, id)?;
@@ -800,6 +804,7 @@ impl Context {
         if matches!(
             value,
             Value::TemplateIter { .. }
+                | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1108,6 +1113,15 @@ impl Context {
         if let Value::Scandir(scan) = self.heap.get(id) {
             return stdlib::os::scandir::advance(self, scan.clone());
         }
+        if let Value::GenericAliasIterator(source) = self.heap.get_mut(id) {
+            let source = source.take();
+            return Ok(source.map(|source| {
+                let Value::GenericAlias(alias) = self.heap.get(source) else {
+                    unreachable!()
+                };
+                self.alloc(Value::GenericAlias(alias.unpacked_copy()))
+            }));
+        }
         if let Value::SequenceIterator { source, index } = *self.heap.get(id) {
             return self.next_sequence_item(id, source, index);
         }
@@ -1377,6 +1391,7 @@ impl Context {
             Value::AstWalk { .. }
                 | Value::Template { .. }
                 | Value::TemplateIter { .. }
+                | Value::GenericAliasIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1394,7 +1409,8 @@ impl Context {
                 | Value::Count { .. }
                 | Value::Repeat(_)
                 | Value::Enumerate { .. }
-        ) || self.slot(id, "__iter__").is_some()
+        ) || matches!(self.heap.get(id), Value::GenericAlias(alias) if alias.is_builtin_alias())
+            || self.slot(id, "__iter__").is_some()
             || self.slot(id, "__getitem__").is_some()
         {
             let iter = self.iterator(id)?;
