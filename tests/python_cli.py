@@ -1476,6 +1476,19 @@ def main():
         )
         compare("-IB", decorated)
 
+        unrelated = root / "unrelated_asdict.py"
+        unrelated.write_text(
+            "from collections import namedtuple\n"
+            "Point = namedtuple('Point', 'x y')\n"
+            "class Other:\n"
+            "    def _asdict(self): return 37\n"
+            "def read(other: Other):\n"
+            "    saved = other._asdict\n"
+            "    return other._asdict(), saved()\n"
+            "print(read(Other()))\n"
+        )
+        compare("-B", unrelated, native_args=("run", unrelated, "--quiet"))
+
         locale_script = root / "get_locale.py"
         locale_script.write_text(
             "from _locale import LC_ALL, setlocale\n"
@@ -2480,10 +2493,12 @@ def report(text):
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
             "boxed_typing_async_collection_aliases.py",
+            "boxed_typing_abc_aliases.py",
             "boxed_typing_alias_defaults.py",
             "boxed_typing_type.py",
             "boxed_type_alias_statements.py",
             "boxed_typing_mapping.py",
+            "boxed_typing_concrete_collections.py",
             "boxed_typing_iterable.py",
             "boxed_typing_regex_aliases.py",
             "boxed_pprint.py",

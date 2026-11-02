@@ -32,6 +32,11 @@ mod watch;
 mod zip_entry;
 pub use zip_entry::is_zip_path;
 
+/// Emits native provider IR for packaging alongside the Linux toolchain.
+pub fn write_bundled_provider_ir(directory: &std::path::Path) -> Result<(), String> {
+    dynamic::provider_pack::write(directory)
+}
+
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
@@ -91,6 +96,8 @@ pub struct CompileOptions {
     pub runtime_imports: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
+    /// Optional archive of bundled native provider bodies for this target and LLVM optimization.
+    pub bundled_provider_archive: Option<PathBuf>,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
 }

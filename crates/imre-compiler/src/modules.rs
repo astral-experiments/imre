@@ -1545,6 +1545,7 @@ impl IntrinsicModule {
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "get_clock_info") => Intrinsic::ObjectRuntimeExport("time.get_clock_info"),
             (Self::Time, "tzset") => Intrinsic::ObjectRuntimeExport("time.tzset"),
             (Self::Time, "timezone") => Intrinsic::ObjectRuntimeExport("time.timezone"),
             (Self::Time, "altzone") => Intrinsic::ObjectRuntimeExport("time.altzone"),
@@ -1966,11 +1967,33 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.AsyncContextManager")
             }
             (Self::Typing, "Awaitable") => Intrinsic::ObjectRuntimeExport("typing.Awaitable"),
+            (Self::Typing, "AbstractSet") => Intrinsic::ObjectRuntimeExport("typing.AbstractSet"),
+            (Self::Typing, "AsyncGenerator") => {
+                Intrinsic::ObjectRuntimeExport("typing.AsyncGenerator")
+            }
+            (Self::Typing, "AsyncIterable") => {
+                Intrinsic::ObjectRuntimeExport("typing.AsyncIterable")
+            }
+            (Self::Typing, "Collection") => Intrinsic::ObjectRuntimeExport("typing.Collection"),
+            (Self::Typing, "Container") => Intrinsic::ObjectRuntimeExport("typing.Container"),
+            (Self::Typing, "Coroutine") => Intrinsic::ObjectRuntimeExport("typing.Coroutine"),
+            (Self::Typing, "Hashable") => Intrinsic::ObjectRuntimeExport("typing.Hashable"),
+            (Self::Typing, "ItemsView") => Intrinsic::ObjectRuntimeExport("typing.ItemsView"),
+            (Self::Typing, "KeysView") => Intrinsic::ObjectRuntimeExport("typing.KeysView"),
+            (Self::Typing, "MappingView") => Intrinsic::ObjectRuntimeExport("typing.MappingView"),
+            (Self::Typing, "MutableSequence") => {
+                Intrinsic::ObjectRuntimeExport("typing.MutableSequence")
+            }
+            (Self::Typing, "MutableSet") => Intrinsic::ObjectRuntimeExport("typing.MutableSet"),
+            (Self::Typing, "ValuesView") => Intrinsic::ObjectRuntimeExport("typing.ValuesView"),
             (Self::Typing, "AsyncIterator") => {
                 Intrinsic::ObjectRuntimeExport("typing.AsyncIterator")
             }
             (Self::Typing, "Pattern") => Intrinsic::ObjectRuntimeExport("typing.Pattern"),
             (Self::Typing, "Match") => Intrinsic::ObjectRuntimeExport("typing.Match"),
+            (Self::Typing, "ChainMap") => Intrinsic::ObjectRuntimeExport("typing.ChainMap"),
+            (Self::Typing, "Deque") => Intrinsic::ObjectRuntimeExport("typing.Deque"),
+            (Self::Typing, "OrderedDict") => Intrinsic::ObjectRuntimeExport("typing.OrderedDict"),
             (Self::Typing, "Counter") => Intrinsic::ObjectRuntimeExport("typing.Counter"),
             (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
             (Self::Typing, "Mapping") => Intrinsic::TYPING_MAPPING,
@@ -2584,6 +2607,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("resource.RLIM_INFINITY")
             }
             (Self::Random, "shuffle") => Intrinsic::Random(crate::ir::RandomOperation::Shuffle),
+            (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },
             (Self::Random, "seed") => Intrinsic::Random(crate::ir::RandomOperation::Seed),
@@ -5203,7 +5227,14 @@ impl<'a> Loader<'a> {
             "selectors" if cfg!(any(target_os = "linux", target_os = "macos")) => {
                 Some(("selectors.py", include_str!("../stdlib/selectors.py")))
             }
-            "doctest" => Some(("doctest.py", include_str!("../stdlib/doctest.py"))),
+            "doctest" => Some((
+                "doctest.py",
+                concat!(
+                    include_str!("../stdlib/doctest.py"),
+                    "\n",
+                    include_str!("../stdlib/doctest_typed.py"),
+                ),
+            )),
             "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
             "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
             "zipimport" if cfg!(unix) => Some((

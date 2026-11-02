@@ -7,6 +7,90 @@ fn invoke(ctx: &mut Context, tz: Id, dt: Id) -> Result<Id> {
     ctx.call(callback, vec![dt], vec![])
 }
 
+/// Date.today calls the public clock before looking up fromtimestamp on the receiving class.
+pub(super) fn date_constructor(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (&class, args) = args
+        .split_first()
+        .ok_or_else(|| Error::new("TypeError", "date class method requires a type"))?;
+    let name = ctx.class_name(class).rsplit('.').next().unwrap();
+    if method == "date.today" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}.today() takes no keyword arguments"),
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}.today() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        let mark = ctx.heap.temporary_mark();
+        let time = import_clock_module(ctx)?;
+        ctx.heap.keep(time);
+        let clock = ctx.lookup_attr(time, "time")?;
+        ctx.finish_call_operands(mark, clock);
+        ctx.heap.keep(clock);
+        let stamp = ctx.call(clock, vec![], vec![])?;
+        // Releasing the last clock reference can replace the class's fromtimestamp method.
+        ctx.finish_call_operands(mark, stamp);
+        ctx.heap.keep(stamp);
+        let construct = ctx.lookup_attr(class, "fromtimestamp")?;
+        return ctx.call(construct, vec![stamp], vec![]);
+    }
+    let name = format!("{name}.fromtimestamp");
+    let stamp = crate::dynamic::builtins::one_positional_arg(&name, args, kwargs)?;
+    let parts = super::super::time::civil(ctx, Some(stamp), false)?;
+    let fields = parts.fields[..3].iter().map(|&n| ctx.int(n)).collect();
+    ctx.call(class, fields, vec![])
+}
+
+/// Import for side effects, then resolve the clock module from the interpreter's registry.
+fn import_clock_module(ctx: &mut Context) -> Result<Id> {
+    let mark = ctx.heap.temporary_mark();
+    let builtins_key = ctx.heap.code_name("__builtins__");
+    let globals = if ctx.heap.python_depth() == 0 {
+        let builtins = ctx.module("builtins")?;
+        ctx.dict(vec![(builtins_key, builtins)])
+    } else {
+        ctx.module_globals(ctx.heap.current_scope())?
+    };
+    ctx.heap.keep(globals);
+    let builtins = ctx.get_item(globals, builtins_key)?;
+    ctx.heap.keep(builtins);
+    let hook = if ctx.dict_storage(builtins).is_some() {
+        let key = ctx.heap.code_name("__import__");
+        ctx.get_item(builtins, key)
+            .map_err(|_| ctx.lookup_error("KeyError", key))?
+    } else {
+        ctx.lookup_attr(builtins, "__import__")?
+    };
+    ctx.heap.keep(hook);
+    let name = ctx.heap.code_name("time");
+    let fromlist = ctx.alloc(Value::List(Vec::new()));
+    ctx.heap.keep(fromlist);
+    let level = ctx.int(0);
+    ctx.heap.keep(level);
+    let call_mark = ctx.heap.temporary_mark();
+    let returned = ctx.call(hook, vec![name, globals, globals, fromlist, level], vec![])?;
+    // The hook's result can finalize and replace the registry entry before it is read.
+    ctx.heap.keep(returned);
+    ctx.discard_truth(call_mark);
+    let time = ctx.get_item(ctx.modules, name)?;
+    let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+    ctx.heap.keep(time);
+    if collect {
+        ctx.collect_unreachable();
+    }
+    Ok(time)
+}
+
 pub(super) fn constructor(
     ctx: &mut Context,
     method: &str,

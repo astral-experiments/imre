@@ -1,5 +1,5 @@
 import random
-from random import choice, random as draw, shuffle
+from random import choice, choices, random as draw, shuffle
 
 
 def current():
@@ -44,6 +44,12 @@ def current():
             print(str(error))
         else:
             raise AssertionError("invalid choice keyword accepted")
+
+    assert choices is random.choices
+    assert choices([seq])[0] is seq
+    assert choices([None, seq], (w for w in [0, 1]), k=3) == [seq, seq, seq]
+    assert random.choices(population=[None, seq], cum_weights=[0, 2])[0] is seq
+    assert choices([], k=0) == []
 
     # A single possible result tests both directions without depending on generator state.
     from random import randrange

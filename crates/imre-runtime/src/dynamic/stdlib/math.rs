@@ -103,7 +103,7 @@ pub(super) fn call(
 }
 
 /// Read a float subclass's stored double before trying the numeric conversion protocol.
-fn as_double(ctx: &mut Context, value: Id) -> Result<f64> {
+pub(super) fn as_double(ctx: &mut Context, value: Id) -> Result<f64> {
     match *ctx.heap.get(ctx.scalar_value(value)) {
         Value::Float(x) => Ok(x),
         _ => {

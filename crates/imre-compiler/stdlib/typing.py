@@ -5,11 +5,13 @@ import builtins as _builtins
 import functools
 import sys as _sys
 import typing as _typing
-from _collections_abc import Generator as _Generator, Iterable as _Iterable, Iterator as _Iterator
+import _collections_abc as _abc
+from _collections_abc import Generator as _Generator, Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from _collections_abc import Reversible as _Reversible, Sized as _Sized
 from collections.abc import ByteString as _ByteString
 from collections import Counter as _Counter, defaultdict as _defaultdict
+from collections import ChainMap as _ChainMap, OrderedDict as _OrderedDict, deque as _deque
 from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
@@ -1920,6 +1922,19 @@ Tuple.__doc__ = \
     To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
     """
 Awaitable = _SpecialGenericAlias(_Awaitable, 1)
+AbstractSet = _SpecialGenericAlias(_abc.Set, 1, name="AbstractSet")
+AsyncGenerator = _SpecialGenericAlias(_abc.AsyncGenerator, 2, defaults=(type(None),))
+AsyncIterable = _SpecialGenericAlias(_abc.AsyncIterable, 1)
+Collection = _SpecialGenericAlias(_abc.Collection, 1)
+Container = _SpecialGenericAlias(_abc.Container, 1)
+Coroutine = _SpecialGenericAlias(_abc.Coroutine, 3)
+Hashable = _SpecialGenericAlias(_abc.Hashable, 0)
+ItemsView = _SpecialGenericAlias(_abc.ItemsView, 2)
+KeysView = _SpecialGenericAlias(_abc.KeysView, 1)
+MappingView = _SpecialGenericAlias(_abc.MappingView, 1)
+MutableSequence = _SpecialGenericAlias(_abc.MutableSequence, 1)
+MutableSet = _SpecialGenericAlias(_abc.MutableSet, 1)
+ValuesView = _SpecialGenericAlias(_abc.ValuesView, 1)
 AsyncIterator = _SpecialGenericAlias(_AsyncIterator, 1)
 Generator = _SpecialGenericAlias(_Generator, 3, defaults=(type(None), type(None)))
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
@@ -1950,13 +1965,16 @@ Type.__doc__ = \
 
     At this point the type checker knows that joe has type BasicUser.
     """
+Deque = _SpecialGenericAlias(_deque, 1, name="Deque")
 Counter = _SpecialGenericAlias(_Counter, 1)
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
+OrderedDict = _SpecialGenericAlias(_OrderedDict, 2)
+ChainMap = _SpecialGenericAlias(_ChainMap, 2)
 Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
-Iterator = _SpecialGenericAlias(_Iterator, 1, name="Iterator")
+Iterator = _SpecialGenericAlias(_abc.Iterator, 1)
 Reversible = _SpecialGenericAlias(_Reversible, 1)
 Sized = _SpecialGenericAlias(_Sized, 0)
 ByteString = _DeprecatedGenericAlias(_ByteString, 0, removal_version=(3, 17))

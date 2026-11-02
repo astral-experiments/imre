@@ -2,6 +2,8 @@
 
 mod emit;
 mod import_module;
+mod provider_archive;
+pub(crate) mod provider_pack;
 pub(super) use import_module::{RegisteredImports, registered_imports};
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -753,33 +755,11 @@ pub(crate) fn compile(
                 if prefix == "_imp" && !frozen_imports.names.is_empty() {
                     work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
                 }
-                let bundled = if prefix == "dataclasses" {
-                    Some((
-                        "dataclasses.py",
-                        concat!(
-                            include_str!("../../stdlib/dataclasses_missing.py"),
-                            "\n",
-                            include_str!("../../stdlib/dataclasses.py"),
-                        ),
-                    ))
-                } else {
-                    import_module::boxed_source(&prefix)
-                };
-                if let Some((filename, source)) = bundled {
+                if let Some((filename, source)) = bundled_module_source(&prefix) {
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
-                    let pkgutil_source;
-                    let source = if prefix == "pkgutil" {
-                        pkgutil_source = format!(
-                            "{source}\n_module_suffixes = {}\n",
-                            crate::modules::pkgutil_suffixes()
-                        );
-                        &pkgutil_source
-                    } else {
-                        source
-                    };
-                    let imports = imports_for_module(&path, source)?;
-                    sources.push((prefix.clone(), path, source.to_owned()));
+                    let imports = imports_for_module(&path, &source)?;
+                    sources.push((prefix.clone(), path, source.into_owned()));
                     work.push_back((prefix.clone(), package, imports));
                 }
                 if bundled_only {
@@ -872,62 +852,17 @@ pub(crate) fn compile(
         sources.push((
             "collections".into(),
             Path::new(bundled_root).join("collections/__init__.py"),
-            include_str!("../../stdlib/collections/namedtuple_repr.py").into(),
+            NAMEDTUPLE_COLLECTIONS.into(),
         ));
     }
     // The sealed io module also needs its Python protocols when imported indirectly.
     sources.push((
         "io".into(),
         Path::new(bundled_root).join("io.py"),
-        include_str!("../../stdlib/io.py").into(),
+        SEALED_IO.into(),
     ));
     // These modules and their dependencies must be available when selected by name at runtime.
-    for name in [
-        "__future__",
-        "__hello__",
-        "_frozen_importlib",
-        "_frozen_importlib_external",
-        "_opcode_metadata",
-        "_tokenize",
-        "abc",
-        "annotationlib",
-        "ast",
-        "code",
-        "codecs",
-        "codeop",
-        "copyreg",
-        "datetime",
-        "encodings",
-        "encodings.ascii",
-        "encodings.latin_1",
-        "encodings.utf_8",
-        "encodings.utf_8_sig",
-        "encodings.cp1251",
-        "encodings.cp424",
-        "encodings.cp437",
-        "enum",
-        "genericpath",
-        "hashlib",
-        "itertools",
-        "json",
-        "json.decoder",
-        "json.encoder",
-        "json.scanner",
-        "opcode",
-        "platform",
-        "re",
-        "signal",
-        "stat",
-        "string",
-        "string.templatelib",
-        "subprocess",
-        "token",
-        "types",
-        "zipimport",
-    ]
-    .into_iter()
-    .chain(threading)
-    {
+    for name in RUNTIME_PROVIDERS.iter().copied().chain(threading) {
         if !seen.contains(name)
             && let Some((file, source)) = import_module::boxed_source(name)
         {
@@ -962,18 +897,101 @@ pub(crate) fn compile(
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
     check_returns()?;
-    let llvm_ir = emit::emit(
+    let providers = options
+        .bundled_provider_archive
+        .as_deref()
+        .filter(|_| keep_docstrings)
+        .and_then(provider_archive::symbols)
+        .unwrap_or_default();
+    let (llvm_ir, used_archive) = emit::emit(
         &sources,
         &config.to_string(),
         keep_docstrings,
         Path::new(bundled_root),
+        &providers,
     )?;
     Ok(Some(Compilation {
         llvm_ir,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),
         source_inputs: inputs,
-        extension_archives: Vec::new(),
+        extension_archives: options
+            .bundled_provider_archive
+            .iter()
+            .filter(|_| used_archive)
+            .cloned()
+            .collect(),
     }))
+}
+
+const NAMEDTUPLE_COLLECTIONS: &str = include_str!("../../stdlib/collections/namedtuple_repr.py");
+const SEALED_IO: &str = include_str!("../../stdlib/io.py");
+const RUNTIME_PROVIDERS: &[&str] = &[
+    "__future__",
+    "__hello__",
+    "_frozen_importlib",
+    "_frozen_importlib_external",
+    "_opcode_metadata",
+    "_tokenize",
+    "abc",
+    "annotationlib",
+    "ast",
+    "code",
+    "codecs",
+    "codeop",
+    "copyreg",
+    "datetime",
+    "encodings",
+    "encodings.ascii",
+    "encodings.latin_1",
+    "encodings.utf_8",
+    "encodings.utf_8_sig",
+    "encodings.cp1251",
+    "encodings.cp424",
+    "encodings.cp437",
+    "enum",
+    "genericpath",
+    "hashlib",
+    "itertools",
+    "json",
+    "json.decoder",
+    "json.encoder",
+    "json.scanner",
+    "opcode",
+    "platform",
+    "re",
+    "signal",
+    "stat",
+    "string",
+    "string.templatelib",
+    "subprocess",
+    "token",
+    "types",
+    "zipimport",
+];
+
+/// Return the effective source used for a discovered bundled module on this target.
+fn bundled_module_source(name: &str) -> Option<(&'static str, std::borrow::Cow<'static, str>)> {
+    let (file, source) = if name == "dataclasses" {
+        (
+            "dataclasses.py",
+            concat!(
+                include_str!("../../stdlib/dataclasses_missing.py"),
+                "\n",
+                include_str!("../../stdlib/dataclasses.py"),
+            ),
+        )
+    } else {
+        import_module::boxed_source(name)?
+    };
+    let source = if name == "pkgutil" {
+        std::borrow::Cow::Owned(format!(
+            "{source}\n_module_suffixes = {}\n",
+            crate::modules::pkgutil_suffixes()
+        ))
+    } else {
+        std::borrow::Cow::Borrowed(source)
+    };
+    Some((file, source))
 }
 
 fn imports_for_module(path: &Path, src: &str) -> Result<Imports, String> {
