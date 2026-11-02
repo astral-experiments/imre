@@ -2713,6 +2713,7 @@ for name in ("md4", "ripemd160"):
             "boxed_int_rational_fields.py",
             "boxed_int_from_bytes.py",
             "boxed_int_conversion.py",
+            "boxed_comparison_wrappers.py",
             "boxed_divmod_slots.py",
             "boxed_complex.py",
             "boxed_float.py",

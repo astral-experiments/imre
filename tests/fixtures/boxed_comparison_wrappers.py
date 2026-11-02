@@ -23,6 +23,16 @@ def current():
     assert WithNew.__init__ is object.__init__
     assert WithNew(1).__init__() is None
 
+    class Plain:
+        pass
+
+    try:
+        Plain(1)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError('plain constructor accepted an argument')
+
     class Number(int):
         def __int__(self):
             raise AssertionError
