@@ -97,7 +97,18 @@ pub fn translate_with_flags(
     pattern: &str,
     verbose: bool,
     ascii: bool,
+    dotall: bool,
+) -> Result<FixedPattern, String> {
+    translate_for_runtime(pattern, verbose, ascii, dotall, true)
+}
+
+/// Use the caller's regex flags to limit literal guards to sound text modes.
+pub fn translate_for_runtime(
+    pattern: &str,
+    verbose: bool,
+    ascii: bool,
     mut dotall: bool,
+    literal_guards: bool,
 ) -> Result<FixedPattern, String> {
     let mut input = pattern.chars().peekable();
     let mut output = String::new();
@@ -105,28 +116,20 @@ pub fn translate_with_flags(
     let mut can_repeat = false;
     let mut may_backtrack = false;
     let mut outer_prefixes = Vec::new();
-    while let Some(c) = input.next() {
+    while let Some(c) = next_token(&mut input, verbose)? {
         match c {
-            c if verbose && verbose_space(c) => continue,
-            '#' if verbose => {
-                // The Python tokenizer consumes a backslash and its next character
-                // as one token even inside a comment, including a physical newline.
-                while let Some(ch) = input.next() {
-                    match ch {
-                        '\\' => {
-                            input.next().ok_or("incomplete regex escape in comment")?;
-                        }
-                        '\n' => break,
-                        _ => {}
-                    }
-                }
-                continue;
-            }
             '(' => {
+                let extension = input.next_if_eq(&'?').is_some();
+                if literal_guards && extension && input.next_if_eq(&'!').is_some() {
+                    guarded_class(&mut input, &mut output, verbose, ascii)?;
+                    // A following quantifier would repeat the consumed class alone.
+                    can_repeat = false;
+                    continue;
+                }
                 outer_prefixes.push((may_backtrack, dotall));
                 may_backtrack = false;
                 output.push('(');
-                if input.next_if_eq(&'?').is_some() {
+                if extension {
                     if input.next_if_eq(&':').is_some() {
                         output.push_str("?:");
                     } else if input.next_if_eq(&'s').is_some() {
@@ -189,7 +192,9 @@ pub fn translate_with_flags(
                 output.push(c);
                 can_repeat = c == '.';
             }
-            '$' if input.peek().is_none() || verbose && verbose_tail(input.clone()) => {
+            '$' if input.peek().is_none()
+                || verbose && next_token(&mut input.clone(), true)?.is_none() =>
+            {
                 // Remember a consumed final newline so the runtime can exclude it
                 // from group zero. Dots are not valid in Python group names.
                 output.push_str(FINAL_NEWLINE_ANCHOR);
@@ -404,28 +409,58 @@ fn count(input: &mut Input<'_>, output: &mut String) -> Result<bool, String> {
     Ok(true)
 }
 
-/// A terminal dollar may be followed by ignored layout and comments in VERBOSE mode.
-fn verbose_tail(mut input: Input<'_>) -> bool {
+/// Skip ignored VERBOSE layout outside character classes.
+fn next_token(input: &mut Input<'_>, verbose: bool) -> Result<Option<char>, String> {
     while let Some(c) = input.next() {
-        if verbose_space(c) {
-            continue;
+        if !verbose || !(verbose_space(c) || c == '#') {
+            return Ok(Some(c));
         }
-        if c != '#' {
-            return false;
-        }
-        while let Some(c) = input.next() {
-            match c {
-                '\\' => {
-                    if input.next().is_none() {
-                        return false;
+        if c == '#' {
+            while let Some(ch) = input.next() {
+                match ch {
+                    '\\' => {
+                        input.next().ok_or("incomplete regex escape in comment")?;
                     }
+                    '\n' => break,
+                    _ => {}
                 }
-                '\n' => break,
-                _ => {}
             }
         }
     }
-    true
+    Ok(None)
+}
+
+/// A negative choice of single literals directly before one class excludes those
+/// characters from the class. Captures and multi-character alternatives need a real assertion.
+fn guarded_class(
+    input: &mut Input<'_>,
+    output: &mut String,
+    verbose: bool,
+    ascii: bool,
+) -> Result<(), String> {
+    let unsupported =
+        "negative regex guard requires single literal alternatives followed by a class";
+    let mut excluded = String::new();
+    loop {
+        match next_token(input, verbose)? {
+            Some('\\') if escaped(input, &mut excluded, false, ascii)? == Escape::Scalar => {}
+            Some(c) if !r"\.^$*+?{}[]()|".contains(c) => literal(&mut excluded, c),
+            _ => return Err(unsupported.into()),
+        }
+        match next_token(input, verbose)? {
+            Some('|') => {}
+            Some(')') => break,
+            _ => return Err(unsupported.into()),
+        }
+    }
+    output.push('[');
+    match next_token(input, verbose)? {
+        Some('[') => class(input, output, ascii)?,
+        Some('\\') if escaped(input, output, false, ascii)? == Escape::Class => {}
+        _ => return Err(unsupported.into()),
+    }
+    write!(output, "--[{excluded}]]").unwrap();
+    Ok(())
 }
 
 /// A lazy scan inside an atomic group commits to its first matching delimiter.
@@ -611,6 +646,41 @@ fn class(input: &mut Input<'_>, output: &mut String, ascii: bool) -> Result<(), 
 mod tests {
     use super::translate;
     use regex::Regex;
+
+    #[test]
+    fn subtracts_single_literal_guards_from_consuming_classes() {
+        let opts = r"(?P<option>(?:(?!=|:)\S)*(?:\s+(?:(?!=|:)\S)+)*)
+                     \s*(?P<vi>=|:)\s*(?P<value>.*)$";
+        let regex = Regex::new(&translate(opts, true).unwrap().source).unwrap();
+        let caps = regex.captures("two words : =value").unwrap();
+        assert_eq!(
+            (&caps["option"], &caps["vi"], &caps["value"]),
+            ("two words", ":", "=value")
+        );
+        let spaced = r"(?:(?! \# |  # a second excluded literal
+                         \| ) [^!])+";
+        let regex = Regex::new(&translate(spaced, true).unwrap().source).unwrap();
+        let runs: Vec<_> = regex.find_iter("a#b|c!d").map(|m| m.as_str()).collect();
+        assert_eq!(runs, ["a", "b", "c", "d"]);
+        for (ascii, expected) in [(false, "a"), (true, "a\u{1c}b\u{a0}c")] {
+            let pattern =
+                super::translate_with_flags(r"(?:(?!\x3a)\S)+", false, ascii, false).unwrap();
+            let regex = Regex::new(&pattern.source).unwrap();
+            assert_eq!(regex.find("a\u{1c}b\u{a0}c:d").unwrap().as_str(), expected);
+        }
+        for unsupported in [
+            r"(?!ab)\S",
+            r"(?!a|)\S",
+            r"(?![ab])\S",
+            r"(?!(a))\S",
+            r"(?!\d)\S",
+            r"(?!a)b",
+            r"(?!a)\S+",
+            r"(?!a)\S {1,2}",
+        ] {
+            assert!(translate(unsupported, true).is_err(), "{unsupported}");
+        }
+    }
 
     #[test]
     fn preserves_verbose_class_contents_and_python_whitespace() {
