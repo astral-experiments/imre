@@ -189,4 +189,16 @@ def current():
             retained.clear()
             assert row[1] == "updated"
 
+    original_quote = json.encoder.encode_basestring_ascii
+    def quote(value):
+        text = original_quote(value)
+        return Replacement(text) if value == "first" else text
+
+    try:
+        json.encoder.encode_basestring_ascii = quote
+        row[:] = ["first", "initial"]
+        assert json.dumps(row) == '["first", "updated"]'
+    finally:
+        json.encoder.encode_basestring_ascii = original_quote
+
     print("encoded container subclasses")

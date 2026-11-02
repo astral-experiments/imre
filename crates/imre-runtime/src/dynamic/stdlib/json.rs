@@ -549,18 +549,22 @@ impl Encoder {
         };
         let roots = ctx.heap.temporary_mark();
         let encoded = ctx.call(quote, super::super::copy_ids(&[id])?, Vec::new())?;
-        let Some(storage) = ctx.string_storage(encoded) else {
-            let class = ctx.exact_type(encoded)?;
-            let name = ctx.class_name(class);
-            let name = &name[..name.floor_char_boundary(80)];
-            return Err(Error::new(
-                "TypeError",
-                format!("encoder() must return a string, not {name}"),
-            ));
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(encoded);
+        let outcome = if let Some(storage) = ctx.string_storage(encoded) {
+            self.output.raw(ctx.heap.get(storage))
+        } else {
+            ctx.exact_type(encoded).and_then(|class| {
+                let name = ctx.class_name(class);
+                let name = &name[..name.floor_char_boundary(80)];
+                Err(Error::new(
+                    "TypeError",
+                    format!("encoder() must return a string, not {name}"),
+                ))
+            })
         };
-        self.output.raw(ctx.heap.get(storage))?;
-        ctx.heap.release_temporaries_since(roots);
-        Ok(())
+        Self::release_encoded(ctx, roots, encoded, outcome)
+            .map_err(|exc| notes::live_error(ctx, exc))
     }
 
     fn value(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
