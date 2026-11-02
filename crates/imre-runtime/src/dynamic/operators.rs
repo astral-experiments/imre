@@ -3087,6 +3087,11 @@ impl Context {
             })?;
             return Ok(hay.contains(needle));
         }
+        if let Value::ByteArray(data) = self.heap.get(scalar)
+            && matches!(self.heap.get(item), Value::MemoryView { .. })
+        {
+            return Ok(crate::objects::bytes_contains(data, self.bytes_like(item)?));
+        }
         if matches!(self.heap.get(scalar), Value::Bytes(_)) {
             // CPython falls back to the buffer protocol when integer conversion fails.
             let number = self.index_value(item).ok().flatten();
@@ -4728,7 +4733,7 @@ impl Context {
             return self.set_binary(op, a, right, true);
         }
         if op == "+"
-            && let Value::ByteArray(left) = self.heap.get(a)
+            && matches!(self.heap.get(a), Value::ByteArray(_))
             && let Value::Bytes(right) | Value::ByteArray(right) = self.heap.get(b)
         {
             if right.is_empty() {
@@ -4739,7 +4744,7 @@ impl Context {
                 return Err(Self::exported_bytearray_error());
             }
             self.check_bytearray_resize(a)?;
-            let bytes = crate::objects::concat_bytes(left, right)?;
+            let bytes = crate::objects::concat_bytes(self.bytes_like(a)?, self.bytes_like(b)?)?;
             let Value::ByteArray(left) = self.heap.get_mut(a) else {
                 unreachable!()
             };
