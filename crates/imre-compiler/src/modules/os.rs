@@ -63,6 +63,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         return Some(Intrinsic::IntConstant(i64::from(flag)));
     }
     Some(match name {
+        "abort" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.abort"),
         "access" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.access"),
         "urandom" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.urandom"),
         "umask" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.umask"),

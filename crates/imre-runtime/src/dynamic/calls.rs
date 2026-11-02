@@ -2465,6 +2465,9 @@ impl Context {
                         };
                         return Ok(self.text(doc));
                     }
+                    "__doc__" if symbol == "posix.abort" => {
+                        return Ok(self.text("Abort the interpreter immediately.\n\nThis function 'dumps core' or otherwise fails in the hardest way possible\non the hosting operating system.  This function never returns."));
+                    }
                     "__doc__" if symbol == "posix.kill" => {
                         return Ok(self.text("Kill a process with a signal."));
                     }
@@ -2480,7 +2483,8 @@ impl Context {
                     "__text_signature__"
                         if matches!(
                             symbol.as_str(),
-                            "posix.getpid"
+                            "posix.abort"
+                                | "posix.getpid"
                                 | "posix.getppid"
                                 | "gc.enable"
                                 | "gc.disable"
