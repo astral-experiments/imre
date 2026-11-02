@@ -9,6 +9,11 @@ from types import GenericAlias
 from posix import chdir
 
 if sys.platform == "linux":
+    import posix as _posix
+    for _name in vars(_posix):
+        if _name.startswith("RTLD_"):
+            globals()[_name] = getattr(_posix, _name)
+    del _name, _posix
     from posix import O_TMPFILE, fstatvfs, statvfs, statvfs_result
     from posix import (
         sched_getscheduler, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,

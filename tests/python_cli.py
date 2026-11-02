@@ -1914,6 +1914,7 @@ def report(text):
         fixtures = Path(__file__).with_name("fixtures")
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
+        compare("-IB", fixtures / "boxed_pickle_writer.py")
         compare(
             "-B", "-c",
             "import typing as t\ndef build():\n    class P(t.Protocol): pass\n"
@@ -2064,6 +2065,7 @@ def report(text):
             "boxed_sys_audit_recursion.py",
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
+            "boxed_sys_byteorder.py",
             "boxed_sys_hash_info.py",
             "boxed_sys_flags.py",
             "boxed_sys_jit.py",
@@ -2125,6 +2127,7 @@ def report(text):
             "boxed_typing_optional.py",
             "boxed_typing_literal.py",
             "boxed_typing_protocol.py",
+            "boxed_typing_typevar_members.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
             "boxed_typing_async_collection_aliases.py",
@@ -2165,6 +2168,7 @@ def report(text):
             "boxed_time_timezone.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_wide_decode.py",
             "boxed_buffered_partial_write.py",
             "boxed_io_exports.py",
             "boxed_io_reimport.py",
@@ -2320,6 +2324,8 @@ def report(text):
             "boxed_redirect_streams.py",
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",
+            "boxed_itertools_type_namespaces.py",
+            "boxed_itertools_cursor_repr.py",
             "boxed_itertools_chain.py",
             "boxed_itertools_cycle.py",
             "boxed_itertools_batched.py",
@@ -2392,6 +2398,7 @@ def report(text):
             "boxed_bytes_fromhex.py",
             "boxed_binary_endswith.py",
             "boxed_struct.py",
+            "boxed_pickle_writer.py",
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
             "boxed_heapq.py",
@@ -2459,6 +2466,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_posix_sched_getscheduler.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_rtld_flags.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

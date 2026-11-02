@@ -172,8 +172,16 @@ impl<F: Read + Write + Seek> Random<F> {
                 return Ok(target);
             }
         }
+        self.seek_raw(|raw| raw.seek(target.map_or(at, SeekFrom::Start)))
+    }
+
+    /// A failed raw seek leaves unread bytes available at the logical cursor.
+    pub(crate) fn seek_raw(
+        &mut self,
+        seek: impl FnOnce(&mut F) -> io::Result<u64>,
+    ) -> io::Result<u64> {
         self.write_back()?;
-        let position = self.file.seek(target.map_or(at, SeekFrom::Start))?;
+        let position = seek(&mut self.file)?;
         self.reset();
         Ok(position)
     }

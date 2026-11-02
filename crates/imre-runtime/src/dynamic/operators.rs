@@ -115,6 +115,7 @@ fn close_parens(out: &mut String, count: usize) -> Result<()> {
 
 enum RenderRoot<'a> {
     Object(Id),
+    Cursor(Id),
     BuiltinContainer {
         object: Id,
         storage: Id,
@@ -132,6 +133,8 @@ enum FormatLookup {
 
 enum FormatPart {
     Value(Id, bool),
+    Cursor(Id),
+    CursorEnd,
     TypeArgument(Id, bool),
     TypeList(Id, usize, usize),
     TypeEnd(Id, &'static str, bool),
@@ -168,6 +171,7 @@ impl FormatPart {
     fn keep_alive(&mut self, heap: &mut Heap) {
         match self {
             Self::Value(id, _)
+            | Self::Cursor(id)
             | Self::TypeArgument(id, _)
             | Self::TypeList(id, _, _)
             | Self::TypeEnd(id, _, _)
@@ -188,6 +192,7 @@ impl FormatPart {
             Self::Suffix(_)
             | Self::Text(_)
             | Self::Closing(_)
+            | Self::CursorEnd
             | Self::SliceEnd
             | Self::NamedTupleEnd
             | Self::DefaultDictEnd(_) => {}
@@ -1260,6 +1265,11 @@ impl Context {
         )
     }
 
+    /// Bypass the receiver's override for an explicit count or repeat descriptor call.
+    pub(super) fn checked_cursor_slot_repr(&mut self, object: Id) -> Result<String> {
+        self.checked_render(RenderRoot::Cursor(object), true)
+    }
+
     /// Render the native defaultdict slot while looking up hooks on its live children.
     pub(super) fn checked_defaultdict_slot_repr(
         &mut self,
@@ -1331,6 +1341,15 @@ impl Context {
                 .dict_storage(object)
                 .filter(|&storage| matches!(self.heap.get(storage), Value::DefaultDict { .. }))
                 .map(|storage| (storage, true)),
+            "itertools.count.__repr__" | "itertools.repeat.__repr__" => {
+                let storage = self.scalar_value(object);
+                matches!(
+                    (name.as_str(), self.heap.get(storage)),
+                    ("itertools.count.__repr__", Value::Count { .. })
+                        | ("itertools.repeat.__repr__", Value::Repeat(_))
+                )
+                .then_some((storage, false))
+            }
             "list.__repr__" | "tuple.__repr__" | "set.__repr__" | "frozenset.__repr__" => {
                 let storage = self.scalar_value(object);
                 matches!(
@@ -1596,6 +1615,7 @@ impl Context {
         }
         match root {
             RenderRoot::Object(id) => push_frame(&mut work, Part::Value(id, quoted))?,
+            RenderRoot::Cursor(id) => push_frame(&mut work, Part::Cursor(id))?,
             RenderRoot::BuiltinContainer {
                 object,
                 storage,
@@ -1667,6 +1687,9 @@ impl Context {
             None
         };
         let mut extra_deque_words = 0usize;
+        // Stock count and repeat consume 1,088 native stack bytes per nested repr on x86-64.
+        const CURSOR_FRAME_WORDS: usize = 136;
+        let mut cursor_words = 0usize;
         let mut slice_depth = 0usize;
         let mut namedtuple_depth = 0usize;
         // Pinned CPython 3.14 uses 192 native bytes per nested builtin alias with
@@ -1677,10 +1700,48 @@ impl Context {
         let mut typing_frames = 0usize;
         while let Some(part) = work.pop() {
             let remaining_sequence_words = sequence_stack_words.map(|limit| {
-                limit.saturating_sub(active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words)
+                limit.saturating_sub(
+                    active.len() * SEQUENCE_FRAME_WORDS + extra_deque_words + cursor_words,
+                )
             });
             match part {
                 Part::Closing(count) => close_parens(&mut output, count)?,
+                Part::Cursor(id) => {
+                    if remaining_sequence_words
+                        .map_or(cursor_words >= 1024 * 1024, |n| n < CURSOR_FRAME_WORDS)
+                    {
+                        return Err(Error::new(
+                            "RecursionError",
+                            "maximum recursion depth exceeded while getting the repr of an object",
+                        ));
+                    }
+                    cursor_words += CURSOR_FRAME_WORDS;
+                    push_frame(&mut work, Part::CursorEnd)?;
+                    append_rendered_text(&mut output, ctx.type_name(id))?;
+                    append_rendered_text(&mut output, "(")?;
+                    // Snapshot both operands before a Python repr hook can advance the cursor.
+                    let first = match ctx.heap.get(ctx.scalar_value(id)) {
+                        Value::Count { current, step } => {
+                            if stdlib::itertools::machine_integer(&ctx, *step) != Some(1) {
+                                push_frame(&mut work, Part::Value(*step, true))?;
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                            *current
+                        }
+                        Value::Repeat(repeat) => {
+                            if let Some(count) = repeat.remaining {
+                                push_frame(&mut work, Part::Suffix(format!(", {count}")))?;
+                            }
+                            repeat.value
+                        }
+                        _ => unreachable!("native count or repeat repr slot"),
+                    };
+                    push_frame(&mut work, Part::Value(first, true))?;
+                }
+                Part::CursorEnd => {
+                    cursor_words -= CURSOR_FRAME_WORDS;
+                    append_rendered_text(&mut output, ")")?;
+                }
                 Part::Text(text) => append_rendered_text(&mut output, text)?,
                 Part::ContextEnd(id) => {
                     use std::fmt::Write;
@@ -2170,6 +2231,13 @@ impl Context {
                         }
                         _ => {}
                     }
+                    if matches!(
+                        ctx.heap.get(ctx.scalar_value(storage)),
+                        Value::Count { .. } | Value::Repeat(_)
+                    ) {
+                        push_frame(&mut work, Part::Cursor(id))?;
+                        continue;
+                    }
                     let (start, end, placeholder, contents) = match ctx.heap.get(storage) {
                         Value::Int(value) => {
                             let text = rendered_integer(value)?;
@@ -2412,6 +2480,12 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if matches!(
+            self.heap.get(self.scalar_value(id)),
+            Value::Count { .. } | Value::Repeat(_)
+        ) {
+            return self.repr(id);
+        }
         if let Value::HandlerLock(lock) = self.heap.get(self.scalar_value(id)) {
             let (state, owner, depth) = match lock.state() {
                 Some((owner, depth)) => ("locked", owner, depth),
@@ -2518,23 +2592,6 @@ impl Context {
             Value::RegexPattern(pattern) => pattern.repr(self),
             Value::Float(n) => crate::floats::render(*n).to_string(),
             Value::Complex(z) => z.repr(),
-            Value::Repeat(repeat) => {
-                let value = self.format_value(repeat.value, true, active);
-                match repeat.remaining {
-                    Some(n) => format!("repeat({value}, {n})"),
-                    None => format!("repeat({value})"),
-                }
-            }
-            Value::Count { current, step } => {
-                let current = self.repr(*current);
-                if matches!(self.heap.get(*step), Value::Bool(true))
-                    || matches!(self.heap.get(*step), Value::Int(n) if n.as_small() == Some(1))
-                {
-                    format!("count({current})")
-                } else {
-                    format!("count({current}, {})", self.repr(*step))
-                }
-            }
             Value::Calendar { value, .. } if repr => value.repr(),
             Value::Calendar { value, .. } => value.text(),
             Value::NamedTuple {
@@ -4407,14 +4464,17 @@ fn binary_slots(op: &str) -> Option<(&'static str, &'static str, &'static str)> 
 }
 
 impl Context {
-    /// Native timedelta participates in the same reflected arithmetic ordering as a Python class.
-    fn timedelta_slot_class(&self, value: Id) -> Option<Id> {
-        match self.heap.get(value) {
-            Value::Calendar { value, .. } if value.class() == "timedelta" => {
-                self.builtins.get("datetime.timedelta").copied()
-            }
-            _ => None,
-        }
+    /// Exact native calendar operands participate in Python's reflected numeric slot ordering.
+    fn calendar_slot_class(&self, value: Id, add_or_subtract: bool) -> Option<Id> {
+        let Value::Calendar { value, .. } = self.heap.get(value) else {
+            return None;
+        };
+        let class = match value.class() {
+            "timedelta" => "datetime.timedelta",
+            "datetime" if add_or_subtract => "datetime.datetime",
+            _ => return None,
+        };
+        self.builtins.get(class).copied()
     }
 
     /// An inherited object.__ne__ leaves ordinary comparison to the equality fallback.
@@ -4449,7 +4509,12 @@ impl Context {
                 | "__rtruediv__"
                 | "__floordiv__"
                 | "__rfloordiv__"
-        ) && self.timedelta_slot_class(obj).is_some()
+        ) && self
+            .calendar_slot_class(
+                obj,
+                matches!(name, "__add__" | "__radd__" | "__sub__" | "__rsub__"),
+            )
+            .is_some()
         {
             Some(self.lookup_attr(obj, name)?)
         } else {
@@ -4742,7 +4807,7 @@ impl Context {
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
                 if matches!(op, "+" | "-" | "*" | "/" | "//") {
-                    self.timedelta_slot_class(id)
+                    self.calendar_slot_class(id, matches!(op, "+" | "-"))
                 } else {
                     None
                 }

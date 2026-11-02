@@ -7,6 +7,7 @@ use ruff_python_stdlib::{identifiers::is_identifier, keyword::is_keyword};
 
 pub(super) const GETTER: &str = "collections._tuplegetter";
 pub(super) const DOC_REPR: &str = "<member '__doc__' of 'collections._tuplegetter' objects>";
+pub(super) const MEMBER_SLOTS: &[&str] = &["__get__", "__set__", "__delete__"];
 pub(super) const GETTER_METHODS: &[&str] = &["__get__", "__set__", "__delete__", "__reduce__"];
 
 /// Return the shared native type attributes that describe the tuple field descriptor.
@@ -74,8 +75,42 @@ pub(super) fn doc_method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let Some((&member, rest)) = args.split_first() else {
-        return Err(Error::new("TypeError", "missing member descriptor"));
+        return Err(Error::new(
+            "TypeError",
+            format!("descriptor '{name}' of 'member_descriptor' object needs an argument"),
+        ));
     };
+    if MEMBER_SLOTS.contains(&name) {
+        let ty = ctx.exact_type(member)?;
+        if ty != ctx.builtin("member_descriptor") {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{name}' requires a 'member_descriptor' object but received a '{}'",
+                    ctx.class_name(ty)
+                ),
+            ));
+        }
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("wrapper {name}() takes no keyword arguments"),
+            ));
+        }
+        let count = rest.len();
+        let invalid = match name {
+            "__get__" if count == 0 => Some("__get__ expected at least 1 argument, got 0".into()),
+            "__get__" if count > 2 => {
+                Some(format!("__get__ expected at most 2 arguments, got {count}"))
+            }
+            "__set__" if count != 2 => Some(format!("__set__ expected 2 arguments, got {count}")),
+            "__delete__" if count != 1 => Some(format!("expected 1 argument, got {count}")),
+            _ => None,
+        };
+        if let Some(message) = invalid {
+            return Err(Error::new("TypeError", message));
+        }
+    }
     if let Value::SlotMember { owner, name: field } = *ctx.heap.get(member)
         && kwargs.is_empty()
     {
@@ -127,8 +162,7 @@ pub(super) fn doc_method(
             }
         }
         ("__set__", [obj, _]) | ("__delete__", [obj]) if let Some((owner, field)) = field => {
-            ctx.read_member(owner, field, *obj)?;
-            Err(Error::new("AttributeError", "readonly attribute"))
+            ctx.reject_member_write(owner, field, *obj).map(|()| NONE)
         }
         ("__set__", [obj, value]) => set_document(ctx, *obj, Some(*value)),
         ("__delete__", [obj]) => set_document(ctx, *obj, None),
