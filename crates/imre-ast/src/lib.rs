@@ -1,5 +1,8 @@
 //! Apply Python's lexical class-name mangling before lowering boxed modules.
 
+/// CPython 3.14.5's pyc magic number followed by CRLF in little-endian wire order.
+pub const PYC_MAGIC_NUMBER_TOKEN: u32 = 3627 | ((b'\r' as u32) << 16) | ((b'\n' as u32) << 24);
+
 pub mod exceptions;
 pub mod startup;
 pub mod strings;

@@ -14,6 +14,53 @@ impl Checker<'_> {
         .then_some(owner)
     }
 
+    /// Bind the operands in source order. Only exact text and bytes values have
+    /// the builtin repr and class identity used by this assertion helper.
+    pub(super) fn unittest_text_instance(
+        &mut self,
+        call: &ast::ExprCall,
+        class: usize,
+        receiver: &Expr,
+    ) -> Result<Option<Expr>, String> {
+        let name = "assertIsInstance";
+        let record = &self.classes.declarations.definitions[class];
+        if self.classes.methods[class].contains_key(name)
+            || record.static_bindings.contains_key(name)
+            || record.fields.iter().any(|field| field.name == name)
+        {
+            return Ok(None);
+        }
+        let method = "_assertTextBytesInstance";
+        let Some(owner) = self.bundled_case_method_owner(class, method) else {
+            return Ok(None);
+        };
+        let signature = self.classes.methods[owner][method].clone();
+        let params = &signature.params[1..];
+        let receiver = self.coerce(receiver.clone(), Type::Class(owner), call)?;
+        let args = self
+            .arguments_with(call, params, Some(receiver), |checker, index, arg| {
+                let value = checker.expr(arg)?;
+                let supported = match index {
+                    0 => matches!(value.ty, Type::Str | Type::StrLiteral(_) | Type::Bytes),
+                    1 => {
+                        checker.unshadowed_builtin(arg, "str")
+                            || checker.unshadowed_builtin(arg, "bytes")
+                    }
+                    _ => true,
+                };
+                if !supported {
+                    return Err(checker.object_runtime_export("assertIsInstance", call));
+                }
+                checker.coerce(value, params[index].ty, arg)
+            })
+            .map_err(|_| self.object_runtime_export("assertIsInstance", call))?;
+        self.calls.insert(signature.id);
+        Ok(Some(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(signature.id, args),
+        }))
+    }
+
     /// Resolve a membership assertion from its container. The ordinary argument
     /// binder still evaluates the receiver, member, container, and message in
     /// source order, including when they are supplied by keyword.

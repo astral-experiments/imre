@@ -85,6 +85,9 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(members) = stdlib::datetime::members(owner) => {
                 Some((members.owner, attr, members.methods))
             }
+            Some((owner, attr)) if let Some(class) = deque::iterator_class(owner) => {
+                Some((class, attr, deque::ITERATOR_METHODS))
+            }
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
@@ -158,6 +161,8 @@ impl BuiltinDescriptor {
                 owner,
                 name,
                 method: !name.starts_with("__")
+                    || (deque::iterator_class(owner).is_some() && name == "__length_hint__")
+                    || (owner == "list" && name == "__getitem__")
                     || (owner == defaultdict::CLASS && matches!(name, "__copy__" | "__missing__"))
                     || matches!(
                         name,
@@ -351,7 +356,8 @@ impl BuiltinDescriptor {
             }
             "dict" => ctx.dict_storage(receiver).is_some(),
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
-            deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
+            deque::ITERATOR | deque::REVERSE_ITERATOR => ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner),
+            deque::CLASS => matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             _ => ctx.builtin_slot_accepts(receiver, self.owner),
         };
@@ -524,7 +530,10 @@ impl BuiltinDescriptor {
                     ("__bytes__", "__doc__") => "Convert this value to exact type bytes.",
                     ("__complex__", "__doc__") => "Convert this value to exact type complex.",
                     ("__bytes__" | "__complex__", _) => "($self, /)",
-                    ("count" | "find", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
+                    ("index", "__doc__") if self.owner == "bytes" => {
+                        "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nRaise ValueError if the subsection is not found."
+                    }
+                    ("count" | "find" | "index", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
                     }
@@ -567,6 +576,8 @@ impl BuiltinDescriptor {
                     ) => "($self, /)",
                     ("mro", "__doc__") => "Return a type's method resolution order.",
                     ("mro", _) => "($self, /)",
+                    ("__getitem__", "__doc__") if self.owner == "list" => "Return self[index].",
+                    ("__getitem__", _) if self.owner == "list" => "($self, index, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

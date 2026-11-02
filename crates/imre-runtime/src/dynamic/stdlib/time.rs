@@ -187,17 +187,20 @@ pub(super) fn call(
                     ),
                 ));
             };
-            let name = ctx.string_storage(*name).ok_or_else(|| {
+            let Some(name) = ctx.string_storage(*name) else {
                 let kind = if *name == NONE {
                     "None"
                 } else {
                     ctx.type_name(*name)
                 };
-                Error::new(
-                    "TypeError",
-                    format!("get_clock_info() argument 1 must be str, not {kind}"),
-                )
-            })?;
+                // PyArg formats at most 50 bytes of tp_name, then decodes the full diagnostic.
+                let mut message = b"get_clock_info() argument 1 must be str, not ".to_vec();
+                message.extend_from_slice(&kind.as_bytes()[..kind.len().min(50)]);
+                let text = crate::objects::Codec::Utf8 { signature: false }
+                    .decode(&message, None)
+                    .map_err(|error| ctx.decode_error(error))?;
+                return Err(Error::new("TypeError", text));
+            };
             // PyArg_ParseTuple's "s" rejects unencodable Unicode and embedded NULs.
             let name = codecs::encode_text(ctx, name, None, None)?;
             if name.contains(&0) {

@@ -21,6 +21,19 @@ def current():
         else:
             raise AssertionError("invalid clock name accepted")
 
+    prefix = "get_clock_info() argument 1 must be str, not "
+    for kind, expected in (("x" * 60, TypeError), ("界" * 17, UnicodeDecodeError)):
+        try:
+            time.get_clock_info(type(kind, (), {})())
+        except expected as exc:
+            if expected is TypeError:
+                assert str(exc) == prefix + kind[:50]
+            else:
+                assert exc.object == prefix.encode() + kind.encode()[:50]
+                assert exc.reason == "unexpected end of data"
+        else:
+            raise AssertionError("invalid clock type accepted")
+
     first = monotonic()
     assert type(first) is float and time.monotonic is monotonic
     sleep = time.sleep

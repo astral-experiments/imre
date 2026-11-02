@@ -7,6 +7,7 @@ from ._bootstrap_external import (
     NamespaceLoader,
     PathFinder,
     SourceFileLoader,
+    SourcelessFileLoader,
 )
 
 

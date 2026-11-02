@@ -1,4 +1,4 @@
-//! Build the runtime's Unicode and platform errno tables.
+//! Build the runtime's Unicode and platform constant tables.
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -24,6 +24,29 @@ fn write_class_table(out_dir: &Path, file: &str, pattern: &str) {
     }
     table.push_str("]\n");
     std::fs::write(out_dir.join(file), table).unwrap();
+}
+
+// Keep target-specific constants in C so their names and values come from the target headers.
+fn add_sysconf_table(c: &mut String) {
+    let names = include_str!("native/sysconf-names.txt");
+    c.push_str("#include <unistd.h>\nstatic const struct entry sysconf_entries[] = {\n");
+    for name in names.lines().filter(|line| !line.starts_with('#')) {
+        writeln!(c, "#ifdef _{name}\n{{\"{name}\", _{name}}},\n#endif").unwrap();
+    }
+    c.push_str(
+        r#"};
+const struct entry *imre_platform_sysconf_entries(size_t *length) {
+    *length = sizeof(sysconf_entries) / sizeof(sysconf_entries[0]);
+    return sysconf_entries;
+}
+long imre_platform_sysconf(int name, int *error) {
+    errno = 0;
+    long value = sysconf(name);
+    *error = value == -1 ? errno : 0;
+    return value;
+}
+"#,
+    );
 }
 
 fn main() {
@@ -71,7 +94,11 @@ fn main() {
         // h_errno may be a macro rather than an exported variable.
         c.push_str("#include <netdb.h>\nint imre_socket_host_errno(void) { return h_errno; }\n");
     }
-    let path = out_dir.join("errno.c");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rerun-if-changed=native/sysconf-names.txt");
+        add_sysconf_table(&mut c);
+    }
+    let path = out_dir.join("platform.c");
     std::fs::write(&path, c).unwrap();
     println!("cargo:rerun-if-changed=native/locale_decode.c");
     println!("cargo:rerun-if-changed=native/faulthandler.c");

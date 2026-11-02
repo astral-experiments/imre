@@ -454,6 +454,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("unicodedata", "normalize" | "decomposition") => {
             ctx.builtin(&format!("unicodedata.{name}"))
         }
+        ("_imp", "pyc_magic_number_token") => ctx.int(i64::from(imre_ast::PYC_MAGIC_NUMBER_TOKEN)),
         (
             "_imp",
             "is_frozen"
@@ -705,7 +706,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("posix", "_create_environ" | "putenv" | "unsetenv") => {
             ctx.builtin(&format!("posix.{name}"))
         }
-        ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
+        ("os" | "posix", "abort" | "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os", "name") => ctx.text("posix"),
@@ -960,7 +961,10 @@ pub(super) fn call(
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
     }
     #[cfg(unix)]
-    if matches!(name, "_signal.sigpending" | "_imre_signal.make_signals") {
+    if matches!(
+        name,
+        "_signal.sigpending" | "_imre_signal.make_signals" | "_thread.interrupt_main"
+    ) {
         return signal::call(ctx, name, args, kwargs);
     }
     if name == "_thread.get_ident"
@@ -1214,20 +1218,22 @@ pub(super) fn call(
     if name == "sys.getsizeof" {
         return system_size::getsizeof(ctx, &args[1..], kwargs);
     }
-    if name == "sys.getrecursionlimit" {
+    if matches!(name, "sys.getrecursionlimit" | "sys.is_finalizing") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "sys.getrecursionlimit() takes no keyword arguments",
+                format!("{name}() takes no keyword arguments"),
             ));
         }
         if !args[1..].is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!(
-                    "sys.getrecursionlimit() takes no arguments ({} given)",
-                    args.len() - 1
-                ),
+                format!("{name}() takes no arguments ({} given)", args.len() - 1),
+            ));
+        }
+        if name == "sys.is_finalizing" {
+            return Ok(builtins::boolean(
+                ctx.finalizing.load(std::sync::atomic::Ordering::Acquire),
             ));
         }
         return Ok(ctx.int(i64::from(crate::sys::recursion_limit())));
@@ -1318,6 +1324,7 @@ pub(super) fn call(
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
+            | "posix.abort"
             | "posix.getpid"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
@@ -1356,6 +1363,9 @@ pub(super) fn call(
                 ctx.heap.code_name(crate::sys::filesystem_errors().as_str())
             }
             "_locale.getencoding" => ctx.text(crate::sys::file_encoding(Some("locale"))),
+            // SAFETY: C abort takes no arguments and terminates the calling process.
+            #[cfg(unix)]
+            "posix.abort" => unsafe { libc::abort() },
             "posix.getpid" => ctx.int(i64::from(std::process::id())),
             "sys.getdefaultencoding" => ctx.default_encoding,
             "sys.get_int_max_str_digits" => {
@@ -1574,6 +1584,10 @@ pub(super) fn call(
         return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    if name == "posix.sysconf" {
+        return os::sysconf::call(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
         return os::scheduler::get_policy(ctx, args, kwargs);
     }
@@ -1701,6 +1715,15 @@ pub(super) fn call(
             return Ok(NONE);
         }
         return Err(Error::new("TypeError", "invalid chain state arguments"));
+    }
+    if let Some(class) = super::deque::iterator_class(name) {
+        return super::deque::construct_iterator(ctx, class, args);
+    }
+    if let Some((class, method)) = name.rsplit_once('.')
+        && super::deque::iterator_class(class).is_some()
+        && super::deque::ITERATOR_METHODS.contains(&method)
+    {
+        return super::deque::iterator_method(ctx, class, method, args, kwargs);
     }
     if name == super::deque::CLASS {
         return super::deque::construct(ctx, args, kwargs);
@@ -1959,6 +1982,9 @@ pub(super) fn call(
     }
     if let Some(operation) = name.strip_prefix("typing.") {
         return super::typing::call(ctx, operation, args, kwargs);
+    }
+    if name == "collections.abc._CallableGenericAlias" {
+        return super::typing::abc_callable_alias(ctx, args, kwargs);
     }
     if name == "types.GenericAlias" {
         if !kwargs.is_empty() {

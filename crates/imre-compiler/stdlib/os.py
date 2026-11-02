@@ -3,11 +3,13 @@ import abc
 import sys
 import posixpath as path
 import stat as st
+from posix import _exit
+from posix import pread
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import _create_environ, _exit, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
-from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, open, rmdir, stat
+from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, open, rmdir, stat, truncate
 
 try:
     from posix import waitstatus_to_exitcode
@@ -20,7 +22,8 @@ if sys.platform == "linux":
         if _name.startswith("RTLD_"):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
-    from posix import O_PATH, O_TMPFILE, fstatvfs, statvfs, statvfs_result
+    from posix import O_PATH, O_TMPFILE, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
+    from posix import posix_fallocate
     from posix import (
         sched_getscheduler, sched_param, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
         SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,

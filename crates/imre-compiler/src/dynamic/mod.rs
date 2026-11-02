@@ -497,9 +497,18 @@ pub(crate) fn compile(
     } else if let Some(command) = command {
         command.to_owned()
     } else {
+        // A direct .pyc operand already received its bytecode diagnostic from the script loader.
+        if options.script_startup.is_some() && crate::named_bytecode(path) {
+            return Ok(None);
+        }
         let Ok(source) = std::fs::read_to_string(path) else {
             return Ok(None);
         };
+        if options.script_startup.is_some()
+            && crate::bytecode_script_error(path, source.as_bytes()).is_some()
+        {
+            return Ok(None);
+        }
         source
     };
     // An ordinary entry can import a package that uses the object runtime without

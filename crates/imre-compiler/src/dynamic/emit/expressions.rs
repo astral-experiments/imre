@@ -2,7 +2,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::boolean::{Context as BooleanContext, Flow, Target};
-use super::{Body, Function};
+use super::{Body, DefinitionName, Function};
 
 enum Element<'a> {
     Value(&'a ast::Expr),
@@ -125,8 +125,7 @@ impl Function<'_, '_> {
             }
             ast::Expr::Lambda(v) => self.define(
                 v.start(),
-                "<lambda>",
-                false,
+                DefinitionName::Plain("<lambda>"),
                 v.parameters.as_deref(),
                 None,
                 None,
@@ -160,8 +159,7 @@ impl Function<'_, '_> {
                 let iter = self.op("iter", &[&iterable]);
                 let step = self.define(
                     v.start(),
-                    "<genexpr>",
-                    false,
+                    DefinitionName::Plain("<genexpr>"),
                     None,
                     None,
                     None,

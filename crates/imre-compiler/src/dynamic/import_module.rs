@@ -374,15 +374,18 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     let begin = UPSTREAM.find(start).unwrap();
                     UPSTREAM[begin..].split_once(end).unwrap().0
                 };
-                // The native runtime loads source files directly. FileFinder can also use
-                // any loader supplied by its caller, with the original package and cache rules.
+                // Preserve FileFinder’s package, loader and cache ordering for filesystem entries.
                 let spec = section("_POPULATE = object()", "def _bless_my_loader(")
                     .replace("_get_supported_file_loaders()", "_file_loader_defaults(location)");
                 [
                     include_str!("../../stdlib/importlib/source_loader.py"),
                     section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _pack_uint32("),
+                    section("def _unpack_uint32(", "def _unpack_uint16("),
                     section("if _MS_WINDOWS:\n    def _path_join(", "def _write_atomic("),
                     section("def _get_cached(", "def _calc_mode("),
+                    section("def _classify_pyc(", "def _validate_timestamp_pyc("),
+                    section("def _compile_bytecode(", "def _code_to_timestamp_pyc("),
+                    section("class SourcelessFileLoader(", "class ExtensionFileLoader("),
                     &spec,
                     &section("class _NamespacePath:", "class FileFinder:")
                         .replace("_warnings.warn('sys.path_hooks is empty', ImportWarning)",

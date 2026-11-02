@@ -38,9 +38,9 @@ impl Nargs {
         }
     }
 
-    pub(super) fn label(self, metavar: &str) -> String {
+    pub(super) fn label(self, metavar: &str, rest: &[String]) -> String {
         let mut label = String::new();
-        self.write_label(&mut label, metavar).unwrap();
+        self.write_label(&mut label, metavar, rest).unwrap();
         label
     }
 
@@ -48,18 +48,29 @@ impl Nargs {
         self,
         out: &mut impl std::fmt::Write,
         metavar: &str,
+        rest: &[String],
     ) -> std::fmt::Result {
         match self {
             Self::One => out.write_str(metavar),
             Self::Optional => write!(out, "[{metavar}]"),
+            Self::ZeroOrMore if let Some(next) = rest.first() => {
+                write!(out, "[{metavar} [{next} ...]]")
+            }
             Self::ZeroOrMore => write!(out, "[{metavar} ...]"),
-            Self::OneOrMore => write!(out, "{metavar} [{metavar} ...]"),
+            Self::OneOrMore => write!(
+                out,
+                "{metavar} [{} ...]",
+                rest.first().map_or(metavar, String::as_str)
+            ),
             Self::Fixed(count) => {
-                for i in 0..count {
-                    if i != 0 {
+                let mut labels = rest.iter();
+                for index in 0..count {
+                    if index == 0 {
+                        out.write_str(metavar)?;
+                    } else {
                         out.write_char(' ')?;
+                        out.write_str(labels.next().map_or(metavar, String::as_str))?;
                     }
-                    out.write_str(metavar)?;
                 }
                 Ok(())
             }

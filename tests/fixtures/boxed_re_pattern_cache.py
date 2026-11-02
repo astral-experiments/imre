@@ -1,3 +1,4 @@
+import pickle
 import re
 
 
@@ -57,4 +58,12 @@ def current():
     high = compile_fresh(chr(0xd800))
     assert high != compile_fresh(chr(0xdfff))
     assert high.fullmatch(chr(0xd800)) and high.fullmatch(chr(0xdfff)) is None
+    p = re.compile(b'a(.)', re.I)
+    for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+        data = pickle.dumps(p, proto)
+        re.purge()
+        restored = pickle.loads(data)
+        assert restored == p and restored is not p
+        assert restored.fullmatch(b'Ab').groups() == (b'b',)
+        assert restored.fullmatch(b'bb') is None
     print('pattern cache and comparison passed')

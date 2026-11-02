@@ -118,6 +118,7 @@ fn run() -> Result<ExitCode, String> {
         || Path::new(&command)
             .extension()
             .is_some_and(|ext| ext == "py")
+        || command.as_encoded_bytes().ends_with(b".pyc")
     {
         let invocation = match python_command::parse(command.clone(), &mut args) {
             Ok(value) => value,

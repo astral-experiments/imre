@@ -43,9 +43,52 @@ fn encode(point: u32) -> char {
     char::from_u32(scalar).unwrap()
 }
 
+/// Project an enumerated character class onto the scalar and surrogate matchers.
+fn literal_class(points: &[u32]) -> Option<(String, String)> {
+    let members = points
+        .strip_prefix(&[u32::from('[')])?
+        .strip_suffix(&[u32::from(']')])?;
+    let (negated, members) = match members.strip_prefix(&[u32::from('^')]) {
+        Some(rest) => (true, rest),
+        None => (false, members),
+    };
+    // Ranges, escapes and set operators need the class parser. The encoded
+    // matcher also reserves private-use characters which a literal may not alias.
+    if members.iter().any(|&p| {
+        matches!(p, 0xf0000..=0xf0800)
+            || matches!(
+                char::from_u32(p),
+                Some('[' | ']' | '-' | '\\' | '^' | '&' | '|' | '~')
+            )
+    }) {
+        return None;
+    }
+
+    let prefix = if negated { "[^" } else { "[" };
+    let mut plain = String::from(prefix);
+    let mut encoded = String::from(prefix);
+    for &point in members {
+        if let Some(c) = char::from_u32(point) {
+            plain.push(c);
+        }
+        encoded.push(encode(point));
+    }
+    if plain.len() == prefix.len() {
+        // A scalar subject contains no surrogates, even under IGNORECASE.
+        plain = if negated { r"[\s\S]" } else { r"[^\s\S]" }.into();
+    } else {
+        plain.push(']');
+    }
+    encoded.push(']');
+    Some((plain, encoded))
+}
+
 /// Compile raw surrogate atoms separately for scalar-only and code-point subjects.
 /// No Unicode scalar can match a surrogate literal, including under IGNORECASE.
 pub(super) fn literal_patterns(points: &[u32]) -> Result<(String, String)> {
+    if let Some(class) = literal_class(points) {
+        return Ok(class);
+    }
     let unsupported = || {
         Error::new(
             "NotImplementedError",

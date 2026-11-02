@@ -271,6 +271,17 @@ class TestCase(_SuiteMember):
             standard = _inequality_message(repr(first), repr(second))
             raise self.failureException(self._formatMessage(msg, standard))
 
+    def _assertTextBytesInstance(self, obj: str | bytes, cls: type, msg: str | None = None) -> None:
+        if isinstance(obj, str):
+            if cls is str:
+                return
+            shown = repr(obj)
+        else:
+            if cls is bytes:
+                return
+            shown = repr(obj)
+        self.fail(self._formatMessage(msg, shown + " is not an instance of " + repr(cls)))
+
     def _assertClassEqual(self, first: type, second: type, msg: str | None = None) -> None:
         if first != second:
             standard = _inequality_message(repr(first), repr(second))

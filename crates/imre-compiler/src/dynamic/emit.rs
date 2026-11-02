@@ -196,6 +196,11 @@ impl Output {
     }
 }
 
+enum DefinitionName<'a> {
+    Binding(&'a ast::Identifier),
+    Plain(&'a str),
+}
+
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
@@ -334,6 +339,7 @@ impl Output {
             source,
             class_sites: None,
             in_function,
+            module,
             declared_globals: Default::default(),
             annotation_lookup: false,
             class_locals: match &body {
@@ -358,6 +364,12 @@ impl Output {
         };
         match body {
             Body::Namespace(stmts) => {
+                if module
+                    && source.string_annotations
+                    && imre_ast::annotations::has_variable_annotation(stmts)
+                {
+                    f.op("setup_module_string_annotations", &[&f.scope.clone()]);
+                }
                 if f.output.keep_docstrings
                     && let Some(doc) = f.source.docstring(f.prefix.trim_end_matches('.'), stmts)
                 {
@@ -436,6 +448,7 @@ struct Function<'a, 'p> {
     prefix: String,
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
+    module: bool,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,

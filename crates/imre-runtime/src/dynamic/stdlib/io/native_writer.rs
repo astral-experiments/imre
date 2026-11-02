@@ -32,8 +32,25 @@ impl ActiveCall {
 }
 
 pub(super) const METHODS: &[&str] = &[
-    "__init__", "raw", "closed", "name", "mode", "writable", "seekable", "isatty", "fileno",
-    "flush", "close", "tell", "seek", "write", "truncate", "detach",
+    "__init__",
+    "__repr__",
+    "_dealloc_warn",
+    "raw",
+    "closed",
+    "name",
+    "mode",
+    "writable",
+    "seekable",
+    "isatty",
+    "fileno",
+    "flush",
+    "close",
+    "tell",
+    "seek",
+    "write",
+    "truncate",
+    "detach",
+    "__getstate__",
 ];
 
 /// Path and standard writers own their fd internally and have no Python FileIO to delegate to.
@@ -85,7 +102,26 @@ pub(super) fn call(
             format!("{owner}.{name}() takes no keyword arguments"),
         ));
     }
+    if name == "_dealloc_warn" {
+        let [source] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{owner}.{name}() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        super::buffered_io::dealloc_warn(ctx, receiver, *source);
+        return Ok(NONE);
+    }
     super::argument_count(owner, name, args.len())?;
+    if name == "__repr__" {
+        return super::buffered_io::repr(ctx, receiver);
+    }
+    if name == "__getstate__" {
+        return super::buffered_io::getstate(ctx, receiver);
+    }
     if name == "write" {
         files::output_bytes(ctx, args[0])?;
     }
@@ -146,6 +182,9 @@ pub(super) fn call(
                 ctx.call(truncate, args.to_vec(), Vec::new())
             }
             "close" if buffer != receiver && !fd.closed() => {
+                if owner == "BufferedWriter" {
+                    fd.warn_on_close(ctx, receiver)?;
+                }
                 let flushed = ctx
                     .lookup_attr(receiver, "flush")
                     .and_then(|flush| ctx.call(flush, vec![], Vec::new()));

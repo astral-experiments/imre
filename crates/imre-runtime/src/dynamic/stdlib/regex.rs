@@ -390,10 +390,32 @@ fn raw_unicode_compatible(source: &str, ascii: bool, boundaries: &[usize]) -> bo
     true
 }
 
+// Python treats the first character after '[' or '[^' as a set member. A second
+// hyphen can then introduce a range. Leave later ambiguous operators alone.
+fn literal_operator_start(mut input: std::iter::Peekable<std::str::Chars<'_>>) -> bool {
+    let Some(first @ ('-' | '&' | '|' | '~')) = input.next() else {
+        return false;
+    };
+    if input.peek() != Some(&first) {
+        return false;
+    }
+    while let Some(c) = input.next() {
+        match c {
+            ']' => return true,
+            '\\' => {
+                input.next();
+            }
+            '-' | '&' | '|' | '~' if input.peek() == Some(&c) => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
 // Python uses str.isalnum() plus "_" for \w and includes four additional
 // ASCII separators in Unicode whitespace. The nested classes also work
 // when these escapes occur inside a bracketed class in the input.
-fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)> {
+fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, bool)> {
     if flags & VERBOSE != 0 {
         return None;
     }
@@ -401,6 +423,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
         pattern.contains("(?") && pattern.contains('u') && (ascii || pattern.contains('-'));
     let mut boundaries = Vec::new();
     let mut prefer_translation = false;
+    let mut possessive = false;
     let mut result = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
     let mut in_class = false;
@@ -418,13 +441,22 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
                     prefer_translation |= prefer_python_flags;
                 }
             }
+            // The regular backend reads a possessive modifier as another repetition.
+            // Ask the Python tokenizer to bind it to its operand.
+            possessive |= !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
                     prefer_translation = true;
-                } else if chars.peek() == Some(&',') {
-                    // Python treats an omitted lower bound as zero, including in {,}.
-                    result.push_str("{0");
-                    continue;
+                } else {
+                    let mut suffix = chars
+                        .clone()
+                        .skip_while(|c| c.is_ascii_digit() || *c == ',');
+                    possessive |= suffix.next() == Some('}') && suffix.next() == Some('+');
+                    if chars.peek() == Some(&',') {
+                        // Python treats an omitted lower bound as zero, including in {,}.
+                        result.push_str("{0");
+                        continue;
+                    }
                 }
             }
             if c == '$' && !in_class && flags & MULTILINE == 0 && chars.peek().is_none() {
@@ -445,6 +477,8 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
                 // A closing bracket in the first position is a literal member.
                 if chars.next_if_eq(&']').is_some() {
                     result.push(']');
+                } else if literal_operator_start(chars.clone()) {
+                    result.push('\\');
                 }
                 continue;
             }
@@ -492,7 +526,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
     if check_unicode && !raw_unicode_compatible(&result, ascii, &boundaries) {
         return None;
     }
-    Some((result, prefer_translation))
+    Some((result, prefer_translation, possessive))
 }
 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
@@ -723,7 +757,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
     let inline_verbose = flags & VERBOSE == 0 && parsed.bits & VERBOSE != 0;
     let flags = parsed.bits;
     let spelling = &spelling[parsed.skip..];
-    if let Some(bad) = &parsed.misplaced
+    if let Some(bad) = &parsed.deferred
         && valid_prefix(id, &bad.prefix, flags, bytes, inline_verbose)
     {
         return Err(pattern_error_at(
@@ -751,7 +785,7 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
             ));
         }
     }
-    if let Some(bad) = parsed.misplaced {
+    if let Some(bad) = parsed.deferred {
         return Err(pattern_error_at(
             ctx,
             id,
@@ -889,31 +923,48 @@ fn prepare(
         Some(pattern) => raw_pattern(pattern, ascii, flags & !VERBOSE),
         None => raw_pattern(&source, ascii, flags),
     };
-    let prepared = if let Some((raw, prefer_translation)) = raw {
-        let original = || {
-            if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, flags & VERBOSE != 0) {
-                return Err(msg.to_owned());
+    let prepared =
+        if let Some((raw, prefer_translation, possessive)) = raw {
+            let original = || {
+                if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, flags & VERBOSE != 0) {
+                    return Err(msg.to_owned());
+                }
+                let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
+                if flags & IGNORECASE != 0 && !bytes {
+                    build(imre_regex::expand_case(&raw, ascii)?)
+                } else {
+                    build(raw)
+                }
+            };
+            let committed = possessive.then(|| backtrack(String::new()).ok()).flatten();
+            match committed {
+                Some((source, Matcher::Lookahead(matcher))) if matcher.total_close_order() => {
+                    Ok((source, Matcher::Lookahead(matcher)))
+                }
+                fallback => {
+                    // Preserve the regular matcher's winning close trace when a repeated
+                    // capture has no fixed syntax order. The committed VM can still
+                    // handle such a pattern when the regular engine cannot compile it.
+                    let regular = if prefer_translation || inline_verbose {
+                        translate(&source)
+                            .and_then(build)
+                            .or_else(|err| {
+                                if fallback.is_some() {
+                                    Err(err)
+                                } else {
+                                    backtrack(err)
+                                }
+                            })
+                            .or_else(|_| original())
+                    } else {
+                        original()
+                    };
+                    regular.or_else(|err| fallback.ok_or(err))
+                }
             }
-            let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
-            if flags & IGNORECASE != 0 && !bytes {
-                build(imre_regex::expand_case(&raw, ascii)?)
-            } else {
-                build(raw)
-            }
-        };
-        if prefer_translation || inline_verbose {
-            // Python has its own verbose layout and literal-brace rules. Keep the
-            // direct parser for features outside the subset translator.
-            translate(&source)
-                .and_then(build)
-                .or_else(backtrack)
-                .or_else(|_| original())
         } else {
-            original()
-        }
-    } else {
-        translate(&source).and_then(build)
-    };
+            translate(&source).and_then(build)
+        };
     let prepared = match prepared {
         Err(original)
             if !bytes
@@ -1286,11 +1337,18 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
             "cannot use a bytes pattern on a string-like object",
         )),
         _ => ctx.str_value(id).map(str::as_bytes).map_err(|_| {
+            let name = match ctx.heap.get(id) {
+                Value::Native(_) => ctx
+                    .builtin_type_name(id)
+                    .and_then(|name| name.rsplit('.').next())
+                    .unwrap_or_else(|| ctx.type_name(id)),
+                _ => ctx.type_name(id),
+            };
             Error::new(
                 "TypeError",
                 format!(
                     "expected string or bytes-like object, got '{}'",
-                    ctx.type_name(id)
+                    &name[..name.floor_char_boundary(200)]
                 ),
             )
         }),

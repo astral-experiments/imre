@@ -313,7 +313,7 @@ impl Pickler {
             (ctx.builtin("codecs.encode"), vec![text, latin1])
         };
         let args = ctx.alloc(Value::Tuple(args));
-        self.save_reduce(ctx, obj, func, args, NONE, NONE)
+        self.save_reduce(ctx, obj, func, args, NONE, [NONE; 2])
     }
 
     fn save_list(&mut self, ctx: &mut Context, obj: Id, length: usize) -> Result<()> {
@@ -518,7 +518,7 @@ impl Pickler {
                 _ => return self.save_global(ctx, obj, None),
             };
             let args = ctx.alloc(Value::Tuple(vec![singleton]));
-            return self.save_reduce(ctx, obj, class, args, NONE, NONE);
+            return self.save_reduce(ctx, obj, class, args, NONE, [NONE; 2]);
         }
         // The accelerated pickler owns these exact types even when this runtime
         // cannot yet encode their payloads. A registration cannot replace them.
@@ -569,26 +569,28 @@ impl Pickler {
             ));
         }
         let optional = |index| fields.get(index).copied().unwrap_or(NONE);
-        let mapping_items = optional(4);
-        if mapping_items != NONE
-            && !ctx.is_native_iterator(mapping_items)
-            && ctx.slot(mapping_items, "__next__").is_none()
-        {
-            return Err(pickling_error(
-                ctx,
-                format!(
-                    "fifth item of the tuple returned by __reduce__ must be an iterator, not {}",
-                    ctx.type_name(mapping_items)
-                ),
-            ));
+        let items = [optional(3), optional(4)];
+        for (iterator, position) in items.into_iter().zip(["fourth", "fifth"]) {
+            if iterator != NONE
+                && !ctx.is_native_iterator(iterator)
+                && ctx.slot(iterator, "__next__").is_none()
+            {
+                let class = ctx.exact_type(iterator)?;
+                let name = super::qualified_type(ctx, class)?;
+                let message = format!(
+                    "{position} item of the tuple returned by __reduce__ must be an iterator, not {}",
+                    ctx.str_value(name)?
+                );
+                return Err(pickling_error(ctx, message));
+            }
         }
-        if optional(3) != NONE || optional(5) != NONE {
+        if optional(5) != NONE {
             return Err(Error::new(
                 "NotImplementedError",
-                "native pickle does not yet support reduction list items or state setters",
+                "native pickle does not yet support reduction state setters",
             ));
         }
-        self.save_reduce(ctx, obj, fields[0], fields[1], optional(2), mapping_items)
+        self.save_reduce(ctx, obj, fields[0], fields[1], optional(2), items)
     }
 
     fn call_reduce_hook(ctx: &mut Context, obj: Id, protocol: u8) -> Result<Id> {
@@ -604,6 +606,37 @@ impl Pickler {
             },
             Err(e) => Err(e),
         }
+    }
+
+    /// Binary protocols fetch the second item before saving the first to select APPENDS.
+    fn save_list_items(&mut self, ctx: &mut Context, iterator: Id) -> Result<()> {
+        while let Some(first) = ctx.next_item(iterator)? {
+            ctx.heap.keep(first);
+            if self.protocol == 0 {
+                self.save(ctx, first)?;
+                self.out.push(b'a'); // APPEND
+                continue;
+            }
+            let Some(second) = ctx.next_item(iterator)? else {
+                self.save(ctx, first)?;
+                self.out.push(b'a');
+                break;
+            };
+            ctx.heap.keep(second);
+            self.out.push(b'('); // MARK
+            self.save(ctx, first)?;
+            self.save(ctx, second)?;
+            for _ in 2..BATCH_SIZE {
+                let Some(item) = ctx.next_item(iterator)? else {
+                    self.out.push(b'e'); // APPENDS
+                    return Ok(());
+                };
+                ctx.heap.keep(item);
+                self.save(ctx, item)?;
+            }
+            self.out.push(b'e');
+        }
+        Ok(())
     }
 
     /// Binary protocols fetch a second pair before serializing the first to select SETITEMS.
@@ -706,7 +739,7 @@ impl Pickler {
         func: Id,
         args: Id,
         state: Id,
-        mapping_items: Id,
+        [list_items, mapping_items]: [Id; 2],
     ) -> Result<()> {
         let newobj = if self.protocol >= 2 {
             match ctx.lookup_attr(func, "__name__") {
@@ -731,6 +764,9 @@ impl Pickler {
             return Ok(());
         }
         self.remember(ctx, obj)?;
+        if list_items != NONE {
+            self.save_list_items(ctx, list_items)?;
+        }
         if mapping_items != NONE {
             self.save_mapping_items(ctx, mapping_items)?;
         }

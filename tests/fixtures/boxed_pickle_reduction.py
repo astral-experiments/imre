@@ -347,6 +347,25 @@ def check_namedtuple_reducer():
     assert duplicate.left is duplicate.right and duplicate.left is not shared
 
 
+def check_list_items(protocol):
+    from collections import UserList, deque
+
+    values = []
+    item = BadReturn((deque, ((), 3), None, iter(values)))
+    values.extend((0, item, values, values))
+    restored = pickle.loads(pickle.dumps(item, protocol))
+    assert restored.maxlen == 3
+    assert restored[0] is restored and restored[1] is restored[2]
+    for invalid, name in (([], "list"), (42, "int"), (UserList(), "collections.UserList")):
+        try:
+            pickle.dumps(BadReturn((list, (), None, invalid)), protocol)
+        except pickle.PicklingError as error:
+            assert str(error) == ("fourth item of the tuple returned by __reduce__ "
+                                  "must be an iterator, not " + name)
+        else:
+            raise AssertionError("accepted noniterator list items")
+
+
 def produce():
     check_namedtuple_reducer()
     check_object_reducer()
@@ -355,6 +374,7 @@ def produce():
         check_global_names(protocol)
         check_registered_reducer(protocol)
         check_reduction_state(protocol)
+        check_list_items(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
             try:

@@ -79,7 +79,7 @@ class Popen:
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
                  stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True,
-                 universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False, pipesize=-1):
+                 universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False, umask=-1, pipesize=-1):
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -111,7 +111,7 @@ class Popen:
         self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
                                        restore_signals, cwd, env, bufsize, pipesize,
                                        encoding if self.text_mode else None,
-                                       errors if self.text_mode else None, shell, start_new_session)
+                                       errors if self.text_mode else None, shell, start_new_session, umask)
         try:
             self.stdin = _process.pipe(self._handle, 0)
             self.stdout = _process.pipe(self._handle, 1)
