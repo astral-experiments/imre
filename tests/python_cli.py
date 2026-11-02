@@ -900,9 +900,17 @@ def check_pickle_reductions(imre, root, run):
     work.mkdir()
     (work / fixture.name).write_bytes(fixture.read_bytes())
     entry = work / "main.py"
-    entry.write_text("from boxed_pickle_reduction import produce\nproduce()\n")
     sys.path.insert(0, str(work))  # CPython must import the reconstruction function by name.
     try:
+        from boxed_pickle_reduction import LabeledTuple
+
+        obj = LabeledTuple((3, 4))
+        obj.label = {"back": obj}
+        streams = [pickle.dumps((obj, obj.label), protocol) for protocol in range(6)]
+        entry.write_text(
+            "from boxed_pickle_reduction import consume, produce\n"
+            f"consume({streams!r})\nproduce()\n"
+        )
         for optimization in (0, 3):
             executable = work / f"pickle-O{optimization}"
             build = run(imre, "build", entry, "--module-root", work, "--runtime-imports",

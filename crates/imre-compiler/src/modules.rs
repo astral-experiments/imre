@@ -68,6 +68,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/case.py",
             include_str!("../stdlib/unittest/boxed_case.py"),
         )),
+        "pickle" => Some(("pickle.py", include_str!("../stdlib/pickle.py"))),
+        "_compat_pickle" => Some((
+            "_compat_pickle.py",
+            include_str!("../stdlib/_compat_pickle.py"),
+        )),
         "_tokenize" => Some(("_tokenize.py", include_str!("../stdlib/_tokenize.py"))),
         "__future__" => Some(("__future__.py", include_str!("../stdlib/__future__.py"))),
         "__hello__" => Some(("__hello__.py", include_str!("../stdlib/__hello__.py"))),
@@ -1021,6 +1026,10 @@ impl IntrinsicModule {
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
+            (Self::Pickle, "loads") => Intrinsic::ObjectRuntimeExport("pickle.loads"),
+            (Self::Pickle, "UnpicklingError") => {
+                Intrinsic::ObjectRuntimeExport("pickle.UnpicklingError")
+            }
             (Self::Struct, "Struct") => Intrinsic::ObjectRuntimeExport("struct.Struct"),
             (Self::Struct, "calcsize") => Intrinsic::ObjectRuntimeExport("struct.calcsize"),
             (Self::Struct, "pack") => Intrinsic::ObjectRuntimeExport("struct.pack"),
