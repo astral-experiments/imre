@@ -6119,7 +6119,7 @@ impl<'a> Checker<'a> {
             ));
         }
         if let ast::Expr::Attribute(attr) = expression
-            && let Some(value) = self.calendar_class_attribute(attr)
+            && let Some(value) = self.calendar_class_attribute(attr)?
         {
             return Ok(value);
         }
@@ -7875,6 +7875,18 @@ impl<'a> Checker<'a> {
                         ty: self.types.dict(Type::Str, Type::Str),
                         kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
                     });
+                }
+                if matches!(attribute.attr.as_str(), "min" | "max" | "resolution")
+                    && matches!(
+                        receiver.ty,
+                        Type::Calendar(
+                            ir::CalendarType::Date
+                                | ir::CalendarType::DateTime
+                                | ir::CalendarType::Delta
+                        ) | Type::ClockTime
+                    )
+                {
+                    return Err(self.object_runtime_export("datetime class constants", attribute));
                 }
                 if let Type::Calendar(kind) = receiver.ty {
                     return self.calendar_attribute(kind, receiver, attribute);
