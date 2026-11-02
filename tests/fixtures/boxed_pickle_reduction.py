@@ -75,6 +75,25 @@ def dictionary_cases(protocol):
     return graph, small, wide, replaced, recursive
 
 
+class EditList:
+    def __init__(self, target):
+        self.target = target
+
+    def __reduce__(self):
+        self.target.append("added")
+        return int, (7,)
+
+
+def list_cases():
+    singleton = []
+    singleton.append(EditList(singleton))
+    live = [None, "second"]
+    live[0] = EditList(live)
+    shared = []
+    shared.append(shared)
+    return singleton, live, [shared, shared], BadReturn((iter, (["c", "a"],)))
+
+
 def check_floats(protocol):
     for value, text, bits in (
         (-0.0, b"-0.0", "8000000000000000"),
@@ -172,7 +191,7 @@ def produce():
         reduced = WithProtocol()
         payload = bytes(range(256))
         value = (shared, shared, reduced, reduced, WithoutProtocol(), (), dictionary_cases(protocol),
-                 (b"", payload[:-1], payload, payload, ReducedBytes(b"x")))
+                 (b"", payload[:-1], payload, payload, ReducedBytes(b"x")), list_cases())
         print(list(pickle.dumps(value, protocol)))
 
 
