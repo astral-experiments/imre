@@ -21,8 +21,8 @@ pub(super) fn backing(ctx: &Context, receiver: Id) -> Option<Id> {
     }
 }
 
-/// Only a writer initialized with a caller's FileIO delegates finalization to its wrapper.
-fn writer_fallback(ctx: &Context, owner: Id) -> Option<(Id, &BufferedFd, &Cell<bool>)> {
+/// An explicit buffered wrapper retains the caller's FileIO and controls its close.
+fn wrapper_fallback(ctx: &Context, owner: Id) -> Option<(Id, &BufferedFd, &Cell<bool>)> {
     let Value::Instance {
         class,
         memory_stream: Some(MemoryStream::BufferedFile(buffer)),
@@ -40,9 +40,15 @@ fn writer_fallback(ctx: &Context, owner: Id) -> Option<(Id, &BufferedFd, &Cell<b
     Some((*class, fd, fd.drop_fallback.as_ref()?))
 }
 
+/// The raw object of a reader constructed from a caller's descriptor.
+pub(super) fn explicit_reader_raw(ctx: &Context, receiver: Id) -> Option<Id> {
+    let (_, fd, _) = wrapper_fallback(ctx, receiver)?;
+    (fd.reading && !fd.writing).then_some(fd.raw)
+}
+
 /// A Python finalizer can decline close, raise, or resurrect the writer.
 pub(in crate::dynamic) fn note_writer_finalizer(ctx: &Context, owner: Id) {
-    if let Some((_, _, armed)) = writer_fallback(ctx, owner) {
+    if let Some((_, _, armed)) = wrapper_fallback(ctx, owner) {
         armed.set(false);
     }
 }
@@ -51,7 +57,7 @@ pub(in crate::dynamic) fn note_writer_finalizer(ctx: &Context, owner: Id) {
 /// Permit the native flush only while it still implements the writer's close.
 pub(in crate::dynamic) fn prepare_writer_shutdown(ctx: &Context) {
     for &owner in ctx.heap.pending_finalizers() {
-        let Some((class, fd, armed)) = writer_fallback(ctx, owner) else {
+        let Some((class, fd, armed)) = wrapper_fallback(ctx, owner) else {
             continue;
         };
         if !armed.get() || fd.closed() {
@@ -83,7 +89,7 @@ const RANDOM_RAW_METHODS: &[&str] = &[
     "read", "readall", "readinto", "write",
 ];
 
-fn native_raw(ctx: &Context, raw: Id, methods: &[&str], owner: &str) -> Result<Rc<RawFile>> {
+fn native_handle(ctx: &Context, raw: Id, methods: &[&str]) -> Option<Rc<RawFile>> {
     // Going straight to the descriptor is valid only while the Python raw methods
     // are native. The instance dictionary can change after the buffer is created.
     if ctx
@@ -95,14 +101,20 @@ fn native_raw(ctx: &Context, raw: Id, methods: &[&str], owner: &str) -> Result<R
         && !methods
             .iter()
             .any(|method| ctx.raw_instance_field(raw, method).is_some())
-        && let Some(handle) = file_io::state(ctx, raw)
     {
-        return Ok(handle);
+        file_io::state(ctx, raw)
+    } else {
+        None
     }
-    Err(Error::new(
-        "NotImplementedError",
-        format!("{owner} with Python raw methods is unsupported"),
-    ))
+}
+
+fn native_raw(ctx: &Context, raw: Id, methods: &[&str], owner: &str) -> Result<Rc<RawFile>> {
+    native_handle(ctx, raw, methods).ok_or_else(|| {
+        Error::new(
+            "NotImplementedError",
+            format!("{owner} with Python raw methods is unsupported"),
+        )
+    })
 }
 
 pub(super) fn ssize(ctx: &mut Context, value: Id) -> Result<i64> {
@@ -147,11 +159,10 @@ pub(super) fn initialize(
         .map(|n| ssize(ctx, n))
         .transpose()?
         .unwrap_or(super::DEFAULT_BUFFER_SIZE);
-    // Only the native FileIO path may bypass Python raw methods. Preserve its
-    // method checks after argument conversion, as well as the writer/random paths.
+    // A FileIO subclass still owns a native fd, but its Python methods must run.
     if owner == "BufferedReader"
-        && file_io::state(ctx, raw).is_none()
-        && backing(ctx, receiver).is_none()
+        && native_handle(ctx, raw, methods).is_none()
+        && (backing(ctx, receiver).is_none() || explicit_reader_raw(ctx, receiver).is_some())
     {
         return super::buffered_reader::initialize(ctx, receiver, raw, capacity);
     }
@@ -188,9 +199,9 @@ pub(super) fn initialize(
     } else {
         BufferedFd::new(raw, handle, owner == "BufferedReader", capacity as usize)?
     };
-    if owner != "BufferedReader" {
-        fd.drop_fallback = Some(Cell::new(true));
-    }
+    // A reader has no output to flush at shutdown. Only its Python close or
+    // the last owner of the raw stream should close the caller's descriptor.
+    fd.drop_fallback = Some(Cell::new(owner != "BufferedReader"));
     // Do not close the caller's file if allocating the backing value fails.
     let pending = fd.buffer.take();
     let value = files::BinaryFile::Descriptor(fd).into_value()?;
@@ -450,7 +461,7 @@ pub(in crate::dynamic) struct BufferedFd {
     pub(in crate::dynamic) writing: bool,
     drop_fallback: Option<Cell<bool>>,
     handle: Rc<RawFile>,
-    truncating: Cell<bool>,
+    callback_active: Cell<bool>,
     buffer: RefCell<Option<Buffer>>,
 }
 
@@ -489,7 +500,7 @@ impl BufferedFd {
             writing: !reading,
             handle,
             drop_fallback: None,
-            truncating: Cell::new(false),
+            callback_active: Cell::new(false),
             buffer: RefCell::new(Some(buffer)),
         })
     }
@@ -510,7 +521,7 @@ impl BufferedFd {
             reading: true,
             writing: true,
             drop_fallback: None,
-            truncating: Cell::new(false),
+            callback_active: Cell::new(false),
             buffer: RefCell::new(Some(Buffer::Random(buffer))),
         })
     }
@@ -522,7 +533,7 @@ impl BufferedFd {
             reading,
             writing: !reading,
             drop_fallback: None,
-            truncating: Cell::new(false),
+            callback_active: Cell::new(false),
             buffer: RefCell::new(Some(Buffer::Pipe(pipe))),
         }
     }
@@ -578,13 +589,24 @@ impl BufferedFd {
         self.handle.live_fd().is_none()
     }
 
-    /// A Python raw truncate or size conversion can call back into its own buffer.
+    pub(super) fn warn_on_reader_close(&self, ctx: &mut Context, receiver: Id) -> Result<()> {
+        self.check_reentry(ctx)?;
+        if ctx.raw_instance_field(receiver, "_finalizing") == Some(TRUE) {
+            self.callback_active.set(true);
+            super::native_reader::dealloc_warn(ctx, receiver, receiver);
+            self.callback_active.set(false);
+        }
+        Ok(())
+    }
+
+    /// A raw warning or truncate callback can call back into its own buffer.
     fn check_reentry(&self, ctx: &Context) -> Result<()> {
-        if self.truncating.get() {
+        if self.callback_active.get() {
             let name = ctx.raw_instance_field(self.raw, "name");
+            let kind = if self.writing { "BufferedRandom" } else { "BufferedReader" };
             let value = name.map_or_else(
-                || "<_io.BufferedRandom>".to_owned(),
-                |id| format!("<_io.BufferedRandom name={}>", ctx.repr(id)),
+                || format!("<_io.{kind}>"),
+                |id| format!("<_io.{kind} name={}>", ctx.repr(id)),
             );
             return Err(Error::new(
                 "RuntimeError",
@@ -606,7 +628,7 @@ impl BufferedFd {
             };
             file.flush().map_err(os_error)?;
         }
-        self.truncating.set(true);
+        self.callback_active.set(true);
         let result = ctx
             .lookup_attr(self.raw, "truncate")
             .and_then(|truncate| ctx.call(truncate, vec![size], Vec::new()));
@@ -617,7 +639,7 @@ impl BufferedFd {
                 .lookup_attr(self.raw, "tell")
                 .and_then(|tell| ctx.call(tell, Vec::new(), Vec::new()));
         }
-        self.truncating.set(false);
+        self.callback_active.set(false);
         result
     }
 
@@ -650,7 +672,7 @@ impl BufferedFd {
         }
     }
 
-    /// A BufferedWriter subclass has already had its one opportunity to flush.
+    /// The buffered wrapper has already called its public flush method.
     pub(super) fn close_after_flush(&self, ctx: &Context, receiver: Id) -> Result<()> {
         self.check_reentry(ctx)?;
         self.check_raw(ctx, receiver, "close")?;
@@ -775,12 +797,10 @@ impl BufferedFd {
             }
             "tell" => Ok(ctx.int(buffer.position().map_err(os_error)? as i64)),
             "peek" => {
+                self.check_reentry(ctx)?;
                 let data = match buffer {
                     Buffer::Reader(reader) => crate::objects::peek_bytes(reader)?,
-                    Buffer::Random(reader) => {
-                        self.check_reentry(ctx)?;
-                        reader.peek()?
-                    }
+                    Buffer::Random(reader) => reader.peek()?,
                     Buffer::Pipe(pipe) => pipe.peek()?,
                     Buffer::Writer(_) => unreachable!("peek requires a buffered reader"),
                 };
@@ -842,7 +862,7 @@ impl BufferedFd {
                 Ok(ctx.alloc(Value::Bytes(data)))
             }
             "readinto" if args.len() == 1 => {
-                if self.truncating.get() {
+                if self.callback_active.get() {
                     files::readinto_target(ctx, args[0])?;
                     self.check_reentry(ctx)?;
                 }
