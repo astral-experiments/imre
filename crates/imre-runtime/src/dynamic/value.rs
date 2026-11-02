@@ -2847,13 +2847,12 @@ impl Heap {
         if !self.retains_first_child(value, old) {
             return false;
         }
+        let operands = &self.frames.last().unwrap().live;
         let mut budget = 64;
-        self.frames
-            .last()
-            .unwrap()
-            .live
-            .iter()
-            .all(|&operand| self.kept_assignment_operand(scope, value, old, operand, &mut budget))
+        operands.len() <= budget
+            && operands.chunk_by(|a, b| a == b).all(|copies| {
+                self.kept_assignment_operand(scope, value, old, copies[0], &mut budget)
+            })
     }
 
     fn kept_assignment_operand(
@@ -2887,6 +2886,12 @@ impl Heap {
         let mut kept = |item| self.kept_assignment_operand(scope, value, old, item, budget);
         match self.get(operand) {
             Value::Range(_) | Value::RangeIterator(_) => true,
+            // An exhausted unpack iterator has released its sequence.
+            Value::Iterator {
+                sequence: None,
+                context: None,
+                ..
+            } => true,
             Value::List(items) | Value::Tuple(items) => items.iter().all(|&item| kept(item)),
             Value::Dict(entries) if entries.ordered_nodes().is_empty() => {
                 entries.iter().all(|&(key, child)| kept(key) && kept(child))
