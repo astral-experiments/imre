@@ -1,9 +1,13 @@
-//! Real-number decomposition and integer rounding for boxed math callables.
+//! Real-number and integer operations for boxed math callables.
+
+use num_bigint::BigInt;
+use num_integer::Integer;
+use num_traits::One;
 
 use super::{Context, Error, Id, Result, Value};
 use crate::dynamic::builtins;
 
-/// These functions share the positional-only, single-argument math calling convention.
+/// Dispatch the positional-only boxed math functions.
 pub(super) fn call(
     ctx: &mut Context,
     operation: &str,
@@ -15,6 +19,16 @@ pub(super) fn call(
             "TypeError",
             format!("math.{operation}() takes no keyword arguments"),
         ));
+    }
+    if operation == "gcd" {
+        let mut gcd = BigInt::default();
+        for &arg in args {
+            let integer = ctx.index_integer(arg)?;
+            if !gcd.is_one() {
+                gcd = gcd.gcd(&integer.big());
+            }
+        }
+        return Ok(ctx.alloc(Value::Int(crate::Int::new(gcd))));
     }
     let &[value] = args else {
         return Err(Error::new(

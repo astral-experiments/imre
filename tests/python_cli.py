@@ -1875,6 +1875,7 @@ def report(text):
             "boxed_float.py",
             "boxed_round.py",
             "boxed_math_rounding.py",
+            "boxed_math_gcd.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",

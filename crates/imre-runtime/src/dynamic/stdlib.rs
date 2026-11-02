@@ -428,7 +428,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
+        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd") => {
+            ctx.builtin(&format!("math.{name}"))
+        }
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
