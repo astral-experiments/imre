@@ -5,9 +5,6 @@ import tempfile
 from _imre_tempfile import cleanup_directory
 from contextlib import contextmanager
 
-from importlib.resources._filesystem import _FilePath
-
-
 def _remove(path, remove=os.remove):
     try:
         remove(path)
@@ -66,8 +63,6 @@ def as_file(path):
 
     if isinstance(path, Path):
         return _existing(path)
-    if isinstance(path, _FilePath):
-        return _existing(Path(path))
     try:
         directory = path.is_dir()
     except FileNotFoundError:

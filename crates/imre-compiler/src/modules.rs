@@ -1480,6 +1480,9 @@ impl IntrinsicModule {
             (Self::ImportlibResourcesAbc, "Traversable") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.Traversable")
             }
+            (Self::ImportlibReaders | Self::ImportlibResourceReaders, "FileReader") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.readers.FileReader")
+            }
             (Self::ImportlibReaders | Self::ImportlibResourceReaders, "ZipReader") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.readers.ZipReader")
             }
