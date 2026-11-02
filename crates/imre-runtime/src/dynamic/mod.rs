@@ -2694,6 +2694,21 @@ impl Context {
             let rlock = self.builtin(thread_rlock::CLASS);
             self.bind(scope, "RLock", rlock);
         }
+        #[cfg(target_os = "linux")]
+        if name == "posix" && source.is_none() {
+            for name in ["getxattr", "setxattr", "listxattr", "removexattr"] {
+                let function = self.builtin(&format!("posix.{name}"));
+                self.bind(scope, name, function);
+            }
+            for (attr, n) in [
+                ("XATTR_CREATE", libc::XATTR_CREATE),
+                ("XATTR_REPLACE", libc::XATTR_REPLACE),
+                ("XATTR_SIZE_MAX", 65536),
+            ] {
+                let value = self.int(i64::from(n));
+                self.bind(scope, attr, value);
+            }
+        }
         if matches!(name, "io" | "_io") {
             let error = self.builtin("BlockingIOError");
             self.bind(scope, "BlockingIOError", error);
@@ -2772,18 +2787,6 @@ impl Context {
             #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
-                for name in ["getxattr", "setxattr", "listxattr", "removexattr"] {
-                    let function = self.builtin(&format!("posix.{name}"));
-                    self.bind(scope, name, function);
-                }
-                for (attr, n) in [
-                    ("XATTR_CREATE", libc::XATTR_CREATE),
-                    ("XATTR_REPLACE", libc::XATTR_REPLACE),
-                    ("XATTR_SIZE_MAX", 65536),
-                ] {
-                    let value = self.int(i64::from(n));
-                    self.bind(scope, attr, value);
-                }
                 for (attr, flag) in [("O_PATH", libc::O_PATH), ("O_TMPFILE", libc::O_TMPFILE)] {
                     let value = self.int(i64::from(flag));
                     self.bind(scope, attr, value);
