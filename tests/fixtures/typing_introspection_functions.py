@@ -4,6 +4,8 @@ import typing
 from typing import get_args, get_origin
 
 
+assert typing.__dict__["Union"] is type(int | str)
+
 for fn, name in ((get_args, "get_args"), (get_origin, "get_origin")):
     assert fn is getattr(typing, name)
     assert type(fn) is types.FunctionType

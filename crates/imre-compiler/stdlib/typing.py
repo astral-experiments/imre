@@ -13,7 +13,7 @@ from abc import abstractmethod
 from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
 from _typing import _idfunc
-from typing import Any, Callable, Generic, Protocol, TypeVar
+from typing import Any, Callable, Generic, Protocol, TypeVar, Union
 from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
