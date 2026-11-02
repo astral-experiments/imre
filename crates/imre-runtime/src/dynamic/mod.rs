@@ -2986,6 +2986,8 @@ impl Context {
                 self.bind(scope, "_native_new", native_new);
             }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
+            "grp" => stdlib::grp::install(self, scope),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             "pwd" => stdlib::pwd::install(self, scope),
             "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {

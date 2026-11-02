@@ -82,6 +82,10 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(any(target_os = "linux", target_os = "macos"))]
+        "grp" if matches!(function, "getgrall" | "getgrgid" | "getgrnam") => {
+            Some((module, function))
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         "pwd" if matches!(function, "getpwall" | "getpwnam" | "getpwuid") => {
             Some((module, function))
         }

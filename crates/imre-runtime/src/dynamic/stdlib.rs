@@ -25,6 +25,8 @@ pub(super) mod flags;
 mod fnmatch;
 mod formatters;
 pub(super) mod functools;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) mod grp;
 pub(super) mod hashlib;
 mod hmac;
 mod inspect;
@@ -135,7 +137,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "subprocess"
             | "warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
-        || (cfg!(any(target_os = "linux", target_os = "macos")) && name == "pwd")
+        || (cfg!(any(target_os = "linux", target_os = "macos")) && matches!(name, "grp" | "pwd"))
         || has_lazy_attributes(name)
 }
 
@@ -1488,6 +1490,10 @@ pub(super) fn call(
             // As in typed SysJitPredicate, Imre compiles before the process starts.
             _ => FALSE,
         });
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(function @ ("getgrall" | "getgrgid" | "getgrnam")) = name.strip_prefix("grp.") {
+        return grp::call(ctx, function, args, kwargs);
     }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if let Some(function @ ("getpwall" | "getpwnam" | "getpwuid")) = name.strip_prefix("pwd.") {

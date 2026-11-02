@@ -6,7 +6,7 @@ use super::{
 };
 use crate::dynamic::stdlib::audit;
 
-fn owner_id(ctx: &mut Context, value: Id, group: bool) -> Result<u64> {
+pub(in crate::dynamic::stdlib) fn owner_id(ctx: &mut Context, value: Id, group: bool) -> Result<u64> {
     let index = ctx.index_integer(value).map_err(|_| {
         let which = if group { "gid" } else { "uid" };
         Error::new(
