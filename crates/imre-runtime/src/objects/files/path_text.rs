@@ -75,7 +75,7 @@ fn open_text_output(
     let spelling = crate::sys::file_encoding(encoding);
     let policy = errors.as_deref().map_or("strict", Str::as_str);
     let mut state =
-        super::open_state_with_encoding(path, mode, false, false, Some((spelling, policy)))?;
+        super::open_state_with_encoding(path, mode, false, false, Some((spelling, policy)), None)?;
     let codec = options(Some(spelling), newline)?;
     let Some(super::Stream::Write(writer)) = state.stream.as_mut() else {
         unreachable!()

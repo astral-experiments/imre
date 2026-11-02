@@ -99,8 +99,15 @@ impl Drop for FileState {
 
 impl FileState {
     /// Opens a buffered binary writer with the same ownership and errors as typed files.
-    pub(crate) fn binary_writer(path: &str, mode: u32) -> Result<Self> {
-        open_state(&super::text::try_owned_string(path)?, mode, true, false)
+    pub(crate) fn binary_writer(path: &str, mode: u32, capacity: Option<usize>) -> Result<Self> {
+        open_state_with_encoding(
+            &super::text::try_owned_string(path)?,
+            mode,
+            true,
+            false,
+            None,
+            capacity,
+        )
     }
 
     /// Opens an anonymous binary update stream, buffered against its own POSIX descriptor.
@@ -612,6 +619,7 @@ pub unsafe extern "C" fn imre_text_open(
         false,
         false,
         Some((encoding.map_or("UTF-8", |name| name), "strict")),
+        None,
     );
     finish(
         state.map(|file| crate::ObjectOwner::into_raw(file.into_object())),
@@ -724,7 +732,7 @@ pub(super) fn open(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Resu
 
 fn open_state(path: &StrOwner, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
     let encoding = (!binary).then_some((if gzip { "utf-8" } else { "UTF-8" }, "strict"));
-    open_state_with_encoding(path, mode, binary, gzip, encoding)
+    open_state_with_encoding(path, mode, binary, gzip, encoding, None)
 }
 
 /// The wrapper owns its encoding and errors spellings, including after close.
@@ -734,6 +742,7 @@ fn open_state_with_encoding(
     binary: bool,
     gzip: bool,
     encoding: Option<(&str, &str)>,
+    writer_capacity: Option<usize>,
 ) -> Result<FileState> {
     let (file, metadata) = open_file_with(path.as_bytes(), mode, false, |error| {
         errno_with_filenames(
@@ -743,7 +752,8 @@ fn open_state_with_encoding(
         )
     })?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
+    let capacity = writer_capacity
+        .unwrap_or_else(|| crate::text_output::binary_capacity(metadata.blksize().into()));
     let fd = file.as_raw_fd();
     let stream = match mode {
         0 if gzip => Stream::UnreadGzip { file, capacity },
