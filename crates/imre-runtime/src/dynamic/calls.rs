@@ -1947,12 +1947,30 @@ impl Context {
             Value::None if name == "__doc__" => {
                 return Ok(self.text("The type of the None singleton."));
             }
-            Value::MemoryView { owner, .. } if matches!(name, "obj" | "readonly" | "nbytes") => {
+            Value::MemoryView { owner, .. }
+                if matches!(
+                    name,
+                    "obj" | "readonly" | "nbytes" | "itemsize" | "format" | "shape"
+                ) =>
+            {
                 let owner = Self::memoryview_owner(owner)?;
+                let (format, width, len, readonly) = match self.heap.get(self.scalar_value(owner)) {
+                    Value::Array(array) => {
+                        let (format, width) = array.view_layout();
+                        (format, width, array.len(), false)
+                    }
+                    _ => ("B", 1, self.bytes_like(owner)?.len(), true),
+                };
                 return Ok(match name {
                     "obj" => owner,
-                    "readonly" => TRUE,
-                    _ => self.int(self.bytes_like(owner)?.len() as i64),
+                    "readonly" => builtins::boolean(readonly),
+                    "nbytes" => self.int((len * width) as i64),
+                    "itemsize" => self.int(width as i64),
+                    "format" => self.text(format),
+                    _ => {
+                        let length = self.int(len as i64);
+                        self.alloc(Value::Tuple(vec![length]))
+                    }
                 });
             }
             Value::Slice(parts) if matches!(name, "start" | "stop" | "step") => {

@@ -341,13 +341,20 @@ impl Context {
         Ok(())
     }
 
-    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
+    fn buffer_storage(&self, id: Id) -> Result<&Value> {
         let owner = match self.heap.get(id) {
             Value::MemoryView { owner, .. } => Self::memoryview_owner(*owner)?,
             _ => id,
         };
-        match self.heap.get(self.scalar_value(owner)) {
+        Ok(self.heap.get(self.scalar_value(owner)))
+    }
+
+    fn bytes_like(&self, id: Id) -> Result<&[u8]> {
+        match self.buffer_storage(id)? {
             Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+            Value::Array(array) if matches!(self.heap.get(id), Value::MemoryView { .. }) => {
+                Ok(array.as_bytes())
+            }
             _ => Err(Error::new(
                 "TypeError",
                 format!(

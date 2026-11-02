@@ -1636,7 +1636,13 @@ pub(super) fn call(
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
-                Value::MemoryView { .. } => ctx.bytes_like(args[0])?.len(),
+                Value::MemoryView { owner, .. } => {
+                    let owner = Context::memoryview_owner(*owner)?;
+                    match ctx.heap.get(ctx.scalar_value(owner)) {
+                        Value::Array(array) => array.len(),
+                        _ => ctx.bytes_like(owner)?.len(),
+                    }
+                }
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
                         Error::new(
@@ -1684,6 +1690,7 @@ pub(super) fn call(
             let owner = match ctx.heap.get(ctx.scalar_value(object)) {
                 Value::Bytes(_) => object,
                 Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
+                Value::Array(array) if array.view_layout().0 != "w" => object,
                 Value::Array(_) | Value::ByteArray(_) => {
                     return Err(Error::new(
                         "NotImplementedError",
@@ -1697,6 +1704,10 @@ pub(super) fn call(
                     )));
                 }
             };
+            let storage = ctx.scalar_value(owner);
+            if let Value::Array(array) = ctx.heap.get_mut(storage) {
+                array.viewed = true;
+            }
             Ok(ctx.alloc(Value::MemoryView {
                 owner: Some(owner),
                 hash: None,
