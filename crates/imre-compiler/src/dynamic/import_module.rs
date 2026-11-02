@@ -331,11 +331,23 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 const UPSTREAM: &str = include_str!(
                     "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap_external.py"
                 );
-                let start = UPSTREAM.find("class _NamespacePath:").unwrap();
-                let (namespace, _) = UPSTREAM[start..].split_once("class PathFinder:").unwrap();
-                let start = UPSTREAM.find("def _set_bootstrap_module(").unwrap();
-                let (set_bootstrap, _) = UPSTREAM[start..].split_once("def _install(").unwrap();
-                [include_str!("../../stdlib/importlib/source_loader.py"), namespace, set_bootstrap].join("\n")
+                let section = |start, end| {
+                    let begin = UPSTREAM.find(start).unwrap();
+                    UPSTREAM[begin..].split_once(end).unwrap().0
+                };
+                // The native runtime loads source files directly. FileFinder can also use
+                // any loader supplied by its caller, with the original package and cache rules.
+                let spec = section("_POPULATE = object()", "def _bless_my_loader(")
+                    .replace("_get_supported_file_loaders()", "_file_loader_defaults(location)");
+                [
+                    include_str!("../../stdlib/importlib/source_loader.py"),
+                    section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _pack_uint32("),
+                    section("if _MS_WINDOWS:\n    def _path_join(", "def _write_atomic("),
+                    &spec,
+                    section("class _NamespacePath:", "class PathFinder:"),
+                    section("class FileFinder:", "class AppleFrameworkLoader("),
+                    section("def _set_bootstrap_module(", "def _install("),
+                ].join("\n")
             })))
         }
         _ => crate::modules::bundled_runtime_source(name),

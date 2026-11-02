@@ -79,6 +79,20 @@ with fresh_imports("_frozen_importlib", "_frozen_importlib_external"):
         loader.exec_module(module)
         assert module.answer == 42
 
+    source_only = source.import_module("importlib.abc")
+    assert issubclass(machinery.FileFinder, source_only.PathEntryFinder)
+    assert not issubclass(frozen_machinery.FileFinder, source_only.PathEntryFinder)
+
+    # Keep the source machinery facade while the two private frozen providers are available.
+    sys.modules["_frozen_importlib"] = _frozen_importlib
+    sys.modules["_frozen_importlib_external"] = _frozen_importlib_external
+    del sys.modules["importlib.abc"]
+    protocols = source.import_module("importlib.abc")
+    for provider in (machinery, frozen_machinery):
+        assert issubclass(provider.FileFinder, protocols.PathEntryFinder)
+        assert issubclass(provider.SourceFileLoader, protocols.FileLoader)
+        assert issubclass(provider.NamespaceLoader, protocols.InspectLoader)
+
 assert frozen._bootstrap is _frozen_importlib
 assert frozen._bootstrap_external is _frozen_importlib_external
 assert sys.modules["importlib"] is importlib
