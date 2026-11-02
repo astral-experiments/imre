@@ -7,6 +7,20 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         return Some(source);
     }
     match name {
+        "types" => {
+            // PEP 3115/560 class construction uses only builtins; native types remain module exports.
+            const UPSTREAM: &str = include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/types/upstream/Lib/types.py"
+            );
+            let start = UPSTREAM.find("def new_class(").unwrap();
+            Some((
+                "types.py",
+                UPSTREAM[start..]
+                    .split_once("def get_original_bases(")
+                    .unwrap()
+                    .0,
+            ))
+        }
         "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
         "datetime" => Some(("datetime.py", include_str!("../../stdlib/datetime.py"))),
         "enum" => Some(("enum.py", include_str!("../../stdlib/enum.py"))),

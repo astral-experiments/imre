@@ -5501,10 +5501,26 @@ impl Context {
                 ..
             } => {
                 if self.builtins.get("abc.ABCMeta") == Some(&callable) {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        "direct ABCMeta construction is unsupported",
-                    ));
+                    let parameters = ["name", "bases", "namespace"];
+                    let [name, bases, namespace] = args.as_slice() else {
+                        let function = "ABCMeta.__new__";
+                        return Err(if args.len() < parameters.len() {
+                            missing_arguments_error(
+                                function,
+                                "positional",
+                                &parameters[args.len()..],
+                            )
+                        } else {
+                            excess_positional_error(function, 4, 0, args.len() + 1, 0)
+                        });
+                    };
+                    return self.type_from_namespace(
+                        Some(callable),
+                        *name,
+                        *bases,
+                        *namespace,
+                        &kwargs,
+                    );
                 }
                 if let Some(meta) = metaclass
                     && let Some(slot) = self.class_attr(meta, "__call__")

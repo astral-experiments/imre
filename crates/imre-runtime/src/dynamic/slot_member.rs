@@ -215,9 +215,10 @@ impl Context {
         self.finish_namespace_class(class, scope, cell, Vec::new())
     }
 
-    /// Construct an ordinary class from the three positional arguments of Python's type().
+    /// Construct a class from a copied namespace, optionally using the builtin ABCMeta.
     pub(super) fn type_from_namespace(
         &mut self,
+        explicit_meta: Option<Id>,
         name: Id,
         bases: Id,
         namespace: Id,
@@ -266,13 +267,28 @@ impl Context {
                 "metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases",
             ));
         }
-        if specialized {
-            self.select_class_metaclass(&bases, Some(type_class), None, false)?;
-            return Err(Error::new(
-                "NotImplementedError",
-                "type() with specialized metaclasses is unsupported",
-            ));
-        }
+        let metaclass = if specialized || explicit_meta.is_some() {
+            let winner = self.select_class_metaclass(
+                &bases,
+                Some(explicit_meta.unwrap_or(type_class)),
+                None,
+                false,
+            )?;
+            if winner.is_none()
+                || winner.as_ref() != self.builtins.get("abc.ABCMeta")
+                || bases
+                    .iter()
+                    .any(|&base| self.direct_subclass(base, type_class))
+            {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "type() with specialized metaclasses is unsupported",
+                ));
+            }
+            winner
+        } else {
+            None
+        };
         let layout = super::typing::ClassLayout::TypeNamespace;
         let bases = self.validate_class_bases(bases, layout)?;
         let layout_base = self.member_layout_base(&bases)?;
@@ -312,9 +328,13 @@ impl Context {
             self.heap.keep(key);
             self.heap.keep(value);
         }
-        let globals = self.module_globals(self.heap.current_scope())?;
+        let creator_scope = match metaclass.map(|meta| self.heap.get(meta)) {
+            Some(Value::Class { scope, .. }) => *scope,
+            _ => self.heap.current_scope(),
+        };
+        let globals = self.module_globals(creator_scope)?;
         let module = self.dict_named_item(globals, "__name__");
-        let module_text = self.scope_data(self.heap.current_scope()).module.clone();
+        let module_text = self.scope_data(creator_scope).module.clone();
         let cell = match self.type_namespace_cell(namespace, "__classcell__")? {
             Some(cell) => cell,
             None => self.alloc(Value::Cell(None)),
@@ -366,7 +386,19 @@ impl Context {
         }
         let qualname = self.heap.code_name("__qualname__");
         self.delete_item(namespace, qualname)?;
-        self.finish_namespace_class(class, scope, cell, kwargs.to_vec())
+        let Value::Class {
+            metaclass: class_meta,
+            ..
+        } = self.heap.get_mut(class)
+        else {
+            unreachable!()
+        };
+        *class_meta = metaclass;
+        self.finish_namespace_class(class, scope, cell, kwargs.to_vec())?;
+        if metaclass.is_some() {
+            self.init_abstract_class(class, scope)?;
+        }
+        Ok(class)
     }
 
     fn type_namespace_cell(&self, namespace: Id, name: &str) -> Result<Option<Id>> {

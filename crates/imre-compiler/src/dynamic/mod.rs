@@ -808,6 +808,7 @@ pub(crate) fn compile(
         "string.templatelib",
         "subprocess",
         "token",
+        "types",
         "zipimport",
     ]
     .into_iter()
