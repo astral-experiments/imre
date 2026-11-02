@@ -277,6 +277,7 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "zip"
             | "itertools.count"
             | "itertools.repeat"
+            | "_io.BufferedRandom"
             | "_io.BufferedReader"
             | "_io.BufferedWriter"
             | super::deque::ITERATOR

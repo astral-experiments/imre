@@ -1113,7 +1113,7 @@ impl Context {
             Value::Union(_) => Ok(super::union::class(self)),
             Value::TextFile(_) => {
                 self.module("io")?;
-                Ok(self.builtins[stdlib::io::STANDARD_STREAM_CLASS])
+                Ok(self.builtins["_io.TextIOWrapper"])
             }
             Value::Instance { class, .. }
             | Value::Class {
@@ -1182,7 +1182,7 @@ impl Context {
             return classes.iter().any(|&c| self.instance_of(value, c));
         }
         if matches!(self.heap.get(value), Value::TextFile(_)) {
-            if let Some(&actual) = self.builtins.get(stdlib::io::STANDARD_STREAM_CLASS)
+            if let Some(&actual) = self.builtins.get("_io.TextIOWrapper")
                 && self.subclass(actual, class)
             {
                 return true;
