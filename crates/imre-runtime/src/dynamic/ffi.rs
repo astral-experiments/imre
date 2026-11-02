@@ -671,6 +671,8 @@ pub(super) fn new_context<S: Into<String>>(
         codec_entries: Default::default(),
         frozen_override: 0,
         modules: NONE,
+        import_missing: NONE,
+        bootstrap_globals: NONE,
         classes: HashMap::new(),
         typing: super::typing::Registry::default(),
         logger_wrappers: HashMap::new(),
@@ -682,6 +684,8 @@ pub(super) fn new_context<S: Into<String>>(
         slot_depth: 0,
     };
     ctx.modules = ctx.dict(Vec::new());
+    let object = ctx.builtin("object");
+    ctx.import_missing = ctx.instance(object, None);
     let args = args.into_iter().map(|s| ctx.text(s)).collect();
     ctx.argv = ctx.alloc(Value::List(args));
     let paths: Vec<String> =
@@ -719,7 +723,8 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    let status = match ctx.module("__main__") {
+    let result = ctx.module("sys").and_then(|_| ctx.module("__main__"));
+    let status = match result {
         Ok(_) => 0,
         Err(e) if e.kind == "SystemExit" => match e.exit_status {
             Some(status) => status.report(),
@@ -1377,6 +1382,8 @@ impl Context {
                     self.argv,
                     self.sys_path,
                     self.modules,
+                    self.import_missing,
+                    self.bootstrap_globals,
                     self.default_encoding,
                     self.token_missing,
                 ]),
