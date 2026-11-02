@@ -8704,6 +8704,7 @@ declare ptr @imre_subprocess_quote_argument(i64, i32)
 @imre_os_o_excl = external constant i64
 @imre_os_o_trunc = external constant i64
 @imre_os_o_cloexec = external constant i64
+@imre_os_wnohang = external constant i64
 @imre_os_o_directory = external constant i64
 @imre_os_o_nofollow = external constant i64
 @imre_os_o_nonblock = external constant i64
