@@ -102,6 +102,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__sub__",
                 "__rsub__",
                 "ctime",
+                "isoformat",
                 "isoweekday",
                 "toordinal",
                 "weekday",
@@ -911,6 +912,7 @@ pub(super) fn call(
         }
         "date.today" | "date.fromtimestamp" => fromutc::date_constructor(ctx, method, args, kwargs),
         "date.fromordinal" => date_fromordinal(ctx, args, kwargs),
+        "date.isoformat" => render::date_isoformat(ctx, args, kwargs),
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),

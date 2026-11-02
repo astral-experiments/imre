@@ -1562,6 +1562,17 @@ def main():
         )
         compare("-IB", names, native_args=("run", names, "--quiet"))
 
+        date_isoformat = root / "date_isoformat.py"
+        for body in (
+            "print(d.isoformat())",
+            "print(date.isoformat(d))",
+            "render = d.isoformat\nprint(render())",
+            "print(getattr(d, 'isoformat')())",
+            "print(getattr(d, 'isoformat', None)())",
+        ):
+            date_isoformat.write_text("from datetime import date\nd = date(2, 3, 2)\n" + body + "\n")
+            compare("-IB", date_isoformat, native_args=("run", date_isoformat, "--quiet"))
+
         comparisons = root / "calendar_comparison.py"
         for expression in (
             "d.__eq__(dt)", "date.__le__(dt, d)", "dt.__ne__(d)",
