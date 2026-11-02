@@ -20,7 +20,7 @@ mod random;
 pub(crate) use random::Random;
 mod seekable;
 mod text_memory;
-use seekable::Memory;
+pub(crate) use seekable::Memory;
 pub(super) use seekable::disk_offset;
 
 pub(crate) use buffered::peek_bytes;

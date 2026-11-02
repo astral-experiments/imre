@@ -134,25 +134,8 @@ impl Array {
         self.bytes.len() / self.format.width()
     }
 
-    /// Compare one-dimensional buffer values across formats, independently of element width.
-    pub(super) fn equals_unsigned_bytes(&self, bytes: &[u8]) -> bool {
-        self.format != Format::Wide
-            && self.len() == bytes.len()
-            && bytes
-                .iter()
-                .enumerate()
-                .all(|(i, &byte)| self.numeric_item(i) == Some(f64::from(byte)))
-    }
-
-    pub(super) fn equals_numeric_array(&self, other: &Self) -> bool {
-        self.format != Format::Wide
-            && other.format != Format::Wide
-            && self.len() == other.len()
-            && (0..self.len()).all(|i| self.numeric_item(i) == other.numeric_item(i))
-    }
-
     // Every supported integral element fits exactly in a double.
-    fn numeric_item(&self, i: usize) -> Option<f64> {
+    pub(super) fn numeric_item(&self, i: usize) -> Option<f64> {
         match self.at(i).ok()? {
             Value::Int(n) => n.as_small().map(|n| n as f64),
             Value::Float(f) => Some(f),

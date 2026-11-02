@@ -101,13 +101,15 @@ impl RawWriter<'_> {
     fn raw_write(&mut self, data: &[u8]) -> Result<Option<usize>> {
         let ctx = &mut *self.ctx;
         if let Some(stream) = native_writer(ctx, self.raw) {
-            stream.write(data)?;
+            stream.write(ctx, data)?;
             return Ok(Some(data.len()));
         }
         let bytes = ctx.alloc(Value::Bytes(copy_bytes(data)?));
         let view = ctx.alloc(Value::MemoryView {
             owner: Some(bytes),
             anonymous: true,
+            layout: None,
+            readonly: false,
             hash: None,
         });
         // Attribute lookup itself can invoke Python and collect temporaries.
@@ -239,7 +241,10 @@ impl Writer {
                 if b.len() < self.capacity
                     && matches!(
                         ctx.buffer_storage(id)?,
-                        Value::ByteArray(_) | Value::Array(_)
+                        Value::ByteArray(_)
+                            | Value::Array(_)
+                            | Value::BytesIoStorage(_)
+                            | Value::RawReadWindow(_)
                     ) =>
             {
                 Some(id)
@@ -367,7 +372,10 @@ impl Writer {
             && files::output_bytes(ctx, args[0])?.len() >= self.capacity
             && matches!(
                 ctx.buffer_storage(args[0])?,
-                Value::ByteArray(_) | Value::Array(_)
+                Value::ByteArray(_)
+                    | Value::Array(_)
+                    | Value::BytesIoStorage(_)
+                    | Value::RawReadWindow(_)
             )
             && native_writer(ctx, raw).is_none()
         {

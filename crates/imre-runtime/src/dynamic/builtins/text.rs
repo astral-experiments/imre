@@ -386,9 +386,12 @@ pub(super) fn call_bytes_method(ctx: &mut Context, source: Id) -> Result<Option<
 }
 
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
+    if matches!(ctx.heap.get(obj), Value::MemoryView { .. }) {
+        return ctx.memoryview_bytes(obj);
+    }
     if matches!(
         ctx.heap.get(ctx.scalar_value(obj)),
-        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. }
+        Value::Bytes(_) | Value::ByteArray(_) | Value::BytesIoBuffer { .. }
     ) {
         return super::super::copy_ids(ctx.bytes_like(obj)?);
     }
@@ -1610,9 +1613,12 @@ pub(super) fn method(
             }
             ctx.check_buffer_exporter(needle)?;
             let byte;
-            let needle = match ctx.buffer_storage(needle)? {
-                Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
-                Value::Array(array) => array.as_bytes(),
+            let needle = match ctx.heap.get(ctx.scalar_value(needle)) {
+                Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::MemoryView { .. }
+                | Value::BytesIoBuffer { .. }
+                | Value::Array(_) => ctx.native_buffer_bytes(needle)?,
                 _ => {
                     let index = ctx.index_value(needle)?.ok_or_else(|| {
                         type_error(format!(

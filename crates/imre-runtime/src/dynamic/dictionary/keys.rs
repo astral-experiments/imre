@@ -524,23 +524,31 @@ impl Context {
         if let Value::Union(union) = *self.heap.get(key) {
             return union.hash(self).map(ControlFlow::Break);
         }
+        if matches!(self.heap.get(key), Value::BytesIoBuffer { .. }) {
+            return Ok(ControlFlow::Break(Self::identity_hash(key)));
+        }
         if let Value::MemoryView { owner, hash, .. } = *self.heap.get(key) {
             if let Some(hash) = hash {
                 return Ok(ControlFlow::Break(hash));
             }
             let owner = Self::memoryview_owner(owner)?;
-            if matches!(
-                self.heap.get(self.scalar_value(owner)),
-                Value::Array(_) | Value::ByteArray(_) | Value::RawReadWindow(_)
-            ) {
+            if !self.view_is_readonly(key)? {
                 return Err(Error::new(
                     "ValueError",
                     "cannot hash writable memoryview object",
                 ));
             }
+            if let Value::Array(a) = self.heap.get(self.view_storage_id(owner))
+                && !matches!(a.view_layout().0, "B" | "b" | "c")
+            {
+                return Err(Error::new(
+                    "ValueError",
+                    "memoryview: hashing is restricted to formats 'B', 'b' or 'c'",
+                ));
+            }
             let hash = self.with_buffer_export(key, |ctx| {
                 ctx.dictionary_hash(owner)?;
-                Ok(crate::python_hash::bytes(ctx.bytes_like(key)?))
+                Ok(crate::python_hash::bytes(&ctx.memoryview_bytes(key)?))
             })?;
             if let Value::MemoryView { hash: cached, .. } = self.heap.get_mut(key) {
                 *cached = Some(hash);

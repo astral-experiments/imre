@@ -4,10 +4,7 @@ use num_traits::{Signed, ToPrimitive};
 use super::{Context, Error, Id, NONE, Result, Value, builtins, openssl};
 
 fn input_bytes(ctx: &Context, id: Id) -> Result<&[u8]> {
-    match ctx.buffer_storage(id)? {
-        Value::Array(array) => Ok(array.as_bytes()),
-        _ => ctx.bytes_like(id),
-    }
+    ctx.native_buffer_bytes(id)
 }
 
 /// Integer conversions may mutate either buffer or try to release a memoryview.

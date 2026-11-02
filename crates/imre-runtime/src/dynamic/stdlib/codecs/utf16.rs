@@ -2,10 +2,7 @@
 use super::{Context, Id, NONE, Result, Utf16Order, Value, resume_decode, type_error};
 
 fn data(ctx: &Context, input: Id) -> Result<&[u8]> {
-    match ctx.buffer_storage(input)? {
-        Value::Array(array) => Ok(array.as_bytes()),
-        _ => ctx.bytes_like(input),
-    }
+    ctx.native_buffer_bytes(input)
 }
 
 pub(in crate::dynamic::stdlib) fn extended(
