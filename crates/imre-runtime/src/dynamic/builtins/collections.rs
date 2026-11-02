@@ -1206,6 +1206,10 @@ pub(super) fn method(
         "set.intersection" | "frozenset.intersection" => set_intersection(ctx, receiver, args),
         "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
         "set.intersection_update" => {
+            // Later intersections can compare colliding keys in an intermediate set.
+            if args.is_empty() || matches!(args, [other] if ctx.scalar_value(*other) == receiver) {
+                return Ok(NONE);
+            }
             let result = set_intersection(ctx, receiver, args)?;
             ctx.replace_set_entries(receiver, result);
             Ok(NONE)
