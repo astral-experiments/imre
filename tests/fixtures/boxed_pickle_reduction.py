@@ -149,10 +149,26 @@ def check_object_reducer():
     assert events == [False, True]
 
 
+class Outer:
+    class Middle:
+        class Inner:
+            pass
+
+
+def check_global_names(protocol):
+    from collections import OrderedDict, UserDict, UserList, UserString
+
+    for cls in (Outer.Middle, Outer.Middle.Inner, OrderedDict, UserDict, UserList, UserString):
+        for fix_imports in (True, False):
+            data = pickle.dumps(cls, protocol, fix_imports=fix_imports)
+            assert pickle.loads(data, fix_imports=fix_imports) is cls
+
+
 def produce():
     check_object_reducer()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        check_global_names(protocol)
         check_reduction_state(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
