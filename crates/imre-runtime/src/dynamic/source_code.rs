@@ -579,6 +579,35 @@ impl<'a> CompiledStrings<'a, '_> {
         Ok(id)
     }
 
+    /// Keep exact code points for f-string text that has no scalar spelling.
+    fn format_literal(&mut self, range: ruff_text_size::TextRange, text: &'a str) -> Result<()> {
+        let replacements = self
+            .spellings
+            .range(range.start()..range.end())
+            .flat_map(|(_, points)| points.iter().copied());
+        if replacements.clone().any(|p| p != 0xfffd) {
+            let id = self.decoded_text(text.into(), replacements)?;
+            self.constant(range, id)?;
+        }
+        Ok(())
+    }
+
+    fn format_elements(&mut self, elements: &'a [ast::InterpolatedStringElement]) -> Result<()> {
+        for element in elements {
+            match element {
+                ast::InterpolatedStringElement::Literal(lit) => {
+                    self.format_literal(lit.range(), &lit.value)?;
+                }
+                ast::InterpolatedStringElement::Interpolation(field) => {
+                    if let Some(spec) = &field.format_spec {
+                        self.format_elements(&spec.elements)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn template_strings(&mut self, template: &'a ast::ExprTString) -> Result<()> {
         let mut items = Vec::new();
         let mut segment = TemplateSegment::default();
@@ -698,10 +727,17 @@ impl<'a> CompiledStrings<'a, '_> {
                     let id = self.literal_text(literal)?;
                     self.constant(literal.range(), id)?;
                 }
-                ast::Expr::FString(formatted)
-                    if fstring_has_surrogate(formatted, self.spellings) =>
-                {
-                    return Err(unsupported("surrogate escapes in f-string literal parts"));
+                ast::Expr::FString(formatted) => {
+                    for part in formatted.value.iter() {
+                        match part {
+                            ast::FStringPartRef::Literal(lit) => {
+                                self.format_literal(lit.range(), &lit.value)?;
+                            }
+                            ast::FStringPartRef::FString(part) => {
+                                self.format_elements(&part.elements)?;
+                            }
+                        }
+                    }
                 }
                 ast::Expr::TString(template) => self.template_strings(template)?,
                 ast::Expr::Tuple(tuple)
@@ -748,33 +784,6 @@ impl<'a> CompiledStrings<'a, '_> {
 }
 
 type StringReplacements = BTreeMap<ruff_text_size::TextSize, Vec<u32>>;
-
-/// F-string literal text currently goes directly from Ruff to the formatter.
-fn fstring_has_surrogate(formatted: &ast::ExprFString, spellings: &StringReplacements) -> bool {
-    fn contains(
-        elements: &[ast::InterpolatedStringElement],
-        surrogate: &impl Fn(ruff_text_size::TextRange) -> bool,
-    ) -> bool {
-        elements.iter().any(|element| match element {
-            ast::InterpolatedStringElement::Literal(lit) => surrogate(lit.range()),
-            ast::InterpolatedStringElement::Interpolation(field) => field
-                .format_spec
-                .as_ref()
-                .is_some_and(|spec| contains(&spec.elements, surrogate)),
-        })
-    }
-
-    let surrogate = |range: ruff_text_size::TextRange| {
-        spellings
-            .range(range.start()..range.end())
-            .any(|(_, points)| points.iter().any(|&p| p != 0xfffd))
-    };
-    surrogate(formatted.range())
-        && formatted.value.iter().any(|part| match part {
-            ast::FStringPartRef::Literal(lit) => surrogate(lit.range()),
-            ast::FStringPartRef::FString(part) => contains(&part.elements, &surrogate),
-        })
-}
 
 /// Collect the original Python code points that Ruff represents as U+FFFD.
 pub(super) fn string_replacements(source: &str, tokens: &ast::token::Tokens) -> StringReplacements {
@@ -3971,6 +3980,18 @@ impl Context {
         builtins::call(self, "str.join", &[empty, items], &[])
     }
 
+    fn source_format_text(
+        &mut self,
+        code: &Program,
+        range: ruff_text_size::TextRange,
+        text: &str,
+    ) -> Id {
+        code.literals
+            .get(&range)
+            .copied()
+            .unwrap_or_else(|| self.text(text))
+    }
+
     fn source_format_elements(
         &mut self,
         code: &Program,
@@ -3981,7 +4002,9 @@ impl Context {
         for element in elements {
             let part = match element {
                 ast::InterpolatedStringElement::Literal(lit) if lit.value.is_empty() => continue,
-                ast::InterpolatedStringElement::Literal(lit) => self.text(&*lit.value),
+                ast::InterpolatedStringElement::Literal(lit) => {
+                    self.source_format_text(code, lit.range(), &lit.value)
+                }
                 ast::InterpolatedStringElement::Interpolation(field) => {
                     if let Some(debug) = &field.debug_text {
                         parts.push(self.text(debug.as_str()));
@@ -4070,7 +4093,7 @@ impl Context {
                 for part in fstring.value.iter() {
                     match part {
                         ast::FStringPartRef::Literal(lit) if !lit.value.is_empty() => {
-                            parts.push(self.text(&*lit.value));
+                            parts.push(self.source_format_text(code, lit.range(), &lit.value));
                         }
                         ast::FStringPartRef::Literal(_) => {}
                         ast::FStringPartRef::FString(part) => {

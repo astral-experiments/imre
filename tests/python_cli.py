@@ -1432,12 +1432,8 @@ print(ascii(ast.literal_eval(r"'\ud800' '�' '\udfff'")))
 exec(compile(r"def f(x: '\udfff'): pass", "<annotation>", "exec"), scope)
 print(ascii(scope["f"].__annotations__))
 for expression, expected in [(r"f'\ud800{3}'", "\ud8003"), (r"f'{3}' '\udfff'", "3\udfff")]:
-    try:
-        exec(compile("formatted = " + expression, "<fstring>", "exec"), scope)
-    except NotImplementedError as exc:
-        assert "surrogate escapes in f-string literal parts" in str(exc)
-    else:
-        assert scope["formatted"] == expected
+    exec(compile("formatted = " + expression, "<fstring>", "exec"), scope)
+    assert scope["formatted"] == expected
 sys.displayhook = lambda value: print(ascii(value))
 exec(compile(r"'\udfff'", "<interactive>", "single"), scope)
 try:
