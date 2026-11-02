@@ -37,8 +37,36 @@ def current():
     data.append(100)
     assert bytes(data) == b"Abcd"
     resize_buffer()
+    extend_buffer()
     unsigned_cast()
     print("bytearray memoryview")
+
+
+def extend_buffer():
+    class Buffer(bytearray):
+        def __buffer__(self, flags):
+            raise AssertionError("requested buffer from self")
+
+    data = Buffer(b"ab")
+    data.extend(data)
+    assert data[:] == b"abab"
+
+    source = array("i", [300, -1])
+    target = bytearray()
+    assert target.extend(source) is None
+    target.extend(memoryview(source))
+    assert target == source.tobytes() * 2
+
+    released = memoryview(b"abcd")
+    released.release()
+    for view in (memoryview(b"abcd")[::2], released):
+        try:
+            target.extend(view)
+        except TypeError as error:
+            assert str(error) == "can't set bytearray slice from memoryview"
+        else:
+            raise AssertionError("extended from an unavailable contiguous buffer")
+    assert target == source.tobytes() * 2
 
 
 def unsigned_cast():

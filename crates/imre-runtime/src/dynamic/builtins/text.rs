@@ -449,7 +449,26 @@ pub(super) fn bytearray_method(
         byte = [ctx.byte_value(argument)?];
         Cow::Borrowed(byte.as_slice())
     } else {
-        Cow::Owned(bytes_from_iterable(ctx, argument)?)
+        if argument != receiver {
+            ctx.check_buffer_exporter(argument)?;
+        }
+        let bytes = match ctx.heap.get(ctx.scalar_value(argument)) {
+            Value::Bytes(_)
+            | Value::ByteArray(_)
+            | Value::Array(_)
+            | Value::MemoryView { .. }
+            | Value::BytesIoBuffer { .. } => {
+                let buffer = ctx.native_buffer_bytes(argument).map_err(|_| {
+                    type_error(format!(
+                        "can't set bytearray slice from {}",
+                        ctx.type_name(argument)
+                    ))
+                })?;
+                super::super::copy_ids(buffer)?
+            }
+            _ => bytes_from_iterable(ctx, argument)?,
+        };
+        Cow::Owned(bytes)
     };
     if !extra.is_empty() {
         ctx.check_bytearray_resize(storage)?;
