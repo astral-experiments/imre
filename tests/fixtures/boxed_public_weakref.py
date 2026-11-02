@@ -25,3 +25,23 @@ def current():
     observed = ref(first)
     del first
     print(observed() is None, equal in caches[0], caches[0][collision])
+    generic_alias_weakref()
+
+
+def generic_alias_weakref():
+    from collections.abc import Callable
+    from gc import collect
+    from types import GenericAlias
+
+    for alias in (list[int], Callable[[int], str]):
+        handle = ref(alias)
+        print(handle() is alias, ref(alias) is handle)
+
+    owner = Key("origin")
+    alias = GenericAlias(owner, int)
+    owner.alias = alias
+    callbacks = []
+    handle = ref(alias, callbacks.append)
+    del owner, alias
+    collect()
+    print(handle() is None, len(callbacks) == 1 and callbacks[0] is handle)
