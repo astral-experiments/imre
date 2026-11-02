@@ -13,7 +13,7 @@ def closed(fd):
         raise AssertionError("descriptor survived close")
 
 
-def main():
+def current():
     target = "opener-actual"
     spelling = b"opener-requested"
     calls = []
@@ -138,4 +138,5 @@ def main():
     print("opener layers and rollback")
 
 
-main()
+if __name__ == "__main__":
+    current()
