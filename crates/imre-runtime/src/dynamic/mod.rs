@@ -98,6 +98,11 @@ impl IteratorSlice<'_> {
     }
 }
 
+struct ExposedClassBody {
+    mapping: Id,
+    annotation_cell: Option<Id>,
+}
+
 pub(crate) struct Context {
     threads: lowlevel_threads::Workers,
     workers: thread_worker::Registry,
@@ -1516,6 +1521,20 @@ impl Context {
         }
     }
 
+    /// Expose the current class-body mapping and use it for subsequent name bindings.
+    fn active_class_namespace(&mut self, scope: Id) -> Id {
+        if let Some(dict) = self.scope_data(scope).namespace {
+            return dict;
+        }
+        let dict = self.class_namespace_dict(scope, true);
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.namespace = Some(dict);
+        frame.names.clear();
+        dict
+    }
+
     /// Share the class namespace cell across source-loaded and precompiled method providers.
     pub(super) fn class_annotation_dict_cell(&mut self, scope: Id) -> Id {
         if let Some(cell) = self
@@ -1526,27 +1545,22 @@ impl Context {
         {
             return cell;
         }
-        let dict = self.class_namespace_dict(scope, true);
+        let dict = self.active_class_namespace(scope);
         let cell = self.alloc(Value::Cell(Some(dict)));
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         frame.class_namespace.as_mut().unwrap().annotation_dict_cell = Some(cell);
-        frame.namespace = Some(dict);
-        frame.names.clear();
         cell
     }
 
-    /// Preserve edits made through an annotator's cell before type creation copies the class body.
-    fn finish_annotation_body(&mut self, scope: Id) -> Result<Option<(Id, Id)>> {
+    /// Copy the bindings from an exposed class-body namespace before creating the type.
+    fn finish_class_namespace(&mut self, scope: Id) -> Result<Option<ExposedClassBody>> {
         let frame = self.scope_data(scope);
-        let Some((cell, body)) = frame
-            .class_namespace
-            .as_ref()
-            .and_then(|ns| ns.annotation_dict_cell.zip(ns.dictionary))
-        else {
+        let Some(body) = frame.namespace else {
             return Ok(None);
         };
+        let annotation_cell = frame.class_namespace.as_ref().and_then(|ns| ns.annotation_dict_cell);
         let names: indexmap::IndexMap<String, Id> = self
             .dict_entries(body)
             .expect("class body dictionary")
@@ -1554,7 +1568,7 @@ impl Context {
             .filter_map(|&(key, value)| {
                 self.str_value(key)
                     .ok()
-                    .filter(|&name| name != "__classdictcell__")
+                    .filter(|&name| annotation_cell.is_none() || name != "__classdictcell__")
                     .map(|name| (name.to_owned(), value))
             })
             .collect();
@@ -1565,10 +1579,12 @@ impl Context {
         frame.names = names;
         frame.namespace = None;
         frame.class_namespace.as_mut().unwrap().dictionary = None;
-        let key = self.text("__classdictcell__");
-        self.put_item(body, key, cell)?;
         self.heap.keep(body);
-        Ok(Some((cell, body)))
+        if let Some(cell) = annotation_cell {
+            let key = self.text("__classdictcell__");
+            self.put_item(body, key, cell)?;
+        }
+        Ok(Some(ExposedClassBody { mapping: body, annotation_cell }))
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
