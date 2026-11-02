@@ -1,0 +1,19 @@
+1902912146f5688c9fcca1bf46fdaaecb6d94b20
+   Compiling imre-runtime v0.1.5 (/tmp/imre3310/fs-family/provider-replay/checkouts/1902912146f5688c9fcca1bf46fdaaecb6d94b20/crates/imre-runtime)
+    Finished `test` profile [unoptimized] target(s) in 2m 10s
+     Running unittests src/lib.rs (/tmp/imre3310/fs-family/provider-replay/cache/dependency-target/debug/deps/imre_runtime-53bd398ca0bb203b)
+
+running 10 tests
+test dynamic::value::reachability_tests::clear_trace_links_between_cyclic_reachability_queries ... ok
+test dynamic::value::tests::collected_mock_call_list_does_not_mark_a_reused_list_slot ... ok
+test dynamic::value::tests::exhausted_context_iterator_traces_bindings_until_dropped ... ok
+test dynamic::value::reachability_tests::full_collection_rechecks_resurrected_roots_and_excludes_new_cycles ... ok
+test dynamic::value::tests::releasing_a_cached_module_cannot_finalize_its_globals ... ok
+test dynamic::value::tests::mixed_input_owners_leave_unreachable_finalizers_eligible ... ok
+test dynamic::value::tests::removing_heap_slots_preserves_collection_order ... ok
+test dynamic::value::tests::prompt_sweep_preserves_cycle_descendants_and_pending_owners ... ok
+test dynamic::value::tests::released_child_stays_live_through_external_owners_and_cycles ... ok
+test dynamic::value::tests::reuse_vacant_slots_without_disturbing_survivors ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 348 filtered out; finished in 0.01s
+
