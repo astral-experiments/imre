@@ -1823,6 +1823,7 @@ def report(text):
             "boxed_re_escape.py",
             "boxed_datetime.py",
             "boxed_timedelta_multiply.py",
+            "boxed_timedelta_scale.py",
             "boxed_dataclasses.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
