@@ -136,7 +136,7 @@ fn default_directory() -> Result<Str> {
     })
 }
 
-pub(crate) fn find_default_directory() -> Result<PathBuf> {
+fn find_default_directory() -> Result<PathBuf> {
     let candidates = ["TMPDIR", "TEMP", "TMP"]
         .into_iter()
         .filter_map(std::env::var_os)

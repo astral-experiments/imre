@@ -442,8 +442,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         (
             "_imre_tempfile",
-            "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "default_directory"
-            | "check_text_options" | "open_named" | "finish_named" | "keep_named",
+            "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "check_text_options"
+            | "open_named" | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
@@ -453,9 +453,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_locale", "LC_NUMERIC") => ctx.int(libc::LC_NUMERIC.into()),
         ("_locale", "LC_TIME") => ctx.int(libc::LC_TIME.into()),
         ("_locale", "LC_MESSAGES") => ctx.int(libc::LC_MESSAGES.into()),
-        ("tempfile", "TemporaryFile") | ("_imre_tempfile", "open_file") => {
-            ctx.builtin("tempfile.TemporaryFile")
-        }
+        ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         ("gc", "enable" | "disable" | "isenabled") => ctx.builtin(&format!("gc.{name}")),
         ("unicodedata", "normalize" | "decomposition") => {
             ctx.builtin(&format!("unicodedata.{name}"))
@@ -493,7 +491,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "field_identifier"
             | "make_type"
             | "is_defaultdict"
-            | "load_global"
             | "loaded_module"
             | "members"
             | "metadata"
@@ -755,10 +752,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_tokenize", "scan")
         | ("_imre_json", "loads" | "surrogate_text" | "encoder_state" | "encoder_call")
         | ("_imre_linecache", "source_lines")
-        | (
-            "_imre_metadata",
-            "filenames" | "dedent" | "exists" | "read_text" | "zip_names" | "zip_open" | "zip_read",
-        )
+        | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
             "_imre_posixpath",
             "extension_start" | "relative_parts" | "realpath_parts" | "realpath_parent"
@@ -1925,15 +1919,6 @@ pub(super) fn call(
                 } else {
                     FALSE
                 });
-            }
-            ("load_global", [module, name], []) => {
-                let scope = match ctx.heap.get(*module) {
-                    Value::Module { scope, .. } => *scope,
-                    Value::None => ctx.scope("", None),
-                    _ => return Err(Error::new("TypeError", "expected module or None")),
-                };
-                let name = ctx.str_value(*name)?.to_owned();
-                return ctx.lookup(scope, &name);
             }
             ("loaded_module", [name], []) => {
                 return Ok(ctx.public_registered_module(*name)?.unwrap_or(NONE));
