@@ -50,6 +50,25 @@ print(second["IMRE_PROCESS_OVERRIDE"])
 print(os.environ.copy()["IMRE_PROCESS_OVERRIDE"])
 changed = subprocess.run(command, capture_output=True, encoding="utf-8", env=first, cwd=Path("directory"))
 print(changed.stdout)
+os.environ[marked("IMRE_PROCESS_OVERRIDE")] = marked("assigned λ")
+print(os.environ.get("IMRE_PROCESS_OVERRIDE"))
+print(subprocess.run(command, capture_output=True, encoding="utf-8").stdout)
+os.environb[b"IMRE_PROCESS_OVERRIDE"] = b"bytes assignment"
+print(os.environ.get("IMRE_PROCESS_OVERRIDE"))
+os.environb[b"IMRE_PROCESS_NEW_BYTES"] = b"\xff"
+print(dict(os.environb)[b"IMRE_PROCESS_NEW_BYTES"])
+os.environb[b"IMRE_PROCESS_NEW_BYTES"] = b""
+for invalid in ("", "bad=name", "bad\0name"):
+    try:
+        os.environ[invalid] = "rejected"
+    except (ValueError, OSError) as error:
+        print(str(error))
+try:
+    os.environ["IMRE_PROCESS_OVERRIDE"] = "bad\0value"
+except ValueError as error:
+    print(str(error))
+print(os.environ.get("IMRE_PROCESS_OVERRIDE"))
+
 empty = subprocess.run(command, capture_output=True, encoding="utf-8", env={})
 print(empty.stdout)
 # An explicit cwd selects CPython's fork/exec path, which accepts an empty name.
