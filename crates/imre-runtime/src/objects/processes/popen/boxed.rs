@@ -82,7 +82,6 @@ impl BoxedPopen {
         pipesize: Int,
         start_new_session: bool,
         umask: i32,
-        warn_line_buffering: &mut dyn FnMut() -> Result<()>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -131,7 +130,6 @@ impl BoxedPopen {
             failure_site: Some(&mut site),
             direct,
             search_path,
-            warn_line_buffering: Some(warn_line_buffering),
             environment: env,
             child: (start_new_session || umask >= 0).then_some((0, mask.0, start_new_session)),
             ..Default::default()

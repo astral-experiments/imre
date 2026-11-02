@@ -25,6 +25,17 @@ def current():
     child_mask = inherited_mask ^ 0o077
     assert int(subprocess.check_output(report_umask, umask=child_mask), 8) == child_mask
     assert int(subprocess.check_output(report_umask), 8) == inherited_mask
+    class InvalidMask:
+        def __index__(self):
+            raise RuntimeError("unusable mask")
+
+    try:
+        Popen(["/bin/true"], cwd=".", env={"x": "\x00"}, umask=InvalidMask())
+    except RuntimeError as exc:
+        assert str(exc) == "unusable mask"
+    else:
+        raise AssertionError("fork accepted an invalid umask")
+
     assert subprocess.Popen is Popen and Popen.__module__ == "subprocess"
     args = ["imre-argv-zero", "-c", 'printf "%s" "$0"']
     with Popen(args, executable=b"./sh", cwd="/bin", stdout=subprocess.PIPE) as child:
