@@ -2491,6 +2491,8 @@ impl Context {
                 for name in [
                     "audit",
                     "addaudithook",
+                    "getrecursionlimit",
+                    "setrecursionlimit",
                     "_getframe",
                     "_getframemodulename",
                     "displayhook",
