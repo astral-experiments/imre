@@ -24,6 +24,11 @@ def main() -> None:
     except ValueError as error:
         print(str(error))
     print(f.format(r))
+    for template in ("$$ $message", "$missing $", "α\r\nβ $"):
+        try:
+            print(logging.Formatter(template, style="$", validate=False).format(r))
+        except ValueError as error:
+            print(str(error))
     defaults["route"] = "changed"
     print(f.format(r))
     r.route = "record"
