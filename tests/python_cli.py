@@ -2860,6 +2860,7 @@ def report(text):
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",
             "boxed_itertools_type_namespaces.py",
+            "boxed_itertools_immutable_types.py",
             "boxed_itertools_cursor_repr.py",
             "boxed_itertools_chain.py",
             "boxed_itertools_cycle.py",
