@@ -2848,6 +2848,8 @@ impl Context {
             }
             #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
+                let cpu_count = self.builtin("posix.cpu_count");
+                self.bind(scope, "cpu_count", cpu_count);
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
                 for name in ["get_terminal_size", "lockf", "posix_fadvise", "ptsname", "splice"] {

@@ -28,7 +28,7 @@ if sys.platform == "linux":
         if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in ("posix_spawn", "posix_spawnp"):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
-    from posix import O_PATH, O_TMPFILE, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
+    from posix import O_PATH, O_TMPFILE, cpu_count, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
     from posix import (
         POSIX_FADV_DONTNEED, POSIX_FADV_NOREUSE, POSIX_FADV_NORMAL, POSIX_FADV_RANDOM,
         POSIX_FADV_SEQUENTIAL, POSIX_FADV_WILLNEED, posix_fadvise, posix_fallocate,

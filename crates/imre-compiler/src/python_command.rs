@@ -23,6 +23,8 @@ pub(super) enum Invocation {
 pub(super) enum ParseError {
     Usage(String),
     ContextWarnings(&'static str),
+    #[cfg(target_os = "linux")]
+    FatalStartup(&'static str),
 }
 
 impl From<String> for ParseError {
@@ -91,6 +93,7 @@ pub(super) fn parse(
                     let option = operand(flags.as_str(), args, "-X")?;
                     match option.split_once('=').unwrap_or((&option, "")) {
                         ("faulthandler", _) => faulthandler = true,
+                        ("cpu_count", _) if cfg!(target_os = "linux") => {}
                         ("context_aware_warnings", _) => {
                             context_option.get_or_insert_with(|| option.clone());
                         }
@@ -145,22 +148,67 @@ pub(super) fn parse(
                     .unwrap_or(1)
             })
     };
+    // A launcher error must preserve the priority of settings validated earlier by CPython.
+    let startup_error = |error| {
+        #[cfg(target_os = "linux")]
+        if !ignore_environment {
+            if let Err(message) = imre_ast::startup::environment_hash_seed() {
+                return ParseError::FatalStartup(message);
+            }
+            if let Err(message) = imre_ast::startup::environment_digit_limit() {
+                return ParseError::FatalStartup(message);
+            }
+        }
+        error
+    };
     // CPython validates the environment even when a command-line option overrides it.
+    #[cfg(target_os = "linux")]
+    let cpu_count = {
+        let invalid =
+            || startup_error(ParseError::FatalStartup(imre_ast::startup::CPU_COUNT_ERROR));
+        let mut cpu_count = if ignore_environment {
+            0
+        } else {
+            imre_ast::startup::environment_cpu_count().ok_or_else(invalid)?
+        };
+        if let Some(option) = xoptions
+            .iter()
+            .find(|s| s.split('=').next() == Some("cpu_count"))
+        {
+            let value = option.strip_prefix("cpu_count=").ok_or_else(invalid)?;
+            cpu_count = if value.is_ascii() {
+                imre_ast::startup::parse_cpu_count(OsStr::new(value))
+            } else {
+                linux_numeric_option(value, ignore_environment)
+                    .and_then(|s| s.parse::<i32>().ok())
+                    .filter(|n| *n > 0)
+            }
+            .ok_or_else(invalid)?;
+        }
+        cpu_count
+    };
+    #[cfg(not(target_os = "linux"))]
+    let cpu_count = 0;
     let mut context_aware_warnings = false;
     if !ignore_environment
         && let Some(value) = env::var_os("PYTHON_CONTEXT_AWARE_WARNINGS").filter(|s| !s.is_empty())
     {
-        context_aware_warnings = imre_ast::startup::parse_context_flag(&value).ok_or(
-            ParseError::ContextWarnings("PYTHON_CONTEXT_AWARE_WARNINGS=N: N is missing or invalid"),
-        )?;
+        context_aware_warnings =
+            imre_ast::startup::parse_context_flag(&value).ok_or_else(|| {
+                startup_error(ParseError::ContextWarnings(
+                    "PYTHON_CONTEXT_AWARE_WARNINGS=N: N is missing or invalid",
+                ))
+            })?;
     }
     if let Some(option) = context_option {
         context_aware_warnings = option
             .strip_prefix("context_aware_warnings=")
             .and_then(|s| context_option_value(s, ignore_environment))
-            .ok_or(ParseError::ContextWarnings(
-                "-X context_aware_warnings=n: n is missing or invalid",
-            ))?;
+            .ok_or_else(|| {
+                startup_error(ParseError::ContextWarnings(
+                    "-X context_aware_warnings=n: n is missing or invalid",
+                ))
+            })?;
     }
     let env_present =
         |key| !ignore_environment && env::var_os(key).is_some_and(|value| !value.is_empty());
@@ -168,6 +216,7 @@ pub(super) fn parse(
         isolated,
         ignore_environment,
         context_aware_warnings,
+        cpu_count,
         optimize: optimize.max(env_flag("PYTHONOPTIMIZE")),
         safe_path: isolated || env_present("PYTHONSAFEPATH"),
         no_user_site: isolated || env_flag("PYTHONNOUSERSITE") != 0,
@@ -207,7 +256,8 @@ pub(super) fn parse(
 fn context_option_value(value: &str, ignore_environment: bool) -> Option<bool> {
     #[cfg(target_os = "linux")]
     if !value.is_ascii() {
-        return linux_context_option_value(value, ignore_environment);
+        return linux_numeric_option(value, ignore_environment)
+            .and_then(|s| imre_ast::startup::parse_context_flag(OsStr::new(s)));
     }
     #[cfg(not(target_os = "linux"))]
     let _ = ignore_environment;
@@ -215,7 +265,7 @@ fn context_option_value(value: &str, ignore_environment: bool) -> Option<bool> {
 }
 
 #[cfg(target_os = "linux")]
-fn linux_context_option_value(value: &str, ignore_environment: bool) -> Option<bool> {
+fn linux_numeric_option(value: &str, ignore_environment: bool) -> Option<&str> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
 
@@ -256,10 +306,7 @@ fn linux_context_option_value(value: &str, ignore_environment: bool) -> Option<b
     let rest = value.trim_start_matches(|c: char| unsafe { iswspace_l(c as u32, locale) != 0 });
     // SAFETY: this call owns the non-null locale, and the trim above has finished using it.
     unsafe { libc::freelocale(locale) };
-    if rest.is_empty() {
-        return None;
-    }
-    imre_ast::startup::parse_context_flag(OsStr::new(rest))
+    (!rest.is_empty()).then_some(rest)
 }
 
 fn operand(
