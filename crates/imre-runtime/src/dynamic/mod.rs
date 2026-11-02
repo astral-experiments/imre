@@ -444,6 +444,10 @@ impl Context {
                 let cursor = deque::iterator(id, ring, false);
                 return Ok(self.alloc(cursor));
             }
+            Value::TypeVarTuple { .. } => {
+                let unpacked = typing::unpack_parameter(self, id)?;
+                (self.alloc(Value::Tuple(vec![unpacked])), "tuple_iterator")
+            }
             Value::Array(_) => (id, "array.arrayiterator"),
             Value::List(_) => (id, "list_iterator"),
             Value::Tuple(_) => (id, "tuple_iterator"),

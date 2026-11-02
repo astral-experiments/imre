@@ -805,6 +805,12 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "NoDefaultType" {
+        if !args.is_empty() || !kwargs.is_empty() {
+            return Err(Error::new("TypeError", "NoDefaultType takes no arguments"));
+        }
+        return Ok(super::typing::no_default(ctx));
+    }
     if let Some(slot) = name.strip_prefix("functools.KeyWrapper.") {
         return functools::key_method(ctx, slot, args, kwargs);
     }

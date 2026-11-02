@@ -791,6 +791,7 @@ impl Context {
             return matches!(
                 (child.as_str(), parent.as_str()),
                 ("bool", "int")
+                    | ("typing._UnpackGenericAlias", "typing._GenericAlias")
                     | (HashState::XOF_CLASS, HashState::CLASS)
                     | (stdlib::os::stat::CLASS, "tuple")
                     | ("collections.defaultdict", "dict")
@@ -918,7 +919,7 @@ impl Context {
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
             Value::TypeVarTuple { .. } => "typing.TypeVarTuple",
-            Value::NoDefault => "typing.NoDefaultType",
+            Value::NoDefault => "NoDefaultType",
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
             Value::Union(_) => "typing.Union",
@@ -996,7 +997,7 @@ impl Context {
                             | "typing.TypeVar"
                             | "typing.TypeVarTuple"
                             | "typing._UnpackGenericAlias"
-                            | "typing.NoDefaultType"
+                            | "NoDefaultType"
                             | "typing._GenericAlias"
                             | "typing._LiteralGenericAlias"
                             | "typing._CallableGenericAlias"
@@ -1190,6 +1191,11 @@ impl Context {
                     ..
                 },
             ) => true,
+            ("typing._GenericAlias", Value::GenericAlias(alias))
+                if alias.kind == super::typing::AliasKind::Unpack =>
+            {
+                true
+            }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
             (
                 name,
