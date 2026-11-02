@@ -1362,14 +1362,15 @@ impl Context {
             .collect();
         let enclosing = self.scope_data(parent);
         let module = enclosing.module.clone();
-        let (parent, kind) = if enclosing.class_body.is_some() {
-            (
-                enclosing.parent.expect("class has an enclosing scope"),
-                ComprehensionKind::ClassBody,
-            )
-        } else {
-            (parent, ComprehensionKind::Ordinary)
-        };
+        let (parent, kind) =
+            if enclosing.class_body.is_some() || enclosing.class_namespace.is_some() {
+                (
+                    enclosing.parent.expect("class has an enclosing scope"),
+                    ComprehensionKind::ClassBody,
+                )
+            } else {
+                (parent, ComprehensionKind::Ordinary)
+            };
         let scope = self.scope(&module, Some(parent));
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
@@ -1412,14 +1413,35 @@ impl Context {
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
         if let Some(&cell) = scope.closure.cells.get(name)
-            && let Value::Cell(contents) | Value::ClassCell(contents) = self.heap.get(cell)
+            && let Value::Cell(contents) = self.heap.get(cell)
         {
             return *contents;
         }
-        if let Some(namespace) = scope.namespace {
+        self.namespace_binding(scope, name)
+    }
+
+    /// Read the scope's own dictionary, excluding cells captured from another scope.
+    fn namespace_binding(&self, scope: &Scope, name: &str) -> Option<Id> {
+        if let Some(namespace) = scope.binding_namespace(name) {
             return self.dict_named_item(namespace, name);
         }
         scope.names.get(name).copied()
+    }
+
+    /// Enumerate a scope's bindings even after Python code materializes its namespace.
+    fn scope_bindings(&self, scope: Id) -> impl Iterator<Item = (&str, Id)> {
+        let frame = self.scope_data(scope);
+        let names = frame
+            .names
+            .iter()
+            .map(|(name, &value)| (name.as_str(), value));
+        let dictionary = frame.namespace.and_then(|dict| self.dict_entries(dict));
+        names.chain(
+            dictionary
+                .into_iter()
+                .flatten()
+                .filter_map(|&(key, value)| self.str_value(key).ok().map(|name| (name, value))),
+        )
     }
 
     /// Link a function's free-variable cells to its globals without retaining its caller's frame.
@@ -1440,10 +1462,16 @@ impl Context {
         environment
     }
 
-    /// Expose the class's own unbound members through a fresh read-only proxy.
+    /// Materialize the class namespace used by its mapping proxy and annotation functions.
     fn class_dictionary(&mut self, scope: Id) -> Id {
+        let dictionary = self.class_namespace_dict(scope, false);
+        self.alloc(Value::MappingProxy(dictionary))
+    }
+
+    /// Materialize a mutable class namespace for an annotation closure.
+    fn class_namespace_dict(&mut self, scope: Id, building: bool) -> Id {
         let frame = self.scope_data(scope);
-        let dictionary = match frame
+        match frame
             .class_namespace
             .as_ref()
             .and_then(|class| class.dictionary)
@@ -1453,7 +1481,7 @@ impl Context {
                 let names = frame.names.clone();
                 let entries = names
                     .into_iter()
-                    .filter(|(name, _)| name != "__qualname__")
+                    .filter(|(name, _)| building || name != "__qualname__")
                     .map(|(name, value)| (self.text(name), value))
                     .collect();
                 let dictionary = self.dict(entries);
@@ -1466,8 +1494,62 @@ impl Context {
                     .dictionary = Some(dictionary);
                 dictionary
             }
+        }
+    }
+
+    /// Share the class namespace cell across source-loaded and precompiled method providers.
+    pub(super) fn class_annotation_dict_cell(&mut self, scope: Id) -> Id {
+        if let Some(cell) = self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .and_then(|ns| ns.annotation_dict_cell)
+        {
+            return cell;
+        }
+        let dict = self.class_namespace_dict(scope, true);
+        let cell = self.alloc(Value::Cell(Some(dict)));
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
         };
-        self.alloc(Value::MappingProxy(dictionary))
+        frame.class_namespace.as_mut().unwrap().annotation_dict_cell = Some(cell);
+        frame.namespace = Some(dict);
+        frame.names.clear();
+        cell
+    }
+
+    /// Preserve edits made through an annotator's cell before type creation copies the class body.
+    fn finish_annotation_body(&mut self, scope: Id) -> Result<Option<(Id, Id)>> {
+        let frame = self.scope_data(scope);
+        let Some((cell, body)) = frame
+            .class_namespace
+            .as_ref()
+            .and_then(|ns| ns.annotation_dict_cell.zip(ns.dictionary))
+        else {
+            return Ok(None);
+        };
+        let names: indexmap::IndexMap<String, Id> = self
+            .dict_entries(body)
+            .expect("class body dictionary")
+            .iter()
+            .filter_map(|&(key, value)| {
+                self.str_value(key)
+                    .ok()
+                    .filter(|&name| name != "__classdictcell__")
+                    .map(|name| (name.to_owned(), value))
+            })
+            .collect();
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.class_body = Some(names.keys().cloned().collect());
+        frame.names = names;
+        frame.namespace = None;
+        frame.class_namespace.as_mut().unwrap().dictionary = None;
+        let key = self.text("__classdictcell__");
+        self.put_item(body, key, cell)?;
+        self.heap.keep(body);
+        Ok(Some((cell, body)))
     }
 
     /// Materialize once and keep that exact dict as the module's binding storage.
@@ -1503,11 +1585,11 @@ impl Context {
         if let Some(locals) = self.scope_data(scope).exec_locals {
             return Ok(self.delete_item(locals, key).is_ok());
         }
-        if let Some(namespace) = self.scope_data(scope).namespace {
+        if let Some(namespace) = self.scope_data(scope).binding_namespace(name) {
             if self.scope_name(scope, name).is_none() {
                 return Ok(false);
             }
-            let storage = self.dict_storage(namespace).expect("module namespace");
+            let storage = self.dict_storage(namespace).expect("namespace dictionary");
             self.delete_item(storage, key)?;
             return Ok(true);
         }
@@ -1567,11 +1649,11 @@ impl Context {
             self.heap.replace_cell(cell, Some(value));
             return;
         }
-        if let Some(namespace) = self.scope_data(scope).namespace {
+        if let Some(namespace) = self.scope_data(scope).binding_namespace(name) {
             let key = self.heap.code_name(name);
-            let storage = self.dict_storage(namespace).expect("module namespace");
+            let storage = self.dict_storage(namespace).expect("namespace dictionary");
             self.put_item(storage, key, value)
-                .expect("string key in module dictionary");
+                .expect("string key in namespace dictionary");
             return;
         }
         let Value::Scope(s) = self.heap.get_mut(scope) else {
@@ -1588,7 +1670,7 @@ impl Context {
             .and_then(|class| class.dictionary);
         let previous = s.names.insert(name.to_owned(), value);
         if let Some(dictionary) = dictionary
-            && name != "__qualname__"
+            && (s.class_body.is_some() || name != "__qualname__")
         {
             let key = self.text(name);
             self.put_item(dictionary, key, value)
@@ -1660,7 +1742,7 @@ impl Context {
             if name == "__class__"
                 && s.class_body.is_none()
                 && let Some(cell) = s.class_cell
-                && let Value::ClassCell(value) = self.heap.get(cell)
+                && let Value::Cell(value) = self.heap.get(cell)
             {
                 return value.ok_or_else(|| Error::new("NameError", "cannot access free variable '__class__' where it is not associated with a value in enclosing scope"));
             }

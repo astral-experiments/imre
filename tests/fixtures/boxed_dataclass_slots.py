@@ -8,7 +8,7 @@ def current():
         number: int
         label: str = 'value'
 
-        def owner(self):
+        def owner(self) -> type:
             return __class__
 
     Slotted = dataclass(frozen=True, slots=True)(Original)
@@ -16,6 +16,7 @@ def current():
     assert Slotted.__slots__ == ('number', 'label')
     obj = Slotted(4)
     assert not hasattr(obj, '__dict__') and obj.owner() is Slotted
+    assert Slotted.owner.__annotate__(2) == {"return": type}
     assert Slotted.label.__get__(obj, Slotted) == 'value'
     assert Slotted.number.__objclass__ is Slotted
     assert obj.__getstate__() == [4, 'value']
