@@ -184,8 +184,7 @@ class PrettyPrinter:
         rep = self._repr(object, context, level)
         max_width = self._width - indent - allowance
         if len(rep) > max_width:
-            cls = type(object)
-            p = self._dispatch.get(getattr(cls, "__repr__", cls))
+            p = self._dispatch.get(type(object).__repr__, None)
             # Lazy import to improve module import time
             from dataclasses import is_dataclass
 
@@ -376,7 +375,7 @@ class PrettyPrinter:
                      context, level)
         stream.write(')')
 
-    _dispatch[getattr(_types.MappingProxyType, "__repr__", _types.MappingProxyType)] = _pprint_mappingproxy
+    _dispatch[_types.MappingProxyType.__repr__] = _pprint_mappingproxy
 
     def _pprint_simplenamespace(self, object, stream, indent, allowance, context, level):
         if type(object) is _types.SimpleNamespace:
@@ -550,8 +549,7 @@ class PrettyPrinter:
             rml = self._repr(object.maxlen, context, level)
             stream.write('],\n%smaxlen=%s)' % (' ' * indent, rml))
 
-    # Some native types implement repr without exposing a slot descriptor.
-    _dispatch[getattr(_collections.deque, "__repr__", _collections.deque)] = _pprint_deque
+    _dispatch[_collections.deque.__repr__] = _pprint_deque
 
     def _pprint_user_dict(self, object, stream, indent, allowance, context, level):
         self._format(object.data, stream, indent, allowance, context, level - 1)
@@ -576,7 +574,7 @@ class PrettyPrinter:
 
         r = getattr(typ, "__repr__", None)
 
-        if issubclass(typ, int) and r is getattr(int, "__repr__", None):
+        if issubclass(typ, int) and r is int.__repr__:
             if self._underscore_numbers:
                 return f"{object:_d}", True, False
             else:
