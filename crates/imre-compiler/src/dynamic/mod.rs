@@ -107,6 +107,7 @@ impl Imports {
                 name,
                 "_imp"
                     | "atexit"
+                    | "codeop"
                     | "json"
                     | "json.encoder"
                     | "sysconfig"
@@ -432,6 +433,7 @@ pub(crate) fn compile(
             "__future__",
             "_imp",
             "atexit",
+            "codeop",
             "weakref",
             "sys",
             "platform",

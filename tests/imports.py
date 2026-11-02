@@ -16,6 +16,9 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "codeop_import_keeps_return_check": ({
+        "main.py": 'import codeop\ndef wrong() -> int:\n    return "invalid return"\nwrong()\n',
+    }, "invalid-return-type"),
     "function_wildcard": ({
         "main.py": "def invalid():\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
@@ -230,6 +233,16 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "codeop_module": {
+        "main.py": (
+            "import codeop\n"
+            "from codeop import Compile, CommandCompiler\n"
+            "assert codeop.Compile is Compile\n"
+            "compiler = CommandCompiler().compiler\n"
+            "assert type(compiler) is Compile\n"
+            "assert compiler.flags == codeop.PyCF_DONT_IMPLY_DEDENT | codeop.PyCF_ALLOW_INCOMPLETE_INPUT\n"
+        ),
+    },
     "atexit_in_dependency": {
         "main.py": "from cleanup import prepare\nprepare()\n",
         "cleanup.py": (
