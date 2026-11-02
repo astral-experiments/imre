@@ -578,6 +578,13 @@ class _SubTestContext:
         runner = self.case._runner
         if runner is None or isinstance(exc, (_SubTestStop, KeyboardInterrupt)):
             return False
+        case = self.case
+        runner._subtest_result(case, self._description(), exc, isinstance(exc, case.failureException))
+        if runner.failfast:
+            raise _SubTestStop()
+        return True
+
+    def _description(self) -> str:
         parts: list[str] = []
         if self.has_message:
             parts.append("[" + str(self.message) + "]")
@@ -586,12 +593,7 @@ class _SubTestContext:
             for key in self.params:
                 items.append(key + "=" + repr(self.params[key]))
             parts.append("(" + ", ".join(items) + ")")
-        description = " ".join(parts) or "(<subtest>)"
-        case = self.case
-        runner._subtest_result(case, description, exc, isinstance(exc, case.failureException))
-        if runner.failfast:
-            raise _SubTestStop()
-        return True
+        return " ".join(parts) or "(<subtest>)"
 
 
 class TestResult:

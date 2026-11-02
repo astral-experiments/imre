@@ -161,7 +161,10 @@ def main():
 
 
 import unittest.case as case
-from unittest.case import addModuleCleanup, doModuleCleanups, enterModuleContext
+from unittest.case import addModuleCleanup, doModuleCleanups, enterModuleContext, expectedFailure
+
+TestCase._addExpectedFailure = case._addExpectedFailure
+TestCase._addUnexpectedSuccess = case._addUnexpectedSuccess
 
 from unittest import loader, signals, util
 from unittest.signals import registerResult, removeResult
