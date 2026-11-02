@@ -14,6 +14,30 @@ def ordered_dictionary():
     dense[0] = "updated"
     assert list(items) == [(0, "updated"), (2, "two")]
 
+    for view in (dense.keys(), dense.values(), dense.items()):
+        for direction in (iter, reversed):
+            cursor = direction(view)
+            expected = list(direction(view))[1:]
+            next(cursor)
+            rebuild, args = cursor.__reduce__()
+            assert rebuild is iter and args == (expected,)
+            assert list(rebuild(*args)) == list(cursor) == expected
+            assert cursor.__reduce__() == (iter, ([],))
+    invalid = iter(dense)
+    dense.move_to_end(2)
+    try:
+        invalid.__reduce__()
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("reduction ignored out-of-order keys")
+    try:
+        next(invalid)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("failed snapshot consumed the live cursor")
+
     class NoKeys(OrderedDict):
         def keys(self):
             raise AssertionError("comparison called keys")
