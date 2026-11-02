@@ -57,8 +57,13 @@ pub(in crate::dynamic) fn prepare_writer_shutdown(ctx: &Context) {
         if !armed.get() || fd.closed() {
             continue;
         }
+        let kind = if fd.reading {
+            "BufferedRandom"
+        } else {
+            "BufferedWriter"
+        };
         let base = ctx.find_in_mro(class, |candidate| {
-            (ctx.heap.get(candidate).io_kind() == Some("BufferedWriter")).then_some(candidate)
+            (ctx.heap.get(candidate).io_kind() == Some(kind)).then_some(candidate)
         });
         let native = base.is_some_and(|base| {
             ["__del__", "__getattribute__", "closed", "close", "flush"]
@@ -72,6 +77,11 @@ pub(in crate::dynamic) fn prepare_writer_shutdown(ctx: &Context) {
         armed.set(native);
     }
 }
+
+const RANDOM_RAW_METHODS: &[&str] = &[
+    "close", "flush", "readable", "writable", "seekable", "isatty", "fileno", "tell", "seek",
+    "read", "readall", "readinto", "write",
+];
 
 fn native_raw(ctx: &Context, raw: Id, methods: &[&str], owner: &str) -> Result<Rc<RawFile>> {
     // Going straight to the descriptor is valid only while the Python raw methods
@@ -110,26 +120,25 @@ pub(super) fn initialize(
     receiver: Id,
     args: &[Id],
     kwargs: &[(String, Id)],
-    reading: bool,
+    owner: &str,
 ) -> Result<Id> {
-    let (owner, capability, methods): (_, _, &[&str]) = if reading {
-        (
-            "BufferedReader",
-            "readable",
+    let (capabilities, methods): (&[&str], &[&str]) = match owner {
+        "BufferedReader" => (
+            &["readable"],
             &[
                 "close", "flush", "readable", "seekable", "isatty", "fileno", "tell", "seek",
                 "read", "readall", "readinto",
             ],
-        )
-    } else {
-        (
-            "BufferedWriter",
-            "writable",
+        ),
+        "BufferedWriter" => (
+            &["writable"],
             &[
                 "close", "flush", "writable", "seekable", "isatty", "fileno", "tell", "seek",
                 "write", "truncate",
             ],
-        )
+        ),
+        "BufferedRandom" => (&["seekable", "readable", "writable"], RANDOM_RAW_METHODS),
+        _ => unreachable!("sealed buffered class"),
     };
     let [raw, capacity] =
         builtins::bind_builtin_arguments(owner, args, kwargs, ["raw", "buffer_size"], 1)?;
@@ -138,12 +147,14 @@ pub(super) fn initialize(
         .map(|n| ssize(ctx, n))
         .transpose()?
         .unwrap_or(super::DEFAULT_BUFFER_SIZE);
-    let method = ctx.lookup_attr(raw, capability)?;
-    if ctx.call(method, vec![], Vec::new())? != TRUE {
-        return Err(Error::new(
-            "UnsupportedOperation",
-            format!("File or stream is not {capability}."),
-        ));
+    for &capability in capabilities {
+        let method = ctx.lookup_attr(raw, capability)?;
+        if ctx.call(method, vec![], Vec::new())? != TRUE {
+            return Err(Error::new(
+                "UnsupportedOperation",
+                format!("File or stream is not {capability}."),
+            ));
+        }
     }
     if capacity <= 0 {
         return Err(Error::new(
@@ -153,7 +164,7 @@ pub(super) fn initialize(
     }
     let handle = match native_raw(ctx, raw, methods, owner) {
         Ok(handle) => handle,
-        Err(_) if !reading => {
+        Err(_) if owner == "BufferedWriter" => {
             return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize);
         }
         Err(error) => return Err(error),
@@ -164,8 +175,12 @@ pub(super) fn initialize(
             format!("{owner} reinitialization is unsupported"),
         ));
     }
-    let mut fd = BufferedFd::new(raw, handle, reading, capacity as usize)?;
-    if !reading {
+    let mut fd = if owner == "BufferedRandom" {
+        BufferedFd::update(raw, handle, capacity as usize)?
+    } else {
+        BufferedFd::new(raw, handle, owner == "BufferedReader", capacity as usize)?
+    };
+    if owner != "BufferedReader" {
         fd.drop_fallback = Some(Cell::new(true));
     }
     // Do not close the caller's file if allocating the backing value fails.
@@ -509,14 +524,22 @@ impl BufferedFd {
         if name != "seek" && matches!(ctx.heap.get(receiver), Value::File(_)) {
             return Ok(());
         }
-        let (owner, methods): (_, &[&str]) = if self.reading && self.writing && name == "seek" {
-            ("BufferedRandom", &["write", "seek", "tell"])
+        let (owner, methods): (_, &[&str]) = if self.reading && self.writing {
+            let methods: &[&str] = match name {
+                // These operations synchronize the cursor. truncate and its subsequent
+                // tell are looked up on the live raw object after synchronization.
+                "seek" => &["write", "seek", "tell"],
+                "truncate" | "flush" => &["write", "seek"],
+                "close" => &["write", "seek", "flush", "close"],
+                _ => RANDOM_RAW_METHODS,
+            };
+            ("BufferedRandom", methods)
         } else if self.reading {
             (
                 "BufferedReader",
                 match name {
                     "read" => &["read", "readall", "readinto"],
-                    "read1" | "readline" | "readinto" => &["readinto"],
+                    "read1" | "readline" | "readinto" | "peek" => &["readinto"],
                     "seek" => &["seek", "tell"],
                     "close" => &["flush", "close"],
                     _ => std::slice::from_ref(&name),
@@ -621,6 +644,7 @@ impl BufferedFd {
 
     /// A BufferedWriter subclass has already had its one opportunity to flush.
     pub(super) fn close_after_flush(&self, ctx: &Context, receiver: Id) -> Result<()> {
+        self.check_reentry(ctx)?;
         self.check_raw(ctx, receiver, "close")?;
         self.close(None, false)
     }
@@ -652,6 +676,7 @@ impl BufferedFd {
                 match name {
                     "read" | "read1" => "read of closed file",
                     "readline" => "readline of closed file",
+                    "peek" => "peek of closed file",
                     "readinto" => "readinto of closed file",
                     "truncate" => "truncate of closed file",
                     "seek" => "seek of closed file",
@@ -741,6 +766,18 @@ impl BufferedFd {
                 Ok(NONE)
             }
             "tell" => Ok(ctx.int(buffer.position().map_err(os_error)? as i64)),
+            "peek" => {
+                let data = match buffer {
+                    Buffer::Reader(reader) => crate::objects::peek_bytes(reader)?,
+                    Buffer::Random(reader) => {
+                        self.check_reentry(ctx)?;
+                        reader.peek()?
+                    }
+                    Buffer::Pipe(pipe) => pipe.peek()?,
+                    Buffer::Writer(_) => unreachable!("peek requires a buffered reader"),
+                };
+                Ok(ctx.alloc(Value::Bytes(data)))
+            }
             "read" | "read1" | "readline" => {
                 if !self.reading {
                     return Err(Error::new("UnsupportedOperation", "read"));
@@ -759,12 +796,8 @@ impl BufferedFd {
                     let bytes = match buffer {
                         Buffer::Reader(r) => read_once(r, size)?,
                         Buffer::Random(file) => {
-                            let size = if size < 0 {
-                                file.capacity() as i64
-                            } else {
-                                size
-                            };
-                            let mut bytes = builtins::zeroed_bytes(size)?;
+                            let size = file.read_once_size(usize::try_from(size).ok());
+                            let mut bytes = builtins::zeroed_bytes(size as i64)?;
                             let count = file.read_once(&mut bytes).map_err(os_error)?;
                             bytes.truncate(count);
                             bytes

@@ -7,8 +7,10 @@ mod newline_decoder;
 pub(in crate::dynamic) const NEWLINE_DECODER: &str = "IncrementalNewlineDecoder";
 mod buffered_io;
 mod descriptor_buffer;
+mod native_random;
 mod native_reader;
 mod native_writer;
+mod rwpair;
 pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,
 };
@@ -25,11 +27,18 @@ pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
 pub(super) use text_wrapper::text_options;
 
+#[derive(Clone, Copy)]
+pub(in crate::dynamic) enum NativeClass {
+    Named(&'static str),
+    Pair { reader: Id, writer: Id },
+}
+
 #[derive(Clone)]
 pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
     BufferedFile(Id),
     BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
+    Pair(rwpair::Pair),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
@@ -217,8 +226,6 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         let value = ctx.int(origin);
         ctx.bind(module, name, value);
     }
-    let buffered_random = ctx.builtin("_io.BufferedRandom");
-    ctx.bind(module, "_buffered_random", buffered_random);
 }
 
 /// Construct a low-level module's native I/O classes before io.py declares its ABCs.
@@ -282,6 +289,12 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
         buffered,
         native_writer::METHODS,
     );
+    let pair = class(ctx, module, "BufferedRWPair", buffered, rwpair::METHODS);
+    let Value::Class { io_kind, .. } = ctx.heap.get_mut(pair) else {
+        unreachable!()
+    };
+    *io_kind = Some(NativeClass::Pair { reader, writer });
+    let random = class(ctx, module, "BufferedRandom", buffered, native_random::METHODS);
     let bytes_io = class(ctx, module, "BytesIO", buffered, bytes_io::METHODS);
     let text = class(
         ctx,
@@ -319,7 +332,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
             .insert("_io.open.__self__".into(), module_object);
         ctx.builtin("open")
     } else {
-        let callable = ctx.alloc(Value::IoOpen { reader, writer });
+        let callable = ctx.alloc(Value::IoOpen { reader, writer, random });
         ctx.alloc(Value::Method {
             callable,
             receiver: module_object,
@@ -333,6 +346,7 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
             ("_io._RawIOBase", raw),
             ("_io._BufferedIOBase", buffered),
             ("_io._TextIOBase", text),
+            ("_io.BufferedRandom", random),
             ("_io.BufferedReader", reader),
             ("_io.BufferedWriter", writer),
             ("_io.FileIO", file),
@@ -370,7 +384,7 @@ fn class(
     let Value::Class { io_kind, .. } = ctx.heap.get_mut(owner) else {
         unreachable!()
     };
-    *io_kind = Some(name.trim_start_matches('_'));
+    *io_kind = Some(NativeClass::Named(name.trim_start_matches('_')));
     if name == NEWLINE_DECODER
         && let Value::Scope(frame) = ctx.heap.get_mut(scope)
     {
@@ -390,8 +404,10 @@ fn class(
         "StringIO" => "_io.StringIO",
         "FileIO" => "_io.FileIO",
         "TextIOWrapper" => "_io.TextIOWrapper",
+        "BufferedRandom" => "_io.BufferedRandom",
         "BufferedReader" => "_io.BufferedReader",
         "BufferedWriter" => "_io.BufferedWriter",
+        "BufferedRWPair" => "_io.BufferedRWPair",
         "BytesIO" => "_io.BytesIO",
         NEWLINE_DECODER => newline_decoder::CLASS,
         _ => "_io._IOBase",
@@ -405,7 +421,7 @@ fn class(
             && matches!(name, "mode" | "closefd" | "_blksize")
             || matches!(
                 descriptor_owner,
-                "_io.BufferedReader" | "_io.BufferedWriter"
+                "_io.BufferedReader" | "_io.BufferedWriter" | "_io.BufferedRandom"
             ) && matches!(name, "raw" | "mode" | "name")
             || wrapper && text_wrapper::property(name)
         {
@@ -492,7 +508,7 @@ fn unsupported_transfer(
 
 fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
     let message = match name {
-        "read" | "read1" | "readline" | "readlines" | "truncate" if n > 1 => {
+        "read" | "read1" | "readline" | "readlines" | "peek" | "truncate" if n > 1 => {
             format!("{name} expected at most 1 argument, got {n}")
         }
         "seek" if n == 0 => "seek expected at least 1 argument, got 0".into(),
@@ -500,7 +516,7 @@ fn argument_count(owner: &str, name: &str, n: usize) -> Result<()> {
         "write" | "readinto" | "writelines" if n != 1 => {
             format!("{owner}.{name}() takes exactly one argument ({n} given)")
         }
-        "read" | "read1" | "readline" | "readlines" | "writelines" | "seek" | "write"
+        "read" | "read1" | "readline" | "readlines" | "peek" | "writelines" | "seek" | "write"
         | "readinto" | "truncate" | "__exit__" => {
             return Ok(());
         }
@@ -654,6 +670,7 @@ pub(in super::super) fn open_from_module(
     ctx: &mut Context,
     reader: Id,
     writer: Id,
+    random: Id,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
@@ -662,6 +679,7 @@ pub(in super::super) fn open_from_module(
     };
     let file = open(ctx, arguments, kwargs)?;
     let class = match ctx.heap.get(file).native_io_class_name() {
+        Some("_io.BufferedRandom") => random,
         Some("_io.BufferedReader") => reader,
         Some("_io.BufferedWriter") => writer,
         _ => return Ok(file),
@@ -696,7 +714,10 @@ pub(in super::super) fn call(
         Some("_BufferedIOBase")
     } else if text {
         Some("_TextIOBase")
-    } else if matches!(owner_kind, Some("BufferedReader" | "BufferedWriter")) {
+    } else if matches!(
+        owner_kind,
+        Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
+    ) {
         owner_kind
     } else if owner_kind == Some("TextIOWrapper") && name == "__next__" {
         Some("TextIOWrapper")
@@ -707,7 +728,10 @@ pub(in super::super) fn call(
     };
     let Some((&receiver, rest)) = args.split_first() else {
         let message = match (descriptor, name) {
-            (Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter")), "__init__") => {
+            (
+                Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")),
+                "__init__",
+            ) => {
                 format!("descriptor '__init__' of '_io.{class}' object needs an argument")
             }
             (Some("TextIOWrapper"), "__next__") => {
@@ -728,7 +752,10 @@ pub(in super::super) fn call(
     else {
         let actual = ctx.type_name(receiver);
         let message = match (descriptor, name) {
-            (Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter")), "__init__") => {
+            (
+                Some(class @ ("BytesIO" | "BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")),
+                "__init__",
+            ) => {
                 format!(
                     "descriptor '__init__' requires a '_io.{class}' object but received a '{actual}'"
                 )
@@ -754,8 +781,10 @@ pub(in super::super) fn call(
         {
             return text_wrapper::next(ctx, receiver, receiver_class == owner, rest, kwargs);
         }
-        Some("BufferedReader") => return native_reader::call(ctx, receiver, name, rest, kwargs),
-        Some("BufferedWriter") => return native_writer::call(ctx, receiver, name, rest, kwargs),
+        Some("BufferedRandom") => return native_random::call(ctx, receiver, name, rest, kwargs),
+        Some("BufferedReader") => return native_reader::call(ctx, "BufferedReader", receiver, name, rest, kwargs),
+        Some("BufferedWriter") => return native_writer::call(ctx, "BufferedWriter", receiver, name, rest, kwargs),
+        Some("BufferedRWPair") => return rwpair::call(ctx, owner, receiver, name, rest, kwargs),
         _ => {}
     }
     if raw && matches!(name, "write" | "readinto") {
@@ -825,13 +854,21 @@ pub(in super::super) fn call(
                     | "StringIO"
                     | "BufferedReader"
                     | "BufferedWriter"
+                    | "BufferedRandom"
+                    | "BufferedRWPair"
             )
         });
+    if layout == Some("BufferedRWPair") && matches!(name, "__enter__" | "__exit__") {
+        return rwpair::call(ctx, owner, receiver, name, rest, kwargs);
+    }
+    if layout == Some("BufferedRandom") && matches!(name, "__enter__" | "__exit__") {
+        return native_random::call(ctx, receiver, name, rest, kwargs);
+    }
     if layout == Some("BufferedReader") && matches!(name, "__enter__" | "__exit__" | "writable") {
-        return native_reader::call(ctx, receiver, name, rest, kwargs);
+        return native_reader::call(ctx, "BufferedReader", receiver, name, rest, kwargs);
     }
     if layout == Some("BufferedWriter") && matches!(name, "__enter__" | "__exit__" | "readable") {
-        return native_writer::call(ctx, receiver, name, rest, kwargs);
+        return native_writer::call(ctx, "BufferedWriter", receiver, name, rest, kwargs);
     }
     if layout == Some("TextIOWrapper") {
         if matches!(ctx.heap.get(receiver), Value::TextFile(_)) {

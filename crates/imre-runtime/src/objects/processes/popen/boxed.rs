@@ -261,6 +261,10 @@ impl BoxedPipe {
         })
     }
 
+    pub(crate) fn peek(&self) -> Result<Vec<u8>> {
+        self.with_file(|file| file.peek_pipe())
+    }
+
     pub(crate) fn read1(&self, size: Option<usize>) -> Result<Vec<u8>> {
         self.with_file(|file| file.read_pipe_once(size))
     }
