@@ -959,6 +959,7 @@ impl Context {
                             | super::thread_local::CLASS
                             | stdlib::os::scandir::ENTRY
                             | stdlib::os::scandir::ITER
+                            | super::thread_rlock::CLASS
                             | super::thread_lock::CLASS
                             | "traceback"
                             | "frame"
@@ -1149,6 +1150,7 @@ impl Context {
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
             | (stdlib::os::scandir::ENTRY, Value::DirEntry(_))
             | (stdlib::os::scandir::ITER, Value::Scandir(_))
+            | (super::thread_rlock::CLASS, Value::HandlerLock(_))
             | (super::thread_lock::CLASS, Value::PrimitiveLock(_))
             | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => true,
             (
@@ -2206,6 +2208,14 @@ impl Context {
                 "__module__" => return Ok(self.text("_thread")),
                 "__name__" | "__qualname__" => return Ok(self.text("lock")),
                 attr if super::thread_lock::is_method(attr) => {
+                    return Ok(self.builtin(&format!("{class}.{attr}")));
+                }
+                _ => {}
+            },
+            Value::Native(ref class) if class == super::thread_rlock::CLASS => match name {
+                "__module__" => return Ok(self.text("_thread")),
+                "__name__" | "__qualname__" => return Ok(self.text("RLock")),
+                attr if super::thread_rlock::is_method(attr) => {
                     return Ok(self.builtin(&format!("{class}.{attr}")));
                 }
                 _ => {}
@@ -4452,6 +4462,7 @@ impl Context {
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
                 let float_subclass = self.has_base(callable, "float");
+                let rlock_subclass = self.has_base(callable, super::thread_rlock::CLASS);
                 let collection_kind = ["set", "frozenset", "bytearray"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
@@ -4484,7 +4495,9 @@ impl Context {
                         self.has_base(callable, "dict")
                             .then(|| self.dict(Vec::new()))
                     };
-                    let storage = if self.has_base(callable, "list") {
+                    let storage = if rlock_subclass {
+                        Some(self.alloc(Value::HandlerLock(Default::default())))
+                    } else if self.has_base(callable, "list") {
                         Some(self.alloc(Value::List(Vec::new())))
                     } else if let Some(kind) = collection_kind {
                         let custom_init = self.class_attr(callable, "__init__").is_some();
@@ -4519,6 +4532,7 @@ impl Context {
                     }
                 } else if new.is_none()
                     && string_base.is_none()
+                    && !rlock_subclass
                     && !float_subclass
                     && collection_kind.is_none()
                     && (!args.is_empty() || !kwargs.is_empty())

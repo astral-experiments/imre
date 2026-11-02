@@ -410,6 +410,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             super::stdlib::os::scandir::ENTRY
         }
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
+        Value::HandlerLock(_) if super::thread_rlock::is_method(attr) => super::thread_rlock::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
         Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",

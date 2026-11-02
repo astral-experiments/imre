@@ -1655,6 +1655,7 @@ def report(text):
             "boxed_user_containers.py",
             "boxed_dict_pop.py",
             "boxed_recursive_equality.py",
+            "boxed_thread_rlock.py",
             "boxed_selector_modify_data.py",
             "boxed_structural_hooks.py",
             "boxed_list_pop.py",

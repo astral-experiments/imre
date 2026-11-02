@@ -38,6 +38,35 @@ pub(super) fn construct(
     Ok(ctx.alloc(Value::PrimitiveLock(Default::default())))
 }
 
+pub(super) fn acquire_args(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(bool, Option<std::time::Duration>)> {
+    let [blocking, timeout] =
+        bind_method_arguments("acquire", args, kwargs, ["blocking", "timeout"], 2)?;
+    let blocking = ctx.optional_truth(blocking, true)?;
+    let timeout = match timeout {
+        None => None,
+        Some(value) => match *ctx.heap.get(ctx.scalar_value(value)) {
+            Value::Float(seconds) => timeout_float(blocking, seconds)?,
+            _ => {
+                let seconds = ctx.index_value(value)?.ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "'{}' object cannot be interpreted as an integer or float",
+                            ctx.type_name(value)
+                        ),
+                    )
+                })?;
+                timeout_int(blocking, &seconds)?
+            }
+        },
+    };
+    Ok((blocking, timeout))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     name: &str,
@@ -61,27 +90,7 @@ pub(super) fn method(
     };
     let lock = lock.clone();
     if matches!(name, "acquire" | "__enter__") {
-        let [blocking, timeout] =
-            bind_method_arguments("acquire", args, kwargs, ["blocking", "timeout"], 2)?;
-        let blocking = ctx.optional_truth(blocking, true)?;
-        let timeout = match timeout {
-            None => None,
-            Some(value) => match *ctx.heap.get(value) {
-                Value::Float(seconds) => timeout_float(blocking, seconds)?,
-                _ => {
-                    let seconds = ctx.index_value(value)?.ok_or_else(|| {
-                        Error::new(
-                            "TypeError",
-                            format!(
-                                "'{}' object cannot be interpreted as an integer or float",
-                                ctx.type_name(value)
-                            ),
-                        )
-                    })?;
-                    timeout_int(blocking, &seconds)?
-                }
-            },
-        };
+        let (blocking, timeout) = acquire_args(ctx, args, kwargs)?;
         return Ok(boolean(lock.acquire(blocking, timeout)));
     }
     if !kwargs.is_empty() {
