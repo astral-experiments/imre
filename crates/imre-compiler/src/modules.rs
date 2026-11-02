@@ -117,6 +117,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
+        "warnings" => Some((
+            "warnings.py",
+            include_str!("../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"),
+        )),
+        "_py_warnings" => Some((
+            "_py_warnings.py",
+            include_str!("../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"),
+        )),
         "re" => Some(("re.py", include_str!("../stdlib/re.py"))),
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
