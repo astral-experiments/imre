@@ -2560,6 +2560,9 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if matches!(self.heap.get(self.scalar_value(id)), Value::Super { .. }) {
+            return self.super_repr(id);
+        }
         if matches!(
             self.heap.get(self.scalar_value(id)),
             Value::Count { .. } | Value::Repeat(_)

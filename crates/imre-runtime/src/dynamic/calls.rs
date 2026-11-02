@@ -1206,6 +1206,9 @@ impl Context {
     }
 
     pub(super) fn read_member(&mut self, owner: &str, field: &str, receiver: Id) -> Result<Id> {
+        if owner == "super" {
+            return self.super_field(receiver, field);
+        }
         if owner == "datetime.timedelta" {
             return stdlib::datetime::read_field(self, owner, field, receiver);
         }
@@ -1279,7 +1282,6 @@ impl Context {
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
             Value::Union(_) => "typing.Union",
-            Value::Super { .. } => "super",
             Value::Method { explicit: true, .. } => "method",
             Value::Method { callable, .. } => match self.heap.get(*callable) {
                 Value::Function { .. } => "method",
@@ -1761,6 +1763,7 @@ impl Context {
             Value::Module { scope, .. } => {
                 return self.module_get_attribute(obj, scope, name, original);
             }
+            Value::Super { .. } => return self.super_getattribute(obj, name),
             _ => return self.default_get_attr(obj, name),
         };
         let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
@@ -3344,11 +3347,12 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("{class}.__new__")));
             }
-            Value::Super {
-                start,
-                receiver,
-                owner,
-            } => return self.super_attribute(start, receiver, owner, name),
+            Value::Super { .. } => {
+                let class = self.builtin("super");
+                if let Some(member) = self.class_attr(class, name) {
+                    return self.bind_attribute(member, obj, class);
+                }
+            }
             Value::Partial {
                 function,
                 args,
@@ -3519,7 +3523,7 @@ impl Context {
                 return Ok(self.text("defaultdict"));
             }
             Value::Native(ref class)
-                if class == "collections.defaultdict"
+                if matches!(class.as_str(), "collections.defaultdict" | "super")
                     && let Some(member) = self.own_class_attr(obj, name) =>
             {
                 return Ok(member);
@@ -5799,6 +5803,7 @@ impl Context {
                         name.split('.').next(),
                         Some(
                             "str"
+                                | "super"
                                 | "enumerate"
                                 | "generator"
                                 | "coroutine"

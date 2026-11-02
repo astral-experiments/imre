@@ -104,6 +104,7 @@ def current():
         print(str(error))
 
     check_mro()
+    check_super_initialization()
     check_native_classmethod()
     check_subclass_hooks()
 
@@ -140,6 +141,43 @@ def check_mro():
             pass
         else:
             raise AssertionError("invalid mro call succeeded")
+
+
+def check_super_initialization():
+    obj = D()
+    proxy = super.__new__(super, C, obj, ignored=True)
+    assert (proxy.__thisclass__, proxy.__self__, proxy.__self_class__) == (None, None, None)
+    assert super.__init__(proxy, C, obj) is None
+    assert proxy.walk() == "AB"
+
+    error = LookupError("reported class")
+
+    class Reentrant:
+        @property
+        def __class__(self):
+            assert proxy.__self__ is obj
+            super.__init__(proxy, A)
+            raise error
+
+    try:
+        super.__init__(proxy, C, Reentrant())
+    except LookupError as exc:
+        assert exc is error
+    else:
+        raise AssertionError("lost exception from __class__")
+    assert (proxy.__thisclass__, proxy.__self__, proxy.__self_class__) == (A, None, None)
+
+    class Custom(super):
+        walk = "own"
+
+        def __init__(self, start, receiver):
+            super().__init__(start, receiver)
+            self.seen = receiver
+
+    custom = Custom(C, obj)
+    assert custom.__class__ is Custom and custom.walk() == "AB"
+    super.__init__(custom, C, None)
+    assert custom.walk == "own" and custom.seen is obj
 
 
 def check_native_classmethod():
