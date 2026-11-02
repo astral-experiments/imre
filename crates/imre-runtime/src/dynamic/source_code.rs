@@ -42,6 +42,43 @@ pub(super) struct Program {
     eager_comprehension_targets: HashMap<ruff_text_size::TextRange, HashSet<String>>,
 }
 
+/// The original source expression and line, with no references into the defining heap.
+pub(super) struct CapturedAcquire {
+    line: u32,
+    expression: ast::Expr,
+}
+
+impl CapturedAcquire {
+    pub(super) fn load(
+        self,
+        ctx: &mut Context,
+        scope: Id,
+        name: Id,
+        parameters: Id,
+        qualname: Id,
+        location: Location,
+    ) -> Result<Id> {
+        let mut program = Program::new(
+            Rc::from(location.file.as_ref()),
+            ctx.str_value(name)?,
+            false,
+        );
+        program.qualname = ctx.str_value(qualname)?.to_owned();
+        program.first_line = location.line;
+        program
+            .instructions
+            .push((self.line, Instruction::Eval(self.expression)));
+        program.prepare_strings(
+            &mut ctx.heap,
+            &mut SharedConstants::default(),
+            &StringReplacements::new(),
+            &|_| self.line,
+        )?;
+        let freevars = ctx.enclosing_freevars(scope, program.reads.iter().map(String::as_str));
+        Ok(ctx.box_source_closure(Rc::new(program), Some(parameters), freevars))
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FunctionKind {
     Plain,
@@ -983,6 +1020,36 @@ fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result
 }
 
 impl Program {
+    /// A worker may replay one direct acquire on its one captured receiver.
+    pub(super) fn captured_acquire(&self, freevar: &str) -> Option<CapturedAcquire> {
+        let [(line, Instruction::Eval(expression))] = self.instructions.as_slice() else {
+            return None;
+        };
+        let call = expression.as_call_expr()?;
+        // Imported receiver spellings use ordinary attribute evaluation instead.
+        let field =
+            imre_ast::direct_method(call, &self.method_imports, self.private_names.as_deref())?;
+        if field.attr.as_str() != "acquire"
+            || field.value.as_name_expr()?.id.as_str() != freevar
+            || !call.arguments.is_empty()
+            || self.kind != FunctionKind::Plain
+            || self.interactive
+            || self.nested_global
+            || self.class_attributes.is_some()
+            || self.class_cell
+            || !self.locals.is_empty()
+            || !self.directives.is_empty()
+            || self.doc.is_some()
+            || self.string_roots != NONE
+        {
+            return None;
+        }
+        Some(CapturedAcquire {
+            line: *line,
+            expression: expression.clone(),
+        })
+    }
+
     /// Keep each code object's constants alive, including constants owned by unexecuted children.
     fn prepare_strings<'a>(
         &'a mut self,
@@ -2553,6 +2620,15 @@ impl Context {
     }
 
     fn box_source_code(&mut self, program: Rc<Program>, parameters: Option<Id>) -> Id {
+        self.box_source_closure(program, parameters, None)
+    }
+
+    fn box_source_closure(
+        &mut self,
+        program: Rc<Program>,
+        parameters: Option<Id>,
+        freevars: Option<Vec<String>>,
+    ) -> Id {
         let name = self.heap.code_name(&program.name);
         let qualname = self.heap.code_name(&program.qualname);
         let filename = self.text(program.filename.as_ref());
@@ -2572,8 +2648,8 @@ impl Context {
             flags: None,
             parameters: parameters.unwrap_or(NONE),
             nested: Vec::new(),
-            freevars: Vec::new(),
-            closure_supported: false,
+            closure_supported: freevars.is_some(),
+            freevars: freevars.unwrap_or_default(),
         }))
     }
 
@@ -4398,14 +4474,7 @@ impl Context {
             } else {
                 None
             };
-            let id = self.box_source_code(child.clone(), Some(parameters));
-            if let Some(names) = freevars {
-                let Value::Code(nested) = self.heap.get_mut(id) else {
-                    unreachable!()
-                };
-                nested.freevars = names;
-                nested.closure_supported = true;
-            }
+            let id = self.box_source_closure(child.clone(), Some(parameters), freevars);
             let Value::Code(parent) = self.heap.get_mut(owner) else {
                 unreachable!()
             };
