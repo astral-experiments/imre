@@ -113,3 +113,9 @@ def current():
             pattern.match(subject)
         except TypeError as error:
             print(str(error))
+
+    found = re.search(r"w(?# comment 1)xy(?# comment 2)z", "!wxyz!")
+    assert found.span() == (1, 5) and found.groups() == ()
+    assert re.fullmatch(rb"a(?# escaped \) inside)*b", b"aaab")
+    assert re.fullmatch(r"a(?#)b", "a#b") is None
+    assert re.compile(r"(?# before flag)(?x) a").flags == re.X | re.U
