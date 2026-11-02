@@ -313,9 +313,21 @@ impl Function<'_, '_> {
                     if let Some(value) = &v.value {
                         let value = self.expr(value);
                         self.assign(&v.target, &value);
+                    } else if self.source.string_annotations {
+                        match &*v.target {
+                            ast::Expr::Attribute(attr) => {
+                                self.discard_annotation_operand(&attr.value);
+                            }
+                            ast::Expr::Subscript(subscript) => {
+                                self.discard_annotation_operand(&subscript.value);
+                                self.discard_annotation_slice(&subscript.slice);
+                            }
+                            _ => {}
+                        }
                     }
                     if let ast::Expr::Name(name) = &*v.target
-                        && (self.class_locals.is_none() || v.simple)
+                        && v.simple
+                        && (self.module || self.class_locals.is_some())
                     {
                         let key = self.code_name(name.id.as_str());
                         if self.class_locals.is_some() && !self.source.string_annotations {
@@ -341,12 +353,11 @@ impl Function<'_, '_> {
                             let offset = v.start().to_u32();
                             self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
                         } else {
-                            let value =
-                                if self.class_locals.is_some() && self.source.string_annotations {
-                                    self.text(&crate::frontend::annotation_spelling(&v.annotation))
-                                } else {
-                                    "0".into()
-                                };
+                            let value = if self.source.string_annotations {
+                                self.text(&crate::frontend::annotation_spelling(&v.annotation))
+                            } else {
+                                "0".into()
+                            };
                             self.op("annotate", &[&self.scope.clone(), &key, &value]);
                         }
                     }
@@ -987,6 +998,30 @@ impl Function<'_, '_> {
             value = self.invoke(decorator, &[&value]);
         }
         self.bind(name.as_str(), &value);
+    }
+
+    fn discard_annotation_operand(&mut self, expr: &ast::Expr) {
+        let mark = self.temporary_mark();
+        self.expr(expr);
+        self.discard_truth(&mark);
+    }
+
+    // Without an assignment, CPython evaluates each subscript operand but
+    // neither constructs an extended slice nor invokes __getitem__.
+    fn discard_annotation_slice(&mut self, slice: &ast::Expr) {
+        match slice {
+            ast::Expr::Slice(s) => {
+                for bound in [&s.lower, &s.upper, &s.step].into_iter().flatten() {
+                    self.discard_annotation_operand(bound);
+                }
+            }
+            ast::Expr::Tuple(t) => {
+                for item in &t.elts {
+                    self.discard_annotation_slice(item);
+                }
+            }
+            expr => self.discard_annotation_operand(expr),
+        }
     }
 
     fn place(&mut self, target: &ast::Expr) -> Option<Place> {
