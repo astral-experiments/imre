@@ -257,6 +257,11 @@ enum Storage {
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
+    JsonEncoder {
+        ensure_ascii: bool,
+        allow_nan: bool,
+        sort_keys: bool,
+    },
     JsonDecoder(crate::ObjectOwner),
 }
 

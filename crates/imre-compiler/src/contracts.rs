@@ -467,6 +467,7 @@ impl Builtin {
             | Self::JsonLoads
             | Self::JsonEmptyObject
             | Self::JsonDecoderDecode
+            | Self::JsonEncoderEncode(_)
             | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
@@ -515,6 +516,7 @@ impl Builtin {
             | Self::NewPlainObject
             | Self::InspectSentinel
             | Self::JsonDecoderNew
+            | Self::JsonEncoderNew
             | Self::JsonDecoderMemo
             | Self::HashUpdate
             | Self::HashDigestSize
