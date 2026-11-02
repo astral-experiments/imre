@@ -217,6 +217,10 @@ with BlockedRaw(b"abcdefgh") as raw:
     f.flush()
     assert f.tell() == raw.tell() == 9
     assert raw.getvalue() == b"abcX01234"
+    assert f.write(b"Z") == 1
+    f.flush()
+    assert raw.getvalue() == b"abcX01234Z"
+    assert f.seek(8) == 8 and f.read() == b"4Z"
     f.close()
 
 # Older native TemporaryFile wrappers own their descriptor internally.
