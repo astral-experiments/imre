@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 2, 2026, Imre has a paired pass for **7,911 of 13,328 tests (59.4%)** in the 25 standard library module families selected for this campaign.
+As of November 2, 2026, Imre has a paired pass for **7,911 of 13,328 tests (59.4%)** in the original 25 standard library module families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -141,6 +141,19 @@ in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain e
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
+
+### Additional module families
+
+CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Linux. They use the same pairing rule and have a separate total. A dash marks a pending native baseline.
+
+| Module | Paired passes | Upstream tests | Initial coverage target |
+| --- | ---: | ---: | --- |
+| `contextlib` | — | 149 | Context managers, exception propagation, and cleanup order |
+| `inspect` | — | 362 | Callable signatures, argument binding, and decorator unwrapping |
+| `ssl` | — | 195 | SSL contexts, certificates, and loopback TLS connections |
+| `types` | — | 141 | Bound methods, module objects, namespaces, and read-only mappings |
+| `warnings` | — | 187 | Filter selection, warning capture, and caller attribution |
+| `weakref` | — | 183 | Reference callbacks, weak containers, and finalizers |
 
 ## Design
 
