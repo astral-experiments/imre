@@ -26,6 +26,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
     let (module, function) = symbol.split_once('.')?;
     match module {
+        "_typing" if function == "_idfunc" => Some((module, function)),
         "posix"
             if !function.contains('.')
                 && !matches!(
@@ -42,7 +43,6 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         #[cfg(target_os = "linux")]
         "_signal" if function == "sigpending" => Some((module, function)),
-        "_typing" if function == "_idfunc" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
@@ -2048,6 +2048,10 @@ impl Context {
             }
             Value::Native(ref symbol) if let Some((module, function)) = module_function(symbol) => {
                 match name {
+                    "__text_signature__" if symbol == "_typing._idfunc" => {
+                        return Ok(self.text("($module, x, /)"));
+                    }
+                    "__doc__" if symbol == "_typing._idfunc" => return Ok(NONE),
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
                     "__doc__" if symbol == "_signal.sigpending" => {
@@ -2114,10 +2118,7 @@ impl Context {
                     "__text_signature__" if symbol == "fcntl.fcntl" => {
                         return Ok(self.text("($module, fd, cmd, arg=0, /)"));
                     }
-                    "__text_signature__" if symbol == "_typing._idfunc" => {
-                        return Ok(self.text("($module, x, /)"));
-                    }
-                    "__doc__" if matches!(symbol.as_str(), "resource.getrlimit" | "_typing._idfunc") => return Ok(NONE),
+                    "__doc__" if symbol == "resource.getrlimit" => return Ok(NONE),
                     "__text_signature__" if symbol == "resource.getrlimit" => {
                         return Ok(self.text("($module, resource, /)"));
                     }
