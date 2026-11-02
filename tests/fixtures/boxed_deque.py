@@ -118,6 +118,29 @@ def current():
             bounded.clear()
             return self.result
 
+    bounded = deque([0, Match(True)])
+    contains = bounded.__contains__
+    assert type(deque.__contains__).__name__ == "wrapper_descriptor"
+    for method in (deque.__contains__, contains):
+        assert method.__doc__ == "Return bool(key in self)."
+        assert method.__text_signature__ == "($self, key, /)"
+    assert contains(0) is True and len(bounded) == 2
+    assert deque.__contains__(bounded, 99) is True and not bounded
+    assert contains(99) is False
+    bounded.append(Match(False))
+    try:
+        contains(99)
+    except RuntimeError as error:
+        assert str(error) == "deque mutated during iteration"
+    else:
+        raise AssertionError("changed deque during membership test")
+    try:
+        contains()
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("missing membership operand")
+
     bounded = deque([Match(True)])
     assert bounded.index(99) == 0
     bounded.append(Match(False))
