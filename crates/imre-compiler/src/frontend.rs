@@ -312,7 +312,7 @@ impl ClassInfo {
             }
         }
         let cached_properties = cached_properties::slots(graph, types, &declarations, &mut fields)?;
-        let setup_fields = unittest_setup::slots(graph, types, &declarations, &mut fields);
+        let setup_fields = unittest_setup::slots(graph, types, &mut declarations, &mut fields)?;
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
         if let Some(id) = Self::cyclic_field_root(&fields, types) {
@@ -3158,6 +3158,13 @@ impl<'a> Checker<'a> {
             && let Some(raised) = self.defaultdict_factory_error(call, expected)?
         {
             return Ok(raised);
+        }
+        if let ast::Expr::Call(call) = expression
+            && let Some(shape) = self.types.mapping(concrete)
+            && concrete == self.types.dict(shape.0, shape.1)
+            && let Some(result) = self.copied_factory_mapping(call, shape)?
+        {
+            return coerce(self, result, expected, expression);
         }
         if let ast::Expr::Call(call) = expression
             && let Some(shape) = self.types.mapping(concrete)
@@ -10583,6 +10590,20 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let [operand] = args.as_slice()
+            && matches!(operand.ty, Type::Str | Type::StrLiteral(_) | Type::Bytes)
+            && self.unshadowed_builtin(&call.func, "type")
+        {
+            let class = if operand.ty == Type::Bytes {
+                "bytes"
+            } else {
+                "str"
+            };
+            return Ok(partials::after(
+                operand.clone(),
+                annotations::class_value(class),
+            ));
+        }
         if let [proxy] = args.as_slice()
             && matches!(proxy.ty, Type::WeakProxy(_))
             && let Some(value) = self.weak_proxy_builtin(name.id.as_str(), proxy.clone())

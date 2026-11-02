@@ -538,6 +538,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("_typing", "_get_args") => ctx.builtin("typing.get_args"),
+        ("_typing", "_get_origin") => ctx.builtin("typing.get_origin"),
         ("_typing", "_idfunc") => ctx.builtin("_typing._idfunc"),
         ("typing", "NoDefault") => super::typing::no_default(ctx),
         ("typing", "TYPE_CHECKING") => FALSE,
@@ -571,8 +573,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_overloads"
             | "clear_overloads"
             | "_overload_dummy"
-            | "get_args"
-            | "get_origin"
             | "_GenericAlias"
             | "_CallableGenericAlias"
             | "_LiteralGenericAlias",

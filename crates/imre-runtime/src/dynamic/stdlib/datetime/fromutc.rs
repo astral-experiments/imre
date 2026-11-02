@@ -245,21 +245,33 @@ pub(super) fn astimezone(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
             ));
         }
     };
-    if source == NONE || target == NONE {
-        return Err(Error::new(
-            "NotImplementedError",
-            "astimezone() with the system local timezone",
-        ));
-    }
-    if source == target {
+    if source == target && source != NONE {
         return Ok(dt);
     }
+    let offset_mark = ctx.heap.temporary_mark();
     let source_offset = call_tzinfo(ctx, source, "utcoffset", dt)?;
-    let off = calendar(ctx, source_offset, "timedelta")
-        .ok_or_else(|| Error::new("NotImplementedError", "astimezone() with a naive datetime"))?;
+    let off = if source_offset == NONE {
+        value.system_offset()?
+    } else {
+        calendar(ctx, source_offset, "timedelta").expect("validated utcoffset")
+    };
     let shifted = value.shift(&off, true)?;
+    // The system timezone is chosen after the subtype constructor runs, using
+    // the actual UTC intermediate it returned.
+    let system_target = target == NONE;
+    let (target, target_zone) = if system_target {
+        (utc(ctx), Some(Calendar::utc()))
+    } else {
+        (target, target_zone)
+    };
     let class = ctx.exact_type(dt)?;
-    let intermediate = if class == ctx.builtin("datetime.datetime") {
+    let exact = class == ctx.builtin("datetime.datetime");
+    let mark = if system_target {
+        offset_mark
+    } else {
+        ctx.heap.temporary_mark()
+    };
+    let result = if exact {
         store(
             ctx,
             shifted.with_datetime_zone(target_zone.as_ref())?,
@@ -267,8 +279,20 @@ pub(super) fn astimezone(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         )
     } else {
         // Subtracting the offset calls the subtype constructor with the original zone.
-        let mark = ctx.heap.temporary_mark();
-        let result = result_datetime(ctx, class, shifted, source)?;
+        result_datetime(ctx, class, shifted, source)?
+    };
+    // An offset subtype can switch TZ in __del__ before the system zone is sampled.
+    if system_target
+        && ctx.scalar_value(source_offset) != source_offset
+        && ctx.heap.observes_released_roots()
+    {
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(result);
+        ctx.collect_unreachable();
+    }
+    let intermediate = if exact {
+        result
+    } else {
         ctx.heap.release_temporaries_since(mark);
         let intermediate = attach_target(ctx, result, target, target_zone.as_ref())?;
         ctx.heap.release_temporaries_since(mark);
@@ -278,6 +302,31 @@ pub(super) fn astimezone(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         }
         intermediate
     };
+    if system_target {
+        let scalar = ctx.scalar_value(intermediate);
+        let wall = calendar(ctx, intermediate, "datetime").ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                "datetime subtype constructor did not return a datetime",
+            )
+        })?;
+        let (zone, name) = wall.system_zone_at_utc()?;
+        let zoned = wall.with_datetime_zone(Some(&zone))?;
+        let target = if zone.is_utc() {
+            utc(ctx)
+        } else {
+            let tzname = name.map_or(NONE, |name| ctx.text(name));
+            let tzoffset = store(ctx, zone.zone_offset().expect("fixed system zone"), NONE);
+            ctx.alloc(Value::Calendar {
+                value: zone,
+                tzinfo: NONE,
+                tzoffset,
+                tzname,
+            })
+        };
+        change_zone(ctx, scalar, zoned, target);
+        return invoke(ctx, target, intermediate);
+    }
     invoke(ctx, target, intermediate)
 }
 

@@ -104,7 +104,7 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
         return Err(unsupported_reducer(ctx, receiver));
     }
     if protocol < 2 {
-        if ctx.allocation_base(class) != ctx.builtins.get("object").copied() {
+        if !ctx.uses_object_new(ctx.allocation_base(class)) {
             return Err(unsupported_reducer(ctx, receiver));
         }
         let copyreg = ctx.module("copyreg")?;

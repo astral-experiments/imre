@@ -111,6 +111,7 @@ impl Imports {
                     | "faulthandler"
                     | "code"
                     | "codeop"
+                    | "copyreg"
                     | "json"
                     | "json.encoder"
                     | "opcode"
@@ -513,6 +514,7 @@ pub(crate) fn compile(
             "atexit",
             "faulthandler",
             "code",
+            "copyreg",
             "weakref",
             "pathlib",
             "sys",
@@ -625,6 +627,12 @@ pub(crate) fn compile(
     let mut seen_roots = HashSet::new();
     roots.retain(|root| seen_roots.insert(root.clone()));
     let bundled_root = "<imre stdlib>";
+    let mut inputs = SourceInputs::default();
+    let mut archive = if options.path_entry && !entry.is_dir() {
+        Some(crate::zip_entry::ZipSources::open(&entry, &mut inputs)?)
+    } else {
+        None
+    };
     let mut sources = vec![(
         "__main__".to_owned(),
         if in_memory {
@@ -634,7 +642,6 @@ pub(crate) fn compile(
         },
         src.clone(),
     )];
-    let mut inputs = SourceInputs::default();
     if let Some(identity) = entry_identity {
         inputs.files.push((
             path.to_owned(),
@@ -659,6 +666,10 @@ pub(crate) fn compile(
             let mut imports = Imports::default();
             if late_pprint && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
+            }
+            // The native time.strptime classmethod imports its Python parser on first use.
+            if seen.contains("_datetime") && !seen.contains("_strptime") {
+                imports.names.push((0, "_strptime".to_owned()));
             }
             // Python 3.13 path pickles name this module even when the reader never imports pathlib.
             if (seen.contains("pickle") || seen.contains("pathlib"))
@@ -783,6 +794,20 @@ pub(crate) fn compile(
                         && let Some(selected) = entry_sources.get(parent)
                         && selected.as_ref() != Some(root)
                     {
+                        continue;
+                    }
+                    if let Some(archive) = &mut archive
+                        && initial.first() == Some(root)
+                    {
+                        if let Some((member, source, package)) = archive.module(&prefix) {
+                            if let Ok(imports) =
+                                imports_for_module(&member, source.trim_start_matches('\u{feff}'))
+                            {
+                                work.push_back((prefix.clone(), package, imports));
+                            }
+                            entry_sources.insert(prefix.clone(), package.then(|| root.clone()));
+                            break;
+                        }
                         continue;
                     }
                     let stem = root.join(prefix.replace('.', "/"));

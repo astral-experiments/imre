@@ -1,5 +1,6 @@
 from collections.abc import Iterable as IterableABC
-from typing import Iterable, get_args, get_origin
+from collections.abc import Reversible as ReversibleABC, Sized as SizedABC
+from typing import Iterable, Reversible, Sized, get_args, get_origin
 
 
 def current():
@@ -23,4 +24,13 @@ def current():
             assert str(error) == "Can't instantiate abstract class Iterable without an implementation for abstract method '__iter__'"
         else:
             raise AssertionError("instantiated abstract Iterable")
+    assert get_origin(Reversible[int]) is ReversibleABC
+    assert isinstance([], Reversible) and not issubclass(int, Reversible)
+    assert get_origin(Sized[()]) is SizedABC and get_args(Sized[()]) == ()
+    try:
+        Sized[int]
+    except TypeError as error:
+        assert str(error) == "typing.Sized is not a generic class"
+    else:
+        raise AssertionError("accepted a type argument for Sized")
     print("Iterable alias")

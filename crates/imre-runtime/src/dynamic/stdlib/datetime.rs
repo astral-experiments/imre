@@ -46,6 +46,7 @@ pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
     matches!(
         symbol,
         "datetime.time.fromisoformat"
+            | "datetime.time.strptime"
             | "datetime.datetime.now"
             | "datetime.datetime.fromtimestamp"
             | "datetime.datetime.utcnow"
@@ -139,6 +140,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__format__",
                 "__replace__",
                 "fromisoformat",
+                "strptime",
                 "isoformat",
                 "replace",
                 "__reduce__",
@@ -882,6 +884,7 @@ pub(super) fn call(
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
         "time.fromisoformat" => time_fromisoformat(ctx, args, kwargs),
+        "time.strptime" => time_strptime(ctx, args, kwargs),
         "datetime.date"
         | "datetime.time"
         | "datetime.timetz"
@@ -1292,11 +1295,11 @@ fn new_time(ctx: &mut Context, fields: [i32; 5], tz: Id) -> Result<Id> {
     ))
 }
 
-fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+fn time_class_args<'a>(ctx: &mut Context, method: &str, args: &'a [Id]) -> Result<(Id, &'a [Id])> {
     let Some((&class, args)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            "descriptor 'fromisoformat' of 'datetime.time' object needs an argument",
+            format!("descriptor '{method}' of 'datetime.time' object needs an argument"),
         ));
     };
     let base = ctx.builtin("datetime.time");
@@ -1305,7 +1308,7 @@ fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         return Err(Error::new(
             "TypeError",
             format!(
-                "descriptor 'fromisoformat' for type 'datetime.time' needs a type, not a '{}' as arg 2",
+                "descriptor '{method}' for type 'datetime.time' needs a type, not a '{}' as arg 2",
                 ctx.class_name(kind)
             ),
         ));
@@ -1314,11 +1317,52 @@ fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         return Err(Error::new(
             "TypeError",
             format!(
-                "descriptor 'fromisoformat' requires a subtype of 'datetime.time' but received '{}'",
+                "descriptor '{method}' requires a subtype of 'datetime.time' but received '{}'",
                 ctx.class_name(class)
             ),
         ));
     }
+    Ok((class, args))
+}
+
+fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, args) = time_class_args(ctx, "strptime", args)?;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "strptime() takes no keyword arguments",
+        ));
+    }
+    let &[text, format] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "strptime() takes exactly 2 arguments ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    for (i, &arg) in args.iter().enumerate() {
+        if ctx.string_storage(arg).is_none() {
+            let kind = if arg == NONE {
+                "None".into()
+            } else {
+                type_name(ctx, arg)
+            };
+            return Err(Error::new(
+                "TypeError",
+                format!("strptime() argument {} must be str, not {kind}", i + 1),
+            ));
+        }
+    }
+
+    let module = ctx.module("_strptime")?;
+    let parser = ctx.lookup_attr(module, "_strptime_datetime_time")?;
+    ctx.call(parser, vec![class, text, format], vec![])
+}
+
+fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, args) = time_class_args(ctx, "fromisoformat", args)?;
     let name = ctx.class_qualname(class);
     let input = crate::dynamic::builtins::one_positional_arg(
         &format!("{name}.fromisoformat"),

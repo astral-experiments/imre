@@ -353,6 +353,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "chmod"
             | "fchmod"
             | "chdir"
+            | "umask"
             | "utime"
             | "dup"
             | "dup2"
@@ -712,6 +713,13 @@ pub(super) fn descriptor(
     }
     if name == "readlink" {
         return readlink(ctx, args, kwargs);
+    }
+    if name == "umask" {
+        let mask = builtins::one_positional_arg("posix.umask", args, kwargs)?;
+        let mask = c_int(ctx, mask)?;
+        // SAFETY: umask takes a numeric mode and returns the process's previous mask.
+        let previous = unsafe { libc::umask(mask as libc::mode_t) };
+        return Ok(ctx.int(i64::from(previous)));
     }
     if name == "open" {
         return open(ctx, args, kwargs);

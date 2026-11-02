@@ -130,7 +130,10 @@ impl Function<'_, '_> {
                 v.parameters.as_deref(),
                 None,
                 None,
-                Body::Expression(&v.body),
+                match v.body.as_ref() {
+                    ast::Expr::Yield(_) => Body::YieldingLambda(&v.body),
+                    body => Body::Expression(body),
+                },
             ),
             ast::Expr::TString(v) => self.template(&v.value),
             ast::Expr::FString(v) => {

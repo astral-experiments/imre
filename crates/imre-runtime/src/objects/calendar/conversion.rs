@@ -113,7 +113,7 @@ pub(super) fn local_candidate(wall: i64, fold: bool) -> Result<i64, Error> {
     })
 }
 
-fn naive_offset(local: i128, fold: bool) -> Result<i128, Error> {
+pub(super) fn naive_offset(local: i128, fold: bool) -> Result<i128, Error> {
     let wall = ((local - (EPOCH_ORD - 1) * DAY).div_euclid(1_000_000)) as i64;
     let first = local_candidate(wall, fold)?;
     let other = local_candidate(wall, !fold)?;

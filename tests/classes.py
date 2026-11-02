@@ -86,6 +86,13 @@ REJECTED = {
     "frozen_inherited_class_data": 'from dataclasses import dataclass\nclass Base:\n    items = [1]\n@dataclass(frozen=True)\nclass Child(Base):\n    n: int\nChild(1).items = [2]\n',
     "sibling_guard_field": SUBCLASS_LAYOUT + "def f(x: Base) -> str:\n    if isinstance(x, (A, B)): return x.label\n    return 'other'\n",
     "reassigned_subclass_field": SUBCLASS_LAYOUT + "def f(x: Base, replacement: Base) -> str:\n    if isinstance(x, A):\n        x = replacement\n        return x.label\n    return 'other'\n",
+    "init_popped_pair_does_not_type_unrelated_fields": """class Values:
+    def make(self): return {"key": "value"}
+    def __init__(self):
+        self.data = self.make().copy()
+        key, value = self.data.popitem()
+        self.unrelated = {"a": 1, "b": (1, 2)}
+""",
     "init_hook_value_reads_uninitialized": """class Base:
     value: int
     def __init__(self) -> None:
@@ -175,6 +182,11 @@ class Child(Base):
     "abc_meta_dataclass_generated": "import abc\nfrom dataclasses import dataclass\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def __init__(self): pass\n@dataclass\nclass B(A):\n    n: int\n",
     "abc_meta_eager_default": "import abc\ndef init() -> int: return 42\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def f(self, *, n: int = init()): pass\n",
     "abc_meta_registry_collision": "import abc\nclass Parent: _abc_impl = 42\nclass B(Parent, metaclass=abc.ABCMeta): pass\n",
+    "strenum_keeps_its_type_at_a_str_parameter": (
+        'from enum import StrEnum\nclass Token(StrEnum):\n    KEY = "value"\n'
+        "def is_plain(value: str) -> bool:\n    return type(value) is str\n"
+        "print(is_plain(Token.KEY))\n"
+    ),
     "abc_meta_enum_conflict": "import abc\nfrom enum import Enum\nclass C(Enum, metaclass=abc.ABCMeta): pass\n",
     "magic_method": CELL + '    def __bytes__(self) -> bytes:\n        return b"Cell"\n',
     "str_extra_parameter": CELL + '    def __str__(self, detail: bool = False) -> str:\n        return "Cell"\n',

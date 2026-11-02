@@ -15,10 +15,11 @@ mod exception_forwarders;
 mod exceptions;
 mod inheritance;
 mod init_hooks;
+mod init_mappings;
 mod record_hash;
 pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
-pub(crate) use exception_forwarders::ForwardingInitializer;
+pub(crate) use exception_forwarders::{ForwardingInitializer, mangle_fields, private_field};
 pub(crate) use exceptions::explicit_message_initializer;
 pub(crate) use inheritance::{direct_base_init, super_init, super_method};
 
@@ -87,6 +88,10 @@ pub(crate) struct Class {
 }
 
 impl Class {
+    pub(crate) fn has_literal_hook(&self, name: &str) -> bool {
+        self.init_hooks.get(name).is_some_and(|hook| hook.writes.is_empty())
+    }
+
     /// The ABI slot stays in the root layout when a subclass adds Python fields.
     pub(crate) fn exception_argument_slot(&self) -> usize {
         self.fields
@@ -806,7 +811,7 @@ fn collect_class(
                 }
                 let mut method = method.clone();
                 if forwarder.is_some() {
-                    exception_forwarders::mangle_fields(node.name.as_str(), &mut method);
+                    mangle_fields(node.name.as_str(), &mut method, |_| true);
                 }
                 methods.push(method);
                 method_kinds.push(kind);
@@ -1014,6 +1019,7 @@ fn collect_class(
         let infer = fields.len() == inherited_fields.len();
         inheritance::annotated_fields(graph, definition.module, &mut methods[init], &mut fields);
         if infer {
+            init_mappings::infer(graph, definition.module, init, &mut methods, &mut fields);
             inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields);
             // A write to inherited or local class data creates an instance shadow.
             fields.retain(|f| {

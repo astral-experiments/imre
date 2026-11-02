@@ -168,6 +168,7 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         flags,
         bytes: false,
         engine_source: source,
+        surrogate_literals: None,
         assertions: Vec::new(),
         regex,
         full: OnceCell::new(),

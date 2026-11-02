@@ -83,6 +83,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         // CPython 3.14.5 Lib/_colorize.py. See licenses/CPython.txt.
         "_colorize" => Some(("_colorize.py", include_str!("../stdlib/_colorize.py"))),
+        // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
+        "_strptime" => Some(("_strptime.py", include_str!("../stdlib/_strptime.py"))),
+        "calendar" => Some(("calendar.py", include_str!("../stdlib/calendar.py"))),
         "_compat_pickle" => Some((
             "_compat_pickle.py",
             include_str!("../stdlib/_compat_pickle.py"),
@@ -1948,8 +1951,12 @@ impl IntrinsicModule {
             (Self::Typing, "VT") => Intrinsic::ObjectRuntimeExport("typing.VT"),
             (Self::Typing, "Type") => Intrinsic::ObjectRuntimeExport("typing.Type"),
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
+            (Self::Typing, "Set") => Intrinsic::ObjectRuntimeExport("typing.Set"),
+            (Self::Typing, "FrozenSet") => Intrinsic::ObjectRuntimeExport("typing.FrozenSet"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
             (Self::Typing, "Generator") => Intrinsic::ObjectRuntimeExport("typing.Generator"),
+            (Self::Typing, "Reversible") => Intrinsic::ObjectRuntimeExport("typing.Reversible"),
+            (Self::Typing, "Sized") => Intrinsic::ObjectRuntimeExport("typing.Sized"),
             (Self::Typing, "ContextManager") => {
                 Intrinsic::ObjectRuntimeExport("typing.ContextManager")
             }
@@ -2021,6 +2028,7 @@ impl IntrinsicModule {
             (Self::Typing, "TypedDict") => Intrinsic::ObjectRuntimeExport("typing.TypedDict"),
             (Self::Typing, "is_typeddict") => Intrinsic::ObjectRuntimeExport("typing.is_typeddict"),
             (Self::Typing, "Final") => Intrinsic::Final,
+            (Self::Typing, "Text") => Intrinsic::ObjectRuntimeExport("typing.Text"),
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
             (Self::Typing, "Union") => Intrinsic::Union,
@@ -2621,6 +2629,9 @@ impl IntrinsicModule {
             }
             (Self::Posix, name) => os::symbol(name)?,
             (Self::Os, "makedirs") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.makedirs"),
+            (Self::Os, "removedirs") if cfg!(unix) => {
+                Intrinsic::ObjectRuntimeExport("os.removedirs")
+            }
             (Self::Os, "walk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.walk"),
             (Self::Os, "fwalk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.fwalk"),
             (Self::Os, "F_OK") => Intrinsic::AccessMode(0),

@@ -149,3 +149,24 @@ def current():
         assert str(exc) == "cannot hash writable memoryview object"
     else:
         raise AssertionError("unhashable writable memoryview template accepted")
+
+    subject = "\ud800\ue000Xé\udfff!"
+    assert re.sub("X", "_", subject) == "\ud800\ue000_é\udfff!"
+    assert re.sub("X", "\udcfe", subject) == "\ud800\ue000\udcfeé\udfff!"
+    assert re.subn("(|.)", r"<\1>", "\udfff") == ("<><\udfff><>", 3)
+    assert re.compile("XX").sub("_", subject) is subject
+    captures = re.compile(r"(?P<ch>.)(X)?")
+    assert captures.subn(r"\g<ch>/<\2>", subject, 2) == ("\ud800/<>\ue000/<X>é\udfff!", 2)
+    seen = []
+
+    def keep_first(match):
+        assert match.string is subject and match.re is captures
+        assert (match.lastindex, match.lastgroup) == ((2, None) if match.group(2) else (1, "ch"))
+        seen.append((match.span(), match.groups()))
+        return match.group(1)
+
+    assert captures.sub(keep_first, subject) == "\ud800\ue000é\udfff!"
+    assert seen == [
+        ((0, 1), ("\ud800", None)), ((1, 3), ("\ue000", "X")), ((3, 4), ("é", None)),
+        ((4, 5), ("\udfff", None)), ((5, 6), ("!", None)),
+    ]

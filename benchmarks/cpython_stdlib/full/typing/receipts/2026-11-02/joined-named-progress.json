@@ -1,0 +1,334 @@
+{
+  "denominator": 712,
+  "input_ledger_sha256": "35f09b0b99e51bfac53fa2e99d5ca18f6b6599af517d8fcfd67d47619701d78a",
+  "input_pairs": 129,
+  "historical_unidentified_floor": 107,
+  "worker_pairs": 19,
+  "overlap": [],
+  "additional_keys": [
+    [
+      "test.test_typing.ConcatenateTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_dir",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_invalid_uses",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_valid_uses",
+      1
+    ],
+    [
+      "test.test_typing.ConcatenateTests.test_var_substitution",
+      1
+    ],
+    [
+      "test.test_typing.RevealTypeTests.test_reveal_type",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_cannot_init",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_cannot_subclass",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_no_isinstance",
+      1
+    ],
+    [
+      "test.test_typing.TypeGuardTests.test_repr",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_basics",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_cannot_init",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_cannot_subclass",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_no_isinstance",
+      1
+    ],
+    [
+      "test.test_typing.TypeIsTests.test_repr",
+      1
+    ],
+    [
+      "typing.ParamSpec",
+      1
+    ],
+    [
+      "typing.ParamSpecArgs",
+      1
+    ],
+    [
+      "typing.ParamSpecKwargs",
+      1
+    ]
+  ],
+  "union_pairs": 148,
+  "whole": false,
+  "details": [
+    {
+      "id": "test.test_typing.ConcatenateTests.test_basics",
+      "occurrence": 1,
+      "stock_ordinal": 123,
+      "receipt": "concatenate-all-71e902fc.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.ConcatenateTests.test_dir",
+      "occurrence": 1,
+      "stock_ordinal": 124,
+      "receipt": "concatenate-all-71e902fc.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.ConcatenateTests.test_invalid_uses",
+      "occurrence": 1,
+      "stock_ordinal": 125,
+      "receipt": "concatenate-all-71e902fc.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.ConcatenateTests.test_valid_uses",
+      "occurrence": 1,
+      "stock_ordinal": 126,
+      "receipt": "concatenate-all-71e902fc.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.ConcatenateTests.test_var_substitution",
+      "occurrence": 1,
+      "stock_ordinal": 127,
+      "receipt": "concatenate-all-71e902fc.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.RevealTypeTests.test_reveal_type",
+      "occurrence": 1,
+      "stock_ordinal": 485,
+      "receipt": "reveal-type-original-485.json",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.TypeGuardTests.test_basics",
+      "occurrence": 1,
+      "stock_ordinal": 515,
+      "receipt": "type-predicates-3ebdd019.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.TypeGuardTests.test_cannot_init",
+      "occurrence": 1,
+      "stock_ordinal": 516,
+      "receipt": "type-predicates-3ebdd019.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.TypeGuardTests.test_cannot_subclass",
+      "occurrence": 1,
+      "stock_ordinal": 517,
+      "receipt": "type-predicates-3ebdd019.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.TypeGuardTests.test_no_isinstance",
+      "occurrence": 1,
+      "stock_ordinal": 518,
+      "receipt": "type-predicates-3ebdd019.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.TypeGuardTests.test_repr",
+      "occurrence": 1,
+      "stock_ordinal": 519,
+      "receipt": "type-predicates-3ebdd019.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.TypeIsTests.test_basics",
+      "occurrence": 1,
+      "stock_ordinal": 520,
+      "receipt": "type-predicates-3ebdd019.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.TypeIsTests.test_cannot_init",
+      "occurrence": 1,
+      "stock_ordinal": 521,
+      "receipt": "type-predicates-3ebdd019.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.TypeIsTests.test_cannot_subclass",
+      "occurrence": 1,
+      "stock_ordinal": 522,
+      "receipt": "type-predicates-3ebdd019.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.TypeIsTests.test_no_isinstance",
+      "occurrence": 1,
+      "stock_ordinal": 523,
+      "receipt": "type-predicates-3ebdd019.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "test.test_typing.TypeIsTests.test_repr",
+      "occurrence": 1,
+      "stock_ordinal": 524,
+      "receipt": "type-predicates-3ebdd019.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0",
+        "boxed-O3"
+      ]
+    },
+    {
+      "id": "typing.ParamSpec",
+      "occurrence": 1,
+      "stock_ordinal": 702,
+      "receipt": "param-docs-f10db8a.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0"
+      ]
+    },
+    {
+      "id": "typing.ParamSpecArgs",
+      "occurrence": 1,
+      "stock_ordinal": 703,
+      "receipt": "param-docs-f10db8a.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0"
+      ]
+    },
+    {
+      "id": "typing.ParamSpecKwargs",
+      "occurrence": 1,
+      "stock_ordinal": 704,
+      "receipt": "param-docs-f10db8a.tgz",
+      "verified_profiles": [
+        "stock",
+        "ordinary-O0",
+        "ordinary-O3",
+        "boxed-O0"
+      ]
+    }
+  ]
+}

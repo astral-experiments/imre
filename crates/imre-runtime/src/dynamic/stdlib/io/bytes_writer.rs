@@ -36,12 +36,14 @@ pub(super) fn state(ctx: &Context, receiver: Id) -> Option<Rc<Writer>> {
 /// writer. During shutdown, inspecting the raw or resolving close could run Python.
 pub(in crate::dynamic) fn has_pending_callback_write(ctx: &Context) -> bool {
     ctx.heap.pending_finalizers().iter().copied().any(|owner| {
-        state(ctx, owner).is_some_and(|w| {
-            w.unflushed.get() != 0
-                && w.raw
-                    .get()
-                    .is_some_and(|raw| native_writer(ctx, raw).is_none())
-        })
+        super::buffered_reader::pending_update(ctx, owner)
+            .is_some_and(|raw| native_writer(ctx, raw).is_none())
+            || state(ctx, owner).is_some_and(|w| {
+                w.unflushed.get() != 0
+                    && w.raw
+                        .get()
+                        .is_some_and(|raw| native_writer(ctx, raw).is_none())
+            })
     })
 }
 
@@ -99,10 +101,21 @@ struct RawWriter<'a> {
     error: Option<Error>,
 }
 
+pub(super) fn raw_write(ctx: &mut Context, raw: Id, data: &[u8]) -> Result<Option<usize>> {
+    let mark = ctx.heap.temporary_mark();
+    let result = RawWriter::call_raw(ctx, raw, data);
+    ctx.heap.release_temporaries_since(mark);
+    if let Err(error) = &result {
+        for id in error.roots() {
+            ctx.heap.keep(id);
+        }
+    }
+    result
+}
+
 impl RawWriter<'_> {
-    fn raw_write(&mut self, data: &[u8]) -> Result<Option<usize>> {
-        let ctx = &mut *self.ctx;
-        if let Some(stream) = native_writer(ctx, self.raw) {
+    fn call_raw(ctx: &mut Context, raw: Id, data: &[u8]) -> Result<Option<usize>> {
+        if let Some(stream) = native_writer(ctx, raw) {
             stream.write(ctx, data)?;
             return Ok(Some(data.len()));
         }
@@ -118,7 +131,7 @@ impl RawWriter<'_> {
         ctx.heap.keep(view);
         let retry_mark = ctx.heap.temporary_mark();
         let result = loop {
-            match invoke(ctx, self.raw, "write", vec![view]) {
+            match invoke(ctx, raw, "write", vec![view]) {
                 Err(error) if ctx.has_errno(&error, libc::EINTR) => {
                     ctx.heap.release_temporaries_since(retry_mark);
                     continue;
@@ -149,10 +162,7 @@ impl RawWriter<'_> {
 
 impl Write for RawWriter<'_> {
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        let mark = self.ctx.heap.temporary_mark();
-        let result = self.raw_write(data);
-        self.ctx.heap.release_temporaries_since(mark);
-        match result {
+        match raw_write(self.ctx, self.raw, data) {
             // CPython retries a zero result without consuming any input.
             Ok(Some(0)) => Err(io::ErrorKind::Interrupted.into()),
             Ok(Some(count)) => {
@@ -162,9 +172,6 @@ impl Write for RawWriter<'_> {
             }
             Ok(None) => Err(io::ErrorKind::WouldBlock.into()),
             Err(error) => {
-                for id in error.roots() {
-                    self.ctx.heap.keep(id);
-                }
                 if self.writing && self.unflushed.get() != 0 {
                     // A blocked preflush can still accept new input into the buffer.
                     // A direct raw write or explicit flush propagates the original error.
