@@ -3548,7 +3548,7 @@ impl Context {
                 let repeated = repeat_values(items, n)?;
                 self.alloc(Value::List(repeated))
             }
-            Value::Tuple(items) if items.is_empty() || n == 1 => storage,
+            Value::Tuple(items) if items.is_empty() || (n == 1 && owner == storage) => storage,
             Value::Tuple(items) => {
                 let repeated = repeat_values(items, n)?;
                 self.alloc(Value::Tuple(repeated))

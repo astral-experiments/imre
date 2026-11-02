@@ -497,6 +497,7 @@ impl Context {
             Value::Module {
                 constructor: None, ..
             } => "module",
+            Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).heap_type() => name,
             Value::Instance { class, .. }
                 if self.classes.get(super::namespace::CLASS) == Some(class) =>
             {
@@ -756,6 +757,21 @@ impl std::ops::Deref for BoxedTextFile {
     }
 }
 
+/// State that belongs to a single initialization of a native module.
+#[derive(Clone, Copy)]
+pub(super) enum NativeModuleState {
+    LocaleError(Id),
+    IsoCalendarDate(Id),
+}
+
+impl NativeModuleState {
+    fn class(self) -> Id {
+        match self {
+            Self::LocaleError(class) | Self::IsoCalendarDate(class) => class,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum Value {
     None,
@@ -880,7 +896,7 @@ pub(super) enum Value {
         origin: Option<Id>,
         initializing: bool,
         // Private state retained by this generation of a native module.
-        module_state: Option<Id>,
+        module_state: Option<NativeModuleState>,
         // Imported modules are resolved separately from independently constructed ones.
         constructor: Option<Id>,
     },
@@ -1485,7 +1501,7 @@ impl Value {
                 ..
             } => {
                 visit.push(*scope);
-                visit.extend(module_state);
+                visit.extend(module_state.map(NativeModuleState::class));
                 visit.extend(origin);
                 visit.extend(constructor);
             }
@@ -1576,13 +1592,9 @@ impl Value {
                     }
                 }
             }
-            Self::TypeVar(var) => visit.extend([
-                var.name,
-                var.module,
-                var.bound,
-                var.constraints,
-                var.default,
-            ]),
+            Self::TypeVar(var) => {
+                visit.extend([var.name, var.module, var.bound, var.constraints, var.default])
+            }
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);
                 visit.extend(alias.name);

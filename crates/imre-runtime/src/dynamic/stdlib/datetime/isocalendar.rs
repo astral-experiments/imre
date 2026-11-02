@@ -1,6 +1,7 @@
 //! The private tuple subtype owned by each initialization of the C datetime module.
 
 use super::{Context, Error, Id, Result, Value, calendar};
+use crate::dynamic::value::NativeModuleState;
 use crate::dynamic::{builtins, weakref};
 
 pub(in crate::dynamic) const CLASS: &str = "datetime.IsoCalendarDate";
@@ -62,7 +63,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, module: Id) -> Result<()> {
     let Value::Module { module_state, .. } = ctx.heap.get_mut(module) else {
         unreachable!()
     };
-    *module_state = Some(owner);
+    *module_state = Some(NativeModuleState::IsoCalendarDate(owner));
     let weak = weakref::call(ctx, weakref::REFERENCE_TYPE, &[module], &[])?;
     ctx.builtins.insert(MODULE_REF.into(), weak);
     Ok(())
@@ -82,9 +83,9 @@ fn current_class(ctx: &mut Context) -> Result<Id> {
     };
     match *ctx.heap.get(module) {
         Value::Module {
-            module_state: Some(class),
+            module_state: Some(NativeModuleState::IsoCalendarDate(class)),
             ..
-        } if ctx.heap.get(class).heap_type() == Some(CLASS) => Ok(class),
+        } => Ok(class),
         _ => Err(Error::new(
             "ImportError",
             "_datetime module has no calendar state",
@@ -141,6 +142,43 @@ pub(in crate::dynamic) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "__repr__" {
+        let (&receiver, rest) = args.split_first().ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                format!("descriptor '__repr__' of '{CLASS}' object needs an argument"),
+            )
+        })?;
+        if ctx.heap.get(receiver).instance_class() != Some(owner) {
+            let actual = ctx.type_name(receiver);
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__repr__' requires a '{CLASS}' object but received a '{actual}'"
+                ),
+            ));
+        }
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "wrapper __repr__() takes no keyword arguments",
+            ));
+        }
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 0 arguments, got {}", rest.len()),
+            ));
+        }
+        let Value::Tuple(parts) = ctx.heap.get(ctx.scalar_value(receiver)) else {
+            unreachable!()
+        };
+        let [year, week, weekday] =
+            [parts[0], parts[1], parts[2]].map(|part| ctx.as_int(part).expect("C integer"));
+        return Ok(ctx.text(format!(
+            "{CLASS}(year={year}, week={week}, weekday={weekday})"
+        )));
+    }
     let (&receiver, args) = args.split_first().ok_or_else(|| {
         Error::new(
             "TypeError",
@@ -173,16 +211,8 @@ pub(in crate::dynamic) fn call(
     if let Some(i) = FIELDS.iter().position(|field| *field == name) {
         return Ok(parts[i]);
     }
-    if name == "__repr__" {
-        let [year, week, weekday] =
-            [parts[0], parts[1], parts[2]].map(|part| ctx.as_int(part).expect("C integer"));
-        return Ok(ctx.text(format!(
-            "{CLASS}(year={year}, week={week}, weekday={weekday})"
-        )));
-    }
     debug_assert_eq!(name, "__reduce__");
-    let values = parts.clone();
-    let tuple = ctx.alloc(Value::Tuple(values));
+    let tuple = ctx.alloc(Value::Tuple(parts.clone()));
     let args = ctx.alloc(Value::Tuple(vec![tuple]));
     let constructor = ctx.builtin("tuple");
     Ok(ctx.alloc(Value::Tuple(vec![constructor, args])))

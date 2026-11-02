@@ -1,5 +1,7 @@
 use std::ffi::CString;
 
+use crate::dynamic::value::NativeModuleState;
+
 use super::{Context, Error, Id, NONE, Result, Value};
 
 /// Bind setlocale to this module and keep its exception class across namespace edits.
@@ -16,7 +18,7 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Res
     let Value::Module { module_state, .. } = ctx.heap.get_mut(module) else {
         unreachable!()
     };
-    *module_state = Some(class);
+    *module_state = Some(NativeModuleState::LocaleError(class));
     ctx.bind(scope, "Error", class);
 
     let callable = ctx.builtin("_locale.setlocale");
@@ -80,7 +82,7 @@ pub(super) fn setlocale(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
             .map_err(|error| ctx.decode_error(error));
     }
     let Value::Module {
-        module_state: Some(class),
+        module_state: Some(NativeModuleState::LocaleError(class)),
         ..
     } = *ctx.heap.get(module)
     else {

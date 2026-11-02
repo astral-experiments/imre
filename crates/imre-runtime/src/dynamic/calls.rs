@@ -819,12 +819,7 @@ impl Context {
         if self.heap.get(receiver).instance_class() == Some(owner) {
             return Ok(());
         }
-        let actual = self
-            .heap
-            .get(receiver)
-            .instance_class()
-            .and_then(|class| self.heap.get(class).heap_type())
-            .unwrap_or_else(|| self.type_name(receiver));
+        let actual = self.type_name(receiver);
         Err(Error::new(
             "TypeError",
             format!(
@@ -2897,9 +2892,7 @@ impl Context {
                         return Ok(self.builtin(owner));
                     }
                     "__name__" => return Ok(self.text(field)),
-                    "__doc__" if owner == super::deque::CLASS => {
-                        return Ok(self.text("maximum size of a deque or None if unbounded"));
-                    }
+                    "__doc__" if owner == super::deque::CLASS => return Ok(self.text("maximum size of a deque or None if unbounded")),
                     "__doc__" if owner == "int" => {
                         return Ok(
                             self.text(format!("the {field} of a rational number in lowest terms"))
@@ -4432,6 +4425,9 @@ impl Context {
                 {
                     return self.update_dictionary_field(obj, storage, name, None);
                 }
+                if self.heap.get(class).heap_type().is_some() {
+                    self.check_instance_field(obj, name)?;
+                }
                 if (layout.declared_slot && !layout.active_slot)
                     || self.has_namedtuple_field(class, name)
                 {
@@ -5472,6 +5468,9 @@ impl Context {
     /// Describe a receiver rejected by a builtin allocator.
     pub(super) fn invalid_new_subtype(&self, kind: &str, class: Id) -> Error {
         let message = match self.heap.get(class) {
+            heap_type if let Some(name) = heap_type.heap_type() => {
+                format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
+            }
             Value::Class { name, .. } => {
                 format!("{kind}.__new__({name}): {name} is not a subtype of {kind}")
             }
