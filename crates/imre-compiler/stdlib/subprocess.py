@@ -220,7 +220,7 @@ class Popen:
                 if input:
                     if self.text_mode:
                         input = input.encode(self.stdin.encoding, self.stdin.errors)
-                    self._replacement_input = input if isinstance(input, (bytes, bytearray)) else memoryview(input)
+                    self._replacement_input = input
                 else:
                     try:
                         self.stdin.close()
@@ -232,8 +232,8 @@ class Popen:
         # A caller may mutate the buffer before retrying a timed-out exchange.
         # Snapshot non-byte-format views in byte order for this call's offset.
         input_bytes = self._replacement_input
-        if isinstance(input_bytes, memoryview):
-            input_bytes = bytes(input_bytes)
+        if not isinstance(input_bytes, (bytes, bytearray)):
+            input_bytes = bytes(memoryview(input_bytes))
         output = self._replacement_output
         with _PopenSelector() as selector:
             pending = 0
