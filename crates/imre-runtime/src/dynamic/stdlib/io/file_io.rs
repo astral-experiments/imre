@@ -1009,7 +1009,7 @@ pub(super) fn call(
         return Ok(ctx.alloc(Value::Bytes(Vec::new())));
     }
     if name == "write" {
-        ctx.bytes_like(args[0])?;
+        files::output_bytes(ctx, args[0])?;
     }
     if name == "readinto" && ctx.writable_byte_span(args[0])?.is_none() {
         return Err(Error::new(
@@ -1091,7 +1091,7 @@ pub(super) fn call(
         }
         "write" => {
             raw.check_direction(false)?;
-            let bytes = ctx.bytes_like(args[0])?;
+            let bytes = files::output_bytes(ctx, args[0])?;
             // SAFETY: write reads only the live bytes slice for this call.
             Ok(
                 transfer(|| unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) })?

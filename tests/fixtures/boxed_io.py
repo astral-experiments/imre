@@ -149,6 +149,17 @@ def check_text_base():
 
 
 def exercise(path):
+    items = array("i", [1, -2, 256])
+    expected = items.tobytes()
+    with io.BytesIO(items) as memory, io.FileIO(path + ".array", "w+") as raw:
+        assert memory.getvalue() == expected
+        for stream in (memory, raw):
+            assert stream.write(items) == len(expected)
+            stream.writelines((items,))
+            stream.seek(0)
+            assert stream.read() == expected * 2
+    os.unlink(path + ".array")
+
     check_base_writes()
     check_text_base()
     events = []

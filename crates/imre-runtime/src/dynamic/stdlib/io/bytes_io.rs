@@ -4,6 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::io::SeekFrom;
 use std::rc::Rc;
 
+use super::super::files;
 use super::{Context, Error, FALSE, Id, MemoryStream, NONE, Result, TRUE, Value};
 use crate::objects::FileState;
 
@@ -148,7 +149,7 @@ impl BytesIo {
         }
         self.snapshot.set(None);
         if initial != NONE {
-            let data = ctx.bytes_like(initial)?;
+            let data = files::output_bytes(ctx, initial)?;
             if !matches!(ctx.heap.get(initial), Value::Bytes(_)) && file.closed() {
                 file.flush()?;
             }
@@ -245,7 +246,7 @@ pub(super) fn call(
             Ok(ctx.int(size as i64))
         }
         "write" => {
-            let input = ctx.bytes_like(args[0])?;
+            let input = files::output_bytes(ctx, args[0])?;
             stream.write(input)?;
             Ok(ctx.int(input.len() as i64))
         }
@@ -254,7 +255,7 @@ pub(super) fn call(
             stream.file.borrow_mut().flush()?;
             let iterator = ctx.iterator(args[0])?;
             while let Some(line) = ctx.next_item(iterator)? {
-                stream.write(ctx.bytes_like(line)?)?;
+                stream.write(files::output_bytes(ctx, line)?)?;
             }
             Ok(NONE)
         }
