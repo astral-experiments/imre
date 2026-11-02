@@ -4212,7 +4212,11 @@ impl Context {
                     imre_ast::direct_method(v, &code.method_imports, code.private_names.as_deref())
                 {
                     let receiver = eval(self, &field.value)?;
-                    self.lookup_method(receiver, field.attr.as_str())?
+                    let method = self.lookup_method(receiver, field.attr.as_str())?;
+                    // Evaluating an argument can delete the receiver's reference to the callable.
+                    self.heap.reserve_temporaries(1)?;
+                    self.heap.keep(method);
+                    method
                 } else {
                     eval(self, &v.func)?
                 };
