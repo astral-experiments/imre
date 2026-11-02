@@ -161,6 +161,7 @@ impl BuiltinDescriptor {
             });
         }
         let (owner, name) = match symbol {
+            "type.__init__" => ("type", "__init__"),
             "object.__format__" => ("object", "__format__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
