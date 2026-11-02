@@ -8853,6 +8853,9 @@ impl<'a> Checker<'a> {
         if let Some((origin, declaration)) = self.namedtuple_factory(&call.func) {
             return self.namedtuple_call(origin, &declaration, call);
         }
+        if self.collection_binding(&call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple)) {
+            return Err(self.scoped_builtin_error("collections.namedtuple", call));
+        }
         if let Some((method, name)) = crate::classes::super_method(call)
             && self.unshadowed_builtin(name, "super")
         {
@@ -9330,9 +9333,6 @@ impl<'a> Checker<'a> {
                 return Ok(self.ordered_builtin(Builtin::BytesIo, Type::BytesIO, args));
             }
             Some(Binding::Intrinsic(Intrinsic::ZipFile)) => return self.zipfile_constructor(call),
-            Some(Binding::Intrinsic(Intrinsic::NamedTuple)) => {
-                return Err(self.scoped_builtin_error("collections.namedtuple", call));
-            }
             Some(Binding::Intrinsic(Intrinsic::Deque)) => return self.deque_new(call, None),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::ChainMap)) => return self.chainmap(call, None),

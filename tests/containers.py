@@ -340,6 +340,14 @@ REJECTED = {
     "deepcopy_explicit_memo": "from copy import deepcopy\nx = [1]\nmemo: dict[int, list[int]] = {}\ny = deepcopy(x, memo)\n",
     "deepcopy_live_resource": "from copy import deepcopy\nwith open('input.txt') as f:\n    x = deepcopy([f])\n",
     "deepcopy_unproved_cycle": "from copy import deepcopy\nx = []\nx.append(x)\ny = deepcopy(x)\n",
+    "shadowed_namedtuple_factory": """
+from collections import namedtuple
+
+def call(namedtuple: int):
+    return namedtuple("Point", "x y")
+
+call(5)
+""",
     "namedtuple_factory_typed_call": """
 from collections import namedtuple
 
