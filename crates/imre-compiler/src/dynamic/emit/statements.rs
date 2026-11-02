@@ -61,17 +61,15 @@ impl<'a> Visitor<'a> for ClosureNames {
                         !child.locals.contains(name) && !child.globals.contains(name)
                     }));
                 }
-                // Loading a name or a literal cannot introduce a binding in the
-                // defining frame. Keep the conservative fallback for other expressions.
+                // A bare decorator name cannot introduce a binding in the defining frame.
                 for decorator in &f.decorator_list {
                     self.visit_decorator(decorator);
                     self.locals_incomplete |= !decorator.expression.is_name_expr();
                 }
                 for param in f.parameters.iter_non_variadic_params() {
                     if let Some(default) = &param.default {
+                        // Defaults run here. Their expression walk records enclosing bindings.
                         self.visit_expr(default);
-                        self.locals_incomplete |=
-                            !default.is_literal_expr() && !default.is_name_expr();
                     }
                 }
             }
