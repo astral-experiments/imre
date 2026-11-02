@@ -317,6 +317,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 include_str!("../stdlib/platform/metadata.py"),
             ),
         )),
+        // CPython 3.14.5 Lib/ftplib.py. See stdlib/docstrings/LICENSE.
+        "ftplib" if cfg!(unix) => Some(("ftplib.py", include_str!("../stdlib/ftplib.py"))),
         "mimetypes" if cfg!(unix) => Some((
             "mimetypes.py",
             include_str!(
