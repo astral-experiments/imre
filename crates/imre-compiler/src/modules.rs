@@ -2146,6 +2146,12 @@ impl IntrinsicModule {
             (Self::Io | Self::IoNative, "text_encoding") => {
                 Intrinsic::ObjectRuntimeExport("_io.text_encoding")
             }
+            (Self::Io, "IncrementalNewlineDecoder") => {
+                Intrinsic::ObjectRuntimeExport("io.IncrementalNewlineDecoder")
+            }
+            (Self::IoNative, "IncrementalNewlineDecoder") => {
+                Intrinsic::ObjectRuntimeExport("_io.IncrementalNewlineDecoder")
+            }
             (Self::Io, "TextIOWrapper") => Intrinsic::ObjectRuntimeExport("io.TextIOWrapper"),
             (Self::IoNative, "TextIOWrapper") => {
                 Intrinsic::ObjectRuntimeExport("_io.TextIOWrapper")

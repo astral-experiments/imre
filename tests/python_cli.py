@@ -2031,6 +2031,7 @@ def report(text):
             "boxed_array.py",
             "boxed_bytearray_memoryview.py",
             "boxed_bytes_io.py",
+            "boxed_io_newline_decoder.py",
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",

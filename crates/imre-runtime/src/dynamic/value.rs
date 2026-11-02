@@ -1521,6 +1521,9 @@ impl Value {
                     Some(super::stdlib::io::MemoryStream::Wrapper(stream)) => {
                         stream.children(visit)
                     }
+                    Some(super::stdlib::io::MemoryStream::Decoder(decoder)) => {
+                        visit.extend([decoder.delegate, decoder.errors]);
+                    }
                     _ => {}
                 }
                 visit.push(*class);
