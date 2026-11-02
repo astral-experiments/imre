@@ -3463,7 +3463,7 @@ impl Context {
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 Value::Class { .. } | Value::Instance { .. } => {
                     let class = self.heap.get(base).instance_class().unwrap_or(base);
-                    if self.allocation_base(class) == self.builtins.get("object").copied() {
+                    if self.uses_object_new(self.allocation_base(class)) {
                         return Ok(self.builtin("object.__new__"));
                     }
                 }
@@ -4551,19 +4551,10 @@ impl Context {
         })
     }
 
-    /// Find the allocator inherited from the first native base.
+    /// The first non-Python base owns the instance layout. Native classes
+    /// represented with a class namespace (e.g. BytesIO) have no Python class cell.
     fn allocation_base(&self, class: Id) -> Option<Id> {
         self.find_in_mro(class, |base| self.owns_allocation(base).then_some(base))
-            .map(|base| self.new_slot_owner(base))
-    }
-
-    /// The decoder owns its native layout but inherits object.__new__.
-    fn new_slot_owner(&self, base: Id) -> Id {
-        if self.heap.get(base).io_kind() == Some(stdlib::io::NEWLINE_DECODER) {
-            self.builtins["object"]
-        } else {
-            base
-        }
     }
 
     fn owns_allocation(&self, base: Id) -> bool {
@@ -4640,7 +4631,7 @@ impl Context {
                 Ok(builtins::boolean(!self.truth(equal)?))
             };
         }
-        if self.allocation_base(class) == self.builtins.get("object").copied() {
+        if self.uses_object_new(self.allocation_base(class)) {
             return Ok(if object == other {
                 FALSE
             } else {
@@ -4654,6 +4645,14 @@ impl Context {
                 self.type_name(object)
             ),
         ))
+    }
+
+    /// The decoder owns its native layout but inherits object.__new__.
+    fn uses_object_new(&self, base: Option<Id>) -> bool {
+        base == self.builtins.get("object").copied()
+            || base.is_some_and(|base| {
+                self.heap.get(base).io_kind() == Some(stdlib::io::NEWLINE_DECODER)
+            })
     }
 
     /// Allocate a plain instance without invoking its constructor or initializer.
@@ -4694,13 +4693,12 @@ impl Context {
         let base = self.allocation_base(class).unwrap_or(class);
         let base = if Some(&base) == self.builtins.get(stdlib::datetime::TZINFO) {
             self.tzinfo_allocation_base(class, base, object)
-                .map(|owner| self.new_slot_owner(owner))
                 .unwrap_or(base)
         } else {
             base
         };
         let new = self.class_attr(class, "__new__");
-        if base != object {
+        if !self.uses_object_new(Some(base)) {
             let name = self.class_name(class);
             let owner = if new.is_some_and(|new| !matches!(self.heap.get(new), Value::Native(_))) {
                 self.class_name(base)
