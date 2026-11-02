@@ -280,6 +280,42 @@ def _make_dropwhile(_allocate, _state):
 
 
 dropwhile = _make_dropwhile(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+def _make_compress(_allocate, _state):
+    class compress:
+        """Yield each data item whose corresponding selector is true."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, data, selectors):
+            if not isinstance(cls, type) or not issubclass(cls, __class__):
+                raise TypeError("expected a compress subclass")
+            # Acquire data first. The allocator then obtains the selectors iterator.
+            return _allocate(__class__, cls, iter(data), selectors)
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a compress instance")
+            return self
+
+        def __next__(self):
+            selectors, data = _state(__class__, self)
+            while True:
+                item = next(data)
+                if next(selectors):
+                    return item
+                del item
+
+    compress.__qualname__ = "compress"
+    return compress
+
+
+compress = _make_compress(_itertools._predicate_allocate, _itertools._predicate_state)
 del _itertools
 
 
