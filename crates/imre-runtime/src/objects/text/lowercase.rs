@@ -26,10 +26,10 @@ fn contains(class: &ClassUnicode, ch: char) -> bool {
 }
 
 static CASED: LazyLock<ClassUnicode> = LazyLock::new(|| property(r"\p{Cased}"));
+static LOWERCASE: LazyLock<ClassUnicode> = LazyLock::new(|| property(r"\p{Lowercase}"));
 
 /// True if at least one character is cased and every cased character is lowercase.
 pub(crate) fn python_islower(chars: impl Iterator<Item = char>) -> bool {
-    static LOWERCASE: LazyLock<ClassUnicode> = LazyLock::new(|| property(r"\p{Lowercase}"));
     let mut seen_lower = false;
     for ch in chars {
         if ch.is_ascii() {
@@ -44,6 +44,24 @@ pub(crate) fn python_islower(chars: impl Iterator<Item = char>) -> bool {
         }
     }
     seen_lower
+}
+
+/// Each cased run starts with an uppercase or titlecase character, followed by lowercase.
+pub(crate) fn python_istitle(chars: impl Iterator<Item = char>) -> bool {
+    let mut seen_cased = false;
+    let mut previous_cased = false;
+    for ch in chars {
+        let cased = contains(&CASED, ch);
+        if cased {
+            // Cased is the union of Lowercase, Uppercase, and Titlecase_Letter.
+            if contains(&LOWERCASE, ch) != previous_cased {
+                return false;
+            }
+            seen_cased = true;
+        }
+        previous_cased = cased;
+    }
+    seen_cased
 }
 
 /// U+03A3 is final after a cased character unless another cased character follows.
