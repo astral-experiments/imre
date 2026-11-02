@@ -117,6 +117,10 @@ impl Reader {
     pub(super) fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
         match &self.snapshot {
             Snapshot::None => return Ok(end),
+            // Absolute seek starts with an empty snapshot. After iteration there are no
+            // saved bytes to replay; use the current chunk's supported byte position.
+            // CPython's release-build estimate can extend beyond that empty input.
+            Snapshot::Previous(Some(chunk)) if chunk.bytes == 0 => {}
             Snapshot::Previous(Some(chunk)) => {
                 let used = self.text[self.chunk_start..self.cursor.max(self.chunk_start)]
                     .chars()

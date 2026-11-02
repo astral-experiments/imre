@@ -146,6 +146,10 @@ def current():
         assert text.readline() == "a\n" and next(text) == "b\n" and next(text) == "c\n"
         text.flush()
         assert text.buffer.tell() == 6 and text.tell() == 4
+        text.seek(0)
+        assert next(text) == "a\n"
+        text.flush()
+        assert isinstance(text.tell(), int)
 
     with io.TextIOWrapper(io.BytesIO("é\nXabc\n".encode()), encoding="utf-8") as text:
         text._CHUNK_SIZE = 4
