@@ -235,7 +235,7 @@ pub(in crate::dynamic::stdlib) fn check_open_string(
     check_string_arg(ctx, value, "open", name, expected)
 }
 
-fn check_string_arg(
+pub(super) fn check_string_arg(
     ctx: &mut Context,
     value: Id,
     function: &str,
