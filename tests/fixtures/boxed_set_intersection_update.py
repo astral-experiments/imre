@@ -11,6 +11,9 @@ def current():
     values = {1, 2, 3}
     alias = values
     update = values.intersection_update
+    for method in (descriptor, update):
+        assert method.__doc__ == "Update the set, keeping only elements found in it and all others."
+        assert method.__text_signature__ == "($self, /, *others)"
     assert update() is None
     assert update([2, 3, 4], iter([1, 3, 3])) is None
     assert alias == {3}
