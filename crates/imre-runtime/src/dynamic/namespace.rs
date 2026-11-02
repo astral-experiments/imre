@@ -102,7 +102,7 @@ pub(super) fn method(
                 format!("SimpleNamespace.__reduce__() takes no arguments ({} given)", rest.len()),
             ));
         }
-        let args = ctx.alloc(Value::Tuple(Vec::new()));
+        let args = ctx.heap.packed_tuple(Vec::new(), false);
         let state = ctx.instance_dictionary(object, class);
         return Ok(ctx.alloc(Value::Tuple(vec![class, args, state])));
     }
