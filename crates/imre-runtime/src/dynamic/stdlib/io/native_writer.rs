@@ -50,6 +50,7 @@ pub(super) const METHODS: &[&str] = &[
     "write",
     "truncate",
     "detach",
+    "__getstate__",
 ];
 
 /// Path and standard writers own their fd internally and have no Python FileIO to delegate to.
@@ -117,6 +118,9 @@ pub(super) fn call(
     super::argument_count(owner, name, args.len())?;
     if name == "__repr__" {
         return super::buffered_io::repr(ctx, receiver);
+    }
+    if name == "__getstate__" {
+        return super::buffered_io::getstate(ctx, receiver);
     }
     if name == "write" {
         files::output_bytes(ctx, args[0])?;

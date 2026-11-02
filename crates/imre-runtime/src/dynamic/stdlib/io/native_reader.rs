@@ -100,11 +100,7 @@ pub(super) fn call(
         return super::buffered_io::repr(ctx, receiver);
     }
     if name == "__getstate__" {
-        let class = ctx.exact_type(receiver)?;
-        return Err(Error::new(
-            "TypeError",
-            format!("cannot pickle '{}' instances", ctx.class_name(class)),
-        ));
+        return super::buffered_io::getstate(ctx, receiver);
     }
     if name == "peek"
         && let Some(&size) = args.first()

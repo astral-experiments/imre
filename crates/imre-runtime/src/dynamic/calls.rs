@@ -5240,6 +5240,7 @@ impl Context {
                         stdlib::io::NEWLINE_DECODER
                             | "BufferedRWPair"
                             | "BufferedReader"
+                            | "BufferedWriter"
                             | "IOBase"
                             | "BufferedIOBase"
                     )

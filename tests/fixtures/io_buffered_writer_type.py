@@ -1,12 +1,21 @@
 import gc
 import io
 import os
+import pickle
 import tempfile
 from _io import BufferedWriter as NativeWriter
 
 
 class Writer(io.BufferedWriter):
     pass
+
+
+class StatefulWriter(NativeWriter):
+    def __getstate__(self):
+        return self.raw.getvalue()
+
+    def __setstate__(self, data):
+        self.__init__(io.BytesIO(data))
 
 
 class KeepsRawOpen(io.BufferedWriter):
@@ -29,6 +38,20 @@ assert not issubclass(Writer, io.RawIOBase)
 assert not issubclass(Writer, io.TextIOBase)
 raises(TypeError, NativeWriter.write, object(), b"x")
 raises(TypeError, NativeWriter.__init__, object())
+
+for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+    for cls in (NativeWriter, Writer):
+        with cls(io.BytesIO()) as writer:
+            try:
+                pickle.dumps(writer, protocol)
+            except TypeError as error:
+                assert str(error) == f"cannot pickle '{cls.__name__}' instances"
+            else:
+                raise AssertionError("pickled a writer without custom state")
+    with StatefulWriter(io.BytesIO(b"state")) as writer:
+        wire = pickle.dumps(writer, protocol)
+    with pickle.loads(wire) as restored:
+        assert type(restored) is StatefulWriter and restored.raw.getvalue() == b"state"
 
 fd, path = tempfile.mkstemp()
 try:
@@ -76,6 +99,26 @@ try:
         with io.FileIO(path, "r") as source:
             assert source.read() == b"abcd"
             raises(io.UnsupportedOperation, NativeWriter, source)
+    allocate = NativeWriter.__new__
+    assert allocate is object.__new__
+    raises(TypeError, allocate, 7)
+    raises(TypeError, allocate, int)
+    for cls in (NativeWriter, Writer):
+        writer = allocate(cls)
+        assert type(writer) is cls and writer.raw is None
+        raises(ValueError, writer.write, b"")
+        raises(ValueError, writer.flush)
+        raises(ValueError, writer.close)
+        with io.FileIO(path, "w") as raw:
+            writer.__init__(raw, 8)
+            assert writer.raw is raw and writer.write(b"bare") == 4
+            assert raw.tell() == 0
+            writer.flush()
+            assert raw.tell() == 4
+            writer.close()
+            assert raw.closed
+        with io.FileIO(path, "r") as source:
+            assert source.read() == b"bare"
     with io.FileIO(path, "w") as raw:
         raises(ValueError, NativeWriter, raw, 0)
     with io.open(path, "wb") as stream:
