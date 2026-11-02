@@ -2848,6 +2848,7 @@ impl Context {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
             }
+            "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {
                 for name in [
                     "sha3_224",

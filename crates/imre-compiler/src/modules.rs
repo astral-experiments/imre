@@ -555,6 +555,7 @@ pub(crate) enum IntrinsicModule {
     Hashlib,
     Blake2,
     Sha3,
+    Md5,
     Hmac,
     Types,
     Base64,
@@ -1088,6 +1089,7 @@ impl IntrinsicModule {
             "hashlib" => Some(Self::Hashlib),
             "_blake2" => Some(Self::Blake2),
             "_sha3" => Some(Self::Sha3),
+            "_md5" => Some(Self::Md5),
             "hmac" => Some(Self::Hmac),
             "base64" => Some(Self::Base64),
             "binascii" => Some(Self::Binascii),
@@ -2188,6 +2190,9 @@ impl IntrinsicModule {
                 _ => return None,
             }),
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
+            (Self::Md5, "md5") => Intrinsic::ObjectRuntimeExport("_md5.md5"),
+            (Self::Md5, "MD5Type") => Intrinsic::ObjectRuntimeExport("_md5.MD5Type"),
+            (Self::Md5, "_GIL_MINSIZE") => Intrinsic::ObjectRuntimeExport("_md5._GIL_MINSIZE"),
             (Self::Sha3, "sha3_224") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_224"),
             (Self::Sha3, "sha3_256") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_256"),
             (Self::Sha3, "sha3_384") => Intrinsic::ObjectRuntimeExport("_sha3.sha3_384"),
@@ -2227,7 +2232,7 @@ impl IntrinsicModule {
             (Self::Blake2, "BLAKE2S_MAX_DIGEST_SIZE") => {
                 Intrinsic::ObjectRuntimeExport("_blake2.BLAKE2S_MAX_DIGEST_SIZE")
             }
-            (Self::Hashlib, "md5") => Intrinsic::NamedHash("md5"),
+            (Self::Hashlib, "md5") => Intrinsic::ObjectRuntimeExport("hashlib.md5"),
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
             (Self::Hmac, "new") => Intrinsic::ObjectRuntimeExport("hmac.new"),
             (Self::Hmac, "HMAC") => Intrinsic::ObjectRuntimeExport("hmac.HMAC"),
@@ -4813,6 +4818,7 @@ impl<'a> Loader<'a> {
                 IntrinsicModule::Ast
                     | IntrinsicModule::Blake2
                     | IntrinsicModule::Sha3
+                    | IntrinsicModule::Md5
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp

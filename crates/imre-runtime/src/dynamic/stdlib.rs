@@ -112,6 +112,7 @@ pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
         "_blake2"
+            | "_md5"
             | "_sha3"
             | "_datetime"
             | "_imre_itertools"
@@ -594,7 +595,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
-            if crate::objects::HashState::public_constructor(name).is_none()
+            if name != "md5"
+                && crate::objects::HashState::public_constructor(name).is_none()
                 && crate::objects::HashState::algorithms().any(|alg| alg == name) =>
         {
             ctx.alloc(Value::Native(format!("hashlib.{name}")))

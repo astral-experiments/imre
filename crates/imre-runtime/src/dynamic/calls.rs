@@ -5,6 +5,19 @@ use super::*;
 
 const KEY_WRAPPER: &str = "functools.KeyWrapper";
 
+/// These native result types inherit object.__new__ but reject direct allocation.
+fn nonconstructible_result_type(name: &str) -> bool {
+    matches!(
+        name,
+        HashState::CLASS
+            | HashState::XOF_CLASS
+            | HashState::OPENSSL_CLASS
+            | KEY_WRAPPER
+            | value::REGEX_PATTERN_TYPE
+            | value::REGEX_MATCH_TYPE
+    )
+}
+
 pub(super) enum MappingOperation {
     Copy,
     Update,
@@ -741,6 +754,7 @@ impl Context {
                 | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
                 | Value::IoOpen { .. }
+                | Value::HashMethod { .. }
                 | Value::Method { .. }
         ) || matches!(self.heap.get(value),Value::Weak(wr) if wr.kind != weakref::Kind::Proxy)
             || self.slot(value, "__call__").is_some()
@@ -829,6 +843,10 @@ impl Context {
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::IoMethod { .. } => true,
+                Value::HashMethod { owner, name } => {
+                    stdlib::hashlib::md5::check_receiver(self, *owner, name, receiver)?;
+                    true
+                }
                 Value::Native(name) => {
                     matches!(
                         name.as_str(),
@@ -1194,9 +1212,10 @@ impl Context {
                     name: "__init__" | "__repr__" | "__iter__" | "__next__" | "__del__",
                     ..
                 } => "method-wrapper",
-                Value::Native(_) | Value::IoOpen { .. } | Value::IoMethod { .. } => {
-                    "builtin_function_or_method"
-                }
+                Value::Native(_)
+                | Value::IoOpen { .. }
+                | Value::IoMethod { .. }
+                | Value::HashMethod { .. } => "builtin_function_or_method",
                 _ => return None,
             },
             Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
@@ -1823,6 +1842,12 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if name == "__new__" {
+            let class = self.heap.get(obj).instance_class().unwrap_or(obj);
+            if self.heap.get(class).hash_type().is_some() {
+                return Ok(self.builtin("object.__new__"));
+            }
+        }
         if let Some(&scope) = self.enum_scopes.get(&obj) {
             if let Some(value) = self.enum_base_attribute(obj, scope, name)? {
                 return Ok(value);
@@ -2586,6 +2611,29 @@ impl Context {
                 explicit,
             } => match name {
                 "__self__" => return Ok(receiver),
+                _ if let Value::HashMethod {
+                    owner,
+                    name: method,
+                } = *self.heap.get(callable) =>
+                {
+                    match name {
+                        "__name__" => return Ok(self.text(method)),
+                        "__qualname__" if method == "md5" => return Ok(self.text(method)),
+                        "__qualname__" => {
+                            return Ok(self.text(format!("{}.{method}", self.class_name(owner))));
+                        }
+                        "__module__" if method == "md5" => return Ok(self.text("_md5")),
+                        "__text_signature__" if method == "md5" => {
+                            return Ok(self.text(
+                                "($module, /, data=b'', *, usedforsecurity=True, string=None)",
+                            ));
+                        }
+                        "__doc__" if method == "md5" => return Ok(self.text(
+                            "Return a new MD5 hash object; optionally initialized with a string.",
+                        )),
+                        _ => {}
+                    }
+                }
                 _ if matches!(self.heap.get(callable), Value::IoOpen { .. }) => {
                     let original = self.builtin("open");
                     return self.lookup_attr(original, name);
@@ -2712,15 +2760,42 @@ impl Context {
                     _ => {}
                 }
             }
+            Value::HashMethod {
+                owner,
+                name: member,
+            } => match name {
+                "__name__" => return Ok(self.text(member)),
+                "__objclass__" => return Ok(owner),
+                "__qualname__" => {
+                    return Ok(self.text(format!("{}.{member}", self.class_name(owner))));
+                }
+                "__get__" => {
+                    let callable = self.builtin("method_descriptor.__get__");
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: obj,
+                        explicit: false,
+                    }));
+                }
+                _ => {}
+            },
             Value::GetSetDescriptor {
-                owner, name: field, ..
-            } if matches!(owner, "int" | "typing.Union")
+                get,
+                owner,
+                name: field,
+                ..
+            } if matches!(owner, "int" | "typing.Union" | stdlib::hashlib::md5::CLASS)
                 || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
             {
                 match name {
-                    "__objclass__" => return Ok(self.builtin(owner)),
+                    "__objclass__" => {
+                        if let Value::HashMethod { owner, .. } = *self.heap.get(get) {
+                            return Ok(owner);
+                        }
+                        return Ok(self.builtin(owner));
+                    }
                     "__name__" => return Ok(self.text(field)),
                     "__doc__" if owner == "int" => {
                         return Ok(
@@ -2734,7 +2809,7 @@ impl Context {
                     }
                     "__get__" | "__set__" | "__delete__"
                         if name == "__get__"
-                            || matches!(owner, "int" | "typing.Union")
+                            || matches!(owner, "int" | "typing.Union" | stdlib::hashlib::md5::CLASS)
                             || HashState::is_provider_class(owner) =>
                     {
                         let symbol = format!("getset_descriptor.{name}");
@@ -2747,6 +2822,11 @@ impl Context {
                     }
                     _ => {}
                 }
+            }
+            Value::Native(ref class)
+                if name == "__new__" && nonconstructible_result_type(class) =>
+            {
+                return Ok(self.builtin("object.__new__"));
             }
             Value::Native(ref class) if let Some(owner) = HashState::provider_class(class) => {
                 let (module, short) = owner.rsplit_once('.').unwrap();
@@ -2831,14 +2911,6 @@ impl Context {
                     "MISSING" if class == "_contextvars.Token" => return Ok(self.token_missing),
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
                         return Ok(NONE);
-                    }
-                    "__new__"
-                        if matches!(
-                            class.as_str(),
-                            KEY_WRAPPER | value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE
-                        ) =>
-                    {
-                        return Ok(self.builtin("object.__new__"));
                     }
                     _ if class == KEY_WRAPPER
                         && BuiltinDescriptor::lookup(&format!("{class}.{name}")).is_some() =>
@@ -3973,6 +4045,12 @@ impl Context {
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
+        if let Some(class) = self.heap.get(obj).hash_type() {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot set '{name}' attribute of immutable type '{class}'"),
+            ));
+        }
         self.check_thread_reporting_binding(obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
@@ -4606,6 +4684,12 @@ impl Context {
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
         stdlib::io::check_class_write(self, obj, name)?;
+        if let Some(class) = self.heap.get(obj).hash_type() {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot set '{name}' attribute of immutable type '{class}'"),
+            ));
+        }
         if let Value::Native(class) = self.heap.get(obj)
             && (builtins::is_static_gc_type(class)
                 || stdlib::itertools::cursor_type(class).is_some()
@@ -5135,16 +5219,16 @@ impl Context {
                 ),
             ));
         }
+        if let Some(name) = self.heap.get(class).hash_type() {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot create '{name}' instances"),
+            ));
+        }
         let object = self.builtin("object");
         if let Value::Native(name) = self.heap.get(class)
-            && matches!(
-                name.as_str(),
-                KEY_WRAPPER
-                    | value::REGEX_PATTERN_TYPE
-                    | value::REGEX_MATCH_TYPE
-                    | stdlib::os::scandir::ENTRY
-                    | "_io._BytesIOBuffer"
-            )
+            && (nonconstructible_result_type(name)
+                || matches!(name.as_str(), stdlib::os::scandir::ENTRY | "_io._BytesIOBuffer"))
         {
             return Err(Error::new(
                 "TypeError",
@@ -5368,6 +5452,12 @@ impl Context {
             };
             return Err(non_callable_error(name));
         }
+        if let Some(name) = self.heap.get(callable).hash_type() {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot create '{name}' instances"),
+            ));
+        }
         let target = match self.heap.get(callable) {
             Value::Native(name) => Value::Native(copy_label(name)?),
             Value::Class {
@@ -5377,6 +5467,7 @@ impl Context {
                 namedtuple_fields,
                 metaclass,
                 io_kind,
+                hash_type,
             } => {
                 let mut copied_name = String::new();
                 copied_name
@@ -5391,6 +5482,7 @@ impl Context {
                 Value::Class {
                     metaclass: *metaclass,
                     io_kind: *io_kind,
+                    hash_type: *hash_type,
                     name: copied_name,
                     scope: *scope,
                     ancestors: copied_ancestors,
@@ -5565,22 +5657,10 @@ impl Context {
             {
                 builtins::call(self, &name, &args, &kwargs)
             }
-            Value::Native(name)
-                if matches!(
-                    name.as_str(),
-                    HashState::CLASS
-                        | HashState::XOF_CLASS
-                        | HashState::OPENSSL_CLASS
-                        | KEY_WRAPPER
-                        | value::REGEX_PATTERN_TYPE
-                        | value::REGEX_MATCH_TYPE
-                ) =>
-            {
-                Err(Error::new(
-                    "TypeError",
-                    format!("cannot create '{name}' instances"),
-                ))
-            }
+            Value::Native(name) if nonconstructible_result_type(&name) => Err(Error::new(
+                "TypeError",
+                format!("cannot create '{name}' instances"),
+            )),
             Value::Native(name) => stdlib::call(self, &name, &args, &kwargs)
                 .map_err(|error| stdlib::io::qualify_error(self, error, None)),
             Value::StaticMethod { callable, .. } => self.call(callable, args, kwargs),
@@ -5593,6 +5673,9 @@ impl Context {
             }
             Value::CodecEncoder(codec) => stdlib::codecs::entry_encode(self, codec, &args, &kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
+            Value::HashMethod { owner, name } => {
+                stdlib::hashlib::md5::call(self, owner, name, &args, &kwargs)
+            }
             Value::IoOpen {
                 reader,
                 writer,
