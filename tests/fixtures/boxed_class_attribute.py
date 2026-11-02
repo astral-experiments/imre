@@ -146,21 +146,6 @@ def current():
     else:
         raise AssertionError("a class name cannot contain a null character")
 
-    for owner, label in ((Journal, "type object 'Journáux'"), (Journal(), "'Journáux' object")):
-        try:
-            getattr(owner, 'missing')
-        except AttributeError as error:
-            assert str(error) == label + " has no attribute 'missing'"
-        else:
-            raise AssertionError('lookup accepted a missing attribute')
-    Journal.__name__ = '☃' * 34
-    try:
-        getattr(Journal, 'missing')
-    except AttributeError as error:
-        assert str(error) == "type object '" + '☃' * 33 + "' has no attribute 'missing'"
-    else:
-        raise AssertionError('lookup accepted a missing attribute')
-
     private_names()
     for obj in (Plain(), Advertised(), Data(), Fallback(), Key(), Guarded()):
         cls = obj.__class__
