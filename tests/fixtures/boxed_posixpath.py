@@ -5,7 +5,7 @@ import posix
 import posixpath
 from os import altsep, fspath, linesep, pathsep, sep
 from os.path import altsep as path_altsep, pathsep as path_list_sep, sep as path_sep
-from posixpath import normpath
+from posixpath import abspath, normpath
 
 
 class Path:
@@ -112,6 +112,17 @@ def current():
     assert os.path.join(Path("root"), "dirA") == "root/dirA"
     assert os.path.join("root", Path("/other"), Path("child")) == "/other/child"
     assert os.path.isabs(Path(b"/test"))
+    assert abspath is os.path.abspath is posixpath.abspath
+    assert abspath(path=Path(b"sub/../\xff")) == os.getcwdb().rstrip(b"/") + b"/\xff"
+    assert abspath(Path(os.fsdecode(b"//host/\xff/./name/.."))) == os.fsdecode(b"//host/\xff")
+    assert abspath(Raw(b"///host/../../dir")) == b"/dir"
+
+    class Rooted(Text):
+        def startswith(self, sep):
+            assert sep == "/"
+            return True
+
+    assert abspath(Rooted("a/../relative")) == "relative"
     assert os.path.relpath(Path("/a/./b"), start="/a/c") == "../b"
     assert os.path.relpath(Path(b"/a/\xff"), start=b"/a") == b"\xff"
     try:
