@@ -237,31 +237,80 @@ impl Context {
         }
     }
 
-    pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
-        if let Some((mut loc, frame)) = self.heap.trace_location() {
-            if let Some(&[line, start, split, end]) = span {
-                loc.line = line;
-                loc.span = Some([start, split, end]);
-            }
-            let active = self.heap.active_exception();
-            if error.context == NONE
-                && active != NONE
-                && error
-                    .trace
-                    .as_ref()
-                    .is_none_or(|trace| trace.frames.is_empty() && trace.instance != Some(active))
-            {
-                error.context = active;
-            }
-            if let Some(trace) = error.try_tracing()
-                && trace.frames.try_reserve(1).is_ok()
-            {
-                trace.frames.push((loc, frame));
-                return;
-            }
-            let original = std::mem::replace(error, Error::new("MemoryError", ""));
-            error.context = self.raised_instance(original);
+    /// Return the same Python frame to introspection and traceback construction.
+    pub(super) fn active_frame(&mut self, depth: usize) -> Result<Option<(Location, Id)>> {
+        let Some((index, _)) = self
+            .heap
+            .frames
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, frame)| frame.code != NONE)
+            .nth(depth)
+        else {
+            return Ok(None);
+        };
+        self.materialize_frame(index)
+    }
+
+    fn materialize_frame(&mut self, index: usize) -> Result<Option<(Location, Id)>> {
+        let frame = &self.heap.frames[index];
+        if frame.code == NONE {
+            return Ok(None);
         }
+        let Some(location) = frame.location.clone() else {
+            return Ok(None);
+        };
+        if let Some(object) = frame.object {
+            return Ok(Some((location, object)));
+        }
+        let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
+        let globals = self.module_globals(scope)?;
+        let object = self.alloc(Value::PythonFrame {
+            scope,
+            code,
+            globals,
+            lineno: location.line,
+        });
+        if let FrameOwner::Generator(id) = owner {
+            let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
+                unreachable!()
+            };
+            *frame = Some(object);
+        }
+        self.heap.frames[index].object = Some(object);
+        Ok(Some((location, object)))
+    }
+
+    pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
+        let failure = match self.materialize_frame(self.heap.frames.len() - 1) {
+            Err(failure) => failure,
+            Ok(None) => return,
+            Ok(Some((mut loc, frame))) => {
+                if let Some(&[line, start, split, end]) = span {
+                    loc.line = line;
+                    loc.span = Some([start, split, end]);
+                }
+                let active = self.heap.active_exception();
+                if error.context == NONE
+                    && active != NONE
+                    && error.trace.as_ref().is_none_or(|trace| {
+                        trace.frames.is_empty() && trace.instance != Some(active)
+                    })
+                {
+                    error.context = active;
+                }
+                if let Some(trace) = error.try_tracing()
+                    && trace.frames.try_reserve(1).is_ok()
+                {
+                    trace.frames.push((loc, frame));
+                    return;
+                }
+                Error::new("MemoryError", "")
+            }
+        };
+        let original = std::mem::replace(error, failure);
+        error.context = self.raised_instance(original);
     }
 
     /// Preserve identity of an observed traceback head and reuse its tail on a later raise.
@@ -690,6 +739,7 @@ pub(super) enum Value {
     Code(CodeObject),
     Generator {
         owner: FrameOwner,
+        frame: Option<Id>,
         code: Id,
         scope: Id,
         iterators: Vec<Id>,
@@ -749,6 +799,7 @@ pub(super) enum Value {
     PythonFrame {
         scope: Id,
         code: Id,
+        globals: Id,
         lineno: u32,
     },
     Method {
@@ -1172,6 +1223,7 @@ impl Value {
             }
             Self::Generator {
                 owner,
+                frame,
                 code,
                 scope,
                 iterators,
@@ -1179,6 +1231,7 @@ impl Value {
                 ..
             } => {
                 visit.extend([*code, *scope, owner.root()]);
+                visit.extend(*frame);
                 visit.extend(iterators);
                 visit.extend(
                     protected
@@ -1283,7 +1336,12 @@ impl Value {
             }
             Self::Raised(error) => visit.extend(error.roots()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
-            Self::PythonFrame { scope, code, .. } => visit.extend([*scope, *code]),
+            Self::PythonFrame {
+                scope,
+                code,
+                globals,
+                ..
+            } => visit.extend([*scope, *code, *globals]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::RegexPattern(pattern) => visit.push(pattern.source),
@@ -1691,6 +1749,7 @@ struct InternedString {
 /// A Python call observes its mutable function, while bare code keeps its entry module.
 #[derive(Clone, Copy)]
 pub(super) enum FrameOwner {
+    Generator(Id),
     Function(Id),
     Module(Id),
 }
@@ -1698,7 +1757,7 @@ pub(super) enum FrameOwner {
 impl FrameOwner {
     fn root(self) -> Id {
         match self {
-            Self::Function(id) | Self::Module(id) => id,
+            Self::Function(id) | Self::Module(id) | Self::Generator(id) => id,
         }
     }
 }
@@ -2086,8 +2145,14 @@ impl Heap {
             .expect("live native handle")
     }
     pub fn enter(&mut self, scope: Id, code: Id, owner: FrameOwner) {
-        self.frames
-            .push(Frame::new(scope, code, owner, self.active_exception()));
+        let mut activation = Frame::new(scope, code, owner, self.active_exception());
+        if let FrameOwner::Generator(id) = owner {
+            let Value::Generator { frame, .. } = self.get(id) else {
+                unreachable!()
+            };
+            activation.object = *frame;
+        }
+        self.frames.push(activation);
     }
     /// Release the activation and report whether a returning function may have dropped a writer.
     pub fn leave(&mut self, value: Id, returning: bool) -> bool {
@@ -2256,22 +2321,6 @@ impl Heap {
         std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
     }
 
-    /// Materialize one frame per activation only when an exception unwinds it.
-    pub fn trace_location(&mut self) -> Option<(Location, Id)> {
-        let frame = self.frames.last()?;
-        let location = frame.location.clone()?;
-        if let Some(object) = frame.object {
-            return Some((location, object));
-        }
-        let object = self.alloc(Value::PythonFrame {
-            scope: frame.scope,
-            code: frame.code,
-            lineno: location.line,
-        });
-        self.frames.last_mut().unwrap().object = Some(object);
-        Some((location, object))
-    }
-
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
     pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
         let Value::PythonFrame { scope, .. } = *self.get(value) else {
@@ -2305,7 +2354,18 @@ impl Heap {
     }
 
     pub fn caller_module_at(&self, depth: usize) -> Option<Id> {
-        Some(match self.frames.iter().rev().nth(depth)?.owner {
+        let mut owner = self.frames.iter().rev().nth(depth)?.owner;
+        if let FrameOwner::Generator(id) = owner {
+            let Value::Generator {
+                owner: function, ..
+            } = self.get(id)
+            else {
+                unreachable!()
+            };
+            owner = *function;
+        }
+        Some(match owner {
+            FrameOwner::Generator(_) => unreachable!("a generator belongs to a function or module"),
             FrameOwner::Module(module) => module,
             FrameOwner::Function(function) => {
                 let Value::Function { fields, .. } = self.get(function) else {

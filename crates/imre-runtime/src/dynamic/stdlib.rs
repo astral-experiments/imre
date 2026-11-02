@@ -978,6 +978,38 @@ pub(super) fn call(
         builtins::update_dict(ctx, dict, args.get(1).copied(), kwargs)?;
         return Ok(if receiver.is_some() { NONE } else { dict });
     }
+    if name == "sys._getframe" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "sys._getframe() takes no keyword arguments",
+            ));
+        }
+        let depth = match &args[1..] {
+            [] => 0,
+            [value] => ctx
+                .index_integer(*value)?
+                .to_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new("OverflowError", "Python int too large to convert to C int")
+                })?,
+            extra => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("_getframe expected at most 1 argument, got {}", extra.len()),
+                ));
+            }
+        };
+        let (_, frame) = ctx
+            .active_frame(depth.max(0) as usize)?
+            .ok_or_else(|| Error::new("ValueError", "call stack is not deep enough"))?;
+        if !ctx.audit_hooks.is_empty() {
+            let event = ctx.text("sys._getframe");
+            audit::emit(ctx, &[event, frame], &[])?;
+        }
+        return Ok(frame);
+    }
     if name == "sys.audit" {
         return audit::emit(ctx, &args[1..], kwargs);
     }

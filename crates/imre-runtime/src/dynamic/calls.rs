@@ -1647,6 +1647,7 @@ impl Context {
                 let owner = self.builtin("frame");
                 return self.bind_attribute(method, obj, owner);
             }
+            Value::PythonFrame { globals, .. } if name == "f_globals" => return Ok(globals),
             Value::PythonFrame { code, .. } if name == "f_code" => return Ok(code),
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
                 return Ok(self.int(i64::from(lineno)));
@@ -1972,6 +1973,9 @@ impl Context {
                             "__qualname__" if module_bound => method.rsplit('.').next(),
                             "__module__" if module_bound => {
                                 method.rsplit_once('.').map(|(module, _)| module)
+                            }
+                            "__text_signature__" if method == "sys._getframe" => {
+                                Some("($module, depth=0, /)")
                             }
                             "__text_signature__" if method == "sys.audit" => {
                                 Some("($module, event, /, *args)")
