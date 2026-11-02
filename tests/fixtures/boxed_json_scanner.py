@@ -35,6 +35,12 @@ def current():
     values, end = default_scan(document, 2)
     assert end == document.index(']') + 1
     assert values[0] is values[1] is json.decoder._CONSTANTS['NaN']
+    constants = json.decoder._CONSTANTS
+    del json.decoder._CONSTANTS
+    try:
+        assert json.JSONDecoder(parse_constant=str).decode("NaN") == "NaN"
+    finally:
+        json.decoder._CONSTANTS = constants
     try:
         default_scan('é [ ?', 2)
     except StopIteration as error:
