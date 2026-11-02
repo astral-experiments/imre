@@ -158,6 +158,7 @@ impl BuiltinDescriptor {
                 owner,
                 name,
                 method: !name.starts_with("__")
+                    || (owner == "list" && name == "__getitem__")
                     || (owner == defaultdict::CLASS && matches!(name, "__copy__" | "__missing__"))
                     || matches!(
                         name,
@@ -567,6 +568,8 @@ impl BuiltinDescriptor {
                     ) => "($self, /)",
                     ("mro", "__doc__") => "Return a type's method resolution order.",
                     ("mro", _) => "($self, /)",
+                    ("__getitem__", "__doc__") if self.owner == "list" => "Return self[index].",
+                    ("__getitem__", _) if self.owner == "list" => "($self, index, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

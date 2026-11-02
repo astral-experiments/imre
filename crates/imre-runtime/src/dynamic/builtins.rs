@@ -349,8 +349,8 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const LIST_METHODS: &[&str] = &[
-    "__add__", "__iadd__", "__init__", "__repr__", "append", "clear", "copy", "count", "extend",
-    "index", "insert", "pop", "remove", "reverse", "sort",
+    "__add__", "__getitem__", "__iadd__", "__init__", "__repr__", "append", "clear", "copy",
+    "count", "extend", "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
 const FROZENSET_OPERATORS: &[&str] = &[

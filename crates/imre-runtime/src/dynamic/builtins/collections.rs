@@ -772,6 +772,7 @@ pub(super) fn method(
             }
         };
         return match method {
+            "__getitem__" => ctx.sequence_subscript(receiver, one_arg()?),
             "append" => {
                 let value = one_arg()?;
                 let items = list_items_mut(ctx, receiver)?;
