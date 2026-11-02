@@ -10,6 +10,7 @@ mod blake2;
 pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
     match ctx.heap.get(ctx.scalar_value(id)) {
         Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
+        Value::Array(array) => Ok(array.as_bytes()),
         Value::Str(_) => Err(Error::new(
             "TypeError",
             "Strings must be encoded before hashing",
