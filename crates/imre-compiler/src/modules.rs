@@ -1398,6 +1398,7 @@ impl IntrinsicModule {
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
             (Self::Sys, "warnoptions") => Intrinsic::ObjectRuntimeExport("sys.warnoptions"),
             (Self::Sys, "hash_info") => Intrinsic::ObjectRuntimeExport("sys.hash_info"),
+            (Self::Sys, "monitoring") => Intrinsic::ObjectRuntimeExport("sys.monitoring"),
             (Self::Sys, "stdout") => Intrinsic::Stdout,
             (Self::Sys, "__stdout__") => Intrinsic::OriginalStdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,

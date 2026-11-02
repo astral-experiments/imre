@@ -1796,6 +1796,17 @@ def report(text):
             "reference = union.__args__[-1]\n"
             "print(type(reference).__name__, reference.__forward_arg__)",
         )
+        monitoring_entry = root / "monitoring_entry.py"
+        (root / "monitoring_helper.py").write_text(
+            "from sys import monitoring\ndef line_mask():\n    return monitoring.events.LINE\n"
+        )
+        for program in (
+            "from monitoring_helper import line_mask\nprint(line_mask())\n",
+            "import sys\nprint(sys.monitoring.events.LINE)\n",
+            "from sys import monitoring\nprint(monitoring.events.LINE)\n",
+        ):
+            monitoring_entry.write_text(program)
+            compare("-EB", monitoring_entry, native_args=("run", monitoring_entry, "--quiet"))
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         compare("-IB", fixtures / "boxed_unittest_patch.py")
         call_args = fixtures / "unittest_mock_call_args.py"
@@ -1829,6 +1840,7 @@ def report(text):
             "boxed_sys_hash_info.py",
             "boxed_sys_flags.py",
             "boxed_sys_jit.py",
+            "boxed_sys_monitoring_events.py",
             "boxed_bytes_add.py",
             "boxed_binary_iterators.py",
             "boxed_array.py",
