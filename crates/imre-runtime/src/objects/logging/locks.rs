@@ -360,10 +360,10 @@ mod tests {
     #[test]
     fn reset_leaves_a_parked_waiter_enrolled_until_timeout() {
         let mut lock = Arc::new(HandlerLock::default());
-        assert!(lock.acquire(true, None).unwrap());
+        assert_eq!(lock.acquire(true, None).ok(), Some(true));
         thread::scope(|scope| {
             let peer = Arc::clone(&lock);
-            let waiter = scope.spawn(move || peer.acquire(true, Some(Duration::from_secs(1))));
+            let waiter = scope.spawn(move || peer.acquire(true, Some(Duration::from_secs(1))).ok());
             let started = std::time::Instant::now();
             while !lock.state.lock().unwrap().parked {
                 assert!(started.elapsed() < Duration::from_secs(5));
@@ -371,13 +371,13 @@ mod tests {
             }
 
             HandlerLock::at_fork_reinit(&mut lock);
-            assert!(lock.acquire(false, None).unwrap());
+            assert_eq!(lock.acquire(false, None).ok(), Some(true));
             // A zero-timeout probe must not re-arm the cleared parking bit.
             let peer = Arc::clone(&lock);
-            let probe = scope.spawn(move || peer.acquire(true, Some(Duration::ZERO)));
-            assert!(!probe.join().unwrap().unwrap());
-            lock.release().unwrap();
-            assert!(!waiter.join().unwrap().unwrap());
+            let probe = scope.spawn(move || peer.acquire(true, Some(Duration::ZERO)).ok());
+            assert_eq!(probe.join().unwrap(), Some(false));
+            assert!(lock.release().is_ok());
+            assert_eq!(waiter.join().unwrap(), Some(false));
         });
     }
 
