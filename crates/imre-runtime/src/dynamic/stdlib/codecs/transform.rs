@@ -224,13 +224,24 @@ pub(in crate::dynamic) fn decode_named(
         let Some(entry) = lookup_transform(ctx, &name, native)? else {
             return native_decode(ctx, wide, input, errors);
         };
-        let owner = if matches!(ctx.heap.get(input), Value::Bytes(_)) {
-            input
+        let storage = ctx.scalar_value(input);
+        let view = if let Value::ByteArray(bytes) = ctx.heap.get(storage) {
+            ctx.ownerless_byte_view(storage, 0, bytes.len(), true)?
         } else {
-            let bytes = ctx.bytes_like(input)?.to_vec();
-            ctx.alloc(Value::Bytes(bytes))
+            let owner = if matches!(ctx.heap.get(storage), Value::Bytes(_)) {
+                storage
+            } else {
+                let bytes = ctx.bytes_like(input)?.to_vec();
+                ctx.alloc(Value::Bytes(bytes))
+            };
+            ctx.alloc(Value::MemoryView {
+                owner: Some(owner),
+                anonymous: true,
+                layout: None,
+                readonly: true,
+                hash: None,
+            })
         };
-        let view = ctx.alloc(Value::MemoryView { owner: Some(owner), anonymous: true, hash: None });
         let result = apply(ctx, entry, "decode", view, &name, errors, true)?;
         if ctx.string_storage(result).is_none() {
             return Err(type_error(format!("'{name}' decoder returned '{}' instead of 'str'; use codecs.decode() to decode to arbitrary types", ctx.type_name(result))));
