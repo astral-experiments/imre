@@ -360,7 +360,7 @@ impl Context {
         let input = self.scalar_value(input);
         if !matches!(
             self.heap.get(input),
-            Value::ByteArray(_) | Value::MemoryView { .. }
+            Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. }
         ) {
             return convert(self);
         }
