@@ -4402,7 +4402,7 @@ impl Context {
         Ok(merged)
     }
 
-    fn extend_source_call_args(
+    fn extend_source_items(
         &mut self,
         args: &mut Vec<Id>,
         iterable: Id,
@@ -4583,11 +4583,36 @@ impl Context {
                 if let Some(&id) = code.literals.get(&v.range()) {
                     return Ok(id);
                 }
-                let items = v
-                    .elts
-                    .iter()
-                    .map(|x| eval(self, x))
-                    .collect::<Result<_>>()?;
+                let mut items = Vec::with_capacity(v.elts.len());
+                for item in &v.elts {
+                    if let Expr::Starred(star) = item {
+                        let mark = self.heap.temporary_mark();
+                        let first = items.len();
+                        let expanded = eval(self, &star.value)
+                            .and_then(|iterable| self.extend_source_items(&mut items, iterable, None));
+                        // Only yielded values outlive this operand. Release the iterator before
+                        // evaluating the next tuple element or dispatching a weakref callback.
+                        let collect = self.heap.discard_truth_operands(mark);
+                        match &expanded {
+                            Ok(()) => {
+                                for &value in &items[first..] {
+                                    self.heap.keep(value);
+                                }
+                            }
+                            Err(error) => {
+                                for root in error.roots() {
+                                    self.heap.keep(root);
+                                }
+                            }
+                        }
+                        if collect {
+                            self.collect_unreachable();
+                        }
+                        expanded?;
+                    } else {
+                        items.push(eval(self, item)?);
+                    }
+                }
                 Ok(self
                     .heap
                     .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))
@@ -4684,7 +4709,7 @@ impl Context {
                             // CALL_FUNCTION_EX consumes a sole iterable after evaluating keywords.
                             sole_star = Some(value);
                         } else {
-                            self.extend_source_call_args(&mut args, value, None)?;
+                            self.extend_source_items(&mut args, value, None)?;
                         }
                     } else {
                         args.push(eval(self, arg)?);
@@ -4702,7 +4727,7 @@ impl Context {
                     None
                 };
                 if let Some(value) = sole_star {
-                    self.extend_source_call_args(&mut args, value, Some(f))?;
+                    self.extend_source_items(&mut args, value, Some(f))?;
                 }
                 if let Some(mapping) = mapping {
                     kwargs = self.keyword_args(mapping)?;
