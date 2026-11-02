@@ -3676,6 +3676,49 @@ impl Context {
                 });
             }
         }
+        if !inplace
+            && op == "|"
+            && (matches!(self.heap.get(a), Value::MappingProxy(_))
+                || matches!(self.heap.get(b), Value::MappingProxy(_)))
+        {
+            // Each mappingproxy number slot removes one layer from both operands.
+            // Keep their owners alive across Python calls and iterate through nested proxies.
+            self.heap.reserve_temporaries(2)?;
+            self.heap.keep(a);
+            self.heap.keep(b);
+            let (mut left, mut right) = (a, b);
+            loop {
+                let right_mapping = match *self.heap.get(right) {
+                    Value::MappingProxy(mapping) => Some(mapping),
+                    _ => None,
+                };
+                if let Value::MappingProxy(mapping) = *self.heap.get(left) {
+                    left = mapping;
+                } else if right_mapping.is_some() {
+                    // Union types and dictionary views already accept the original right operand.
+                    if matches!(
+                        self.heap.get(left),
+                        Value::Union(_) | Value::TypeVar(_) | Value::DictView {
+                            kind: value::DictViewKind::Keys | value::DictViewKind::Items,
+                            ..
+                        }
+                    ) {
+                        break;
+                    }
+                    if let Some(result) = self.operator_slot(left, "__or__", right)? {
+                        return Ok(result);
+                    }
+                } else {
+                    break;
+                }
+                if let Some(mapping) = right_mapping {
+                    right = mapping;
+                }
+            }
+            if (left, right) != (a, b) {
+                return self.binary("|", left, right);
+            }
+        }
         if op == "|" && matches!(self.heap.get(a), Value::Union(_) | Value::TypeVar(_)) {
             return super::union::make(self, &[a, b]);
         }

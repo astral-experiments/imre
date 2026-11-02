@@ -46,4 +46,38 @@ def current():
         pass
     else:
         raise AssertionError("accepted a dict as a proxy descriptor receiver")
+    assert view | {'a': 3} == {'a': 3, 'b': 2}
+    assert {'a': 3} | view == values
+    assert values == {'a': 1, 'b': 2}
+
+    class Left:
+        def __or__(self, other):
+            return 'left' if type(other) is MappingProxyType else NotImplemented
+
+    class UnionMapping(dict):
+        def __or__(self, other):
+            return 'left backing', other
+
+        def __ror__(self, other):
+            return 'right backing', other
+
+    mapping = UnionMapping()
+    proxy = MappingProxyType(mapping)
+    assert Left() | proxy == 'left'
+    assert proxy | view == ('left backing', values)
+    assert {} | proxy == ('right backing', {})
+    side, received = proxy | MappingProxyType(view)
+    assert side == 'left backing' and received is view
+    assert values.keys() | proxy == {'a', 'b'}
+    seen = []
+
+    class Fallback:
+        def __or__(self, other):
+            seen.append(other)
+            return NotImplemented
+
+    fallback = Fallback()
+    assert fallback | MappingProxyType(proxy) == ('right backing', fallback)
+    assert len(seen) == 3
+    assert type(seen[0]) is MappingProxyType and seen[1] is proxy and seen[2] is mapping
     return 0
