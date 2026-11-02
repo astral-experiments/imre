@@ -4,6 +4,23 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "json" => Some((
+            "json/__init__.py",
+            concat!(
+                "r\"\"\"",
+                include_str!("../../stdlib/docstrings/json.txt"),
+                "\"\"\"\n",
+                include_str!("../../stdlib/json/boxed_init.py"),
+            ),
+        )),
+        "json.decoder" => Some((
+            "json/decoder.py",
+            include_str!("../../stdlib/json/decoder.py"),
+        )),
+        "json.scanner" => Some((
+            "json/scanner.py",
+            include_str!("../../stdlib/json/scanner.py"),
+        )),
         "traceback" => Some((
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),
