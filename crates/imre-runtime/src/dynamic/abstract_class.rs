@@ -140,6 +140,7 @@ impl Context {
             "__instancecheck__",
             "__subclasscheck__",
             "_abc_registry_clear",
+            "_abc_caches_clear",
         ] {
             let check = self.builtin(&format!("abc.{name}"));
             self.bind(scope, name, check);

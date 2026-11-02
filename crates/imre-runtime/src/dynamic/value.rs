@@ -2130,8 +2130,8 @@ pub(super) struct Heap {
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
     pub(super) abc_registrations: Vec<[Id; 2]>,
-    // Protocol subclass results use weak keys just like ABC registrations.
-    pub(super) protocol_subclass_cache: HashMap<[Id; 2], bool>,
+    // ABC subclass results use weak keys just like ABC registrations.
+    pub(super) abc_subclass_cache: HashMap<[Id; 2], bool>,
     // Collecting weak registration pairs must not roll back the invalidation counter.
     pub(super) abc_cache_token: u64,
     free_head: usize,
@@ -2224,7 +2224,7 @@ impl Heap {
             linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
-            protocol_subclass_cache: HashMap::new(),
+            abc_subclass_cache: HashMap::new(),
             abc_cache_token: 0,
             free_head: END,
             free_count: 0,
@@ -3721,7 +3721,7 @@ impl Heap {
         self.abc_registrations.retain(|&[owner, member]| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
-        self.protocol_subclass_cache.retain(|&[owner, member], _| {
+        self.abc_subclass_cache.retain(|&[owner, member], _| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
         // Vacant slots supply their own free-list links. A sweep can therefore
