@@ -6,11 +6,11 @@ from subprocess import Popen
 
 
 def ignored_signals(restore):
-    with Popen(["/bin/cat", "/proc/self/status"], stdout=subprocess.PIPE,
+    with Popen(["cat", "/proc/self/status"], stdout=subprocess.PIPE,
                restore_signals=restore) as child:
         data, _ = child.communicate()
         assert child.returncode == 0
-    return next(line for line in data.split(b"\\n") if line.startswith(b"SigIgn:"))
+    return next(line for line in data.split(b"\n") if line.startswith(b"SigIgn:"))
 
 
 def current():
