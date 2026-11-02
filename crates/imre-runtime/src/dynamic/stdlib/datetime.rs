@@ -38,6 +38,8 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__format__",
                 "__repr__",
                 "__str__",
+                "ctime",
+                "isoweekday",
                 "toordinal",
                 "weekday",
                 "timetuple",
@@ -46,7 +48,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
         "datetime.datetime" => (
             "datetime.datetime",
             &["hour", "minute", "second", "microsecond", "fold", "tzinfo"],
-            &["__repr__", "__str__", "timetuple"],
+            &["__repr__", "__str__", "ctime", "timetuple"],
         ),
         "datetime.time" => (
             "datetime.time",
@@ -551,6 +553,9 @@ pub(super) fn call(
         | "date.timetuple"
         | "date.toordinal"
         | "datetime.toordinal"
+        | "date.ctime"
+        | "datetime.ctime"
+        | "date.isoweekday"
         | "date.weekday"
         | "datetime.weekday"
         | "timedelta.total_seconds" => {
@@ -611,6 +616,14 @@ pub(super) fn call(
                 }
                 "total_seconds" => ctx.alloc(Value::Float(value.seconds())),
                 "toordinal" => ctx.int(value.ordinal()),
+                "ctime" => {
+                    let mut fields = value.timetuple();
+                    if class == "date" {
+                        fields[3..6].fill(0);
+                    }
+                    ctx.text(super::time::ctime_text(fields, 4))
+                }
+                "isoweekday" => ctx.int((value.ordinal() - 1) % 7 + 1),
                 "weekday" => ctx.int((value.ordinal() - 1) % 7),
                 "timetuple" => {
                     let mut fields = value.timetuple();
