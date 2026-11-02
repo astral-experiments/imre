@@ -313,6 +313,24 @@ impl Drop for AddrInfoList {
     }
 }
 
+fn check_gai(code: i32) -> Result<()> {
+    if code == libc::EAI_SYSTEM {
+        return Err(errno_error(io::Error::last_os_error()));
+    }
+    if code != 0 {
+        // SAFETY: gai_strerror returns a static terminated message for a resolver error code.
+        let message = unsafe { CStr::from_ptr(libc::gai_strerror(code)) }.to_string_lossy();
+        return Err(Error::from_errno(
+            Kind::GaiError,
+            code,
+            &message,
+            None,
+            None,
+        ));
+    }
+    Ok(())
+}
+
 fn address_list(
     host: Option<&[u8]>,
     service: Option<&[u8]>,
@@ -347,20 +365,7 @@ fn address_list(
             &raw mut res,
         )
     };
-    if code == libc::EAI_SYSTEM {
-        return Err(errno_error(io::Error::last_os_error()));
-    }
-    if code != 0 {
-        // SAFETY: gai_strerror returns a static terminated message for a getaddrinfo result.
-        let message = unsafe { CStr::from_ptr(libc::gai_strerror(code)) }.to_string_lossy();
-        return Err(Error::from_errno(
-            Kind::GaiError,
-            code,
-            &message,
-            None,
-            None,
-        ));
-    }
+    check_gai(code)?;
     if res.is_null() {
         return Err(Error::new(
             Kind::OSError,
@@ -416,6 +421,67 @@ pub(crate) fn getaddrinfo(
         cursor = entry.ai_next;
     }
     Ok(rows)
+}
+
+/// Resolve the numeric sockaddr first, then let the platform interpret the requested NI flags.
+pub(crate) fn getnameinfo(
+    host: &[u8],
+    port: i32,
+    flowinfo: Option<u32>,
+    scope_id: u32,
+    flags: i32,
+) -> Result<(String, String)> {
+    let list = address_list(
+        Some(host),
+        Some(port.to_string().as_bytes()),
+        libc::AF_UNSPEC,
+        libc::SOCK_DGRAM,
+        0,
+        libc::AI_NUMERICHOST,
+    )?;
+    // SAFETY: address_list returned a non-null list owned until the end of this function.
+    let entry = unsafe { &*list.0 };
+    if !entry.ai_next.is_null() {
+        return Err(Error::new(
+            Kind::OSError,
+            "sockaddr resolved to multiple addresses",
+        ));
+    }
+    // SAFETY: the list guard keeps ai_addr readable for its reported length.
+    let mut addr = unsafe { InternetAddress::read(entry.ai_addr, entry.ai_addrlen)? };
+    match &mut addr {
+        InternetAddress::V4(_) if flowinfo.is_some() => {
+            return Err(Error::new(Kind::OSError, "IPv4 sockaddr must be 2 tuple"));
+        }
+        InternetAddress::V6(v6) => {
+            v6.sin6_flowinfo = flowinfo.unwrap_or(0).to_be();
+            v6.sin6_scope_id = scope_id;
+        }
+        InternetAddress::V4(_) => {}
+    }
+    let (raw, len) = addr.raw_parts();
+    let mut host = [0; libc::NI_MAXHOST as usize];
+    let mut service = [0; 32]; // NI_MAXSERV on supported platforms.
+    // SAFETY: addr lives through the call and both writable lengths match their buffers.
+    check_gai(unsafe {
+        libc::getnameinfo(
+            raw,
+            len,
+            host.as_mut_ptr(),
+            host.len() as _,
+            service.as_mut_ptr(),
+            service.len() as _,
+            flags,
+        )
+    })?;
+    let decode = |buffer: &[libc::c_char]| {
+        // SAFETY: getnameinfo succeeded, so both output buffers are NUL terminated.
+        let bytes = unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_bytes();
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|err| super::bytes::decode_error(bytes, err))
+    };
+    Ok((decode(&host)?, decode(&service)?))
 }
 
 /// Darwin's mDNS resolver also puts the owner of the PTR query in h_aliases.
