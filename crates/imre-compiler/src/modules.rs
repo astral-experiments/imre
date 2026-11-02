@@ -1336,6 +1336,10 @@ impl IntrinsicModule {
                 "AF_UNSPEC" => "_socket.AF_UNSPEC",
                 "AF_UNIX" => "_socket.AF_UNIX",
                 "SOCK_STREAM" => "_socket.SOCK_STREAM",
+                "SOCK_DGRAM" => "_socket.SOCK_DGRAM",
+                "SOCK_RAW" => "_socket.SOCK_RAW",
+                "SOCK_RDM" => "_socket.SOCK_RDM",
+                "SOCK_SEQPACKET" => "_socket.SOCK_SEQPACKET",
                 "SOL_SOCKET" => "_socket.SOL_SOCKET",
                 "IPPROTO_TCP" => "_socket.IPPROTO_TCP",
                 "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
@@ -1358,6 +1362,12 @@ impl IntrinsicModule {
             (Self::Socket, "IPV6_V6ONLY") => Intrinsic::ObjectRuntimeExport("socket.IPV6_V6ONLY"),
             (Self::Socket, "has_ipv6") => Intrinsic::ObjectRuntimeExport("socket.has_ipv6"),
             (Self::Socket, "AF_INET6") => Intrinsic::ObjectRuntimeExport("socket.AF_INET6"),
+            (Self::Socket, "SOCK_DGRAM") => Intrinsic::ObjectRuntimeExport("socket.SOCK_DGRAM"),
+            (Self::Socket, "SOCK_RAW") => Intrinsic::ObjectRuntimeExport("socket.SOCK_RAW"),
+            (Self::Socket, "SOCK_RDM") => Intrinsic::ObjectRuntimeExport("socket.SOCK_RDM"),
+            (Self::Socket, "SOCK_SEQPACKET") => {
+                Intrinsic::ObjectRuntimeExport("socket.SOCK_SEQPACKET")
+            }
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
