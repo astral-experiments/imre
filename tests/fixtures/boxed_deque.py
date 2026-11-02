@@ -354,4 +354,28 @@ def current():
     assert derived == EmptyView([3, 4]) and derived != deque([1, 2])
     assert derived != EmptyView([1])
 
+    class Match:
+        def __eq__(self, other):
+            queue[1] = marker
+            return False
+
+    queue = deque([Match(), None, marker])
+    assert queue.count(marker) == 2
+    assert deque.count(EmptyView([1, 2]), 2) == 1
+
+    class MutatingMatch:
+        def __eq__(self, other):
+            queue.clear()
+            return True
+
+    match = MutatingMatch()
+    queue = deque([match])
+    assert queue.count(match) == 1 and len(queue) == 1
+    try:
+        queue.count(marker)
+    except RuntimeError as error:
+        assert str(error) == "deque mutated during iteration" and not queue
+    else:
+        raise AssertionError("count ignored a mutation in its final comparison")
+
     print("deque passed")
