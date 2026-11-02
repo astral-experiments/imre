@@ -3,7 +3,6 @@
 
 import _imp
 import sys
-from _imre_importlib import import_module as _import_module
 
 try:
     import _frozen_importlib as _bootstrap
@@ -62,12 +61,12 @@ def _resolve_relative(name, package):
 
 def import_module(name, package=None):
     """Import a module by absolute name or relative to package."""
+    level = 0
     if name.startswith("."):
         if not package:
             raise TypeError(f"the 'package' argument is required to perform a relative import for {name!r}")
-        if not isinstance(package, str):
-            raise TypeError("__package__ not set to a string")
-        name = _resolve_relative(name, package)
-    elif not name:
-        raise ValueError("Empty module name")
-    return _import_module(name)
+        for character in name:
+            if character != ".":
+                break
+            level += 1
+    return _bootstrap._gcd_import(name[level:], package, level)
