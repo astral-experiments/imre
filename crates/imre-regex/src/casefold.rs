@@ -5,22 +5,47 @@ use std::fmt::Write;
 
 use regex_syntax::ast::{self, Ast, ClassSetItem, Span, Visitor};
 
-pub(super) fn expand(source: &str, ascii: bool) -> Result<String, String> {
-    expand_with_syntax(source, source, ascii)
+use super::Alphabet;
+
+/// Expand Python's additional case equivalents for an unscoped backend expression.
+pub fn expand_case(source: &str, ascii: bool) -> Result<String, String> {
+    let alphabet = if ascii {
+        Alphabet::AsciiIgnoreCase
+    } else {
+        Alphabet::UnicodeIgnoreCase
+    };
+    scoped(source, &[(0, alphabet)], false)
 }
 
-/// A translated lookahead opener can be parsed as a same-width group for folding its literals.
-pub(super) fn expand_with_syntax(
+/// Expand each literal under its lexical Python alphabet before class negation or repetition.
+pub(super) fn scoped(
     source: &str,
-    syntax: &str,
-    ascii: bool,
+    modes: &[(usize, Alphabet)],
+    lookahead: bool,
 ) -> Result<String, String> {
+    // regex-syntax cannot parse lookarounds. Substituting same-width group
+    // openers lets its AST address literals at their original byte offsets.
+    let masked;
+    let syntax = if lookahead {
+        if source.contains(r"\k<") || source.contains("(?(") {
+            return Err("case-insensitive lookahead group references are unsupported".into());
+        }
+        masked = source
+            .replace("(?=", "(?:")
+            .replace("(?!", "(?:")
+            .replace("(?>", "(?:")
+            .replace("(?<=", "(?i:")
+            .replace("(?<!", "(?i:");
+        &masked
+    } else {
+        source
+    };
     let ast = ast::parse::Parser::new()
         .parse(syntax)
         .map_err(|err| err.to_string())?;
     let visitor = Fold {
         source,
-        ascii,
+        modes,
         copied: 0,
         output: String::with_capacity(source.len()),
     };
@@ -29,7 +54,7 @@ pub(super) fn expand_with_syntax(
 
 struct Fold<'a> {
     source: &'a str,
-    ascii: bool,
+    modes: &'a [(usize, Alphabet)],
     copied: usize,
     output: String,
 }
@@ -37,7 +62,14 @@ struct Fold<'a> {
 impl Fold<'_> {
     fn range(&mut self, span: Span, start: char, end: char, bracketed: bool) {
         let mut extra = String::new();
-        if self.ascii {
+        let index = self
+            .modes
+            .partition_point(|(offset, _)| *offset <= span.start.offset);
+        let alphabet = self.modes[index - 1].1;
+        if !alphabet.ignores_case() {
+            return;
+        }
+        if alphabet == Alphabet::AsciiIgnoreCase {
             for (low, high) in [('a', 'z'), ('A', 'Z')] {
                 let first = low.max(start);
                 let last = high.min(end);
