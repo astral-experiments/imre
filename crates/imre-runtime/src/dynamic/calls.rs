@@ -5325,21 +5325,29 @@ impl Context {
                     "cannot inherit from both a TypedDict type and a non-TypedDict base class",
                 ));
             }
-            if parameterized || generic.is_some_and(|generic| bases.contains(&generic)) {
+            if parameterized {
                 return Err(Error::new(
                     "NotImplementedError",
-                    "generic TypedDict declarations are unsupported",
+                    "PEP 695 generic TypedDict declarations are unsupported",
                 ));
             }
             let dict = self.builtin("dict");
-            let parents = std::mem::replace(&mut bases, vec![dict]);
+            let generic = generic.filter(|&g| bases.iter().any(|&base| self.subclass(base, g)));
+            let parents = std::mem::take(&mut bases);
+            bases.extend(generic);
+            bases.push(dict);
             let parents = self.alloc(Value::Tuple(parents));
             let (fields, thunks) = self.prepare_typeddict_namespace(scope, annotations)?;
-            Some((parents, fields, thunks))
+            Some((parents, fields, thunks, generic))
         } else {
             None
         };
-        super::typing::class_parameters(self, scope, original, &bases)?;
+        if let Some(original) = original {
+            self.bind(scope, "__orig_bases__", original);
+        }
+        if typed_dict_meta.is_none() {
+            super::typing::class_parameters(self, scope, original, &bases)?;
+        }
         // type.__new__ implicitly wraps only plain functions stored under this name.
         if let Some(function) = self.scope_name(scope, "__init_subclass__")
             && matches!(self.heap.get(function), Value::Function { .. })
@@ -5394,7 +5402,16 @@ impl Context {
                 .insert(format!("collections.abc.{name}"), class);
         }
         self.init_abstract_class(class, scope)?;
-        if let Some((parents, fields, thunks)) = typed_dict_fields {
+        if let Some((parents, fields, thunks, generic)) = typed_dict_fields {
+            if let Some(generic) = generic {
+                // Generic.__init_subclass__ reads the declared bases after __set_name__.
+                let raw = self
+                    .scope_name(scope, "__orig_bases__")
+                    .map(|tuple| self.items(tuple))
+                    .transpose()?
+                    .unwrap_or_default();
+                super::typing::bind_generic_parameters(self, scope, generic, &raw)?;
+            }
             let configure = self
                 .module_value("typing", "_configure_typeddict")
                 .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;

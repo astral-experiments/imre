@@ -104,9 +104,35 @@ def check_required_keys():
     assert Child() == {}
 
 
+def check_generic_bases():
+    from typing import Generic, TypeVar
+
+    T = TypeVar("T")
+    seen = []
+
+    class Descriptor:
+        def __set_name__(self, owner, name):
+            seen.append("__parameters__" in owner.__dict__)
+
+    class Row(TypedDict, Generic[T]):
+        value: T
+        descriptor = Descriptor()
+
+    class Fixed(Row[int], total=False):
+        extra: str
+
+    assert seen == [False] and Row.__parameters__ == (T,)
+    assert Fixed.__mro__ == (Fixed, Generic, dict, object)
+    assert Fixed.__orig_bases__ == (Row[int],) and Fixed.__parameters__ == ()
+    assert Fixed.__annotations__ == {"value": T, "extra": str}
+    assert Fixed.__required_keys__ == {"value"} and Fixed.__optional_keys__ == {"extra"}
+    assert type(Fixed()) is dict
+
+
 def current():
     check_inheritance()
     check_required_keys()
+    check_generic_bases()
 
     class Film(TypedDict):
         title: str
