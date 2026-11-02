@@ -1,5 +1,6 @@
 //! Forward values across equal counted loops when their intermediate lists are private.
 
+mod nullable;
 mod records;
 
 use std::collections::{HashMap, HashSet};
@@ -13,8 +14,9 @@ pub(crate) fn specialize(module: &mut Module) {
     let constructors = records::constructors(module);
     for function in &mut module.functions {
         for first in (0..function.body.len()).rev() {
-            if let Some((last, replacement, locals)) =
-                fused(function, first).or_else(|| records::fuse(function, first, &constructors))
+            if let Some((last, replacement, locals)) = fused(function, first)
+                .or_else(|| records::fuse(function, first, &constructors))
+                .or_else(|| nullable::fuse(function, first, &constructors))
             {
                 function.locals.extend(locals);
                 function.body.splice(first..=last, replacement);
@@ -25,6 +27,12 @@ pub(crate) fn specialize(module: &mut Module) {
 
 /// Both loops enumerate the ordinal used to append and read each element.
 fn counted(statement: &Statement) -> Option<(&Expr, usize, &[Statement])> {
+    let (bound, target, body) = ordinal_loop(statement)?;
+    matches!(bound.kind, ExprKind::Local(_) | ExprKind::Int(_)).then_some((bound, target, body))
+}
+
+/// Recognize a range from zero with unit stride and an arbitrary upper bound.
+fn ordinal_loop(statement: &Statement) -> Option<(&Expr, usize, &[Statement])> {
     let Statement::Scope { body, clear } = statement else {
         return None;
     };
@@ -55,7 +63,7 @@ fn counted(statement: &Statement) -> Option<(&Expr, usize, &[Statement])> {
         [zero, bound, one] if integer(zero, "0") && integer(one, "1") => bound,
         _ => return None,
     };
-    matches!(bound.kind, ExprKind::Local(_) | ExprKind::Int(_)).then_some((bound, *target, body))
+    Some((bound, *target, body))
 }
 
 fn integer(expr: &Expr, value: &str) -> bool {
@@ -164,6 +172,26 @@ fn greater(left: &Expr, right: i128) -> Expr {
     }
 }
 
+/// Find the original top-level list initialization before its producer.
+fn seed(function: &Function, first: usize, slot: usize) -> Option<&[Expr]> {
+    function.body[..first]
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::Assign(
+                to,
+                Expr {
+                    kind: ExprKind::List(items),
+                    ..
+                },
+            ) if *to == slot => Some(items.as_slice()),
+            _ => None,
+        })
+}
+
+fn absent(value: &Expr) -> bool {
+    matches!(&value.kind, ExprKind::Absent(inner) if matches!(inner.kind,ExprKind::None))
+}
+
 /// Only the original append receivers and the forwarded reads may see these
 /// freshly initialized lists. Count slot transfers separately from expressions.
 fn private_lists(
@@ -171,6 +199,7 @@ fn private_lists(
     first: usize,
     consumer_reads: &HashMap<usize, usize>,
     inputs: &HashSet<usize>,
+    prefix: usize,
 ) -> bool {
     let mut reads = HashMap::new();
     let mut writes = HashMap::new();
@@ -220,15 +249,15 @@ fn private_lists(
         Statement::Scope { clear, .. } => hidden |= clear.iter().any(&protected),
         _ => {}
     });
-    !hidden && consumer_reads.iter().all(|(slot, expected)| {
-        let initialized = function.body[..first].iter().any(|statement| {
-            matches!(statement, Statement::Assign(to, Expr { kind: ExprKind::List(items), .. }) if to == slot && items.is_empty())
-        });
-        initialized
-            && *expected > 0
-            && reads.get(slot) == Some(&(1 + expected))
-            && writes.get(slot) == Some(&1)
-    })
+    !hidden
+        && consumer_reads.iter().all(|(slot, expected)| {
+            let initialized = seed(function, first, *slot)
+                .is_some_and(|items| items.len() == prefix && items.iter().all(absent));
+            initialized
+                && *expected > 0
+                && reads.get(slot) == Some(&(1 + expected))
+                && writes.get(slot) == Some(&1)
+        })
 }
 
 /// Only constant local initialization may separate the two loops.
@@ -387,7 +416,7 @@ fn fused(function: &Function, first: usize) -> Option<(usize, Vec<Statement>, Ve
         .iter()
         .map(|(&slot, column)| (slot, column.reads))
         .collect();
-    if observable || !private_lists(function, first, &reads, &inputs) {
+    if observable || !private_lists(function, first, &reads, &inputs, 0) {
         return None;
     }
 
