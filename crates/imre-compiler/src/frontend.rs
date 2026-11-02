@@ -310,7 +310,7 @@ impl ClassInfo {
             }
         }
         let cached_properties = cached_properties::slots(graph, types, &declarations, &mut fields)?;
-        let setup_fields = unittest_setup::slots(graph, types, &declarations, &mut fields);
+        let setup_fields = unittest_setup::slots(graph, types, &mut declarations, &mut fields)?;
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
         if let Some(id) = Self::cyclic_field_root(&fields, types) {

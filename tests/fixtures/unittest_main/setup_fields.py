@@ -1,3 +1,4 @@
+import os
 import unittest
 
 
@@ -111,7 +112,44 @@ class BranchTaken(Conditional):
         print("branch assigned")
 
 
+class TextSave(unittest.TestCase):
+    def setUp(self):
+        self.__save = dict(os.environ)
+
+    def original(self) -> str:
+        return self.__save["IMRE_SETUP_FIXTURE"]
+
+
+class ByteSave(TextSave):
+    def setUp(self):
+        if os.supports_bytes_environ:
+            self.__save = dict(os.environb)
+
+    def original_bytes(self) -> bytes:
+        return self.__save[b"IMRE_SETUP_FIXTURE"]
+
+
 def outside_runner() -> None:
+    saved = dict(os.environ)
+    os.environ["IMRE_SETUP_FIXTURE"] = "initial"
+    text = TextSave()
+    try:
+        text.original()
+    except AttributeError as exc:
+        print(str(exc))
+    text.setUp()
+    os.environ["IMRE_SETUP_FIXTURE"] = "replacement"
+    print(text.original())
+    other = ByteSave()
+    other.setUp()
+    if os.supports_bytes_environ:
+        print(other.original_bytes())
+    try:
+        other.original()
+    except AttributeError as exc:
+        print(str(exc))
+    os.environ.clear()
+    os.environ.update(saved)
     direct = Ready()
     try:
         direct.read()

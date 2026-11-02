@@ -63,6 +63,24 @@ fn value_type(
             ast::Number::Float(_) => Type::Float,
             _ => return None,
         },
+        ast::Expr::Call(c)
+            if c.func.as_name_expr().is_some_and(|n| n.id == "dict")
+                && c.arguments.keywords.is_empty()
+                && let [env @ ast::Expr::Attribute(mapping)] = c.arguments.args.as_slice()
+                && graph.session.is_known_class(
+                    module,
+                    &c.func,
+                    ty_python_semantic::types::KnownClass::Dict,
+                )
+                && graph.session.is_stdlib_module(module, &mapping.value, "os") =>
+        {
+            let item = match graph.resolve(module, env) {
+                Some(Binding::Intrinsic(Intrinsic::Environ)) => Type::Str,
+                Some(Binding::Intrinsic(Intrinsic::EnvironBytes)) => Type::Bytes,
+                _ => return None,
+            };
+            types.dict(item, item)
+        }
         ast::Expr::Call(c) => {
             let Binding::Definition(def) = graph.resolve(module, &c.func)? else {
                 return None;
@@ -99,15 +117,15 @@ fn value_type(
 pub(super) fn slots(
     graph: &SourceGraph,
     types: &Types,
-    classes: &Classes,
+    classes: &mut Classes,
     fields: &mut [Vec<Type>],
-) -> Slots {
+) -> Result<Slots, String> {
     let mut slots = vec![HashMap::new(); fields.len()];
     let Some(case) = classes.definitions.iter().position(|c| {
         let m = &graph.modules[c.definition.module];
         m.bundled && m.name == "unittest" && c.name == "TestCase"
     }) else {
-        return slots;
+        return Ok(slots);
     };
     let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     for (id, c) in classes.definitions.iter().enumerate() {
@@ -118,8 +136,10 @@ pub(super) fn slots(
                 .push(id);
         }
     }
+    let owners: Vec<_> = classes.definitions.iter().map(|c| c.name.clone()).collect();
     for group in groups.values() {
-        let mut names: BTreeMap<&str, Option<Type>> = BTreeMap::new();
+        let mut private = HashSet::new();
+        let mut names: BTreeMap<String, Option<Type>> = BTreeMap::new();
         for &id in group {
             let c = &classes.definitions[id];
             let Some(setup) = c.node.body.iter().find_map(|s| match s {
@@ -149,13 +169,33 @@ pub(super) fn slots(
                 writes.visit_stmt(stmt);
             }
             for (name, value) in writes.assignments {
-                if c.fields.iter().any(|f| f.name == name)
+                let Some(ty) = value_type(graph, c.definition.module, classes, types, value) else {
+                    continue;
+                };
+                let name = if let Some(key) = crate::classes::private_field(&c.name, name) {
+                    // Class-data publication scans the original source. Until private
+                    // declarations share that normalization, never invent a second slot.
+                    if group.iter().any(|&member| {
+                        let def = &classes.definitions[member];
+                        [name, key.as_str()].into_iter().any(|member| {
+                            def.static_bindings.contains_key(member)
+                                || def.fields.iter().any(|f| f.name == member)
+                                || def.methods.iter().any(|m| m.name.as_str() == member)
+                        })
+                    }) {
+                        return Err(graph.modules[c.definition.module].error(
+                            value,
+                            "private fixture field overlaps a declared class member",
+                        ));
+                    }
+                    private.insert(key.clone());
+                    key
+                } else if c.fields.iter().any(|f| f.name == name)
                     || c.methods.iter().any(|m| m.name.as_str() == name)
                 {
                     continue;
-                }
-                let Some(ty) = value_type(graph, c.definition.module, classes, types, value) else {
-                    continue;
+                } else {
+                    name.to_owned()
                 };
                 names
                     .entry(name)
@@ -198,7 +238,7 @@ pub(super) fn slots(
             let mut overlaps = false;
             for &id in group {
                 let Some(crate::classes::ClassValue::Runtime { owner, ordinal }) =
-                    classes.definitions[id].static_bindings.get(name)
+                    classes.definitions[id].static_bindings.get(&name)
                 else {
                     continue;
                 };
@@ -232,8 +272,20 @@ pub(super) fn slots(
             }
             end += 2;
         }
+        if !private.is_empty() {
+            // Only source attributes mangle. An inherited method keeps its declaring
+            // class, while literal getattr/attrgetter names keep their exact spelling.
+            for &id in group {
+                let c = &mut classes.definitions[id];
+                for (method, origin) in c.methods.iter_mut().zip(&c.method_origins) {
+                    crate::classes::mangle_fields(&owners[classes.ids[origin]], method, |key| {
+                        private.contains(key)
+                    });
+                }
+            }
+        }
     }
-    slots
+    Ok(slots)
 }
 
 impl Checker<'_> {
