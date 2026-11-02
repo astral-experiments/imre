@@ -1,7 +1,14 @@
 //! Read into a sequence of exported buffers in one Linux scatter-read operation.
 
 use super::{Context, Error, Id, Result, Value};
-use std::{collections::HashMap, ops::Range};
+use std::{
+    collections::{HashMap, TryReserveError, hash_map::Entry},
+    ops::Range,
+};
+
+fn no_memory(_: TryReserveError) -> Error {
+    Error::new("MemoryError", "")
+}
 
 fn is_sequence(ctx: &Context, id: Id) -> bool {
     // PySequence_Check excludes dict subclasses even if they override __getitem__.
@@ -19,11 +26,7 @@ fn is_sequence(ctx: &Context, id: Id) -> bool {
                 | Value::ByteArray(_)
                 | Value::Array(_)
                 | Value::MemoryView { .. }
-        ) || ctx
-            .heap
-            .get(id)
-            .instance_class()
-            .is_some_and(|class| ctx.class_attr(class, "__getitem__").is_some()))
+        ) || ctx.slot(id, "__getitem__").is_some())
 }
 
 fn writable_span(ctx: &Context, id: Id) -> Result<(Id, Range<usize>)> {
@@ -51,8 +54,10 @@ fn writable_span(ctx: &Context, id: Id) -> Result<(Id, Range<usize>)> {
 }
 
 fn read_exported(ctx: &mut Context, fd: i32, spans: &[(Id, Range<usize>)]) -> Result<Id> {
-    let mut vectors = Vec::with_capacity(spans.len());
+    let mut vectors = Vec::new();
+    vectors.try_reserve_exact(spans.len()).map_err(no_memory)?;
     let mut bases = HashMap::new();
+    bases.try_reserve(spans.len()).map_err(no_memory)?;
     loop {
         // Get one pointer per allocation; multiple iovecs may overlap in that storage.
         // A signal handler can mutate buffers between attempts, so reacquire the bases.
@@ -60,8 +65,8 @@ fn read_exported(ctx: &mut Context, fd: i32, spans: &[(Id, Range<usize>)]) -> Re
         vectors.clear();
         for (storage, range) in spans {
             let (base, length) = match bases.entry(*storage) {
-                std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
-                std::collections::hash_map::Entry::Vacant(entry) => {
+                Entry::Occupied(entry) => *entry.get(),
+                Entry::Vacant(entry) => {
                     let bytes = ctx.writable_storage_bytes(*storage)?;
                     *entry.insert((bytes.as_mut_ptr(), bytes.len()))
                 }
@@ -97,9 +102,7 @@ pub(super) fn readv(ctx: &mut Context, fd: i32, buffers: Id) -> Result<Id> {
     }
     let count = ctx.sequence_len(buffers)?;
     let mut spans = Vec::new();
-    spans
-        .try_reserve_exact(count)
-        .map_err(|_| Error::new("MemoryError", ""))?;
+    spans.try_reserve_exact(count).map_err(no_memory)?;
     let mark = ctx.buffer_exports.len();
     let result = (|| {
         for index in 0..count {
@@ -107,6 +110,7 @@ pub(super) fn readv(ctx: &mut Context, fd: i32, buffers: Id) -> Result<Id> {
             let item = ctx.get_item(buffers, key)?;
             let (storage, range) = writable_span(ctx, item)?;
             // Pin this view and backing before the next __getitem__ runs Python.
+            ctx.buffer_exports.try_reserve(2).map_err(no_memory)?;
             ctx.buffer_exports.extend([item, storage]);
             spans.push((storage, range));
         }

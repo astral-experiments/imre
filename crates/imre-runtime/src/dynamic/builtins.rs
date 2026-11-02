@@ -2132,6 +2132,9 @@ pub(super) fn call(
                     let mapping = ctx.mapping_proxy_target(args[0]);
                     return call(ctx, "len", &[mapping], &[]);
                 }
+                Value::Class { .. } if ctx.enum_values(args[0]).is_none() => {
+                    ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
+                }
                 Value::Class { .. } => {
                     let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;
                     if let Some(names) = ctx.float_enum_names(args[0]) {
