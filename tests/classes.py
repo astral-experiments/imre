@@ -182,6 +182,11 @@ class Child(Base):
     "abc_meta_dataclass_generated": "import abc\nfrom dataclasses import dataclass\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def __init__(self): pass\n@dataclass\nclass B(A):\n    n: int\n",
     "abc_meta_eager_default": "import abc\ndef init() -> int: return 42\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def f(self, *, n: int = init()): pass\n",
     "abc_meta_registry_collision": "import abc\nclass Parent: _abc_impl = 42\nclass B(Parent, metaclass=abc.ABCMeta): pass\n",
+    "strenum_keeps_its_type_at_a_str_parameter": (
+        'from enum import StrEnum\nclass Token(StrEnum):\n    KEY = "value"\n'
+        "def is_plain(value: str) -> bool:\n    return type(value) is str\n"
+        "print(is_plain(Token.KEY))\n"
+    ),
     "abc_meta_enum_conflict": "import abc\nfrom enum import Enum\nclass C(Enum, metaclass=abc.ABCMeta): pass\n",
     "magic_method": CELL + '    def __bytes__(self) -> bytes:\n        return b"Cell"\n',
     "str_extra_parameter": CELL + '    def __str__(self, detail: bool = False) -> str:\n        return "Cell"\n',

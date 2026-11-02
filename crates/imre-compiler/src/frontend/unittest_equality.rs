@@ -197,12 +197,16 @@ impl Checker<'_> {
                 "_assertOptionalTextEqual"
             } else if matches!(ty, Type::Str | Type::StrLiteral(_)) {
                 "assertMultiLineEqual"
-            } else if ty == Type::Bytes
+            } else if matches!(ty, Type::Bytes | Type::BuiltinClass)
                 && let Some(base) = self.bundled_case_method_owner(class, "_baseAssertEqual")
             {
                 // Only specialize the bundled default. The private helper isn't a user hook.
                 owner = base;
-                "_assertBytesEqual"
+                if ty == Type::Bytes {
+                    "_assertBytesEqual"
+                } else {
+                    "_assertClassEqual"
+                }
             } else if matches!(
                 ty,
                 Type::Calendar(ir::CalendarType::Date | ir::CalendarType::DateTime)
