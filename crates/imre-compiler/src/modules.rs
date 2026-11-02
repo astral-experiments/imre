@@ -261,9 +261,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "logging/config.py",
             include_str!("../stdlib/logging/config.py"),
         )),
+        // CPython 3.14.5 Lib/logging/handlers.py.
         "logging.handlers" => Some((
             "logging/handlers.py",
-            include_str!("../stdlib/logging/buffering.py"),
+            include_str!("../stdlib/logging/boxed_handlers.py"),
         )),
         "platform" => Some((
             "platform.py",
