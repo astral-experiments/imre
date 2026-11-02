@@ -644,13 +644,6 @@ mod tests {
         }
     }
 
-    fn int() -> Expr {
-        Expr {
-            ty: Type::Int,
-            kind: ExprKind::Int("1".into()),
-        }
-    }
-
     fn reject(module: &Module, expected: &str) {
         let error = super::module(module).unwrap_err();
         assert!(error.contains(expected), "{error}");
@@ -691,7 +684,7 @@ mod tests {
                     ty: Type::Float,
                     kind: ExprKind::Float(2.0),
                 },
-                int(),
+                Expr::integer(1),
             ],
             order: vec![1, 0],
         };
@@ -715,7 +708,10 @@ mod tests {
         }
         module.entry.body = vec![Statement::Expr(Expr {
             ty: Type::Int,
-            kind: ExprKind::Call(0, CallArgs::positional(vec![int(), int()])),
+            kind: ExprKind::Call(
+                0,
+                CallArgs::positional(vec![Expr::integer(1), Expr::integer(1)]),
+            ),
         })];
         reject(&module, "expected None, got int");
         module.entry.body = vec![Statement::Expr(Expr {
@@ -755,7 +751,7 @@ mod tests {
                 },
             })
         };
-        module.entry.body = vec![invoke(CallArgs::positional(vec![int()]))];
+        module.entry.body = vec![invoke(CallArgs::positional(vec![Expr::integer(1)]))];
         super::module(&module).unwrap();
         module.entry.body = vec![invoke(CallArgs::positional(Vec::new()))];
         reject(&module, "argument count");
@@ -771,7 +767,7 @@ mod tests {
             params: Vec::new(),
             returns: Type::Int,
             locals: Vec::new(),
-            body: vec![Statement::Return(int())],
+            body: vec![Statement::Return(Expr::integer(1))],
         });
         let make_callback = |result| {
             Statement::Expr(Expr {
@@ -827,19 +823,13 @@ mod tests {
                         ty: Type::ListInt,
                         kind: ExprKind::List(Vec::new()),
                     },
-                    int(),
+                    Expr::integer(1),
                 ],
             ),
             (
                 0,
                 10,
-                vec![
-                    Expr::local(0, Type::ListInt),
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Int("-1".into()),
-                    },
-                ],
+                vec![Expr::local(0, Type::ListInt), Expr::integer(-1)],
             ),
         ] {
             module.entry.body = vec![read(min, max, args)];
@@ -859,7 +849,7 @@ mod tests {
                 ty: Type::Int,
                 kind: ExprKind::Scope {
                     body: vec![Statement::Clear(7)],
-                    value: Box::new(int()),
+                    value: Box::new(Expr::integer(1)),
                     clear: Vec::new(),
                 },
             })],
@@ -886,7 +876,7 @@ mod tests {
     fn rejects_inconsistent_expression_storage() {
         let mut module = empty();
         module.entry.locals.push(Type::Bool);
-        module.entry.body = vec![Statement::Assign(0, int())];
+        module.entry.body = vec![Statement::Assign(0, Expr::integer(1))];
         reject(&module, "expected bool, got int");
         module.entry.body = vec![Statement::Expr(Expr {
             ty: module.types.tuple(vec![Type::Int]),
@@ -895,7 +885,7 @@ mod tests {
         reject(&module, "tuple field count");
         module.entry.body = vec![Statement::Expr(Expr {
             ty: module.types.optional(Type::Str),
-            kind: ExprKind::Present(Box::new(int())),
+            kind: ExprKind::Present(Box::new(Expr::integer(1))),
         })];
         reject(&module, "optional payload");
     }

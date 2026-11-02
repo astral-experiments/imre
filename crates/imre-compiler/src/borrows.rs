@@ -593,10 +593,7 @@ mod tests {
         assert!(facts[2].locals[2]);
         assert_eq!(facts[2].length_roots[2], Some(0));
 
-        let integer = Expr {
-            ty: Type::Int,
-            kind: ExprKind::Int("1".into()),
-        };
+        let integer = Expr::integer(1);
         module.functions[1].body = vec![Statement::Expr(Expr {
             ty: Type::None,
             kind: ExprKind::Builtin(Builtin::Append, vec![Expr::local(0, list), integer.clone()]),
@@ -1091,13 +1088,7 @@ def total(rows: list[Row], fail: bool) -> int:
             vec![0, 1],
             vec![ty, Type::Bool, Type::Int],
             vec![
-                Statement::Assign(
-                    2,
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Int("0".into()),
-                    },
-                ),
+                Statement::Assign(2, Expr::integer(0)),
                 Statement::If(Expr::local(1, Type::Bool), vec![outer.clone()], vec![outer]),
                 read,
             ],
@@ -1157,13 +1148,7 @@ def total(rows: list[Row], fail: bool) -> int:
                 vec![ty, ty, ty, Type::Int],
                 vec![
                     Statement::Assign(1, Expr::local(0, ty)),
-                    Statement::Assign(
-                        3,
-                        Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Int("0".into()),
-                        },
-                    ),
+                    Statement::Assign(3, Expr::integer(0)),
                     Statement::While(
                         Expr {
                             ty: Type::Bool,
@@ -1230,13 +1215,7 @@ def total(rows: list[Row], fail: bool) -> int:
                 ty: Type::None,
                 kind: ExprKind::Builtin(
                     Builtin::Append,
-                    vec![
-                        Expr::local(0, Type::ListInt),
-                        Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Int("1".into()),
-                        },
-                    ],
+                    vec![Expr::local(0, Type::ListInt), Expr::integer(1)],
                 ),
             })],
         );

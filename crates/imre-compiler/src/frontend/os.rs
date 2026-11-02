@@ -122,10 +122,7 @@ impl Checker<'_> {
             Dup2 => {
                 params.push(param("fd2"));
                 let mut inherit = param("inheritable");
-                inherit.default = Some(Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Int("1".into()),
-                });
+                inherit.default = Some(Expr::integer(1));
                 params.push(inherit);
             }
             _ => {}
@@ -159,14 +156,7 @@ impl Checker<'_> {
         if op == FdOperation::Open {
             params.extend([
                 ("flags", Type::Int, None),
-                (
-                    "mode",
-                    Type::Int,
-                    Some(Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Int("511".into()),
-                    }),
-                ),
+                ("mode", Type::Int, Some(Expr::integer(511))),
             ]);
         }
         params.push(("dir_fd", dir_fd, Some(Expr::none())));

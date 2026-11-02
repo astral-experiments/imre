@@ -188,7 +188,7 @@ fn build_wrapper(
         }
     }
     let key = match args.as_slice() {
-        [] => pipelines::integer(0),
+        [] => Expr::integer(0),
         [arg] if types.is_len_argument(arg.ty) => field(arg.clone(), 2, types.len_key()),
         [arg] => arg.clone(),
         _ => {
@@ -624,7 +624,7 @@ fn cache_size(capacity: i64) -> Expr {
     if capacity < 0 {
         Expr::none()
     } else {
-        pipelines::integer(capacity)
+        Expr::integer(capacity)
     }
 }
 

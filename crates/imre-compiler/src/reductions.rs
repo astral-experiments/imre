@@ -236,7 +236,7 @@ fn version(
         Expr {
             ty: Type::Bool,
             kind: ExprKind::Compare(
-                vec![length(source), integer(budget)],
+                vec![length(source), Expr::integer(budget)],
                 vec![Compare::LessEqual],
             ),
         },
@@ -595,13 +595,6 @@ pub(super) fn literal(value: &Expr) -> Option<i64> {
         .then_some(value)
 }
 
-pub(super) fn integer(value: i64) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(value.to_string()),
-    }
-}
-
 fn length(source: usize) -> Expr {
     Expr {
         ty: Type::Int,
@@ -790,7 +783,7 @@ def total(text: str) -> int:
                         vec![read.clone()],
                         vec![read],
                     )],
-                    value: Box::new(integer(0)),
+                    value: Box::new(Expr::integer(0)),
                     clear: vec![],
                 },
             }),
@@ -933,7 +926,7 @@ def total(text: str) -> int:
             ty: Type::Int,
             kind: ExprKind::Scope {
                 body: Vec::new(),
-                value: Box::new(integer(0)),
+                value: Box::new(Expr::integer(0)),
                 clear: vec![cursor],
             },
         }));

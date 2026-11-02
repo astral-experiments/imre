@@ -601,14 +601,7 @@ impl Checker<'_> {
                 PathOperation::Mkdir,
                 Type::None,
                 vec![
-                    parameter(
-                        "mode",
-                        Type::Int,
-                        Some(Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Int("511".to_owned()),
-                        }),
-                    ),
+                    parameter("mode", Type::Int, Some(Expr::integer(511))),
                     parameter("parents", Type::Bool, Some(Expr::boolean(false))),
                     parameter("exist_ok", Type::Bool, Some(Expr::boolean(false))),
                 ],

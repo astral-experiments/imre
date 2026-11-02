@@ -326,7 +326,7 @@ impl Checker<'_> {
                 .into_iter()
                 .map(|v| {
                     let len = length(&v.list);
-                    pipelines::compare(Compare::Equal, len, pipelines::integer(n))
+                    pipelines::compare(Compare::Equal, len, Expr::integer(n))
                 })
                 .collect();
             Expr {
@@ -349,7 +349,7 @@ impl Checker<'_> {
                 root,
                 Expr {
                     ty: input.item,
-                    kind: ExprKind::Builtin(get, vec![input.list, pipelines::integer(0)]),
+                    kind: ExprKind::Builtin(get, vec![input.list, Expr::integer(0)]),
                 },
             ));
             clear.push(root);

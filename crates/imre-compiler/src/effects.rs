@@ -255,13 +255,6 @@ mod tests {
         super::analyze(module, &Targets::analyze(module))
     }
 
-    fn integer() -> Expr {
-        Expr {
-            ty: Type::Int,
-            kind: ExprKind::Int("1".into()),
-        }
-    }
-
     fn function(body: Vec<Statement>) -> Function {
         Function {
             params: Vec::new(),
@@ -293,7 +286,7 @@ mod tests {
                 ty: item,
                 kind: ExprKind::Builtin(
                     Builtin::SequenceGetInBounds,
-                    vec![Expr::local(1, list), integer()],
+                    vec![Expr::local(1, list), Expr::integer(1)],
                 ),
             };
             for value in [literal, read] {
@@ -331,7 +324,7 @@ mod tests {
             ty: Type::Int,
             kind: ExprKind::Invoke {
                 callable: Box::new(callback),
-                args: CallArgs::positional(vec![integer()]),
+                args: CallArgs::positional(vec![Expr::integer(1)]),
             },
         };
         assert!(expression(&invocation, &[], context));
@@ -366,11 +359,11 @@ mod tests {
             globals: Vec::new(),
             source_frames: Vec::new(),
             functions: vec![
-                function(vec![Statement::Return(integer())]),
-                function(vec![Statement::Return(integer())]),
+                function(vec![Statement::Return(Expr::integer(1))]),
+                function(vec![Statement::Return(Expr::integer(1))]),
                 function(vec![Statement::Return(invocation(
                     local.clone(),
-                    vec![integer()],
+                    vec![Expr::integer(1)],
                 ))]),
                 function(vec![Statement::Raise(None)]),
             ],
@@ -404,7 +397,7 @@ mod tests {
                         clear: Vec::new(),
                     },
                 },
-                vec![integer()]
+                vec![Expr::integer(1)]
             ),
             &functions,
             context,
@@ -430,7 +423,7 @@ mod tests {
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
                 function(vec![Statement::Return(call(2, Vec::new()))]),
-                function(vec![Statement::Return(integer())]),
+                function(vec![Statement::Return(Expr::integer(1))]),
                 function(vec![Statement::Return(call(4, Vec::new()))]),
                 function(vec![Statement::Return(call(3, Vec::new()))]),
             ],
@@ -491,7 +484,7 @@ def integers(values: list[int]) -> int:
             globals: Vec::new(),
             source_frames: Vec::new(),
             functions: vec![
-                function(vec![Statement::Return(integer())]),
+                function(vec![Statement::Return(Expr::integer(1))]),
                 function(vec![Statement::Raise(None)]),
                 function(vec![Statement::Return(field(construct(0, Vec::new())))]),
                 function(vec![Statement::Return(field(call(1, Vec::new())))]),
@@ -501,7 +494,11 @@ def integers(values: list[int]) -> int:
                     0,
                     vec![call(1, Vec::new())],
                 ))]),
-                function(vec![Statement::SetField(integer(), 0, call(1, Vec::new()))]),
+                function(vec![Statement::SetField(
+                    Expr::integer(1),
+                    0,
+                    call(1, Vec::new()),
+                )]),
             ],
             entry: function(Vec::new()),
         };
@@ -577,9 +574,13 @@ def integers(values: list[int]) -> int:
             body: Vec::new(),
             orelse: Vec::new(),
         };
-        assert!(!block(&[range(vec![integer()])], &[], context));
+        assert!(!block(&[range(vec![Expr::integer(1)])], &[], context));
         assert!(block(
-            &[range(vec![integer(), integer(), integer()])],
+            &[range(vec![
+                Expr::integer(1),
+                Expr::integer(1),
+                Expr::integer(1)
+            ])],
             &[],
             context
         ));
@@ -588,7 +589,7 @@ def integers(values: list[int]) -> int:
             ty: Type::Int,
             kind: ExprKind::Builtin(
                 Builtin::DictGetDefault,
-                vec![integer(), integer(), call(0, Vec::new())],
+                vec![Expr::integer(1), Expr::integer(1), call(0, Vec::new())],
             ),
         };
         assert!(expression(&value, &[true], context));

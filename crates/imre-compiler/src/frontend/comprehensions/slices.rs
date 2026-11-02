@@ -69,18 +69,18 @@ pub(super) fn fuse(body: &mut [Statement], params: &[usize], args: &mut [Expr]) 
     };
     // These are private iteration slots created by lower_iteration. The body
     // cannot name or rebind them; the only cursor write is its own advance.
-    *increment = add(local(*cursor), integer(step));
+    *increment = add(local(*cursor), Expr::integer(step));
     *initial = add(
         Expr {
             ty: Type::Int,
             kind: ExprKind::Builtin(Builtin::Len, vec![list_local(*captured)]),
         },
-        integer(start),
+        Expr::integer(start),
     );
     *test = Expr {
         ty: Type::Bool,
         kind: ExprKind::Compare(
-            vec![local(*cursor), integer(0)],
+            vec![local(*cursor), Expr::integer(0)],
             vec![Compare::GreaterEqual],
         ),
     };
@@ -98,13 +98,6 @@ fn forward_condition(value: &Expr, captured: usize, cursor: usize) -> bool {
         && matches!(left.kind, ExprKind::Local(slot) if slot == cursor)
         && matches!(&right.kind, ExprKind::Builtin(Builtin::Len, args)
             if matches!(args.as_slice(), [Expr { kind: ExprKind::Local(slot), .. }] if *slot == captured))
-}
-
-fn integer(value: i64) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(value.to_string()),
-    }
 }
 
 fn local(slot: usize) -> Expr {

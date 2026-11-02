@@ -62,7 +62,7 @@ impl Checker<'_> {
             }
         };
         let size = match call.arguments.keywords.as_ref() {
-            [] => pipelines::integer(1 << 18),
+            [] => Expr::integer(1 << 18),
             [size] if size.arg.as_deref() == Some("_bufsize") => {
                 let value = self.evaluated_argument(&size.value)?;
                 if stream_ty == Type::BinaryIO && !matches!(value.ty, Type::Int | Type::Bool) {

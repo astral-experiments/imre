@@ -29,10 +29,7 @@ impl Checker<'_> {
             self.graph.checked_overload(self.module, call.range());
         }
         let flag = match (args.args.as_ref(), args.keywords.as_ref()) {
-            ([], []) => Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int("8".into()),
-            },
+            ([], []) => Expr::integer(8),
             ([arg], []) => {
                 let value = self.expr(arg)?;
                 self.index_word(value, arg, false)?

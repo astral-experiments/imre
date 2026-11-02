@@ -421,7 +421,7 @@ impl Checker<'_> {
                         };
                         (field(0, key), field(1, Type::Int))
                     } else {
-                        (checker.coerce(item, key, call)?, pipelines::integer(1))
+                        (checker.coerce(item, key, call)?, Expr::integer(1))
                     };
                     Ok(vec![Statement::AugmentItem(
                         checker.local(target),

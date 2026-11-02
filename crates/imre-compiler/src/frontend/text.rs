@@ -580,14 +580,7 @@ impl Checker<'_> {
                 self.types.list(Type::Str),
                 vec![
                     parameter("sep", optional_string, Some(Expr::absent(optional_string))),
-                    parameter(
-                        "maxsplit",
-                        Type::Int,
-                        Some(Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Int("-1".to_owned()),
-                        }),
-                    ),
+                    parameter("maxsplit", Type::Int, Some(Expr::integer(-1))),
                 ],
             ),
             "strip" | "lstrip" | "rstrip" => (

@@ -197,13 +197,7 @@ impl Checker<'_> {
                 ty: element,
                 kind: ExprKind::Builtin(
                     Builtin::ListGet,
-                    vec![
-                        self.local(slot),
-                        Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Int(index.to_string()),
-                        },
-                    ],
+                    vec![self.local(slot), Expr::integer(index)],
                 ),
             })
             .collect();

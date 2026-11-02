@@ -1,6 +1,5 @@
 //! Fuses adjacent sums over the same strict zip after their scalar callees have been checked.
 
-use super::pipelines::integer;
 use super::*;
 
 mod terms;
@@ -190,7 +189,7 @@ fn group(
     let mut clear = first.clear.clone();
     clear.extend(start..locals.len());
     for &(_, result) in &outputs {
-        body.push(Statement::Assign(result, integer(0)));
+        body.push(Statement::Assign(result, Expr::integer(0)));
         clear.push(result);
     }
     let mut next = first.next.clone();

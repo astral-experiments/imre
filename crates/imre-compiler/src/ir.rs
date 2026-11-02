@@ -652,6 +652,14 @@ impl Expr {
         }
     }
 
+    /// Store the decimal spelling so the literal can exceed the host integer width.
+    pub(crate) fn integer(value: impl ToString) -> Self {
+        Self {
+            ty: Type::Int,
+            kind: ExprKind::Int(value.to_string()),
+        }
+    }
+
     /// Construct an absent optional from a literal None.
     pub(crate) fn absent(ty: Type) -> Self {
         Self {

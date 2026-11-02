@@ -82,7 +82,7 @@ impl Checker<'_> {
         let index = match number.ty {
             Type::Int => number.clone(),
             Type::Bool => powers::integer(number.clone()),
-            _ => pipelines::integer(0),
+            _ => Expr::integer(0),
         };
         let string = |value: Expr| {
             if value.ty == Type::Str {

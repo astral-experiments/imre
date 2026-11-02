@@ -179,7 +179,7 @@ impl Checker<'_> {
     ) -> Result<(Expr, Option<(usize, u32)>), String> {
         let source = self.deferred_comparator(arg);
         let comparator = if let Some((_, start)) = source {
-            pipelines::integer(i64::from(start))
+            Expr::integer(i64::from(start))
         } else {
             self.expr(arg)?
         };
@@ -240,7 +240,7 @@ impl Checker<'_> {
         let cell = self.cmp_field(key, frame, 1);
         Expr {
             ty: self.types.element(cell.ty).unwrap(),
-            kind: ExprKind::Builtin(Builtin::ListGet, vec![cell, pipelines::integer(0)]),
+            kind: ExprKind::Builtin(Builtin::ListGet, vec![cell, Expr::integer(0)]),
         }
     }
 
@@ -307,7 +307,7 @@ impl Checker<'_> {
                 ty: Type::Int,
                 kind: ExprKind::Builtin(Builtin::Len, vec![values]),
             };
-            let test = pipelines::compare(Compare::Greater, length, pipelines::integer(1));
+            let test = pipelines::compare(Compare::Greater, length, Expr::integer(1));
             let fail = raised(
                 Type::None,
                 "TypeError",
@@ -409,7 +409,7 @@ impl Checker<'_> {
         };
         let comparison = powers::integer(comparison);
         let zero = match comparison.ty {
-            Type::Int => pipelines::integer(0),
+            Type::Int => Expr::integer(0),
             Type::Float => Expr {
                 ty: Type::Float,
                 kind: ExprKind::Float(0.0),

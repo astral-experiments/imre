@@ -158,17 +158,13 @@ fn remap_index(expr: &mut Expr, from: usize, to: usize) {
     }
 }
 
-fn int(value: i128) -> Expr {
-    Expr {
-        ty: Type::Int,
-        kind: ExprKind::Int(value.to_string()),
-    }
-}
-
 fn greater(left: &Expr, right: i128) -> Expr {
     Expr {
         ty: Type::Bool,
-        kind: ExprKind::Compare(vec![left.clone(), int(right)], vec![Compare::Greater]),
+        kind: ExprKind::Compare(
+            vec![left.clone(), Expr::integer(right)],
+            vec![Compare::Greater],
+        ),
     }
 }
 
@@ -296,7 +292,11 @@ fn loop_prefix(
     if source_index != index {
         let final_index = Expr {
             ty: Type::Int,
-            kind: ExprKind::Binary(Binary::Subtract, Box::new(bound.clone()), Box::new(int(1))),
+            kind: ExprKind::Binary(
+                Binary::Subtract,
+                Box::new(bound.clone()),
+                Box::new(Expr::integer(1)),
+            ),
         };
         replacement.push(Statement::If(
             greater(bound, 0),

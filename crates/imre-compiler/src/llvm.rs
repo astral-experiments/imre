@@ -11813,10 +11813,7 @@ def total(text: str) -> int:
             kind: ExprKind::Scope {
                 body: vec![Statement::Assign(
                     *slot,
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Int("100000000000000000000000000000000".into()),
-                    },
+                    Expr::integer("100000000000000000000000000000000"),
                 )],
                 value: right.clone(),
                 clear: Vec::new(),
