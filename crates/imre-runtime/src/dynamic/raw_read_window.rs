@@ -100,13 +100,10 @@ impl Context {
             Value::MemoryView { owner, .. } => {
                 let owner = Self::memoryview_owner(owner)?;
                 let view = self.view_layout(object)?;
-                if view.len > 1 && view.stride != 1 {
+                if !view.is_contiguous() {
                     return Ok(None);
                 }
-                let width = match self.heap.get(self.view_storage_id(owner)) {
-                    Value::Array(a) => a.view_layout().1,
-                    _ => 1,
-                };
+                let (_, width) = self.view_format_width(owner, view);
                 (owner, view.start * width, view.len * width)
             }
             Value::BytesIoBuffer { .. } => (object, 0, self.view_element_count(object)?),
@@ -154,7 +151,17 @@ impl Context {
         if let Value::Slice(parts) = *self.heap.get(key) {
             let range = self.raw_view_slice(id, parts)?;
             let w = self.checked_window(id)?;
-            return self.ownerless_byte_view(w.backing, w.start + range.start, range.len(), false);
+            let parent = self.view_layout(id)?;
+            let child =
+                self.ownerless_byte_view(w.backing, w.start + range.start, range.len(), false)?;
+            if let Value::MemoryView { layout, .. } = self.heap.get_mut(child) {
+                *layout = Some(super::memoryview::ViewLayout {
+                    start: 0,
+                    len: range.len(),
+                    ..parent
+                });
+            }
+            return Ok(child);
         }
         let pos = self.raw_view_index(id, key)?;
         let byte = self.window_bytes(self.checked_window(id)?)?[pos];
@@ -171,27 +178,7 @@ impl Context {
                 let range = ctx.raw_view_slice(id, parts)?;
                 ctx.check_buffer_exporter(value)?;
                 // Snapshot first for assignments between overlapping windows.
-                let source = match ctx.buffer_storage(value)? {
-                    Value::Array(array) if array.view_layout().0 == "B" => array.as_bytes(),
-                    Value::Array(_) => {
-                        return Err(Error::new(
-                            "ValueError",
-                            "memoryview assignment: lvalue and rvalue have different structures",
-                        ));
-                    }
-                    _ => ctx.bytes_like(value)?,
-                };
-                if source.len() != range.len() {
-                    return Err(Error::new(
-                        "ValueError",
-                        "memoryview assignment: lvalue and rvalue have different structures",
-                    ));
-                }
-                let mut bytes = Vec::new();
-                bytes
-                    .try_reserve_exact(source.len())
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                bytes.extend_from_slice(source);
+                let bytes = ctx.unsigned_assignment_bytes(value, range.len())?;
                 (range, bytes)
             } else {
                 let index = ctx.raw_view_index(id, key)?;

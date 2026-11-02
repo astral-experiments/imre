@@ -340,6 +340,7 @@ fn unhashable_part(ctx: &Context, value: Id) -> Option<Id> {
         | Value::Deque(_)
         | Value::List(_)
         | Value::ByteArray(_)
+        | Value::Array(_)
         | Value::Context(_)
         | Value::ContextToken { .. }
         | Value::Set { frozen: false, .. }

@@ -538,9 +538,8 @@ impl Context {
                     "cannot hash writable memoryview object",
                 ));
             }
-            if let Value::Array(a) = self.heap.get(self.view_storage_id(owner))
-                && !matches!(a.view_layout().0, "B" | "b" | "c")
-            {
+            let (format, _) = self.view_format_width(owner, self.view_layout(key)?);
+            if !matches!(format.trim_start_matches('@'), "B" | "b" | "c") {
                 return Err(Error::new(
                     "ValueError",
                     "memoryview: hashing is restricted to formats 'B', 'b' or 'c'",

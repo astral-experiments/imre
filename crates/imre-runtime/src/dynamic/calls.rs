@@ -309,7 +309,7 @@ impl Context {
                 if name == "__hash__"
                     && matches!(
                         kind.as_str(),
-                        "list" | "dict" | "set" | "bytearray" | KEY_WRAPPER
+                        "list" | "dict" | "set" | "bytearray" | "array.array" | KEY_WRAPPER
                     ) =>
             {
                 Some(NONE)
@@ -2207,10 +2207,7 @@ impl Context {
                 let owner = Self::memoryview_owner(owner)?;
                 let view = self.view_layout(obj)?;
                 let len = view.len;
-                let (format, width) = match self.heap.get(self.view_storage_id(owner)) {
-                    Value::Array(array) => array.view_layout(),
-                    _ => ("B", 1),
-                };
+                let (format, width) = self.view_format_width(owner, view);
                 return Ok(match name {
                     "obj" => {
                         if anonymous {
@@ -2227,7 +2224,7 @@ impl Context {
                     }
                     "suboffsets" => self.alloc(Value::Tuple(vec![])),
                     "contiguous" | "c_contiguous" | "f_contiguous" => {
-                        builtins::boolean(len <= 1 || view.stride == 1)
+                        builtins::boolean(view.is_contiguous())
                     }
                     "nbytes" => self.int((len * width) as i64),
                     "itemsize" => self.int(width as i64),
