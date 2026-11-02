@@ -68,7 +68,7 @@ mod zipimport;
 mod zlib;
 
 /// Format a type for CPython diagnostics, including a non-default module and its qualname.
-fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
+pub(super) fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
     let name = match ctx.own_class_attr(class, "__qualname__") {
         Some(name) => name,
         None => ctx.text(ctx.class_name(class).to_owned()),

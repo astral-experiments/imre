@@ -1055,6 +1055,46 @@ fn percent_layout(
     Ok((width, precision))
 }
 
+/// Convert a Unicode `%c` argument without invoking string-subclass overrides.
+fn percent_char(ctx: &mut Context, arg: Id) -> Result<Id> {
+    if let Some(storage) = ctx.string_storage(arg) {
+        let len = match ctx.heap.get(storage) {
+            Value::Str(s) => s.chars().count(),
+            Value::SurrogateStr(s) => s.len(),
+            _ => unreachable!("string storage"),
+        };
+        return if len == 1 {
+            Ok(storage)
+        } else {
+            Err(type_error(format!(
+                "%c requires an int or a unicode character, not a string of length {len}"
+            )))
+        };
+    }
+    match ctx.index_integer(arg) {
+        Ok(n) => {
+            let point = n
+                .to_i64()
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|&p| p <= 0x10ffff)
+                .ok_or_else(|| Error::new("OverflowError", "%c arg not in range(0x110000)"))?;
+            Ok(ctx.text_codepoints(vec![point]))
+        }
+        Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+            let name = if let Some(class) = ctx.heap.get(arg).instance_class() {
+                let name = super::super::stdlib::qualified_type(ctx, class)?;
+                ctx.str_value(name)?
+            } else {
+                ctx.type_name(arg)
+            };
+            Err(type_error(format!(
+                "%c requires an int or a unicode character, not {name}"
+            )))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Old-style interpolation accepts a single operand, a positional tuple or a mapping.
 pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Result<Id> {
     let parsed = format
@@ -1133,10 +1173,21 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     continue;
                 }
                 let rendered: Cow<'_, str> = match spec.format_char {
-                    's' => {
-                        let text = super::call(ctx, "str", &[arg], &[])?;
+                    's' | 'c' => {
+                        let text = if spec.format_char == 'c' {
+                            percent_char(ctx, arg)?
+                        } else {
+                            super::call(ctx, "str", &[arg], &[])?
+                        };
                         if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(text)) {
-                            let (width, precision) = layout.unwrap_or_default();
+                            let (mut width, mut precision) = layout.unwrap_or_default();
+                            if spec.format_char == 'c' {
+                                precision = None;
+                                // A negated minimum Py_ssize_t gives no padding in CPython.
+                                if width == isize::MIN {
+                                    width = 0;
+                                }
+                            }
                             let field =
                                 &points[..precision.unwrap_or(points.len()).min(points.len())];
                             let padding = width.unsigned_abs().saturating_sub(field.len());
@@ -1167,15 +1218,6 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
                     }
                     'r' => ctx.checked_format(arg, true)?.into(),
                     'a' => ascii(&ctx.checked_format(arg, true)?).into(),
-                    'c' => match ctx.heap.get(arg) {
-                        Value::Str(s) if s.chars().count() == 1 => Cow::Borrowed(s),
-                        _ => u32::try_from(ctx.as_integer(arg)?)
-                            .ok()
-                            .and_then(char::from_u32)
-                            .ok_or_else(|| Error::new("OverflowError", "%c arg not in range"))?
-                            .to_string()
-                            .into(),
-                    },
                     _ => {
                         return Err(Error::new(
                             "ValueError",
