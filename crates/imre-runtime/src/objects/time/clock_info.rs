@@ -12,10 +12,11 @@ pub(crate) struct ClockInfo {
 
 // CPython samples the clock even for an information request, including its
 // conversion to a signed 64-bit nanosecond count.
-fn check_timestamp(seconds: libc::time_t, nanos: i64) -> Result<(), Error> {
-    (seconds as i64)
+fn check_timestamp(seconds: impl Into<i64>, nanos: impl Into<i64>) -> Result<(), Error> {
+    seconds
+        .into()
         .checked_mul(1_000_000_000)
-        .and_then(|whole| whole.checked_add(nanos))
+        .and_then(|whole| whole.checked_add(nanos.into()))
         .map(|_| ())
         .ok_or_else(|| {
             Error::new(
@@ -47,8 +48,9 @@ pub(crate) fn clock_info(name: &[u8]) -> Result<ClockInfo, Error> {
         }
         return Err(errno_error(io::Error::last_os_error()));
     }
+    // SAFETY: the successful clock_gettime call initialized sample.
     let sample = unsafe { sample.assume_init() };
-    let check = || check_timestamp(sample.tv_sec, sample.tv_nsec as i64);
+    let check = || check_timestamp(sample.tv_sec, sample.tv_nsec);
     // The wall and monotonic providers convert their sample before querying
     // resolution. The CPU providers query resolution first.
     let cpu = matches!(
@@ -61,6 +63,7 @@ pub(crate) fn clock_info(name: &[u8]) -> Result<ClockInfo, Error> {
     let mut res = MaybeUninit::uninit();
     // SAFETY: clock_getres initializes the timespec on success.
     let resolution = if unsafe { libc::clock_getres(id, res.as_mut_ptr()) } == 0 {
+        // SAFETY: clock_getres returned success.
         let res = unsafe { res.assume_init() };
         res.tv_sec as f64 + res.tv_nsec as f64 * 1e-9
     } else if id == libc::CLOCK_REALTIME {
@@ -86,15 +89,17 @@ fn process_fallback() -> Result<ClockInfo, Error> {
         libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr())
     } == 0
     {
+        // SAFETY: getrusage returned success.
         let usage = unsafe { usage.assume_init() };
         for tv in [usage.ru_utime, usage.ru_stime] {
-            check_timestamp(tv.tv_sec, tv.tv_usec as i64 * 1000)?;
+            check_timestamp(tv.tv_sec, tv.tv_usec * 1000)?;
         }
         ("getrusage(RUSAGE_SELF)", 1e-6)
     } else {
         let mut times = MaybeUninit::uninit();
-        // SAFETY: times writes into a tms, and sysconf takes a standard Linux key.
+        // SAFETY: times writes the process accounting snapshot into a tms.
         if unsafe { libc::times(times.as_mut_ptr()) } != -1 {
+            // SAFETY: _SC_CLK_TCK is a standard sysconf key.
             let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
             if ticks <= 0 {
                 return Err(errno_error(io::Error::last_os_error()));
