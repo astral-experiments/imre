@@ -134,6 +134,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "close" => Intrinsic::Fd(FdOperation::Close),
         "closerange" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.closerange"),
         "read" => Intrinsic::Fd(FdOperation::Read),
+        "readinto" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readinto"),
         "pread" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.pread"),
         "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),

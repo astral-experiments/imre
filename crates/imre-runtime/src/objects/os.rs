@@ -539,6 +539,15 @@ pub(crate) fn read<E: From<Error>>(
     Ok(bytes)
 }
 
+/// Read directly into an exported buffer. An interrupted call needs signal dispatch before retry.
+pub(crate) fn try_readinto(fd: i32, dst: &mut [u8]) -> Result<Option<usize>> {
+    let length = dst.len();
+    #[cfg(target_os = "macos")]
+    let length = length.min(i32::MAX as usize);
+    // SAFETY: read writes at most length bytes into the borrowed slice and retains no pointer.
+    transferred(unsafe { libc::read(fd, dst.as_mut_ptr().cast(), length) })
+}
+
 pub(crate) fn try_write(fd: i32, data: &[u8]) -> Result<Option<usize>> {
     crate::initialize_io();
     let length = data.len();

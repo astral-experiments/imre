@@ -4,7 +4,7 @@ import sys
 import posixpath as path
 import stat as st
 from posix import _exit
-from posix import pread
+from posix import pread, readinto
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
