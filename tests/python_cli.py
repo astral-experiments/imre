@@ -70,9 +70,9 @@ def check_context_protocol_allocation(imre, root, run):
         "-C", f"link-arg={wrapper}",
         "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
-    for shape, opcode in [(0, "lookup_enter"), (7, "lookup_exit")]:
+    for opcode in ("lookup_enter", "lookup_exit"):
         for target in [0, 1]:
-            result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", str(shape), extra={
+            result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", opcode, extra={
                 "IMRE_ENCODED_FLAGS": flags,
                 "CONTEXT_REFUSE_NTH": str(target),
                 "CONTEXT_REFUSE_OPCODE": opcode,
@@ -83,8 +83,8 @@ def check_context_protocol_allocation(imre, root, run):
                 assert b"context_allocation 1 " in result.stderr and b" 1\n" in result.stderr, result
             else:
                 assert result.stdout.startswith(b"kind TypeError\ndetail "), result
-    for shape in [8, 9]:
-        result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", str(shape), root / "context-output", extra={"IMRE_ENCODED_FLAGS": flags})
+    for mode in ("wb", "w"):
+        result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", mode, root / "context-output", extra={"IMRE_ENCODED_FLAGS": flags})
         assert (result.returncode, result.stdout) == (0, b"written 4\nclosed True\ncontent True\n"), result
 
 

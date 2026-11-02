@@ -16,15 +16,12 @@ impl Context {
         callable: Id,
         arguments: Id,
         keywords: Id,
-        mark: Option<usize>,
+        mark: usize,
     ) -> Result<Id> {
         let args = self.items(arguments)?;
         let kwargs = self.keyword_args(keywords)?;
         let result = self.call(callable, args, kwargs)?;
-        // Older compiled modules identify the boundary by their fresh argument list.
-        if let Some(mark) = mark.or_else(|| self.heap.argument_mark(arguments)) {
-            self.finish_call_operands(mark, result);
-        }
+        self.finish_call_operands(mark, result);
         Ok(result)
     }
 
@@ -165,9 +162,9 @@ impl Context {
                 }
                 self.lookup(a, &name)
             }
-            "assign" | "assign_expr" | "assign_target" | "assign_named_target" => {
+            "assign" | "assign_target" | "assign_named_target" => {
                 let mut scope = a;
-                if matches!(op, "assign_expr" | "assign_named_target") {
+                if op == "assign_named_target" {
                     while self.scope_data(scope).comprehension.is_some() {
                         scope = self
                             .scope_data(scope)
@@ -326,7 +323,6 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
-            "call" => self.call_packed(a, b, c, None),
             "class" => self.class(a, b, c),
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
@@ -454,13 +450,7 @@ impl Context {
                     Ok(FALSE)
                 }
             }
-            "type" => {
-                if !matches!(self.heap.get(a), Value::Raised(_)) {
-                    return Err(Error::new("TypeError", "expected exception"));
-                }
-                self.exact_type(a)
-            }
-            "exit_context" | "exit_exception" => {
+            "exit_context" => {
                 let (class, traceback, active) = if b == NONE {
                     (NONE, NONE, self.heap.caught_exception(c))
                 } else {
@@ -881,7 +871,7 @@ pub(super) unsafe extern "C" fn imre_dyn_call_at(
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = ctx.call_packed(callable, args, kwargs, Some(mark));
+    let result = ctx.call_packed(callable, args, kwargs, mark);
     finish_at(ctx, result, span)
 }
 
