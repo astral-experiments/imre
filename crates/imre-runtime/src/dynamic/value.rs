@@ -2162,8 +2162,6 @@ pub(super) struct Heap {
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
-    // Call-history markers belong to list storage and expire when it is collected.
-    pub(super) mock_call_lists: HashSet<Id>,
     frames: Vec<Frame>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
@@ -2254,7 +2252,6 @@ impl Heap {
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),
-            mock_call_lists: HashSet::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
@@ -3792,8 +3789,6 @@ impl Heap {
         self.interned
             .retain(|_, entry| self.slots[entry.id as usize].marked());
         let callbacks = self.clear_weak_targets(None, None);
-        self.mock_call_lists
-            .retain(|&list| self.slots[list as usize].marked());
         self.abc_registrations.retain(|&[owner, member]| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
@@ -3984,21 +3979,6 @@ mod tests {
         heap.collect(std::iter::empty());
         assert!(heap.slots[owner as usize].value.is_none());
         assert!(heap.slots[child as usize].value.is_none());
-    }
-
-    #[test]
-    fn collected_mock_call_list_does_not_mark_a_reused_list_slot() {
-        let mut heap = Heap::new();
-        let list = heap.alloc(Value::List(Vec::new()));
-        heap.mock_call_lists.insert(list);
-        heap.frames.last_mut().unwrap().live.clear();
-
-        heap.collect([list].into_iter());
-        assert!(heap.mock_call_lists.contains(&list));
-        heap.collect(std::iter::empty());
-        let ordinary = heap.alloc(Value::List(Vec::new()));
-        assert_eq!(ordinary, list);
-        assert!(!heap.mock_call_lists.contains(&ordinary));
     }
 
     #[test]
