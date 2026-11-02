@@ -4,6 +4,7 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "reprlib" => Some(("reprlib.py", include_str!("../../stdlib/reprlib.py"))),
         "datetime" => Some(("datetime.py", include_str!("../../stdlib/datetime.py"))),
         "json" => Some((
             "json/__init__.py",
