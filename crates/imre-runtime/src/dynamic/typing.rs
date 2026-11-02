@@ -780,7 +780,20 @@ pub(super) fn bind_generic_parameters(
     Ok(())
 }
 
+/// Return the shared member descriptor for a variance flag stored on a TypeVar.
+pub(super) fn variance_member(ctx: &mut Context, name: &str) -> Option<Id> {
+    let field = ["__covariant__", "__contravariant__", "__infer_variance__"]
+        .into_iter()
+        .find(|&field| field == name)?;
+    Some(ctx.readonly_member("typing.TypeVar", field))
+}
+
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
+    if matches!(ctx.heap.get(value), Value::Native(class) if class == "typing.TypeVar")
+        && let Some(member) = variance_member(ctx, name)
+    {
+        return Some(Ok(member));
+    }
     let attr = match ctx.heap.get(value) {
         Value::TypeVar(_) | Value::TypeVarTuple { .. } | Value::GenericAlias(_)
             if name == "__mro_entries__" =>

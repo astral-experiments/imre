@@ -127,8 +127,7 @@ pub(super) fn doc_method(
             }
         }
         ("__set__", [obj, _]) | ("__delete__", [obj]) if let Some((owner, field)) = field => {
-            ctx.read_member(owner, field, *obj)?;
-            Err(Error::new("AttributeError", "readonly attribute"))
+            ctx.reject_member_write(owner, field, *obj).map(|()| NONE)
         }
         ("__set__", [obj, value]) => set_document(ctx, *obj, Some(*value)),
         ("__delete__", [obj]) => set_document(ctx, *obj, None),

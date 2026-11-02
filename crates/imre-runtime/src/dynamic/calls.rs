@@ -990,14 +990,33 @@ impl Context {
         if ty == self.builtin(owner) {
             self.lookup_attr(receiver, field)
         } else {
-            Err(Error::new(
-                "TypeError",
-                format!(
-                    "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
-                    self.type_name(receiver)
-                ),
-            ))
+            Err(self.member_receiver_error(owner, field, ty))
         }
+    }
+
+    fn member_receiver_error(&self, owner: &str, field: &str, ty: Id) -> Error {
+        Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{field}' for '{owner}' objects doesn't apply to a '{}' object",
+                self.class_name(ty)
+            ),
+        )
+    }
+
+    /// A read-only member rejects an unrelated receiver before reporting a read-only write.
+    pub(super) fn reject_member_write(
+        &mut self,
+        owner: &str,
+        field: &str,
+        receiver: Id,
+    ) -> Result<()> {
+        let ty = self.exact_type(receiver)?;
+        let class = self.builtin(owner);
+        if !self.direct_subclass(ty, class) {
+            return Err(self.member_receiver_error(owner, field, ty));
+        }
+        Err(Error::new("AttributeError", "readonly attribute"))
     }
 
     /// Check whether an inline value is an immutable tuple position.
@@ -1994,6 +2013,7 @@ impl Context {
                 _ => {}
             },
             Value::ReadOnlyMember(owner, field) => match name {
+                "__doc__" if owner == "typing.TypeVar" => return Ok(NONE),
                 "__name__" => return Ok(self.text(field)),
                 "__qualname__" => {
                     return Ok(self.text(format!("{}.{field}", owner.rsplit('.').next().unwrap())));
@@ -3545,8 +3565,8 @@ impl Context {
                 Value::TupleGetterDoc => {
                     return super::namedtuple::set_document(self, obj, None).map(|_| ());
                 }
-                Value::ReadOnlyMember(_, _) => {
-                    return Err(Error::new("AttributeError", "readonly attribute"));
+                Value::ReadOnlyMember(owner, field) => {
+                    return self.reject_member_write(owner, field, obj);
                 }
                 Value::TupleGetter { .. } => {
                     return Err(Error::new("AttributeError", "can't delete attribute"));
@@ -3857,6 +3877,9 @@ impl Context {
         {
             return Some(member);
         }
+        if matches!(self.heap.get(obj), Value::TypeVar(_)) {
+            return super::typing::variance_member(self, name);
+        }
         let member = self.slot(obj, name)?;
         if let Value::Instance { class, .. } = *self.heap.get(obj)
             && self.instance_layout(class, name).active_slot
@@ -4120,6 +4143,7 @@ impl Context {
                     class.as_str(),
                     HashState::CLASS
                         | HashState::XOF_CLASS
+                        | "typing.TypeVar"
                         | KEY_WRAPPER
                         | stdlib::flags::TYPE
                         | value::REGEX_PATTERN_TYPE
@@ -4242,8 +4266,8 @@ impl Context {
             if matches!(self.heap.get(descriptor), Value::SlotMember { .. }) {
                 return self.write_slot_member(descriptor, obj, Some(value));
             }
-            if matches!(self.heap.get(descriptor), Value::ReadOnlyMember(_, _)) {
-                return Err(Error::new("AttributeError", "readonly attribute"));
+            if let Value::ReadOnlyMember(owner, field) = *self.heap.get(descriptor) {
+                return self.reject_member_write(owner, field, obj);
             }
             if matches!(self.heap.get(descriptor), Value::TupleGetterDoc) {
                 return super::namedtuple::set_document(self, obj, Some(value)).map(|_| ());
