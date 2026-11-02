@@ -44,6 +44,11 @@ def read_text(anchor, *path_names, encoding=_missing, errors='strict'):
     return _get_resource(anchor, path_names).read_text(encoding=encoding, errors=errors)
 
 
+def path(anchor, *path_names):
+    """Return the path to the *resource* as an actual file system path."""
+    return as_file(_get_resource(anchor, path_names))
+
+
 def as_file(path):
     """Provide a pathlib.Path for the duration of a context manager."""
     from importlib.resources._as_file import as_file as materialize
