@@ -469,21 +469,43 @@ pub(super) fn encoder_call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
 }
 
 /// Exact JSON scalars have no Python callbacks or child references.
+fn json_scalar(ctx: &Context, id: Id) -> bool {
+    matches!(
+        ctx.heap.get(id),
+        Value::None
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::Str(_)
+            | Value::SurrogateStr(_)
+    )
+}
+
 fn scalar_entries(ctx: &Context, entries: &[(Id, Id)]) -> bool {
-    let scalar = |id| {
-        matches!(
-            ctx.heap.get(id),
-            Value::None
-                | Value::Bool(_)
-                | Value::Int(_)
-                | Value::Float(_)
-                | Value::Str(_)
-                | Value::SurrogateStr(_)
-        )
-    };
     entries
         .iter()
-        .all(|&(key, value)| scalar(key) && scalar(value))
+        .all(|&(key, value)| json_scalar(ctx, key) && json_scalar(ctx, value))
+}
+
+/// Prove a small replacement contains only plain JSON data. Charge repeated
+/// references against the same budget so cycles and shared subgraphs stay bounded.
+fn plain_replacement(ctx: &Context, id: Id, budget: &mut usize) -> bool {
+    let Some(next) = budget.checked_sub(1) else {
+        return false;
+    };
+    *budget = next;
+    match ctx.heap.get(id) {
+        Value::Tuple(items) | Value::List(items) => items
+            .iter()
+            .all(|&item| plain_replacement(ctx, item, budget)),
+        Value::Dict(entries) => {
+            entries.ordered_nodes().is_empty()
+                && entries.iter().all(|&(key, value)| {
+                    plain_replacement(ctx, key, budget) && plain_replacement(ctx, value, budget)
+                })
+        }
+        _ => json_scalar(ctx, id),
+    }
 }
 
 /// Test whether dropping an encoder callback result can run observable cleanup.
@@ -500,7 +522,7 @@ fn observe_release(ctx: &Context, result: Id) -> bool {
             return false;
         }
     }
-    ctx.heap.could_own_finalizer(result, true)
+    ctx.heap.could_own_finalizer(result, true) && !plain_replacement(ctx, result, &mut 64)
 }
 
 impl Encoder {
