@@ -2780,6 +2780,7 @@ impl Context {
             #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
+                stdlib::os::sysconf::initialize(self, module, scope);
                 for (attr, flag) in [("O_PATH", libc::O_PATH), ("O_TMPFILE", libc::O_TMPFILE)] {
                     let value = self.int(i64::from(flag));
                     self.bind(scope, attr, value);
