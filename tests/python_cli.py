@@ -2073,16 +2073,6 @@ def report(text):
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
         compare("-IB", fixtures / "boxed_pickle_writer.py")
-        compare(
-            "-IB", "-c",
-            "import codecs, io; choose = codecs.getwriter; sink = io.BytesIO(); "
-            "choose('cp1251')(sink).write('до'); print(sink.getvalue())",
-        )
-        compare(
-            "-IB", "-c",
-            "import codecs\nclass Sink:\n    def write(self, data: bytes) -> None: print(data)\n"
-            "codecs.getwriter('cp1251')(Sink()).write('до')",
-        )
         compare("-IB", "-c", "import io; b = io.BytesIO(b'abc'); print(bytes(b.getbuffer()))")
         compare(
             "-IB", "-c",
@@ -2101,6 +2091,16 @@ def report(text):
         compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        compare(
+            "-IB", "-c",
+            "import codecs, io; choose = codecs.getwriter; sink = io.BytesIO(); "
+            "choose('cp1251')(sink).write('до'); print(sink.getvalue())",
+        )
+        compare(
+            "-IB", "-c",
+            "import codecs\nclass Sink:\n    def write(self, data: bytes) -> None: print(data)\n"
+            "codecs.getwriter('cp1251')(Sink()).write('до')",
+        )
         reinit_writer = fixtures / "io_buffered_writer_reinitialize.py"
         reinit_path = root / "reinitialized-writer.bin"
         compare("-IB", reinit_writer, reinit_path, native_args=("run", reinit_writer, "--quiet", "--", reinit_path))
