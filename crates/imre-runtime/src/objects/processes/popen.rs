@@ -248,7 +248,6 @@ struct LaunchExtras<'a> {
     failure_site: Option<&'a mut Option<(launch_error::Site, bool)>>,
     direct: Option<bool>,
     search_path: Option<Vec<u8>>,
-    warn_line_buffering: Option<&'a mut dyn FnMut() -> Result<()>>,
 }
 
 impl LaunchConfig {
@@ -512,12 +511,6 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
     let mut pipes: Pipes = [None, None, None];
     for (i, parent) in parents.into_iter().enumerate() {
         if let Some(fd) = parent {
-            if !text
-                && bufsize == 1
-                && let Some(warn) = &mut extras.warn_line_buffering
-            {
-                warn()?;
-            }
             pipes[i] = Some(FileState::pipe(fd.into(), i != 0, text, bufsize)?);
         }
     }
