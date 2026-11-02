@@ -141,6 +141,20 @@ def current():
     else:
         raise AssertionError("missing membership operand")
 
+    class StopCompares:
+        def __eq__(self, other):
+            raise LookupError("comparison reached")
+
+    stop = StopCompares()
+    assert deque([stop]).__contains__(stop)
+    assert deque([1, stop]).__contains__(1)
+    try:
+        deque([stop, 1]).__contains__(1)
+    except LookupError as error:
+        assert str(error) == "comparison reached"
+    else:
+        raise AssertionError("membership skipped a comparison error")
+
     bounded = deque([Match(True)])
     assert bounded.index(99) == 0
     bounded.append(Match(False))
