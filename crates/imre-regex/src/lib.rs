@@ -772,69 +772,165 @@ fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, 
 /// Encode a literal replacement as UTF-8 runs and capture indices. The high
 /// bit distinguishes a group from a byte count, so user text needs no sentinel.
 pub fn replacement(template: &str, groups: &[Capture]) -> Result<Vec<u8>, &'static str> {
-    fn flush(out: &mut Vec<u8>, literal: &mut String) -> Result<(), &'static str> {
-        if !literal.is_empty() {
-            let n = u32::try_from(literal.len())
-                .ok()
-                .filter(|&n| n < 1 << 31)
-                .ok_or("replacement literal is too long")?;
-            out.extend(n.to_le_bytes());
-            out.extend_from_slice(literal.as_bytes());
-            literal.clear();
-        }
-        Ok(())
-    }
-    let mut chars = template.chars().peekable();
+    let parts = parse_replacement(template, groups.len(), |name| {
+        groups.iter().position(|g| g.name.as_deref() == Some(name))
+    })
+    .map_err(|error| match error {
+        ReplacementError::Syntax { compiler, .. } => compiler,
+        ReplacementError::GroupName { .. } => "unknown replacement group",
+    })?;
     let mut out = Vec::new();
+    for part in parts {
+        match part {
+            ReplacementPart::Literal(text) => {
+                let n = u32::try_from(text.len())
+                    .ok()
+                    .filter(|&n| n < 1 << 31)
+                    .ok_or("replacement literal is too long")?;
+                if n != 0 {
+                    out.extend(n.to_le_bytes());
+                    out.extend_from_slice(text.as_bytes());
+                }
+            }
+            ReplacementPart::Group(index) => out.extend((index as u32 | 1 << 31).to_le_bytes()),
+        }
+    }
+    Ok(out)
+}
+
+/// A replacement contains literal runs interspersed with public capture indices.
+pub enum ReplacementPart {
+    Literal(String),
+    Group(usize),
+}
+
+pub enum ReplacementError {
+    Syntax {
+        compiler: &'static str,
+        message: String,
+        position: usize,
+    },
+    GroupName {
+        name: String,
+        position: usize,
+    },
+}
+
+/// Parse text or Latin-1-decoded bytes. Offsets count characters in the original template.
+pub fn parse_replacement(
+    template: &str,
+    groups: usize,
+    named_group: impl Fn(&str) -> Option<usize>,
+) -> Result<Vec<ReplacementPart>, ReplacementError> {
+    let syntax = |position, compiler, message| ReplacementError::Syntax {
+        compiler,
+        message,
+        position,
+    };
+    let numeric_group = |digits: &str, start| {
+        let digits = digits.trim_start_matches('0');
+        let digits = if digits.is_empty() { "0" } else { digits };
+        digits.parse().ok().filter(|&i| i < groups).ok_or_else(|| {
+            syntax(
+                start,
+                "unknown replacement group",
+                format!("invalid group reference {digits}"),
+            )
+        })
+    };
+    let mut chars = template.chars().enumerate().peekable();
+    let mut parts = Vec::new();
     let mut literal = String::new();
-    while let Some(c) = chars.next() {
+    while let Some((pos, c)) = chars.next() {
         if c != '\\' {
             literal.push(c);
             continue;
         }
-        let escape = chars.next().ok_or("incomplete replacement escape")?;
+        let eof = |pos| {
+            syntax(
+                pos,
+                "incomplete replacement escape",
+                "bad escape (end of pattern)".into(),
+            )
+        };
+        let (_, escape) = chars.next().ok_or_else(|| eof(pos))?;
         let group = match escape {
             'g' => {
-                if chars.next() != Some('<') {
-                    return Err("expected < in replacement group");
+                if chars.next_if(|&(_, ch)| ch == '<').is_none() {
+                    if chars.peek().is_some_and(|&(_, ch)| ch == '\\')
+                        && chars.clone().nth(1).is_none()
+                    {
+                        return Err(eof(pos + 2));
+                    }
+                    return Err(syntax(
+                        pos + 2,
+                        "expected < in replacement group",
+                        "missing <".into(),
+                    ));
                 }
+                let start = pos + 3;
                 let mut name = String::new();
                 loop {
                     match chars.next() {
-                        Some('>') => break,
-                        Some(c) => name.push(c),
-                        None => return Err("unterminated replacement group"),
+                        Some((_, '>')) if !name.is_empty() => break,
+                        Some((_, '>')) | None if name.is_empty() => {
+                            return Err(syntax(
+                                start,
+                                "unknown replacement group",
+                                "missing group name".into(),
+                            ));
+                        }
+                        Some((slash, '\\')) => {
+                            name.push('\\');
+                            name.push(chars.next().ok_or_else(|| eof(slash))?.1);
+                        }
+                        Some((_, ch)) => name.push(ch),
+                        None => {
+                            return Err(syntax(
+                                start,
+                                "unterminated replacement group",
+                                "missing >, unterminated name".into(),
+                            ));
+                        }
                     }
                 }
-                if !name.is_empty() && name.bytes().all(|c| c.is_ascii_digit()) {
-                    name.parse().ok()
+                if name.bytes().all(|ch| ch.is_ascii_digit()) {
+                    numeric_group(&name, start)?
                 } else {
-                    groups.iter().position(|g| g.name.as_deref() == Some(&name))
+                    named_group(&name).filter(|&index| index < groups).ok_or(
+                        ReplacementError::GroupName {
+                            name,
+                            position: start,
+                        },
+                    )?
                 }
             }
             '1'..='9' => {
                 let mut digits = String::from(escape);
-                if let Some(c) = chars.next_if(char::is_ascii_digit) {
+                if let Some((_, c)) = chars.next_if(|&(_, ch)| ch.is_ascii_digit()) {
                     digits.push(c);
                     if digits.bytes().all(|d| (b'0'..=b'7').contains(&d))
-                        && let Some(c) = chars.next_if(|c| matches!(c, '0'..='7'))
+                        && let Some((_, c)) = chars.next_if(|&(_, ch)| matches!(ch, '0'..='7'))
                     {
                         digits.push(c);
-                        let octal = u8::from_str_radix(&digits, 8)
-                            .map_err(|_| "octal escape exceeds 0o377")?;
+                        let octal = u8::from_str_radix(&digits, 8).map_err(|_| {
+                            syntax(
+                                pos,
+                                "octal escape exceeds 0o377",
+                                format!("octal escape value \\{digits} outside of range 0-0o377"),
+                            )
+                        })?;
                         literal.push(char::from(octal));
                         continue;
                     }
                 }
-                digits.parse().ok()
+                numeric_group(&digits, pos + 1)?
             }
             '0' => {
                 let mut octal = 0;
                 for _ in 0..2 {
-                    if let Some(c) = chars.next_if(|c| matches!(c, '0'..='7')) {
-                        octal = octal * 8 + c.to_digit(8).unwrap() as u8;
-                    } else {
-                        break;
+                    if let Some((_, c)) = chars.next_if(|&(_, ch)| matches!(ch, '0'..='7')) {
+                        octal = octal * 8 + (c as u8 - b'0');
                     }
                 }
                 literal.push(char::from(octal));
@@ -850,7 +946,13 @@ pub fn replacement(template: &str, groups: &[Capture]) -> Result<Vec<u8>, &'stat
                     'n' => '\n',
                     'r' => '\r',
                     't' => '\t',
-                    c if c.is_ascii_alphabetic() => return Err("invalid replacement escape"),
+                    c if c.is_ascii_alphabetic() => {
+                        return Err(syntax(
+                            pos,
+                            "invalid replacement escape",
+                            format!("bad escape \\{c}"),
+                        ));
+                    }
                     c => {
                         literal.push('\\');
                         c
@@ -860,14 +962,15 @@ pub fn replacement(template: &str, groups: &[Capture]) -> Result<Vec<u8>, &'stat
                 continue;
             }
         };
-        let group = group
-            .filter(|&i| i < groups.len())
-            .ok_or("unknown replacement group")?;
-        flush(&mut out, &mut literal)?;
-        out.extend((group as u32 | 1 << 31).to_le_bytes());
+        if parts.is_empty() || !literal.is_empty() {
+            parts.push(ReplacementPart::Literal(std::mem::take(&mut literal)));
+        }
+        parts.push(ReplacementPart::Group(group));
     }
-    flush(&mut out, &mut literal)?;
-    Ok(out)
+    if parts.is_empty() || !literal.is_empty() {
+        parts.push(ReplacementPart::Literal(literal));
+    }
+    Ok(parts)
 }
 
 type Input<'a> = std::iter::Peekable<std::str::Chars<'a>>;

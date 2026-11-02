@@ -76,3 +76,23 @@ def current():
     source.extend(b"?")
     source[1] = 99
     assert retained[0].string is source and retained[0].group() == b"c"
+
+    # The punctuation escape in _strptime.TimeRE.pattern prefixes the captured character.
+    assert re.sub(r"([\\.^$*+?\(\){}\[\]|])", r"\\\1", "[é].") == r"\[é\]\."
+    groups = re.compile(r"(?P<one>a)?(b)$")
+    assert groups.sub(r"<\g<one>/\2/\g<0>>", "b\n") == "</b/b>\n"
+    assert re.compile("(|é)").sub(r"[\1]", "é", 2) == "[][é]"
+    assert re.compile(b"(.)").sub(bytearray(rb"\377\1"), b"\x81") == b"\xff\x81"
+    for count in (-1, 0):
+        try:
+            groups.sub(r"é\3", "", count)
+        except re.PatternError as exc:
+            assert (exc.msg, exc.pattern, exc.pos) == ("invalid group reference 3", r"é\3", 2)
+        else:
+            raise AssertionError("missing group accepted before matching")
+    try:
+        groups.sub(r"\g<absent>", "b")
+    except IndexError as exc:
+        assert exc.args == ("unknown group name 'absent'",)
+    else:
+        raise AssertionError("unknown named group accepted")
