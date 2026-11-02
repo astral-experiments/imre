@@ -28,6 +28,9 @@ fn count(
 
 impl Wrapper {
     pub(super) fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
+        if !self.readable.get() {
+            return Ok(end);
+        }
         let input = self.input.borrow();
         let Some(snapshot) = input.snapshot.clone() else {
             return Ok(end);
@@ -40,7 +43,9 @@ impl Wrapper {
         let bytes = snapshot.input.as_slice();
         let cookie = Cookie {
             start: ctx
-                .as_integer(end)?
+                .index_integer(end)?
+                .to_i64()
+                .ok_or_else(|| Error::new("OverflowError", "int too big to convert"))?
                 .checked_sub(bytes.len() as i64)
                 .ok_or_else(overflow)?,
             flags: snapshot.flags,

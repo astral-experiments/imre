@@ -485,9 +485,15 @@ impl Wrapper {
             let (method, args) = if all {
                 ("read", vec![])
             } else {
+                let mut size = w.chunk_size.get();
+                if let Some(limit) = limit
+                    && !line
+                {
+                    size = w.input.borrow().read_size(size, limit);
+                }
                 (
                     if w.read1 { "read1" } else { "read" },
-                    vec![ctx.int(w.chunk_size.get() as i64)],
+                    vec![ctx.int(size as i64)],
                 )
             };
             // A Python read method may seek or reinitialize the wrapper. The snapshot
@@ -774,6 +780,7 @@ pub(super) fn call(
                         "telling position disabled by next() call",
                     ));
                 }
+                w.drain(ctx, receiver)?;
                 invoke(ctx, receiver, "flush", vec![])?;
                 let pos = Wrapper::invoke_buffer(ctx, receiver, "tell", vec![])?;
                 return Wrapper::from_receiver(ctx, receiver)?.position(ctx, pos);
@@ -824,10 +831,12 @@ pub(super) fn call(
                 let zero = ctx.int(0);
                 let end = ctx.int(2);
                 let position = Wrapper::invoke_buffer(ctx, receiver, "seek", vec![zero, end])?;
-                let beginning = ctx.checked_equal(position, zero)?;
-                let w = Wrapper::from_receiver(ctx, receiver)?;
-                w.write_start.set(beginning);
-                w.utf8_signature_pending.set(beginning);
+                if Wrapper::from_receiver(ctx, receiver)?.writable.get() {
+                    let beginning = ctx.checked_equal(position, zero)?;
+                    let w = Wrapper::from_receiver(ctx, receiver)?;
+                    w.write_start.set(beginning);
+                    w.utf8_signature_pending.set(beginning);
+                }
                 return Ok(position);
             }
 

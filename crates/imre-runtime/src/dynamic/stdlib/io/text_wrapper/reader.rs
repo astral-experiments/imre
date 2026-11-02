@@ -130,11 +130,13 @@ impl Reader {
     pub(super) fn after_seek(&mut self, cookie: Cookie, codec: StreamCodec, newline: Option<&str>) {
         self.discard();
         self.set_state(cookie, codec, newline);
-        self.snapshot = Some(Snapshot {
-            flags: cookie.flags,
-            input: Rc::default(),
-        });
-        self.seek_seed = true;
+        if cookie.skip == 0 {
+            self.snapshot = Some(Snapshot {
+                flags: cookie.flags,
+                input: Rc::default(),
+            });
+            self.seek_seed = true;
+        }
     }
 
     pub(super) fn capture(
@@ -191,6 +193,17 @@ impl Reader {
         });
         self.seek_seed = data.is_empty();
         Ok(())
+    }
+
+    /// Sized reads estimate the byte count from the previous successful decoder refill.
+    pub(super) fn read_size(&self, minimum: usize, requested: usize) -> usize {
+        let buffered = self.text[self.cursor..].chars().count();
+        let remaining = requested.saturating_sub(buffered);
+        let estimate = self.bytes_per_char.max(1.0) * remaining as f64;
+        if estimate >= i64::MAX as f64 {
+            return minimum;
+        }
+        minimum.max(estimate as usize)
     }
 
     pub(super) fn used_in_chunk(&self) -> usize {

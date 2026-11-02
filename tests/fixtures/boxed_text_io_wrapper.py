@@ -210,6 +210,19 @@ def current():
         else:
             raise AssertionError("restored a cookie without enough decoded characters")
 
+    class InvalidReplay(io.BytesIO):
+        def read(self, size):
+            return bytearray()
+
+    with io.TextIOWrapper(InvalidReplay(b"a\rXY"), encoding="utf-8") as text:
+        try:
+            text.seek(cookie)
+        except TypeError as error:
+            assert str(error) == "underlying read() should have returned a bytes object, not 'bytearray'"
+        else:
+            raise AssertionError("accepted a bytearray during cookie restoration")
+        assert text.tell() == 2
+
     with io.TextIOWrapper(io.BytesIO("é\nXabc\n".encode()), encoding="utf-8") as text:
         text._CHUNK_SIZE = 4
         assert text.readline() == "é\n" and next(text) == "Xabc\n"
