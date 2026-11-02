@@ -189,16 +189,12 @@ impl Context {
         Ok(Some(entries.remove(0)))
     }
 
-    /// Find the exception storage only when the object inherits StopIteration.
-    fn stop_iteration_error(&mut self, object: Id) -> Option<&mut Error> {
+    /// Borrow the native member storage of an exception or a Python subclass.
+    fn exception_storage(&mut self, object: Id, kind: &str) -> Option<&mut Error> {
         let Value::Raised(error) = self.heap.get(object) else {
             return None;
         };
-        let stop = error.class().map_or_else(
-            || error.kind == "StopIteration",
-            |class| self.has_base(class, "StopIteration"),
-        );
-        if !stop {
+        if !self.is_builtin_error(error, kind) {
             return None;
         }
         let Value::Raised(error) = self.heap.get_mut(object) else {
@@ -220,6 +216,22 @@ impl Context {
             unreachable!()
         };
         error.tracing().dictionary = Some(dictionary);
+        dictionary
+    }
+
+    /// Keep the dictionary absent until first used, so wrapping an untouched partial can flatten it.
+    fn partial_dictionary(&mut self, obj: Id, dictionary: Option<Id>) -> Id {
+        if let Some(dictionary) = dictionary {
+            return dictionary;
+        }
+        let dictionary = self.dict(Vec::new());
+        let Value::Partial {
+            dictionary: field, ..
+        } = self.heap.get_mut(obj)
+        else {
+            unreachable!()
+        };
+        *field = Some(dictionary);
         dictionary
     }
 
@@ -786,7 +798,11 @@ impl Context {
         if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            if child == stdlib::hash_info::TYPE && parent == "tuple" {
+            if matches!(
+                child.as_str(),
+                stdlib::hash_info::TYPE | stdlib::flags::TYPE
+            ) && parent == "tuple"
+            {
                 return true;
             }
             if parent == "object" {
@@ -901,6 +917,7 @@ impl Context {
             | Value::Module { .. }
             | Value::ThreadLocal(_)
             | Value::Hash(_)
+            | Value::ThreadHandle(_)
             | Value::PrimitiveLock(_) => self.type_name(obj),
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::DefaultDict { .. } => "collections.defaultdict",
@@ -1054,6 +1071,7 @@ impl Context {
                     Some(
                         class @ ("time.struct_time"
                         | stdlib::hash_info::TYPE
+                        | stdlib::flags::TYPE
                         | stdlib::os::stat::CLASS),
                     ),
                 ..
@@ -1213,7 +1231,12 @@ impl Context {
             (
                 name,
                 Value::NamedTuple {
-                    class: Some(class @ ("time.struct_time" | stdlib::hash_info::TYPE)),
+                    class:
+                        Some(
+                            class @ ("time.struct_time"
+                            | stdlib::hash_info::TYPE
+                            | stdlib::flags::TYPE),
+                        ),
                     ..
                 },
             ) if name == *class => true,
@@ -1569,8 +1592,17 @@ impl Context {
                 return Ok(self.exception_dictionary(obj));
             }
         }
+        if name == "name"
+            && let Some(error) = self.exception_storage(obj, "NameError")
+        {
+            return Ok(error
+                .trace
+                .as_ref()
+                .and_then(|t| t.name_error_name)
+                .unwrap_or(NONE));
+        }
         if name == "value"
-            && let Some(error) = self.stop_iteration_error(obj)
+            && let Some(error) = self.exception_storage(obj, "StopIteration")
         {
             return Ok(error.stop_value());
         }
@@ -1855,8 +1887,11 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("generator.{name}")));
             }
-            Value::Native(ref class) if class == "staticmethod" && name == "__get__" => {
-                return Ok(self.builtin("staticmethod.__get__"));
+            Value::Native(ref class)
+                if matches!(class.as_str(), "classmethod" | "staticmethod")
+                    && name == "__get__" =>
+            {
+                return Ok(self.builtin(&format!("{class}.__get__")));
             }
             Value::Native(ref class)
                 if class == "property" && super::property::METHODS.contains(&name) =>
@@ -2255,21 +2290,20 @@ impl Context {
                 owner,
             } => return self.super_attribute(start, receiver, owner, name),
             Value::Partial {
-                coroutine_marker: Some(mark),
-                ..
-            } if name == "_is_coroutine_marker" => {
-                return Ok(mark);
-            }
-            Value::Partial {
                 function,
                 args,
                 keywords,
-                ..
+                dictionary,
             } => match name {
                 "func" => return Ok(function),
                 "args" => return Ok(args),
                 "keywords" => return Ok(keywords),
-                _ => {}
+                "__dict__" => return Ok(self.partial_dictionary(obj, dictionary)),
+                _ => {
+                    if let Some(value) = self.dictionary_field(dictionary, name)? {
+                        return Ok(value);
+                    }
+                }
             },
             Value::File(ref handle) if name == "closed" => {
                 return Ok(if handle.closed() { TRUE } else { FALSE });
@@ -2277,7 +2311,9 @@ impl Context {
             Value::Native(ref class) if class == "socket.socket" && name == "__name__" => {
                 return Ok(self.text("socket"));
             }
-            Value::Socket(_) if name == "family" => return Ok(self.int(i64::from(libc::AF_INET))),
+            Value::Socket(ref socket) if name == "family" => {
+                return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
+            }
             Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
             Value::BufferedRandom(ref file) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
@@ -2344,6 +2380,11 @@ impl Context {
             Value::Native(ref class) if class == "float" && name == "__getformat__" => {
                 let method = self.builtin("float.__getformat__");
                 return Ok(self.bind_native_classmethod(method, obj));
+            }
+            Value::Native(ref class) if class == stdlib::flags::TYPE => {
+                if let Some(value) = stdlib::flags::type_attribute(self, name, true) {
+                    return Ok(value);
+                }
             }
             Value::Native(ref class) if class == stdlib::hash_info::TYPE => {
                 if let Some(value) = stdlib::hash_info::type_attribute(self, name, true) {
@@ -2734,7 +2775,9 @@ impl Context {
                         return Ok(self.int(n));
                     }
                 }
-                if let Some(owner @ ("time.struct_time" | stdlib::hash_info::TYPE)) = class
+                if let Some(
+                    owner @ ("time.struct_time" | stdlib::hash_info::TYPE | stdlib::flags::TYPE),
+                ) = class
                     && name == "__class__"
                 {
                     return Ok(self.builtin(owner));
@@ -2745,6 +2788,10 @@ impl Context {
                 ) && let Some(property) = stdlib::urllib::property(self, values[1], name)?
                 {
                     return Ok(property);
+                } else if class == Some(stdlib::flags::TYPE)
+                    && let Some(value) = stdlib::flags::type_attribute(self, name, false)
+                {
+                    return Ok(value);
                 } else if class == Some(stdlib::hash_info::TYPE)
                     && let Some(value) = stdlib::hash_info::type_attribute(self, name, false)
                 {
@@ -2960,12 +3007,23 @@ impl Context {
             return Ok(());
         }
         if name == "__dict__"
-            && matches!(self.heap.get(obj), Value::Raised(_) | Value::Cached { .. })
+            && matches!(
+                self.heap.get(obj),
+                Value::Raised(_) | Value::Cached { .. } | Value::Partial { .. }
+            )
         {
             return Err(Error::new("TypeError", "cannot delete __dict__"));
         }
+        if name == "name"
+            && let Some(error) = self.exception_storage(obj, "NameError")
+        {
+            if let Some(trace) = error.trace.as_mut() {
+                trace.name_error_name = None;
+            }
+            return Ok(());
+        }
         if name == "value"
-            && let Some(error) = self.stop_iteration_error(obj)
+            && let Some(error) = self.exception_storage(obj, "StopIteration")
         {
             error.set_stop_value(NONE);
             return Ok(());
@@ -2996,6 +3054,13 @@ impl Context {
         }
         self.check_instance_field(obj, name)?;
         match *self.heap.get(obj) {
+            Value::Partial { dictionary, .. } => {
+                if matches!(name, "func" | "args" | "keywords") {
+                    return Err(Error::new("AttributeError", "readonly attribute"));
+                }
+                let dictionary = self.partial_dictionary(obj, dictionary);
+                self.update_dictionary_field(obj, dictionary, name, None)
+            }
             Value::Cached { dictionary, .. } => {
                 if name == "__dict__" {
                     return Err(Error::new("TypeError", "cannot delete __dict__"));
@@ -3182,6 +3247,16 @@ impl Context {
                 ..
             }
         ) && let Some(member) = stdlib::os::stat::member(self, name)
+        {
+            return Some(member);
+        }
+        if matches!(
+            self.heap.get(obj),
+            Value::NamedTuple {
+                class: Some(stdlib::flags::TYPE),
+                ..
+            }
+        ) && let Some(member) = stdlib::flags::member(self, name)
         {
             return Some(member);
         }
@@ -3388,7 +3463,7 @@ impl Context {
             && (HashState::is_provider_class(class)
                 || matches!(
                     class.as_str(),
-                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER
+                    HashState::CLASS | HashState::XOF_CLASS | KEY_WRAPPER | stdlib::flags::TYPE
                 ))
         {
             return Err(Error::new(
@@ -3534,7 +3609,10 @@ impl Context {
             return Ok(());
         }
         if name == "__dict__"
-            && matches!(self.heap.get(obj), Value::Raised(_) | Value::Cached { .. })
+            && matches!(
+                self.heap.get(obj),
+                Value::Raised(_) | Value::Cached { .. } | Value::Partial { .. }
+            )
         {
             if self.dict_storage(value).is_none() {
                 return Err(Error::new(
@@ -3547,6 +3625,13 @@ impl Context {
             }
             match self.heap.get_mut(obj) {
                 Value::Raised(error) => error.tracing().dictionary = Some(value),
+                Value::Partial { dictionary, .. } => {
+                    if let Some(old) = dictionary.replace(value)
+                        && old != value
+                    {
+                        self.heap.weak_edge_removed(old);
+                    }
+                }
                 Value::Cached { dictionary, .. } => {
                     let old = std::mem::replace(dictionary, value);
                     if old != value {
@@ -3557,8 +3642,14 @@ impl Context {
             }
             return Ok(());
         }
+        if name == "name"
+            && let Some(error) = self.exception_storage(obj, "NameError")
+        {
+            error.tracing().name_error_name = Some(value);
+            return Ok(());
+        }
         if name == "value"
-            && let Some(error) = self.stop_iteration_error(obj)
+            && let Some(error) = self.exception_storage(obj, "StopIteration")
         {
             error.set_stop_value(value);
             return Ok(());
@@ -3613,6 +3704,15 @@ impl Context {
             return Ok(());
         }
         self.check_instance_field(obj, name)?;
+        if let Value::Partial { dictionary, .. } = *self.heap.get(obj)
+            && name != "__class__"
+        {
+            if matches!(name, "func" | "args" | "keywords") {
+                return Err(Error::new("AttributeError", "readonly attribute"));
+            }
+            let dictionary = self.partial_dictionary(obj, dictionary);
+            return self.update_dictionary_field(obj, dictionary, name, Some(value));
+        }
         if let Value::Cached { dictionary, .. } = *self.heap.get(obj)
             && name != "__class__"
         {
@@ -3655,11 +3755,6 @@ impl Context {
                 ) =>
             {
                 return Err(Error::new("AttributeError", "readonly attribute"));
-            }
-            Value::Partial {
-                coroutine_marker, ..
-            } if name == "_is_coroutine_marker" => {
-                *coroutine_marker = Some(value);
             }
             Value::Property(property) if name == "__doc__" => property.doc = value,
             Value::Complex(_) if matches!(name, "real" | "imag") => {
@@ -3988,18 +4083,28 @@ impl Context {
                 }
                 Ok(result)
             }
+            Value::Native(name) if name == "classmethod.__get__" => {
+                wrapper_descriptor::descriptor_get(self, "classmethod", &args, &kwargs)
+            }
             Value::Native(name) if name == "wrapper_descriptor.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "wrapper_descriptor", &args, &kwargs)
             }
             Value::Native(name) if name == "method_descriptor.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "method_descriptor", &args, &kwargs)
             }
+            Value::Native(name) if name == stdlib::flags::TYPE => Err(Error::new(
+                "TypeError",
+                "cannot create 'sys.flags' instances",
+            )),
             Value::Native(name) if name == stdlib::hash_info::TYPE => {
                 stdlib::hash_info::construct(self, &args, &kwargs)
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "tuple.__new__" => {
+                if args.first().is_some_and(|&class| matches!(self.heap.get(class), Value::Native(name) if name == stdlib::flags::TYPE)) {
+                    return Err(Error::new("TypeError", "cannot create 'sys.flags' instances"));
+                }
                 super::namedtuple::allocate(self, &args, &kwargs)
             }
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),

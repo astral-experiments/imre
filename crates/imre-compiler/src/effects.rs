@@ -299,8 +299,7 @@ mod tests {
         }
         let module = Module {
             list_builds: Default::default(),
-            ignore_python_environment: false,
-            command_utf8_mode: None,
+            command_flags: None,
             types,
             functions,
             class_fields: Vec::new(),
@@ -349,12 +348,11 @@ mod tests {
         };
         let local = Expr::local(0, callback);
         let mut module = Module {
-            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             list_builds: Default::default(),
             class_metadata: Vec::new(),
-            command_utf8_mode: None,
+            command_flags: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
@@ -411,12 +409,11 @@ mod tests {
     #[test]
     fn transitive_calls_converge_and_uncertain_cycles_stay_fallible() {
         let module = Module {
-            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             list_builds: Default::default(),
             class_metadata: Vec::new(),
-            command_utf8_mode: None,
+            command_flags: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
@@ -474,12 +471,11 @@ def integers(values: list[int]) -> int:
             },
         };
         let module = Module {
-            ignore_python_environment: false,
             types: Default::default(),
             class_fields: Vec::new(),
             list_builds: Default::default(),
             class_metadata: Vec::new(),
-            command_utf8_mode: None,
+            command_flags: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),

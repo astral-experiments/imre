@@ -6,22 +6,25 @@ use ruff_python_ast as ast;
 #[derive(Clone, Copy)]
 struct Proof<'a> {
     params: &'a [&'a str],
+    lock_only: bool,
 }
 
 impl Proof<'_> {
     fn expression(self, expr: &ast::Expr) -> bool {
         match expr {
-            ast::Expr::BooleanLiteral(_)
-            | ast::Expr::NoneLiteral(_)
-            | ast::Expr::NumberLiteral(_) => true,
-            ast::Expr::Compare(expr) => expr.operands.iter().all(|e| self.expression(e)),
+            ast::Expr::BooleanLiteral(_) | ast::Expr::NoneLiteral(_) => true,
+            ast::Expr::NumberLiteral(_) => !self.lock_only,
+            ast::Expr::Compare(expr) if !self.lock_only => {
+                expr.operands.iter().all(|e| self.expression(e))
+            }
             ast::Expr::UnaryOp(expr) if expr.op == ast::UnaryOp::Not => {
                 self.expression(&expr.operand)
             }
             ast::Expr::BoolOp(expr) => expr.values.iter().all(|operand| self.expression(operand)),
             ast::Expr::Call(call) if call.arguments.keywords.is_empty() => {
                 if let ast::Expr::Name(name) = &*call.func {
-                    return self.params.contains(&name.id.as_str())
+                    return !self.lock_only
+                        && self.params.contains(&name.id.as_str())
                         && call.arguments.args.iter().all(|arg| self.expression(arg));
                 }
                 let ast::Expr::Attribute(attr) = &*call.func else {
@@ -34,7 +37,7 @@ impl Proof<'_> {
                             call.arguments.args.as_ref(),
                             [] | [ast::Expr::BooleanLiteral(_)]
                         ),
-                        "release" => call.arguments.args.is_empty(),
+                        "release" => !self.lock_only && call.arguments.args.is_empty(),
                         _ => false,
                     }
             }
@@ -77,7 +80,7 @@ impl Proof<'_> {
 pub(super) fn parameters<'a>(
     stmts: &[ast::Stmt],
     params: &'a ast::Parameters,
-) -> Option<Vec<&'a str>> {
+) -> Option<(Vec<&'a str>, bool)> {
     if params.vararg.is_some() || params.kwarg.is_some() || !params.kwonlyargs.is_empty() {
         return None;
     }
@@ -89,6 +92,18 @@ pub(super) fn parameters<'a>(
         }
         names.push(name);
     }
-    let proof = Proof { params: &names };
-    proof.suite(stmts).then_some(names)
+    let proof = Proof {
+        params: &names,
+        lock_only: false,
+    };
+    if !proof.suite(stmts) {
+        return None;
+    }
+    // Joinable workers cannot dispatch a Python exception hook across heaps.
+    let lock_only = Proof {
+        lock_only: true,
+        ..proof
+    }
+    .suite(stmts);
+    Some((names, lock_only))
 }

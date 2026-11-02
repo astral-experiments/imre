@@ -74,6 +74,13 @@ def current():
     print(str.partition is str.partition)
     parent = super(Text, Text)
     print(parent.replace is str.replace, parent.replace("<m>", "m", "&amp;"))
+    assert parent.replace(Text("aaa"), "a", "x", count=Index()) == "xxx"
+    try:
+        parent.replace("abc", None, "", count=Index())
+    except TypeError as error:
+        assert str(error) == "replace() argument 1 must be str, not None"
+    else:
+        raise AssertionError("str.replace accepted None as its old string")
     try:
         DescriptorOwner().partition(":")
     except TypeError as error:

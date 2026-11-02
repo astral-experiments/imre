@@ -1144,6 +1144,13 @@ impl Context {
         })
     }
 
+    /// Attach the name at the failed lookup, leaving exceptions raised by Python code alone.
+    fn undefined_source_name(name: &str, object: Id) -> Error {
+        let mut error = Error::new("NameError", format!("name '{name}' is not defined"));
+        error.tracing().name_error_name = Some(object);
+        error
+    }
+
     pub(super) fn source_global(&mut self, globals: ExecGlobals, name: &str) -> Result<Id> {
         for mapping in [globals.dict, globals.builtins] {
             if matches!(self.heap.get(mapping), Value::Dict(_)) {
@@ -1157,10 +1164,7 @@ impl Context {
                 }
             }
         }
-        Err(Error::new(
-            "NameError",
-            format!("name '{name}' is not defined"),
-        ))
+        Err(Self::undefined_source_name(name, self.text(name)))
     }
 
     /// Construct a function whose globals are supplied by Python code.
@@ -1350,7 +1354,50 @@ impl Context {
             .expect("initialized builtins dictionary"))
     }
 
+    /// Evaluate one forward-reference expression in its defining Python namespaces.
+    pub(super) fn eval_type_expression(&mut self, text: Id, globals: Id, locals: Id) -> Result<Id> {
+        let source = self.str_value(text)?;
+        let parsed = ruff_python_parser::parse_expression(source).map_err(|_| {
+            Error::new(
+                "SyntaxError",
+                format!("Forward reference must be an expression -- got {source:?}"),
+            )
+        })?;
+        check_runtime_strings(source, parsed.tokens())?;
+        let expr = *parsed.into_syntax().body;
+        if let ast::Expr::Name(ident) = &expr
+            && usize::from(ident.range().len()) == source.len()
+        {
+            // ForwardRef.evaluate looks up the original string for a bare identifier.
+            // The parser applies NFKC to ident.id, as required for compound expressions.
+            for mapping in [locals, globals, self.default_source_builtins()?] {
+                if self.contains(text, mapping)? {
+                    return self.get_item(mapping, text);
+                }
+            }
+            return Err(Self::undefined_source_name(self.str_value(text)?, text));
+        }
+        let mut program = Program::new(Rc::from("<string>"), "<module>");
+        program
+            .instructions
+            .push((1, Instruction::Return(Some(expr))));
+        program.prepare_strings(&mut self.heap, &mut HashMap::new())?;
+        let code = self.box_source_code(Rc::new(program), None);
+        self.run_in_namespace(code, globals, Some(locals), None)
+    }
+
     pub(super) fn exec_source(
+        &mut self,
+        source: Id,
+        globals: Id,
+        locals: Option<Id>,
+        function: Option<Id>,
+    ) -> Result<Id> {
+        self.run_in_namespace(source, globals, locals, function)
+            .map(|_| NONE)
+    }
+
+    fn run_in_namespace(
         &mut self,
         source: Id,
         globals: Id,
@@ -1439,7 +1486,7 @@ impl Context {
             }
             let defaults = self.dict(Vec::new());
             let function = self.source_function(code_id, scope, defaults);
-            self.call(function, Vec::new(), Vec::new())?;
+            self.call(function, Vec::new(), Vec::new())
         } else {
             // Definitions retain the global frame. The module alone sees the separate mapping.
             let module = if let Some(locals) = locals {
@@ -1456,9 +1503,8 @@ impl Context {
                 || FrameOwner::Module(self.function_module(scope)),
                 FrameOwner::Function,
             );
-            self.execute(code_id, module, owner)?;
+            self.execute(code_id, module, owner)
         }
-        Ok(NONE)
     }
 
     pub(super) fn call_source(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {

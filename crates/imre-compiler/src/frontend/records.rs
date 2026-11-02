@@ -991,7 +991,7 @@ impl Checker<'_> {
         Ok(self.evaluated_receiver(receiver, value))
     }
 
-    /// Route inherited instance assertions to the object runtime when a typed class lacks the member.
+    /// Route inherited type assertions to the object runtime when a typed class lacks the member.
     pub(super) fn missing_class_member(
         &self,
         class: usize,
@@ -999,8 +999,12 @@ impl Checker<'_> {
         node: &impl Ranged,
         diagnostic: &str,
     ) -> String {
-        if matches!(name, "assertIsInstance" | "assertNotIsInstance") && self.unittest_case(class) {
-            return self.object_runtime_export("unittest instance assertions", node);
+        if matches!(
+            name,
+            "assertIsInstance" | "assertNotIsInstance" | "assertIsSubclass" | "assertNotIsSubclass"
+        ) && self.unittest_case(class)
+        {
+            return self.object_runtime_export("unittest type assertions", node);
         }
         error(self.source, node, diagnostic)
     }
@@ -1573,7 +1577,7 @@ impl Checker<'_> {
                 }
             })?
         } else if self.inference.is_some() {
-            self.infer_call(call, &signature, None, 1)?.1
+            self.bind_source(call, &signature, None, 1, None)?.1
         } else {
             self.held_arguments(call, &signature.params[1..], None, &mut scope)?
         };
@@ -1795,7 +1799,8 @@ impl Checker<'_> {
         };
         let mut scope = calls::ArgumentScope::default();
         let args = if self.inference.is_some() {
-            self.infer_call(call, &signature, Some(receiver), 1)?.1
+            self.bind_source(call, &signature, Some(receiver), 1, None)?
+                .1
         } else {
             self.held_arguments(call, &signature.params[1..], Some(receiver), &mut scope)?
         };

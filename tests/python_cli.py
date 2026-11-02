@@ -70,9 +70,9 @@ def check_context_protocol_allocation(imre, root, run):
         "-C", f"link-arg={wrapper}",
         "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_op,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
-    for shape, opcode in [(0, "lookup_enter"), (7, "lookup_exit")]:
+    for opcode in ("lookup_enter", "lookup_exit"):
         for target in [0, 1]:
-            result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", str(shape), extra={
+            result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", opcode, extra={
                 "IMRE_ENCODED_FLAGS": flags,
                 "CONTEXT_REFUSE_NTH": str(target),
                 "CONTEXT_REFUSE_OPCODE": opcode,
@@ -83,8 +83,8 @@ def check_context_protocol_allocation(imre, root, run):
                 assert b"context_allocation 1 " in result.stderr and b" 1\n" in result.stderr, result
             else:
                 assert result.stdout.startswith(b"kind TypeError\ndetail "), result
-    for shape in [8, 9]:
-        result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", str(shape), root / "context-output", extra={"IMRE_ENCODED_FLAGS": flags})
+    for mode in ("wb", "w"):
+        result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", mode, root / "context-output", extra={"IMRE_ENCODED_FLAGS": flags})
         assert (result.returncode, result.stdout) == (0, b"written 4\nclosed True\ncontent True\n"), result
 
 
@@ -852,11 +852,15 @@ def check_unittest_file_discovery(imre, root, run):
             "class Late(unittest.TestCase):\n"
             "    def test_body(self):\n"
             "        for member in Marker: self.fail(member.name)\n"
+            "    def test_util(self):\n"
+            "        from unittest.util import safe_repr\n"
+            "        self.assertIs(safe_repr, unittest.util.safe_repr)\n"
+            "        self.assertEqual(safe_repr(None), 'None')\n"
         )
         for command in ((sys.executable, "-B", entry), (executable,)):
             result = run(*command, directory)
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, b"1 ['test_late.Late.test_body'] 0\n", b"",
+                0, b"2 ['test_late.Late.test_body'] 0\n", b"",
             ), result
 
 
@@ -1057,6 +1061,8 @@ def main():
 
         instance_check = root / "unittest_instance.py"
         for statement in (
+            "case.assertIsSubclass(bool, int)",
+            "check = Case.assertNotIsSubclass\ncheck(case, int, str)",
             "case.assertIsInstance(1, int)",
             "Case.assertNotIsInstance(case, 1, str)",
             "check = case.assertIsInstance\ncheck(1, int)",
@@ -1451,11 +1457,15 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        final_fixture = fixtures / "boxed_typing_final.py"
+        compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
-        for name in ("boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py"):
+        for name in ("boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py", "boxed_thread_dangling.py"):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
+        hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
+        compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":
             exe = root / "marshal-allocation"
             built = run(imre, "build", fixtures / "boxed_marshal_allocation.py",
@@ -1491,6 +1501,7 @@ def report(text):
             "boxed_sys_audit_recursion.py",
             "boxed_sys_intern.py",
             "boxed_sys_hash_info.py",
+            "boxed_sys_flags.py",
             "boxed_sys_jit.py",
             "boxed_bytes_add.py",
             "boxed_binary_iterators.py",
@@ -1518,6 +1529,7 @@ def report(text):
             "boxed_lru_cache_metadata.py",
             "boxed_functools_cache.py",
             "boxed_functools_reduce.py",
+            "boxed_functools_partialmethod.py",
             "boxed_contextmanager.py",
             "boxed_total_ordering.py",
             "boxed_cmp_to_key.py",
@@ -1528,6 +1540,8 @@ def report(text):
             "boxed_typing_literal.py",
             "boxed_typing_protocol.py",
             "boxed_typing_variadic.py",
+            "boxed_typing_tuple.py",
+            "boxed_typing_mapping.py",
             "boxed_formatter.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
@@ -1535,6 +1549,7 @@ def report(text):
             "boxed_re_findall_empty.py",
             "boxed_datetime.py",
             "boxed_dataclasses.py",
+            "boxed_dataclass_init_annotations.py",
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
             "boxed_time.py",
@@ -1550,6 +1565,7 @@ def report(text):
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
+            "boxed_warning_categories.py",
             "boxed_oserror.py",
             "boxed_type_identity.py",
             "boxed_singleton_types.py",
@@ -1569,6 +1585,7 @@ def report(text):
             "boxed_unittest_assert_count_equal.py",
             "boxed_unittest_membership.py",
             "boxed_unittest_instance.py",
+            "boxed_unittest_subclass.py",
             "boxed_unittest_not_equal.py",
             "boxed_unittest_assert_raises.py",
             "boxed_unittest_identity.py",
