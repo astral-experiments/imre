@@ -194,18 +194,27 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "collections" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("collections/__init__.py", SOURCE.get_or_init(|| {
-                // The three user container classes form the tail of the pinned CPython module.
-                let (_, wrappers) = include_str!(
+                const UPSTREAM: &str = include_str!(
                     "../../../benchmarks/cpython_stdlib/full/collections/upstream/Lib/collections/__init__.py"
-                )
-                .split_once("### UserDict\n")
-                .expect("CPython 3.14.5 UserDict section");
+                );
+                let (_, wrappers) = UPSTREAM
+                    .split_once("### UserDict\n")
+                    .expect("CPython 3.14.5 UserDict section");
+                let (ordered, _) = UPSTREAM
+                    .split_once("### OrderedDict\n")
+                    .and_then(|(_, tail)| tail.split_once("### namedtuple\n"))
+                    .expect("CPython 3.14.5 OrderedDict section");
+                // Define the Python class in the fresh module's globals and let the
+                // upstream module select _collections.OrderedDict when it is available.
                 concat!(
                     include_str!("../stdlib/collections/__init__.py"),
                     "\n",
                     include_str!("../stdlib/collections/namedtuple_repr.py"),
+                    "\n",
+                    include_str!("../stdlib/collections/recursive_repr.py"),
                     "\nimport _collections_abc\nimport sys as _sys\n",
-                ).to_owned() + wrappers
+                    "from _weakref import proxy as _proxy\nfrom operator import eq as _eq\n",
+                ).to_owned() + ordered + wrappers
             })))
         }
         // CPython 3.14.5 Lib/configparser.py.

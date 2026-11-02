@@ -294,6 +294,7 @@ def current():
 
     fromkeys_construction()
     ordered_dictionary()
+    pure_ordered_dictionary()
     base_equality()
     allocate_without_init()
     mapping_patterns()
@@ -889,3 +890,28 @@ def base_equality():
         pass
     else:
         raise AssertionError("cyclic dicts unexpectedly compared equal")
+
+
+def pure_ordered_dictionary():
+    # Blocking the accelerator creates independent linked-list storage in a fresh module.
+    import importlib
+    import sys
+
+    public_collections = sys.modules["collections"]
+    public_accelerator = sys.modules["_collections"]
+    try:
+        del sys.modules["collections"]
+        sys.modules["_collections"] = None
+        fresh_collections = importlib.import_module("collections")
+        pure_type = fresh_collections.OrderedDict
+        assert pure_type is not public_accelerator.OrderedDict
+        assert pure_type.__module__ == "collections"
+        ordered = pure_type([("a", 1), ("b", 2)])
+        ordered.move_to_end("a")
+        print(list(ordered), list(dict.keys(ordered)), list(ordered.copy().items()))
+        print(fresh_collections.Counter("aba")["a"], type(iter(ordered)).__name__)
+    finally:
+        sys.modules["_collections"] = public_accelerator
+        sys.modules["collections"] = public_collections
+    assert pure_type.__iter__.__globals__ is fresh_collections.__dict__
+    assert pure_type.__iter__.__globals__["OrderedDict"] is pure_type

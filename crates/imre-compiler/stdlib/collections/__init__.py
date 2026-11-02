@@ -1,9 +1,16 @@
 """Dictionary and mapping classes for the runtime collections module."""
 
 import operator as _operator
-from _collections import OrderedDict, _count_elements
 from _collections_abc import MutableMapping as _MutableMapping, MutableSequence as _MutableSequence
 from itertools import repeat as _repeat
+
+try:
+    from _collections import _count_elements
+except ImportError:
+    def _count_elements(mapping, iterable):
+        mapping_get = mapping.get
+        for elem in iterable:
+            mapping[elem] = mapping_get(elem, 0) + 1
 
 _MutableSequence.register(deque)
 
