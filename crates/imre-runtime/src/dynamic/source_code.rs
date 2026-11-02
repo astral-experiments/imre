@@ -108,7 +108,18 @@ enum Instruction {
         item: ast::WithItem,
         handler: usize,
     },
+    AsyncWithMethods(Option<ast::Expr>),
+    CallAsyncEnter,
+    AwaitWithResult(&'static str),
+    EnterAsyncWith {
+        target: Option<Box<ast::Expr>>,
+        handler: usize,
+        end: usize,
+    },
     ExitWith,
+    CallAsyncExit,
+    TestAsyncExit,
+    FinishAsyncExit,
     EnterExcept {
         handler: usize,
         end: usize,
@@ -936,6 +947,11 @@ impl Program {
                         }
                     }
                 }
+                Instruction::AsyncWithMethods(Some(context)) => strings.visit_expr(context),
+                Instruction::EnterAsyncWith {
+                    target: Some(target),
+                    ..
+                } => strings.visit_expr(target),
                 Instruction::EnterWith { item, .. } => {
                     strings.visit_expr(&item.context_expr);
                     if let Some(target) = &item.optional_vars {
@@ -1072,7 +1088,14 @@ impl Program {
                 | Instruction::Jump(_)
                 | Instruction::Break(_)
                 | Instruction::EnterFinally { .. }
+                | Instruction::AsyncWithMethods(None)
+                | Instruction::EnterAsyncWith { target: None, .. }
                 | Instruction::ExitWith
+                | Instruction::CallAsyncExit
+                | Instruction::CallAsyncEnter
+                | Instruction::AwaitWithResult(_)
+                | Instruction::TestAsyncExit
+                | Instruction::FinishAsyncExit
                 | Instruction::EnterExcept { .. }
                 | Instruction::StartFinally
                 | Instruction::EndFinally
@@ -1681,27 +1704,62 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::With(s) if !s.is_async => {
-                    let first = self.instructions.len();
+                Stmt::With(s) => {
+                    if s.is_async && self.kind != FunctionKind::Coroutine {
+                        return Err(Error::new(
+                            "SyntaxError",
+                            "'async with' outside async function",
+                        ));
+                    }
+                    let mut entered = Vec::new();
                     for item in s.items {
                         if let Some(target) = &item.optional_vars {
                             self.declare_target(target)?;
                         }
-                        self.instructions
-                            .push((line, Instruction::EnterWith { item, handler: 0 }));
+                        let entry = if s.is_async {
+                            let context =
+                                self.lower_suspension(item.context_expr, line, function)?;
+                            self.instructions
+                                .push((line, Instruction::AsyncWithMethods(context)));
+                            self.instructions.push((line, Instruction::CallAsyncEnter));
+                            self.instructions
+                                .push((line, Instruction::AwaitWithResult("__aenter__")));
+                            self.instructions.push((line, Instruction::Delegate));
+                            Instruction::EnterAsyncWith {
+                                target: item.optional_vars,
+                                handler: 0,
+                                end: 0,
+                            }
+                        } else {
+                            Instruction::EnterWith { item, handler: 0 }
+                        };
+                        entered.push(self.instructions.len());
+                        self.instructions.push((line, entry));
                     }
-                    let entered = first..self.instructions.len();
                     self.lower(s.body, lines, function, active.as_deref_mut())?;
-                    for i in entered.rev() {
+                    for i in entered.into_iter().rev() {
                         self.instructions.push((line, Instruction::StartFinally));
                         let cleanup = self.instructions.len();
-                        self.instructions.push((line, Instruction::ExitWith));
+                        if s.is_async {
+                            self.instructions.push((line, Instruction::CallAsyncExit));
+                            self.instructions
+                                .push((line, Instruction::AwaitWithResult("__aexit__")));
+                            self.instructions.push((line, Instruction::Delegate));
+                            self.instructions.push((line, Instruction::TestAsyncExit));
+                            self.instructions.push((line, Instruction::FinishAsyncExit));
+                        } else {
+                            self.instructions.push((line, Instruction::ExitWith));
+                        }
                         self.instructions.push((line, Instruction::EndFinally));
-                        let Instruction::EnterWith { handler, .. } = &mut self.instructions[i].1
-                        else {
-                            unreachable!("context manager entry")
-                        };
-                        *handler = cleanup;
+                        let after = self.instructions.len();
+                        match &mut self.instructions[i].1 {
+                            Instruction::EnterWith { handler, .. } => *handler = cleanup,
+                            Instruction::EnterAsyncWith { handler, end, .. } => {
+                                *handler = cleanup;
+                                *end = after;
+                            }
+                            _ => unreachable!("context manager entry"),
+                        }
                     }
                     continue;
                 }
@@ -3142,7 +3200,15 @@ impl Context {
                     op,
                     Some((
                         _,
-                        Instruction::BindSent(_) | Instruction::ReturnSent | Instruction::Delegate
+                        Instruction::BindSent(_)
+                            | Instruction::ReturnSent
+                            | Instruction::Delegate
+                            | Instruction::AsyncWithMethods(None)
+                            | Instruction::CallAsyncEnter
+                            | Instruction::AwaitWithResult(_)
+                            | Instruction::EnterAsyncWith { .. }
+                            | Instruction::TestAsyncExit
+                            | Instruction::FinishAsyncExit
                     ))
                 ) {
                     cursor.sent = NONE;
@@ -3592,6 +3658,56 @@ impl Context {
                     *ip = *destination;
                 }
             }
+            Instruction::AsyncWithMethods(context) => {
+                cursor
+                    .protected
+                    .try_reserve(1)
+                    .map_err(|_| crate::Error::allocation())?;
+                iterators
+                    .try_reserve(2)
+                    .map_err(|_| crate::Error::allocation())?;
+                let manager = match context {
+                    Some(expr) => eval(self, expr)?,
+                    None => *sent,
+                };
+                let exit = self.context_method(manager, "__aexit__")?;
+                self.heap.keep(exit);
+                *sent = self.context_method(manager, "__aenter__")?;
+                // Keep the bound exit below the delegate while __aenter__ is suspended.
+                iterators.push(exit);
+                self.heap.weak_edge_removed(manager);
+                self.heap.release_unbound_finalizers();
+            }
+            Instruction::CallAsyncEnter => {
+                let enter = *sent;
+                *sent = self.call(enter, Vec::new(), Vec::new())?;
+                self.heap.weak_edge_removed(enter);
+                self.heap.release_unbound_finalizers();
+            }
+            Instruction::AwaitWithResult(method) => {
+                let value = std::mem::replace(sent, NONE);
+                iterators.push(self.await_iterator(value, Some(method))?);
+                self.heap.weak_edge_removed(value);
+                self.heap.release_unbound_finalizers();
+            }
+            Instruction::EnterAsyncWith {
+                target,
+                handler,
+                end,
+            } => {
+                let exit = iterators.pop().expect("saved asynchronous context exit");
+                cursor.protected.push(FinallyBlock {
+                    start: *ip,
+                    handler: *handler,
+                    end: *end,
+                    depth: iterators.len(),
+                    pending: None,
+                    kind: HandlerKind::With(exit),
+                });
+                if let Some(target) = target {
+                    self.bind_target(code, scope, target, *sent)?;
+                }
+            }
             Instruction::EnterWith { item, handler } => {
                 cursor
                     .protected
@@ -3615,7 +3731,10 @@ impl Context {
                     self.bind_target(code, scope, target, value)?;
                 }
             }
-            Instruction::ExitWith => {
+            Instruction::ExitWith
+            | Instruction::CallAsyncExit
+            | Instruction::TestAsyncExit
+            | Instruction::FinishAsyncExit => {
                 let block = cursor.protected.last_mut().expect("active context manager");
                 let HandlerKind::With(exit) = block.kind else {
                     unreachable!("context manager exit");
@@ -3624,9 +3743,45 @@ impl Context {
                     Some(Transfer::Raise(error)) => error,
                     _ => NONE,
                 };
-                let active = self.heap.active_exception();
-                let result = self.op("exit_context", exit, exception, active)?;
-                if exception != NONE && result == TRUE {
+                let suppress = match op {
+                    Instruction::CallAsyncExit => {
+                        let (class, tb) = if exception == NONE {
+                            (NONE, NONE)
+                        } else {
+                            (
+                                self.exact_type(exception)?,
+                                self.exception_traceback(exception)?,
+                            )
+                        };
+                        *sent = self.call(exit, vec![class, exception, tb], Vec::new())?;
+                        if exception == NONE {
+                            // Only exceptional cleanup retains its callable during the await and truth test.
+                            block.kind = HandlerKind::With(NONE);
+                            self.heap.weak_edge_removed(exit);
+                            self.heap.release_unbound_finalizers();
+                        }
+                        return Ok(None);
+                    }
+                    Instruction::TestAsyncExit => {
+                        let result = *sent;
+                        *sent = if exception != NONE && self.truth(result)? {
+                            TRUE
+                        } else {
+                            FALSE
+                        };
+                        // Release the result while a raised body exception is still active.
+                        self.heap.weak_edge_removed(result);
+                        self.heap.release_unbound_finalizers();
+                        return Ok(None);
+                    }
+                    Instruction::FinishAsyncExit => *sent == TRUE,
+                    _ => {
+                        let active = self.heap.active_exception();
+                        let result = self.op("exit_context", exit, exception, active)?;
+                        exception != NONE && result == TRUE
+                    }
+                };
+                if suppress {
                     block.pending = Some(Transfer::Jump {
                         destination: block.end,
                         pop_iter: false,
@@ -3678,7 +3833,7 @@ impl Context {
             }
             Instruction::Await(e) => {
                 let value = eval(self, e)?;
-                iterators.push(self.await_iterator(value)?);
+                iterators.push(self.await_iterator(value, None)?);
             }
             Instruction::Next(_, _) | Instruction::Delegate => {
                 let delegated = matches!(op, Instruction::Delegate);
