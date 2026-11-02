@@ -50,35 +50,43 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()>
 
 /// Keep the full Python integer until the backend needs a native descriptor.
 fn fd(ctx: &mut Context, obj: Id) -> Result<Id> {
-    let n = if matches!(ctx.heap.get(obj), Value::Int(_) | Value::Bool(_)) {
-        ctx.as_int(obj)?
+    let number = if matches!(
+        ctx.heap.get(ctx.scalar_value(obj)),
+        Value::Int(_) | Value::Bool(_)
+    ) {
+        obj
     } else {
-        let number = ctx
+        match ctx
             .lookup_attr(obj, "fileno")
             .and_then(|f| ctx.call(f, Vec::new(), Vec::new()))
             .and_then(|v| builtins::call(ctx, "int", &[v], &[]))
-            .and_then(|v| ctx.as_int(v));
-        number.map_err(|e| {
-            if matches!(
-                e.kind.as_ref(),
-                "AttributeError" | "TypeError" | "ValueError"
-            ) {
-                Error::new(
+        {
+            Ok(number) => number,
+            Err(e)
+                if matches!(
+                    e.kind.as_ref(),
+                    "AttributeError" | "TypeError" | "ValueError"
+                ) =>
+            {
+                let name = ctx.checked_format(obj, true)?;
+                return Err(Error::new(
                     "ValueError",
-                    format!("Invalid file object: {}", ctx.repr(obj)),
-                )
-            } else {
-                e
+                    format!("Invalid file object: {name}"),
+                ));
             }
-        })?
+            Err(e) => return Err(e),
+        }
     };
-    if n.cmp(&crate::Int::from(0)).is_lt() {
+    let zero = ctx.int(0);
+    let negative = ctx.binary("<", number, zero)?;
+    if ctx.truth(negative)? {
+        let n = ctx.checked_format(number, false)?;
         return Err(Error::new(
             "ValueError",
             format!("Invalid file descriptor: {n}"),
         ));
     }
-    Ok(ctx.alloc(Value::Int(n)))
+    Ok(number)
 }
 
 fn native_fd(ctx: &Context, fd: Id) -> Result<i32> {
@@ -199,72 +207,14 @@ fn registration(ctx: &mut Context, keys: Id, fd: Id) -> Result<Option<Registrati
     Ok(position.map(|i| Registration::unpack(ctx, ctx.dict_entries(keys).unwrap()[i].1)))
 }
 
-fn missing(ctx: &Context, fileobj: Id) -> Error {
-    Error::new(
-        "KeyError",
-        format!("{} is not registered", ctx.repr(fileobj)),
-    )
+fn missing<T>(ctx: &mut Context, fileobj: Id) -> Result<T> {
+    let name = ctx.checked_format(fileobj, true)?;
+    Err(Error::new("KeyError", format!("{name} is not registered")))
 }
 
 impl Selector {
     pub(in crate::dynamic) fn trace(&self, roots: &mut MarkQueue<'_>) {
         roots.extend([self.keys, self.mapping]);
-    }
-
-    /// Each selected pair reuses the key returned by register or modify.
-    fn select(&mut self, ctx: &mut Context, timeout: Option<Duration>) -> Result<Id> {
-        let Some(poll) = &mut self.poll else {
-            let mut sets = SelectFds::new();
-            for (index, &(fd, entry)) in ctx.dict_entries(self.keys).unwrap().iter().enumerate() {
-                let key = Registration::unpack(ctx, entry);
-                let fd = native_fd(ctx, fd)?;
-                if key.interests & READ != 0 {
-                    sets.insert(0, index, fd)?;
-                }
-                if key.interests & WRITE != 0 {
-                    sets.insert(1, index, fd)?;
-                }
-            }
-            let mut results = Vec::new();
-            if sets.wait(timeout)? {
-                for i in 0..ctx.dict_entries(self.keys).unwrap().len() {
-                    let (fd, entry) = ctx.dict_entries(self.keys).unwrap()[i];
-                    let key = Registration::unpack(ctx, entry);
-                    let fd = native_fd(ctx, fd)?;
-                    let events = (i64::from(sets.ready(0, fd)) * READ)
-                        | (i64::from(sets.ready(1, fd)) * WRITE);
-                    if events != 0 {
-                        results
-                            .try_reserve(1)
-                            .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-                        let mask = ctx.int(events);
-                        results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
-                    }
-                }
-            }
-            return Ok(ctx.alloc(Value::List(results)));
-        };
-        let (count, events) = poll.ready(timeout)?;
-        let mut results = Vec::new();
-        results
-            .try_reserve(count)
-            .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-        for (fd, flags) in events {
-            let fd = ctx.int(i64::from(fd));
-            let Some(key) = registration(ctx, self.keys, fd)? else {
-                continue;
-            };
-            let mut ready = 0;
-            if flags & !(libc::POLLIN as u16) != 0 {
-                ready |= WRITE;
-            }
-            if flags & !(libc::POLLOUT as u16) != 0 {
-                ready |= READ;
-            }
-            let mask = ctx.int(ready & key.interests);
-            results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
-        }
-        Ok(ctx.alloc(Value::List(results)))
     }
 
     pub(in crate::dynamic) fn class_name(&self) -> &'static str {
@@ -276,11 +226,86 @@ impl Selector {
     }
 }
 
+/// Resolve Python keys after the native wait releases the selector borrow; int subclasses may compare in Python.
+fn select(ctx: &mut Context, handle: &RefCell<Selector>, timeout: Option<Duration>) -> Result<Id> {
+    let keys = handle.borrow().keys;
+    if handle.borrow().poll.is_none() {
+        let mut sets = SelectFds::new();
+        for (index, &(fd, entry)) in ctx.dict_entries(keys).unwrap().iter().enumerate() {
+            let key = Registration::unpack(ctx, entry);
+            let fd = native_fd(ctx, fd)?;
+            if key.interests & READ != 0 {
+                sets.insert(0, index, fd)?;
+            }
+            if key.interests & WRITE != 0 {
+                sets.insert(1, index, fd)?;
+            }
+        }
+        let mut results = Vec::new();
+        if sets.wait(timeout)? {
+            for i in 0..ctx.dict_entries(keys).unwrap().len() {
+                let (fd, entry) = ctx.dict_entries(keys).unwrap()[i];
+                let key = Registration::unpack(ctx, entry);
+                let fd = native_fd(ctx, fd)?;
+                let events =
+                    (i64::from(sets.ready(0, fd)) * READ) | (i64::from(sets.ready(1, fd)) * WRITE);
+                if events != 0 {
+                    results
+                        .try_reserve(1)
+                        .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+                    let mask = ctx.int(events);
+                    results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
+                }
+            }
+        }
+        return Ok(ctx.alloc(Value::List(results)));
+    }
+    let events = {
+        let mut selector = handle.borrow_mut();
+        let (count, ready) = selector.poll.as_mut().unwrap().ready(timeout)?;
+        let mut events = Vec::new();
+        events
+            .try_reserve(count)
+            .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+        events.extend(ready);
+        events
+    };
+    let mut results = Vec::new();
+    results
+        .try_reserve(events.len())
+        .map_err(|_| Error::new("MemoryError", "out of memory"))?;
+    for (fd, flags) in events {
+        let fd = ctx.int(i64::from(fd));
+        let Some(key) = registration(ctx, keys, fd)? else {
+            continue;
+        };
+        let mut ready = 0;
+        if flags & !(libc::POLLIN as u16) != 0 {
+            ready |= WRITE;
+        }
+        if flags & !(libc::POLLOUT as u16) != 0 {
+            ready |= READ;
+        }
+        let mask = ctx.int(ready & key.interests);
+        results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
+    }
+    Ok(ctx.alloc(Value::List(results)))
+}
+
 fn close(ctx: &mut Context, handle: &RefCell<Selector>) -> Result<Id> {
     let keys = handle.borrow().keys;
     builtins::call(ctx, "dict.clear", &[keys], &[])?;
     handle.borrow_mut().mapping = NONE;
     Ok(NONE)
+}
+
+fn mapping_owner(ctx: &mut Context, mapping: Id) -> Result<Rc<RefCell<Selector>>> {
+    let owner = ctx.lookup_attr(mapping, "_selector")?;
+    if let Value::Selector(handle) = ctx.heap.get(owner) {
+        Ok(handle.clone())
+    } else {
+        Err(Error::new("TypeError", "expected selector"))
+    }
 }
 
 fn mapping(
@@ -297,14 +322,11 @@ fn mapping(
         ctx.set_attr(receiver, "_selector", selector)?;
         return Ok(NONE);
     }
-    let owner = ctx.lookup_attr(receiver, "_selector")?;
-    let Value::Selector(handle) = ctx.heap.get(owner).clone() else {
-        return Err(Error::new("TypeError", "expected selector"));
-    };
-    let keys = handle.borrow().keys;
+    let handle = mapping_owner(ctx, receiver)?;
     match method {
         "__len__" | "__iter__" => {
             builtins::bind(method, args, kwargs, [])?;
+            let keys = handle.borrow().keys;
             if method == "__iter__" {
                 ctx.iterator(keys)
             } else {
@@ -321,10 +343,12 @@ fn mapping(
             };
             let obj = obj.ok_or_else(|| Error::new("TypeError", "missing file object"))?;
             let fd = reg_fd(ctx, &handle, obj)?;
+            // fileno() can replace the mapping's owner.
+            let keys = mapping_owner(ctx, receiver)?.borrow().keys;
             registration(ctx, keys, fd)?
                 .map(|entry| entry.key)
                 .or(default)
-                .ok_or_else(|| missing(ctx, obj))
+                .map_or_else(|| missing(ctx, obj), Ok)
         }
         _ => unreachable!(),
     }
@@ -398,7 +422,7 @@ pub(super) fn call(
                 let module = ctx.module("selectors")?;
                 (obj, ctx.lookup_attr(module, "SelectorKey")?, bits)
             } else {
-                let key = registration(ctx, keys, fd)?.ok_or_else(|| missing(ctx, obj))?;
+                let key = registration(ctx, keys, fd)?.map_or_else(|| missing(ctx, obj), Ok)?;
                 // A data comparison can unregister or replace the key and collect its old data.
                 ctx.heap.keep(key.key);
                 let bits = if handle.borrow().poll.is_none() {
@@ -453,17 +477,24 @@ pub(super) fn call(
         "get_key" | "unregister" => {
             let [obj] = builtins::bind(name, args, kwargs, ["fileobj"])?;
             let obj = obj.ok_or_else(bad)?;
-            if name == "get_key" && handle.borrow().mapping == NONE {
-                return Err(Error::new("RuntimeError", "Selector is closed"));
+            if name == "get_key" {
+                let view = handle.borrow().mapping;
+                if view == NONE {
+                    return Err(Error::new("RuntimeError", "Selector is closed"));
+                }
+                return match ctx.get_item(view, obj) {
+                    Err(e) if e.kind == "KeyError" => missing(ctx, obj),
+                    result => result,
+                };
             }
             let fd = reg_fd(ctx, &handle, obj)?;
-            let key = registration(ctx, keys, fd)?.ok_or_else(|| missing(ctx, obj))?;
-            if name == "unregister" {
-                ctx.heap.keep(key.key);
-                ctx.delete_item(keys, fd)?;
-                if let Some(poll) = &mut handle.borrow_mut().poll {
-                    poll.remove(native_fd(ctx, fd)?);
-                }
+            let Some(key) = registration(ctx, keys, fd)? else {
+                return missing(ctx, obj);
+            };
+            ctx.heap.keep(key.key);
+            ctx.delete_item(keys, fd)?;
+            if let Some(poll) = &mut handle.borrow_mut().poll {
+                poll.remove(native_fd(ctx, fd)?);
             }
             Ok(key.key)
         }
@@ -471,7 +502,7 @@ pub(super) fn call(
             let [seconds] = builtins::bind(name, args, kwargs, ["timeout"])?;
             let poll = handle.borrow().poll.is_some();
             let timeout = timeout(ctx, seconds.unwrap_or(NONE), poll)?;
-            handle.borrow_mut().select(ctx, timeout)
+            select(ctx, &handle, timeout)
         }
         "__enter__" | "close" => {
             builtins::bind(name, args, kwargs, [])?;

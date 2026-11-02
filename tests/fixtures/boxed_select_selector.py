@@ -4,6 +4,18 @@ from collections.abc import Mapping
 import os
 
 
+class Descriptor(int):
+    pass
+
+
+class Missing:
+    def fileno(self):
+        return 999999
+
+    def __repr__(self):
+        raise LookupError("custom repr")
+
+
 def current():
     assert SelectSelector is selectors.SelectSelector
     assert PollSelector is selectors.PollSelector
@@ -18,7 +30,15 @@ def current():
             assert not mapping
             with open("selector-ready.bin", "w+b", 0) as stream:
                 key = selector.register(stream, EVENT_READ)
-                assert mapping.get(stream) is mapping[stream.fileno()] is key
+                assert mapping.get(stream) is mapping[Descriptor(stream.fileno())] is key
+                missing = Missing()
+                assert mapping.get(missing) is None
+                try:
+                    mapping[missing]
+                except LookupError as exc:
+                    assert exc.args == ("custom repr",)
+                else:
+                    raise AssertionError("missing key bypassed repr")
                 assert list(mapping) == [stream.fileno()]
                 assert list(mapping.values()) == [key]
                 ready = selector.select(0)
