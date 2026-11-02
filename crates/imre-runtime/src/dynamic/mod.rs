@@ -1809,6 +1809,7 @@ impl Context {
             self.builtin("BaseException.with_traceback");
         }
         let methods = match name {
+            "type" => &["mro"][..],
             "object" => &[
                 "__hash__",
                 "__ne__",
