@@ -93,6 +93,27 @@ The 140-key coordinator file (SHA-256 `532094fab84f29a89382f844532a902df887df835
 
 The five files contain the complete selected stock, O0 and O3 stdout and stderr streams, with the actual process exits and product hashes. Each named parent recorded a verbose unittest success terminal and the enclosing process exited 0. The selected driver also printed successful subtests. The five-key archive has SHA-256 `1cce072dbd2e0e4e66a91590ca73c7b54ce838519e87e0f177e4de79890a4c9a`. Method hashes cover the complete definition at the pinned revision, from the first decorator or definition line through the final newline. [Pinned source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py)
 
+## Intact Linux run and five quiet callbacks
+
+At public Imre `f45a52ca1ba9a4050bc2d8973a7a7afd6541a3d8`, the ordinary O0 and O3 executables used the same optimized Rust runtime. Each intact run and the CPython 3.14.5 reference at `5607950ef232dad16d75c0cf53101d9649d89115` started and stopped all 165 registered parents. [Imre revision](https://github.com/astral-experiments/imre/commit/f45a52ca1ba9a4050bc2d8973a7a7afd6541a3d8) · [CPython source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py)
+
+| Lane | Unittest terminal | Exit | Parents (pass / fail / error / skip) | Subtests (pass / fail / error) |
+| --- | --- | ---: | --- | --- |
+| CPython | `Ran 165 tests in 1.083s` · `OK (skipped=3)` | 0 | 162 / 0 / 0 / 3 | 2824 / 0 / 0 |
+| O0 | `Ran 165 tests in 1878.396s` · `FAILED (failures=72, errors=13, skipped=14)` | 1 | 127 / 13 / 11 / 14 | 2730 / 68 / 3 |
+| O3 | `Ran 165 tests in 1673.594s` · `FAILED (failures=72, errors=13, skipped=14)` | 1 | 127 / 13 / 11 / 14 | 2730 / 68 / 3 |
+
+The same 127 parents passed in all three runs. For each, every subtest ID, result and occurrence count matched stock. All 127 belong to the coordinator’s confirmed 145 distinct public keys. The SHA-256 of `ledger-re-145.json` is `4a3fa067f67a6626ae0a480f6ce2382ec31243244dd14d7b6a0bcb01f15dd736`.
+
+The intact `test_search_anchor_at_beginning` assertion measured 0.5160606280041975s at O0 and 0.33790804100135574s at O3 against its strict 0.1s limit. Each executable then ran the same five original IDs once after two consecutive quiet three-second intervals. Stock, O0 and O3 each reported `Ran 5 tests` (0.082s, 4.606s and 3.663s respectively), `OK` and exit 0. The passing assertion prints no stopwatch value. The five files preserve the upstream body hashes and actual `startTest`, `addSuccess` and `stopTest` callback lines and byte offsets for each lane. [66 · atomic groups](quiet-f45a52ca/066-test_bug_gh100061.txt) · [122 · bytes pattern comparison](quiet-f45a52ca/122-test_pattern_compare_bytes.txt) · [123 · pickling](quiet-f45a52ca/123-test_pickling.txt) · [147 · anchored search](quiet-f45a52ca/147-test_search_anchor_at_beginning.txt) · [158 · symbolic groups](quiet-f45a52ca/158-test_symbolic_groups.txt)
+
+| Receipt | SHA-256 |
+| --- | --- |
+| `imre-re-intact-f45a52ca-linux.tgz` | `543fa9e41100ac8495b10ca00af83059c45ce107f586c21a9505ff49f48e2299` |
+| `imre-re-intact-145-join-f45a-release.tgz` | `470d79aa00b6062844cfc298cf6a66cc17a6d27d8efae881bea715268839cbac` |
+| `imre-re-five-explicit-f45a-release-intact.tgz` | `382c0396f2cc7056c593c504e0c883f1554a3abaeefe374086499a84fdb426ae` |
+| `imre-re-five-explicit-f45a-release-quiet.tgz` | `7e3c920cd7681c806f0ce9368d5f1bd617cc0162e7df282f5e00fb865bbfce10` |
+
 ## Reproduce the historical join
 
 The upstream source is CPython commit `5607950ef232dad16d75c0cf53101d9649d89115`. The SHA-256 of `Lib/test/test_re.py` is `879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2`. The following command checks the complement against loader order and reconstructs the historical key digest. Run from the Imre root with the staged CPython test tree and interpreter from the capture replay instructions. [Upstream source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py)
