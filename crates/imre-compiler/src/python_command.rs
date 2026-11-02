@@ -54,6 +54,7 @@ pub(super) fn parse(
     let mut warn_default_encoding = false;
     let mut optimize: i32 = 0;
     let mut dont_write_bytecode = false;
+    let mut unbuffered = false;
     let mut utf8 = None;
     let mut warnoptions = Vec::new();
     let mut xoptions = Vec::new();
@@ -79,6 +80,7 @@ pub(super) fn parse(
                 'E' => ignore_environment = true,
                 'O' => optimize = optimize.checked_add(1).ok_or("too many -O options")?,
                 'B' => dont_write_bytecode = true,
+                'u' => unbuffered = true,
                 'c' => break 'options Input::Command(operand(flags.as_str(), args, "-c")?),
                 'm' => break 'options Input::Module(operand(flags.as_str(), args, "-m")?),
                 'W' => {
@@ -170,6 +172,7 @@ pub(super) fn parse(
         safe_path: isolated || env_present("PYTHONSAFEPATH"),
         no_user_site: isolated || env_flag("PYTHONNOUSERSITE") != 0,
         dont_write_bytecode: dont_write_bytecode || env_flag("PYTHONDONTWRITEBYTECODE") != 0,
+        unbuffered: unbuffered || env_flag("PYTHONUNBUFFERED") != 0,
         utf8_mode,
         warn_default_encoding: warn_default_encoding || env_present("PYTHONWARNDEFAULTENCODING"),
         warnoptions,

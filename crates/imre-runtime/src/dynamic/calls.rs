@@ -3218,6 +3218,10 @@ impl Context {
             {
                 return Ok(buffer);
             }
+            Value::TextFile(_) if name == "write_through" => return Ok(FALSE),
+            Value::TextFile(ref file) if name == "line_buffering" => {
+                return Ok(if file.line_buffering { TRUE } else { FALSE });
+            }
             Value::TextFile(ref file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
             }

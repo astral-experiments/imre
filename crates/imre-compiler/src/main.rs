@@ -29,7 +29,7 @@ const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--runtime-imports] [--entry-profile FILE] [--watch | -w]
-       imre [-I] [-E] [-B] [-O] [-W OPTION] [-X faulthandler] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
+       imre [-I] [-E] [-B] [-O] [-u] [-W OPTION] [-X faulthandler] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
        imre extension-header
        imre build-target [--output-dir DIRECTORY]
        imre wheel PROJECT [--out-dir DIR] [--overlay DIR] [--python PYTHON]

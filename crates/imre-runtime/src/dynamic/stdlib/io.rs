@@ -91,6 +91,9 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
     if crate::objects::os::INHERITABLE.enabled(fd).is_err() {
         return Ok(NONE);
     }
+    if ctx.config["unbuffered"].as_bool() == Some(true) {
+        return unbuffered_standard(ctx, fd, if stderr { "<stderr>" } else { "<stdout>" });
+    }
     let file = crate::objects::TextFile::standard(stderr);
     let path = ctx.text(if stderr { "<stderr>" } else { "<stdout>" });
     let buffer = ctx.alloc(
@@ -104,12 +107,19 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
         ctx.alloc(Value::TextFile(super::super::value::BoxedTextFile {
             file,
             buffer: Some(buffer),
+            line_buffering: stderr || crate::stdio_settings().stdout_line_buffered,
         })),
     )
 }
 
 /// Build the interpreter's shared text reader without taking ownership of fd 0.
 pub(in crate::dynamic) fn standard_input(ctx: &mut Context) -> Result<Id> {
+    if ctx.config["unbuffered"].as_bool() == Some(true) {
+        if crate::objects::os::INHERITABLE.enabled(0).is_err() {
+            return Ok(NONE);
+        }
+        return unbuffered_standard(ctx, 0, "<stdin>");
+    }
     let fd = ctx.int(0);
     let mode = ctx.text("r");
     let buffering = ctx.int(-1);
@@ -134,6 +144,38 @@ pub(in crate::dynamic) fn standard_input(ctx: &mut Context) -> Result<Id> {
     let raw = ctx.lookup_attr(buffer, "raw")?;
     let name = ctx.text("<stdin>");
     ctx.set_attr(raw, "name", name)?;
+    Ok(stream)
+}
+
+/// Under -u the binary input remains buffered, while outputs wrap FileIO directly.
+fn unbuffered_standard(ctx: &mut Context, fd: i32, name: &str) -> Result<Id> {
+    let input = fd == 0;
+    let descriptor = ctx.int(i64::from(fd));
+    let mode = ctx.text(if input { "rb" } else { "wb" });
+    let buffering = ctx.int(if input { -1 } else { 0 });
+    let buffer = open(
+        ctx,
+        &[descriptor, mode, buffering, NONE, NONE, NONE, FALSE],
+        &[],
+    )?;
+    let raw = if input {
+        ctx.lookup_attr(buffer, "raw")?
+    } else {
+        buffer
+    };
+    let name = ctx.text(name);
+    ctx.set_attr(raw, "name", name)?;
+    let wrapper = ctx.builtins["_io.TextIOWrapper"];
+    let encoding = ctx.text(crate::sys::standard_field(fd as u32, false).as_str());
+    let errors = ctx.text(crate::sys::standard_field(fd as u32, true).as_str());
+    let newline = ctx.text("\n");
+    let stream = ctx.call(
+        wrapper,
+        vec![buffer, encoding, errors, newline, FALSE, TRUE],
+        Vec::new(),
+    )?;
+    let mode = ctx.text(if input { "r" } else { "w" });
+    ctx.set_attr(stream, "mode", mode)?;
     Ok(stream)
 }
 
