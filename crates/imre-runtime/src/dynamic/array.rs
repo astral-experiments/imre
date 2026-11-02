@@ -196,6 +196,12 @@ fn append_item(ctx: &mut Context, receiver: Id, item: Id) -> Result<()> {
     let format = array.format;
     let offset = array.bytes.len();
     format.encode(ctx, item)?;
+    if ctx.buffer_exports.contains(&receiver) {
+        return Err(Error::new(
+            "BufferError",
+            "cannot resize an array that is exporting buffers",
+        ));
+    }
     let end = offset
         .checked_add(format.width())
         .ok_or_else(|| Error::new("MemoryError", ""))?;

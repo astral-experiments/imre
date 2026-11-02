@@ -38,7 +38,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "functools" if matches!(function, "cmp_to_key" | "reduce") => {
             Some(("_functools", function))
         }
-        "codecs" if function == "encode" => Some(("_codecs", function)),
+        "codecs" if matches!(function, "encode" | "escape_decode") => Some(("_codecs", function)),
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         #[cfg(target_os = "linux")]
         "_signal" if function == "sigpending" => Some((module, function)),
@@ -49,6 +49,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
         "resource" if function == "getrlimit" => Some((module, function)),
+        "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
         "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -160,9 +161,9 @@ impl Context {
         let attr = self.find_in_mro(class, |base| self.own_class_attr(base, name));
         if attr.is_none()
             && name == "__reduce_ex__"
-            && (self.has_base(class, "datetime.date") || self.has_base(class, "datetime.timedelta"))
+            && self.own_class_attr(class, "__reduce__").is_some()
         {
-            // These classes override __reduce__, and inherit the delegating object method.
+            // Exact native classes have no stored MRO but inherit object's delegating reducer.
             return self.builtins.get("object.__reduce_ex__").copied();
         }
         attr
@@ -194,6 +195,9 @@ impl Context {
             Value::Native(kind) if kind == "object" => match name {
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
                 "__format__" => self.builtins.get("object.__format__").copied(),
+                "__getstate__" => self.builtins.get("object.__getstate__").copied(),
+                "__reduce__" => self.builtins.get("object.__reduce__").copied(),
+                "__reduce_ex__" => self.builtins.get("object.__reduce_ex__").copied(),
                 "__init_subclass__" => self.builtins.get("object.__init_subclass__").copied(),
                 _ => None,
             },
@@ -239,6 +243,7 @@ impl Context {
                     "dict"
                         | "list"
                         | "tuple"
+                        | "bool"
                         | "int"
                         | "float"
                         | "bytes"
@@ -252,7 +257,7 @@ impl Context {
                     .is_some_and(|members| members.owns(name))
                     || (kind == "function" && name == "__call__")
                     || (kind == "set" && name == "update")
-                    || (matches!(name, "__repr__" | "issubset")
+                    || (matches!(name, "__repr__" | "__reduce__" | "issubset")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
@@ -643,7 +648,7 @@ impl Context {
             || self.slot(value, "__call__").is_some()
     }
 
-    fn native_data_descriptor(&self, descriptor: Id) -> bool {
+    pub(super) fn native_data_descriptor(&self, descriptor: Id) -> bool {
         matches!(
             self.heap.get(descriptor),
             Value::Property(_)
@@ -987,6 +992,7 @@ impl Context {
         Some(match self.heap.get(obj) {
             Value::Module { .. } => self.type_name(obj),
             Value::DefaultDict { .. } => "collections.defaultdict",
+            Value::Partial { .. } => "functools.partial",
             Value::Cached { .. } => "functools._lru_cache_wrapper",
             Value::KeyWrapper { .. } => KEY_WRAPPER,
             Value::PartialPlaceholder => "functools._PlaceholderType",
@@ -1055,6 +1061,7 @@ impl Context {
                             | KEY_WRAPPER
                             | "functools._PlaceholderType"
                             | "functools._lru_cache_wrapper"
+                            | "functools.partial"
                             | HashState::CLASS
                             | HashState::XOF_CLASS
                             | "operator.attrgetter"
@@ -2051,6 +2058,15 @@ impl Context {
                     "__text_signature__" if symbol == "resource.getrlimit" => {
                         return Ok(self.text("($module, resource, /)"));
                     }
+                    "__doc__" if module == "gc" => {
+                        let doc = match function {
+                            "enable" => "Enable automatic garbage collection.",
+                            "disable" => "Disable automatic garbage collection.",
+                            "isenabled" => "Returns true if automatic garbage collection is enabled.",
+                            _ => unreachable!("registered GC control"),
+                        };
+                        return Ok(self.text(doc));
+                    }
                     "__doc__" if symbol == "posix.getpid" => {
                         return Ok(self.text("Return the current process id."));
                     }
@@ -2058,6 +2074,9 @@ impl Context {
                         if matches!(
                             symbol.as_str(),
                             "posix.getpid"
+                                | "gc.enable"
+                                | "gc.disable"
+                                | "gc.isenabled"
                                 | "_signal.sigpending"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
@@ -2079,7 +2098,7 @@ impl Context {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref class)
-                if class == "generator" && matches!(name, "send" | "throw" | "close") =>
+                if class == "generator" && super::generator_protocol::generator_method(name) =>
             {
                 return Ok(self.builtin(&format!("generator.{name}")));
             }
@@ -2155,6 +2174,12 @@ impl Context {
                 }
                 if name == "__globals__" {
                     return self.module_globals(scope);
+                }
+                if name == "__builtins__" {
+                    return match self.scope_data(self.root_scope(scope)).exec_globals {
+                        Some(globals) => Ok(globals.builtins),
+                        None => self.default_source_builtins(),
+                    };
                 }
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
@@ -2623,6 +2648,9 @@ impl Context {
             Value::Socket(ref socket) if name == "family" => {
                 return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
             }
+            Value::Socket(ref socket) if name == "proto" => {
+                return Ok(self.int(i64::from(crate::objects::socket::proto(socket))));
+            }
             Value::Socket(ref socket) if name == "type" => {
                 return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
             }
@@ -2876,6 +2904,11 @@ impl Context {
                     _ => {}
                 }
             }
+            Value::Native(ref class)
+                if matches!(name, "__bases__" | "__mro__") && builtins::is_exported_type(class) =>
+            {
+                return Ok(self.builtin_hierarchy_tuple(obj, name));
+            }
             Value::Native(ref builtin)
                 if name == "__name__" && self.builtins.get(builtin) == Some(&obj) =>
             {
@@ -2886,8 +2919,11 @@ impl Context {
             {
                 return Ok(TRUE);
             }
-            Value::Native(ref class) if class == "object" && name == "__reduce_ex__" => {
-                return Ok(self.builtin("object.__reduce_ex__"));
+            Value::Native(ref class)
+                if class == "object"
+                    && matches!(name, "__getstate__" | "__reduce__" | "__reduce_ex__") =>
+            {
+                return Ok(self.builtin(&format!("object.{name}")));
             }
             Value::Native(ref class)
                 if name == "__format__" && self.builtin_type_name(obj) == Some("type") =>
@@ -2906,7 +2942,7 @@ impl Context {
                 return Ok(self.builtin("bytearray.maketrans"));
             }
             Value::Native(ref class)
-                if class == "bool" && matches!(name, "bit_length" | "to_bytes") =>
+                if class == "bool" && matches!(name, "__add__" | "bit_length" | "to_bytes") =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
@@ -2957,7 +2993,8 @@ impl Context {
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
-                    || (class == "int" && matches!(name, "bit_length" | "to_bytes"))
+                    || (name == "__repr__" && matches!(class.as_str(), "bool" | "int" | "float"))
+                    || (class == "int" && matches!(name, "__add__" | "bit_length" | "to_bytes"))
                     || (class == "float" && name == "as_integer_ratio")
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
@@ -2972,6 +3009,7 @@ impl Context {
                         name,
                         "__hash__"
                             | "__repr__"
+                            | "__str__"
                             | "__getattribute__"
                             | "__setattr__"
                             | "__delattr__"
@@ -2980,6 +3018,12 @@ impl Context {
                     ) =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
+            }
+            Value::Native(ref class)
+                if DictIterator::METHODS.contains(&name)
+                    && DictIterator::class(class).is_some() =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref class)
                 if class == "slice" && super::slice::METHODS.contains(&name) =>
@@ -3207,6 +3251,17 @@ impl Context {
                 let init = self.builtin("object.__init__");
                 return self.bind_attribute(init, obj, tuple);
             }
+        }
+        if name == "__getstate__" {
+            let callable = self.builtin("object.__getstate__");
+            if self.builtin_type_name(obj) == Some("type") {
+                return Ok(callable);
+            }
+            return Ok(self.alloc(Value::Method {
+                callable,
+                receiver: obj,
+                explicit: false,
+            }));
         }
         let base = self.scalar_value(obj);
         if name == "__format__" {
@@ -3586,6 +3641,11 @@ impl Context {
         self.instance_layout(class, "").dictionary
     }
 
+    /// A source slot stored inline has no boxed descriptor to return to inspect.
+    pub(super) fn is_inline_instance_slot(&self, class: Id, name: &str) -> bool {
+        self.instance_layout(class, name).active_slot
+    }
+
     /// Whether instances have a dictionary and whether this particular name addresses a slot.
     fn instance_layout(&self, class: Id, name: &str) -> InstanceLayout {
         let mut layout = InstanceLayout::default();
@@ -3718,6 +3778,44 @@ impl Context {
             .get(name)
             .copied()
             .or_else(|| self.dict_named_item(self.dict_storage((*namespace)?)?, name))
+    }
+
+    /// Return the live instance dictionary for default object state, bypassing attribute hooks.
+    pub(super) fn pickle_instance_state_dict(&mut self, obj: Id) -> Result<Id> {
+        let dictionary = match *self.heap.get(obj) {
+            Value::Instance {
+                class,
+                ref fields,
+                namespace,
+                ..
+            } if (!fields.is_empty() || namespace.is_some())
+                && self.class_instances_have_dict(class) =>
+            {
+                Some(self.instance_dictionary(obj, class))
+            }
+            Value::Module { scope, .. } => Some(self.module_globals(scope)?),
+            Value::Function { fields, .. } => self.function_attr(obj, fields, "__dict__")?,
+            Value::Raised(ref error) => error.trace.as_ref().and_then(|trace| trace.dictionary),
+            Value::Partial { dictionary, .. } => dictionary,
+            Value::StaticMethod { dictionary, .. } | Value::Cached { dictionary, .. } => {
+                Some(dictionary)
+            }
+            Value::Class { scope, .. }
+                if self.classes.get(super::namespace::CLASS) != Some(&obj) =>
+            {
+                let proxy = self.class_dictionary(scope);
+                Some(self.mapping_proxy_target(proxy))
+            }
+            _ => None,
+        };
+        Ok(dictionary
+            .filter(|&dictionary| {
+                !self
+                    .dict_entries(dictionary)
+                    .expect("instance dictionary")
+                    .is_empty()
+            })
+            .unwrap_or(NONE))
     }
 
     /// Lazily expose the dictionary that subsequent ordinary attribute operations use.
@@ -4578,6 +4676,13 @@ impl Context {
             Value::Native(name) if let Some(class) = stdlib::fixed_structseq::fixed_type(&name) => {
                 stdlib::fixed_structseq::construct(self, class, &args, &kwargs)
             }
+            Value::Native(ref name)
+                if let Some((owner, slot)) = name.split_once('.')
+                    && DictIterator::METHODS.contains(&slot)
+                    && DictIterator::class(owner).is_some() =>
+            {
+                self.iterator_method(owner, slot, &args, &kwargs)
+            }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "tuple.__new__" => {
@@ -4586,37 +4691,13 @@ impl Context {
                 }
                 super::namedtuple::allocate(self, &args, &kwargs)
             }
-            Value::Native(name) if name == "object.__reduce_ex__" => {
-                let Some((&receiver, rest)) = args.split_first() else {
-                    return Err(Error::new(
-                        "TypeError",
-                        "unbound method object.__reduce_ex__() needs an argument",
-                    ));
-                };
-                let class = self.type_name(receiver);
-                if !kwargs.is_empty() {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("{class}.__reduce_ex__() takes no keyword arguments"),
-                    ));
-                }
-                let [protocol] = rest else {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!(
-                            "{class}.__reduce_ex__() takes exactly one argument ({} given)",
-                            rest.len()
-                        ),
-                    ));
-                };
-                self.index_integer(*protocol)?
-                    .to_i64()
-                    .and_then(|n| i32::try_from(n).ok())
-                    .ok_or_else(|| {
-                        Error::new("OverflowError", "Python int too large to convert to C int")
-                    })?;
-                let reducer = self.lookup_attr(receiver, "__reduce__")?;
-                self.call(reducer, Vec::new(), Vec::new())
+            Value::Native(name) if name == "object.__getstate__" => {
+                self.object_getstate(&args, &kwargs)
+            }
+            Value::Native(name)
+                if matches!(name.as_str(), "object.__reduce__" | "object.__reduce_ex__") =>
+            {
+                stdlib::pickle::object_reduce(self, &name["object.".len()..], &args, &kwargs)
             }
             Value::Native(name) if name == "float.__new__" => self.new_float(&args, &kwargs),
             Value::Native(name)
@@ -4631,6 +4712,8 @@ impl Context {
                             | "StopIteration.__init__"
                             | "float.__format__"
                             | "float.__getformat__"
+                            | "bool.__repr__"
+                            | "float.__repr__"
                             | "float.as_integer_ratio"
                     )
                     || !name.contains('.')
@@ -5581,9 +5664,7 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         self.bind_local(scope, "__annotations__", annotations);
-        if typed_dict_meta.is_none()
-            && let Value::Scope(frame) = self.heap.get_mut(scope)
-        {
+        if let Value::Scope(frame) = self.heap.get_mut(scope) {
             frame.class_namespace.get_or_insert_with(Default::default).annotation_scratch = Some(annotations);
         }
         self.execute(code, scope, FrameOwner::Function(body))?;
@@ -5645,16 +5726,13 @@ impl Context {
             bases.extend(generic);
             bases.push(dict);
             let parents = self.alloc(Value::Tuple(parents));
-            let (fields, thunks) = self.prepare_typeddict_namespace(scope, annotations)?;
-            Some((parents, fields, thunks, generic))
+            let (fields, annotate) = self.prepare_typeddict_namespace(scope, annotations)?;
+            Some((parents, fields, annotate, generic))
         } else {
             None
         };
         if typed_dict_meta.is_none() && self.scope_name(scope, "__annotate_func__").is_some() {
             self.enable_class_annotation_provider(scope);
-            if let Value::Scope(frame) = self.heap.get_mut(scope) {
-                frame.class_namespace.as_mut().unwrap().annotation_sites = None;
-            }
             if self.scope_name(scope, "__annotations__") == Some(annotations) {
                 let key = self.heap.code_name("__annotations__");
                 self.remove_binding(scope, "__annotations__", key)?;
@@ -5665,13 +5743,6 @@ impl Context {
         }
         if typed_dict_meta.is_none() {
             super::typing::class_parameters(self, scope, original, &bases)?;
-        }
-        // type.__new__ implicitly wraps only plain functions stored under this name.
-        if let Some(function) = self.scope_name(scope, "__init_subclass__")
-            && matches!(self.heap.get(function), Value::Function { .. })
-        {
-            let method = self.alloc(Value::ClassMethod(function));
-            self.bind_local(scope, "__init_subclass__", method);
         }
         let class = self.allocate_class(name.clone(), scope, bases)?;
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
@@ -5720,7 +5791,7 @@ impl Context {
                 .insert(format!("collections.abc.{name}"), class);
         }
         self.init_abstract_class(class, scope)?;
-        if let Some((parents, fields, thunks, generic)) = typed_dict_fields {
+        if let Some((parents, fields, annotate, generic)) = typed_dict_fields {
             if let Some(generic) = generic {
                 // Generic.__init_subclass__ reads the declared bases after __set_name__.
                 let raw = self
@@ -5735,7 +5806,7 @@ impl Context {
                 .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict initializer"))?;
             self.call(
                 configure,
-                vec![class, fields, total.unwrap_or(TRUE), thunks, parents],
+                vec![class, fields, total.unwrap_or(TRUE), annotate, parents],
                 Vec::new(),
             )?;
         }

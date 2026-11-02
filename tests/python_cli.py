@@ -50,7 +50,17 @@ def check_command_stdin(imre, run):
         "assert buffer.read1() == b''\n"
         "signal.alarm(0)\n"
     )
+    last_input_reference = (
+        "import sys, weakref\n"
+        "wrapper = weakref.ref(sys.stdin)\n"
+        "buffer = sys.stdin.buffer\n"
+        "sys.stdin = None\n"
+        "assert wrapper() is sys.__stdin__ and not buffer.closed\n"
+        "vars(sys)['__stdin__'] = None\n"
+        "assert wrapper() is None and buffer.closed\n"
+    )
     cases = [
+        (last_input_reference, b""),
         ("import sys; print(repr(sys.stdin.read()))", b""),
         (source, "one\r\ntwo\nλtail".encode()),
     ]
@@ -1310,6 +1320,8 @@ def main():
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
+        static_fixture = Path(__file__).with_name("fixtures") / "boxed_getattr_static.py"
+        compare("-IB", static_fixture, native_args=("run", static_fixture, "--runtime-imports", "--quiet"))
         inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
         (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
         inspect_entry = root / "inspect_views.py"
@@ -1330,6 +1342,15 @@ def main():
             "print(sys.flags.dont_write_bytecode)\nprint(sys.dont_write_bytecode)\n"
         )
         compare("-I", "-B", "-c", args_code, "--help", "--", "two words", "π")
+        scoped_import = (
+            "import sys\nif sys.argv[1] == 'match':\n"
+            "    import os as operating_system\n    from os import sep\n"
+            "    print(operating_system.sep == sep)\n"
+            "else:\n    try:\n        import _missing_scoped_import_test\n"
+            "    except ModuleNotFoundError as error:\n        print(error.name)\n"
+        )
+        compare("-I", "-c", scoped_import, "match", extra={"IMREFLAGS": "--bogus"})
+        compare("-I", "-c", scoped_import, "inverse", extra={"IMREFLAGS": "--bogus"})
         compare("-IBc" + flags_code)
         compare("-c", flags_code, extra={"PYTHONDONTWRITEBYTECODE": "1"})
         compare(
@@ -1369,6 +1390,16 @@ def main():
             "gc.collect()\n"
             "sys.exit(37)\n",
             status=37,
+        )
+        compare(
+            "-B", "-c",
+            "import sys\n"
+            "atexit = __import__(sys.argv[1])\n"
+            "events = []\n"
+            "class Result:\n"
+            "    def __del__(self): print('finalized', events)\n"
+            "atexit.register(events.append, 'older')\n"
+            "atexit.register(Result)\n", "atexit",
         )
         compare("-IB", "-c", "raise SystemExit")
         compare("-IB", "-c", "from sys import exit\nexit(None)")
@@ -1714,8 +1745,8 @@ def report(text):
         for name in (
             "boxed_threading_deprecated_accessors.py",
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
-            "boxed_thread_dangling.py", "boxed_threading_rlock.py",
-            "boxed_threading_condition_event.py",
+            "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
+            "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
@@ -1746,13 +1777,33 @@ def report(text):
             "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
         )
+        monitoring_entry = root / "monitoring_entry.py"
+        (root / "monitoring_helper.py").write_text(
+            "from sys import monitoring\ndef line_mask():\n    return monitoring.events.LINE\n"
+        )
+        for program in (
+            "from monitoring_helper import line_mask\nprint(line_mask())\n",
+            "import sys\nprint(sys.monitoring.events.LINE)\n",
+            "from sys import monitoring\nprint(monitoring.events.LINE)\n",
+        ):
+            monitoring_entry.write_text(program)
+            compare("-EB", monitoring_entry, native_args=("run", monitoring_entry, "--quiet"))
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         compare("-IB", fixtures / "boxed_unittest_patch.py")
+        call_args = fixtures / "unittest_mock_call_args.py"
+        compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
+        boxed_call_args = fixtures / "boxed_unittest_call_args.py"
+        compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
+        for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py"):
+            fixture = fixtures / name
+            compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
+            compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
+            "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
@@ -1824,6 +1875,7 @@ def report(text):
             "boxed_typing_tuple.py",
             "boxed_typing_type.py",
             "boxed_typing_mapping.py",
+            "boxed_typing_regex_aliases.py",
             "boxed_formatter.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
@@ -1838,6 +1890,7 @@ def report(text):
             "boxed_timedelta_multiply.py",
             "boxed_timedelta_scale.py",
             "boxed_timedelta_floordiv.py",
+            "boxed_timedelta_add_sub.py",
             "boxed_dataclasses.py",
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
@@ -1851,8 +1904,10 @@ def report(text):
             "boxed_io_exports.py",
             "boxed_io_reimport.py",
             "boxed_io_text_encoding.py",
+            "boxed_locale.py",
             "boxed_io_protocols.py",
             "boxed_io_abc_registration.py",
+            "boxed_logging_handler_list.py",
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
@@ -1862,8 +1917,10 @@ def report(text):
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
             "boxed_os_makedirs.py",
+            "boxed_os_walk.py",
             "boxed_select.py",
             "boxed_urlsplit.py",
+            "boxed_urllib_request.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
@@ -1908,6 +1965,7 @@ def report(text):
             "boxed_unittest_assert_regex.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
+            "boxed_unittest_seal.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",
@@ -1920,6 +1978,7 @@ def report(text):
             "boxed_weakref.py",
             "boxed_public_weakref.py",
             "boxed_gc_collect.py",
+            "boxed_gc_controls.py",
             "boxed_gc_finalizers.py",
             "boxed_weakref_subclass.py",
             "boxed_proxy_truth.py",
@@ -1975,6 +2034,7 @@ def report(text):
             "boxed_sequence_repeat.py",
             "boxed_sequence_order.py",
             "boxed_json_containers.py",
+            "boxed_json_decoder.py",
             "boxed_json_module_doc.py",
             "boxed_json_quote.py",
             "boxed_deque.py",
@@ -1996,6 +2056,7 @@ def report(text):
             "boxed_source_coroutine.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",
+            "boxed_doctest_suite.py",
             "boxed_slice.py",
             "boxed_binascii.py",
             "boxed_zlib.py",

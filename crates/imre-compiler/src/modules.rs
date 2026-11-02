@@ -288,6 +288,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
         "http.server" => Some(("http/server.py", include_str!("../stdlib/http/server.py"))),
+        "locale" => Some(("locale.py", include_str!("../stdlib/locale.py"))),
+        "_locale" => Some(("_locale.py", include_str!("../stdlib/_locale.py"))),
         "_imre_gettext_locale" => Some((
             "_imre_gettext_locale.py",
             include_str!("../stdlib/_imre_gettext_locale.py"),
@@ -364,6 +366,7 @@ pub(crate) enum IntrinsicModule {
     Array,
     Imp,
     Ast,
+    Atexit,
     Marshal,
     Gc,
     Pickle,
@@ -838,6 +841,7 @@ impl IntrinsicModule {
             "array" => Some(Self::Array),
             "_imp" => Some(Self::Imp),
             "ast" => Some(Self::Ast),
+            "atexit" => Some(Self::Atexit),
             "marshal" => Some(Self::Marshal),
             "gc" => Some(Self::Gc),
             "pickle" => Some(Self::Pickle),
@@ -1027,6 +1031,13 @@ impl IntrinsicModule {
             (Self::Imp, "_override_multi_interp_extensions_check") => {
                 Intrinsic::ObjectRuntimeExport("_imp._override_multi_interp_extensions_check")
             }
+            (Self::Atexit, "register") => Intrinsic::ObjectRuntimeExport("atexit.register"),
+            (Self::Atexit, "unregister") => Intrinsic::ObjectRuntimeExport("atexit.unregister"),
+            (Self::Atexit, "_run_exitfuncs") => {
+                Intrinsic::ObjectRuntimeExport("atexit._run_exitfuncs")
+            }
+            (Self::Atexit, "_ncallbacks") => Intrinsic::ObjectRuntimeExport("atexit._ncallbacks"),
+            (Self::Atexit, "_clear") => Intrinsic::ObjectRuntimeExport("atexit._clear"),
             (Self::Ast, "parse") => Intrinsic::ObjectRuntimeExport("ast.parse"),
             (Self::Ast, "walk") => Intrinsic::ObjectRuntimeExport("ast.walk"),
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
@@ -1036,7 +1047,16 @@ impl IntrinsicModule {
             (Self::Ast, "Interpolation") => Intrinsic::ObjectRuntimeExport("ast.Interpolation"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
+            (Self::Gc, "disable") => Intrinsic::ObjectRuntimeExport("gc.disable"),
+            (Self::Gc, "enable") => Intrinsic::ObjectRuntimeExport("gc.enable"),
+            (Self::Gc, "isenabled") => Intrinsic::ObjectRuntimeExport("gc.isenabled"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
+            (Self::Codecs, "escape_decode") => {
+                Intrinsic::ObjectRuntimeExport("codecs.escape_decode")
+            }
+            (Self::CodecsNative, "escape_decode") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.escape_decode")
+            }
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Pickle, "loads") => Intrinsic::ObjectRuntimeExport("pickle.loads"),
@@ -1358,6 +1378,7 @@ impl IntrinsicModule {
             (Self::Sys, "stdin" | "__stdin__") => Intrinsic::Stdin,
             (Self::Sys, "warnoptions") => Intrinsic::ObjectRuntimeExport("sys.warnoptions"),
             (Self::Sys, "hash_info") => Intrinsic::ObjectRuntimeExport("sys.hash_info"),
+            (Self::Sys, "monitoring") => Intrinsic::ObjectRuntimeExport("sys.monitoring"),
             (Self::Sys, "stdout") => Intrinsic::Stdout,
             (Self::Sys, "__stdout__") => Intrinsic::OriginalStdout,
             (Self::Sys, "stderr" | "__stderr__") => Intrinsic::Stderr,
@@ -1465,6 +1486,8 @@ impl IntrinsicModule {
             (Self::Typing, "Type") => Intrinsic::ObjectRuntimeExport("typing.Type"),
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
+            (Self::Typing, "Pattern") => Intrinsic::ObjectRuntimeExport("typing.Pattern"),
+            (Self::Typing, "Match") => Intrinsic::ObjectRuntimeExport("typing.Match"),
             (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
             (Self::Typing, "Mapping") => Intrinsic::TYPING_MAPPING,
             (Self::Typing, "MutableMapping") => {
@@ -1509,6 +1532,9 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
+            (Self::Types, "MappingProxyType") => {
+                Intrinsic::ObjectRuntimeExport("types.MappingProxyType")
+            }
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
             (Self::Types, "TracebackType") => Intrinsic::NominalClass("traceback"),
@@ -1571,6 +1597,7 @@ impl IntrinsicModule {
             (Self::WeakRef, "WeakKeyDictionary") => {
                 Intrinsic::ObjectRuntimeExport("weakref.WeakKeyDictionary")
             }
+            (Self::WeakRef, "finalize") => Intrinsic::ObjectRuntimeExport("weakref.finalize"),
             (Self::WeakRef, "ref") => Intrinsic::ObjectRuntimeExport("weakref.ref"),
             (Self::WeakRef, "WeakMethod") => Intrinsic::ObjectRuntimeExport("weakref.WeakMethod"),
             (Self::WeakRef, "WeakSet") => Intrinsic::ObjectRuntimeExport("weakref.WeakSet"),
@@ -1629,6 +1656,7 @@ impl IntrinsicModule {
                 "SHUT_RDWR" => "_socket.SHUT_RDWR",
                 "SOMAXCONN" => "_socket.SOMAXCONN",
                 "socket" => "_socket.socket",
+                "socketpair" => "_socket.socketpair",
                 "close" => "_socket.close",
                 "gethostname" => "_socket.gethostname",
                 "gethostbyname" => "_socket.gethostbyname",
@@ -1686,6 +1714,7 @@ impl IntrinsicModule {
             (Self::Socket, "SOCK_SEQPACKET") => {
                 Intrinsic::ObjectRuntimeExport("socket.SOCK_SEQPACKET")
             }
+            (Self::Socket, "socketpair") => Intrinsic::ObjectRuntimeExport("socket.socketpair"),
             (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
             (Self::Socket, "gethostname") => Intrinsic::ObjectRuntimeExport("socket.gethostname"),
             (Self::Socket, "gethostbyname") => {
@@ -1953,6 +1982,7 @@ impl IntrinsicModule {
             }
             (Self::Posix, name) => os::symbol(name)?,
             (Self::Os, "makedirs") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.makedirs"),
+            (Self::Os, "walk") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.walk"),
             (Self::Os, "F_OK") => Intrinsic::AccessMode(0),
             (Self::Os, "X_OK") => Intrinsic::AccessMode(1),
             (Self::Os, "W_OK") => Intrinsic::AccessMode(2),
@@ -2173,6 +2203,11 @@ impl SearchRoots {
     }
 }
 
+/// These public names are supplied by the boxed unittest.mock module.
+pub(crate) fn boxed_mock_export(name: &str) -> bool {
+    matches!(name, "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal")
+}
+
 impl SourceModule {
     fn local_value(&self, id: ModuleId, statement: &ast::Stmt) -> Option<DefinitionId> {
         let name = value_name(statement)?;
@@ -2219,9 +2254,9 @@ impl SourceModule {
                 return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(export)));
             }
         }
-        if self.is_bundled("unittest.mock") && matches!(name, "sentinel" | "DEFAULT") {
+        if self.is_bundled("unittest.mock") && boxed_mock_export(name) {
             return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
-                "unittest.mock sentinel objects",
+                "unittest.mock objects",
             )));
         }
         let binding = *self.bindings.get(name)?;
@@ -4118,6 +4153,7 @@ impl<'a> Loader<'a> {
             self.needs_object_imports |= matches!(
                 module,
                 IntrinsicModule::Ast
+                    | IntrinsicModule::Atexit
                     | IntrinsicModule::SocketNative
                     | IntrinsicModule::Imp
                     | IntrinsicModule::ImportlibBootstrapExternal
@@ -4365,7 +4401,10 @@ impl<'a> Loader<'a> {
             )),
             // The boxed email package is intrinsic. Typed child modules need a package root.
             "email" => Some(("email/__init__.py", "")),
-            "email.message" => Some(("email/message.py", include_str!("../stdlib/email/message.py"))),
+            "email.message" => Some((
+                "email/message.py",
+                include_str!("../stdlib/email/message.py"),
+            )),
             "unittest" => Some((
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),

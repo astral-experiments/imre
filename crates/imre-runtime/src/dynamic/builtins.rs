@@ -1,7 +1,9 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
 use super::Context;
-use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
+use super::value::{
+    DictIterator, ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value,
+};
 
 mod collections;
 mod dir;
@@ -214,11 +216,15 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
         || is_enum_base(name)
 }
 
+/// The native classes exported directly by the builtins module.
+pub(super) fn is_exported_type(name: &str) -> bool {
+    TYPES.contains(&name) || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
+}
+
 /// Static builtin types have a GC-capable metaclass, but are never themselves tracked.
 pub(super) fn is_static_gc_type(name: &str) -> bool {
-    TYPES.contains(&name)
+    is_exported_type(name)
         || name == super::stdlib::flags::TYPE
-        || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
         || (is_iterator_type(name) && !name.contains('.'))
         || matches!(
             name,
@@ -249,6 +255,9 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
 
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
+    if DictIterator::class(name).is_some() {
+        return true;
+    }
     matches!(
         name,
         "iterator"
@@ -261,9 +270,6 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "bytearray_iterator"
             | "range_iterator"
             | "longrange_iterator"
-            | "dict_keyiterator"
-            | "dict_valueiterator"
-            | "dict_itemiterator"
             | "callable_iterator"
             | "fieldnameiterator"
             | "formatteriterator"
@@ -363,6 +369,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "expandtabs",
     "find",
     "format",
+    "index",
     "isalnum",
     "isascii",
     "isalpha",
@@ -414,10 +421,13 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ThreadLocal(_) if super::thread_local::is_method(attr) => super::thread_local::CLASS,
         Value::HandlerLock(_) if super::thread_rlock::is_method(attr) => super::thread_rlock::CLASS,
         Value::PrimitiveLock(_) if super::thread_lock::is_method(attr) => super::thread_lock::CLASS,
-        Value::Int(_) | Value::Bool(_) if matches!(attr, "bit_length" | "to_bytes") => "int",
-        Value::Float(_) if attr == "as_integer_ratio" => "float",
+        Value::Bool(_) if attr == "__repr__" => "bool",
+        Value::Int(_) if attr == "__repr__" => "int",
+        Value::Int(_) | Value::Bool(_) if matches!(attr, "__add__" | "bit_length" | "to_bytes") => "int",
+        Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
+        Value::DictIterator(iter) if DictIterator::METHODS.contains(&attr) => iter.class_name(),
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {
@@ -440,7 +450,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
-        Value::Generator { .. } if matches!(attr, "send" | "throw" | "close") => "generator",
+        Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
             "coroutine"
         }
@@ -481,6 +491,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "accept"
                     | "connect"
                     | "getsockname"
+                    | "getpeername"
                     | "fileno"
                     | "close"
                     | "recv"
@@ -492,6 +503,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "getsockopt"
                     | "setsockopt"
                     | "setblocking"
+                    | "get_inheritable"
                     | "getblocking"
                     | "__enter__"
                     | "__exit__"
@@ -1076,6 +1088,9 @@ pub(super) fn call(
                 arity(name, args, min, max)?;
                 ctx.call_coroutine_method(owner, method, args)
             }
+            "generator" if matches!(method, "__iter__" | "__next__") => {
+                ctx.iterator_method(owner, method, args, kwargs)
+            }
             "generator" if method == "send" => {
                 let [generator, value] = args else {
                     return Err(type_error("generator.send() takes exactly one argument"));
@@ -1117,7 +1132,8 @@ pub(super) fn call(
             "bytes" | "bytearray" if method == "translate" => {
                 translation::translate(ctx, owner, args, kwargs)
             }
-            "str" | "bytes" | "bytearray" if method == "__repr__" => {
+            "int" if method == "__add__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
@@ -1242,6 +1258,10 @@ pub(super) fn call(
             let class = ctx.builtin("object");
             Ok(ctx.instance(class, None))
         }
+        "mappingproxy" => {
+            let [mapping] = bind_builtin_arguments(name, args, kwargs, ["mapping"], 1)?;
+            ctx.mapping_proxy(mapping.expect("required mapping"))
+        }
         "type" => {
             let [object] = args else {
                 return Err(if args.len() == 3 {
@@ -1289,6 +1309,11 @@ pub(super) fn call(
             }
             let scalar = ctx.scalar_value(value);
             match ctx.heap.get(scalar) {
+                Value::Calendar {
+                    value: duration, ..
+                } if duration.class() == "timedelta" => {
+                    super::stdlib::call(ctx, "datetime.timedelta.__abs__", &[value], &[])
+                }
                 Value::Float(number) => Ok(ctx.alloc(Value::Float(number.abs()))),
                 Value::Complex(number) => {
                     let magnitude = number.real.hypot(number.imag);

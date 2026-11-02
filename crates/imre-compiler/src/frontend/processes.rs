@@ -978,6 +978,19 @@ impl Checker<'_> {
                 });
             }
         }
+        if matches!(api, LaunchApi::Popen | LaunchApi::Call(_))
+            && keyword("universal_newlines").is_some()
+        {
+            // stream_plan already checked the literal alias and selected the pipe type.
+            params.push(ParameterKind::KeywordOnly.parameter(
+                "universal_newlines",
+                Type::Bool,
+                None,
+            ));
+            if validation == 5 {
+                streams |= 1 << 22; // Popen must reject the conflicting flags before spawning.
+            }
+        }
         let child_options = params.len();
         if [
             "process_group",
@@ -1054,6 +1067,9 @@ impl Checker<'_> {
                 } else {
                     checker.coerce(value, Type::Int, arg)
                 };
+            }
+            if params[index].name == "universal_newlines" {
+                return Ok(Expr::boolean(false));
             }
             match index {
                 0 => checker.command_argument(arg),

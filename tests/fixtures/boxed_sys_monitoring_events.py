@@ -6,14 +6,18 @@ def current():
     assert type(monitoring) is ModuleType
     assert monitoring is sys.__dict__["monitoring"]
     assert monitoring.__name__ == "sys.monitoring"
-    assert monitoring.__doc__ is monitoring.__package__ is monitoring.__spec__ is None
+    assert monitoring.__doc__ is monitoring.__package__ is None
+    assert monitoring.__loader__ is monitoring.__spec__ is None
     assert "sys.monitoring" not in sys.modules
     try:
-        __import__("sys.monitoring")
+        import sys.monitoring
     except ModuleNotFoundError:
         pass
     else:
         raise AssertionError("sys.monitoring unexpectedly importable")
+
+    exports = "DISABLE MISSING events DEBUGGER_ID COVERAGE_ID PROFILER_ID OPTIMIZER_ID".split()
+    assert [name for name in vars(monitoring) if name in exports] == exports
 
     events = monitoring.events
     assert type(events) is SimpleNamespace
@@ -37,3 +41,12 @@ def current():
         assert sys.monitoring.events.LINE == -1
     finally:
         events.LINE = original
+
+    del sys.modules["sys"]
+    try:
+        fresh = __import__("sys")
+        assert fresh is not sys
+        assert not hasattr(fresh, "monitoring")
+        assert sys.monitoring is monitoring and monitoring.events is events
+    finally:
+        sys.modules["sys"] = sys

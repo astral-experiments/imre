@@ -32,6 +32,12 @@ pub(in crate::dynamic) fn module(ctx: &mut Context) -> Result<Id> {
     let name = ctx.text("sys.monitoring");
     ctx.init_module(module, &[name], &[])?;
 
+    let object = ctx.builtin("object");
+    for name in ["DISABLE", "MISSING"] {
+        let sentinel = ctx.instance(object, None);
+        ctx.set_attr(module, name, sentinel)?;
+    }
+
     let class = namespace::class(ctx)?;
     let events = ctx.instance(class, None);
     for (index, name) in EVENTS.iter().enumerate() {
@@ -50,11 +56,6 @@ pub(in crate::dynamic) fn module(ctx: &mut Context) -> Result<Id> {
     ] {
         let id = ctx.int(number);
         ctx.set_attr(module, name, id)?;
-    }
-    let object = ctx.builtin("object");
-    for name in ["DISABLE", "MISSING"] {
-        let sentinel = ctx.instance(object, None);
-        ctx.set_attr(module, name, sentinel)?;
     }
     Ok(module)
 }

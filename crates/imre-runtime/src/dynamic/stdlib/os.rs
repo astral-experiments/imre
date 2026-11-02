@@ -361,7 +361,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_inheritable"
             | "link"
             | "symlink"
-    )
+    ) || (cfg!(target_os = "linux") && name == "sendfile")
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -370,6 +370,21 @@ pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+fn ssize_t(ctx: &mut Context, value: Id) -> Result<isize> {
+    crate::signed_index(&ctx.index_integer(value)?).ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })
+}
+
+fn file_offset(ctx: &mut Context, value: Id) -> Result<i64> {
+    ctx.index_integer(value)?
+        .to_i64()
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C long"))
 }
 
 enum PathArg {
@@ -648,6 +663,30 @@ pub(super) fn descriptor(
     if name == "open" {
         return open(ctx, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if name == "sendfile" {
+        let [Some(out_fd), Some(in_fd), Some(offset), Some(count)] =
+            builtins::bind_builtin_arguments(
+                name,
+                args,
+                kwargs,
+                ["out_fd", "in_fd", "offset", "count"],
+                4,
+            )?
+        else {
+            unreachable!("sendfile requires both descriptors, offset and count")
+        };
+        let out_fd = c_int(ctx, out_fd)?;
+        let in_fd = c_int(ctx, in_fd)?;
+        // Argument Clinic converts count before sendfile converts an explicit offset.
+        let count = ssize_t(ctx, count)?;
+        let offset = if offset == NONE {
+            None
+        } else {
+            Some(file_offset(ctx, offset)?)
+        };
+        return Ok(ctx.int(native::sendfile(out_fd, in_fd, offset, count)? as i64));
+    }
     if name == "dup2" {
         let [Some(fd), Some(fd2), inheritable] = builtins::bind_builtin_arguments(
             "dup2",
@@ -726,12 +765,7 @@ pub(super) fn descriptor(
         };
         let fd = c_int(ctx, *fd)?;
         return if name == "read" {
-            let length = crate::signed_index(&ctx.index_integer(*data)?).ok_or_else(|| {
-                Error::new(
-                    "OverflowError",
-                    "Python int too large to convert to C ssize_t",
-                )
-            })?;
+            let length = ssize_t(ctx, *data)?;
             Ok(ctx.alloc(Value::Bytes(native::read(fd, length)?)))
         } else {
             // The synchronous syscall borrows the buffer after fd conversion.
@@ -752,9 +786,7 @@ pub(super) fn descriptor(
             ));
         };
         let fd = c_int(ctx, *fd)?;
-        let position = ctx.index_integer(*position)?.to_i64().ok_or_else(|| {
-            Error::new("OverflowError", "Python int too large to convert to C long")
-        })?;
+        let position = file_offset(ctx, *position)?;
         let whence = c_int(ctx, *whence)?;
         return Ok(ctx.int(native::seek(fd, position, whence)?));
     }

@@ -1237,7 +1237,8 @@ pub(super) fn builtin_slot(
     if !ctx.builtin_slot_accepts(object, owner) {
         return Err(type_error(format!(
             "descriptor '{method}' requires a '{owner}' object but received a '{}'",
-            ctx.type_name(object)
+            ctx.builtin_type_name(object)
+                .unwrap_or_else(|| ctx.type_name(object))
         )));
     }
     let storage = ctx.scalar_value(object);
@@ -1253,6 +1254,9 @@ pub(super) fn builtin_slot(
                 rest.len()
             )));
         };
+        if owner == "int" {
+            return integer::add(ctx, storage, *value);
+        }
         if method == "__add__" {
             return ctx.concat_list(storage, *value);
         }
@@ -1270,7 +1274,13 @@ pub(super) fn builtin_slot(
             )));
         }
         let text = match ctx.heap.get(storage) {
-            Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) => ctx.repr(storage),
+            Value::Bool(value) if owner == "int" => u8::from(*value).to_string(),
+            Value::Int(value) => super::super::operators::rendered_integer(value)?.into_string(),
+            Value::Bool(_)
+            | Value::Float(_)
+            | Value::Str(_)
+            | Value::SurrogateStr(_)
+            | Value::Bytes(_) => ctx.repr(storage),
             Value::ByteArray(bytes) => ctx.bytearray_repr(object, bytes),
             Value::List(_) | Value::Tuple(_) | Value::Set { .. } => {
                 ctx.checked_container_slot_repr(object, storage)?

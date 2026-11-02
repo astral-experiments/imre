@@ -28,6 +28,69 @@ fn pickling_error(ctx: &Context, message: impl Into<String>) -> Error {
     error
 }
 
+fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
+    Error::new(
+        "NotImplementedError",
+        format!("native pickle has no reducer for {}", ctx.type_name(obj)),
+    )
+}
+
+/// Delegate to the instance hook only when its class overrides object's reducer.
+pub(in crate::dynamic) fn object_reduce(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method object.{name}() needs an argument"),
+        ));
+    };
+    let class = ctx.type_name(receiver);
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{class}.{name}() takes no keyword arguments"),
+        ));
+    }
+    if name == "__reduce__" {
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{class}.{name}() takes no arguments ({} given)", rest.len()),
+            ));
+        }
+        return Err(unsupported_reducer(ctx, receiver));
+    }
+    let [protocol] = rest else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{class}.{name}() takes exactly one argument ({} given)",
+                rest.len()
+            ),
+        ));
+    };
+    ctx.index_integer(*protocol)?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))?;
+    let reducer = match ctx.lookup_attr(receiver, "__reduce__") {
+        Ok(reducer) => reducer,
+        Err(error) if ctx.is_attribute_error(&error) => {
+            return Err(unsupported_reducer(ctx, receiver));
+        }
+        Err(error) => return Err(error),
+    };
+    let class = ctx.exact_type(receiver)?;
+    if ctx.lookup_attr(class, "__reduce__")? == ctx.builtin("object.__reduce__") {
+        return Err(unsupported_reducer(ctx, receiver));
+    }
+    ctx.call(reducer, Vec::new(), Vec::new())
+}
+
 struct Pickler {
     protocol: u8,
     fix_imports: bool,
@@ -126,7 +189,7 @@ impl Pickler {
             (ctx.builtin("codecs.encode"), vec![text, latin1])
         };
         let args = ctx.alloc(Value::Tuple(args));
-        self.save_reduce(ctx, obj, func, args)
+        self.save_reduce(ctx, obj, func, args, NONE)
     }
 
     fn save_dict(&mut self, ctx: &mut Context, obj: Id) -> Result<()> {
@@ -270,10 +333,7 @@ impl Pickler {
             Err(e) if ctx.is_attribute_error(&e) => match ctx.lookup_attr(obj, "__reduce__") {
                 Ok(hook) => ctx.call(hook, Vec::new(), Vec::new())?,
                 Err(e) if ctx.is_attribute_error(&e) => {
-                    return Err(Error::new(
-                        "NotImplementedError",
-                        format!("native pickle has no reducer for {}", ctx.type_name(obj)),
-                    ));
+                    return Err(unsupported_reducer(ctx, obj));
                 }
                 Err(e) => return Err(e),
             },
@@ -305,16 +365,24 @@ impl Pickler {
                 "second item of the tuple returned by __reduce__ must be a tuple",
             ));
         }
-        if fields[2..].iter().any(|&field| field != NONE) {
+        if fields.iter().skip(3).any(|&field| field != NONE) {
             return Err(Error::new(
                 "NotImplementedError",
-                "native pickle does not yet support reduction state, items or state setters",
+                "native pickle does not yet support reduction items or state setters",
             ));
         }
-        self.save_reduce(ctx, obj, fields[0], fields[1])
+        let state = fields.get(2).copied().unwrap_or(NONE);
+        self.save_reduce(ctx, obj, fields[0], fields[1], state)
     }
 
-    fn save_reduce(&mut self, ctx: &mut Context, obj: Id, func: Id, args: Id) -> Result<()> {
+    fn save_reduce(
+        &mut self,
+        ctx: &mut Context,
+        obj: Id,
+        func: Id,
+        args: Id,
+        state: Id,
+    ) -> Result<()> {
         self.save(ctx, func)?;
         self.save(ctx, args)?;
         self.out.push(b'R');
@@ -324,7 +392,12 @@ impl Pickler {
             encoding::memo_get(&mut self.out, self.protocol, index);
             return Ok(());
         }
-        self.remember(ctx, obj)
+        self.remember(ctx, obj)?;
+        if state != NONE {
+            self.save(ctx, state)?;
+            self.out.push(b'b'); // BUILD
+        }
+        Ok(())
     }
 }
 
