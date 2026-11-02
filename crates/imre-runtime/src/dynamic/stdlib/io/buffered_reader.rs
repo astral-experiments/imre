@@ -176,6 +176,17 @@ impl Reader {
     }
 
     fn check_open(&self, ctx: &mut Context, message: &str) -> Result<()> {
+        if self
+            .update
+            .as_ref()
+            .is_some_and(|update| update.retired.get())
+        {
+            return Err(Error::new("ValueError", message));
+        }
+        self.check_raw_open(ctx, message)
+    }
+
+    fn check_raw_open(&self, ctx: &mut Context, message: &str) -> Result<()> {
         let closed = ctx.lookup_attr(self.raw()?, "closed")?;
         if ctx.truth(closed)? {
             Err(Error::new("ValueError", message))
@@ -527,11 +538,18 @@ pub(super) fn initialized_raw(ctx: &Context, receiver: Id) -> Option<Id> {
 pub(super) fn close_raw(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let reader = Reader::get(ctx, receiver)?;
     let raw = reader.raw()?;
-    let result = reader.with_lock(|| invoke(ctx, raw, "close", vec![]));
-    if result.is_ok() || reader.update.is_none() {
+    let result = reader.with_lock(|| {
+        let result = invoke(ctx, raw, "close", vec![]);
         if let Some(update) = &reader.update {
+            // Retire the backing on which raw.close was called, even when it refuses.
+            // The raw remains attached and determines the public closed property.
+            update.retired.set(true);
             update.dirty.set(None);
+            reader.reset();
         }
+        result
+    });
+    if reader.update.is_none() {
         reader.reset();
     }
     result
@@ -573,7 +591,7 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
             Err(Error::new("UnsupportedOperation", "truncate"))
         }
         "__enter__" => {
-            reader.check_open(ctx, "I/O operation on closed file.")?;
+            reader.check_raw_open(ctx, "I/O operation on closed file.")?;
             Ok(receiver)
         }
         "__exit__" => invoke(ctx, receiver, "close", vec![]),

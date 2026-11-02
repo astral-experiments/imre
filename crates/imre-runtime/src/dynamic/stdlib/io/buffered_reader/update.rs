@@ -5,6 +5,7 @@ use super::{Cell, Context, Error, Id, NONE, Reader, Result, Value, index, invoke
 #[derive(Default)]
 pub(super) struct Update {
     pub(super) raw_offset: Cell<i64>,
+    pub(super) retired: Cell<bool>,
     // Compacting a partially blocked write can place the logical cursor outside the window.
     pub(super) outside: Cell<Option<i64>>,
     // Bytes outside this range were read from the raw stream or have already been written.
