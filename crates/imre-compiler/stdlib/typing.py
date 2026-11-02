@@ -23,6 +23,127 @@ from typing import Any, Callable, Generic, Protocol, TypeVar, Union
 from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
+# Please keep __all__ alphabetized within each category.
+__all__ = [
+    # Super-special typing primitives.
+    'Annotated',
+    'Any',
+    'Callable',
+    'ClassVar',
+    'Concatenate',
+    'Final',
+    'ForwardRef',
+    'Generic',
+    'Literal',
+    'Optional',
+    'ParamSpec',
+    'Protocol',
+    'Tuple',
+    'Type',
+    'TypeVar',
+    'TypeVarTuple',
+    'Union',
+
+    # ABCs (from collections.abc).
+    'AbstractSet',  # collections.abc.Set.
+    'ByteString',
+    'Container',
+    'ContextManager',
+    'Hashable',
+    'ItemsView',
+    'Iterable',
+    'Iterator',
+    'KeysView',
+    'Mapping',
+    'MappingView',
+    'MutableMapping',
+    'MutableSequence',
+    'MutableSet',
+    'Sequence',
+    'Sized',
+    'ValuesView',
+    'Awaitable',
+    'AsyncIterator',
+    'AsyncIterable',
+    'Coroutine',
+    'Collection',
+    'AsyncGenerator',
+    'AsyncContextManager',
+
+    # Structural checks, a.k.a. protocols.
+    'Reversible',
+    'SupportsAbs',
+    'SupportsBytes',
+    'SupportsComplex',
+    'SupportsFloat',
+    'SupportsIndex',
+    'SupportsInt',
+    'SupportsRound',
+
+    # Concrete collection types.
+    'ChainMap',
+    'Counter',
+    'Deque',
+    'Dict',
+    'DefaultDict',
+    'List',
+    'OrderedDict',
+    'Set',
+    'FrozenSet',
+    'NamedTuple',  # Not really a type.
+    'TypedDict',  # Not really a type.
+    'Generator',
+
+    # Other concrete types.
+    'BinaryIO',
+    'IO',
+    'Match',
+    'Pattern',
+    'TextIO',
+
+    # One-off things.
+    'AnyStr',
+    'assert_type',
+    'assert_never',
+    'cast',
+    'clear_overloads',
+    'dataclass_transform',
+    'evaluate_forward_ref',
+    'final',
+    'get_args',
+    'get_origin',
+    'get_overloads',
+    'get_protocol_members',
+    'get_type_hints',
+    'is_protocol',
+    'is_typeddict',
+    'LiteralString',
+    'Never',
+    'NewType',
+    'no_type_check',
+    'no_type_check_decorator',
+    'NoDefault',
+    'NoReturn',
+    'NotRequired',
+    'overload',
+    'override',
+    'ParamSpecArgs',
+    'ParamSpecKwargs',
+    'ReadOnly',
+    'Required',
+    'reveal_type',
+    'runtime_checkable',
+    'Self',
+    'Text',
+    'TYPE_CHECKING',
+    'TypeAlias',
+    'TypeGuard',
+    'TypeIs',
+    'TypeAliasType',
+    'Unpack',
+]
+
+
 # From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
 def _is_unpacked_typevartuple(x: Any) -> bool:
     # Need to check 'is True' here
