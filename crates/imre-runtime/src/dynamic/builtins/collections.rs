@@ -683,21 +683,21 @@ pub(super) fn method(
     if name == "dict.fromkeys" {
         return fromkeys(ctx, args, kwargs);
     }
-    if let Some(method) = name.strip_prefix("list.")
-        && LIST_METHODS.contains(&method)
+    if let Some((owner, method)) = name.split_once('.')
+        && ((owner == "list" && LIST_METHODS.contains(&method)) || name == "tuple.index")
     {
         let Some((&receiver, args)) = args.split_first() else {
             return Err(type_error(format!(
                 "unbound method {name}() needs an argument"
             )));
         };
-        let receiver = ctx.scalar_value(receiver);
-        if !matches!(ctx.heap.get(receiver), Value::List(_)) {
+        if !ctx.builtin_slot_accepts(receiver, owner) {
             return Err(type_error(format!(
-                "descriptor '{method}' for 'list' objects doesn't apply to a '{}' object",
+                "descriptor '{method}' for '{owner}' objects doesn't apply to a '{}' object",
                 ctx.type_name(receiver)
             )));
         }
+        let receiver = ctx.scalar_value(receiver);
         let one_arg = || {
             if !kwargs.is_empty() {
                 return Err(type_error(format!("{name}() takes no keyword arguments")));
@@ -720,7 +720,7 @@ pub(super) fn method(
                 items.push(value);
                 Ok(NONE)
             }
-            "index" => list_index(ctx, receiver, args, kwargs),
+            "index" => sequence_index(ctx, owner, receiver, args, kwargs),
             "extend" => {
                 list_extend(ctx, receiver, one_arg()?)?;
                 Ok(NONE)
@@ -729,14 +729,14 @@ pub(super) fn method(
                 let value = one_arg()?;
                 let mut count = 0;
                 let mut start = 0;
-                while let Some(i) = find_list_item(ctx, receiver, value, start..i64::MAX)? {
+                while let Some(i) = find_sequence_item(ctx, receiver, value, start..i64::MAX)? {
                     count += 1;
                     start = i + 1;
                 }
                 Ok(ctx.int(count))
             }
             "remove" => {
-                let i = find_list_item(ctx, receiver, one_arg()?, 0..i64::MAX)?
+                let i = find_sequence_item(ctx, receiver, one_arg()?, 0..i64::MAX)?
                     .ok_or_else(|| Error::new("ValueError", "list.remove(x): x not in list"))?
                     as usize;
                 let items = list_items_mut(ctx, receiver)?;
@@ -1124,10 +1124,16 @@ pub(super) fn method(
     }
 }
 
-/// Compare against the live list; __index__ and __eq__ can both change its contents.
-fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+/// Convert slice bounds before searching the underlying list or tuple.
+fn sequence_index(
+    ctx: &mut Context,
+    owner: &str,
+    receiver: Id,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
     if !kwargs.is_empty() {
-        return Err(type_error("list.index() takes no keyword arguments"));
+        return Err(type_error(format!("{owner}.index() takes no keyword arguments")));
     }
     let Some((&needle, bounds)) = args.split_first() else {
         return Err(type_error("index expected at least 1 argument, got 0"));
@@ -1151,33 +1157,28 @@ fn list_index(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             }
         });
     }
-    let Value::List(items) = ctx.heap.get(receiver) else {
-        unreachable!()
-    };
+    let (length, _) = ctx.sequence_at(receiver, 0).unwrap();
     let [start, stop] = limits.map(|i| {
         if i < 0 {
-            (items.len() as i64 + i).max(0)
+            (length as i64 + i).max(0)
         } else {
             i
         }
     });
-    find_list_item(ctx, receiver, needle, start..stop)?
+    find_sequence_item(ctx, receiver, needle, start..stop)?
         .map(|i| ctx.int(i))
-        .ok_or_else(|| Error::new("ValueError", "list.index(x): x not in list"))
+        .ok_or_else(|| Error::new("ValueError", format!("{owner}.index(x): x not in {owner}")))
 }
 
-/// Locate the next match in a live list. Equality callbacks may resize or clear it.
-fn find_list_item(
+/// Search by identity or rich equality, re-reading storage if a callback mutates a list.
+fn find_sequence_item(
     ctx: &mut Context,
     receiver: Id,
     needle: Id,
     positions: std::ops::Range<i64>,
 ) -> Result<Option<i64>> {
     for i in positions {
-        let Value::List(items) = ctx.heap.get(receiver) else {
-            unreachable!()
-        };
-        let Some(&item) = items.get(i as usize) else {
+        let Some((_, Some(item))) = ctx.sequence_at(receiver, i as usize) else {
             break;
         };
         if item != needle {
