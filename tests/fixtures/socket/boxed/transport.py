@@ -20,6 +20,8 @@ def run():
         assert exc.args == (exc.errno, exc.strerror)
     else:
         raise AssertionError("resolver accepted an invalid socket type")
+    passive = socket.getaddrinfo(None, 0, socket.AF_INET, socket.SOCK_STREAM, flags=socket.AI_PASSIVE)
+    assert passive[0][4] == ("0.0.0.0", 0)
     results = socket.getaddrinfo("127.0.0.1", 0, socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
     family, kind, protocol, canonical, addr = results[0]
     assert (family, kind, protocol) == (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
