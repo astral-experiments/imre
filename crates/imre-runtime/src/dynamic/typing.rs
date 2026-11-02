@@ -32,6 +32,7 @@ pub(super) struct TypeVariable {
     pub module: Id,
     pub bound: Id,
     pub constraints: Id,
+    pub default: Id,
     pub covariant: bool,
     pub contravariant: bool,
     pub infer_variance: bool,
@@ -67,6 +68,14 @@ impl AliasKind {
         matches!(
             self,
             Self::Generic | Self::Callable | Self::Unpack | Self::Concatenate
+        )
+    }
+
+    /// Alias classes that inherit _GenericAlias.__iter__ without _NotIterable.
+    pub(super) fn iterates_unpack(self) -> bool {
+        matches!(
+            self,
+            Self::Generic | Self::Literal(_) | Self::Concatenate | Self::Unpack
         )
     }
 
@@ -232,6 +241,7 @@ pub(super) fn generic_attr_target(ctx: &Context, mut obj: Id, name: &str, writin
 #[derive(Default)]
 pub(super) struct Registry {
     alias_caches: [Option<Id>; 2],
+    pub(super) callable_factory: Option<Id>,
     no_default: Option<Id>,
     overloads: HashMap<(String, String), Vec<(u32, Id)>>,
 }
@@ -241,6 +251,7 @@ impl Registry {
         self.alias_caches
             .iter()
             .flatten()
+            .chain(self.callable_factory.iter())
             .chain(self.no_default.iter())
             .chain(self.overloads.values().flatten().map(|(_, value)| value))
     }
@@ -293,6 +304,13 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
     let class = ctx
         .allocate_class(name.to_owned(), scope, bases)
         .expect("native typing classes have a single base");
+    if key == "typing.Generic" {
+        // The native base provides neither instance dictionary nor weak-reference storage.
+        let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.class_namespace.as_mut().unwrap().slot_names = Some([].into());
+    }
     ctx.classes.insert(key, class);
     class
 }
@@ -367,9 +385,15 @@ fn native_parameters(ctx: &mut Context, args: Id) -> Id {
 /// Typing retries the constructor without caching when building or comparing its key raises TypeError.
 fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Result<Id> {
     let args = ctx.alloc(Value::Tuple(args));
-    let (index, constructor) = match kind {
-        AliasKind::Generic => (0, "typing._GenericAlias"),
-        AliasKind::Callable => (1, "typing._CallableGenericAlias"),
+    let (index, make_alias, arguments) = match kind {
+        AliasKind::Generic => (0, ctx.builtin("typing._GenericAlias"), vec![origin, args]),
+        AliasKind::Callable => {
+            let make_alias = ctx.typing.callable_factory.ok_or_else(|| {
+                Error::new("RuntimeError", "typing.Callable is not initialized")
+            })?;
+            let constructor = ctx.builtin("typing._CallableGenericAlias");
+            (1, make_alias, vec![constructor, origin, args])
+        }
         _ => {
             let parameters = native_parameters(ctx, args);
             return Ok(allocate_alias(
@@ -380,21 +404,15 @@ fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Resul
     let cached = if let Some(id) = ctx.typing.alias_caches[index] {
         id
     } else {
-        let function = ctx.builtin(constructor);
-        let cache = ctx.cached_function(function);
+        let cache = ctx.cached_function(make_alias);
         ctx.typing.alias_caches[index] = Some(cache);
         cache
     };
-    let kwargs: Vec<_> = (kind == AliasKind::Callable)
-        .then(|| ("name".to_owned(), ctx.text("Callable")))
-        .into_iter()
-        .collect();
-    let result = ctx.call(cached, vec![origin, args], kwargs.clone());
+    let result = ctx.call(cached, arguments.clone(), Vec::new());
     if let Err(error) = &result {
         let type_error = ctx.builtin("TypeError");
         if ctx.raised_error_matches(error, type_error) {
-            let function = ctx.builtin(constructor);
-            return ctx.call(function, vec![origin, args], kwargs);
+            return ctx.call(make_alias, arguments, Vec::new());
         }
     }
     result
@@ -554,6 +572,87 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     )
 }
 
+/// Construct the collections.abc subclass of GenericAlias, including direct keyword calls.
+pub(super) fn abc_callable_alias(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    const NAME: &str = "_CallableGenericAlias.__new__";
+    let fields = super::builtins::bind_method_arguments(NAME, args, kwargs, ["origin", "args"], 2)?;
+    let [Some(origin), Some(pair)] = fields else {
+        let missing: Vec<_> = ["origin", "args"]
+            .into_iter()
+            .zip(fields)
+            .filter_map(|(name, value)| value.is_none().then_some(name))
+            .collect();
+        return Err(super::calls::missing_arguments_error(
+            NAME,
+            "positional",
+            &missing,
+        ));
+    };
+    let tuple = ctx.builtin("tuple");
+    if !ctx.instance_of(pair, tuple) {
+        return Err(Error::new("TypeError", CALLABLE_SHAPE_ERROR));
+    }
+    let length = super::builtins::call(ctx, "len", &[pair], &[])?;
+    if ctx.as_integer(length)? != 2 {
+        return Err(Error::new("TypeError", CALLABLE_SHAPE_ERROR));
+    }
+    let args = ctx.unpack_items(pair, 2, None)?;
+    if matches!(ctx.heap.get(pair), Value::Tuple(_))
+        && !matches!(ctx.heap.get(args[0]), Value::List(_) | Value::Tuple(_))
+        && is_param_expr(ctx, args[0])
+    {
+        let parameters = native_parameters(ctx, pair);
+        return Ok(allocate_alias(
+            ctx,
+            AliasKind::AbcCallable,
+            origin,
+            pair,
+            parameters,
+            None,
+            true,
+        ));
+    }
+    callable_alias(ctx, AliasKind::AbcCallable, origin, args)
+}
+
+const CALLABLE_SHAPE_ERROR: &str = "Callable must be used as Callable[[arg, ...], result].";
+
+fn callable_alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Result<Id> {
+    let [parameters, result] = args.as_slice() else {
+        return Err(Error::new("TypeError", CALLABLE_SHAPE_ERROR));
+    };
+    if kind == AliasKind::Callable {
+        // Cache the spelling supplied by the caller before typing converts its arguments.
+        let parameters = if ctx.list_storage(*parameters).is_some() {
+            let items = ctx.items(*parameters)?;
+            ctx.alloc(Value::Tuple(items))
+        } else {
+            *parameters
+        };
+        return alias(ctx, kind, origin, vec![parameters, *result]);
+    }
+    let tuple = ctx.builtin("tuple");
+    let actual = if ctx.list_storage(*parameters).is_some() || ctx.instance_of(*parameters, tuple) {
+        let mut flat = ctx.items(*parameters)?;
+        flat.push(*result);
+        flat
+    } else if is_param_expr(ctx, *parameters) {
+        args
+    } else {
+        let expected = "Expected a list of types, an ellipsis, ParamSpec, or Concatenate";
+        if kind == AliasKind::AbcCallable {
+            let got = ctx.checked_format(*parameters, false)?;
+            return Err(Error::new("TypeError", format!("{expected}. Got {got}")));
+        }
+        return Err(Error::new("TypeError", expected));
+    };
+    alias(ctx, kind, origin, actual)
+}
+
 fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<Id> {
     let method = ctx.module_value("typing", name).ok_or_else(|| {
         Error::new(
@@ -643,9 +742,6 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(&target) => {
             AliasKind::Generic
         }
-        Value::Class { .. } if ctx.classes.get("collections.abc.Callable") == Some(&target) => {
-            AliasKind::AbcCallable
-        }
         Value::Native(n) if n == "typing.Callable" => AliasKind::Callable,
         Value::Native(n)
             if matches!(
@@ -720,7 +816,20 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                 }
             } else {
                 let params = ctx.lookup_attr(target, "__parameters__")?;
-                let required = ctx.items(params)?.len();
+                let parameters = ctx.items(params)?;
+                if parameters.iter().any(|&id| match ctx.heap.get(id) {
+                    Value::ParamSpec(_) | Value::TypeVarTuple { .. } => true,
+                    Value::TypeVar(var) => !matches!(ctx.heap.get(var.default), Value::NoDefault),
+                    _ => false,
+                }) {
+                    let constructor = ctx.builtin("typing._GenericAlias");
+                    return typing_alias_helper(
+                        ctx,
+                        "_variadic_class_getitem",
+                        vec![target, index, constructor],
+                    );
+                }
+                let required = parameters.len();
                 if args.len() != required {
                     let which = if args.len() < required { "few" } else { "many" };
                     return Err(Error::new(
@@ -734,29 +843,9 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                 }
             }
         }
-        if matches!(kind, AliasKind::Callable | AliasKind::AbcCallable) {
-            let [parameters, result] = args.as_slice() else {
-                return Err(Error::new(
-                    "TypeError",
-                    "Callable must be used as Callable[[arg, ...], result].",
-                ));
-            };
-            let actual = match ctx.heap.get(*parameters) {
-                Value::List(items) | Value::Tuple(items) => {
-                    let mut flat = items.clone();
-                    flat.push(*result);
-                    flat
-                }
-                _ if is_param_expr(ctx, *parameters) => args,
-                _ => {
-                    return Err(Error::new(
-                        "TypeError",
-                        "Expected a list of types, an ellipsis, ParamSpec, or Concatenate",
-                    ));
-                }
-            };
+        if kind == AliasKind::Callable {
             let origin = super::mapping_abc::class(ctx, "Callable")?;
-            return alias(ctx, kind, origin, actual);
+            return callable_alias(ctx, kind, origin, args);
         }
         alias(ctx, kind, target, args)
     })())
@@ -1016,7 +1105,7 @@ impl ParameterClass {
         let (owner, methods, fields, doc): (_, &[_], &[_], _) = match name {
             "typing.TypeVar" => (
                 "typing.TypeVar",
-                &["has_default"],
+                &["__reduce__", "__typing_subst__", "has_default"],
                 &VARIANCE_FIELDS[..],
                 include_str!("../../native/typing-TypeVar-doc.txt"),
             ),
@@ -1175,6 +1264,34 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
     }
     let attr = match ctx.heap.get(value) {
         Value::Native(class)
+            if name == "__iter__" && Context::native_base(class) == Some("typing._GenericAlias") =>
+        {
+            let base = ctx.builtin("typing._GenericAlias");
+            ctx.own_class_attr(base, name)?
+        }
+        Value::Native(class) if name == "__iter__" && class == "typing._CallableGenericAlias" => {
+            NONE
+        }
+        Value::GenericAlias(alias) if name == "__iter__" && alias.kind == AliasKind::Callable => {
+            NONE
+        }
+        Value::GenericAlias(alias) if name == "__iter__" && alias.kind.iterates_unpack() => {
+            let class = ctx.builtin(alias.kind.class());
+            return Some(
+                ctx.lookup_attr(class, name)
+                    .and_then(|method| ctx.bind_attribute(method, value, class)),
+            );
+        }
+        Value::Native(class) if class == "collections.abc._CallableGenericAlias"
+            && matches!(name, "__base__" | "__bases__" | "__mro__") =>
+        {
+            if name == "__base__" {
+                ctx.builtin("types.GenericAlias")
+            } else {
+                ctx.builtin_hierarchy_tuple(value, name)
+            }
+        }
+        Value::Native(class)
             if matches!(
                 class.as_str(),
                 "typing._GenericAlias" | "typing._UnpackGenericAlias"
@@ -1219,6 +1336,19 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__module__" => ctx.text("typing"),
             _ => return None,
         },
+        Value::Native(class) if class == "typing.Callable" && name == "_name" => {
+            ctx.text("Callable")
+        }
+        Value::Native(class)
+            if name == "__reduce__"
+                && matches!(class.as_str(), "typing.Callable" | "typing._CallableType") =>
+        {
+            let parent = *ctx.classes.get("typing._SpecialGenericAlias")?;
+            let reducer = ctx.class_attr(parent, name)?;
+            let receiver = if class == "typing.Callable" { value } else { NONE };
+            let owner = ctx.builtin("typing._CallableType");
+            return Some(ctx.bind_attribute(reducer, receiver, owner));
+        }
         Value::Native(class) if class == "typing.Callable" && name == "__mro_entries__" => {
             let callable = ctx.builtin("typing.alias_mro_entries");
             ctx.alloc(Value::Method {
@@ -1345,9 +1475,10 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__module__" => var.module,
             "__bound__" => var.bound,
             "__constraints__" => var.constraints,
-            "__default__" => no_default(ctx),
-            "has_default" => {
-                let callable = ctx.builtin("typing.TypeVar.has_default");
+            "__default__" => var.default,
+            "evaluate_default" => ctx.alloc(Value::ConstEvaluator(var.default)),
+            "__reduce__" | "__typing_subst__" | "has_default" => {
+                let callable = ctx.builtin(&format!("typing.TypeVar.{name}"));
                 ctx.alloc(Value::Method {
                     callable,
                     receiver: value,
@@ -1555,6 +1686,7 @@ fn typevar(
 ) -> Result<Id> {
     let mut name = args.first().copied();
     let mut bound = NONE;
+    let mut default = no_default(ctx);
     let mut covariant = false;
     let mut contravariant = false;
     let mut infer_variance = false;
@@ -1562,6 +1694,7 @@ fn typevar(
         match key.as_str() {
             "name" if name.is_none() => name = Some(*val),
             "bound" => bound = *val,
+            "default" => default = *val,
             "covariant" => covariant = ctx.truth(*val)?,
             "contravariant" => contravariant = ctx.truth(*val)?,
             "infer_variance" => infer_variance = ctx.truth(*val)?,
@@ -1626,11 +1759,51 @@ fn typevar(
         module,
         bound,
         constraints,
+        default,
         covariant,
         contravariant,
         infer_variance,
         declared,
     })))
+}
+
+/// Parse annotation text without evaluating it or constructing Python AST objects.
+fn parse_annotation_expression(
+    source: &str,
+) -> Result<ruff_python_parser::Parsed<ruff_python_ast::ModExpression>> {
+    use ruff_python_ast::token::TokenKind;
+
+    if source.contains('\0') {
+        return Err(Error::new(
+            "SyntaxError",
+            "source code string cannot contain null bytes",
+        ));
+    }
+    // CPython's tokenizer caps the combined nesting of (), [] and {} at 200.
+    // Keep deeply nested input out of the recursive parser. Short references only lex once.
+    const MAX_NESTING: usize = 200;
+    if source.len() > MAX_NESTING {
+        let mut lexer =
+            ruff_python_parser::lexer::lex(source, ruff_python_parser::Mode::Expression);
+        let mut depth = 0_usize;
+        loop {
+            match lexer.next_token() {
+                TokenKind::Lpar | TokenKind::Lsqb | TokenKind::Lbrace => {
+                    depth += 1;
+                    if depth > MAX_NESTING {
+                        return Err(Error::new("SyntaxError", "too many nested parentheses"));
+                    }
+                }
+                TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => {
+                    depth = depth.saturating_sub(1)
+                }
+                TokenKind::EndOfFile | TokenKind::Unknown => break,
+                _ => {}
+            }
+        }
+    }
+    ruff_python_parser::parse_expression(source)
+        .map_err(|error| Error::new("SyntaxError", error.to_string()))
 }
 
 /// Check a forward reference without evaluating names or converting the tree into Python AST objects.
@@ -1676,37 +1849,7 @@ fn validate_forward_ref(source: &str) -> Result<()> {
             });
         }
     }
-    if source.contains('\0') {
-        return Err(Error::new(
-            "SyntaxError",
-            "source code string cannot contain null bytes",
-        ));
-    }
-    // CPython's tokenizer caps the combined nesting of (), [] and {} at 200.
-    // Keep deeply nested input out of the recursive parser. Short references only lex once.
-    const MAX_NESTING: usize = 200;
-    if source.len() > MAX_NESTING {
-        let mut lexer =
-            ruff_python_parser::lexer::lex(source, ruff_python_parser::Mode::Expression);
-        let mut depth = 0_usize;
-        loop {
-            match lexer.next_token() {
-                TokenKind::Lpar | TokenKind::Lsqb | TokenKind::Lbrace => {
-                    depth += 1;
-                    if depth > MAX_NESTING {
-                        return Err(Error::new("SyntaxError", "too many nested parentheses"));
-                    }
-                }
-                TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => {
-                    depth = depth.saturating_sub(1)
-                }
-                TokenKind::EndOfFile | TokenKind::Unknown => break,
-                _ => {}
-            }
-        }
-    }
-    let parsed = ruff_python_parser::parse_expression(source)
-        .map_err(|error| Error::new("SyntaxError", error.to_string()))?;
+    let parsed = parse_annotation_expression(source)?;
     let body = parsed.syntax().body.as_ref();
     let invalid = match body {
         Expr::Yield(_) => Some("'yield' outside function"),
@@ -1804,23 +1947,29 @@ pub(super) fn call(
 ) -> Result<Id> {
     if matches!(
         operation,
-        "ParamSpec.__typing_subst__" | "ParamSpec.__typing_prepare_subst__"
+        "TypeVar.__reduce__"
+            | "TypeVar.__typing_subst__"
+            | "ParamSpec.__typing_subst__"
+            | "ParamSpec.__typing_prepare_subst__"
     ) {
-        let method = operation.strip_prefix("ParamSpec.").unwrap();
+        let (owner, method) = operation.split_once('.').unwrap();
         let Some((&parameter, rest)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
                 format!("unbound method {operation}() needs an argument"),
             ));
         };
-        if !matches!(ctx.heap.get(parameter), Value::ParamSpec(_)) {
+        if !matches!(
+            (owner, ctx.heap.get(parameter)),
+            ("TypeVar", Value::TypeVar(_)) | ("ParamSpec", Value::ParamSpec(_))
+        ) {
             let actual = ctx
                 .builtin_type_name(parameter)
                 .unwrap_or_else(|| ctx.type_name(parameter));
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "descriptor '{method}' for 'typing.ParamSpec' objects doesn't apply to a '{actual}' object"
+                    "descriptor '{method}' for 'typing.{owner}' objects doesn't apply to a '{actual}' object"
                 ),
             ));
         }
@@ -1831,6 +1980,14 @@ pub(super) fn call(
             ));
         }
         let helper = match (method, rest.len()) {
+            ("__reduce__", 0) => return ctx.lookup_attr(parameter, "__name__"),
+            ("__reduce__", n) => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{operation}() takes no arguments ({n} given)"),
+                ));
+            }
+            ("__typing_subst__", 1) if owner == "TypeVar" => "_typevar_subst",
             ("__typing_subst__", 1) => "_paramspec_subst",
             ("__typing_prepare_subst__", 2) => "_paramspec_prepare_subst",
             ("__typing_subst__", n) => {
@@ -2144,9 +2301,9 @@ pub(super) fn call(
         ("NoDefault.__reduce__", [value]) if matches!(ctx.heap.get(*value), Value::NoDefault) => {
             Ok(ctx.text("NoDefault"))
         }
-        ("TypeVar.has_default", [var]) if matches!(ctx.heap.get(*var), Value::TypeVar(_)) => {
-            Ok(FALSE)
-        }
+        ("TypeVar.has_default", [var]) if let Value::TypeVar(var) = ctx.heap.get(*var) => Ok(
+            super::builtins::boolean(!matches!(ctx.heap.get(var.default), Value::NoDefault)),
+        ),
         ("TypeVar.has_default", _) => Err(Error::new(
             "TypeError",
             "TypeVar.has_default() takes no arguments",
@@ -2232,6 +2389,13 @@ pub(super) fn call(
             "_GenericAlias.__init__() requires an origin and arguments",
         )),
         ("_finish_field_ref", [value]) => finish_field_ref(ctx, *value),
+        ("_check_annotation_syntax", [text]) => {
+            if matches!(ctx.heap.get(ctx.scalar_value(*text)), Value::SurrogateStr(_)) {
+                ctx.encode_utf8_codepoints(*text, false, "strict")?;
+            }
+            parse_annotation_expression(ctx.str_value(*text)?)?;
+            Ok(NONE)
+        }
         ("_validate_forward_ref", [text]) => {
             validate_forward_ref(ctx.str_value(*text)?)?;
             Ok(NONE)
@@ -2251,6 +2415,34 @@ pub(super) fn call(
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
         }
+        // Keep the source method (and its defining globals) on the native alias class.
+        ("_install_generic_alias_iter", [methods]) => {
+            let class = ctx.builtin("typing._GenericAlias");
+            let dictionary = *ctx.native_type_dicts.get(&class).ok_or_else(|| {
+                Error::new(
+                    "RuntimeError",
+                    "missing native typing._GenericAlias dictionary",
+                )
+            })?;
+            if ctx.dict_named_item(dictionary, "__iter__").is_none() {
+                let method = ctx.lookup_attr(*methods, "__iter__")?;
+                let key = ctx.text("__iter__");
+                ctx.put_item(dictionary, key, method)?;
+            }
+            Ok(class)
+        }
+        ("_get_alias_kind", [value]) => Ok(match ctx.heap.get(*value) {
+            Value::GenericAlias(alias) => {
+                let kind = match alias.kind {
+                    AliasKind::Builtin | AliasKind::AbcCallable => "builtin",
+                    AliasKind::Generic | AliasKind::Callable | AliasKind::Literal(_) => "typing",
+                    AliasKind::Concatenate => "concatenate",
+                    AliasKind::Unpack => "unpack",
+                };
+                ctx.text(kind)
+            }
+            _ => NONE,
+        }),
         ("get_origin" | "get_args", [v])
             if matches!(ctx.heap.get(*v), Value::Instance { .. })
                 && ctx
@@ -2776,7 +2968,7 @@ impl Context {
                     "Cannot subclass special typing classes",
                 ));
             }
-            if let Some(name) = self.heap.get(base).hash_type() {
+            if let Some(name) = self.heap.get(base).heap_type() {
                 return Err(Error::new(
                     "TypeError",
                     format!("type '{name}' is not an acceptable base type"),
@@ -2938,7 +3130,7 @@ impl Context {
         }
         let class = self.alloc(Value::Class {
             io_kind: None,
-            hash_type: None,
+            heap_type: None,
             metaclass: None,
             namedtuple_fields,
             name,

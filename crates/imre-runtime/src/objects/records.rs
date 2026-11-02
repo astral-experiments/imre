@@ -53,6 +53,9 @@ pub struct RecordSemantics {
     pub fields: *const RecordField,
 }
 
+/// A plain Python tuple; excludes named tuples, struct sequences, and private frames.
+pub(super) const EXACT_TUPLE: u32 = 1 << 5;
+
 impl RecordDescriptor {
     /// Class and tuple records share storage but have distinct Python protocols.
     pub(super) fn class_semantics(&self) -> Option<&RecordSemantics> {

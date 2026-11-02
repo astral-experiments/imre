@@ -1,5 +1,6 @@
 import _io
 import io
+import gc
 import os
 
 
@@ -7,6 +8,26 @@ def current():
     assert _io.BytesIO is io.BytesIO
     assert _io.StringIO is io.StringIO
     assert (io.BytesIO.__module__, io.BytesIO.__name__) == ("_io", "BytesIO")
+
+    # A fresh stream owns its exact immutable input, even after the caller drops it.
+    original = bytes(bytearray(b"a\nbc"))
+    first = io.BytesIO(original)
+    second = io.BytesIO(original)
+    assert first.getvalue() is original and second.getvalue() is original
+    del original
+    gc.collect()
+    assert first.readline() == b"a\n" and first.seek(-1, 2) == 3
+    assert first.write(b"!") == 1
+    assert first.getvalue() == b"a\nb!" and second.getvalue() == b"a\nbc"
+    assert second.seek(9) == 9 and second.read(1) == b"" and second.tell() == 9
+    assert second.truncate(2) == 2 and second.tell() == 9 and second.getvalue() == b"a\n"
+    empty = io.BytesIO(b"")
+    assert empty.read(1) == b"" and empty.tell() == 0
+    assert empty.seek(3) == 3 and empty.write(b"x") == 1 and empty.getvalue() == b"\0\0\0x"
+    mutable = bytearray(b"abc")
+    independent = io.BytesIO(mutable)
+    mutable[0] = 120
+    assert independent.read() == b"abc"
 
     stream = io.BytesIO(b"abcd")
     snapshot = stream.getvalue()

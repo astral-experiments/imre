@@ -74,7 +74,8 @@ def current():
 
     comparisons = (op.lt, op.le, op.eq, op.ne, op.gt, op.ge)
     print([f(9, 4) for f in comparisons])
-    operations = (op.add, op.sub, op.mul, op.truediv, op.floordiv, op.mod,
+    assert op.__pow__ is op.pow
+    operations = (op.add, op.sub, op.mul, op.truediv, op.floordiv, op.mod, op.pow,
                   op.lshift, op.rshift, op.and_, op.xor, op.or_)
     print([f(9, 2) for f in operations])
     inplace = (op.iadd, op.isub, op.imul, op.itruediv, op.ifloordiv, op.imod,

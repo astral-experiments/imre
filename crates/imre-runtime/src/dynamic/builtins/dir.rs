@@ -32,18 +32,51 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     collections::sorted(ctx, &[names], &[])
 }
 
+/// PEP 585 aliases add their local attributes to the origin's directory.
+fn generic_alias_names(ctx: &mut Context, origin: Id) -> Result<Id> {
+    let dir = ctx.builtin("dir");
+    let names = ctx.call(dir, vec![origin], Vec::new())?;
+    ctx.heap.keep(names);
+    for field in [
+        "__class__",
+        "__origin__",
+        "__args__",
+        "__unpacked__",
+        "__parameters__",
+        "__typing_unpacked_tuple_args__",
+        "__mro_entries__",
+        "__reduce_ex__",
+        "__reduce__",
+    ] {
+        let field = ctx.heap.code_name(field);
+        if !ctx.contains(field, names)? {
+            let Value::List(items) = ctx.heap.get_mut(names) else {
+                unreachable!("dir() returns a list")
+            };
+            items.try_reserve(1).map_err(|_| crate::Error::memory_error())?;
+            items.push(field);
+        }
+    }
+    Ok(names)
+}
+
 /// Merge the instance dictionary with the class dictionaries along the runtime's MRO.
 fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut names = BTreeSet::new();
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
+        Value::GenericAlias(alias) if alias.is_builtin_alias() => {
+            return generic_alias_names(ctx, alias.origin);
+        }
         Value::GenericAlias(alias) if matches!(alias.kind, AliasKind::Literal(_)) => {
             return literal_names(ctx, alias.clone());
         }
         Value::GenericAlias(alias) if alias.kind == AliasKind::Concatenate => {
             let origin = alias.origin;
             names.extend(alias.metadata().map(|(name, _)| name.to_owned()));
-            names.extend(["_inst", "_name", "copy_with", "__mro_entries__"].map(str::to_owned));
+            names.extend(
+                ["_inst", "_name", "copy_with", "__iter__", "__mro_entries__"].map(str::to_owned),
+            );
             let origin_names = call(ctx, &[origin], &[])?;
             ctx.heap.keep(origin_names);
             let marker = ctx.text("__");
@@ -76,6 +109,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         Value::Class { .. } | Value::Native(_) => object,
         Value::Count { .. }
         | Value::Repeat(_)
+        | Value::DequeIterator { .. }
         | Value::Union(_)
         | Value::Dict(_)
         | Value::Tuple(_)
@@ -265,9 +299,13 @@ fn merge_tuple_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()>
 /// Collect a native typing alias's implemented attributes and its origin's non-dunder names.
 pub(in crate::dynamic) fn typing_alias_dir(ctx: &mut Context, alias: &Alias) -> Result<Id> {
     let fields = alias.instance_fields().map(|(name, _)| name);
-    let fields = fields
-        .into_iter()
-        .chain(["__class__", "__dir__", "__mro_entries__", "copy_with"]);
+    let fields = fields.into_iter().chain([
+        "__class__",
+        "__dir__",
+        "__iter__",
+        "__mro_entries__",
+        "copy_with",
+    ]);
     let origin_names = ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
         call(ctx, &[alias.origin], &[])
     })?;
@@ -325,6 +363,7 @@ fn merge_literal_names(ctx: &mut Context, alias: &Alias, origin_names: Id) -> Re
         "__format__",
         "__getstate__",
         "__init_subclass__",
+        "__iter__",
         "__mro_entries__",
     ]);
     merge_origin_names(ctx, fields, origin_names)
@@ -476,13 +515,6 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     .is_none_or(|entries| !entries.is_empty())
             {
                 names.insert("__annotations__".to_owned());
-            }
-            if scope
-                .class_namespace
-                .as_ref()
-                .is_some_and(|ns| ns.annotation_sites.is_some())
-            {
-                names.insert("__annotate_func__".to_owned());
             }
             if let Some(slots) = ctx.namespace_binding(ctx.scope_data(scope_id), "__slots__") {
                 match ctx.heap.get(slots) {

@@ -6,6 +6,18 @@ from types import GenericAlias
 import weakref
 
 
+__all__ = ['BASIC_FORMAT', 'BufferingFormatter', 'CRITICAL', 'DEBUG', 'ERROR',
+           'FATAL', 'FileHandler', 'Filter', 'Formatter', 'Handler', 'INFO',
+           'LogRecord', 'Logger', 'LoggerAdapter', 'NOTSET', 'NullHandler',
+           'StreamHandler', 'WARN', 'WARNING', 'addLevelName', 'basicConfig',
+           'captureWarnings', 'critical', 'debug', 'disable', 'error',
+           'exception', 'fatal', 'getLevelName', 'getLogger', 'getLoggerClass',
+           'info', 'log', 'makeLogRecord', 'setLoggerClass', 'shutdown',
+           'warn', 'warning', 'getLogRecordFactory', 'setLogRecordFactory',
+           'lastResort', 'raiseExceptions', 'getLevelNamesMapping',
+           'getHandlerByName', 'getHandlerNames']
+
+
 _lock = _Lock()
 _handlers = weakref.WeakValueDictionary()
 _handlerList = []
@@ -1065,6 +1077,13 @@ def critical(msg, *args, **kwargs):
     root.critical(msg, *args, **kwargs)
 
 
+def fatal(msg, *args, **kwargs):
+    """
+    Don't use this function, use critical() instead.
+    """
+    critical(msg, *args, **kwargs)
+
+
 def error(msg, *args, **kwargs):
     """
     Log a message with severity 'ERROR' on the root logger. If the logger has
@@ -1094,6 +1113,12 @@ def warning(msg, *args, **kwargs):
     if len(root.handlers) == 0:
         basicConfig()
     root.warning(msg, *args, **kwargs)
+
+
+def warn(msg, *args, **kwargs):
+    warnings.warn("The 'warn' function is deprecated, "
+        "use 'warning' instead", DeprecationWarning, 2)
+    warning(msg, *args, **kwargs)
 
 
 def info(msg, *args, **kwargs):
@@ -1127,6 +1152,10 @@ def log(level, msg, *args, **kwargs):
     if len(root.handlers) == 0:
         basicConfig()
     root.log(level, msg, *args, **kwargs)
+
+
+import atexit
+atexit.register(shutdown)
 
 # Warnings integration
 

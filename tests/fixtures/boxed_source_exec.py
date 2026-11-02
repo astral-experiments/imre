@@ -169,6 +169,48 @@ class Case(Base):
     assert namespace["Broken"] is old and events[-2:] == ["decorated", "Broken"]
 
 
+def source_generic_classes():
+    from typing import Generic, TypedDict, get_args, get_type_hints
+
+    for name, message in [
+        ("__classdict__", "reserved name '__classdict__' cannot be used for type parameter"),
+        ("__debug__", "cannot assign to __debug__"),
+    ]:
+        try:
+            compile(f"class Bad[{name}]: pass", "reserved_parameter.py", "exec")
+        except SyntaxError as exc:
+            assert exc.args[0] == message
+        else:
+            raise AssertionError(f"accepted reserved type parameter {name}")
+
+    seen = []
+    def capture(value):
+        seen.append(value)
+        return value
+
+    ns = {"__name__": __name__, "capture": capture, "TypedDict": TypedDict}
+    code = compile("""class Box[T](list[T]):
+    item: capture(T)
+    def parameter(self):
+        return T
+""", "source_generic.py", "exec")
+    exec(code, ns)
+    box = ns["Box"]
+    (param,) = box.__type_params__
+    assert box.__bases__ == (list, Generic)
+    assert get_args(box.__orig_bases__[0]) == (param,)
+    assert box().parameter() is param and not seen
+    assert box.__annotations__ == {"item": param} and seen == [param]
+    exec(code, ns)
+    assert ns["Box"].__type_params__[0] is not param
+
+    exec("from __future__ import annotations\nclass Row[T](TypedDict):\n    item: T", ns)
+    row = ns["Row"]
+    ref = row.__annotations__["item"]
+    assert ref.__owner__ is row and ref.__forward_module__ == row.__module__
+    assert get_type_hints(row)["item"] is row.__type_params__[0]
+
+
 def module_annotations():
     events = []
     ns = {"events": events, "alias": int}
@@ -724,6 +766,17 @@ def starred_calls():
     events.clear()
     exec("answer = (mark(1), *spread(), *(), mark(3))", scope)
     assert scope["answer"] == (1, 2, 3) and events == [1, "iter", 3]
+    events.clear()
+    exec("answer = [mark(1), *spread(), *(), mark(3)]", scope)
+    assert scope["answer"] == [1, 2, 3] and events == [1, "iter", 3]
+    events.clear()
+    try:
+        eval("[mark(1), *2, mark(3)]", scope)
+    except TypeError as error:
+        assert str(error) == "Value after * must be an iterable, not int"
+    else:
+        raise AssertionError("accepted a noniterable in a starred list")
+    assert events == [1]
 
     import gc
     import weakref
@@ -745,6 +798,8 @@ def starred_calls():
         return cursor_refs[0]() is None
 
     assert eval("(*source, released())", {"source": Source(), "released": released}) == (True,)
+    cursor_refs.clear()
+    assert eval("[*source, released()]", {"source": Source(), "released": released}) == [True]
 
     for source in ("collect(**{}, label=1, label=2)", "collect(label=1, **{}, label=2)"):
         events.clear()
@@ -900,6 +955,7 @@ def current():
     relative_import_hooks()
     source_name_deletion()
     source_classes()
+    source_generic_classes()
     source_test_cases()
     source_nested_functions()
     check_source_lambdas()

@@ -3,6 +3,18 @@ import typing
 
 
 def current():
+    import doctest
+
+    t = typing.TypeVar("T")
+    before = set(vars(typing))
+    assert list[t][int] == list[int]
+    assert set(vars(typing)) == before
+
+    alias = typing.List[int]
+    assert alias.__origin__ is list and alias.__args__ == (int,)
+    discovered = {case.id() for case in doctest.DocTestSuite(typing)}
+    assert {"typing.get_args", "typing.get_origin"} <= discovered
+
     generic = typing._GenericAlias
     unpack = typing._UnpackGenericAlias
     alias_type = typing.TypeAliasType

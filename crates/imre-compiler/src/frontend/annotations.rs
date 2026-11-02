@@ -151,9 +151,13 @@ enum AnnotationScope {
 
 impl Checker<'_> {
     pub(super) fn annotation_type_repr(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        self.reject_builtin_keywords(call)?;
-        let [arg] = call.arguments.args.as_ref() else {
-            return Err(error(self.source, call, "type_repr expects one value"));
+        let arg = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([arg], []) if !matches!(arg, ast::Expr::Starred(_)) => arg,
+            ([], [kw]) if kw.arg.as_deref() == Some("value") => &kw.value,
+            _ => return Err(self.object_runtime_export("annotationlib.type_repr", call)),
         };
         // Function names include the defining module; the spelling at the import site is irrelevant.
         if let Some(Binding::Definition(id)) = self.resolve(arg) {

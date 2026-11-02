@@ -33,6 +33,7 @@ pub(super) struct Callback {
     receiver: Option<(String, Argument)>,
     config: serde_json::Value,
     automatic_gc: Arc<std::sync::atomic::AtomicBool>,
+    finalizing: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn unsupported() -> Error {
@@ -346,6 +347,7 @@ impl Callback {
             receiver: None,
             config: ctx.config.clone(),
             automatic_gc: ctx.heap.automatic_gc.clone(),
+            finalizing: ctx.finalizing.clone(),
         })
     }
 
@@ -356,6 +358,7 @@ impl Callback {
     pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
         let mut ctx = ffi::new_context(self.config, std::iter::empty::<String>());
         ctx.heap.automatic_gc = self.automatic_gc;
+        ctx.finalizing = self.finalizing;
         let globals = ctx.scope(&self.module, None);
         let scope = if let Some((name, receiver)) = self.receiver {
             let value = match receiver {
@@ -377,9 +380,14 @@ impl Callback {
             span: None,
         };
         let code = match self.entry {
-            Entry::Native(entry) => {
-                ctx.prelinked_code(entry, scope, name, signature, (qualname, NONE), location)
-            }
+            Entry::Native(entry) => ctx.prelinked_code(
+                Body::Native(entry),
+                scope,
+                name,
+                signature,
+                (qualname, NONE),
+                location,
+            ),
             Entry::Source(original) => {
                 original.load(&mut ctx, scope, name, signature, qualname, location)?
             }

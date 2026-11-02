@@ -1,12 +1,10 @@
-//! Compile the class annotation provider from the expression sites already emitted
-//! for the class body. Its code may subsequently run with different globals.
+//! Compile the class annotation provider from the declarations in the class body.
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(in crate::dynamic::emit) struct Site {
     name: String,
-    code: String,
-    range: ruff_text_size::TextRange,
+    expression: ast::Expr,
     conditional: Option<usize>,
 }
 
@@ -34,12 +32,10 @@ impl Function<'_, '_> {
             return;
         }
 
-        let mut bindings = ClosureNames::default();
-        bindings.visit_body(statements);
-        captures.reads.retain(|name| {
-            (!bindings.locals.contains(name) || bindings.nonlocals.contains(name))
-                && !bindings.globals.contains(name)
-        });
+        let bindings = self.class_locals.take().expect("class body bindings");
+        captures
+            .reads
+            .retain(|name| !bindings.locals.contains(name) && !bindings.globals.contains(name));
         captures.reads.insert("__classdict__".into());
         let offsets = if sites.values().any(|s| s.conditional.is_some()) {
             captures.reads.insert("__conditional_annotations__".into());
@@ -64,7 +60,7 @@ impl Function<'_, '_> {
         let body = Body::ClassAnnotations(sites.into_values().collect(), bindings.globals);
         let code = self
             .output
-            .definition(self.source, String::new(), body, start, false);
+            .definition(self.source, String::new(), body, start, false, None);
         let environment = self.op(
             "class_annotation_environment",
             &[&self.scope.clone(), &offsets],
@@ -72,16 +68,11 @@ impl Function<'_, '_> {
         let name = self.text("__annotate__");
         let qualname = self.text(&format!("{}__annotate__", self.prefix));
         let defaults = self.op("dict", &[]);
-        let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
+        let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
         self.bind("__annotate_func__", &function);
     }
 
-    pub(super) fn remember_annotation(
-        &mut self,
-        assign: &ast::StmtAnnAssign,
-        name: &str,
-        code: &str,
-    ) {
+    pub(super) fn remember_annotation(&mut self, assign: &ast::StmtAnnAssign, name: &str) {
         let sites = self.class_sites.as_mut().expect("class annotation site");
         sites.captures.visit_expr(&assign.annotation);
         let offset = assign.start();
@@ -90,8 +81,7 @@ impl Function<'_, '_> {
             offset,
             Site {
                 name: name.into(),
-                code: code.into(),
-                range: assign.annotation.range(),
+                expression: (*assign.annotation).clone(),
                 conditional,
             },
         );
@@ -115,6 +105,7 @@ impl Function<'_, '_> {
         }
         let result = self.op("dict", &[]);
         self.live.extend([local.clone(), result.clone()]);
+        self.scope = local;
         for site in sites {
             let after = site.conditional.map(|index| {
                 let index = self.integer(index);
@@ -126,8 +117,8 @@ impl Function<'_, '_> {
                 self.label(&yes);
                 after
             });
-            self.checkpoint(&site.range);
-            let value = self.checked(&format!("call i64 {}(ptr %ctx, i64 {local})", site.code));
+            self.checkpoint(&site.expression);
+            let value = self.expr(&site.expression);
             let key = self.code_name(&site.name);
             self.op("put", &[&result, &key, &value]);
             if let Some(after) = after {

@@ -530,12 +530,13 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let [src, filename, mode] =
         builtins::bind("parse", args, kwargs, ["source", "filename", "mode"])?;
     let copy = |text: &str| crate::Str::try_new(text).map_err(|_| crate::Error::allocation());
-    let source = copy(ctx.str_value(src.ok_or_else(|| {
+    let source = src.ok_or_else(|| {
         Error::new(
             "TypeError",
             "parse() missing 1 required positional argument: 'source'",
         )
-    })?)?)?;
+    })?;
+    let filename_id = filename;
     let filename = copy(
         filename
             .map(|f| ctx.str_value(f))
@@ -547,7 +548,32 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             .transpose()?
             .unwrap_or("exec"),
     )?;
-    parse_source(ctx, &source, &filename, &mode, false)
+    // compile validates mode before asking the tokenizer to decode source bytes.
+    if !matches!(mode.as_str(), "exec" | "eval" | "single" | "func_type") {
+        return Err(Error::new(
+            "ValueError",
+            "compile() mode must be 'exec', 'eval', 'single' or 'func_type'",
+        ));
+    }
+    let text;
+    let decoded;
+    let source = if ctx.string_storage(source).is_some() {
+        text = copy(ctx.str_value(source)?)?;
+        text.as_str()
+    } else {
+        let bytes = ctx.native_buffer_bytes(source).map_err(|_| {
+            Error::new(
+                "TypeError",
+                "compile() arg 1 must be a string, bytes or AST object",
+            )
+        })?;
+        decoded = crate::objects::decode_compile_source(bytes).map_err(|error| {
+            let filename_id = filename_id.unwrap_or_else(|| ctx.text("<unknown>"));
+            ctx.source_decode_error(error, filename_id)
+        })?;
+        decoded.as_str()
+    };
+    parse_source(ctx, source, &filename, &mode, false)
 }
 
 pub(super) fn parse_source(

@@ -156,15 +156,38 @@ fn clock_resolution(clock: libc::clockid_t) -> io::Result<f64> {
     Ok(resolution.tv_sec as f64 + resolution.tv_nsec as f64 * 1e-9)
 }
 
-/// Read the process-independent clock used by CPython's monotonic and performance counters.
-pub(crate) fn monotonic_time() -> std::io::Result<std::time::Duration> {
+fn timestamp_ns(seconds: impl Into<i64>, nanos: impl Into<i64>) -> Result<i64, Error> {
+    seconds
+        .into()
+        .checked_mul(1_000_000_000)
+        .and_then(|whole| whole.checked_add(nanos.into()))
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "timestamp too large to convert to C PyTime_t",
+            )
+        })
+}
+
+fn monotonic_stamp() -> io::Result<libc::timespec> {
     let mut stamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
     // SAFETY: clock_gettime initializes the supplied timespec on success.
     if unsafe { libc::clock_gettime(MONOTONIC_CLOCK.0, stamp.as_mut_ptr()) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
     // SAFETY: the successful call initialized both fields.
-    let stamp = unsafe { stamp.assume_init() };
+    Ok(unsafe { stamp.assume_init() })
+}
+
+/// Sample the monotonic clock directly in signed nanoseconds, preserving its full precision.
+pub(crate) fn monotonic_time_ns() -> Result<i64, Error> {
+    let stamp = monotonic_stamp().map_err(super::errno_error)?;
+    timestamp_ns(stamp.tv_sec, stamp.tv_nsec)
+}
+
+/// Read the process-independent clock used by CPython's monotonic and performance counters.
+pub(crate) fn monotonic_time() -> std::io::Result<std::time::Duration> {
+    let stamp = monotonic_stamp()?;
     Ok(std::time::Duration::new(
         stamp.tv_sec as u64,
         stamp.tv_nsec as u32,

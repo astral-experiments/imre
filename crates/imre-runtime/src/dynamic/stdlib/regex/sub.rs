@@ -318,6 +318,7 @@ fn expanded_sub(
 ) -> Result<(Id, isize)> {
     let subject = SearchSubject::new(ctx, pattern, string, "sub")?;
     let length = subject.bytes(ctx)?.len();
+    let window = subject.original(Span::from(0..length));
     let mut pieces = Vec::new();
     let mut add = |item| -> Result<()> {
         pieces
@@ -350,6 +351,8 @@ fn expanded_sub(
             last,
             pattern: receiver,
             subject: string,
+            window,
+            cached_regs: OnceCell::new(),
             spans: group_spans(&caps)
                 .map(|span| span.map(|s| subject.original(s)))
                 .collect(),

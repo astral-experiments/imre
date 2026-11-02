@@ -49,6 +49,29 @@ fn literal<'a>(expr: &'a ast::Expr, module: &SourceModule) -> Result<&'a str, St
     Ok(value.value.to_str())
 }
 
+fn tuple_metavar(
+    tuple: &ast::ExprTuple,
+    nargs: &Value,
+    module: &SourceModule,
+) -> Result<Value, String> {
+    let count = tuple.elts.len();
+    let matches = match nargs.as_str() {
+        Some("zero_or_more") => matches!(count, 1 | 2),
+        Some("one_or_more") => count == 2,
+        Some("one" | "optional") => count == 1,
+        _ => nargs["fixed"].as_u64() == Some(count as u64),
+    };
+    let Some((first, rest)) = tuple.elts.split_first().filter(|_| matches) else {
+        return Err(module.error(tuple, "static argparse metavar tuple must match nargs"));
+    };
+    let first = literal(first, module)?;
+    let rest = rest
+        .iter()
+        .map(|item| literal(item, module))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(json!({ "first": first, "rest": rest }))
+}
+
 fn method_receiver<'a>(expr: &'a ast::Expr, name: &str) -> Option<(&'a str, &'a ast::ExprCall)> {
     let ast::Expr::Call(call) = expr else {
         return None;
@@ -377,10 +400,13 @@ fn option(
             ));
         }
         Some(ast::Expr::NoneLiteral(_)) => None,
+        Some(ast::Expr::Tuple(tuple)) if action == "store" => {
+            Some(tuple_metavar(tuple, &nargs, module)?)
+        }
         Some(value) => {
             let label = literal(value, module)?;
             // _StoreConstAction accepts metavar but does not pass it to Action.
-            (action == "store").then_some(label)
+            (action == "store").then(|| json!(label))
         }
     };
     if zero
@@ -1594,6 +1620,21 @@ impl Checker<'_> {
             ([value], []) => Some(value),
             ([], [keyword]) if keyword.arg.as_ref().is_some_and(|name| name == "args") => {
                 Some(&keyword.value)
+            }
+            (args, keywords)
+                if !args.iter().any(ast::Expr::is_starred_expr)
+                    && match (args.len(), keywords.len()) {
+                        (2, 0) => true,
+                        (0 | 1, 1) => keywords[0].arg.as_deref() == Some("namespace"),
+                        (0, 2) => {
+                            call.arguments.find_keyword("args").is_some()
+                                && call.arguments.find_keyword("namespace").is_some()
+                        }
+                        _ => false,
+                    } =>
+            {
+                // A supplied namespace keeps its identity and existing attributes.
+                return Err(self.scoped_builtin_error(method, call));
             }
             _ => {
                 return Err(error(

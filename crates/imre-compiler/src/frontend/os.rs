@@ -1,6 +1,7 @@
 use super::*;
 use crate::ir::{FdOperation, ProcessOperation};
 
+mod copy_file_range;
 mod credentials;
 
 impl Checker<'_> {
@@ -81,6 +82,9 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         use FdOperation::*;
 
+        if op == CopyFileRange {
+            return self.copy_file_range(call);
+        }
         if matches!(op, Read | Write) {
             let (name, returns) = if op == Read {
                 ("read", Type::Bytes)
@@ -135,6 +139,35 @@ impl Checker<'_> {
                 })
             });
         }
+        if op == PtsName {
+            return self.posix_positional(call, "ptsname", 1, Type::Str, |checker, _, args| {
+                let value = args.into_iter().next().expect("one bound ptsname argument");
+                let fd = match value.ty {
+                    Type::Int | Type::Bool => value,
+                    Type::TextIO | Type::BinaryIO => Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::FileFileno, vec![value]),
+                    },
+                    _ => {
+                        return Err(
+                            checker.object_runtime_export("os.ptsname file descriptor", call)
+                        );
+                    }
+                };
+                let mut args = vec![fd];
+                if args[0].ty == Type::Bool {
+                    args.push(unpacking::string(
+                        checker.runtime_module_name(checker.module),
+                    ));
+                    args.push(unpacking::string(checker.source_filename()));
+                    args.push(Expr::integer(i64::from(checker.source_line(call.start()))));
+                }
+                Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Process(ProcessOperation::Fd(op)), args),
+                })
+            });
+        }
         if op == Pipe2 {
             let returns = self.types.tuple(vec![Type::Int; 2]);
             return self.posix_positional(call, "pipe2", 1, returns, |checker, _, args| {
@@ -155,7 +188,7 @@ impl Checker<'_> {
         }
         let param = |name: &str| Parameter {
             name: name.into(),
-            kind: if matches!(op, Close | Dup2) {
+            kind: if matches!(op, Close | DeviceEncoding | Dup2) {
                 ParameterKind::PositionalOrKeyword
             } else {
                 ParameterKind::PositionalOnly
@@ -164,7 +197,7 @@ impl Checker<'_> {
             default: None,
             sign_only: false,
         };
-        let mut params = if op == Pipe {
+        let mut params = if matches!(op, Pipe | OpenPty) {
             vec![]
         } else {
             vec![param("fd")]
@@ -183,6 +216,9 @@ impl Checker<'_> {
         }
         let args = self.arguments_with(call, &params, None, |checker, index, arg| {
             let mut value = checker.expr(arg)?;
+            if op == DeviceEncoding {
+                return checker.index_word(value, arg, false);
+            }
             if (op == SetBlocking && index == 1) || (op == Dup2 && index == 2) {
                 value = checker.truth_value(value);
             }
@@ -198,9 +234,14 @@ impl Checker<'_> {
         let returns = match op {
             Close | SetBlocking | SetInheritable | Unlink | Remove => Type::None,
             TransferFd | Write | Open | Seek | Dup | Dup2 => Type::Int,
+            CopyFileRange | CheckCopyCount | CheckCopyOffset => {
+                unreachable!("copy_file_range has its own argument conversion")
+            }
             Read => Type::Bytes,
-            Pipe | Pipe2 => self.types.tuple(vec![Type::Int, Type::Int]),
+            Pipe | Pipe2 | OpenPty => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
+            DeviceEncoding => self.types.optional(Type::Str),
+            PtsName => unreachable!("positional-only ptsname handled above"),
         };
         Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Fd(op)), returns, args))
     }

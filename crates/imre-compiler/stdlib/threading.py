@@ -30,6 +30,8 @@ except AttributeError:
 del _thread
 _counter = count(1).__next__
 _dangling = WeakSet()
+_threading_atexits = []
+_SHUTTING_DOWN = False
 
 
 class Thread:
@@ -77,13 +79,12 @@ class Thread:
             raise RuntimeError("thread.__init__() not called")
         if self._ident is not None:
             raise RuntimeError("threads can only be started once")
-        if self._context is not None:
-            raise NotImplementedError("native workers cannot enter a Python context")
+        has_context = self._context is not None
         # Truth conversion can run Python and replace the target or even start this thread.
         daemon = bool(self.daemon)
         if self._ident is not None:
             raise RuntimeError("threads can only be started once")
-        self._handle, self._ident, self._native_id = _imre_thread.start(self, daemon)
+        self._handle, self._ident, self._native_id = _imre_thread.start(self, daemon, has_context)
 
     def join(self, timeout=None):
         if not self._initialized:
@@ -105,7 +106,8 @@ class Thread:
         status = "initial"
         if self._ident is not None:
             status = "started"
-            if self._handle is not None and not _imre_thread.alive(self._handle):
+            if ((self._handle is not None and not _imre_thread.alive(self._handle))
+                    or (self is _main_thread and self._stopped)):
                 status = "stopped"
         if self._daemonic:
             status += " daemon"
@@ -196,15 +198,34 @@ class Thread:
 class _MainThread(Thread):
     def __init__(self):
         Thread.__init__(self, name="MainThread", daemon=False)
+        self._stopped = False
         self._ident = get_ident()
         if _HAVE_THREAD_NATIVE_ID:
             self._native_id = get_native_id()
 
     def is_alive(self):
-        return True
+        return not self._stopped
 
 
 _main_thread = _MainThread()
+
+
+def _register_atexit(func, *args, **kwargs):
+    """Register a callback to run before non-daemon threads are joined."""
+    if _SHUTTING_DOWN:
+        raise RuntimeError("can't register atexit after shutdown")
+    _threading_atexits.append(lambda: func(*args, **kwargs))
+
+
+def _shutdown():
+    global _SHUTTING_DOWN
+    if _main_thread._stopped:
+        return
+    _SHUTTING_DOWN = True
+    for callback in reversed(_threading_atexits):
+        callback()
+    _main_thread._stopped = True
+    _imre_thread.shutdown()
 
 
 def main_thread():

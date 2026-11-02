@@ -1,13 +1,17 @@
 """POSIX filesystem spellings for runtime-loaded modules."""
 import abc
 import sys
+from posix import device_encoding, openpty
 import posixpath as path
 import stat as st
+from posix import chown, fchown, geteuid, getgid, getgroups, getuid, lchown
+from posix import _exit
+from posix import pread, pwrite, readinto
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
+from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getpgid, getppid, kill, listdir, mkdir, putenv, read, scandir, setpgid, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
-from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, open, rmdir, stat
+from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, open, rmdir, stat, truncate
 
 try:
     from posix import waitstatus_to_exitcode
@@ -15,15 +19,31 @@ except ImportError:
     pass
 
 if sys.platform == "linux":
+    from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
+    from posix import MFD_CLOEXEC, memfd_create
+    from posix import RWF_HIPRI, RWF_NOWAIT, preadv
+    from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice
     import posix as _posix
+    from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv
     for _name in vars(_posix):
-        if _name.startswith("RTLD_"):
+        if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in ("posix_spawn", "posix_spawnp"):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
-    from posix import O_PATH, O_TMPFILE, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
+    from posix import O_PATH, O_TMPFILE, cpu_count, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
+    from posix import (
+        POSIX_FADV_DONTNEED, POSIX_FADV_NOREUSE, POSIX_FADV_NORMAL, POSIX_FADV_RANDOM,
+        POSIX_FADV_SEQUENTIAL, POSIX_FADV_WILLNEED, posix_fadvise, posix_fallocate,
+    )
     from posix import (
         sched_getscheduler, sched_param, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
         SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
+    )
+    from posix import major, makedev, minor, mknod
+    from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
+
+if sys.platform == "linux":
+    from posix import (
+        XATTR_CREATE, XATTR_REPLACE, XATTR_SIZE_MAX, getxattr, listxattr, removexattr, setxattr,
     )
 
 
@@ -264,6 +284,47 @@ def makedirs(name, mode=0o777, exist_ok=False):
             raise
 
 
+from posix import WIFSTOPPED, execv
+
+
+# Adapted from CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
+if sys.platform == "linux":
+    from posix import _spawn_exec
+
+    P_WAIT = 0
+    P_NOWAIT = P_NOWAITO = 1
+
+    def spawnv(mode, file, args):
+        """Execute file with args in a child. Return its exit code or its PID for P_NOWAIT.
+
+        On Linux, child-side Python callbacks require a single-threaded process
+        that glibc can verify. Otherwise they raise NotImplementedError before fork.
+        """
+        func = execv
+        if not isinstance(args, (tuple, list)):
+            raise TypeError("argv must be a tuple or a list")
+        if not args or not args[0]:
+            raise ValueError("argv first element cannot be empty")
+        pid = _spawn_exec(file, args, func)
+        if pid == 0:
+            # A child that needs Python conversions or audit hooks runs the captured execv.
+            try:
+                func(file, args)
+            except:
+                _exit(127)
+        elif mode == P_NOWAIT:
+            return pid
+        else:
+            while True:
+                _, status = waitpid(pid, 0)
+                if not WIFSTOPPED(status):
+                    return waitstatus_to_exitcode(status)
+
+    def spawnl(mode, file, *args):
+        """Execute file with the given arguments. Return its exit code or its PID for P_NOWAIT."""
+        return spawnv(mode, file, args)
+
+
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
 def get_exec_path(env=None):
     """Returns the sequence of directories that will be searched for the
@@ -332,17 +393,21 @@ def removedirs(name):
         head, tail = path.split(head)
 
 
+_fs_encoding = sys.getfilesystemencoding()
+_fs_errors = sys.getfilesystemencodeerrors()
+
+
 def fsencode(filename):
     filename = fspath(filename)
     if isinstance(filename, str):
-        return filename.encode("utf-8", "surrogateescape")
+        return filename.encode(_fs_encoding, _fs_errors)
     return filename
 
 
 def fsdecode(filename):
     filename = fspath(filename)
     if isinstance(filename, bytes):
-        return filename.decode("utf-8", "surrogateescape")
+        return filename.decode(_fs_encoding, _fs_errors)
     return filename
 
 
@@ -403,7 +468,7 @@ class PathLike(abc.ABC):
     __class_getitem__ = classmethod(GenericAlias)
 
 
-_env_encoding = sys.getfilesystemencoding()
+_env_encoding = _fs_encoding
 
 
 def _encode_env(value):

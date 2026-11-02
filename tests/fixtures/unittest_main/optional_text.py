@@ -22,5 +22,26 @@ class Text(unittest.TestCase):
         self.assertIn("+ b", str(different.exception))
 
 
+class TextComparator:
+    def __call__(self, first: str, second: str, *, msg: str | None = "omitted") -> None:
+        print("compare")
+        assert first == "left" and second == "right" and msg is None
+
+
+def operand(value: str) -> str:
+    print(value)
+    return value
+
+
+class ComparatorProperty(unittest.TestCase):
+    @property
+    def assertMultiLineEqual(self) -> TextComparator:
+        print("lookup")
+        return TextComparator()
+
+    def test_text_comparator(self):
+        self.assertEqual(second=operand("right"), first=operand("left"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -102,6 +102,27 @@ impl<T, K> Ring<T, K> {
         Ok(item)
     }
 
+    /// Rotate existing owners in place and invalidate cursors on every nonsingleton ring.
+    pub(crate) fn rotate(&mut self, count: &Int) -> Result<(), Error> {
+        let n = crate::signed_index(count).ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+        let length = self.items.len();
+        if length > 1 {
+            let distance = n.unsigned_abs() % length;
+            if n < 0 {
+                self.items.rotate_left(distance);
+            } else {
+                self.items.rotate_right(distance);
+            }
+            self.state = self.state.wrapping_add(1);
+        }
+        Ok(())
+    }
+
     /// Reverse the live items while keeping every cursor at its current position.
     pub(crate) fn reverse(&mut self) {
         self.items.make_contiguous().reverse();
@@ -444,6 +465,22 @@ pub unsafe extern "C" fn imre_deque_reset(value: *const Object, limit: usize) {
         })
     };
     drop(removed);
+}
+
+/// # Safety
+/// The caller roots the deque and tagged rotation count for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_deque_rotate(value: *const Object, count: usize) {
+    // SAFETY: rearranging the ring moves its existing owners without calling Python.
+    let result = unsafe {
+        let count = Int::borrow(count);
+        object(value)
+            .0
+            .with_mut(|storage| storage.deque_mut().rotate(&count))
+    };
+    if let Err(error) = result {
+        error.returning(());
+    }
 }
 
 /// Reverse the owned words in place. Existing iterators keep their positions.

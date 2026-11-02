@@ -237,42 +237,204 @@ pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     Ok(item)
 }
 
-pub(super) fn filterfalse_allocate(
+impl Context {
+    /// Freeze the exported iterator classes defined by this bundled module generation.
+    pub(in crate::dynamic) fn freeze_itertools_types(&mut self, module: Id) {
+        let classes: Vec<_> = self
+            .scope_bindings(module)
+            .filter_map(|(export, value)| {
+                let Value::Class { name, scope, .. } = self.heap.get(value) else {
+                    return None;
+                };
+                let visible = !export.starts_with('_')
+                    || matches!(export, "_grouper" | "_tee" | "_tee_dataobject");
+                (visible && name == export && self.root_scope(*scope) == module).then_some(*scope)
+            })
+            .collect();
+        for scope in classes {
+            if let Value::Scope(frame) = self.heap.get_mut(scope)
+                && let Some(namespace) = &mut frame.class_namespace
+            {
+                namespace.immutable_type = true;
+            }
+        }
+    }
+
+    pub(in crate::dynamic) fn itertools_layout(&self, class: Id) -> Option<&'static str> {
+        let Value::Class { scope, .. } = *self.heap.get(class) else {
+            return None;
+        };
+        self.scope_data(scope)
+            .class_namespace
+            .as_ref()?
+            .itertools_layout
+    }
+}
+
+pub(super) fn accumulate_allocate(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let [base, class, predicate, iterable] = args else {
+    if let [base, class, state] = args
+        && kwargs.is_empty()
+        && ctx.itertools_layout(*base) == Some("itertools.accumulate")
+        && matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
+            if ancestors.iter().all(|&a| !matches!(ctx.heap.get(a), Value::Native(name) if name != "object")))
+        && ctx.allocation_base(*class) == Some(*base)
+    {
+        return Ok(instance_with_state(ctx, *base, *class, *state));
+    }
+    Err(Error::new(
+        "TypeError",
+        "expected an accumulate subclass with compatible layout",
+    ))
+}
+
+pub(super) fn accumulate_state(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if let [base, receiver] = args
+        && kwargs.is_empty()
+        && ctx.itertools_layout(*base) == Some("itertools.accumulate")
+        && let Value::Instance {
+            member_values: Some(values),
+            ..
+        } = ctx.heap.get(*receiver)
+        && let Some(&state) = values.get(base)
+    {
+        return Ok(state);
+    }
+    Err(Error::new(
+        "TypeError",
+        "expected an initialized accumulate",
+    ))
+}
+
+fn compatible_cursor_class(ctx: &Context, base: Id, class: Id, layout: &str) -> bool {
+    ctx.itertools_layout(base) == Some(layout)
+        && matches!(ctx.heap.get(class), Value::Class { ancestors, .. }
+            if (class == base || ancestors.contains(&base))
+                && ancestors.iter().all(|a| !matches!(ctx.heap.get(*a), Value::Native(kind) if kind != "object")))
+}
+
+pub(super) fn zip_longest_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if let [base, class, state] = args
+        && kwargs.is_empty()
+        && compatible_cursor_class(ctx, *base, *class, "itertools.zip_longest")
+    {
+        return Ok(instance_with_state(ctx, *base, *class, *state));
+    }
+    Err(Error::new(
+        "TypeError",
+        "expected a zip_longest subclass with compatible layout",
+    ))
+}
+
+pub(super) fn starmap_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [base, class, function, source] = args else {
         return Err(Error::new(
             "TypeError",
-            "invalid filterfalse allocation arguments",
+            "invalid starmap allocation arguments",
+        ));
+    };
+    if !kwargs.is_empty() || !compatible_cursor_class(ctx, *base, *class, "itertools.starmap") {
+        return Err(Error::new(
+            "TypeError",
+            "expected a starmap subclass with compatible layout",
+        ));
+    }
+    Ok(iterator_instance(ctx, *base, *class, *source, *function))
+}
+
+/// Fetch one row, fully unpack it, then invoke the saved callable.
+pub(super) fn starmap_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if kwargs.is_empty()
+        && let [base, receiver] = args
+        && ctx.itertools_layout(*base) == Some("itertools.starmap")
+        && let Value::Instance {
+            member_values: Some(values),
+            ..
+        } = ctx.heap.get(*receiver)
+        && let Some(state) = values.get(base)
+        && let Value::Tuple(pair) = ctx.heap.get(*state)
+        && let &[source, function] = pair.as_slice()
+    {
+        let mark = ctx.heap.temporary_mark();
+        let row = ctx
+            .next_result(source)?
+            .ok_or_else(|| Error::new("StopIteration", ""))?;
+        ctx.heap.keep(row);
+        let tuple = super::super::builtins::call(ctx, "tuple", &[row], &[])?;
+        // Converting a non-tuple releases the source row before the callable runs.
+        ctx.finish_call_operands(mark, tuple);
+        let args = ctx
+            .tuple_items(tuple)?
+            .expect("tuple constructor returned a tuple");
+        return ctx.call(function, args, Vec::new());
+    }
+    Err(Error::new("TypeError", "expected an initialized starmap"))
+}
+
+pub(super) fn predicate_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [base, class, state, iterable] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "invalid predicate iterator allocation arguments",
         ));
     };
     if !kwargs.is_empty()
         || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
         if *class == *base || ancestors.contains(base))
     {
-        return Err(Error::new("TypeError", "expected a filterfalse subclass"));
+        return Err(Error::new(
+            "TypeError",
+            "expected a predicate iterator subclass",
+        ));
     }
     let source = ctx.iterator(*iterable)?;
+    Ok(iterator_instance(ctx, *base, *class, source, *state))
+}
+
+/// Retain the source and cursor state in a GC-traced, class-owned slot.
+fn iterator_instance(ctx: &mut Context, base: Id, class: Id, source: Id, state: Id) -> Id {
     ctx.heap.keep(source);
-    let state = ctx.alloc(Value::Tuple(vec![source, *predicate]));
+    let state = ctx.alloc(Value::Tuple(vec![source, state]));
+    instance_with_state(ctx, base, class, state)
+}
+
+fn instance_with_state(ctx: &mut Context, base: Id, class: Id, state: Id) -> Id {
     ctx.heap.keep(state);
-    let result = ctx.instance(*class, None);
+    let result = ctx.instance(class, None);
     let Value::Instance { member_values, .. } = ctx.heap.get_mut(result) else {
-        unreachable!("fresh filterfalse instance")
+        unreachable!("fresh iterator instance")
     };
     // The declaring class keys this private slot, so subclass descriptors cannot intercept it.
     member_values
         .get_or_insert_with(Default::default)
-        .insert(*base, state);
-    Ok(result)
+        .insert(base, state);
+    result
 }
 
-pub(super) fn filterfalse_state(
-    ctx: &mut Context,
+pub(super) fn iterator_state(
+    ctx: &Context,
     args: &[Id],
     kwargs: &[(String, Id)],
+    kind: &str,
 ) -> Result<Id> {
     if let [base, receiver] = args
         && kwargs.is_empty()
@@ -285,7 +447,10 @@ pub(super) fn filterfalse_state(
     {
         return Ok(state);
     }
-    Err(Error::new("TypeError", "expected a filterfalse instance"))
+    Err(Error::new(
+        "TypeError",
+        format!("expected a {kind} instance"),
+    ))
 }
 
 /// Build the shared repeat cursor, converting a supplied count exactly once.
@@ -342,25 +507,64 @@ pub(super) fn count(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let step = step.unwrap_or_else(|| ctx.int(1));
     number(ctx, current)?;
     number(ctx, step)?;
-    if !matches!(ctx.heap.get(current), Value::Int(_))
-        && machine_integer(ctx, step) == Some(1)
-        && let Some(start) = machine_integer(ctx, current)
+    let fast = if machine_integer(ctx, step) == Some(1)
+        && let Some(n) = machine_integer(ctx, current).and_then(|n| isize::try_from(n).ok())
     {
-        current = ctx.int(start);
-    }
-    Ok(ctx.alloc(Value::Count { current, step }))
+        // CPython produces an exact int from its machine counter. A cached
+        // small int has the same identity as the original exact argument.
+        if !matches!(ctx.heap.get(current), Value::Int(_)) || !(-5..=256).contains(&n) {
+            current = ctx.int(n as i64);
+        }
+        true
+    } else {
+        false
+    };
+    Ok(ctx.alloc(Value::Count {
+        current,
+        step,
+        fast,
+    }))
 }
 
-/// Commit the next value only after the shared numeric progression succeeds.
+/// Advance unit integer strides directly. Slow Python addition may reenter this cursor.
 pub(in crate::dynamic) fn advance(ctx: &mut Context, id: Id) -> Result<Id> {
-    let Value::Count { current, step } = *ctx.heap.get(id) else {
+    let Value::Count {
+        current,
+        step,
+        fast,
+    } = *ctx.heap.get(id)
+    else {
         unreachable!("count cursor")
     };
-    let following = ctx.binary("+", current, step)?;
-    let Value::Count { current, .. } = ctx.heap.get_mut(id) else {
+    let position = fast.then(|| machine_integer(ctx, current).expect("machine position"));
+    let (item, following, fast) = if let Some(n) = position
+        && n < isize::MAX as i64
+    {
+        (current, ctx.int(n + 1), true)
+    } else {
+        // CPython materializes maxsize when it first attempts the slow addition.
+        // A failing callback may inspect that argument again on a subsequent attempt.
+        let item = if fast {
+            ctx.int(isize::MAX as i64)
+        } else {
+            current
+        };
+        // A nested next() can replace the cursor's reference to the value we owe.
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(item);
+        (item, ctx.binary("+", item, step)?, false)
+    };
+    let Value::Count {
+        current: slot,
+        fast: mode,
+        ..
+    } = ctx.heap.get_mut(id)
+    else {
         unreachable!("count cursor")
     };
-    Ok(std::mem::replace(current, following))
+    *slot = following;
+    *mode = fast;
+    Ok(item)
 }
 
 pub(super) fn method(

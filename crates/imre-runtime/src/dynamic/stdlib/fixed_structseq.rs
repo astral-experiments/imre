@@ -3,6 +3,8 @@
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::python_hash;
 
+pub(in crate::dynamic) const GROUP: &str = "grp.struct_group";
+pub(in crate::dynamic) const PASSWD: &str = "pwd.struct_passwd";
 pub(in crate::dynamic) const HASH_INFO: &str = "sys.hash_info";
 pub(in crate::dynamic) const THREAD_INFO: &str = "sys.thread_info";
 pub(in crate::dynamic) const SCHED_PARAM: &str = "posix.sched_param";
@@ -22,6 +24,8 @@ const HASH_FIELDS: [&str; 9] = [
 
 pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
     match name {
+        GROUP if cfg!(any(target_os = "linux", target_os = "macos")) => Some(GROUP),
+        PASSWD if cfg!(any(target_os = "linux", target_os = "macos")) => Some(PASSWD),
         HASH_INFO => Some(HASH_INFO),
         THREAD_INFO => Some(THREAD_INFO),
         UNRAISABLE_ARGS => Some(UNRAISABLE_ARGS),
@@ -33,6 +37,16 @@ pub(in crate::dynamic) fn fixed_type(name: &str) -> Option<&'static str> {
 
 pub(in crate::dynamic) fn fields(class: &str) -> &'static [&'static str] {
     match class {
+        GROUP => &["gr_name", "gr_passwd", "gr_gid", "gr_mem"],
+        PASSWD => &[
+            "pw_name",
+            "pw_passwd",
+            "pw_uid",
+            "pw_gid",
+            "pw_gecos",
+            "pw_dir",
+            "pw_shell",
+        ],
         HASH_INFO => &HASH_FIELDS,
         THREAD_INFO => &["name", "lock", "version"],
         UNRAISABLE_ARGS => &[
@@ -280,6 +294,18 @@ pub(in crate::dynamic) fn type_attribute(
         "__doc__" if class == THREAD_INFO => ctx.text(
             "sys.thread_info\n\nA named tuple holding information about the thread implementation.",
         ),
+        "__doc__" if class == GROUP => ctx.text(concat!(
+            "grp.struct_group: Results from getgr*() routines.\n\n",
+            "This object may be accessed either as a tuple of\n",
+            "  (gr_name,gr_passwd,gr_gid,gr_mem)\n",
+            "or via the object attributes as named in the above tuple.\n"
+        )),
+        "__doc__" if class == PASSWD => ctx.text(concat!(
+            "pwd.struct_passwd: Results from getpw*() routines.\n\n",
+            "This object may be accessed either as a tuple of\n",
+            "  (pw_name,pw_passwd,pw_uid,pw_gid,pw_gecos,pw_dir,pw_shell)\n",
+            "or via the object attributes as named in the above tuple."
+        )),
         "__doc__" if class == TERMINAL_SIZE => {
             ctx.text("A tuple of (columns, lines) for holding terminal window size")
         }

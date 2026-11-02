@@ -27,6 +27,46 @@ impl SourceBody {
 }
 
 impl Context {
+    /// Call the caller's import hook for side effects, then read the interpreter's module registry.
+    pub(super) fn import_with_builtins(&mut self, module_name: &str) -> Result<Id> {
+        let mark = self.heap.temporary_mark();
+        let builtins_key = self.heap.code_name("__builtins__");
+        let globals = if self.heap.python_depth() == 0 {
+            let builtins = self.module("builtins")?;
+            self.dict(vec![(builtins_key, builtins)])
+        } else {
+            self.module_globals(self.heap.current_scope())?
+        };
+        self.heap.keep(globals);
+        let builtins = self.get_item(globals, builtins_key)?;
+        self.heap.keep(builtins);
+        let hook = if self.dict_storage(builtins).is_some() {
+            let key = self.heap.code_name("__import__");
+            self.get_item(builtins, key)
+                .map_err(|_| self.lookup_error("KeyError", key))?
+        } else {
+            self.lookup_attr(builtins, "__import__")?
+        };
+        self.heap.keep(hook);
+        let name = self.heap.code_name(module_name);
+        let fromlist = self.alloc(Value::List(Vec::new()));
+        self.heap.keep(fromlist);
+        let level = self.int(0);
+        self.heap.keep(level);
+        let call_mark = self.heap.temporary_mark();
+        let returned = self.call(hook, vec![name, globals, globals, fromlist, level], vec![])?;
+        // The hook's result can finalize and replace the registry entry before it is read.
+        self.heap.keep(returned);
+        self.discard_truth(call_mark);
+        let module = self.get_item(self.modules, name)?;
+        let collect = self.heap.discard_truth_operands(mark, self.modules);
+        self.heap.keep(module);
+        if collect {
+            self.collect_unreachable();
+        }
+        Ok(module)
+    }
+
     /// Receive the launcher's argument vector before imports can run Python code.
     pub(super) fn startup_sys(&mut self) -> Result<Id> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -444,7 +484,8 @@ impl Context {
             first_line: 1,
             module_definition: true,
             coroutine: false,
-            flags: None,
+            flags: 0,
+            flags_complete: false,
         }))
     }
 

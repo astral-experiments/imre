@@ -1,0 +1,22 @@
+147 test.test_re.ReTests.test_search_anchor_at_beginning, occurrence 1
+CPython 5607950ef232dad16d75c0cf53101d9649d89115 test_re.py SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Original definition lines 2476-2488 bytes [122619,123229): 2c9d5ca6ef33dcba7224b0330440cbbc47c5d369151a4bb60809a5c202ee3b27.
+Indented suite bytes [122696,123229): b446c436f8f3a65d5ef660dddd5dbc3df8d0fa38f466348df22029be1069dbc3.
+
+companion-stock-five-entry 5607950ef232dad16d75c0cf53101d9649d89115 CPython 3.14.5 Linux / reference. Parent passed. Whole process exit 0, timeout false, RAN 5.
+raw/companion-stock-five-entry/run.stdout, SHA-256 1f6d2e87224d48ebee6cb96b895f244e5599297a674834191a88691e5dec3933. Raw byte spans are half-open.
+15 [759,829)	EVENT	START	'test.test_re.ReTests.test_search_anchor_at_beginning'	''
+16 [829,896)	EVENT	OK	'test.test_re.ReTests.test_search_anchor_at_beginning'	''
+17 [896,965)	EVENT	STOP	'test.test_re.ReTests.test_search_anchor_at_beginning'	''
+
+companion-intactf45prod-O0 f45a52ca1ba9a4050bc2d8973a7a7afd6541a3d8 release-debug0 / O0. Parent passed. Whole process exit 0, timeout false, RAN 5.
+raw/companion-intactf45prod-O0/run.stdout, SHA-256 1f6d2e87224d48ebee6cb96b895f244e5599297a674834191a88691e5dec3933. Raw byte spans are half-open.
+15 [759,829)	EVENT	START	'test.test_re.ReTests.test_search_anchor_at_beginning'	''
+16 [829,896)	EVENT	OK	'test.test_re.ReTests.test_search_anchor_at_beginning'	''
+17 [896,965)	EVENT	STOP	'test.test_re.ReTests.test_search_anchor_at_beginning'	''
+
+companion-intactf45prod-O3 f45a52ca1ba9a4050bc2d8973a7a7afd6541a3d8 release-debug0 / O3. Parent passed. Whole process exit 0, timeout false, RAN 5.
+raw/companion-intactf45prod-O3/run.stdout, SHA-256 1f6d2e87224d48ebee6cb96b895f244e5599297a674834191a88691e5dec3933. Raw byte spans are half-open.
+15 [759,829)	EVENT	START	'test.test_re.ReTests.test_search_anchor_at_beginning'	''
+16 [829,896)	EVENT	OK	'test.test_re.ReTests.test_search_anchor_at_beginning'	''
+17 [896,965)	EVENT	STOP	'test.test_re.ReTests.test_search_anchor_at_beginning'	''

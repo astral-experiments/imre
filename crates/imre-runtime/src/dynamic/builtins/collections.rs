@@ -385,12 +385,14 @@ pub(in super::super) fn remove_dict_item_hashed(
     let Some(index) = ctx.find_dictionary_key(dict, key, hash)?.1 else {
         return Ok(None);
     };
-    Ok(Some(remove_dict_entry(ctx, dict, index)?.1))
+    Ok(Some(remove_table_entry(ctx, dict, index)?.1))
 }
 
-fn remove_dict_entry(ctx: &mut Context, dict: Id, index: usize) -> Result<(Id, Id)> {
-    let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) = ctx.heap.get_mut(dict) else {
-        unreachable!("dictionary payload")
+fn remove_table_entry(ctx: &mut Context, receiver: Id, index: usize) -> Result<(Id, Id)> {
+    let (Value::Dict(entries) | Value::DefaultDict { entries, .. } | Value::Set { entries, .. }) =
+        ctx.heap.get_mut(receiver)
+    else {
+        unreachable!("dictionary or set payload")
     };
     let (key, value) = entries.remove(index)?;
     ctx.heap.weak_edge_removed(key);
@@ -735,6 +737,8 @@ pub(super) fn method(
             | "list.__init__"
             | "list.__repr__"
             | "tuple.__repr__"
+            | "list.__len__"
+            | "tuple.__len__"
             | "set.__repr__"
             | "frozenset.__repr__"
     ) {
@@ -863,6 +867,8 @@ pub(super) fn method(
     let slot = matches!(
         name,
         "dict.__init__"
+            | "dict.__or__"
+            | "dict.__ror__"
             | "dict.__ior__"
             | "dict.__eq__"
             | "dict.__repr__"
@@ -880,7 +886,7 @@ pub(super) fn method(
             Some(_) => type_error(format!("unbound method {name}() needs an argument")),
             None if matches!(
                 name,
-                "set.discard" | "set.remove" | "set.difference_update" | "set.update"
+                "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
             ) || name.ends_with(".issubset")
                 || name.ends_with(".intersection")
                 || name.ends_with(".difference")
@@ -919,7 +925,7 @@ pub(super) fn method(
         })?
     } else if matches!(
         name,
-        "set.discard" | "set.remove" | "set.difference_update" | "set.update"
+        "set.discard" | "set.pop" | "set.remove" | "set.difference_update" | "set.update"
     ) {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen: false, .. }) {
@@ -946,9 +952,12 @@ pub(super) fn method(
         let representation = ctx.checked_container_slot_repr(object, receiver)?;
         return Ok(ctx.text(representation));
     }
-    if name == "dict.__ior__" {
+    if matches!(name, "dict.__or__" | "dict.__ror__" | "dict.__ior__") {
         if !kwargs.is_empty() {
-            return Err(type_error("wrapper __ior__() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "wrapper {}() takes no keyword arguments",
+                &name[5..]
+            )));
         }
         let [other] = args else {
             return Err(type_error(format!(
@@ -956,8 +965,21 @@ pub(super) fn method(
                 args.len()
             )));
         };
-        update(ctx, receiver, Some(*other), &[])?;
-        return Ok(object);
+        if name == "dict.__ior__" {
+            update(ctx, receiver, Some(*other), &[])?;
+            return Ok(object);
+        }
+        let Some(other_storage) = ctx.dict_storage(*other) else {
+            return Ok(NOT_IMPLEMENTED);
+        };
+        let (left, storage, right) = if name == "dict.__ror__" {
+            (*other, other_storage, object)
+        } else {
+            (object, receiver, *other)
+        };
+        let merged = copy_dict(ctx, left, storage)?;
+        update(ctx, merged, Some(right), &[])?;
+        return Ok(merged);
     }
     if name == "dict.__eq__" {
         if !kwargs.is_empty() {
@@ -1006,6 +1028,7 @@ pub(super) fn method(
             | "set.issuperset"
             | "frozenset.issuperset"
             | "set.discard"
+            | "set.pop"
             | "set.remove"
             | "set.difference_update"
             | "set.update"
@@ -1032,7 +1055,7 @@ pub(super) fn method(
                 let message = ctx.text("popitem(): dictionary is empty");
                 return Err(ctx.lookup_error("KeyError", message));
             };
-            let (key, value) = remove_dict_entry(ctx, receiver, last)?;
+            let (key, value) = remove_table_entry(ctx, receiver, last)?;
             Ok(ctx.alloc(Value::Tuple(vec![key, value])))
         }
         "dict.copy" => {
@@ -1182,6 +1205,19 @@ pub(super) fn method(
             }
             Ok(NONE)
         }
+        "set.pop" => {
+            if !args.is_empty() {
+                return Err(type_error(format!(
+                    "set.pop() takes no arguments ({} given)",
+                    args.len()
+                )));
+            }
+            let Some(last) = ctx.stored_entries(receiver).len().checked_sub(1) else {
+                let message = ctx.text("pop from an empty set");
+                return Err(ctx.lookup_error("KeyError", message));
+            };
+            Ok(remove_table_entry(ctx, receiver, last)?.0)
+        }
         "set.discard" | "set.remove" => {
             let key = super::one_positional_arg(name, args, kwargs)?;
             let index = match ctx.find_dictionary_key(receiver, key, None) {
@@ -1207,12 +1243,7 @@ pub(super) fn method(
                 Err(error) => return Err(error),
             };
             if let Some(index) = index {
-                let Value::Set { entries, .. } = ctx.heap.get_mut(receiver) else {
-                    unreachable!()
-                };
-                let (key, value) = entries.remove(index)?;
-                ctx.heap.weak_edge_removed(key);
-                ctx.heap.weak_edge_removed(value);
+                remove_table_entry(ctx, receiver, index)?;
             } else if name == "set.remove" {
                 return Err(ctx.lookup_error("KeyError", key));
             }
@@ -1412,7 +1443,7 @@ pub(super) fn builtin_slot(
     }
     if matches!(
         method,
-        "__repr__" | "__str__" | "__index__" | "__abs__" | "__int__" | "__float__"
+        "__repr__" | "__str__" | "__index__" | "__abs__" | "__int__" | "__float__" | "__len__"
     ) {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
@@ -1424,6 +1455,19 @@ pub(super) fn builtin_slot(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__len__" {
+            let length = match ctx.heap.get(storage) {
+                Value::List(items)
+                | Value::Tuple(items)
+                | Value::NamedTuple { values: items, .. } => items.len(),
+                Value::Instance { class, .. } => ctx
+                    .namedtuple_fields(*class)
+                    .expect("validated tuple receiver")
+                    .len(),
+                _ => unreachable!("validated list or tuple receiver"),
+            };
+            return Ok(ctx.int(length as i64));
         }
         if method == "__abs__" {
             return super::absolute_value(ctx, object);

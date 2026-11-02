@@ -1,7 +1,6 @@
 //! Percent, brace and template formatting over the actual fields of native log records.
 use crate::StrOwner;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 use regex_automata::meta::Regex;
 use ruff_python_literal::format::{FormatParseError, FormatPart, FormatString, FromTemplate};
@@ -68,15 +67,17 @@ fn braces(fmt: &str) -> Result<Vec<FormatPart>> {
 enum Dollar<'a> {
     Text(&'a str),
     Field(&'a str),
+    /// Prefix through the bare '$', as used by string.Template for its error location.
+    Invalid(&'a str),
 }
 
 /// Template names use ASCII identifiers, even when the surrounding text is Unicode.
-fn dollars(mut fmt: &str) -> Result<Vec<Dollar<'_>>> {
-    let mut tokens = Vec::new();
+fn visit_dollars(template: &str, mut visit: impl FnMut(Dollar<'_>) -> Result<()>) -> Result<()> {
+    let mut fmt = template;
     while let Some((literal, tail)) = fmt.split_once('$') {
-        tokens.push(Dollar::Text(literal));
+        visit(Dollar::Text(literal))?;
         if let Some(rest) = tail.strip_prefix('$') {
-            tokens.push(Dollar::Text("$"));
+            visit(Dollar::Text("$"))?;
             fmt = rest;
             continue;
         }
@@ -90,13 +91,12 @@ fn dollars(mut fmt: &str) -> Result<Vec<Dollar<'_>>> {
             })
             .count();
         if len == 0 || (braced && !name[len..].starts_with('}')) {
-            return Err(invalid("bare '$' not allowed"));
+            return visit(Dollar::Invalid(&template[..template.len() - tail.len()]));
         }
-        tokens.push(Dollar::Field(&name[..len]));
+        visit(Dollar::Field(&name[..len]))?;
         fmt = &name[len + usize::from(braced)..];
     }
-    tokens.push(Dollar::Text(fmt));
-    Ok(tokens)
+    visit(Dollar::Text(fmt))
 }
 
 impl Formatter {
@@ -142,9 +142,18 @@ impl Formatter {
                 }
                 true
             }
-            Style::Dollar => dollars(self.fmt.as_str())?
-                .iter()
-                .any(|t| matches!(t, Dollar::Field(_))),
+            Style::Dollar => {
+                let mut any = false;
+                visit_dollars(self.fmt.as_str(), |part| {
+                    match part {
+                        Dollar::Field(_) => any = true,
+                        Dollar::Invalid(_) => return Err(invalid("bare '$' not allowed")),
+                        Dollar::Text(_) => {}
+                    }
+                    Ok(())
+                })?;
+                any
+            }
             Style::Brace => {
                 let mut any = false;
                 for part in braces(self.fmt.as_str())? {
@@ -220,14 +229,21 @@ impl Formatter {
     fn render(&self, r: &Record) -> Result<String> {
         let mut out = String::new();
         match self.style {
-            Style::Dollar => {
-                for part in dollars(self.fmt.as_str())? {
-                    match part {
-                        Dollar::Text(s) => append(&mut out, s)?,
-                        Dollar::Field(key) => write_display(&mut out, &self.get(r, key)?)?,
-                    }
+            Style::Dollar => visit_dollars(self.fmt.as_str(), |part| match part {
+                Dollar::Text(s) => append(&mut out, s),
+                Dollar::Field(key) => write_display(&mut out, &self.get(r, key)?),
+                Dollar::Invalid(prefix) => {
+                    let mut line = 0usize;
+                    let mut col = 0;
+                    crate::objects::visit_line_fields(prefix, false, |text| {
+                        line += 1;
+                        col = text.chars().count();
+                    });
+                    Err(error(format!(
+                        "Invalid placeholder in string: line {line}, col {col}"
+                    )))
                 }
-            }
+            })?,
             Style::Percent => {
                 let mut tail = self.fmt.as_str();
                 while let Some((literal, rest)) = tail.split_once('%') {
@@ -323,7 +339,7 @@ impl Formatter {
         }
         let custom = date.filter(|s| !s.is_empty());
         let pattern = custom.unwrap_or(self.default_time.as_str());
-        let timestamp = super::format_timestamp(Some(pattern), &clock, Duration::ZERO);
+        let timestamp = super::format_timestamp(pattern, &clock);
         let Some(msec) = self
             .default_msec
             .as_ref()

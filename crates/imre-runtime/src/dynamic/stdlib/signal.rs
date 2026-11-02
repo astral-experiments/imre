@@ -104,6 +104,23 @@ pub(super) fn call(
             format!("{name}() takes no keyword arguments"),
         ));
     }
+    if name == "_thread.interrupt_main" {
+        let signum = match args {
+            [] => libc::SIGINT,
+            [number] => super::index_c_int(ctx, *number)?,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    "interrupt_main() takes at most one argument",
+                ));
+            }
+        };
+        if !(1..crate::signals::nsig()).contains(&signum) {
+            return Err(Error::new("ValueError", "signal number out of range"));
+        }
+        crate::signals::interrupt_main(signum);
+        return Ok(super::NONE);
+    }
     if !args.is_empty() {
         return Err(Error::new(
             "TypeError",

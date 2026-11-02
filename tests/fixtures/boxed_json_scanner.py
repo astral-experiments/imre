@@ -35,6 +35,26 @@ def current():
     values, end = default_scan(document, 2)
     assert end == document.index(']') + 1
     assert values[0] is values[1] is json.decoder._CONSTANTS['NaN']
+    assert json.loads('[NaN, Infinity, -Infinity]', parse_constant=str.upper) == [
+        'NAN', 'INFINITY', '-INFINITY'
+    ]
+
+    class ConstantHook:
+        def __getattribute__(self, name):
+            if name in ('__class__', '__name__', '__self__'):
+                raise AssertionError(name)
+            return object.__getattribute__(self, name)
+
+        def __eq__(self, other):
+            raise AssertionError('unexpected hook comparison')
+
+        def __call__(self, name):
+            raise LookupError(name)
+
+    hooked = json.JSONDecoder(parse_constant=ConstantHook())
+    assert hooked.decode('42') == 42
+    fails(LookupError, hooked.decode, 'NaN')
+    assert json.loads('NaN', parse_constant={'NaN': 17}.__getitem__) == 17
     constants = json.decoder._CONSTANTS
     del json.decoder._CONSTANTS
     try:

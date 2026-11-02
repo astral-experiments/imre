@@ -7,12 +7,27 @@ pub(super) use scanstring::scanstring;
 
 use std::collections::HashMap;
 
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, required_args};
 use crate::objects::{
     DecodedJson, JsonNumber, JsonTokenError, decode_json_tokens_at, write_json_codepoints,
     write_json_fragment, write_json_string,
 };
 use crate::{Str, StrOwner};
+
+/// Recognize an exact dict's bound getter without inspecting an arbitrary parse_constant hook.
+pub(super) fn is_constants_lookup(ctx: &Context, constants: Id, hook: Id) -> bool {
+    let Value::Method {
+        receiver,
+        callable,
+        explicit: false,
+    } = ctx.heap.get(hook)
+    else {
+        return false;
+    };
+    *receiver == constants
+        && matches!(ctx.heap.get(constants), Value::Dict(_))
+        && matches!(ctx.heap.get(*callable), Value::Native(name) if name == "dict.__getitem__")
+}
 
 /// Scan one value at a Python character offset and return its value and end offset.
 pub(super) fn scan_once(ctx: &mut Context, constant: Id, input: Id, idx: Id) -> Result<Id> {
@@ -360,7 +375,7 @@ pub(super) fn encoder_call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     else {
         return Err(bad_state());
     };
-    let argument = encoder_state::required_args(
+    let argument = required_args(
         "_iterencode",
         positional,
         kwargs,

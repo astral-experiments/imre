@@ -46,10 +46,9 @@ pub(super) fn explicit_reader_raw(ctx: &Context, receiver: Id) -> Option<Id> {
     (fd.reading && !fd.writing).then_some(fd.raw)
 }
 
-/// Argument conversion precedes invalidation. During writable() raw still names
-/// the outgoing stream; after it succeeds raw names the replacement even on error.
-fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -> Result<()> {
-    let previous = match ctx.heap.get(receiver) {
+/// Disarm native drop before giving up the writer's current backing.
+fn retire_writer(ctx: &Context, receiver: Id) -> Result<Option<Id>> {
+    let raw = match ctx.heap.get(receiver) {
         Value::Instance {
             memory_stream: Some(MemoryStream::BufferedBytes(writer)),
             ..
@@ -62,7 +61,7 @@ fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -
             ..
         } => *raw,
         Value::Instance {
-            memory_stream: None,
+            memory_stream: Some(MemoryStream::DetachedWriter) | None,
             ..
         } => None,
         _ => {
@@ -80,6 +79,13 @@ fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -
             Some(fd.raw)
         }
     };
+    Ok(raw)
+}
+
+/// Argument conversion precedes invalidation. During writable() raw still names
+/// the outgoing stream; after it succeeds raw names the replacement even on error.
+fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -> Result<()> {
+    let previous = retire_writer(ctx, receiver)?;
     let raw = replacement.or(previous);
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         unreachable!()
@@ -91,6 +97,28 @@ fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -
         ctx.heap.weak_edge_removed(old);
     }
     Ok(())
+}
+
+/// A flush override may reinitialize or detach this writer before returning.
+pub(super) fn detach_writer(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    if !wrapper_fallback(ctx, receiver).is_some_and(|(_, fd, _)| fd.writing && !fd.reading) {
+        return Err(Error::new("UnsupportedOperation", "detach"));
+    }
+    let flush = ctx.lookup_attr(receiver, "flush")?;
+    ctx.call(flush, Vec::new(), Vec::new())?;
+    let raw = retire_writer(ctx, receiver)?;
+    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    *memory_stream = Some(MemoryStream::DetachedWriter);
+    let raw = raw.ok_or_else(|| {
+        Error::new(
+            "SystemError",
+            "detach returned NULL without setting an exception",
+        )
+    })?;
+    ctx.heap.weak_edge_removed(raw);
+    Ok(raw)
 }
 
 /// A successful nested __init__ in tell() supplies the final raw and buffer.
@@ -110,6 +138,17 @@ pub(super) fn finish_writer_probe(ctx: &Context, receiver: Id) -> Result<()> {
         "NotImplementedError",
         "position probe left the buffered writer uninitialized",
     ))
+}
+
+/// A descriptor installed inside a Random raw.tell() keeps its physical position.
+pub(super) fn finish_random_probe(ctx: &Context, receiver: Id) -> bool {
+    let Some((_, fd, _)) = wrapper_fallback(ctx, receiver) else {
+        return false;
+    };
+    if let Some(Buffer::Random(file)) = fd.buffer.borrow_mut().as_mut() {
+        file.reset();
+    }
+    true
 }
 
 /// A Python finalizer can decline close, raise, or resurrect the writer.
@@ -192,6 +231,30 @@ pub(super) fn ssize(ctx: &mut Context, value: Id) -> Result<i64> {
     })
 }
 
+fn random_initialized(ctx: &Context, receiver: Id) -> bool {
+    backing(ctx, receiver).is_some()
+        || matches!(
+            ctx.heap.get(receiver),
+            Value::Instance {
+                memory_stream: Some(MemoryStream::Reader(_)),
+                ..
+            }
+        )
+}
+
+pub(super) fn check_capabilities(ctx: &mut Context, raw: Id, capabilities: &[&str]) -> Result<()> {
+    for &capability in capabilities {
+        let method = ctx.lookup_attr(raw, capability)?;
+        if ctx.call(method, vec![], Vec::new())? != TRUE {
+            return Err(Error::new(
+                "UnsupportedOperation",
+                format!("File or stream is not {capability}."),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Attach one buffered stream to a caller-owned native FileIO, without reopening its fd.
 pub(super) fn initialize(
     ctx: &mut Context,
@@ -232,24 +295,25 @@ pub(super) fn initialize(
     {
         return super::buffered_reader::initialize(ctx, receiver, raw, capacity);
     }
+    if owner == "BufferedRandom"
+        && super::buffered_reader::reinitialize_update(ctx, receiver, raw, capacity, capabilities)?
+    {
+        return Ok(NONE);
+    }
     if owner == "BufferedWriter" {
         invalidate_writer(ctx, receiver, None)?;
     }
-    for &capability in capabilities {
-        let method = ctx.lookup_attr(raw, capability)?;
-        if ctx.call(method, vec![], Vec::new())? != TRUE {
-            return Err(Error::new(
-                "UnsupportedOperation",
-                format!("File or stream is not {capability}."),
-            ));
-        }
-    }
+    check_capabilities(ctx, raw, capabilities)?;
     let mut revived = false;
     if owner == "BufferedWriter" {
         // A successful nested initialization in writable() can make methods usable during tell().
         revived = super::bytes_writer::state(ctx, receiver).is_some_and(|w| w.ready.get())
             || backing(ctx, receiver).is_some();
         invalidate_writer(ctx, receiver, Some(raw))?;
+    }
+    if owner == "BufferedRandom" && !random_initialized(ctx, receiver) {
+        // The public raw slot is visible during size validation and raw.tell().
+        super::buffered_reader::start_init(ctx, receiver, Some(raw))?;
     }
     if capacity <= 0 {
         return Err(Error::new(
@@ -260,8 +324,7 @@ pub(super) fn initialize(
     let handle = match native_raw(ctx, raw, methods, owner) {
         Ok(handle) => handle,
         Err(_) if owner == "BufferedRandom" => {
-            if backing(ctx, receiver).is_some() || super::buffered_reader::has_state(ctx, receiver)
-            {
+            if random_initialized(ctx, receiver) {
                 return Err(Error::new(
                     "NotImplementedError",
                     "BufferedRandom reinitialization is unsupported",
@@ -276,7 +339,7 @@ pub(super) fn initialize(
     };
     if backing(ctx, receiver).is_some()
         || super::bytes_writer::state(ctx, receiver).is_some()
-        || owner == "BufferedRandom" && super::buffered_reader::has_state(ctx, receiver)
+        || owner == "BufferedRandom" && random_initialized(ctx, receiver)
     {
         return Err(Error::new(
             "NotImplementedError",
@@ -782,9 +845,7 @@ impl BufferedFd {
         receiver: Id,
         name: &str,
         args: &[Id],
-        kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        let name = name.strip_prefix("file.").unwrap_or(name);
         if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
             self.check_reentry(ctx)?;
             self.check_raw(ctx, receiver, name)?;
@@ -827,16 +888,6 @@ impl BufferedFd {
             None
         };
         if name == "seek" {
-            if !kwargs.is_empty() {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "{}.seek() takes no keyword arguments",
-                        ctx.type_name(receiver)
-                    ),
-                ));
-            }
-            super::argument_count(ctx.type_name(receiver), name, args.len())?;
             let target = args[0];
             let whence = files::buffered_whence(ctx, args.get(1).copied())?;
             if self.closed() {

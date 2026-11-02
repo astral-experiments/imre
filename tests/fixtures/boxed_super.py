@@ -104,7 +104,36 @@ def current():
         print(str(error))
 
     check_mro()
+    check_super_initialization()
+    check_native_classmethod()
+    check_super_descriptor()
     check_subclass_hooks()
+
+
+def check_super_descriptor():
+    class Base:
+        def method(self):
+            return self
+
+    class Child(Base):
+        pass
+
+    obj = Child()
+    descriptor = super(Child)
+    Child.parent = descriptor
+    assert Child.parent is descriptor and obj.parent.method() is obj
+    bound = obj.parent
+    assert bound.__get__(object(), Child) is bound
+
+    class Custom(super):
+        def __get__(self, obj, owner=None):
+            return "override"
+
+    custom = Custom(Child)
+    Child.parent = custom
+    assert obj.parent == "override"
+    rebound = super.__get__(custom, obj)
+    assert type(rebound) is Custom and rebound.__self__ is obj
 
 
 def check_mro():
@@ -139,6 +168,79 @@ def check_mro():
             pass
         else:
             raise AssertionError("invalid mro call succeeded")
+
+
+def check_super_initialization():
+    obj = D()
+    proxy = super.__new__(super, C, obj, ignored=True)
+    assert (proxy.__thisclass__, proxy.__self__, proxy.__self_class__) == (None, None, None)
+    assert super.__init__(proxy, C, obj) is None
+    assert proxy.walk() == "AB"
+
+    error = LookupError("reported class")
+
+    class Reentrant:
+        @property
+        def __class__(self):
+            assert proxy.__self__ is obj
+            super.__init__(proxy, A)
+            raise error
+
+    try:
+        super.__init__(proxy, C, Reentrant())
+    except LookupError as exc:
+        assert exc is error
+    else:
+        raise AssertionError("lost exception from __class__")
+    assert (proxy.__thisclass__, proxy.__self__, proxy.__self_class__) == (A, None, None)
+
+    class Custom(super):
+        walk = "own"
+
+        def __init__(self, start, receiver):
+            super().__init__(start, receiver)
+            self.seen = receiver
+
+    custom = Custom(C, obj)
+    assert custom.__class__ is Custom and custom.walk() == "AB"
+    super.__init__(custom, C, None)
+    assert custom.walk == "own" and custom.seen is obj
+
+
+def check_native_classmethod():
+    from datetime import date, datetime
+
+    class Stamp(datetime):
+        @classmethod
+        def fromisocalendar(cls, *args):
+            return super().fromisocalendar(*args)
+
+    class Child(Stamp):
+        pass
+
+    class Mapping(dict):
+        pass
+
+    class Integer(int):
+        pass
+
+    for _ in range(2):
+        keys = super(Mapping, Mapping).fromkeys
+        assert keys.__self__ is Mapping and type(keys("a")) is Mapping
+        integer = super(Integer, Integer).from_bytes
+        assert integer.__self__ is Integer and type(integer(b"A")) is Integer
+        assert type(Child.fromisocalendar(2019, 1, 1)) is Child
+    assert super(Stamp, Child(2000, 1, 1)).fromordinal.__self__ is Child
+
+    class Alternate(date):
+        @classmethod
+        def fromisocalendar(cls, *args):
+            return cls, args
+
+    class Mixed(Stamp, Alternate):
+        pass
+
+    assert Mixed.fromisocalendar(2019, 1, 1) == (Mixed, (2019, 1, 1))
 
 
 def check_subclass_hooks():

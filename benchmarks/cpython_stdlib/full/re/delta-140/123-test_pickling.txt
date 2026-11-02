@@ -1,0 +1,49 @@
+123 test.test_re.ReTests.test_pickling, occurrence 1
+
+stock  5607950ef232dad16d75c0cf53101d9649d89115  CPython 3.14.5 Linux x86-64
+Actual process exit 0. Upstream test_re.py lines 1415–1423; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304; runtime (stock executable); executed ELF c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304.
+Complete raw stdout (raw/stock/reference/pickling-original/run.stdout, SHA-256 36b510ef365d74f3a0bf8d4843c4fdde7673962e5c30a8ad7ffb296557a1d0be)
+SELECT test.test_re.ReTests.test_pickling
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 1
+RAN 1
+Complete raw stderr (raw/stock/reference/pickling-original/run.stderr, SHA-256 e1457d56859dda194cd66b4c364e1e4c047b0b8ccf1b4aa2361f2db0b72851a9)
+test_pickling (test.test_re.ReTests.test_pickling) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+OK
+
+O0  44fd746fef8978963404738794102d00fb3dee79  dev-debug0
+Actual process exit 0. Upstream test_re.py lines 1415–1423; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler 4087425a11dbdfc14c063f4c619c73de1a5cd2a25456c8aab84eb52c76cd0be5; runtime 8efb1bf1f18174914e85042becfb4cab78c4737a8da62f82b0ae0c3f9fd79536; executed ELF d485b7ec481c7bee9990bc5b0cd463b466bf2603bd2c886d9d5a3755902252bf.
+Complete raw stdout (raw/picklepublic/O0/pickling-original/run.stdout, SHA-256 36b510ef365d74f3a0bf8d4843c4fdde7673962e5c30a8ad7ffb296557a1d0be)
+SELECT test.test_re.ReTests.test_pickling
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 1
+RAN 1
+Complete raw stderr (raw/picklepublic/O0/pickling-original/run.stderr, SHA-256 e822afb7f051f9efc7ee9454a5ec1fae25c7006ae4ad27c92d347dd5d78739af)
+test_pickling (test.test_re.ReTests.test_pickling) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 16.418s
+
+OK
+
+O3  44fd746fef8978963404738794102d00fb3dee79  dev-debug0
+Actual process exit 0. Upstream test_re.py lines 1415–1423; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler 4087425a11dbdfc14c063f4c619c73de1a5cd2a25456c8aab84eb52c76cd0be5; runtime 8efb1bf1f18174914e85042becfb4cab78c4737a8da62f82b0ae0c3f9fd79536; executed ELF 74360a324870beb44ade11e16885c647d9bff90ccd3aec46d6b5977ad342c4f7.
+Complete raw stdout (raw/picklepublic/O3/pickling-original/run.stdout, SHA-256 36b510ef365d74f3a0bf8d4843c4fdde7673962e5c30a8ad7ffb296557a1d0be)
+SELECT test.test_re.ReTests.test_pickling
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 1
+RAN 1
+Complete raw stderr (raw/picklepublic/O3/pickling-original/run.stderr, SHA-256 7f375c52d09d434df346a96ba30376c3eb62ce9fbc23dcd54704597024b5bce1)
+test_pickling (test.test_re.ReTests.test_pickling) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 8.461s
+
+OK

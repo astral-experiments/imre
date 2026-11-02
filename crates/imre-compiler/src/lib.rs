@@ -55,6 +55,8 @@ pub struct CommandFlags {
     pub isolated: bool,
     pub ignore_environment: bool,
     pub context_aware_warnings: bool,
+    /// A positive CPU-count override; zero selects the operating system.
+    pub cpu_count: i32,
     /// Python's language optimization level; independent of LLVM optimization.
     pub optimize: i32,
     pub safe_path: bool,
@@ -342,10 +344,13 @@ fn object_fallback<T>(
         if checked_file && let Some(graph) = &graph {
             let (skipped, overloads) = graph.diagnostic_scopes();
             let entry = &graph.modules[graph.entry];
-            let all_calls = !entry.optional_imports.is_empty()
+            let all_calls = graph.check_decorated_method_calls.get()
+                || !entry.optional_imports.is_empty()
                 || !graph.needs_object_runtime.get()
                     && graph.object_builtin_errors.borrow().contains(&error);
-            let checked_calls = if all_calls {
+            let checked_calls = if graph.check_method_factories.get() {
+                analysis::FallbackCalls::DecoratorFactories
+            } else if all_calls {
                 analysis::FallbackCalls::All
             } else if entry.has_entry_guard() {
                 analysis::FallbackCalls::Entry(graph.entry)
@@ -966,6 +971,9 @@ mod tests {
 
     #[test]
     fn sealed_imports_work_without_filesystem_modules() {
+        #[cfg(unix)]
+        super::check("import _signal\n").unwrap();
+
         let source = r#"
 import sys as process
 from typing import TextIO as Stream
@@ -981,7 +989,7 @@ def first(stream: Stream) -> str:
         let llvm = compile(source, &CompileOptions::default()).unwrap();
         assert!(llvm.contains("define i32 @main(i32 %argc, ptr %argv)"));
         assert!(llvm.contains("call void @imre_args_init(i32 %argc, ptr %argv)"));
-        assert_eq!(llvm.matches("call void @imre_args_clear()").count(), 2);
+        assert_eq!(llvm.matches("call void @imre_args_clear()").count(), 1);
     }
 
     #[test]

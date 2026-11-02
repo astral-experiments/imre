@@ -51,6 +51,10 @@ CASES = {
         ["empty", "--help"], ["empty", "--nil", "ok", "--a", "value"], ["empty", "--nil"],
         ["hidden", "--help"], ["hidden", "--param1"], ["hidden", "--param1", "--param2"],
     ],
+    "tuple_metavars": [
+        [], ["--help"], ["--op2", "a", "b"], ["--op7", "first", "second", "third"], ["--op7", "short"],
+        ["labels", "--help"], ["labels", "--one", "x", "--many", "a", "b"], ["labels", "--one", "bad"],
+    ],
     "blank_help": [[], ["format"], ["print"], ["parse"]],
     "counts": [
         [], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
@@ -141,6 +145,7 @@ CASES = {
                      ["-q", "-q", "-q"], ["--off"], ["--off=x"], ["-s=x"], ["-v=3"], ["-vh"],
                      ["-v=f", "--help"], ["--help", "--off=x"], ["-f", "extra"]],
     "method_args": [[]],
+    "supplied_namespace": [[]],
     "known_args": [
         [], ["--help"], ["--foo", "F", "--bar", "--baz"], ["--foo"],
         ["one", "two", "--unknown", "-v", "three"], ["-vvv", "π", "one", "两"],
@@ -182,6 +187,8 @@ REJECTED = {
     "mixed_positionals": 'parser.add_argument("input", "--other")',
     "foreign_converter": 'parser.add_argument("--number", type=complex)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
+    "metavar_arity": 'parser.add_argument("--key", nargs="?", metavar=("A", "B"))',
+    "metavar_element": 'parser.add_argument("--key", nargs="*", metavar=("A", 2))',
     "metavar_digit_limit": f"parser.add_argument('-n', type=int, choices=[0x{'f' * 600}], metavar='N')",
     "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
     "escaped_builder": "copy = parser",

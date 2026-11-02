@@ -24,7 +24,9 @@ pub(super) struct CodeObject {
     pub module_definition: bool,
     pub coroutine: bool,
     /// CPython flags for boxed Python function definitions.
-    pub flags: Option<u32>,
+    pub flags: u32,
+    /// Runtime source retains execution flags even when its complete co_flags is unknown.
+    pub flags_complete: bool,
     pub nested: Vec<(usize, Id)>,
     pub freevars: Vec<String>,
     pub closure_supported: bool,
@@ -56,6 +58,7 @@ const EMPTY_TUPLE: Id = 5;
 
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
+pub(super) const REGEX_COPY_METHODS: &[&str] = &["__copy__", "__deepcopy__"];
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
 pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
@@ -497,6 +500,9 @@ impl Context {
             Value::Module {
                 constructor: None, ..
             } => "module",
+            Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).heap_type() => {
+                name
+            }
             Value::Instance { class, .. }
                 if self.classes.get(super::namespace::CLASS) == Some(class) =>
             {
@@ -664,18 +670,22 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 /// Data retained by class namespaces after their body has run.
 #[derive(Clone, Default)]
 pub(super) struct ClassNamespace {
+    /// Qualified name of an iterator type whose instances require private native cursor state.
+    pub itertools_layout: Option<&'static str>,
+    /// Attribute writes to the type object itself are forbidden, independently of its instance layout.
+    pub immutable_type: bool,
     pub bases: Id,
     pub mro: Id,
+    /// The defining extension module of a heap type created with module state.
+    pub defining_module: Option<Id>,
     /// A name assigned through type's __name__ descriptor, including a str subclass.
     pub name_override: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
-    /// Scratch field dictionary used while a class body is executing.
-    pub annotation_scratch: Option<Id>,
-    /// Executed deferred sites in source order, including repeated field names.
-    pub annotation_sites: Option<std::collections::BTreeMap<u32, (Id, Id)>>,
+    /// The field dictionary (NONE if unbound) and executed offsets while the class body runs.
+    pub annotation_scratch: Option<(Id, HashSet<u32>)>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Run pending instance finalizers after user exit callbacks, while the heap is live.
@@ -751,6 +761,21 @@ impl std::ops::Deref for BoxedTextFile {
 
     fn deref(&self) -> &Self::Target {
         &self.file
+    }
+}
+
+/// State that belongs to a single initialization of a native module.
+#[derive(Clone, Copy)]
+pub(super) enum NativeModuleState {
+    LocaleError(Id),
+    IsoCalendarDate(Id),
+}
+
+impl NativeModuleState {
+    fn class(self) -> Id {
+        match self {
+            Self::LocaleError(class) | Self::IsoCalendarDate(class) => class,
+        }
     }
 }
 
@@ -877,8 +902,8 @@ pub(super) enum Value {
         scope: Id,
         origin: Option<Id>,
         initializing: bool,
-        // Exception class retained by this generation of the _locale module.
-        locale_error: Option<Id>,
+        // Private state retained by this generation of a native module.
+        module_state: Option<NativeModuleState>,
         // Imported modules are resolved separately from independently constructed ones.
         constructor: Option<Id>,
     },
@@ -908,8 +933,8 @@ pub(super) enum Value {
     Class {
         /// Private layout tag for native I/O class generations.
         io_kind: Option<super::stdlib::io::NativeClass>,
-        /// Qualified name of a non-instantiable digest implementation type.
-        hash_type: Option<&'static str>,
+        /// Qualified name identifying a native heap type and its module generation.
+        heap_type: Option<&'static str>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
@@ -1044,6 +1069,7 @@ pub(super) enum Value {
     Count {
         current: Id,
         step: Id,
+        fast: bool,
     },
     Repeat(crate::objects::Repeat<Id>),
     Map {
@@ -1083,7 +1109,7 @@ pub(super) enum Value {
         random: Id,
         unsupported: Id,
     },
-    HashMethod {
+    HeapTypeMethod {
         owner: Id,
         name: &'static str,
     },
@@ -1092,13 +1118,17 @@ pub(super) enum Value {
         name: &'static str,
         unsupported: Id,
     },
-    ProcessHandle(crate::objects::BoxedPopen),
+    ProcessHandle {
+        child: crate::objects::BoxedPopen,
+        reported: bool,
+    },
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(BoxedTextFile),
     RegexScanner {
         pattern: Id,
         subject: Id,
         buffer_view: Option<Id>,
+        initial_start: usize,
         start: Option<usize>,
         end: usize,
         retry: bool,
@@ -1165,6 +1195,7 @@ impl Value {
             Self::Context(_) => "_contextvars.Context",
             Self::ContextVar { .. } => "_contextvars.ContextVar",
             Self::ContextToken { .. } => "_contextvars.Token",
+            Self::Super { .. } => "super",
             Self::None => "NoneType",
             Self::Weak(wr) => wr.kind.class(),
             Self::Ellipsis => "ellipsis",
@@ -1177,7 +1208,10 @@ impl Value {
             Self::Map { .. } => "map",
             Self::Filter { .. } => "filter",
             Self::Hash(state) => state.lock().class_name(),
-            Self::HashMethod { .. } => "method_descriptor",
+            Self::HeapTypeMethod {
+                name: "__repr__", ..
+            } => "wrapper_descriptor",
+            Self::HeapTypeMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
@@ -1187,7 +1221,7 @@ impl Value {
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
-            Self::ProcessHandle(_) => "_imre_subprocess.Handle",
+            Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
@@ -1256,8 +1290,13 @@ impl Value {
     }
 
     pub(super) fn hash_type(&self) -> Option<&'static str> {
+        self.heap_type()
+            .filter(|name| *name == super::stdlib::hashlib::md5::CLASS)
+    }
+
+    pub(super) fn heap_type(&self) -> Option<&'static str> {
         match self {
-            Self::Class { hash_type, .. } => *hash_type,
+            Self::Class { heap_type, .. } => *heap_type,
             _ => None,
         }
     }
@@ -1315,7 +1354,7 @@ impl Value {
             | Self::Native(_)
             | Self::Scope(_)
             | Self::LoopIterator { .. }
-            | Self::ProcessHandle(_)
+            | Self::ProcessHandle { .. }
             | Self::Yielded(_) => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
@@ -1342,7 +1381,7 @@ impl Value {
             Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ThreadLocal(local) => visit.extend(local.live()),
-            Self::Count { current, step } => visit.extend([*current, *step]),
+            Self::Count { current, step, .. } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
             Self::TupleGetter { doc, .. } => visit.extend(doc),
             Self::ItemGetter(keys) => visit.push(*keys),
@@ -1445,13 +1484,11 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_dict_cell);
-                    visit.extend(class.annotation_scratch);
-                    if let Some(sites) = &class.annotation_sites {
-                        for &(name, thunk) in sites.values() {
-                            visit.extend([name, thunk]);
-                        }
+                    if let Some((fields, _)) = &class.annotation_scratch {
+                        visit.push(*fields);
                     }
                     visit.extend(class.dictionary);
+                    visit.extend(class.defining_module);
                 }
                 visit.extend(scope.parent);
                 visit.extend(scope.namespace);
@@ -1470,11 +1507,11 @@ impl Value {
                 scope,
                 origin,
                 constructor,
-                locale_error,
+                module_state,
                 ..
             } => {
                 visit.push(*scope);
-                visit.extend(locale_error);
+                visit.extend(module_state.map(NativeModuleState::class));
                 visit.extend(origin);
                 visit.extend(constructor);
             }
@@ -1565,7 +1602,9 @@ impl Value {
                     }
                 }
             }
-            Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
+            Self::TypeVar(var) => {
+                visit.extend([var.name, var.module, var.bound, var.constraints, var.default])
+            }
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);
                 visit.extend(alias.name);
@@ -1701,7 +1740,7 @@ impl Value {
             Self::IoMethod {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),
-            Self::HashMethod { owner, .. } => visit.push(*owner),
+            Self::HeapTypeMethod { owner, .. } => visit.push(*owner),
             Self::RegexScanner {
                 pattern,
                 subject,
@@ -1712,7 +1751,10 @@ impl Value {
                 visit.extend(*buffer_view);
             }
             Self::RegexPattern(pattern) => visit.push(pattern.source),
-            Self::RegexMatch(m) => visit.extend([m.pattern, m.subject]),
+            Self::RegexMatch(m) => {
+                visit.extend([m.pattern, m.subject]);
+                visit.extend(m.cached_regs.get().copied());
+            }
             Self::File(file) => {
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
@@ -1749,7 +1791,7 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
-            | Self::ProcessHandle(_) => {}
+            | Self::ProcessHandle { .. } => {}
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
@@ -1981,7 +2023,6 @@ enum Finalization {
 
 struct Slot {
     value: Option<Value>,
-    trace: Cell<usize>,
     // Next in collection order while occupied, or next free slot while vacant.
     gc_next: Cell<usize>,
     // Previous in collection order while occupied.
@@ -1995,7 +2036,6 @@ impl Slot {
     fn new(value: Value) -> Self {
         Self {
             value: Some(value),
-            trace: Cell::new(UNMARKED),
             gc_next: Cell::new(UNMARKED),
             gc_prev: Cell::new(UNMARKED),
             untracked_tuple: Cell::new(false),
@@ -2012,10 +2052,6 @@ impl Slot {
             Some(value) => !self.untracked_tuple.get() && value.gc_object(),
             None => false,
         }
-    }
-
-    fn marked(&self) -> bool {
-        self.trace.get() != UNMARKED
     }
 }
 
@@ -2069,24 +2105,25 @@ impl GcOrder {
     }
 }
 
-/// The pending trace lives in heap slots, so looking up a weak intern entry needs no scratch allocation.
+/// The trace links are reserved with each heap slot, so marking needs no scratch allocation.
 pub(super) struct MarkQueue<'a> {
     slots: &'a [Slot],
+    traces: &'a [Cell<usize>],
     next: usize,
     ordered: Option<&'a mut GcOrder>,
 }
 
 impl MarkQueue<'_> {
     pub(super) fn push(&mut self, id: Id) {
-        let slot = &self.slots[id as usize];
-        if !slot.marked() {
+        let trace = &self.traces[id as usize];
+        if trace.get() == UNMARKED {
             if let Some(order) = &mut self.ordered {
-                slot.trace.set(END);
-                if slot.gc_next.get() == UNMARKED {
+                trace.set(END);
+                if self.slots[id as usize].gc_next.get() == UNMARKED {
                     order.push(id as usize, self.slots);
                 }
             } else {
-                slot.trace.set(self.next);
+                trace.set(self.next);
                 self.next = id as usize;
             }
         }
@@ -2103,7 +2140,7 @@ impl MarkQueue<'_> {
         if index == END {
             return None;
         }
-        self.next = self.slots[index].trace.replace(END);
+        self.next = self.traces[index].replace(END);
         Some(index as Id)
     }
 }
@@ -2148,6 +2185,8 @@ impl CycleSet {
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
     slots: Vec<Slot>,
+    // Keep the collector's links contiguous so it can scan marks without loading every Value.
+    traces: Vec<Cell<usize>>,
     gc_order: GcOrder,
     linked_string_constants: HashMap<i64, Id>,
     full_collection: Option<CycleSet>,
@@ -2232,21 +2271,23 @@ impl Frame {
 }
 
 impl Heap {
-    /// Bytes reserved beside each boxed value in a slab slot, including alignment.
+    /// Bytes reserved for each boxed value's slot metadata and trace link, including alignment.
     pub(super) fn size_overhead() -> usize {
-        size_of::<Slot>() - size_of::<Value>()
+        size_of::<Slot>() + size_of::<Cell<usize>>() - size_of::<Value>()
     }
 
     pub fn new() -> Self {
+        let slots = vec![
+            Slot::new(Value::None),
+            Slot::new(Value::Bool(false)),
+            Slot::new(Value::Bool(true)),
+            Slot::new(Value::Ellipsis),
+            Slot::new(Value::NotImplemented),
+            Slot::new(Value::Tuple(Vec::new())),
+        ];
         let mut heap = Self {
-            slots: vec![
-                Slot::new(Value::None),
-                Slot::new(Value::Bool(false)),
-                Slot::new(Value::Bool(true)),
-                Slot::new(Value::Ellipsis),
-                Slot::new(Value::NotImplemented),
-                Slot::new(Value::Tuple(Vec::new())),
-            ],
+            traces: vec![Cell::new(UNMARKED); slots.len()],
+            slots,
             gc_order: GcOrder::EMPTY,
             full_collection: None,
             linked_string_constants: HashMap::new(),
@@ -2471,8 +2512,7 @@ impl Heap {
     pub(super) fn fresh_string(&mut self, value: Value) -> Result<Id> {
         debug_assert!(matches!(value, Value::Str(_) | Value::SurrogateStr(_)));
         if self.free_head == END {
-            self.slots
-                .try_reserve(1)
+            self.reserve_slot()
                 .map_err(|_| Error::new("MemoryError", ""))?;
         }
         self.frames
@@ -2484,6 +2524,11 @@ impl Heap {
         Ok(self.alloc_slot(value))
     }
 
+    fn reserve_slot(&mut self) -> std::result::Result<(), std::collections::TryReserveError> {
+        self.traces.try_reserve(1)?;
+        self.slots.try_reserve(1)
+    }
+
     fn alloc_slot(&mut self, value: Value) -> Id {
         let index = if self.free_head != END {
             let index = self.free_head;
@@ -2493,12 +2538,14 @@ impl Heap {
             self.slots[index].may_have_buffer_views = false;
             index
         } else {
-            if self.slots.len() == self.slots.capacity() && self.slots.try_reserve(1).is_err() {
+            if self.reserve_slot().is_err() {
                 // Keep space for the next value when doubling the heap fails.
                 // The next statement can collect with a complete set of live handles.
+                self.traces.reserve_exact(1);
                 self.slots.reserve_exact(1);
                 self.next_collection = self.slots.len();
             }
+            self.traces.push(Cell::new(UNMARKED));
             self.slots.push(Slot::new(value));
             self.slots.len() - 1
         };
@@ -2759,7 +2806,7 @@ impl Heap {
             && callable.is_none_or(|f| matches!(self.get(f), Value::Native(_)) && !weak(f))
             && (pattern(value)
                 || matches!(self.get(value), Value::RegexMatch(m)
-                    if !weak(value) && text(m.subject) && pattern(m.pattern)))
+                    if m.cached_regs.get().is_none() && !weak(value) && text(m.subject) && pattern(m.pattern)))
     }
 
     /// Release inert call arguments and peers at the same boundary as the general discard.
@@ -3087,6 +3134,7 @@ impl Heap {
     fn mark(&self, globals: impl Iterator<Item = Id>) {
         let mut pending = MarkQueue {
             slots: &self.slots,
+            traces: &self.traces,
             next: END,
             ordered: None,
         };
@@ -3122,9 +3170,9 @@ impl Heap {
 
     fn reachable(&self, id: Id, roots: impl Iterator<Item = Id>) -> bool {
         self.mark(roots);
-        let reachable = self.slots[id as usize].marked();
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        let reachable = self.traces[id as usize].get() != UNMARKED;
+        for trace in &self.traces {
+            trace.set(UNMARKED);
         }
         reachable
     }
@@ -3146,15 +3194,15 @@ impl Heap {
     ) -> Result<bool> {
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
-        let live = self.slots.iter().any(|slot| {
-            slot.marked()
+        let live = self.slots.iter().enumerate().any(|(id, slot)| {
+            self.traces[id].get() != UNMARKED
                 && matches!(slot.value, Some(Value::MemoryView { owner: Some(owner), .. })
                     if owner == storage || matches!(self.get(owner),
                         Value::Instance { scalar: Some(payload), .. } if *payload == storage)
                         || matches!(self.get(owner), Value::BytesIoBuffer {storage: backing, ..} if *backing == storage))
         });
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        for trace in &self.traces {
+            trace.set(UNMARKED);
         }
         self.slots[storage as usize].may_have_buffer_views = live;
         Ok(live)
@@ -3312,6 +3360,7 @@ impl Heap {
         let mut visited = END;
         let mut pending = MarkQueue {
             slots: &self.slots,
+            traces: &self.traces,
             next: END,
             ordered: None,
         };
@@ -3320,7 +3369,7 @@ impl Heap {
             && let Some(id) = pending.pop()
         {
             let slot = &self.slots[id as usize];
-            slot.trace.set(visited);
+            self.traces[id as usize].set(visited);
             visited = id as usize;
             if slot.finalization == Finalization::Pending
                 && !stdin.is_some_and(|chain| chain.contains(&id))
@@ -3337,10 +3386,10 @@ impl Heap {
             CycleSet::new(self.slots.len()).map(|mut cycles| self.identify_cycles(&mut cycles))
         };
         while let Some(id) = pending.pop() {
-            self.slots[id as usize].trace.set(UNMARKED);
+            self.traces[id as usize].set(UNMARKED);
         }
         while visited != END {
-            visited = self.slots[visited].trace.replace(UNMARKED);
+            visited = self.traces[visited].replace(UNMARKED);
         }
         next
     }
@@ -3508,7 +3557,7 @@ impl Heap {
     pub(super) fn reserve_slot_or_request_collection(&mut self) {
         if self.slots.len() < self.next_collection
             && self.free_head == END
-            && self.slots.try_reserve(1).is_err()
+            && self.reserve_slot().is_err()
         {
             self.next_collection = self.slots.len();
         }
@@ -3521,9 +3570,7 @@ impl Heap {
 
     /// Request collection before a streaming callback exhausts the heap.
     pub(super) fn prepare_streaming_collection(&mut self, limit: usize) -> bool {
-        if self.free_head == END
-            && (self.slots.len() >= limit || self.slots.try_reserve(1).is_err())
-        {
+        if self.free_head == END && (self.slots.len() >= limit || self.reserve_slot().is_err()) {
             self.next_collection = self.slots.len();
             return true;
         }
@@ -3567,7 +3614,7 @@ impl Heap {
         // Peeling leaves both cycles and their unreachable descendants. Every
         // strong child of a member is therefore already live or itself a member.
         for id in cycles.members() {
-            self.slots[id as usize].trace.set(END);
+            self.traces[id as usize].set(END);
         }
     }
 
@@ -3583,9 +3630,9 @@ impl Heap {
         }
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, Some(child));
-        let last = !self.slots[child as usize].marked();
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        let last = self.traces[child as usize].get() == UNMARKED;
+        for trace in &self.traces {
+            trace.set(UNMARKED);
         }
         Ok(last)
     }
@@ -3603,12 +3650,13 @@ impl Heap {
     fn unreachable_children(&self, value: &Value, mut visit: impl FnMut(usize)) {
         let mut children = MarkQueue {
             slots: &self.slots,
+            traces: &self.traces,
             next: END,
             ordered: None,
         };
         value.children(&mut children);
         while let Some(id) = children.pop() {
-            self.slots[id as usize].trace.set(UNMARKED);
+            self.traces[id as usize].set(UNMARKED);
             visit(id as usize);
         }
     }
@@ -3620,6 +3668,7 @@ impl Heap {
     fn mark_full(&mut self, globals: impl Iterator<Item = Id>, passed: &mut Vec<usize>) {
         let mut pending = MarkQueue {
             slots: &self.slots,
+            traces: &self.traces,
             next: END,
             ordered: None,
         };
@@ -3628,7 +3677,7 @@ impl Heap {
         let mut scan = std::mem::replace(&mut self.gc_order, GcOrder::EMPTY);
         while let Some(id) = scan.pop(&self.slots) {
             let slot = &self.slots[id];
-            if !slot.marked() {
+            if self.traces[id].get() == UNMARKED {
                 passed.push(id);
                 continue;
             }
@@ -3636,6 +3685,7 @@ impl Heap {
             // mark queue would reverse dictionary values and reorder aliases.
             self.get(id as Id).children(&mut MarkQueue {
                 slots: &self.slots,
+                traces: &self.traces,
                 next: END,
                 ordered: Some(&mut scan),
             });
@@ -3654,7 +3704,7 @@ impl Heap {
         // A finalizer can resurrect these objects. Keep their encounter order until
         // the final sweep decides which slots to retire.
         for &id in passed.iter() {
-            if !self.slots[id].marked() {
+            if self.traces[id].get() == UNMARKED {
                 self.gc_order.push(id, &self.slots);
             }
         }
@@ -3662,6 +3712,7 @@ impl Heap {
 
     /// A tracing sweep also releases ordinary expression temporaries. Exclude the
     /// dead objects that refcounting alone would release from the Python GC count.
+    /// The incoming counts must start at zero.
     fn identify_cycles(&self, cycles: &mut CycleSet) -> Option<Id> {
         let mut first_finalizer = None;
         let CycleSet {
@@ -3670,9 +3721,8 @@ impl Heap {
             ..
         } = cycles;
         unowned.clear();
-        incoming.fill(0);
         for (id, slot) in self.slots.iter().enumerate() {
-            if !slot.marked()
+            if self.traces[id].get() == UNMARKED
                 && let Some(value) = &slot.value
             {
                 // Count the candidate itself so that zero denotes a vacant or reachable slot.
@@ -3751,7 +3801,7 @@ impl Heap {
         }
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
-        let reachable = self.slots[owner as usize].marked();
+        let reachable = self.traces[owner as usize].get() != UNMARKED;
         let callbacks = if deallocating || !reachable {
             if !reachable {
                 // Weakrefs in the owner's dictionary are still live during its deallocation.
@@ -3761,8 +3811,8 @@ impl Heap {
         } else {
             Vec::new()
         };
-        for slot in &self.slots {
-            slot.trace.set(UNMARKED);
+        for trace in &self.traces {
+            trace.set(UNMARKED);
         }
         Ok(callbacks)
     }
@@ -3800,8 +3850,8 @@ impl Heap {
                     return !refs.is_empty();
                 }
             } else {
-                refs.retain(|&id| self.slots[id as usize].marked());
-                if dealloc.is_none() && self.slots[target as usize].marked() {
+                refs.retain(|&id| self.traces[id as usize].get() != UNMARKED);
+                if dealloc.is_none() && self.traces[target as usize].get() != UNMARKED {
                     return !refs.is_empty();
                 }
             }
@@ -3824,7 +3874,7 @@ impl Heap {
                 eprintln!("Exception ignored while clearing object weakrefs: MemoryError");
             }
             for &id in refs.iter() {
-                let reachable = self.slots[id as usize].marked();
+                let reachable = self.traces[id as usize].get() != UNMARKED;
                 let wr = self.slots[id as usize]
                     .value
                     .as_mut()
@@ -3885,6 +3935,7 @@ impl Heap {
                 .then_some(id as Id)
         });
         self.mark(globals.chain(outside));
+        cycles.incoming.fill(0);
         self.identify_cycles(&mut cycles);
         let count = cycles
             .members()
@@ -3904,10 +3955,10 @@ impl Heap {
 
     fn sweep(&mut self) -> Option<WeakCallbacks> {
         self.ordinary_finalizers
-            .retain(|&id| self.slots[id as usize].marked());
+            .retain(|&id| self.traces[id as usize].get() != UNMARKED);
         self.file_writers.retain(|&id| {
             let slot = &self.slots[id as usize];
-            slot.marked()
+            self.traces[id as usize].get() != UNMARKED
                 && match &slot.value {
                     Some(Value::TextFile(file)) => !file.closed(),
                     Some(Value::File(file)) => !file.closed(),
@@ -3915,19 +3966,21 @@ impl Heap {
                 }
         });
         self.interned
-            .retain(|_, entry| self.slots[entry.id as usize].marked());
+            .retain(|_, entry| self.traces[entry.id as usize].get() != UNMARKED);
         let callbacks = self.clear_weak_targets(None, None);
         self.abc_registrations.retain(|&[owner, member]| {
-            self.slots[owner as usize].marked() && self.slots[member as usize].marked()
+            self.traces[owner as usize].get() != UNMARKED
+                && self.traces[member as usize].get() != UNMARKED
         });
         self.abc_subclass_cache.retain(|&[owner, member], _| {
-            self.slots[owner as usize].marked() && self.slots[member as usize].marked()
+            self.traces[owner as usize].get() != UNMARKED
+                && self.traces[member as usize].get() != UNMARKED
         });
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
         for id in 0..self.slots.len() {
             let slot = &self.slots[id];
-            if slot.trace.replace(UNMARKED) == UNMARKED && slot.value.is_some() {
+            if self.traces[id].replace(UNMARKED) == UNMARKED && slot.value.is_some() {
                 self.gc_order.remove(id, &self.slots);
                 let slot = &mut self.slots[id];
                 slot.value = None;
@@ -4079,7 +4132,7 @@ mod tests {
             scope: owner,
             origin: None,
             initializing: false,
-            locale_error: None,
+            module_state: None,
             constructor: None,
         });
         let modules = heap.alloc(Value::Dict(vec![(NONE, module)].into()));
@@ -4220,7 +4273,8 @@ mod reachability_tests {
         let Value::List(items) = heap.get_mut(survivor) else {
             unreachable!()
         };
-        items.push(child);
+        // The survivor has two incoming owners before resurrection.
+        items.extend([child, survivor]);
         let Value::List(items) = heap.get_mut(doomed) else {
             unreachable!()
         };

@@ -1,16 +1,57 @@
+import sys
 from inspect import getattr_static
-from types import MappingProxyType
-from typing import TypeVar
+from types import MappingProxyType, ModuleType
+from typing import Any, Callable, List, TypeVar, Unpack
 
 
 def current():
     variable = TypeVar("T", covariant=True)
     namespace = vars(TypeVar)
+    assert namespace["__reduce__"](variable) == variable.__reduce__() == "T"
+    for args in ((), (1,), (variable, 1)):
+        try:
+            TypeVar.__reduce__(*args)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invalid TypeVar reducer call")
+    assert issubclass(type(Any), type)
+    assert type(Callable).__reduce__ is type(List).__reduce__
+    assert Callable.__reduce__() == "Callable"
+
+    class Reducer:
+        def __get__(self, obj, owner):
+            return obj, owner
+
+    parent = type(List)
+    original = parent.__reduce__
+    module = sys.modules["typing"]
+    sys.modules["typing"] = ModuleType("replacement")
+    try:
+        assert type(Callable).__reduce__ is original and Callable.__reduce__() == "Callable"
+        parent.__reduce__ = Reducer()
+        assert type(Callable).__reduce__ == (None, type(Callable))
+        assert Callable.__reduce__ == (Callable, type(Callable))
+    finally:
+        parent.__reduce__ = original
+        sys.modules["typing"] = module
+
     assert type(namespace) is MappingProxyType
     assert namespace["__module__"] == TypeVar.__module__ == "typing"
     assert namespace["__doc__"] == TypeVar.__doc__ and TypeVar.__doc__.startswith("Type variable.")
     assert namespace["has_default"] is TypeVar.has_default
     assert namespace["has_default"](variable) is variable.has_default() is False
+    substitute = namespace["__typing_subst__"]
+    assert substitute is TypeVar.__typing_subst__
+    assert substitute(variable, None) is type(None)
+    assert variable.__typing_subst__(int) is int
+    for unpacked in (Unpack[tuple[int, ...]], (*tuple[int, ...],)[0]):
+        try:
+            variable.__typing_subst__(unpacked)
+        except TypeError as error:
+            assert str(error) == f"{unpacked} is not valid as type argument"
+        else:
+            raise AssertionError("substituted an unpacked tuple for a type variable")
     try:
         namespace["extra"] = 1
     except TypeError:
@@ -45,7 +86,8 @@ def current():
     else:
         raise AssertionError("member accepted unrelated receiver")
 
-    from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
+    from annotationlib import Format
+    from typing import NoDefault, ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
     P = ParamSpec("P")
     parameters = (P, P.args, P.kwargs, TypeVarTuple("Ts"))
@@ -71,3 +113,28 @@ def current():
         assert method.__get__(parameter)() is parameter.has_default() is False
     assert isinstance(ParamSpec.__name__, str)
     assert vars(ParamSpec)["__name__"].__get__(P) == "P"
+
+    marker = []
+    for default in (None, (), marker, NoDefault):
+        parameter = TypeVar("T", default=default)
+        assert parameter.__default__ is default
+        assert parameter.has_default() is (default is not NoDefault)
+        assert parameter.evaluate_default(Format.VALUE) is default
+    assert variable.evaluate_default(Format.VALUE) is NoDefault
+
+    from typing import Generic
+
+    required = TypeVar("U")
+    defaulted = TypeVar("D", default=None)
+
+    class Tail(Generic[variable, required, defaulted]): pass
+
+    assert Tail[str, bool].__args__ == (str, bool, None)
+    assert Tail[str, bool, None].__args__ == (str, bool, type(None))
+    assert Tail[str, bool, int].__args__ == (str, bool, int)
+    try:
+        Tail[str]
+    except TypeError as exc:
+        assert str(exc).endswith("actual 1, expected at least 2")
+    else:
+        raise AssertionError("accepted a missing required type argument")

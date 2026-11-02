@@ -1161,6 +1161,8 @@ pub(crate) enum Builtin {
     BoxValue,
     ObjectRecordProject(usize),
     ObjectStreamProject,
+    ObjectTextProject,
+    ObjectIsExactTuple,
     ObjectRecordIdentity {
         class: usize,
         reversed: bool,
@@ -1545,6 +1547,7 @@ pub(crate) enum Builtin {
     },
     DequeClear,
     DequeReverse,
+    DequeRotate,
     DequeGet {
         method: bool,
     },
@@ -2157,6 +2160,9 @@ pub(crate) enum Readiness {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
     TransferFd,
+    CopyFileRange,
+    CheckCopyCount,
+    CheckCopyOffset,
     Read,
     Write,
     Open,
@@ -2169,10 +2175,13 @@ pub(crate) enum FdOperation {
     Close,
     Dup,
     Isatty,
+    DeviceEncoding,
+    PtsName,
     GetBlocking,
     SetBlocking,
     GetInheritable,
     SetInheritable,
+    OpenPty,
 }
 
 /// Filesystem copy operations using the same ordered pair of path operands.
@@ -2319,7 +2328,10 @@ pub(crate) enum ProcessOperation {
     EnvironSet {
         bytes: bool,
     },
-    GetCwd,
+    GetPid,
+    GetCwd {
+        bytes: bool,
+    },
     Fd(FdOperation),
     Credential(&'static str),
     CredentialId {
@@ -2374,6 +2386,8 @@ impl IoBase {
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    /// An exact builtin string, excluding nominal string subclasses.
+    ExactText,
     ContextVar,
     ContextToken,
     IoBase(IoBase),
@@ -2398,6 +2412,7 @@ impl InstanceType {
             Self::ContextVar => matches!(ty, Type::ContextVar(_)),
             Self::ContextToken => matches!(ty, Type::ContextToken(_)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool | Type::IntEnum(_)),
+            Self::ExactText => matches!(ty, Type::Str | Type::StrLiteral(_)),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
@@ -2493,134 +2508,149 @@ pub(crate) enum Statement {
     Raise(Option<Expr>),
 }
 
-impl Statement {
-    /// Visits nested suites in source order, excluding suites owned by expressions.
-    pub(crate) fn suites<'a>(&'a self, mut visit: impl FnMut(&'a [Statement])) {
-        match self {
-            Self::Scope { body, .. } => visit(body),
-            Self::If(_, body, orelse)
-            | Self::While(_, body, orelse)
-            | Self::For { body, orelse, .. } => {
-                visit(body);
-                visit(orelse);
+// Match ergonomics preserve the borrow of each operand and suite for inspection or rewriting.
+macro_rules! statement_children {
+    ($statement:expr, $expression:expr, $suite:expr) => {
+        match $statement {
+            Statement::Assign(_, value)
+            | Statement::Expr(value)
+            | Statement::Return(value)
+            | Statement::Assert(value) => ($expression)(value),
+            Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
+                for value in [a, b, c] {
+                    ($expression)(value);
+                }
             }
-            Self::Try {
+            Statement::SetField(a, _, b) | Statement::AugmentField(a, _, _, b) => {
+                ($expression)(a);
+                ($expression)(b);
+            }
+            Statement::Scope { body, .. } => ($suite)(body),
+            Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
+                ($expression)(test);
+                ($suite)(yes);
+                ($suite)(no);
+            }
+            Statement::For {
+                args, body, orelse, ..
+            } => {
+                for arg in args {
+                    ($expression)(arg);
+                }
+                ($suite)(body);
+                ($suite)(orelse);
+            }
+            Statement::Try {
                 body,
                 handlers,
                 orelse,
                 finalbody,
             } => {
-                visit(body);
-                for handler in handlers {
-                    visit(&handler.body);
+                ($suite)(body);
+                for ExceptHandler { body, .. } in handlers {
+                    ($suite)(body);
                 }
-                visit(orelse);
-                visit(finalbody);
+                ($suite)(orelse);
+                ($suite)(finalbody);
             }
-            _ => {}
-        }
-    }
-}
-
-/// Visits each statement in ordinary suites. Expression-owned suites have separate roots.
-pub(crate) fn walk_block<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Statement)) {
-    for statement in body {
-        visit(statement);
-        statement.suites(|body| walk_block(body, visit));
-    }
-}
-
-/// Visits all statement nodes once, including those nested inside eager expressions.
-pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Statement)) {
-    walk_block(body, visit);
-    walk_expressions(body, &mut |expression| {
-        if let ExprKind::Scope { body, .. } = &expression.kind {
-            walk_block(body, visit);
-        }
-    });
-}
-
-/// Visits expression trees, including statements embedded in eager expressions.
-/// Analyses must include every checked branch, even when it never executes.
-pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
-    for statement in body {
-        match statement {
-            Statement::Assign(_, value)
-            | Statement::Expr(value)
-            | Statement::Return(value)
-            | Statement::Assert(value)
-            | Statement::If(value, _, _)
-            | Statement::While(value, _, _)
-            | Statement::Raise(Some(value)) => walk_expression(value, visit),
-            Statement::SetItem(receiver, index, value)
-            | Statement::AugmentItem(receiver, index, _, value) => {
-                for operand in [receiver, index, value] {
-                    walk_expression(operand, visit);
-                }
-            }
-            Statement::SetField(receiver, _, value)
-            | Statement::AugmentField(receiver, _, _, value) => {
-                walk_expression(receiver, visit);
-                walk_expression(value, visit);
-            }
-            Statement::For { args, .. } => {
-                for arg in args {
-                    walk_expression(arg, visit);
-                }
-            }
+            Statement::Raise(Some(value)) => ($expression)(value),
             Statement::Move(..)
             | Statement::Clear(_)
-            | Statement::Scope { .. }
-            | Statement::Try { .. }
             | Statement::Raise(None)
             | Statement::IterNext { .. }
             | Statement::Break
             | Statement::Continue
             | Statement::Exhaust => {}
         }
-        statement.suites(|body| walk_expressions(body, visit));
+    };
+}
+
+impl Statement {
+    /// Visits nested suites in source order, excluding suites owned by expressions.
+    pub(crate) fn suites<'a>(&'a self, mut visit: impl FnMut(&'a [Statement])) {
+        statement_children!(self, |_| {}, visit);
     }
 }
 
-/// Visits a checked expression and every expression in its eager scopes.
-pub(crate) fn walk_expression<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
-    visit(value);
+enum Node<'a> {
+    Statement(&'a Statement),
+    Expression(&'a Expr),
+}
+
+fn walk_nodes<'a>(body: &'a [Statement], visit: &mut impl FnMut(Node<'a>)) {
+    for statement in body {
+        visit(Node::Statement(statement));
+        statement_children!(statement, |value| walk_expression(value, visit), |suite| {
+            walk_nodes(suite, visit)
+        });
+    }
+}
+
+fn walk_expression<'a>(value: &'a Expr, visit: &mut impl FnMut(Node<'a>)) {
+    visit(Node::Expression(value));
     if let ExprKind::Scope { body, value, .. } = &value.kind {
-        walk_expressions(body, visit);
+        walk_nodes(body, visit);
         walk_expression(value, visit);
     } else {
         children(value, |child| walk_expression(child, visit));
     }
 }
 
+/// Visits all statement nodes once, including those nested inside eager expressions.
+pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Statement)) {
+    walk_nodes(body, &mut |node| {
+        if let Node::Statement(statement) = node {
+            visit(statement);
+        }
+    });
+}
+
+/// Includes loops in eager expression scopes when deciding whether a suite can be cloned.
+pub(crate) fn contains_loop(body: &[Statement]) -> bool {
+    let mut found = false;
+    walk_statements(body, &mut |statement| {
+        found |= matches!(statement, Statement::For { .. } | Statement::While(..));
+    });
+    found
+}
+
+/// Visits expression trees, including statements embedded in eager expressions.
+/// Analyses must include every checked branch, even when it never executes.
+pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
+    walk_nodes(body, &mut |node| {
+        if let Node::Expression(value) = node {
+            visit(value);
+        }
+    });
+}
+
 /// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.
 pub(crate) fn walk_writes(body: &[Statement], mut visit: impl FnMut(usize, Option<&Expr>)) {
-    statement_writes(body, &mut visit);
-    walk_expressions(body, &mut |value| scoped_writes(value, &mut visit));
+    walk_nodes(body, &mut |node| node_writes(node, &mut visit));
 }
 
 /// Visits writes during operand evaluation, including assignments in eager scopes.
 pub(crate) fn walk_expression_writes(value: &Expr, mut visit: impl FnMut(usize, Option<&Expr>)) {
-    walk_expression(value, &mut |value| scoped_writes(value, &mut visit));
+    walk_expression(value, &mut |node| node_writes(node, &mut visit));
 }
 
-/// The expression walker handles nested operands. Each scope contributes its own suite and cleanup.
-fn scoped_writes(value: &Expr, visit: &mut impl FnMut(usize, Option<&Expr>)) {
-    match &value.kind {
-        ExprKind::Scope { body, clear, .. } => {
-            statement_writes(body, visit);
-            for &slot in clear {
-                visit(slot, None);
+fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
+    let statement = match node {
+        Node::Expression(value) => {
+            match &value.kind {
+                ExprKind::Scope { clear, .. } => {
+                    for &slot in clear {
+                        visit(slot, None);
+                    }
+                }
+                ExprKind::Bind(slot, _) => visit(*slot, None),
+                _ => {}
             }
+            return;
         }
-        ExprKind::Bind(slot, _) => visit(*slot, None),
-        _ => {}
-    }
-}
-
-/// Visits writes in statement-owned suites. Expression scopes are separate roots.
-fn statement_writes(body: &[Statement], visit: &mut impl FnMut(usize, Option<&Expr>)) {
-    walk_block(body, &mut |statement| match statement {
+        Node::Statement(statement) => statement,
+    };
+    match statement {
         Statement::Assign(slot, value) => visit(*slot, Some(value)),
         Statement::Clear(slot) => visit(*slot, None),
         Statement::Move(target, source) => {
@@ -2658,145 +2688,91 @@ fn statement_writes(body: &[Statement], visit: &mut impl FnMut(usize, Option<&Ex
             }
         }
         _ => {}
-    });
+    }
+}
+
+// The same field patterns yield shared or mutable operands depending on the borrow.
+macro_rules! expression_children {
+    ($kind:expr, $visit:ident) => {
+        match $kind {
+            ExprKind::Exception { message, .. } => {
+                if let Some(message) = message {
+                    $visit(message);
+                }
+            }
+            ExprKind::Dict { entries, .. } => {
+                for (key, value) in entries {
+                    $visit(key);
+                    $visit(value);
+                }
+            }
+            ExprKind::List(values)
+            | ExprKind::Set { values, .. }
+            | ExprKind::Tuple(values)
+            | ExprKind::Compare(values, _)
+            | ExprKind::Boolean(_, values)
+            | ExprKind::Builtin(_, values)
+            | ExprKind::Call(_, CallArgs { values, .. })
+            | ExprKind::Construct {
+                args: CallArgs { values, .. },
+                ..
+            } => {
+                for value in values {
+                    $visit(value);
+                }
+            }
+            ExprKind::Callable { receiver, .. } => {
+                if let Some(receiver) = receiver {
+                    $visit(receiver);
+                }
+            }
+            ExprKind::Invoke {
+                callable,
+                args: CallArgs { values, .. },
+            } => {
+                $visit(callable);
+                for value in values {
+                    $visit(value);
+                }
+            }
+            ExprKind::Scope { .. } => {
+                unreachable!("scoped statements require the full inspection or rewrite pass")
+            }
+            ExprKind::Bind(_, value)
+            | ExprKind::Present(value)
+            | ExprKind::Absent(value)
+            | ExprKind::Unwrap(value)
+            | ExprKind::Not(value)
+            | ExprKind::Negate(value)
+            | ExprKind::Field(value, _) => $visit(value),
+            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
+                $visit(left);
+                $visit(right);
+            }
+            ExprKind::Conditional(test, yes, no) => {
+                $visit(test);
+                $visit(yes);
+                $visit(no);
+            }
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Str(_)
+            | ExprKind::Bytes(_)
+            | ExprKind::None
+            | ExprKind::Local(_) => {}
+        }
+    };
 }
 
 /// Visits one expression's operands. Scoped statements are handled by the caller.
 pub(crate) fn children<'a>(expression: &'a Expr, mut visit: impl FnMut(&'a Expr)) {
-    match &expression.kind {
-        ExprKind::Exception { message, .. } => {
-            if let Some(message) = message {
-                visit(message);
-            }
-        }
-        ExprKind::Dict { entries, .. } => {
-            for (key, value) in entries {
-                visit(key);
-                visit(value);
-            }
-        }
-        ExprKind::List(values)
-        | ExprKind::Set { values, .. }
-        | ExprKind::Tuple(values)
-        | ExprKind::Compare(values, _)
-        | ExprKind::Boolean(_, values)
-        | ExprKind::Builtin(_, values) => {
-            for value in values {
-                visit(value);
-            }
-        }
-        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-            for value in &args.values {
-                visit(value);
-            }
-        }
-        ExprKind::Callable { receiver, .. } => {
-            if let Some(receiver) = receiver {
-                visit(receiver);
-            }
-        }
-        ExprKind::Invoke { callable, args } => {
-            visit(callable);
-            for value in &args.values {
-                visit(value);
-            }
-        }
-        ExprKind::Scope { .. } => {
-            unreachable!("scoped statements require the full inspection or rewrite pass")
-        }
-        ExprKind::Bind(_, value)
-        | ExprKind::Present(value)
-        | ExprKind::Absent(value)
-        | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
-        | ExprKind::Field(value, _) => visit(value),
-        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-            visit(left);
-            visit(right);
-        }
-        ExprKind::Conditional(test, yes, no) => {
-            visit(test);
-            visit(yes);
-            visit(no);
-        }
-        ExprKind::Int(_)
-        | ExprKind::Float(_)
-        | ExprKind::Bool(_)
-        | ExprKind::Str(_)
-        | ExprKind::Bytes(_)
-        | ExprKind::None
-        | ExprKind::Local(_) => {}
-    }
+    expression_children!(&expression.kind, visit);
 }
 
-/// Visits one expression's operands. Scoped statements are handled by the caller.
+/// Visits one expression's operands for rewriting.
 pub(crate) fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
-    match &mut expression.kind {
-        ExprKind::Exception { message, .. } => {
-            if let Some(message) = message {
-                visit(message);
-            }
-        }
-        ExprKind::Dict { entries, .. } => {
-            for (key, value) in entries {
-                visit(key);
-                visit(value);
-            }
-        }
-        ExprKind::List(values)
-        | ExprKind::Set { values, .. }
-        | ExprKind::Tuple(values)
-        | ExprKind::Compare(values, _)
-        | ExprKind::Boolean(_, values)
-        | ExprKind::Builtin(_, values) => {
-            for value in values {
-                visit(value);
-            }
-        }
-        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-            for value in &mut args.values {
-                visit(value);
-            }
-        }
-        ExprKind::Callable { receiver, .. } => {
-            if let Some(receiver) = receiver {
-                visit(receiver);
-            }
-        }
-        ExprKind::Invoke { callable, args } => {
-            visit(callable);
-            for value in &mut args.values {
-                visit(value);
-            }
-        }
-        ExprKind::Scope { .. } => {
-            unreachable!("scoped statements require the full inspection or rewrite pass")
-        }
-        ExprKind::Bind(_, value)
-        | ExprKind::Present(value)
-        | ExprKind::Absent(value)
-        | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
-        | ExprKind::Field(value, _) => visit(value),
-        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-            visit(left);
-            visit(right);
-        }
-        ExprKind::Conditional(test, yes, no) => {
-            visit(test);
-            visit(yes);
-            visit(no);
-        }
-        ExprKind::Int(_)
-        | ExprKind::Float(_)
-        | ExprKind::Bool(_)
-        | ExprKind::Str(_)
-        | ExprKind::Bytes(_)
-        | ExprKind::None
-        | ExprKind::Local(_) => {}
-    }
+    expression_children!(&mut expression.kind, visit);
 }
 
 /// Visits the immediate expressions and suites of one statement.
@@ -2809,68 +2785,47 @@ pub(crate) fn statement_children_mut(
     statement: &mut Statement,
     mut visit: impl FnMut(ChildMut<'_>),
 ) {
-    match statement {
-        Statement::Assign(_, value)
-        | Statement::Expr(value)
-        | Statement::Return(value)
-        | Statement::Assert(value) => visit(ChildMut::Expression(value)),
-        Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
-            for value in [a, b, c] {
-                visit(ChildMut::Expression(value));
-            }
-        }
-        Statement::SetField(a, _, b) | Statement::AugmentField(a, _, _, b) => {
-            visit(ChildMut::Expression(a));
-            visit(ChildMut::Expression(b));
-        }
-        Statement::Scope { body, .. } => visit(ChildMut::Suite(body)),
-        Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
-            visit(ChildMut::Expression(test));
-            visit(ChildMut::Suite(yes));
-            visit(ChildMut::Suite(no));
-        }
-        Statement::For {
-            args, body, orelse, ..
-        } => {
-            for arg in args {
-                visit(ChildMut::Expression(arg));
-            }
-            visit(ChildMut::Suite(body));
-            visit(ChildMut::Suite(orelse));
-        }
-        Statement::Try {
-            body,
-            handlers,
-            orelse,
-            finalbody,
-        } => {
-            visit(ChildMut::Suite(body));
-            for handler in handlers {
-                visit(ChildMut::Suite(&mut handler.body));
-            }
-            visit(ChildMut::Suite(orelse));
-            visit(ChildMut::Suite(finalbody));
-        }
-        Statement::Raise(Some(value)) => visit(ChildMut::Expression(value)),
-        _ => {}
-    }
+    statement_children!(
+        statement,
+        |value| visit(ChildMut::Expression(value)),
+        |body| visit(ChildMut::Suite(body))
+    );
+}
+
+/// Visits original statements child-first, including those in expression scopes.
+/// A replacement installed by the visitor is not revisited.
+pub(crate) fn rewrite_statements(body: &mut [Statement], visit: &mut impl FnMut(&mut Statement)) {
+    walk_mut(body, &mut |_| {}, visit);
 }
 
 /// Rewrites every checked expression, including expressions inside eager scopes.
 pub(crate) fn walk_expressions_mut(body: &mut [Statement], visit: &mut impl FnMut(&mut Expr)) {
-    fn expression(value: &mut Expr, visit: &mut impl FnMut(&mut Expr)) {
-        visit(value);
+    walk_mut(body, visit, &mut |_| {});
+}
+
+fn walk_mut(
+    body: &mut [Statement],
+    enter_expr: &mut impl FnMut(&mut Expr),
+    leave_stmt: &mut impl FnMut(&mut Statement),
+) {
+    fn expression(
+        value: &mut Expr,
+        enter_expr: &mut impl FnMut(&mut Expr),
+        leave_stmt: &mut impl FnMut(&mut Statement),
+    ) {
+        enter_expr(value);
         if let ExprKind::Scope { body, value, .. } = &mut value.kind {
-            walk_expressions_mut(body, visit);
-            expression(value, visit);
+            walk_mut(body, enter_expr, leave_stmt);
+            expression(value, enter_expr, leave_stmt);
         } else {
-            children_mut(value, |child| expression(child, visit));
+            children_mut(value, |child| expression(child, enter_expr, leave_stmt));
         }
     }
     for statement in body {
         statement_children_mut(statement, |child| match child {
-            ChildMut::Expression(value) => expression(value, visit),
-            ChildMut::Suite(body) => walk_expressions_mut(body, visit),
+            ChildMut::Expression(value) => expression(value, enter_expr, leave_stmt),
+            ChildMut::Suite(body) => walk_mut(body, enter_expr, leave_stmt),
         });
+        leave_stmt(statement);
     }
 }

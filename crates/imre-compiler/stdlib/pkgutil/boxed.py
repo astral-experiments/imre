@@ -1,7 +1,7 @@
 """Discover filesystem modules and read package resources in runtime imports."""
 
 import sys
-from importlib.util import _spec_name
+from importlib.util import resolve_name as _spec_name
 from os import fsdecode
 from os.path import abspath as _absolute, dirname, join as _join
 from typing import NamedTuple

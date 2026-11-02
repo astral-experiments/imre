@@ -32,6 +32,17 @@ class Accessor(t.Generic[T]):
     pass
 
 
+class Slotted(t.Generic[T]):
+    __slots__ = ("value",)
+
+
+assert "__slots__" not in vars(t.Generic)
+for obj in (Slotted(), Slotted[int]()):
+    obj.value = 7
+    assert obj.value == 7 and not hasattr(obj, "__dict__")
+assert hasattr(Accessor[int](), "__dict__")
+
+
 # Parameterizations share class attributes through their common origin.
 Accessor[int].marker = object()
 assert Accessor[str].marker is Accessor.marker
@@ -89,6 +100,19 @@ class Right:
     def select(self, arg):
         return "other"
 
+
+registry = t._overload_registry
+try:
+    t._overload_registry = type(registry)(registry.default_factory)
+    def temporary(x): pass
+    assert t.overload(temporary) is t._overload_dummy
+    assert t._overload_registry[__name__][temporary.__qualname__] == {temporary.__code__.co_firstlineno: temporary}
+    assert t.get_overloads(temporary) == [temporary]
+    assert t.get_overloads(Left.select) == []
+    t.clear_overloads()
+    assert t._overload_registry == {}
+finally:
+    t._overload_registry = registry
 
 old = t.get_overloads(Left.select)
 print(len(old), old[0](None, 1), old[1](None, 2), old[0] is t.get_overloads(Left().select)[0])

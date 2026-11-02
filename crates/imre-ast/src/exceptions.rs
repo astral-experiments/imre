@@ -50,6 +50,7 @@ exception_kinds! {
         Exception = 1,
         RuntimeError = 10,
         RecursionError = 43,
+        PythonFinalizationError = 73,
         NotImplementedError = 37,
         TypeError = 13,
         ValueError = 8,
@@ -215,7 +216,10 @@ impl Kind {
             }
             Self::RuntimeError => matches!(
                 self,
-                Self::RuntimeError | Self::NotImplementedError | Self::RecursionError
+                Self::RuntimeError
+                    | Self::NotImplementedError
+                    | Self::RecursionError
+                    | Self::PythonFinalizationError
             ),
             Self::ShutilError => matches!(self, Self::ShutilError | Self::SameFileError),
             Self::ConnectionError => matches!(

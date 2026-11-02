@@ -2629,6 +2629,7 @@ impl<'a> Checker<'a> {
             "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
             "union" => "set.union",
             "difference_update" => "set.difference_update",
+            "pop" => "set.pop",
             "remove" => "set.remove",
             "update" => "set.update",
             "issubset" => "set.issubset",
@@ -2660,8 +2661,13 @@ impl<'a> Checker<'a> {
         if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
             return Err(self.object_builtin_error(method, attribute));
         }
-        if receiver.ty == Type::CodecInfo && attribute.attr.as_str() == "_is_text_encoding" {
-            return Err(self.object_builtin_error("CodecInfo._is_text_encoding", attribute));
+        if receiver.ty == Type::CodecInfo
+            && matches!(
+                attribute.attr.as_str(),
+                "_is_text_encoding" | "incrementaldecoder"
+            )
+        {
+            return Err(self.object_builtin_error(attribute.attr.as_str(), attribute));
         }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
@@ -4900,11 +4906,12 @@ impl<'a> Checker<'a> {
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
                         if receiver.ty == Type::CodecInfo
-                            && attr.attr.as_str() == "_is_text_encoding"
+                            && matches!(
+                                attr.attr.as_str(),
+                                "_is_text_encoding" | "incrementaldecoder"
+                            )
                         {
-                            return Err(
-                                self.object_builtin_error("CodecInfo._is_text_encoding", attr)
-                            );
+                            return Err(self.object_builtin_error(attr.attr.as_str(), attr));
                         }
                         if matches!(receiver.ty, Type::Popen(..)) && attr.attr.as_str() == "poll" {
                             statements.push(Statement::Expr(Expr {
@@ -6010,6 +6017,12 @@ impl<'a> Checker<'a> {
             return Err(self.object_runtime_export("timedelta remainder", binary));
         }
         if let (Type::Calendar(first), Type::Calendar(second)) = (left.ty, right.ty) {
+            if binary.op == ast::Operator::Sub
+                && first == ir::CalendarType::Date
+                && second == ir::CalendarType::Date
+            {
+                return Err(self.object_runtime_export("date difference", binary));
+            }
             return calendar::binary(first, second, left, right, binary, self.source);
         }
         if binary.op == ast::Operator::Mod
@@ -6135,6 +6148,9 @@ impl<'a> Checker<'a> {
             return Ok((op, Type::Int));
         }
         if op == ast::Operator::Mult {
+            if matches!(left, Type::Deque(_)) || matches!(right, Type::Deque(_)) {
+                return Err(self.object_builtin_error("collections.deque repetition", node));
+            }
             if (self.types.element(left).is_some() || matches!(left, Type::Bytes | Type::Str))
                 && right == Type::Int
             {
@@ -6145,6 +6161,9 @@ impl<'a> Checker<'a> {
             {
                 return Ok((Binary::Repeat, right));
             }
+        }
+        if op == ast::Operator::Add && matches!(left, Type::Deque(_)) {
+            return Err(self.object_builtin_error("collections.deque concatenation", node));
         }
         if op == ast::Operator::Add && matches!(left, Type::Str | Type::Bytes) && right == left {
             return Ok((Binary::Concat, left));
@@ -6220,7 +6239,7 @@ impl<'a> Checker<'a> {
     }
 
     fn boxed_builtin_callable(&self, expression: &ast::Expr) -> Option<&'static str> {
-        ["exec", "hex"]
+        ["exec", "hex", "oct"]
             .into_iter()
             .find(|name| self.unshadowed_builtin(expression, name))
     }
@@ -6479,6 +6498,9 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::GetEnv if cfg!(unix) && self.graph.command_startup.is_some() => {
+                    return Err(self.scoped_builtin_error("os.getenv", expression));
+                }
                 Intrinsic::UrlSplit => {
                     return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
                 }
@@ -6518,6 +6540,11 @@ impl<'a> Checker<'a> {
                         ty: Type::Bytes,
                         kind: ExprKind::Bytes(bytes.to_vec()),
                     });
+                }
+                // Specialized lookups and mutations are handled at their call sites.
+                // When the mapping itself escapes, preserve its identity and live views.
+                Intrinsic::Environ | Intrinsic::EnvironBytes => {
+                    return Err(self.scoped_builtin_error("environment mapping", expression));
                 }
                 Intrinsic::Stdin => return Err(self.object_runtime_export("sys.stdin", expression)),
                 Intrinsic::Stdout => return Ok(self.stdout_value()),
@@ -6928,6 +6955,27 @@ impl<'a> Checker<'a> {
                 return self.boolean_value(boolean, None);
             }
             ast::Expr::Compare(compare) => {
+                if let Some((value, class, positive)) = self.exact_object_type(compare) {
+                    let predicate = match class {
+                        ty_python_semantic::types::KnownClass::Str => {
+                            Builtin::IsInstance(vec![ir::InstanceType::ExactText])
+                        }
+                        ty_python_semantic::types::KnownClass::Tuple => Builtin::ObjectIsExactTuple,
+                        _ => unreachable!("only exact str and tuple comparisons"),
+                    };
+                    let test = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(predicate, vec![self.expr(value)?]),
+                    };
+                    return Ok(if positive {
+                        test
+                    } else {
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(test)),
+                        }
+                    });
+                }
                 if let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref()
                     && let [left, right] = compare.operands.as_ref()
                     && let (Some(left), Some(right)) =
@@ -7284,6 +7332,15 @@ impl<'a> Checker<'a> {
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
+                    if matches!(
+                        op,
+                        ast::CmpOp::Lt | ast::CmpOp::LtE | ast::CmpOp::Gt | ast::CmpOp::GtE
+                    ) && (matches!(ty, Type::Deque(_)) || matches!(right, Type::Deque(_)))
+                    {
+                        return Err(
+                            self.scoped_builtin_error("collections.deque ordering", expression)
+                        );
+                    }
                     if ty == Type::Context || right == Type::Context {
                         return Err(error(
                             self.source,
@@ -7703,8 +7760,11 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
-                if self.deque_repr_descriptor(attribute) {
-                    return Err(self.scoped_builtin_error("collections.deque.__repr__", attribute));
+                if self.boxed_deque_descriptor(attribute) {
+                    return Err(self.scoped_builtin_error(
+                        &format!("collections.deque.{}", attribute.attr.as_str()),
+                        attribute,
+                    ));
                 }
                 if attribute.attr.as_str() == "MISSING"
                     && self.resolve(&attribute.value)
@@ -8000,6 +8060,11 @@ impl<'a> Checker<'a> {
                         Type::None,
                     ));
                 }
+                if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
+                    && self.types.mapping(receiver.ty).is_some()
+                {
+                    return Err(self.scoped_builtin_error("bound dictionary view method", attribute));
+                }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);
                 }
@@ -8140,7 +8205,9 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
                     });
                 }
-                if calendar::boxed_member(receiver.ty, attribute.attr.as_str()) {
+                if calendar::boxed_member(receiver.ty, attribute.attr.as_str())
+                    || calendar::date_isoformat(receiver.ty, attribute.attr.as_str())
+                {
                     return Err(self.object_runtime_export("datetime instance member", attribute));
                 }
                 if let Type::Calendar(kind) = receiver.ty {
@@ -8805,6 +8872,9 @@ impl<'a> Checker<'a> {
         if let Some((origin, declaration)) = self.namedtuple_factory(&call.func) {
             return self.namedtuple_call(origin, &declaration, call);
         }
+        if self.collection_binding(&call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple)) {
+            return Err(self.scoped_builtin_error("collections.namedtuple", call));
+        }
         if let Some((method, name)) = crate::classes::super_method(call)
             && self.unshadowed_builtin(name, "super")
         {
@@ -8860,9 +8930,18 @@ impl<'a> Checker<'a> {
             return self.counter_elements(call, None);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && self.deque_repr_descriptor(attribute)
+            && self.boxed_deque_descriptor(attribute)
         {
-            return self.boxed_deque_repr_call(call);
+            return self.boxed_deque_call(attribute.attr.as_str(), call);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "__len__"
+            && self
+                .graph
+                .session
+                .is_builtin_sequence_class(self.module, &method.value)
+        {
+            return Err(self.scoped_builtin_error("sequence length descriptor", call));
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "reverse"
@@ -8957,7 +9036,10 @@ impl<'a> Checker<'a> {
                     return self.credential_call(call, name);
                 }
                 Some(Binding::Intrinsic(Intrinsic::Fd(
-                    op @ (ir::FdOperation::Pipe2 | ir::FdOperation::Read | ir::FdOperation::Write),
+                    op @ (ir::FdOperation::Pipe2
+                    | ir::FdOperation::Read
+                    | ir::FdOperation::Write
+                    | ir::FdOperation::CopyFileRange),
                 ))) => {
                     return self.fd_call(call, op);
                 }
@@ -9289,6 +9371,18 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) => {
                 return Err(self.scoped_builtin_error(name, call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport("posix.getpid")))
+                if call.arguments.is_empty()
+                    && self
+                        .graph
+                        .session
+                        .is_stdlib_function(self.module, &call.func, "os", "getpid") =>
+            {
+                return Ok(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetPid), vec![]),
+                });
+            }
             Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) => {
                 return Err(self.object_runtime_export(name, call));
             }
@@ -9320,7 +9414,14 @@ impl<'a> Checker<'a> {
                     "groupby requires direct for iteration with an immediate list(group)",
                 ));
             }
-            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => {
+                // An ordinary POSIX environment can contain surrogate-escaped text
+                // and getenv returns its default by identity, regardless of its type.
+                if cfg!(unix) && self.graph.command_startup.is_some() {
+                    return Err(self.scoped_builtin_error("os.getenv", call));
+                }
+                return self.environ_get(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Strerror)) => {
                 self.reject_builtin_keywords(call)?;
                 let [code] = call.arguments.args.as_ref() else {
@@ -9358,11 +9459,12 @@ impl<'a> Checker<'a> {
                 self.defer_object_error(&error);
                 return Ok(Expr::none());
             }
-            Some(Binding::Intrinsic(Intrinsic::GetCwd)) => {
+            Some(Binding::Intrinsic(Intrinsic::GetCwd { bytes })) => {
                 self.arguments(call, &[], None)?;
+                let op = ir::ProcessOperation::GetCwd { bytes };
                 return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
+                    ty: if bytes { Type::Bytes } else { Type::Str },
+                    kind: ExprKind::Builtin(Builtin::Process(op), vec![]),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Popen)) => return self.popen(call, None),
@@ -10116,7 +10218,7 @@ impl<'a> Checker<'a> {
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
-                return self.named_format_call(Self::string_value(receiver), call);
+                return self.string_format_call(Self::string_value(receiver), call);
             }
             if attribute.attr.as_str() == "translate"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -10362,6 +10464,11 @@ impl<'a> Checker<'a> {
                 {
                     *view = true;
                     return Ok(receiver);
+                }
+                if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
+                    && call.arguments.is_empty()
+                {
+                    return Err(self.scoped_builtin_error("dictionary view", call));
                 }
                 let pop = attribute.attr.as_str() == "pop";
                 if (!pop && attribute.attr.as_str() != "get")
@@ -11039,9 +11146,11 @@ impl<'a> Checker<'a> {
             return Ok(self.implementation_hasattr(receiver.clone(), key));
         }
         if self.unshadowed_builtin(&call.func, "getattr")
-            && let [receiver, attribute] = args.as_slice()
+            && let [receiver, attribute] | [receiver, attribute, _] = args.as_slice()
             && let ExprKind::Str(member) = &attribute.kind
-            && calendar::boxed_comparison(receiver.ty, member)
+            && (calendar::boxed_date_arithmetic(receiver.ty, member)
+                || calendar::date_isoformat(receiver.ty, member)
+                || (args.len() == 2 && calendar::boxed_comparison(receiver.ty, member)))
         {
             return Err(self.object_runtime_export("datetime instance member", call));
         }

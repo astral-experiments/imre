@@ -52,9 +52,16 @@ enum Action {
 }
 
 #[derive(Deserialize)]
+#[serde(untagged)]
+enum Metavar {
+    Text(String),
+    Tuple { first: String, rest: Vec<String> },
+}
+
+#[derive(Deserialize)]
 struct OptionSpec {
     action: Action,
-    metavar: Option<String>,
+    metavar: Option<Metavar>,
     flag: String,
     dest: String,
     positional: bool,

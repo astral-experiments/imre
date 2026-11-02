@@ -1,4 +1,4 @@
-use super::super::value::Hmac;
+use super::super::value::{Hmac, NOT_IMPLEMENTED};
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, option};
 use crate::objects::HashState;
 use crate::objects::hmac::{compare_bytes, compare_text};
@@ -99,6 +99,46 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     })))
 }
 
+/// Called for strings and built-in functions, before Python tries its other providers.
+pub(super) fn digest_native(ctx: &mut Context, args: &[Id]) -> Result<Id> {
+    let key = argument(args, 0)?;
+    let msg = argument(args, 1)?;
+    let digest = argument(args, 2)?;
+    // Argument Clinic acquires both buffers before it checks the supplied constructor.
+    ctx.check_buffer_exporter(key)?;
+    let key = ctx.native_buffer_bytes(key)?;
+    ctx.check_buffer_exporter(msg)?;
+    let msg = ctx.native_buffer_bytes(msg)?;
+    if i32::try_from(key.len()).is_err() || i32::try_from(msg.len()).is_err() {
+        return Err(Error::new("OverflowError", "HMAC input is too long"));
+    }
+    let name = match ctx.heap.get(ctx.scalar_value(digest)) {
+        Value::Str(name) => name.as_str(),
+        Value::Native(symbol)
+            if ctx.builtins.get(symbol) == Some(&digest)
+                && let Some(name) = symbol.strip_prefix("_hashlib.openssl_")
+                && super::hashlib::digest::NAMES.contains(&name) =>
+        {
+            name
+        }
+        // These five public built-ins are separate native objects in Imre.
+        // Try their configured provider; a failed lookup calls the supplied object in Python.
+        Value::Native(symbol)
+            if let Some(name) = symbol.strip_prefix("hashlib.")
+                && matches!(name, "sha1" | "sha224" | "sha256" | "sha384" | "sha512") =>
+        {
+            name
+        }
+        _ => return Ok(NOT_IMPLEMENTED),
+    };
+    if let Some(provider) = super::hashlib::openssl::provider()
+        && let Some(mac) = provider.hmac(name, key, msg)?
+    {
+        return Ok(ctx.alloc(Value::Bytes(mac)));
+    }
+    Ok(NOT_IMPLEMENTED)
+}
+
 pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     let Value::Hmac(mac) = *ctx.heap.get(argument(args, 0)?) else {
         unreachable!("bound HMAC method");
@@ -136,31 +176,72 @@ pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     }
 }
 
-pub(super) fn compare(ctx: &Context, args: &[Id]) -> Result<Id> {
-    let (left, right) = (
-        ctx.heap.get(argument(args, 0)?),
-        ctx.heap.get(argument(args, 1)?),
-    );
-    let equal = match (left, right) {
-        (Value::Bytes(a) | Value::ByteArray(a), Value::Bytes(b) | Value::ByteArray(b)) => {
-            compare_bytes(a, b)
-        }
-        (Value::Str(a), Value::Str(b)) => {
-            compare_text(a, b).map_err(|message| Error::new("TypeError", message))?
-        }
-        (Value::Str(_), Value::Bytes(_) | Value::ByteArray(_))
-        | (Value::Bytes(_) | Value::ByteArray(_), Value::Str(_)) => {
+/// A saved comparison function keeps its originating extension module alive across reimports.
+pub(super) fn bind_compare(ctx: &mut Context, module: Id, scope: Id, symbol: &str) {
+    let callable = ctx.builtin(symbol);
+    let function = ctx.alloc(Value::Method {
+        callable,
+        receiver: module,
+        explicit: false,
+    });
+    ctx.bind(scope, symbol.rsplit('.').next().unwrap(), function);
+}
+
+pub(super) fn compare(
+    ctx: &Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    // The module-bound native method supplies its own receiver.
+    let args = &args[1..];
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name}() takes no keyword arguments"),
+        ));
+    }
+    let &[left, right] = args else {
+        let function = name.rsplit('.').next().unwrap();
+        return Err(Error::new(
+            "TypeError",
+            format!("{function} expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let equal = if let (Some(a), Some(b)) = (ctx.string_storage(left), ctx.string_storage(right)) {
+        let (Value::Str(left), Value::Str(right)) = (ctx.heap.get(a), ctx.heap.get(b)) else {
             return Err(Error::new(
                 "TypeError",
-                "a bytes-like object is required, not 'str'",
+                "comparing strings with non-ASCII characters is not supported",
             ));
-        }
-        _ => {
+        };
+        compare_text(left, right).map_err(|message| Error::new("TypeError", message))?
+    } else {
+        let supports_buffer = |id| {
+            matches!(
+                ctx.heap.get(ctx.scalar_value(id)),
+                Value::Bytes(_)
+                    | Value::ByteArray(_)
+                    | Value::Array(_)
+                    | Value::MemoryView { .. }
+                    | Value::BytesIoBuffer { .. }
+            )
+        };
+        if !supports_buffer(left) && !supports_buffer(right) {
             return Err(Error::new(
                 "TypeError",
-                "compare_digest requires two byte buffers or ASCII strings",
+                format!(
+                    "unsupported operand types(s) or combination of types: '{:.100}' and '{:.100}'",
+                    ctx.type_name(left),
+                    ctx.type_name(right)
+                ),
             ));
         }
+        ctx.check_buffer_exporter(left)?;
+        let left = ctx.native_buffer_bytes(left)?;
+        ctx.check_buffer_exporter(right)?;
+        let right = ctx.native_buffer_bytes(right)?;
+        compare_bytes(left, right)
     };
     Ok(if equal { TRUE } else { FALSE })
 }

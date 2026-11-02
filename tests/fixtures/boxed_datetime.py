@@ -2,6 +2,67 @@ import json
 from datetime import UTC, date, datetime as dt, time, timedelta, timezone, tzinfo
 
 
+def test_date_fromisoformat():
+    class Parts(date):
+        def __new__(cls, *fields):
+            return fields
+
+    class Text(str):
+        def __len__(self):
+            raise AssertionError("queried string override")
+
+        def __repr__(self):
+            return "invalid date"
+
+    bound = date(2000, 1, 1).fromisoformat
+    assert bound(Text("2025-W01")) == date(2024, 12, 30)
+    assert bound("20250102é") == date(2025, 1, 2)
+    assert Parts.fromisoformat("9999-W52-7") == (10000, 1, 2)
+    assert Parts.fromisoformat("2000-02-30") == (2000, 2, 30)
+    try:
+        bound(Text("2021-W53-1"))
+    except ValueError as exc:
+        assert str(exc) == "Invalid isoformat string: invalid date"
+    else:
+        raise AssertionError("accepted a nonexistent ISO week")
+
+
+def test_date_isoformat():
+    class Zone(tzinfo):
+        def utcoffset(self, value):
+            raise AssertionError("date.isoformat queried tzinfo")
+
+    class Day(dt):
+        def isoformat(self):
+            return "override"
+
+        @property
+        def year(self):
+            raise AssertionError("date.isoformat queried a property")
+
+    d = date(2, 3, 2)
+    value = Day(2024, 2, 29, 23, tzinfo=Zone())
+    base = date.isoformat
+    assert d.isoformat() == "0002-03-02"
+    assert value.isoformat() == "override"
+    assert base(value) == "2024-02-29"
+    name = "a" * 99
+    foreign = type(name + "世", (), {})()
+    for args, kwargs, message in (
+        ((), {"self": d}, "unbound method date.isoformat() needs an argument"),
+        ((1, d), {"x": 1}, "descriptor 'isoformat' for 'datetime.date' objects doesn't apply to a 'int' object"),
+        ((foreign,), {}, f"descriptor 'isoformat' for 'datetime.date' objects doesn't apply to a '{name}' object"),
+        ((d, d), {"x": 1}, "date.isoformat() takes no keyword arguments"),
+        ((d, d), {}, "date.isoformat() takes no arguments (1 given)"),
+    ):
+        try:
+            base(*args, **kwargs)
+        except TypeError as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError("date.isoformat accepted invalid arguments")
+
+
 def test_module_exports():
     import _datetime
     import datetime
@@ -181,6 +242,33 @@ def test_time_strptime():
         pass
     else:
         raise AssertionError("invalid hour")
+
+
+def test_date_strptime():
+    class Day(date):
+        pass
+
+    class Parts(date):
+        def __new__(cls, *fields):
+            return fields
+
+    text = "2024-02-29 07:15 -0330"
+    form = "%Y-%m-%d %H:%M %z"
+    day = Day(2000, 1, 1).strptime(text, form)
+    assert type(day) is Day and day == date(2024, 2, 29)
+    assert Parts.strptime(text, form) == (2024, 2, 29)
+
+
+def test_datetime_strptime():
+    class Stamp(dt):
+        pass
+
+    stamp = Stamp.strptime("2004-12-01 -00:02:01.000003", "%Y-%m-%d %z")
+    assert type(stamp) is Stamp
+    assert stamp.isoformat() == "2004-12-01T00:00:00-00:02:01.000003"
+    named = dt.strptime("+1234 UTC", "%z %Z")
+    assert named.utcoffset() == timedelta(hours=12, minutes=34)
+    assert named.tzname() == "UTC"
 
 
 def test_time_of_day():
@@ -408,6 +496,51 @@ def test_subclass_construction():
         raise AssertionError("date allocated an incompatible datetime layout")
 
 
+def test_calendar_classmethod_binding():
+    from inspect import getattr_static
+
+    class Fields(dt):
+        def __new__(cls, *fields):
+            return fields
+
+    ordinal = getattr_static(date, "fromordinal")
+    assert ordinal.__get__(None, Fields)(1) == (1, 1, 1)
+    assert ordinal.__get__(42, Fields).__self__ is Fields
+    assert ordinal.__get__(date(2001, 1, 1))(1) == date(1, 1, 1)
+    for owner in (int, "wrong"):
+        try:
+            ordinal.__get__(None, owner)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("bound an unsuitable calendar class")
+    wrong_type = type("x" * 99 + "ë", (), {})
+    try:
+        ordinal.__get__(None, wrong_type)
+    except TypeError as exc:
+        assert str(exc).endswith("received '" + "x" * 99 + "'")
+    else:
+        raise AssertionError("bound a non-date class")
+    clock = getattr_static(dt, "fromisoformat")
+    assert clock.__get__(None, Fields)("2000-01-02T12") == (2000, 1, 2, 12, 0, 0, 0, None)
+
+
+def test_datetime_fromisoformat():
+    class Stamp(dt):
+        pass
+
+    class Fields(dt):
+        def __new__(cls, *fields):
+            return fields
+
+    bound = Stamp(2000, 1, 1).fromisoformat
+    value = bound("2020-W53-7\ud80024:00:00-00:00:30.000005")
+    assert type(value) is Stamp and value.date() == date(2021, 1, 4)
+    assert value.utcoffset() == -timedelta(seconds=30, microseconds=5)
+    assert dt.fromisoformat("20200103T125530Z").tzinfo is UTC
+    assert Fields.fromisoformat("9999-12-31T24:00") == (10000, 1, 1, 0, 0, 0, 0, None)
+
+
 def test_timedelta_negation():
     class Delta(timedelta):
         @property
@@ -451,6 +584,106 @@ def test_fromordinal():
     assert type(value) is Stamp and value == dt(2003, 4, 14)
     assert date.fromordinal(True) == date(1, 1, 1)
     assert Parts.fromordinal(2**31 - 1) == (5879611, 7, 11)
+
+
+def test_date_replace():
+    import copy
+
+    class Day(date):
+        def __new__(cls, year, month, day):
+            if year == 10000:
+                return (year, month, day)
+            return date.__new__(cls, year, month, day)
+
+        @property
+        def year(self):
+            raise AssertionError("replace read Python year")
+
+    original = Day(2024, 2, 29)
+    result = original.replace(2020, day=28)
+    assert type(result) is Day and result == date(2020, 2, 28)
+    assert copy.replace(original, year=10000) == (10000, 2, 29)
+    assert original.__replace__(day=27) == date(2024, 2, 27)
+    stamp = dt(2024, 2, 29, 23, 59, tzinfo=UTC, fold=1)
+    assert date.replace(stamp, 2020) == dt(2020, 2, 29)
+
+
+def test_isocalendar():
+    import _datetime
+    import datetime
+
+    class Stamp(dt):
+        def toordinal(self):
+            raise AssertionError("isocalendar called Python toordinal")
+
+        @property
+        def year(self):
+            raise AssertionError("isocalendar read Python year")
+
+    result = date.isocalendar(Stamp(2005, 1, 2, 23, tzinfo=UTC))
+    cls = type(result)
+    assert cls.__bases__ == (tuple,) and cls.__name__ == "IsoCalendarDate"
+    assert not hasattr(datetime, cls.__name__) and not hasattr(_datetime, cls.__name__)
+    assert result == (2004, 53, 7) == (result.year, result.week, result.weekday)
+    assert cls(weekday=-1, week=0, year=25) == (25, 0, -1)
+    assert repr(result) == "datetime.IsoCalendarDate(year=2004, week=53, weekday=7)"
+    assert result.__reduce__() == (tuple, ((2004, 53, 7),))
+    assert type(result[:]) is tuple and result + (8,) == (2004, 53, 7, 8)
+    for field in ("year", "week", "weekday"):
+        try:
+            setattr(result, field, 1)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError(field)
+
+
+def test_fromisocalendar():
+    class Parts(date):
+        def __new__(cls, *fields):
+            return fields
+
+    class Stamp(dt):
+        pass
+
+    assert Parts.fromisocalendar(9999, 52, 6) == (10000, 1, 1)
+    stamp = Stamp(2000, 1, 1).fromisocalendar(2019, 1, 1)
+    assert type(stamp) is Stamp and stamp == dt(2018, 12, 31)
+
+    for iso, message in (
+        ((2021, 53, 1), "Invalid week: 53"),
+        ((9999, 52, 6), "year must be in 1..9999, not 10000"),
+        ((2**31, 1, 1), "ISO calendar component out of range"),
+    ):
+        try:
+            date.fromisocalendar(*iso)
+        except ValueError as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError(f"accepted invalid ISO calendar date {iso}")
+
+    calls = []
+    error = LookupError("week conversion")
+
+    class Index:
+        def __init__(self, value):
+            self.value = value
+
+        def __index__(self):
+            calls.append(self.value)
+            if self.value is error:
+                raise error
+            return self.value
+
+    assert date.fromisocalendar(day=Index(7), week=Index(53), year=Index(2020)) == date(2021, 1, 3)
+    assert calls == [2020, 53, 7]
+    calls.clear()
+    try:
+        date.fromisocalendar(Index(0), Index(error), Index(1))
+    except LookupError as exc:
+        assert exc is error and calls == [0, error]
+    else:
+        raise AssertionError("lost __index__ exception")
 
 
 def test_date_clock_constructors():
@@ -835,6 +1068,8 @@ def test_calendar_strftime():
 
 
 def current():
+    test_date_fromisoformat()
+    test_date_isoformat()
     test_calendar_strftime()
     test_calendar_reduction()
     test_fixed_timezone_methods()
@@ -843,15 +1078,22 @@ def current():
     test_astimezone_subtype()
     test_tzinfo_reduction()
     test_calendar_format()
+    test_calendar_classmethod_binding()
+    test_datetime_fromisoformat()
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
     test_timedelta_remainder()
     test_fromordinal()
+    test_date_replace()
+    test_isocalendar()
+    test_fromisocalendar()
     test_date_clock_constructors()
     test_subclass_construction()
     test_now()
     test_time_fromisoformat()
     test_time_strptime()
+    test_date_strptime()
+    test_datetime_strptime()
     test_time_of_day()
     test_http_date()
     test_module_exports()

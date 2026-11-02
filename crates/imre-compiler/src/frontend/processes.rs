@@ -1492,6 +1492,9 @@ impl Checker<'_> {
         bytes: bool,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if name == "keys" {
+            return Err(self.scoped_builtin_error("environment keys view", call));
+        }
         if name == "get" && !bytes {
             return self.environ_get(call);
         }

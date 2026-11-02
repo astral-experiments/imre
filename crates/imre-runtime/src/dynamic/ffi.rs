@@ -28,6 +28,19 @@ impl Context {
         {
             self.finish_call_operands(mark, result);
         }
+        self.check_call_return(result)
+    }
+
+    /// A Python call expression checks for delivery after the callee's native work completes.
+    pub(super) fn check_call_return(&mut self, result: Id) -> Result<Id> {
+        #[cfg(unix)]
+        if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
+            && crate::signals::is_main()
+        {
+            // A Python handler can delete the last other reference and force collection.
+            self.heap.keep(result);
+            self.dispatch_signals()?;
+        }
         Ok(result)
     }
 
@@ -449,18 +462,20 @@ impl Context {
                 code.coroutine = true;
                 Ok(a)
             }
-            "setup_module_string_annotations" => {
-                self.setup_module_annotations(a, true)?;
+            "mark_module_annotation" => {
+                self.mark_module_annotation(a, b)?;
+                Ok(NONE)
+            }
+            "setup_module_string_annotations" | "setup_module_annotations" => {
+                self.setup_module_annotations(a, op == "setup_module_string_annotations")?;
                 Ok(NONE)
             }
             "annotate" => {
                 if self.scope_data(a).class_body.is_some() {
                     let mapping = self.lookup_class_local(a, "__annotations__")?;
                     self.put_item(mapping, b, c)?;
-                } else if c != NONE {
+                } else {
                     let mapping = self.module_annotation_name(a, "__annotations__")?;
-                    self.put_item(mapping, b, c)?;
-                } else if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
@@ -671,11 +686,6 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
     let ignore_environment = config["ignore_environment"].as_bool().unwrap_or(false)
         || config["isolated"].as_bool().unwrap_or(false);
-    crate::sys::context_warnings::imre_context_warnings_init(
-        config["context_aware_warnings"]
-            .as_bool()
-            .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
-    );
     if config["faulthandler"].is_null() {
         config["faulthandler"] = (!ignore_environment
             && std::env::var_os("PYTHONFAULTHANDLER").is_some_and(|value| !value.is_empty()))
@@ -703,8 +713,16 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
             .filter(|prefix| !prefix.is_empty())
             .into();
     }
-    crate::python_hash::initialize(ignore_environment);
-    crate::integer_text::imre_integer_digits_init(u32::from(ignore_environment));
+    crate::sys::imre_process_config_init(
+        u32::from(ignore_environment),
+        config["cpu_count"]
+            .as_i64()
+            .and_then(|n| i32::try_from(n).ok())
+            .unwrap_or(if ignore_environment { 0 } else { -1 }),
+        config["context_aware_warnings"]
+            .as_bool()
+            .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
+    );
     if let Some(options) = config["warnoptions"].as_array() {
         for option in options.iter().filter_map(|value| value.as_str()) {
             if let Err(reason) = crate::objects::warnings::startup_filter(option) {
@@ -744,6 +762,7 @@ pub(super) fn new_context<S: Into<String>>(
         audit_hooks: Vec::new(),
         fault_file: None,
         exit_callbacks: Vec::new(),
+        finalizing: Default::default(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
@@ -760,6 +779,7 @@ pub(super) fn new_context<S: Into<String>>(
         modules: NONE,
         import_missing: NONE,
         bootstrap_globals: NONE,
+        bootstrap_module: NONE,
         import_registry_installed: false,
         bootstrap_file_spec: NONE,
         finder_external: NONE,
@@ -885,8 +905,11 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             1
         }
     };
-    ctx.workers.join_before_exit_callbacks();
+    super::thread_worker::shutdown(&mut ctx);
     atexit::run(&mut ctx);
+    // Exit callbacks run before Python enters its finalization phase.
+    ctx.finalizing
+        .store(true, std::sync::atomic::Ordering::Release);
     if let Err(error) = ctx.finalize_shutdown_resources() {
         super::unraisable::report(
             &mut ctx,
@@ -1104,20 +1127,6 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     finish_at(ctx, result, unsafe { span.as_ref() })
 }
 
-/// Accept calls from native objects generated before lexical call scopes were passed.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_call_at(
-    ctx: *mut Context,
-    callable: Id,
-    args: Id,
-    kwargs: Id,
-    mark: usize,
-    span: *const [u32; 4],
-) -> Id {
-    // SAFETY: both entry points accept the same context, operands, mark and optional position.
-    unsafe { imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, NONE) }
-}
-
 /// Invoke a compiled call using the root mark taken before its operands were evaluated.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
@@ -1138,54 +1147,37 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
     finish_at(ctx, result, span)
 }
 
-/// Attach the original generator suite to the code object before applying Python decorators.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_generator_body(
-    ctx: *mut Context,
-    function: Id,
-    source: *const c_char,
-    body_line: u32,
-) {
-    // SAFETY: the generated call provides the live context that owns the function.
-    let ctx = unsafe { &mut *ctx };
-    let Value::Function { code, .. } = *ctx.heap.get(function) else {
-        unreachable!("compiled Python function");
-    };
-    let Value::Code(code) = ctx.heap.get_mut(code) else {
-        unreachable!("compiled code object");
-    };
-    if matches!(code.body, value::Body::Native(_)) {
-        // SAFETY: the UTF-8 constant is embedded in the executable and outlives all code objects.
-        let source = unsafe { cstr(source) };
-        code.body = value::Body::PendingGenerator { source, body_line };
-    }
-}
-
 /// Record a class annotation only when its statement executes.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_class_annotation(
+pub(super) unsafe extern "C" fn imre_dyn_mark_class_annotation(
     ctx: *mut Context,
     scope: Id,
     name: Id,
-    thunk: Id,
     offset: u32,
 ) -> Id {
     // SAFETY: the compiler passes the active context and handles from the current class body.
     let ctx = unsafe { &mut *ctx };
-    let result = ctx.record_class_annotation(scope, name, thunk, offset);
+    let result = ctx.record_class_annotation(scope, name, offset);
     finish(ctx, result)
 }
 
-/// Static per-definition record emitted beside its native entry point.
+/// The compiler emits a native entry when body_line is zero, or generator source otherwise.
+#[repr(C)]
+union PrelinkedEntry {
+    native: Code,
+    source: *const c_char,
+}
+
 #[repr(C)]
 pub(super) struct PrelinkedSite {
-    entry: Code,
+    entry: PrelinkedEntry,
     filename: *const c_char,
     first_line: u32,
+    body_line: u32,
 }
 
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
+pub(super) unsafe extern "C" fn imre_dyn_define(
     ctx: *mut Context,
     site: *const PrelinkedSite,
     scope: Id,
@@ -1205,8 +1197,20 @@ pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
     } else {
         // SAFETY: the filename is a nul-terminated constant in the native executable.
         let file = unsafe { cstr(definition.filename) };
+        // SAFETY: the compiler tags native functions with line zero and suspended suites
+        // with their one-based source line and a static, nul-terminated UTF-8 string.
+        let body = unsafe {
+            if definition.body_line == 0 {
+                value::Body::Native(definition.entry.native)
+            } else {
+                value::Body::PendingGenerator {
+                    source: cstr(definition.entry.source),
+                    body_line: definition.body_line,
+                }
+            }
+        };
         let code = ctx.prelinked_code(
-            definition.entry,
+            body,
             scope,
             name,
             parameters,
@@ -1276,7 +1280,7 @@ impl Context {
 
     pub(super) fn prelinked_code(
         &mut self,
-        entry: Code,
+        body: value::Body,
         scope: Id,
         name: Id,
         parameters: Id,
@@ -1327,8 +1331,11 @@ impl Context {
         });
         let closure_supported = freevars.is_some();
         let freevars = freevars.unwrap_or_default();
+        let flags = metadata["code_flags"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok());
         self.alloc(Value::Code(value::CodeObject {
-            body: value::Body::Native(entry),
+            body,
             name,
             qualname,
             doc,
@@ -1337,9 +1344,8 @@ impl Context {
             first_line: location.line,
             module_definition,
             coroutine: false,
-            flags: metadata["code_flags"]
-                .as_u64()
-                .and_then(|v| u32::try_from(v).ok()),
+            flags: flags.unwrap_or_default(),
+            flags_complete: flags.is_some(),
             nested: Vec::new(),
             freevars,
             closure_supported,
@@ -1627,6 +1633,7 @@ impl Context {
                     self.modules,
                     self.import_missing,
                     self.bootstrap_globals,
+                    self.bootstrap_module,
                     self.bootstrap_file_spec,
                     self.finder_external,
                     self.default_encoding,
@@ -1896,7 +1903,14 @@ mod tests {
             line: 1,
             span: None,
         };
-        let code = ctx.prelinked_code(read, outer, name, signature, (name, NONE), location.clone());
+        let code = ctx.prelinked_code(
+            value::Body::Native(read),
+            outer,
+            name,
+            signature,
+            (name, NONE),
+            location.clone(),
+        );
         let defaults = ctx.dict(Vec::new());
         let function = ctx.define_function(code, outer, name, defaults, name, NONE, NONE, false);
         let closure = ctx.lookup_attr(function, "__closure__").unwrap();

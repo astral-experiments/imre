@@ -1,0 +1,49 @@
+147 test.test_re.ReTests.test_search_anchor_at_beginning, occurrence 1
+
+stock  5607950ef232dad16d75c0cf53101d9649d89115  CPython 3.14.5 Linux x86-64
+Actual process exit 0. Upstream test_re.py lines 2477–2488; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304; runtime (stock executable); executed ELF c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304.
+Complete raw stdout (raw/stock/reference/anchor/run.stdout, SHA-256 dcbf019e819555f8b88021e5909b01d0407e25f3399feb625f796fd593d80a45)
+SELECT test.test_re.ReTests.test_search_anchor_at_beginning
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 1
+RAN 1
+Complete raw stderr (raw/stock/reference/anchor/run.stderr, SHA-256 f26871cf3261aa2e8ce8963d2876e874fbb0a450dbf15301222123d9efb2fbeb)
+test_search_anchor_at_beginning (test.test_re.ReTests.test_search_anchor_at_beginning) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.008s
+
+OK
+
+O0  ae4220413168d248d1d319c5e511d9c76b56ada7  release-debug0
+Actual process exit 0. Upstream test_re.py lines 2477–2488; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler b1757c0461082c578140c3583e59a2a2a9ac4a42b520c1dcb58457bcc89ade33; runtime 0ebee55b1a4622236f5b48a4e7967fc387cfea9b2c340d5b79f76f850868847c; executed ELF 3a0aa3ccc984cc988811b2cacc7fd90058006a73a3dae75ef57e3481b89284a2.
+Complete raw stdout (raw/lazypublicprod/O0/anchor/run.stdout, SHA-256 dcbf019e819555f8b88021e5909b01d0407e25f3399feb625f796fd593d80a45)
+SELECT test.test_re.ReTests.test_search_anchor_at_beginning
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 1
+RAN 1
+Complete raw stderr (raw/lazypublicprod/O0/anchor/run.stderr, SHA-256 fa3e25847dee2fac15708266d3b413fc96a3c37f9436431080b2137a0b782c7e)
+test_search_anchor_at_beginning (test.test_re.ReTests.test_search_anchor_at_beginning) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.437s
+
+OK
+
+O3  ae4220413168d248d1d319c5e511d9c76b56ada7  release-debug0
+Actual process exit 0. Upstream test_re.py lines 2477–2488; SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Interpreter/compiler b1757c0461082c578140c3583e59a2a2a9ac4a42b520c1dcb58457bcc89ade33; runtime 0ebee55b1a4622236f5b48a4e7967fc387cfea9b2c340d5b79f76f850868847c; executed ELF ce1ffab156d6d2538ea1a890ced379c1e0adf8772ee298c57b828793ad358c91.
+Complete raw stdout (raw/lazypublicprod/O3/anchor/run.stdout, SHA-256 dcbf019e819555f8b88021e5909b01d0407e25f3399feb625f796fd593d80a45)
+SELECT test.test_re.ReTests.test_search_anchor_at_beginning
+ORIGINAL_MODULE /tmp/imre-re2/replay/stage/test/test_re.py
+SELECTED 1
+RAN 1
+Complete raw stderr (raw/lazypublicprod/O3/anchor/run.stderr, SHA-256 c70ab96447a2976f702f7bb62f0499314af9fcbd5f5b0c80276bbe62782a9110)
+test_search_anchor_at_beginning (test.test_re.ReTests.test_search_anchor_at_beginning) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.486s
+
+OK

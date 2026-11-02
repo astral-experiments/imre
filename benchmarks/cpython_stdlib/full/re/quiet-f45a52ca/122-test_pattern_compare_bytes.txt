@@ -1,0 +1,22 @@
+122 test.test_re.ReTests.test_pattern_compare_bytes, occurrence 1
+CPython 5607950ef232dad16d75c0cf53101d9649d89115 test_re.py SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Original definition lines 2338-2353 bytes [117155,117755): 888eb4df0696c09da1494ca346ec5d6b972bec3c7ae5755159ea8c863ea8089b.
+Indented suite bytes [117197,117755): 3a3c4d83b5035ef4bf8ad458c8f6ced17577ff68336f598cf9951cefefad84be.
+
+companion-stock-five-entry 5607950ef232dad16d75c0cf53101d9649d89115 CPython 3.14.5 Linux / reference. Parent passed. Whole process exit 0, timeout false, RAN 5.
+raw/companion-stock-five-entry/run.stdout, SHA-256 1f6d2e87224d48ebee6cb96b895f244e5599297a674834191a88691e5dec3933. Raw byte spans are half-open.
+9 [416,481)	EVENT	START	'test.test_re.ReTests.test_pattern_compare_bytes'	''
+10 [481,543)	EVENT	OK	'test.test_re.ReTests.test_pattern_compare_bytes'	''
+11 [543,607)	EVENT	STOP	'test.test_re.ReTests.test_pattern_compare_bytes'	''
+
+companion-intactf45prod-O0 f45a52ca1ba9a4050bc2d8973a7a7afd6541a3d8 release-debug0 / O0. Parent passed. Whole process exit 0, timeout false, RAN 5.
+raw/companion-intactf45prod-O0/run.stdout, SHA-256 1f6d2e87224d48ebee6cb96b895f244e5599297a674834191a88691e5dec3933. Raw byte spans are half-open.
+9 [416,481)	EVENT	START	'test.test_re.ReTests.test_pattern_compare_bytes'	''
+10 [481,543)	EVENT	OK	'test.test_re.ReTests.test_pattern_compare_bytes'	''
+11 [543,607)	EVENT	STOP	'test.test_re.ReTests.test_pattern_compare_bytes'	''
+
+companion-intactf45prod-O3 f45a52ca1ba9a4050bc2d8973a7a7afd6541a3d8 release-debug0 / O3. Parent passed. Whole process exit 0, timeout false, RAN 5.
+raw/companion-intactf45prod-O3/run.stdout, SHA-256 1f6d2e87224d48ebee6cb96b895f244e5599297a674834191a88691e5dec3933. Raw byte spans are half-open.
+9 [416,481)	EVENT	START	'test.test_re.ReTests.test_pattern_compare_bytes'	''
+10 [481,543)	EVENT	OK	'test.test_re.ReTests.test_pattern_compare_bytes'	''
+11 [543,607)	EVENT	STOP	'test.test_re.ReTests.test_pattern_compare_bytes'	''

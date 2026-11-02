@@ -76,6 +76,17 @@ def check_command_stdin(imre, run):
 
 
 def check_sysconfig_build(imre, root, run):
+    by_name = (
+        "import _imp, importlib, sys\n"
+        "mod = importlib.import_module(sys.argv[1])\n"
+        "assert mod.get_config_var('EXT_SUFFIX') in _imp.extension_suffixes()\n"
+        "assert mod.get_config_vars() is mod.get_config_vars()\n"
+    )
+    flags = "\x1f".join(["--runtime-imports", "--no-cache", "--opt-level", "0"])
+    for executable in (sys.executable, imre):
+        result = run(executable, "-B", "-c", by_name, "sysconfig",
+                     extra={"IMRE_ENCODED_FLAGS": flags}, timeout=180)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"", b""), result
     fixture = Path(__file__).with_name("fixtures") / "boxed_sysconfig_build.py"
     project = root / "build-tree"
     modules = project / "Modules"
@@ -1397,6 +1408,12 @@ def main():
         )
         compare("-Bm", "module_pkg.child", "-m", "tail")
         compare("-B", "-mmodule_pkg", "tail")
+
+        json_input = root / "input.json"
+        json_input.write_text('{"items": [1, 2]}')
+        for module in ("json", "json.tool"):
+            compare("-B", "-m", module, "--compact", json_input)
+
         entry = root / "entry"
         entry.mkdir()
         (entry / "__main__.py").write_text(
@@ -1466,6 +1483,33 @@ def main():
         compare("-I", parser_script, "-h")
         compare("-B", parser_script, "41")
 
+        # Python normalizes the script small L when it parses an identifier.
+        logging_command = (
+            "name = 'worker'\n"
+            "import ℓogging as log\n"
+            "record = log.makeLogRecord({'name': name, 'msg': 'items %d', 'args': (3,)})\n"
+            "print(log.Formatter('%(name)s %(message)s').format(record))\n"
+        )
+        compare("-I", "-c", logging_command, native_timeout=600)
+
+        shadow_dir = root / "logging_provider"
+        shadow_dir.mkdir()
+        (shadow_dir / "logging.py").write_text("marker = 'project logging'\n")
+        shadow_script = shadow_dir / "entry.py"
+        shadow_script.write_text(
+            "import sys\nsys.path.append('unused')\nimport logging\nprint(logging.marker)\n"
+        )
+        compare("-B", shadow_script, extra={"IMREFLAGS": "--opt-level 0"}, native_timeout=300)
+
+        tokenize_script = root / "tokenize_entry.py"
+        tokenize_script.write_text(
+            "from io import StringIO\n"
+            "from tokenize import generate_tokens\n"
+            "for t in generate_tokens(StringIO('x += 1 # note').readline):\n"
+            "    print(t.string, t.exact_type)\n"
+        )
+        compare("-B", tokenize_script)
+
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
@@ -1526,9 +1570,11 @@ def main():
         locale_script = root / "get_locale.py"
         locale_script.write_text(
             "from _locale import LC_ALL, setlocale\n"
-            "from locale import getlocale\n"
+            "from locale import getlocale, getpreferredencoding\n"
             "setlocale(LC_ALL, 'C')\n"
             "print(getlocale(), getlocale(category=LC_ALL))\n"
+            "print(getpreferredencoding(False), getpreferredencoding(do_setlocale=True))\n"
+            "assert setlocale(LC_ALL) == 'C'\n"
         )
         compare("-B", locale_script)
 
@@ -1541,12 +1587,59 @@ def main():
         )
         compare("-IB", years, native_args=("run", years, "--quiet"))
 
+        arithmetic = root / "date_arithmetic.py"
+        for expression in (
+            "(day - date(2000, 2, 28)).days",
+            "day.__add__(timedelta(days=1))",
+            "date.__rsub__(day, date(2000, 3, 1))",
+            "getattr(day, '__radd__')(timedelta(days=1))",
+        ):
+            arithmetic.write_text(
+                "from datetime import date, timedelta\n"
+                "day = date(2000, 2, 29)\n"
+                f"print({expression})\n"
+            )
+            compare("-IB", arithmetic, native_args=("run", arithmetic, "--quiet"))
+
+        if sys.platform == "linux" and sys.version_info >= (3, 13):
+            count = Path(__file__).resolve().parent / "fixtures" / "os_cpu_count.py"
+            compare("-IB", count)
+            compare("-B", count, extra={"PYTHON_CPU_COUNT": "7"})
+            compare("-B", "-X", "cpu_count=2", "-X", "cpu_count=3", count,
+                    extra={"PYTHON_CPU_COUNT": "7"})
+            compare("-E", "-B", "-X", "cpu_count=default", count,
+                    extra={"PYTHON_CPU_COUNT": "invalid"})
+            for options, extra in (
+                (("-B", "-X", "cpu_count=2"), {"PYTHON_CPU_COUNT": "invalid"}),
+                (("-IB", "-X", "cpu_count"), {}),
+                (("-B",), {"PYTHON_CPU_COUNT": "bad", "PYTHONHASHSEED": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "bad", "PYTHONINTMAXSTRDIGITS": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "bad", "PYTHON_CONTEXT_AWARE_WARNINGS": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "2", "PYTHONHASHSEED": "bad", "PYTHON_CONTEXT_AWARE_WARNINGS": "bad"}),
+                (("-B",), {"PYTHON_CPU_COUNT": "2", "PYTHONINTMAXSTRDIGITS": "bad", "PYTHON_CONTEXT_AWARE_WARNINGS": "bad"}),
+            ):
+                expected = run(sys.executable, *options, "-c", "pass", extra=extra)
+                actual = run(imre, *options, "-c", "pass", extra=extra)
+                assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", expected.stderr)
+                assert expected.returncode == 1
+
         names = root / "calendar_type_names.py"
         names.write_text(
             "from datetime import date, datetime, timedelta\n"
             "print(date.__module__, datetime.__qualname__, timedelta.__module__)\n"
         )
         compare("-IB", names, native_args=("run", names, "--quiet"))
+
+        date_isoformat = root / "date_isoformat.py"
+        for body in (
+            "print(d.isoformat())",
+            "print(date.isoformat(d))",
+            "render = d.isoformat\nprint(render())",
+            "print(getattr(d, 'isoformat')())",
+            "print(getattr(d, 'isoformat', None)())",
+        ):
+            date_isoformat.write_text("from datetime import date\nd = date(2, 3, 2)\n" + body + "\n")
+            compare("-IB", date_isoformat, native_args=("run", date_isoformat, "--quiet"))
 
         comparisons = root / "calendar_comparison.py"
         for expression in (
@@ -1861,6 +1954,27 @@ def main():
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
         compare(
             "-B", "-c",
+            "import atexit, os\n"
+            "atexit.register(lambda: print('after shutdown', handler.stream is None))\n"
+            "import logging\n"
+            "handler = logging.FileHandler(os.devnull)\n"
+            "atexit.register(lambda: print('before shutdown', handler.stream is None))\n",
+            extra={"IMREFLAGS": "--opt-level 0"},
+            native_timeout=300,
+        )
+        compare("-B", "-c", "print(list.__len__([1, 2]), tuple.__len__((3,)))")
+        if os.name == "posix":
+            for base in ("list", "tuple"):
+                compare(
+                    "-B", "-c",
+                    "import os\n"
+                    f"class Args({base}):\n"
+                    f"    def __len__(self): return {base}.__len__(self)\n"
+                    f"    def __getitem__(self, index): return {base}.__getitem__(self, index)\n"
+                    "os.execv('/bin/sh', Args(['sh', '-c', 'echo replaced']))\n",
+                )
+        compare(
+            "-B", "-c",
             "import atexit, gc, sys\n"
             "class SelfRemoving:\n"
             "    def __call__(self): atexit.unregister(self)\n"
@@ -1891,6 +2005,12 @@ def main():
             "atexit.register(events.append, 'older')\n"
             "atexit.register(Result)\n", "atexit",
         )
+        if os.name == "posix":
+            immediate_exit = Path(__file__).resolve().parent / "fixtures/os_immediate_exit.py"
+            for flags in ((), ("--runtime-imports",)):
+                compare("-IB", immediate_exit, status=37,
+                        native_args=("run", immediate_exit, "--quiet", "--opt-level", "0", *flags),
+                        native_timeout=300)
         compare("-IB", "-c", "raise SystemExit")
         compare("-IB", "-c", "from sys import exit\nexit(None)")
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
@@ -2315,6 +2435,22 @@ def report(text):
         compare("-IB", coroutine_fixture, native_args=("run", coroutine_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
+        compare(
+            "-I", "-c",
+            "import atexit, threading\n"
+            "seen = []\n"
+            "def register(value):\n"
+            "    def callback(*, suffix): seen.append(value + suffix)\n"
+            "    threading._register_atexit(callback, suffix='!')\n"
+            "register('first')\n"
+            "threading._register_atexit(seen.append, 'last')\n"
+            "def check():\n"
+            "    main = threading.main_thread()\n"
+            "    print(seen, main.is_alive(), 'stopped' in repr(main))\n"
+            "atexit.register(check)\n"
+            "threading._shutdown()\n"
+            "threading._shutdown()",
+        )
         for name in (
             "boxed_threading_deprecated_accessors.py",
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
@@ -2322,6 +2458,7 @@ def report(text):
             "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
             "boxed_thread_bound_lock.py",
             "boxed_thread_captured_acquire.py",
+            "boxed_thread_finalization.py",
             "boxed_thread_hash_update.py",
         ):
             thread_fixture = fixtures / name
@@ -2398,18 +2535,22 @@ def report(text):
         ):
             regex_entry.write_text(program)
             compare("-IB", regex_entry, native_args=("run", regex_entry, "--quiet"))
-        hex_entry = root / "hex_entry.py"
+        radix_entry = root / "radix_entry.py"
         for program in (
             "class Offset:\n    def __index__(self): return -(1 << 100)\nprint(hex(Offset()))",
             "formatter = hex\nprint(formatter(31))",
+            "formatter = oct\nprint(formatter(0), oct(-(1 << 150)), oct(True))",
+            "import builtins\nfrom builtins import oct as formatter\n"
+            "class Number:\n    def __index__(self): return 0o624\n"
+            "print(formatter is builtins.oct, formatter(Number()))",
             "import builtins\nprint(builtins.hex(31))",
             "from builtins import hex as formatter\nprint(formatter(31))",
             "import warnings\nclass Flag:\n    def __index__(self): return True\n"
             "warnings.simplefilter('error', DeprecationWarning)\n"
             "try: hex(Flag())\nexcept DeprecationWarning as warning: print(warning)",
         ):
-            hex_entry.write_text(program)
-            compare("-IB", hex_entry, native_args=("run", hex_entry, "--quiet"))
+            radix_entry.write_text(program)
+            compare("-IB", radix_entry, native_args=("run", radix_entry, "--quiet"))
         monitoring_entry = root / "monitoring_entry.py"
         (root / "monitoring_helper.py").write_text(
             "from sys import monitoring\ndef line_mask():\n    return monitoring.events.LINE\n"
@@ -2421,6 +2562,63 @@ def report(text):
         ):
             monitoring_entry.write_text(program)
             compare("-EB", monitoring_entry, native_args=("run", monitoring_entry, "--quiet"))
+        shadow = root / "hmac_shadow"
+        shadow.mkdir()
+        (shadow / "hmac.py").write_text("marker = 'local'\n")
+        shadow_entry = shadow / "entry.py"
+        shadow_entry.write_text(
+            "import sys\n"
+            "from importlib.machinery import SourceFileLoader\n"
+            "from importlib.util import module_from_spec, spec_from_file_location\n"
+            "sys.modules['_hashlib'] = sys.modules['_operator'] = None\n"
+            "loader = SourceFileLoader('hmac', sys.argv[1])\n"
+            "module = module_from_spec(spec_from_file_location('hmac', sys.argv[1], loader=loader))\n"
+            "sys.modules['hmac'] = module\n"
+            "loader.exec_module(module)\n"
+            "assert __import__('hmac') is module and module.marker == 'local'\n"
+            "for name in ('digest', '_digest_native', 'compare_digest', 'new', 'HMAC'):\n"
+            "    assert not hasattr(module, name)\n"
+        )
+        local_hmac = shadow / "hmac.py"
+        compare(
+            "-IB", shadow_entry, local_hmac,
+            native_args=("run", shadow_entry, "--module-root", shadow, "--runtime-imports", "--quiet", "--", local_hmac),
+        )
+
+        # Only exercise legacy-provider policy when the host OpenSSL can load it.
+        policy = root / "hmac-legacy.cnf"
+        policy.write_text(
+            "openssl_conf = init\n[init]\nproviders = providers\nalg_section = properties\n"
+            "[providers]\ndefault = default_provider\nlegacy = legacy_provider\n"
+            "[default_provider]\nactivate = 1\n[legacy_provider]\nactivate = 1\n"
+            "[properties]\ndefault_properties = provider=legacy\n"
+        )
+        policy_env = {"OPENSSL_CONF": str(policy)}
+        legacy_capabilities = """import _hashlib
+for name in ("md4", "ripemd160"):
+    print(_hashlib.new(name, b"abc").hexdigest())
+for name in ("md4", "ripemd160"):
+    try:
+        _hashlib.hmac_digest(b"k", b"m", name)
+    except ValueError as exc:
+        print(type(exc).__name__, str(exc))
+    else:
+        print("MAC permitted")
+"""
+        probe = run(sys.executable, "-IB", "-c", legacy_capabilities, extra=policy_env)
+        if probe.returncode == 0:
+            lines = probe.stdout.splitlines()
+            assert lines[:2] == [
+                b"a448017aaf21d8525fc10ae87aa6729d",
+                b"8eb208f7e05d987a9b044a8e98c6b087f15a0bfc",
+            ]
+            if lines[2:] == [b"ValueError [digital envelope routines] unsupported"] * 2:
+                hmac_entry = fixtures / "bytes/hmac_digest.py"
+                compare(
+                    "-IB", hmac_entry, "legacy-policy", extra=policy_env,
+                    native_args=("run", hmac_entry, "--runtime-imports", "--quiet", "--", "legacy-policy"),
+                )
+
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
         compare("-IB", fixtures / "boxed_unittest_patch.py")
         call_args = fixtures / "unittest_mock_call_args.py"
@@ -2445,6 +2643,7 @@ def report(text):
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_encoded_source.py",
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
@@ -2487,6 +2686,7 @@ def report(text):
             "boxed_int_to_bytes.py",
             "boxed_int_rational_fields.py",
             "boxed_int_from_bytes.py",
+            "boxed_int_conversion.py",
             "boxed_divmod_slots.py",
             "boxed_complex.py",
             "boxed_float.py",
@@ -2496,6 +2696,7 @@ def report(text):
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
+            "boxed_binary_ljust.py",
             "boxed_binary_strip.py",
             "boxed_class_union.py",
             "boxed_bytes_octal.py",
@@ -2503,6 +2704,7 @@ def report(text):
             "boxed_temporary_file.py",
             "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
+            "boxed_sys_finalizing.py",
             "boxed_named_temporary_writer.py",
             "boxed_temporary_directory.py",
             "boxed_tempfile_default_directory.py",
@@ -2525,9 +2727,11 @@ def report(text):
             "boxed_annotationlib_refs.py",
             "boxed_class_annotation_sites.py",
             "boxed_future_module_annotations.py",
+            "boxed_deferred_module_annotations.py",
             "boxed_typing_no_type_check.py",
             "boxed_typing_no_type_check_decorator.py",
             "boxed_typing_assert_type.py",
+            "boxed_typing_exports.py",
             "boxed_typing_type_predicates.py",
             "boxed_typing_bytestring.py",
             "boxed_typing_new_type.py",
@@ -2539,6 +2743,7 @@ def report(text):
             "boxed_typing_typevar_members.py",
             "boxed_typing_parameter_collector.py",
             "boxed_typing_alias_namespaces.py",
+            "boxed_abc_callable_alias.py",
             "boxed_typing_variadic.py",
             "boxed_typing_tuple.py",
             "boxed_typing_async_collection_aliases.py",
@@ -2613,10 +2818,17 @@ def report(text):
             "boxed_os_fdopen.py",
             "boxed_binary_bytes_paths.py",
             "boxed_buffered_readlines.py",
+            "boxed_os_eventfd.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_ftruncate.py",
+            "boxed_os_lockf.py",
+            "boxed_os_mknod.py",
+            "boxed_os_pread.py",
+            "boxed_os_pwrite.py",
+            "boxed_os_readinto.py",
             "boxed_os_waitpid.py",
             "boxed_os_process_signal.py",
+            "boxed_os_execv.py",
             "boxed_posix_session.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
@@ -2711,6 +2923,7 @@ def report(text):
             "boxed_set_difference_update.py",
             "boxed_set_difference.py",
             "boxed_set_intersection.py",
+            "boxed_set_pop.py",
             "boxed_set_remove.py",
             "boxed_weakref.py",
             "boxed_public_weakref.py",
@@ -2751,16 +2964,23 @@ def report(text):
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",
             "boxed_itertools_type_namespaces.py",
+            "boxed_itertools_immutable_types.py",
             "boxed_itertools_cursor_repr.py",
             "boxed_itertools_chain.py",
             "boxed_itertools_cycle.py",
+            "boxed_itertools_accumulate.py",
             "boxed_itertools_batched.py",
+            "boxed_itertools_zip_longest.py",
             "boxed_itertools_tee.py",
             "boxed_itertools_combinations.py",
             "boxed_itertools_permutations.py",
             "boxed_itertools_product.py",
             "boxed_itertools_groupby.py",
             "boxed_itertools_filterfalse.py",
+            "boxed_itertools_takewhile.py",
+            "boxed_itertools_dropwhile.py",
+            "boxed_itertools_compress.py",
+            "boxed_starmap_subclass.py",
             "boxed_object_new.py",
             "boxed_module_type.py",
             "boxed_source_module_getattr.py",
@@ -2791,10 +3011,13 @@ def report(text):
             "boxed_json_encoder_accelerator.py",
             "boxed_json_quote.py",
             "boxed_deque.py",
+            "boxed_deque_iterator_reduction.py",
+            "boxed_deque_repeat.py",
             "boxed_deque_deep_equal.py",
             "boxed_deque_cycle_callbacks.py",
             "boxed_deque_mixed_equal.py",
             "boxed_deque_nested_mutation.py",
+            "boxed_deque_concat.py",
             "boxed_zip.py",
             "boxed_map.py",
             "boxed_python_iterators.py",
@@ -2818,6 +3041,8 @@ def report(text):
             "bytes/hashlib_md5_provider.py",
             "bytes/hashlib_sha3_provider.py",
             "bytes/hashlib_kdf.py",
+            "bytes/hmac_digest.py",
+            "bytes/hmac_digest_fallback.py",
             "boxed_hashlib_file_digest.py",
             "boxed_standard_base64.py",
             "boxed_csv.py",
@@ -2826,6 +3051,7 @@ def report(text):
             "boxed_binary_splitlines.py",
             "boxed_bytes_join.py",
             "boxed_bytes_fromhex.py",
+            "boxed_bytes_hex.py",
             "boxed_binary_endswith.py",
             "boxed_struct.py",
             "boxed_pickle_writer.py",
@@ -2835,10 +3061,12 @@ def report(text):
             "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
+            "boxed_tokenize.py",
             "boxed_colorize.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
             "boxed_string_surrogates.py",
+            "boxed_string_strip.py",
             "boxed_string_expandtabs.py",
         ):
             if fixture in ("boxed_stat.py", "boxed_signal.py") and sys.platform not in ("linux", "darwin"):
@@ -2846,6 +3074,8 @@ def report(text):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             if fixture == "boxed_slice_deep_repr.py":
                 check_slice_stack(imre, imports, root, env)
+            elif fixture == "boxed_codec_registry.py":
+                compare("-IB", "-c", imports)
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_json_module_doc.py":
@@ -2865,6 +3095,24 @@ def report(text):
                         extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
                     )
         if os.name == "posix":
+            raw_environment = {b"RAW_\xff": b"value_\xff", "LC_ALL": "C"}
+            compare("-B", "-c", r"import os; print(ascii(os.getenv('RAW_\udcff')))", extra=raw_environment)
+            compare("-B", "-c", r"from os import getenvb as read; print(read(b'RAW_\xff'))", extra=raw_environment)
+            compare("-B", "-c", "import os; print('PATH' in list(os.environ.keys()))")
+            compare("-B", "-c", """from os import environb as env
+keys = env.keys()
+key = b'IMRE_KEYS_VIEW_\\xff'
+env[key] = b'\\xfe'
+assert key in keys
+del env[key]
+assert key not in keys
+try:
+    env.keys(1)
+except TypeError:
+    pass
+else:
+    raise AssertionError("keys accepted an argument")
+""")
             check_boxed_unittest_main_reporting(imre, root, run)
             check_unittest_main_names(imre, root, run)
             check_unittest_file_discovery(imre, root, run)
@@ -2872,7 +3120,15 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_exports.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-EOOB", "-Werror::ResourceWarning", "-X", "utf8=0",
+                    "-c", imports + "arithmetic.interpreter_flags()")
             plugin.write_bytes((fixtures / "boxed_subprocess_interruptible_read.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_pass_fds.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_returncode.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_lifetime.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
@@ -2895,10 +3151,34 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        if sys.platform in ("darwin", "linux"):
+            compare("-IB", str(fixtures / "boxed_geteuid_exports.py"), "os", "posix")
+            plugin.write_bytes((fixtures / "boxed_grp.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_pwd.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_expanduser.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-B", "-c", imports + "arithmetic.current()",
+                    extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_os_spawn.py").read_bytes())
+            libc, version = platform.libc_ver()
+            child_callbacks = libc == "glibc" and tuple(map(int, version.split(".")[:2])) >= (2, 32)
+            compare("-IB", "-c", imports + f"arithmetic.current({child_callbacks})")
+            plugin.write_bytes((fixtures / "boxed_posix_fadvise.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_fallocate.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-IB", str(fixtures / "boxed_posix_spawn_exports.py"), "posix", "os")
+            plugin.write_bytes((fixtures / "boxed_posix_spawn_actions.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sched_param.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sched_getscheduler.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-IB", str(fixtures / "boxed_posix_xattr_exports.py"), "os", "posix")
+            plugin.write_bytes((fixtures / "boxed_posix_xattrs.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
@@ -2906,9 +3186,12 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sysconf.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_device.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             compare("-IB", "-c", imports + "arithmetic.core_limits_child()")
+            compare("-IB", "-c", imports + "arithmetic.nofile_limits_child()")
             shim = root / "secrets_entropy.so"
             subprocess.run(["cc", "-shared", "-fPIC", fixtures / "secrets_entropy.c", "-ldl", "-o", shim], check=True)
             probe = root / "entropy.py"

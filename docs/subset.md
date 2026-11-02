@@ -142,9 +142,10 @@ are read-only; mutation, per-line objects, byte inputs, and metadata-only parsin
 are outside this surface.
 
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
-`for key, group` loop, the first statement must assign `list(group)` to a separate
-local. That list can be stored or mutated. The grouper name must be fresh and its
-only supported use is this immediate conversion.
+`for key, group` loop, the first statement can iterate over the group with
+`for member in group`, or assign `list(group)` to a separate local. The inner
+loop pulls members on demand. The materialized list can be stored or mutated.
+The grouper name must be fresh and can only be used by that first statement.
 
 ```python
 from itertools import groupby
@@ -1294,7 +1295,7 @@ the missing-key behavior of a Counter or defaultdict. Membership never inserts a
 key. `get(key, default=None)` tests membership before subscribing, and indexed
 assignment writes through to the first dictionary.
 
-Direct `mapping.keys()` operands and sets of the same key type support `|`, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set. Stored key-view objects and arbitrary iterables as union operands are outside the supported subset.
+The typed path supports `|` between direct `mapping.keys()` operands and sets of the same key type, including chained unions. Each union reads the two key sources after evaluating both operands, and returns an independent set.
 
 `set[T]` accepts the same exact scalar or immutable fixed-tuple shapes as dictionary keys, with the same value equality. Nonempty literals infer their element type and evaluate every element from left to right, including duplicates. Empty `set()` requires a concrete contextual type. `add(value)` inserts an element, `discard(value)` removes it when present, and both return `None`. Adding a duplicate or discarding a missing element is a no-op. `len`, single `in`/`not in` comparisons, direct iteration, and loop-head `enumerate` are supported. Set iteration and display order are unspecified. Iteration checks size changes and owns each yielded element before the body can remove it.
 
@@ -1316,7 +1317,9 @@ Immediate consumers also accept `iter(lambda: expr, sentinel)` for an exact `str
 
 The checker joins assignments from surviving break paths with the normally completed else suite. A search can assign its result before every break and assign a fallback in else, then use the result afterward. An else suite does not make the iteration target initialized when the iterable was empty. False-condition optional facts are available inside a while-else suite; finally writes and exception-handler target deletion cannot preserve stale facts on break paths.
 
-`for key in mapping` and `for key, value in mapping.items()` visit insertion order. `enumerate` accepts either form and creates the iterator after evaluating its start argument. `for value in mapping.values()` visits values in the same order. Each yielded key or value has its own owner before the body runs. If the loop replaces an existing value, later iterations see the replacement. A changed size at the next step reports `RuntimeError`, including after the last yielded item. Same-size structural mutation may report changed keys or skip entries. Mapping views are supported where the loop or reduction immediately consumes them.
+`for key in mapping` and `for key, value in mapping.items()` visit insertion order. `enumerate` accepts either form and creates the iterator after evaluating its start argument. `for value in mapping.values()` visits values in the same order. Each yielded key or value has its own owner before the body runs. If the loop replaces an existing value, later iterations see the replacement. A changed size at the next step reports `RuntimeError`, including after the last yielded item. Same-size structural mutation may report changed keys or skip entries.
+
+Loops and reductions can consume dictionary views directly. Saving a view or a bound `keys`, `items`, or `values` method uses the object runtime. Each read of a view’s `.mapping` attribute returns a fresh read-only proxy that reflects changes to the original dictionary.
 
 Literal elements receive types from an annotated variable, an existing storage location, a function or method argument, or a return annotation. This also applies inside nested literals and list repetition: `rows: list[list[str]] = [[], []]` creates two independent string lists. It does not convert an existing container to a different element type.
 

@@ -53,6 +53,7 @@ pub(in crate::dynamic) enum MemoryStream {
     Reader(std::rc::Rc<buffered_reader::Reader>),
     UninitializedReader(Option<Id>),
     UninitializedWriter(Option<Id>),
+    DetachedWriter,
     BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
     Pair(rwpair::Pair),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
@@ -864,7 +865,7 @@ pub(in super::super) fn call(
         Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
     ) {
         owner_kind
-    } else if owner_kind == Some("TextIOWrapper") && name == "__next__" {
+    } else if owner_kind == Some("TextIOWrapper") && matches!(name, "__next__" | "truncate") {
         Some("TextIOWrapper")
     } else if bytes_io {
         Some("BytesIO")
@@ -1029,6 +1030,9 @@ pub(in super::super) fn call(
         return native_writer::call(ctx, "BufferedWriter", receiver, name, rest, kwargs);
     }
     if layout == Some("TextIOWrapper") {
+        if name == "truncate" {
+            return text_wrapper::truncate(ctx, receiver, rest, kwargs);
+        }
         if matches!(ctx.heap.get(receiver), Value::TextFile(_)) {
             return super::files::text_method(ctx, name, args, kwargs);
         }

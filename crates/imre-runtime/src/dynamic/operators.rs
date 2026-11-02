@@ -305,26 +305,56 @@ impl Context {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
+        let number = self.integer_slot_result(result, "__index__")?;
+        Ok(Some((result, number)))
+    }
+
+    fn integer_slot_result(&mut self, result: Id, slot: &str) -> Result<crate::Int> {
         let number = self.as_int(result).map_err(|_| {
             Error::new(
                 "TypeError",
                 format!(
-                    "__index__ returned non-int (type {})",
+                    "{slot} returned non-int (type {})",
                     self.type_name(result)
                 ),
             )
         })?;
         if !matches!(self.heap.get(result), Value::Int(_)) {
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(result);
             self.emit_builtin_warning(
                 crate::objects::exceptions::Kind::DeprecationWarning,
                 &format!(
-                    "__index__ returned non-int (type {}).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.",
+                    "{slot} returned non-int (type {}).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.",
                     self.type_name(result)
                 ),
                 1,
             )?;
         }
-        Ok(Some((result, number)))
+        Ok(number)
+    }
+
+    /// Apply the numeric conversion used by int(x) before attempting to parse text.
+    pub(super) fn numeric_int(&mut self, value: Id) -> Result<Option<Id>> {
+        if matches!(self.heap.get(value), Value::Int(_)) {
+            return Ok(Some(value));
+        }
+        let (result, number) = if let Some(method) = self.bound_slot(value, "__int__")? {
+            let result = self.call(method, Vec::new(), Vec::new())?;
+            (result, self.integer_slot_result(result, "__int__")?)
+        } else if let Value::Float(number) = *self.heap.get(self.scalar_value(value)) {
+            let integer = crate::floats::float_to_integer(number)?;
+            return Ok(Some(self.alloc(Value::Int(crate::Int::new(integer)))));
+        } else if let Some(index) = self.index_result(value)? {
+            index
+        } else {
+            return Ok(None);
+        };
+        Ok(Some(if matches!(self.heap.get(result), Value::Int(_)) {
+            result
+        } else {
+            self.alloc(Value::Int(number))
+        }))
     }
 
     /// Convert a bytearray element using the index protocol and the inclusive byte bounds.
@@ -1742,7 +1772,7 @@ impl Context {
                     append_rendered_text(&mut output, "(")?;
                     // Snapshot both operands before a Python repr hook can advance the cursor.
                     let first = match ctx.heap.get(ctx.scalar_value(id)) {
-                        Value::Count { current, step } => {
+                        Value::Count { current, step, .. } => {
                             if stdlib::itertools::machine_integer(&ctx, *step) != Some(1) {
                                 push_frame(&mut work, Part::Value(*step, true))?;
                                 push_frame(&mut work, Part::Text(", "))?;
@@ -2094,6 +2124,9 @@ impl Context {
                             } else {
                                 work.push(match alias.kind {
                                     AliasKind::Callable => Part::Text("typing.Callable"),
+                                    AliasKind::AbcCallable if callable => {
+                                        Part::Text("collections.abc.Callable")
+                                    }
                                     AliasKind::Literal(_) => Part::Text("typing.Literal"),
                                     _ => Part::TypeArgument(alias.origin, false),
                                 });
@@ -2527,6 +2560,9 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if matches!(self.heap.get(self.scalar_value(id)), Value::Super { .. }) {
+            return self.super_repr(id);
+        }
         if matches!(
             self.heap.get(self.scalar_value(id)),
             Value::Count { .. } | Value::Repeat(_)
@@ -2795,14 +2831,27 @@ impl Context {
             {
                 format!("<built-in function {leaf}>")
             }
-            Value::HashMethod { name, .. } => format!("<method '{name}' of '_md5.md5' objects>"),
+            Value::HeapTypeMethod { name, owner } => {
+                let class = self.heap.get(*owner).heap_type().unwrap();
+                let kind = if *name == "__repr__" {
+                    "slot wrapper"
+                } else {
+                    "method"
+                };
+                format!("<{kind} '{name}' of '{class}' objects>")
+            }
             Value::Method {
                 callable, receiver, ..
-            } if let Value::HashMethod { name, .. } = self.heap.get(*callable) => {
+            } if let Value::HeapTypeMethod { name, owner } = self.heap.get(*callable) => {
+                let class = self.heap.get(*owner).heap_type().unwrap();
                 if matches!(self.heap.get(*receiver), Value::Module { .. }) {
                     format!("<built-in function {name}>")
+                } else if *name == "__new__" {
+                    format!("<built-in method __new__ of type object at {receiver:#x}>")
+                } else if *name == "__repr__" {
+                    format!("<method-wrapper '__repr__' of {class} object at {receiver:#x}>")
                 } else {
-                    format!("<built-in method {name} of _md5.md5 object at {receiver:#x}>")
+                    format!("<built-in method {name} of {class} object at {receiver:#x}>")
                 }
             }
             Value::Native(name)
@@ -3473,6 +3522,7 @@ impl Context {
         matches!(
             self.heap.get(storage),
             Value::List(_)
+                | Value::Deque(_)
                 | Value::Tuple(_)
                 | Value::Str(_)
                 | Value::SurrogateStr(_)
@@ -3482,15 +3532,12 @@ impl Context {
         .then_some(storage)
     }
 
-    /// Repeat the current contents after converting the multiplier through its index slot.
-    fn repeat_sequence(
+    pub(super) fn sequence_multiplier(
         &mut self,
-        owner: Id,
-        storage: Id,
         multiplier: Id,
-        mode: RepeatMode,
-    ) -> Result<Id> {
-        let count = if mode == RepeatMode::Wrapper {
+        wrapper: bool,
+    ) -> Result<(crate::Int, isize)> {
+        let count = if wrapper {
             self.index_integer(multiplier)?
         } else {
             self.index_value(multiplier)?.ok_or_else(|| {
@@ -3515,7 +3562,27 @@ impl Context {
                     ),
                 )
             })?;
+        Ok((count, n))
+    }
+
+    fn overrides_repeat(&self, owner: Id, name: &str) -> bool {
+        self.slot(owner, name).is_some_and(|slot| {
+            !matches!(self.heap.get(slot), Value::Native(symbol)
+                if symbol.strip_prefix("collections.deque.") == Some(name))
+        })
+    }
+
+    /// Repeat the current contents after converting the multiplier through its index slot.
+    fn repeat_sequence(
+        &mut self,
+        owner: Id,
+        storage: Id,
+        multiplier: Id,
+        mode: RepeatMode,
+    ) -> Result<Id> {
+        let (count, n) = self.sequence_multiplier(multiplier, mode == RepeatMode::Wrapper)?;
         Ok(match self.heap.get(storage) {
+            Value::Deque(_) => return deque::repeat(self, owner, n, mode == RepeatMode::InPlace),
             Value::List(items) if mode == RepeatMode::InPlace => {
                 if n <= 0 {
                     builtins::clear_container(self, storage);
@@ -3532,7 +3599,7 @@ impl Context {
                 let repeated = repeat_values(items, n)?;
                 self.alloc(Value::List(repeated))
             }
-            Value::Tuple(items) if items.is_empty() || n == 1 => storage,
+            Value::Tuple(items) if items.is_empty() || (n == 1 && owner == storage) => storage,
             Value::Tuple(items) => {
                 let repeated = repeat_values(items, n)?;
                 self.alloc(Value::Tuple(repeated))
@@ -4087,6 +4154,33 @@ impl Context {
         Ok(self.alloc(Value::List(items)))
     }
 
+    /// Concatenate tuple storage without consulting a subclass's iterator or item hooks.
+    fn concat_tuple(&mut self, a: Id, b: Id) -> Result<Id> {
+        let items = |value| match self.tuple_backing(value) {
+            Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                Ok(Some(Cow::Borrowed(items.as_slice())))
+            }
+            _ => self.tuple_items(value).map(|items| items.map(Cow::Owned)),
+        };
+        let Some(right) = items(b)? else {
+            let name = self.type_name(b);
+            let name = &name[..name.floor_char_boundary(200)];
+            return Err(Error::new(
+                "TypeError",
+                format!("can only concatenate tuple (not \"{name}\") to tuple"),
+            ));
+        };
+        let left = items(a)?.expect("tuple receiver");
+        if left.is_empty() && matches!(self.heap.get(b), Value::Tuple(_)) {
+            return Ok(b);
+        }
+        if right.is_empty() && matches!(self.heap.get(a), Value::Tuple(_)) {
+            return Ok(a);
+        }
+        let values = concat_ids(&left, &right)?;
+        Ok(self.alloc(Value::Tuple(values)))
+    }
+
     /// Join the boundary strings and preserve the existing interpolation objects.
     fn concat_template(&mut self, left: Id, right: Id) -> Result<Id> {
         let Value::Template {
@@ -4216,13 +4310,14 @@ impl Context {
     }
 
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
-        if !inplace
-            && op == "|"
-            && (matches!(self.heap.get(a), Value::MappingProxy(_))
-                || matches!(self.heap.get(b), Value::MappingProxy(_))
-                    && !matches!(self.heap.get(a), Value::Weak(wr) if wr.kind != weakref::Kind::Reference))
-        {
-            return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
+        if !inplace && op == "|" {
+            let weak_proxy = |id| matches!(self.heap.get(id), Value::Weak(wr) if wr.kind != weakref::Kind::Reference);
+            if matches!(self.heap.get(a), Value::MappingProxy(_))
+                || (matches!(self.heap.get(b), Value::MappingProxy(_)) && !weak_proxy(a))
+                || (weak_proxy(b) && self.dict_storage(a).is_some())
+            {
+                return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
+            }
         }
         if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
             let left = self.weak_proxy_target(a)?;
@@ -4260,14 +4355,6 @@ impl Context {
         }
         let truth = |v| if v { TRUE } else { FALSE };
         match op {
-            "|" if !inplace
-                && matches!(self.heap.get(a), Value::Dict(_))
-                && matches!(self.heap.get(b), Value::Dict(_)) =>
-            {
-                let merged = builtins::copy_dict(self, a, a)?;
-                builtins::update_dict(self, merged, Some(b), &[])?;
-                return Ok(merged);
-            }
             "|" | "&" | "-"
                 if [a, b].into_iter().any(|id| {
                     matches!(
@@ -4292,6 +4379,7 @@ impl Context {
                         value
                     };
                     matches!(self.heap.get(storage), Value::Set { .. })
+                        || (op == "|" && self.dict_storage(value).is_some())
                 }) =>
             {
                 if matches!(
@@ -4356,11 +4444,39 @@ impl Context {
                 };
                 return Err(Error::new("TypeError", message));
             }
+            "+" if self.builtin_slot_accepts(a, "tuple") => {
+                if self.overrides_add(a, "tuple.__add__") {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for +{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
+                return self.concat_tuple(a, b);
+            }
             "+" | "-"
                 if matches!(self.heap.get(a), Value::Complex(_))
                     || matches!(self.heap.get(b), Value::Complex(_)) =>
             {
                 return self.complex_sum(op == "+", a, b);
+            }
+            "+" if matches!(self.heap.get(self.scalar_value(a)), Value::Deque(_)) => {
+                if self.overrides_add(a, "collections.deque.__add__") {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for +{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
+                return deque::concat(self, a, b);
             }
             "+" if let Some(storage) = self.list_storage(a) => {
                 if inplace && storage == a {
@@ -4408,16 +4524,6 @@ impl Context {
                         format!("can't concat {} to bytearray", self.type_name(b)),
                     ));
                 }
-                (Value::Tuple(x), Value::Tuple(y)) => {
-                    if x.is_empty() {
-                        return Ok(b);
-                    }
-                    if y.is_empty() {
-                        return Ok(a);
-                    }
-                    let items = concat_ids(x, y)?;
-                    return Ok(self.alloc(Value::Tuple(items)));
-                }
                 _ => {}
             },
             "*" => {
@@ -4428,12 +4534,15 @@ impl Context {
                     };
                     let mode = if left
                         && inplace
-                        && matches!(self.heap.get(storage), Value::List(_) | Value::ByteArray(_))
-                        && self.slot(owner, "__imul__").is_none()
+                        && matches!(
+                            self.heap.get(storage),
+                            Value::List(_) | Value::ByteArray(_) | Value::Deque(_)
+                        )
+                        && !self.overrides_repeat(owner, "__imul__")
                     {
                         RepeatMode::InPlace
-                    } else if self.slot(owner, "__mul__").is_none()
-                        && self.slot(owner, "__rmul__").is_none()
+                    } else if !self.overrides_repeat(owner, "__mul__")
+                        && !self.overrides_repeat(owner, "__rmul__")
                     {
                         RepeatMode::Sequence
                     } else {
@@ -4669,6 +4778,7 @@ impl Context {
         };
         let class = match value.class() {
             "timedelta" => "datetime.timedelta",
+            "date" if add_or_subtract => "datetime.date",
             "datetime" if add_or_subtract => "datetime.datetime",
             _ => return None,
         };
@@ -4685,17 +4795,51 @@ impl Context {
         if let Value::KeyWrapper { comparator, object } = *self.heap.get(obj) {
             return stdlib::functools::key_comparison(self, name, comparator, object, other);
         }
-        // Without a Python addition hook, list concatenation waits for the reflected operand.
+        // Defining only __radd__ also installs a forward numeric slot. In that case
+        // the inherited tuple concatenation runs before an unrelated reflected slot.
         if name == "__add__"
-            && self.list_storage(obj).is_some()
-            && !self.overrides_add(obj, "list.__add__")
-            && self.slot(obj, "__radd__").is_none()
+            && self.builtin_slot_accepts(obj, "tuple")
+            && !self.overrides_add(obj, "tuple.__add__")
+        {
+            return if self.slot(obj, "__radd__").is_some() {
+                self.concat_tuple(obj, other).map(Some)
+            } else {
+                Ok(None)
+            };
+        }
+        // Native deque repetition is a sequence fallback, after numeric hooks. A subtype
+        // defining either multiply hook installs a numeric slot for both directions.
+        if matches!(name, "__mul__" | "__rmul__" | "__imul__")
+            && matches!(self.heap.get(self.scalar_value(obj)), Value::Deque(_))
+            && !self.overrides_repeat(obj, name)
+            && (name == "__imul__"
+                || (!self.overrides_repeat(obj, "__mul__")
+                    && !self.overrides_repeat(obj, "__rmul__")))
         {
             return Ok(None);
         }
-        let method = if matches!(name, "__xor__" | "__rxor__")
-            && matches!(self.heap.get(obj), Value::Set { .. })
-        {
+        // Sequence concatenation runs after the right operand's reflected numeric slot.
+        if name == "__add__" {
+            let native = match self.heap.get(self.scalar_value(obj)) {
+                Value::List(_) => Some("list.__add__"),
+                Value::Deque(_) => Some("collections.deque.__add__"),
+                _ => None,
+            };
+            if native.is_some_and(|slot| !self.overrides_add(obj, slot))
+                && self.slot(obj, "__radd__").is_none()
+            {
+                return Ok(None);
+            }
+        }
+        let method = if matches!(
+            (name, self.heap.get(obj)),
+            ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
+                | ("__xor__" | "__rxor__", Value::Set { .. })
+                | (
+                    "__or__" | "__ror__",
+                    Value::Dict(_) | Value::DefaultDict { .. }
+                )
+        ) {
             Some(self.lookup_attr(obj, name)?)
         } else if name == "__ne__" && !self.has_custom_ne(obj) {
             None
@@ -4793,7 +4937,7 @@ impl Context {
             (Some(left), Some(right))
                 if left != right && self.direct_subclass(right, left) && python_slot(b) =>
             {
-                !python_slot(a) || self.reflected_divmod_overridden(left, right)?
+                !python_slot(a) || self.reflected_slot_overridden(left, right, "__rdivmod__")?
             }
             _ => false,
         };
@@ -4832,14 +4976,22 @@ impl Context {
         ))
     }
 
+    /// Python-defined union slots compare the reflected methods after binding them to each class.
+    fn has_python_union_slot(&self, obj: Id) -> bool {
+        ["__or__", "__ror__"].iter().any(|name| {
+            self.slot(obj, name)
+                .is_some_and(|slot| !matches!(self.heap.get(slot), Value::Native(_)))
+        })
+    }
+
     /// Compare the attributes on the two classes after applying descriptor binding.
-    fn reflected_divmod_overridden(&mut self, left: Id, right: Id) -> Result<bool> {
-        let right = match self.lookup_attr(right, "__rdivmod__") {
+    fn reflected_slot_overridden(&mut self, left: Id, right: Id, name: &str) -> Result<bool> {
+        let right = match self.lookup_attr(right, name) {
             Ok(slot) => slot,
             Err(error) if self.is_attribute_error(&error) => return Ok(false),
             Err(error) => return Err(error),
         };
-        let left = match self.lookup_attr(left, "__rdivmod__") {
+        let left = match self.lookup_attr(left, name) {
             Ok(slot) => slot,
             Err(error) if self.is_attribute_error(&error) => return Ok(true),
             Err(error) => return Err(error),
@@ -5022,7 +5174,11 @@ impl Context {
         }
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
+                if matches!(op, "<" | "<=" | ">" | ">=")
+                    && matches!(self.heap.get(id), Value::Deque(_))
+                {
+                    self.builtins.get(deque::CLASS).copied()
+                } else if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
                     self.calendar_slot_class(id, matches!(op, "+" | "-"))
                 } else {
                     None
@@ -5034,9 +5190,13 @@ impl Context {
             && [a, b]
                 .into_iter()
                 .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
-        if set_xor {
+        let dict_union = op == "|" && [a, b].into_iter().any(|id| self.dict_storage(id).is_some());
+        if set_xor || dict_union {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
-                if matches!(self.heap.get(value), Value::Set { .. }) {
+                if matches!(
+                    (op, self.heap.get(value)),
+                    ("^", Value::Set { .. }) | ("|", Value::Dict(_) | Value::DefaultDict { .. })
+                ) {
                     *class = Some(self.exact_type(value)?);
                 }
             }
@@ -5054,7 +5214,7 @@ impl Context {
             && [a, b]
                 .into_iter()
                 .any(|id| match self.heap.get(self.scalar_value(id)) {
-                    Value::Set { .. } => true,
+                    Value::Set { .. } | Value::Deque(_) => true,
                     Value::Calendar { value, .. } => value.class() != "timezone",
                     _ => false,
                 });
@@ -5089,13 +5249,17 @@ impl Context {
         }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
             let strict_subclass = ac != bc
-                && if set_xor {
+                && if set_xor || dict_union {
                     self.direct_subclass(bc, ac)
                 } else {
                     self.subclass(bc, ac)
                 };
             strict_subclass
-                && (inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right))
+                && if dict_union && self.has_python_union_slot(a) && self.has_python_union_slot(b) {
+                    self.reflected_slot_overridden(ac, bc, right)?
+                } else {
+                    inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right)
+                }
         } else {
             false
         };
