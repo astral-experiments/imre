@@ -1647,6 +1647,7 @@ def report(text):
             "boxed_function_closure_cells.py",
             "boxed_function_closure_edges.py",
             "boxed_functiontype.py",
+            "boxed_function_call.py",
             "boxed_any_generator.py",
             "boxed_global.py",
             "boxed_logging.py",
