@@ -2035,6 +2035,7 @@ def report(text):
             "boxed_dict_subclasses.py",
             "boxed_dict_union.py",
             "boxed_abc_metaclass.py",
+            "boxed_bless_loader.py",
             "boxed_mapping_abc.py",
             "boxed_user_containers.py",
             "boxed_dict_pop.py",

@@ -467,7 +467,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "path_stats"
             | "cache_name"
             | "source_name"
-            | "warn_debug_override",
+            | "warn_debug_override"
+            | "warn_loader_deprecation",
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
@@ -1654,6 +1655,15 @@ pub(super) fn call(
                     .transpose()?;
                 let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
                 return Ok(ctx.text(path.to_string()));
+            }
+            ("warn_loader_deprecation", [message], []) => {
+                let message = ctx.str_value(*message)?.to_owned();
+                ctx.emit_builtin_warning(
+                    crate::objects::exceptions::Kind::DeprecationWarning,
+                    &message,
+                    1,
+                )?;
+                return Ok(NONE);
             }
             ("warn_debug_override", [], []) => {
                 crate::objects::cache_paths::warn_debug_override()?;
