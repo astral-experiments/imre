@@ -7,6 +7,7 @@ import _locale
 import io
 import locale
 import os
+import weakref
 
 
 class Wrapper(io.TextIOWrapper):
@@ -62,6 +63,19 @@ def current():
         assert raw.getvalue() == b"\xe9\n" and text.errors == "strict"
         text.write("é\n")
         assert raw.getvalue() == b"\xe9\n\xc3\xa9\r\n"
+
+    class Encoding(str):
+        pass
+
+    with io.TextIOWrapper(io.BytesIO()) as text:
+        observed = []
+        encoding = Encoding("ascii")
+        ref = weakref.ref(encoding, lambda _: observed.append((text.encoding, text.errors)))
+        text.reconfigure(encoding=encoding, errors="replace")
+        del encoding
+        assert ref() is text.encoding
+        text.reconfigure(encoding="latin-1", errors="ignore")
+        assert ref() is None and observed == [("latin-1", "replace")]
 
     with io.TextIOWrapper(io.BytesIO(b"a\rb"), encoding="ascii") as text:
         assert text.read(1) == "a"

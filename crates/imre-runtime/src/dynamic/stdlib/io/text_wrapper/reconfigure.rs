@@ -27,8 +27,14 @@ fn setting_flag(
 
 fn release_option(ctx: &mut Context, old: Id, new: Id) -> Result<()> {
     if old != new {
-        ctx.heap.weak_edge_removed(old);
         super::super::release_child(ctx, Some(old))?;
+        if !ctx.heap.weak_references(old).is_empty() {
+            let mark = ctx.heap.temporary_mark();
+            let (heap, roots) = ctx.heap_and_roots();
+            let callbacks = heap.clear_released_weakrefs(old, roots)?;
+            ctx.run_weak_callbacks(callbacks);
+            ctx.heap.release_temporaries_since(mark);
+        }
     }
     Ok(())
 }
