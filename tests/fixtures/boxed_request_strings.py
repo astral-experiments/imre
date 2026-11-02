@@ -1,3 +1,10 @@
+from enum import StrEnum
+
+
+class Digit(StrEnum):
+    TWO = "²"
+
+
 class Index:
     def __index__(self):
         return -3
@@ -117,6 +124,8 @@ def current():
             method("")
         except ValueError as error:
             print(error)
+    bound_digit = Digit.TWO.isdigit
+    print(bound_digit(), str.isalpha(Digit.TWO))
     for value in (Text("é"), Text("²"), "\ud800", Text("7\udfff"), Text("a\udfff"),
                   CustomPredicates("a"), CustomPredicates("1")):
         bound_alpha = value.isalpha

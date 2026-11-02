@@ -7763,11 +7763,11 @@ impl<'a> Checker<'a> {
                     }
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
-                if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
-                    && matches!(
-                        attribute.attr.as_str(),
-                        "isascii" | "isalpha" | "isdigit" | "islower"
-                    )
+                if matches!(
+                    receiver.ty,
+                    Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
+                ) && ir::StrDescriptor::named(attribute.attr.as_str())
+                    .is_some_and(ir::StrDescriptor::is_predicate)
                 {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),

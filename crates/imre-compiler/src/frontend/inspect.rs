@@ -316,7 +316,8 @@ impl Checker<'_> {
         instance: &impl Ranged,
         tail: &[ast::Expr],
     ) -> Result<Expr, String> {
-        if !matches!(receiver.ty, Type::Str | Type::StrLiteral(_)) {
+        let enum_predicate = matches!(receiver.ty, Type::StrEnum(_)) && method.is_predicate();
+        if !matches!(receiver.ty, Type::Str | Type::StrLiteral(_)) && !enum_predicate {
             let name = self.exact_argument_type_name(receiver.ty).ok_or_else(|| {
                 error(
                     self.source,

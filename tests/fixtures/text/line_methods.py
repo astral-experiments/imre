@@ -1,6 +1,14 @@
 """Retained endings, Python whitespace, option truth, and exception ordering."""
 
 
+from enum import StrEnum
+
+
+class Token(StrEnum):
+    LETTER = "東"
+    DIGIT = "²"
+
+
 class Flag:
     def __init__(self, value: int):
         self.value = value
@@ -126,6 +134,8 @@ for text in ("", "Ab東", "A\u0345", "Ⅰ", "\u1c89", "1²", "⑨", "⑩", "½",
     print(unbound_alpha(text))
     print(text.isdigit())
     print(unbound_digit(text))
+print(unbound_alpha(Token.LETTER))
+print(str.isdigit(Token.DIGIT))
 try:
     unbound_alpha(3)
 except TypeError as err:
