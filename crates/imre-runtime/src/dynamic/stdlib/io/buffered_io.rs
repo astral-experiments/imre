@@ -2,7 +2,7 @@
 
 use super::{Context, Error, Id, NONE, Result, Value};
 
-pub(super) const METHODS: &[&str] = &["read", "read1", "readinto", "readinto1", "detach"];
+pub(super) const METHODS: &[&str] = &["read", "read1", "readinto", "readinto1", "write", "detach"];
 
 pub(super) fn call(
     ctx: &mut Context,
@@ -11,6 +11,22 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "write" {
+        let count = args.len() + kwargs.len();
+        if count > 1 {
+            return Err(Error::new(
+                "TypeError",
+                format!("write() takes at most 1 argument ({count} given)"),
+            ));
+        }
+        if args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "write() takes exactly 1 positional argument (0 given)",
+            ));
+        }
+        return Err(Error::new("UnsupportedOperation", "write"));
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",

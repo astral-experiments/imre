@@ -7,18 +7,19 @@ use num_traits::ToPrimitive;
 pub(super) const CLASS: &str = "_thread.RLock";
 
 pub(super) fn is_method(name: &str) -> bool {
-    matches!(
-        name,
-        "acquire"
-            | "release"
-            | "locked"
-            | "__enter__"
-            | "__exit__"
-            | "_recursion_count"
-            | "_is_owned"
-            | "_release_save"
-            | "_acquire_restore"
-    )
+    (cfg!(unix) && name == "_at_fork_reinit")
+        || matches!(
+            name,
+            "acquire"
+                | "release"
+                | "locked"
+                | "__enter__"
+                | "__exit__"
+                | "_recursion_count"
+                | "_is_owned"
+                | "_release_save"
+                | "_acquire_restore"
+        )
 }
 
 fn saved_state(ctx: &mut Context, arg: Id) -> Result<(usize, usize)> {
@@ -98,7 +99,8 @@ pub(super) fn method(
             format!("unbound method RLock.{name}() needs an argument"),
         ));
     };
-    let Value::HandlerLock(lock) = ctx.heap.get(ctx.scalar_value(id)) else {
+    let receiver = ctx.scalar_value(id);
+    if !matches!(ctx.heap.get(receiver), Value::HandlerLock(_)) {
         return Err(Error::new(
             "TypeError",
             format!(
@@ -106,11 +108,15 @@ pub(super) fn method(
                 ctx.type_name(id)
             ),
         ));
+    }
+    // Conversion may run Python and reinitialize this receiver in a forked child.
+    let backing = |ctx: &Context| match ctx.heap.get(receiver) {
+        Value::HandlerLock(lock) => lock.clone(),
+        _ => unreachable!("RLock receiver checked above"),
     };
-    let lock = lock.clone();
     if matches!(name, "acquire" | "__enter__") {
         let (blocking, timeout) = super::thread_lock::acquire_args(ctx, args, kwargs)?;
-        return Ok(boolean(lock.acquire(blocking, timeout)?));
+        return Ok(boolean(backing(ctx).acquire(blocking, timeout)?));
     }
     if !kwargs.is_empty() {
         let label = if matches!(name, "__exit__" | "_acquire_restore") {
@@ -134,7 +140,7 @@ pub(super) fn method(
             ));
         };
         let (depth, owner) = saved_state(ctx, *arg)?;
-        lock.acquire_restore(depth, owner);
+        backing(ctx).acquire_restore(depth, owner);
         return Ok(NONE);
     }
     if !args.is_empty() && name != "__exit__" {
@@ -143,6 +149,15 @@ pub(super) fn method(
             format!("RLock.{name}() takes no arguments ({} given)", args.len()),
         ));
     }
+    #[cfg(unix)]
+    if name == "_at_fork_reinit" {
+        let Value::HandlerLock(lock) = ctx.heap.get_mut(receiver) else {
+            unreachable!("RLock receiver checked above")
+        };
+        crate::objects::logging::HandlerLock::at_fork_reinit(lock);
+        return Ok(NONE);
+    }
+    let lock = backing(ctx);
     match name {
         "locked" => Ok(boolean(lock.state().is_some())),
         "_is_owned" => Ok(boolean(lock.owned())),

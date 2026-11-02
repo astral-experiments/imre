@@ -2,7 +2,7 @@
 
 import builtins as _builtins
 import typing as _typing
-from _collections_abc import MutableMapping as _MutableMapping
+from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from collections import defaultdict as _defaultdict
 from functools import lru_cache
 from typing import Any, Callable, Generic, Protocol, TypeVar
@@ -67,61 +67,134 @@ def _typeddict_field(value):
     return value
 
 
-def _configure_typeddict(cls, fields, total, declared=False, thunks=None):
-    def checked_thunk(thunk):
-        def evaluate():
-            return _typeddict_field(thunk())
-        return evaluate
+def _typeddict_annotation_strings(annotations):
+    # The VALUE fallback has no source expression. Match annotationlib.type_repr.
+    from types import BuiltinFunctionType, FunctionType
 
-    if thunks is None:
-        annotations = {key: _typeddict_field(tp) for key, tp in fields.items()}
-    else:
-        # Keep the original class namespace's lazy cache. The public annotator
-        # also needs to reevaluate fields after that cache has been populated.
-        deferred = {key: checked_thunk(thunk) for key, thunk in thunks.items()}
-        thunks.update(deferred)
-        eager = {key: _typeddict_field(tp) for key, tp in fields.items() if key not in deferred}
-        annotations = dict(eager)
-        for key, thunk in deferred.items():
-            annotations[key] = thunk()
+    result = {}
+    for name, value in annotations.items():
+        if isinstance(value, str):
+            result[name] = value
+        elif value is None:
+            result[name] = "None"
+        elif value is type(None):
+            result[name] = "NoneType"
+        elif isinstance(value, (type, FunctionType, BuiltinFunctionType)):
+            result[name] = (value.__qualname__ if value.__module__ == "builtins" else
+                            f"{value.__module__}.{value.__qualname__}")
+        elif value is ...:
+            result[name] = "..."
+        else:
+            from string.templatelib import Template
+            if isinstance(value, Template):
+                raise NotImplementedError("template annotation strings require AST unparsing")
+            result[name] = repr(value)
+    return result
+
+
+def _typeddict_base_annotations(annotate, format):
+    if format == 2:
+        raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
+    try:
+        return annotate(format)
+    except NotImplementedError:
+        pass
+
+    if format == 1:
+        raise RuntimeError("annotate function does not support VALUE format")
+    if format not in (3, 4):
+        raise ValueError(f"Invalid format: {format!r}")
+
+    from annotationlib import Format
+    probe = annotate
+    if format == Format.FORWARDREF:
+        # The forward-reference probe can read known names and closure cells,
+        # but assignments to its globals must not change the provider's module.
+        from types import FunctionType
+        namespace = dict(annotate.__globals__)
+        probe = FunctionType(annotate.__code__, namespace, argdefs=annotate.__defaults__,
+                             closure=annotate.__closure__, kwdefaults=annotate.__kwdefaults__)
+    try:
+        probe(Format.VALUE_WITH_FAKE_GLOBALS)
+    except NotImplementedError:
+        values = annotate(Format.VALUE)
+        return _typeddict_annotation_strings(values) if format == 4 else values
+    except Exception:
+        pass
+    raise NotImplementedError("replaying an annotation provider with synthetic globals is unsupported")
+
+
+def _typeddict_body_annotator(thunks):
+    # The class body annotation function is visible to descriptors in
+    # type.__new__, before the metaclass installs its merged provider.
+    def __annotate__(format):
+        if format > 2:
+            raise NotImplementedError(format)
+        return {key: thunk() for key, thunk in thunks.items()}
+    return __annotate__
+
+
+def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
+    if not hasattr(cls, "__orig_bases__"):
+        cls.__orig_bases__ = bases
+
+    # Validate concrete fields when the class is defined, retaining the original
+    # evaluators for later annotation requests in the declaring scope.
+    annotations = {}
+    for key, tp in fields.items():
+        if thunks is not None and key in thunks:
+            tp = thunks[key]()
+        annotations[key] = _typeddict_field(tp)
 
     def __annotate__(format):
+        result = {}
+        for base in bases:
+            annotate = base.__annotate__
+            if annotate is not None:
+                result.update(_typeddict_base_annotations(annotate, format))
+        if thunks is not None and format == 2:
+            raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
         if format == 4:
-            if declared and fields:
+            if thunks is not None:
                 raise NotImplementedError("TypedDict class STRING annotations require their source expressions")
-            result = {}
-            for name, tp in fields.items():
-                if tp is None:
-                    result[name] = "None"
-                elif tp is type(None):
-                    result[name] = "NoneType"
-                else:
-                    result[name] = (tp.__qualname__ if tp.__module__ == "builtins" else
-                                    f"{tp.__module__}.{tp.__qualname__}")
+            result.update(_typeddict_annotation_strings(fields))
             return result
         if format in (1, 3):
-            if thunks is None:
-                return dict(annotations)
-            result = dict(eager)
-            for key, thunk in deferred.items():
-                result[key] = thunk()
+            for name, tp in annotations.items():
+                if thunks is not None and name in thunks:
+                    tp = _typeddict_field(thunks[name]())
+                result[name] = tp
             return result
         raise NotImplementedError(format)
 
     cls.__annotate__ = __annotate__
-    if thunks is None:
-        cls.__annotations__ = dict(annotations)
     required = set()
     optional = set()
-    for key in fields:
+    readonly = set()
+    mutable = set()
+    for base in bases:
+        namespace = base.__dict__
+        base_required = namespace.get("__required_keys__", set())
+        required |= base_required
+        optional -= base_required
+        base_optional = namespace.get("__optional_keys__", set())
+        required -= base_optional
+        optional |= base_optional
+        readonly.update(namespace.get("__readonly_keys__", ()))
+        mutable.update(namespace.get("__mutable_keys__", ()))
+    for key in annotations:
         if total:
             required.add(key)
+            optional.discard(key)
         else:
             optional.add(key)
+            required.discard(key)
+        mutable.add(key)
+        readonly.discard(key)
     cls.__required_keys__ = frozenset(required)
     cls.__optional_keys__ = frozenset(optional)
-    cls.__readonly_keys__ = frozenset()
-    cls.__mutable_keys__ = frozenset(fields)
+    cls.__readonly_keys__ = frozenset(readonly)
+    cls.__mutable_keys__ = frozenset(mutable)
     cls.__total__ = total
 
 
@@ -731,10 +804,13 @@ Type.__doc__ = \
     At this point the type checker knows that joe has type BasicUser.
     """
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
+Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
 
 def _substitute_alias_argument(arg, replacements):
+    if isinstance(arg, type):
+        return arg
     for parameter, value in replacements.items():
         if arg is parameter:
             return value
@@ -746,35 +822,50 @@ def _substitute_alias_argument(arg, replacements):
         return GenericAlias(arg.__origin__, tuple(
             _substitute_alias_argument(item, replacements) for item in arg.__args__
         ))
+    if _typing.get_origin(arg) is _typing.Union:
+        return _typing.Union[tuple(_substitute_alias_argument(item, replacements) for item in arg.__args__)]
     return arg[tuple(replacements[p] for p in parameters)]
 
 
-def _specialize_named_alias_uncached(alias, args):
+def _specialize_generic_alias_uncached(alias, args):
+    if alias.__origin__ is Generic or alias.__origin__ is Protocol:
+        raise TypeError(f"Cannot subscript already-subscripted {alias}")
     parameters = alias.__parameters__
     if not parameters:
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
-    if alias._name == "Tuple" and any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
-        raise NotImplementedError("specializing a variadic typing.Tuple requires parameter-pack substitution")
-    args = tuple(_alias_type_arg(arg) for arg in args)
-    if len(args) != len(parameters):
-        which = "few" if len(args) < len(parameters) else "many"
-        expected = f"at least {len(parameters)}" if which == "few" else str(len(parameters))
-        raise TypeError(f"Too {which} arguments for {alias}; actual {len(args)}, expected {expected}")
-    replacements = dict(zip(parameters, args))
+    if any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
+        raise NotImplementedError("specializing a variadic alias requires parameter-pack substitution")
+    expanded = []
+    for arg in args:
+        unpacked = getattr(arg, "__typing_unpacked_tuple_args__", None)
+        if unpacked is not None and not (unpacked and unpacked[-1] is ...):
+            expanded.extend(unpacked)
+        else:
+            expanded.append(arg)
+    if len(expanded) != len(parameters):
+        which = "few" if len(expanded) < len(parameters) else "many"
+        expected = f"at least {len(expanded) + 1}" if which == "few" else str(len(parameters))
+        raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
+    replacements = {}
+    for parameter, arg in zip(parameters, expanded):
+        arg = _alias_type_arg(arg)
+        if _typing.get_origin(arg) is Unpack:
+            raise TypeError(f"{arg} is not valid as type argument")
+        replacements[parameter] = arg
     args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
-_cached_named_specialization = lru_cache(_specialize_named_alias_uncached)
+_cached_generic_specialization = lru_cache(_specialize_generic_alias_uncached)
 
 
-def _specialize_named_alias(alias, args):
+def _specialize_generic_alias(alias, args):
     try:
-        return _cached_named_specialization(alias, args)
+        return _cached_generic_specialization(alias, args)
     except TypeError:
-        return _specialize_named_alias_uncached(alias, args)
+        return _specialize_generic_alias_uncached(alias, args)
 
 
 class _TypedCacheSpecialForm(_SpecialForm):

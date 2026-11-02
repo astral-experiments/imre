@@ -53,6 +53,7 @@ pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
 const EMPTY_TUPLE: Id = 5;
 
+pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
 pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
@@ -456,7 +457,7 @@ impl Context {
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
-            Value::BufferedRandom(_) => "_io.BufferedRandom",
+            Value::BufferedRandom(..) => "_io.BufferedRandom",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
@@ -640,6 +641,8 @@ pub(super) struct ClassNamespace {
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
+    /// TypedDict installs a class-wide annotation function in place of its field thunks.
+    pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
 }
@@ -983,7 +986,10 @@ pub(super) enum Value {
     },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     NamedFileCloser(crate::Shared<std::cell::RefCell<super::stdlib::tempfile::NamedCloser>>),
-    BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
+    BufferedRandom(
+        crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
+        Id,
+    ),
     RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
     Context(std::rc::Rc<HashMap<Id, Id>>),
     ContextVar {
@@ -1041,7 +1047,7 @@ impl Value {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
@@ -1051,6 +1057,7 @@ impl Value {
             Self::DequeIterator { .. } => super::deque::ITERATOR,
             Self::List(_) => "list",
             Self::CallableIterator(_) => "callable_iterator",
+            Self::RegexPattern(_) => REGEX_PATTERN_TYPE,
             Self::RegexScanner { .. } => "_sre.SRE_Scanner",
             Self::Tuple(_) => "tuple",
             Self::Slice(_) => "slice",
@@ -1468,6 +1475,8 @@ impl Value {
             Self::File(file) => {
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
+                } else if let Some((path, _)) = file.path_metadata() {
+                    visit.push(path);
                 }
             }
             Self::None
@@ -1499,8 +1508,8 @@ impl Value {
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::TextFile(_)
-            | Self::NamedFileCloser(_)
-            | Self::BufferedRandom(_) => {}
+            | Self::NamedFileCloser(_) => {}
+            Self::BufferedRandom(_, name) => visit.push(*name),
         }
     }
 }
@@ -2069,7 +2078,7 @@ impl Heap {
     }
 
     pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
-        let Value::Cell(contents) = self.get_mut(cell) else {
+        let (Value::Cell(contents) | Value::ClassCell(contents)) = self.get_mut(cell) else {
             unreachable!("compiled closure cell")
         };
         let previous = std::mem::replace(contents, value);
@@ -2137,6 +2146,23 @@ impl Heap {
         let id = self.alloc_slot(Value::Tuple(items));
         self.slots[id as usize].untracked_tuple.set(untracked);
         id
+    }
+
+    /// Allocate a distinct string result even when its value is a cached Latin-1 character.
+    pub(super) fn fresh_string(&mut self, value: Value) -> Result<Id> {
+        debug_assert!(matches!(value, Value::Str(_) | Value::SurrogateStr(_)));
+        if self.free_head == END {
+            self.slots
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
+        self.frames
+            .last_mut()
+            .unwrap()
+            .live
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        Ok(self.alloc_slot(value))
     }
 
     fn alloc_slot(&mut self, value: Value) -> Id {

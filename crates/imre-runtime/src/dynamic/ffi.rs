@@ -234,7 +234,7 @@ impl Context {
                 self.module(&name)
             }
             "from" => self.import_from(a, b),
-            "import_star" => self.import_star(a, b),
+            "import_star" => self.import_star(a, b, false),
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {
@@ -348,8 +348,9 @@ impl Context {
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "class" | "parameterized_class" => {
+                let metaclass = self.dict_named_item(a, "metaclass");
                 let total = self.dict_named_item(a, "total");
-                self.class(b, c, total, op == "parameterized_class")
+                self.class(b, c, metaclass, total, op == "parameterized_class")
             }
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {

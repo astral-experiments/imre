@@ -7,6 +7,7 @@ mod normalization;
 pub(crate) mod translate;
 pub(crate) mod urlquote;
 pub(crate) mod urlsplit;
+pub(crate) mod zfill;
 
 pub(crate) use expandtabs::expand_tabs;
 pub(crate) use lowercase::{capitalize, python_islower};

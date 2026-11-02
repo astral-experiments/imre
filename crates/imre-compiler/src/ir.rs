@@ -160,6 +160,7 @@ pub(crate) enum Type {
     Hash,
     Poll,
     JsonDecoder,
+    JsonEncoder,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
     ZipInfo,
@@ -413,6 +414,7 @@ impl std::fmt::Display for Type {
             Self::TextOutput => "writable text stream",
             Self::Hash => "hashlib hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
+            Self::JsonEncoder => "json.encoder.JSONEncoder",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
             Self::CsvReader => "CSV reader",
@@ -1414,6 +1416,8 @@ pub(crate) enum Builtin {
     JsonDecoderNew,
     JsonDecoderMemo,
     JsonDecoderDecode,
+    JsonEncoderNew,
+    JsonEncoderEncode(Type),
     JsonEmptyObject,
     ModuleCache(usize),
     /// Capture and access an individual wrapper's independently owned cache.
@@ -1739,6 +1743,7 @@ pub(crate) enum StrDescriptor {
     IsAscii,
     IsAlpha,
     IsDigit,
+    ZFill,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
@@ -1752,6 +1757,7 @@ impl StrDescriptor {
             "isalpha" => Self::IsAlpha,
             "isdigit" => Self::IsDigit,
             "islower" => Self::IsLower,
+            "zfill" => Self::ZFill,
             _ => return None,
         })
     }
@@ -1772,6 +1778,7 @@ impl StrDescriptor {
             Self::IsAlpha => "isalpha",
             Self::IsDigit => "isdigit",
             Self::IsLower => "islower",
+            Self::ZFill => "zfill",
         }
     }
 }
@@ -1802,6 +1809,9 @@ pub(crate) enum TextOperation {
     Predicate(TextPredicate),
     SplitLineEnds,
     ExpandTabs,
+    ZFill {
+        copy: bool,
+    },
     Normalize,
     Lower,
     Upper,
@@ -2119,6 +2129,9 @@ pub(crate) enum Readiness {
 /// POSIX descriptor calls use the target's C int and file descriptor flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
+    TransferFd,
+    Read,
+    Write,
     Open,
     Unlink,
     Remove,

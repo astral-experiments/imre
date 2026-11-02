@@ -245,11 +245,28 @@ fn decode(ctx: &mut Context, receiver: Id, text: Id, final_: bool) -> Result<Id>
 
 pub(super) fn call(
     ctx: &mut Context,
-    receiver: Id,
+    owner: Id,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let Some((&receiver, args)) = args.split_first() else {
+        return Err(type_error(if name == "__init__" {
+            format!("descriptor '__init__' of '{CLASS}' object needs an argument")
+        } else {
+            format!("unbound method IncrementalNewlineDecoder.{name}() needs an argument")
+        }));
+    };
+    if !ctx.instance_of(receiver, owner) {
+        let actual = ctx.type_name(receiver);
+        return Err(type_error(if name == "__init__" {
+            format!("descriptor '__init__' requires a '{CLASS}' object but received a '{actual}'")
+        } else {
+            format!(
+                "descriptor '{name}' for '{CLASS}' objects doesn't apply to a '{actual}' object"
+            )
+        }));
+    }
     if name == "__init__" {
         let [delegate, translate, errors] = parameters(
             "IncrementalNewlineDecoder",

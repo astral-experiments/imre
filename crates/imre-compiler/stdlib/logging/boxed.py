@@ -1,5 +1,8 @@
 """Logging for Python modules executed by the native object runtime."""
+import io
+import os
 import sys
+import weakref
 import _imre_logging as _native
 
 CRITICAL = 50
@@ -27,7 +30,13 @@ class _Lock:
         self.release()
 
 
+_lock = _Lock()
+_handlers = weakref.WeakValueDictionary()
 _handler_level = _native.check_level
+
+
+def _checkLevel(level):
+    return _handler_level(level)
 
 
 class _MessageRecord:
@@ -57,9 +66,28 @@ _default_formatter = _MessageFormatter()
 raiseExceptions = True
 
 
-def _rename_handler(handler, old, new):
-    if old is not None or new is not None:
-        raise NotImplementedError("named handlers in runtime-loaded logging")
+def _set_handler_name(handler, name):
+    with _lock:
+        if handler._name in _handlers:
+            del _handlers[handler._name]
+        handler._name = name
+        if name:
+            _handlers[name] = handler
+
+
+def _close_handler(handler):
+    with _lock:
+        handler._closed = True
+        if handler._name and handler._name in _handlers:
+            del _handlers[handler._name]
+
+
+def getHandlerByName(name):
+    return _handlers.get(name)
+
+
+def getHandlerNames():
+    return frozenset(_handlers)
 
 
 def _handle_error(record):
@@ -71,6 +99,56 @@ def _fallback(logger, level, record, found):
     if not found and level >= WARNING:
         sys.stderr.write(record.getMessage() + "\n")
         sys.stderr.flush()
+
+
+
+class FileHandler(StreamHandler):
+    terminator = "\n"
+
+    def __init__(self, filename, mode="a", encoding=None, delay=False, errors=None):
+        self.baseFilename = os.path.abspath(os.fspath(filename))
+        self.mode = mode
+        self.encoding = encoding if "b" in mode else io.text_encoding(encoding)
+        self.errors = errors
+        self.delay = delay
+        self._builtin_open = open
+
+        # Subclasses can override _open, including during eager construction.
+        stream = None
+        if not delay:
+            stream = self._open()
+            if stream is None:
+                stream = sys.stderr
+        Handler.__init__(self)
+        self.stream = stream
+
+    def _open(self):
+        return self._builtin_open(self.baseFilename, self.mode,
+                                  encoding=self.encoding, errors=self.errors)
+
+    def emit(self, record):
+        if self.stream is None and (self.mode != "w" or not self._closed):
+            self.stream = self._open()
+        if self.stream:
+            StreamHandler.emit(self, record)
+
+    def close(self):
+        with self.lock:
+            try:
+                if self.stream:
+                    try:
+                        self.flush()
+                    finally:
+                        stream = self.stream
+                        self.stream = None
+                        if hasattr(stream, "close"):
+                            stream.close()
+            finally:
+                StreamHandler.close(self)
+
+    def __repr__(self):
+        return "<%s %s (%s)>" % (type(self).__name__, self.baseFilename,
+                                  _native.level_name(self.level))
 
 
 class Logger:

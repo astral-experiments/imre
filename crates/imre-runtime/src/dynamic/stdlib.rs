@@ -51,7 +51,7 @@ mod select;
 pub(super) mod signal;
 mod socket;
 mod structure;
-mod traceback;
+pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
 mod zipimport;
@@ -397,7 +397,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("locale" | "_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
-        ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
+        ("tempfile", "TemporaryFile") | ("_imre_tempfile", "open_file") => {
+            ctx.builtin("tempfile.TemporaryFile")
+        }
         ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
         (
             "_imp",
@@ -416,9 +418,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "warn_debug_override",
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
-        | ("_imre_dataclasses", "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata") => {
-            ctx.builtin(&format!("{module}.{name}"))
-        }
+        | (
+            "_imre_dataclasses",
+            "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata",
+        ) => ctx.builtin(&format!("{module}.{name}")),
         ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
@@ -500,8 +503,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("datetime", "UTC") => datetime::utc(ctx),
         (
             "time",
-            "time" | "monotonic" | "perf_counter" | "gmtime" | "localtime" | "mktime" | "strftime"
-            | "ctime" | "struct_time",
+            "time" | "time_ns" | "monotonic" | "perf_counter" | "gmtime" | "localtime" | "mktime"
+            | "strftime" | "ctime" | "struct_time",
         ) => ctx.builtin(&format!("time.{name}")),
         ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
@@ -532,7 +535,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let items = options.into_iter().map(|option| ctx.text(option)).collect();
             ctx.alloc(Value::List(items))
         }
-        ("zlib", "adler32") => ctx.builtin("zlib.adler32"),
+        ("zlib", "adler32" | "crc32") => ctx.builtin(&format!("zlib.{name}")),
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
@@ -600,6 +603,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("posixpath", "normpath") | ("posix", "_path_normpath") => {
             ctx.builtin("posix._path_normpath")
+        }
+        ("posixpath", "splitroot") | ("posix", "_path_splitroot_ex") => {
+            ctx.builtin("posix._path_splitroot_ex")
         }
         ("posix", "environ") => os::environment(ctx),
         ("posix", "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
@@ -683,7 +689,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("hashlib", "new" | "file_digest")
         | ("hmac", "new" | "HMAC" | "compare_digest")
-        | ("re", "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split")
+        | (
+            "re",
+            "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall",
+        )
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "_simple_enum")
         | (
@@ -820,6 +829,13 @@ fn urlsafe_input(ctx: &mut Context, text: Id) -> Result<(Id, bool)> {
         translated
     };
     Ok((data, false))
+}
+
+fn frame_depth(ctx: &mut Context, value: Id) -> Result<i32> {
+    ctx.index_integer(value)?
+        .to_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
 }
 
 pub(super) fn call(
@@ -1038,6 +1054,20 @@ pub(super) fn call(
         builtins::update_dict(ctx, dict, args.get(1).copied(), kwargs)?;
         return Ok(if receiver.is_some() { NONE } else { dict });
     }
+    if name == "sys._getframemodulename" {
+        let [depth] =
+            builtins::bind_method_arguments("_getframemodulename", &args[1..], kwargs, ["depth"], 1)?;
+        let depth = match depth {
+            Some(value) => frame_depth(ctx, value)?,
+            None => 0,
+        };
+        let argument = ctx.int(i64::from(depth));
+        audit::event(ctx, name, &[argument])?;
+        return Ok(ctx.heap.caller_module_at(depth.max(0) as usize).unwrap_or(NONE));
+    }
+    if name == "sys.unraisablehook" {
+        return super::unraisable::default_hook(ctx, args, kwargs);
+    }
     if name == "sys._getframe" {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -1047,13 +1077,7 @@ pub(super) fn call(
         }
         let depth = match &args[1..] {
             [] => 0,
-            [value] => ctx
-                .index_integer(*value)?
-                .to_i64()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new("OverflowError", "Python int too large to convert to C int")
-                })?,
+            [value] => frame_depth(ctx, *value)?,
             extra => {
                 return Err(Error::new(
                     "TypeError",
@@ -1305,8 +1329,8 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
     }
-    if name == "zlib.adler32" {
-        return binascii::adler32(ctx, args, kwargs);
+    if let Some(method @ ("adler32" | "crc32")) = name.strip_prefix("zlib.") {
+        return binascii::checksum(ctx, method, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);
@@ -1314,8 +1338,10 @@ pub(super) fn call(
     if let Some(op) = name.strip_prefix("_imre_zipimport.") {
         return zipimport::call(ctx, op, args, kwargs);
     }
-    if matches!(name, "posix.fspath" | "posix._path_normpath")
-        || name.starts_with("_imre_posixpath.")
+    if matches!(
+        name,
+        "posix.fspath" | "posix._path_normpath" | "posix._path_splitroot_ex"
+    ) || name.starts_with("_imre_posixpath.")
     {
         return posixpath::call(ctx, name, args, kwargs);
     }
@@ -1577,7 +1603,11 @@ pub(super) fn call(
         match (method, args, kwargs) {
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
-                return Ok(if ctx.defaultdict_factory(*obj).is_some() { TRUE } else { FALSE });
+                return Ok(if ctx.defaultdict_factory(*obj).is_some() {
+                    TRUE
+                } else {
+                    FALSE
+                });
             }
             ("load_global", [module, name], []) => {
                 let scope = match ctx.heap.get(*module) {
@@ -1854,6 +1884,7 @@ pub(super) fn call(
     const JSON_DUMP_KEYWORDS: &[&str] = &[
         "fp",
         "obj",
+        "skipkeys",
         "default",
         "ensure_ascii",
         "allow_nan",

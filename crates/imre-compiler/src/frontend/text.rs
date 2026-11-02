@@ -394,6 +394,43 @@ impl Checker<'_> {
         self.expr(argument)
     }
 
+    /// Convert the positional-only field width after evaluating the string receiver.
+    pub(super) fn zfill(
+        &mut self,
+        receiver: Expr,
+        call: &ast::ExprCall,
+        copy: bool,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let ([width], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            let error = self.one_positional_error(call, "str.zfill", "width", Type::Str)?;
+            self.graph.checked_overload(self.module, call.range());
+            return Ok(self.evaluated_receiver(Some(receiver), error));
+        };
+        let value = self.expr(width)?;
+        // An indirect descriptor call has no syntactic receiver to root a Python __index__.
+        if self.graph.reachable_only()
+            && !matches!(value.ty, Type::Int | Type::Bool | Type::IntEnum(_))
+            && !matches!(call.func.as_ref(), ast::Expr::Attribute(attr) if attr.attr.as_str() == "zfill")
+        {
+            return Err(self.object_builtin_error("indirect str.zfill width", width));
+        }
+        let size = self
+            .index_word(value, width, false)
+            .map_err(|_| self.object_builtin_error("str.zfill width", width))?;
+        self.graph.checked_argument_type(self.module, width.range());
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(
+                Builtin::Text(TextOperation::ZFill { copy }),
+                vec![receiver, size],
+            ),
+        })
+    }
+
     /// Preserve ordinal lookup semantics only for plain tables without Python callbacks.
     pub(super) fn translate_method(
         &mut self,

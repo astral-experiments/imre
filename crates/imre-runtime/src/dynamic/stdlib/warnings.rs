@@ -2,6 +2,20 @@ use super::{Context, Error, NONE, Result};
 
 impl Context {
     pub(in crate::dynamic) fn encoding_warning(&mut self, level: i32) -> Result<()> {
+        self.emit_builtin_warning(
+            crate::objects::exceptions::Kind::EncodingWarning,
+            "'encoding' argument not specified",
+            level,
+        )
+    }
+
+    pub(in crate::dynamic) fn emit_builtin_warning(
+        &mut self,
+        kind: crate::objects::exceptions::Kind,
+        message: &str,
+        level: i32,
+    ) -> Result<()> {
+        let category = kind.name();
         let (filename, line, module) = if let Some((loc, scope)) = self.heap.warning_frame(level) {
             let globals = self.module_globals(scope)?;
             let module = self.dict_named_item(globals, "__name__");
@@ -17,10 +31,9 @@ impl Context {
         } else {
             ("<sys>".into(), 0, "sys".into())
         };
-        let message = "'encoding' argument not specified";
         if !crate::objects::warnings::should_emit(
-            11,
-            crate::objects::exceptions::Kind::EncodingWarning,
+            crate::objects::warnings::category_number(category).expect("warning category"),
+            kind,
             message,
             &module,
             line as isize,
@@ -37,7 +50,7 @@ impl Context {
                             "warnings.showwarning() must be set to a function or method",
                         ));
                     }
-                    let category = self.builtin("EncodingWarning");
+                    let category = self.builtin(category);
                     let text = self.text(message);
                     let warning = self.call(category, vec![text], Vec::new())?;
                     let file = self.text(filename.as_ref());
@@ -54,7 +67,7 @@ impl Context {
         if stderr == NONE {
             return Ok(());
         }
-        let mut formatted = format!("{filename}:{line}: EncodingWarning: {message}\n");
+        let mut formatted = format!("{filename}:{line}: {category}: {message}\n");
         if let Some(index) = line.checked_sub(1)
             && !filename.starts_with('<')
             && let Ok(bytes) = std::fs::read(&*filename)
