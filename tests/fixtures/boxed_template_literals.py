@@ -16,6 +16,19 @@ def current():
     assert first_template.values == (1,) and second_template.values == (2,)
     assert Template("prefix").strings is not Template("prefix").strings
 
+    namespace = {}
+    exec(r'def dormant(): return t"\ud800{1:\udfff}�"', namespace)
+    sample = namespace["dormant"]()
+    assert [ord(part) for part in sample.strings] == [0xD800, 0xFFFD]
+    assert ord(sample.interpolations[0].format_spec) == 0xDFFF
+
+    try:
+        "x" + first_template
+    except TypeError as error:
+        assert str(error) == 'can only concatenate str (not "string.templatelib.Template") to str'
+    else:
+        raise AssertionError("concatenated str and Template")
+
     empty = t""
     assert type(empty) is Template
     assert empty.strings == ("",)
