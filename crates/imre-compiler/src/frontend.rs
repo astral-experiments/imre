@@ -5937,6 +5937,12 @@ impl<'a> Checker<'a> {
         {
             return Ok(self.nullable_int_sum(left, right));
         }
+        if binary.op == ast::Operator::Mod
+            && left.ty == Type::Calendar(ir::CalendarType::Delta)
+            && right.ty == left.ty
+        {
+            return Err(self.object_runtime_export("timedelta remainder", binary));
+        }
         if let (Type::Calendar(first), Type::Calendar(second)) = (left.ty, right.ty) {
             return calendar::binary(first, second, left, right, binary, self.source);
         }
@@ -10684,6 +10690,12 @@ impl<'a> Checker<'a> {
             });
         }
         if name.id == "divmod" && args.len() == 2 {
+            if args
+                .iter()
+                .all(|arg| arg.ty == Type::Calendar(ir::CalendarType::Delta))
+            {
+                return Err(self.object_runtime_export("timedelta divmod", call));
+            }
             let mut body = Vec::with_capacity(2);
             let mut slots = Vec::with_capacity(2);
             for arg in args {
