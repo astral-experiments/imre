@@ -138,6 +138,9 @@ print(t.get_overloads(first)[0] is wrapped, t.get_overloads(wrapped)[1] is secon
 t.clear_overloads()
 
 marker = []
+assert type(t.cast) is type(t.assert_type)
+assert t.cast.__module__ == "typing" and t.cast.__qualname__ == "cast"
+assert t.cast.__doc__.startswith("Cast a value to a type.")
 print(t.cast(T, marker) is marker, t.get_origin(t.Generic) is t.Generic)
 
 print(type(K) is t.TypeVar, K.__class__ is type(K), isinstance(K, t.TypeVar))

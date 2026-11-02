@@ -1178,6 +1178,17 @@ def is_typeddict(tp):
 
 
 # Runtime assertions from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def cast(typ, val):
+    """Cast a value to a type.
+
+    This returns the value unchanged.  To the type checker this
+    signals that the return value has the designated type, but at
+    runtime we intentionally don't check anything (we want this
+    to be as fast as possible).
+    """
+    return val
+
+
 def assert_type(val, typ, /):
     """Ask a static type checker to confirm that the value is of the given type.
 
