@@ -1538,10 +1538,16 @@ fn check_initializer(
         let mut self_use = SelfUse(receiver, None, &initialized);
         self_use.visit_expr(&assignment.value);
         if let Some(expression) = self_use.1 {
-            return Err(module.error(
-                expression,
-                "__init__ cannot expose self before construction or read an uninitialized field",
-            ));
+            if let Some(name) = init_hooks::receiver_call(&assignment.value, receiver, true)
+                && matches!(lookup(name), Some(Ok(writes)) if writes.is_empty())
+            {
+                hooks.entry(name.to_owned()).or_default();
+            } else {
+                return Err(module.error(
+                    expression,
+                    "__init__ cannot expose self before construction or read an uninitialized field",
+                ));
+            }
         }
         let mut targets = Vec::new();
         for target in &assignment.targets {
@@ -1551,6 +1557,22 @@ fn check_initializer(
             if let ast::Expr::Name(name) = target {
                 if name.id == receiver {
                     return Err(module.error(target, "an initializer cannot rebind its receiver"));
+                }
+                continue;
+            }
+            if let ast::Expr::Subscript(item) = target
+                && let ast::Expr::Attribute(field) = &*item.value
+                && matches!(&*field.value, ast::Expr::Name(name) if name.id == receiver)
+                && declared.contains(field.attr.as_str())
+            {
+                // Storing an item reads the container and its index. It initializes no field.
+                let mut use_self = SelfUse(receiver, None, &initialized);
+                use_self.visit_expr(target);
+                if let Some(expr) = use_self.1 {
+                    return Err(module.error(
+                        expr,
+                        "a subscript assignment cannot expose self or read an uninitialized field",
+                    ));
                 }
                 continue;
             }
