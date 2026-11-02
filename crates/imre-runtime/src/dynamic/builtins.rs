@@ -1062,26 +1062,23 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        if scope != NONE
-            && let Value::Native(name) = self.heap.get(callable)
-        {
+        if let Value::Native(name) = self.heap.get(callable) {
             match name.as_str() {
                 "eval" => return self.call_eval_exec(scope, "eval", &args, &kwargs),
                 "exec" => return self.call_eval_exec(scope, "exec", &args, &kwargs),
                 "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
                     return self.frame_locals(scope);
                 }
+                "dir"
+                    if args.is_empty()
+                        && kwargs.is_empty()
+                        && self.scope_data(scope).parent.is_none() =>
+                {
+                    let namespace = self.module_globals(scope)?;
+                    return collections::sorted(self, &[namespace], &[]);
+                }
                 _ => {}
             }
-        }
-        if scope != NONE
-            && args.is_empty()
-            && kwargs.is_empty()
-            && matches!(self.heap.get(callable), Value::Native(name) if name == "dir")
-            && self.scope_data(scope).parent.is_none()
-        {
-            let namespace = self.module_globals(scope)?;
-            return collections::sorted(self, &[namespace], &[]);
         }
         self.call(callable, args, kwargs)
     }
