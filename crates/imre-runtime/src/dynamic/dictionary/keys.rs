@@ -527,6 +527,15 @@ impl Context {
                 format!("unhashable type: '{}'", kind.class()),
             ));
         }
+        if let Value::RegexPattern(pattern) = self.heap.get(key) {
+            if pattern.source == NONE {
+                return Ok(ControlFlow::Break(Self::identity_hash(key)));
+            }
+            let (source, program_hash) = (pattern.source, pattern.program_hash());
+            return Ok(ControlFlow::Break(normalized(
+                self.dictionary_hash(source)? ^ program_hash,
+            )));
+        }
         if let Value::Union(union) = *self.heap.get(key) {
             return union.hash(self).map(ControlFlow::Break);
         }
@@ -853,6 +862,14 @@ impl Context {
                         self.heap.keep(a);
                         self.heap.keep(b);
                         Work::Pair(a, b)
+                    } else if let (Value::RegexPattern(a), Value::RegexPattern(b)) =
+                        (self.heap.get(left), self.heap.get(right))
+                    {
+                        if a.same_program(b) {
+                            Work::Pair(a.source, b.source)
+                        } else {
+                            Work::Done(false)
+                        }
                     } else if let Some(answer) = self.binary_special("==", left, right)? {
                         Work::Done(self.truth(answer)?)
                     } else if matches!(

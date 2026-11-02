@@ -147,7 +147,7 @@ pub(super) fn nonempty(
     Ok(search_nfa(retry_nfa(pattern)?, &[], input, caps, true))
 }
 
-fn retry_nfa(pattern: &Pattern) -> std::result::Result<&NFA, String> {
+pub(super) fn retry_nfa(pattern: &Pattern) -> std::result::Result<&NFA, String> {
     if let Some(nfa) = pattern.regex.guarded_nfa() {
         return Ok(nfa);
     }

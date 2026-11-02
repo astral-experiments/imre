@@ -101,6 +101,46 @@ pub(in crate::dynamic) struct Pattern {
 }
 
 impl Pattern {
+    /// Synthetic Scanner patterns do not have a Python pattern object to compare.
+    pub(in crate::dynamic) fn same_program(&self, other: &Self) -> bool {
+        if self.source == NONE
+            || other.source == NONE
+            || self.flags != other.flags
+            || self.bytes != other.bytes
+            || self.assertions.len() != other.assertions.len()
+            || !self
+                .assertions
+                .iter()
+                .zip(&other.assertions)
+                .all(|((a, x), (b, y))| {
+                    a == b && x.kind == y.kind && x.width == y.width && x.program == y.program
+                })
+        {
+            return false;
+        }
+        // Scalar-only subjects cannot match any surrogate literal. The alternate
+        // program distinguishes the actual code points on surrogate-bearing subjects.
+        match (&self.surrogate_literals, &other.surrogate_literals) {
+            (None, None) => {}
+            (Some(a), Some(b)) if a.same_program(b) => {}
+            _ => return false,
+        }
+        if self.engine_source == other.engine_source {
+            return true;
+        }
+        // str subclasses may compare equal despite different spellings. Compare their
+        // compiled states, independent of spelling and capture names, before calling __eq__.
+        !matches!(self.regex, Matcher::Lookahead(_))
+            && !matches!(other.regex, Matcher::Lookahead(_))
+            && matches!((split::retry_nfa(self), split::retry_nfa(other)), (Ok(a), Ok(b)) if a.states() == b.states())
+    }
+
+    pub(in crate::dynamic) fn program_hash(&self) -> i64 {
+        // Equal state programs can have different spellings (for example noncapturing groups).
+        // The shared group layout is also invariant under capture renaming.
+        self.flags ^ i64::from(self.bytes) ^ (self.group_count() as i64).rotate_left(7)
+    }
+
     pub(in crate::dynamic) fn repr(&self, ctx: &Context) -> String {
         let mut source = ctx.repr(self.source);
         if let Some((end, _)) = source.char_indices().nth(200) {
@@ -631,6 +671,20 @@ fn leading_match_flags(mut pattern: &[u8], mut flags: i64) -> (&[u8], i64) {
 }
 
 fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
+    let module = ctx.module("re")?;
+    match ctx.lookup_attr(module, "_compile_cached") {
+        Ok(cache) => {
+            let raw = ctx.builtin("re._compile_uncached");
+            let flags = flags.unwrap_or_else(|| ctx.int(0));
+            ctx.call(cache, vec![raw, id, flags], Vec::new())
+        }
+        // Computed-only imports can expose the intrinsic module without its Python helpers.
+        Err(error) if ctx.is_attribute_error(&error) => compile_uncached(ctx, id, flags),
+        Err(error) => Err(error),
+    }
+}
+
+fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let flags = flags
         .map(|value| ctx.as_integer(value))
         .transpose()?
@@ -644,7 +698,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         }
         return Ok(id);
     }
-    let bytes = matches!(ctx.heap.get(id), Value::Bytes(_));
+    let bytes = matches!(ctx.heap.get(ctx.scalar_value(id)), Value::Bytes(_));
     if bytes && flags & UNICODE != 0 {
         return Err(Error::new(
             "ValueError",
@@ -697,7 +751,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         pattern.surrogate_literals = Some(Box::new(encoded));
         return Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))));
     }
-    let spelling = match ctx.heap.get(id) {
+    let spelling = match ctx.heap.get(ctx.scalar_value(id)) {
         Value::Bytes(value) => value.as_slice(),
         _ => ctx.str_value(id)?.as_bytes(),
     };
@@ -841,6 +895,7 @@ fn compile_source(
                     name,
                     Guard {
                         regex: guard,
+                        program: hir.to_string(),
                         kind,
                         width,
                     },
@@ -914,6 +969,9 @@ pub(super) fn module_call(
     if name == "re._compile_scanner" {
         let [lexicon, flags] = bind(name, args, kwargs, ["lexicon", "flags"])?;
         return scanner::compile_lexicon(ctx, lexicon.ok_or_else(|| missing("lexicon"))?, flags);
+    }
+    if name == "re._compile_uncached" {
+        return compile_uncached(ctx, argument(args, 0)?, args.get(1).copied());
     }
     if name == "re.compile" {
         let [pattern, flags] = bind(name, args, kwargs, ["pattern", "flags"])?;
