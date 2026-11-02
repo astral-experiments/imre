@@ -1,26 +1,10 @@
 """Logging for Python modules executed by the native object runtime."""
 import sys
 import warnings
+from _thread import RLock as _Lock
 from types import GenericAlias
 import weakref
 import _imre_logging as _native
-
-
-class _Lock:
-    def __init__(self):
-        self._lock = _native.lock()
-
-    def acquire(self):
-        return _native.acquire(self._lock)
-
-    def release(self):
-        _native.release(self._lock)
-
-    def __enter__(self):
-        return self.acquire()
-
-    def __exit__(self, exc_type, exc, traceback):
-        self.release()
 
 
 _lock = _Lock()
