@@ -13,9 +13,12 @@ def current():
     assert os.getsid is posix.getsid
     parent_sid = os.getsid(CurrentProcess())
     assert parent_sid == os.getsid(os.getpid())
-    for create in (False, True):
-        # Keep cat blocked until the parent has observed its real session.
-        with subprocess.Popen(["/bin/cat"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    for create, executable in ((False, None), (True, None), (False, "/bin/cat"), (True, "/bin/cat")):
+        # An absolute executable override with close_fds=False is eligible for posix_spawn
+        # unless a new session is requested. Hold cat open to observe its real session.
+        args = ["/bin/cat"] if executable is None else ["alternate-argv0"]
+        with subprocess.Popen(args, executable=executable, close_fds=executable is None,
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                               start_new_session=create) as child:
             try:
                 sid = os.getsid(child.pid)
