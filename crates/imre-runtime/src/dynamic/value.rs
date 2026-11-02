@@ -2768,7 +2768,20 @@ impl Heap {
         };
     }
 
-    pub(super) fn acyclic_finalizer(&self, roots: impl Iterator<Item = Id>) -> Result<Option<Id>> {
+    pub(super) fn acyclic_finalizer(
+        &self,
+        roots: impl Iterator<Item = Id>,
+        stdin: Option<&[Id; 3]>,
+    ) -> Result<Option<Id>> {
+        // Input's wrapper and raw file usually survive every allocation checkpoint.
+        if let Some(chain) = stdin
+            && self
+                .ordinary_finalizers
+                .iter()
+                .all(|owner| chain.contains(owner))
+        {
+            return Ok(None);
+        }
         // A suspended caller keeps earlier operands live across a nested call.
         // Scan the callers once when only one finalizer needs a reachability check.
         if let [owner] = self.ordinary_finalizers.as_slice()

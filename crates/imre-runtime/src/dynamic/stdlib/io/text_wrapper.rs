@@ -54,7 +54,7 @@ pub(super) fn property(name: &str) -> bool {
 
 /// The heap traces the buffer until detach returns it. No borrow spans a Python stream call.
 pub(in crate::dynamic) struct Wrapper {
-    buffer: Cell<Option<Id>>,
+    pub(super) buffer: Cell<Option<Id>>,
     encoding: Id,
     errors: Id,
     newline: Option<String>,

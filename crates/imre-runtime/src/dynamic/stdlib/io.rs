@@ -79,6 +79,29 @@ pub(in crate::dynamic) fn standard_input(ctx: &mut Context) -> Result<Id> {
     Ok(stream)
 }
 
+/// Follow strong edges from the original sys module without retaining any of the streams.
+pub(in crate::dynamic) fn rooted_input_chain(ctx: &Context) -> Option<[Id; 3]> {
+    let Value::Module { scope, .. } = *ctx.heap.get(ctx.threads.system_module?) else {
+        return None;
+    };
+    let stdin = ctx.scope_name(scope, "__stdin__")?;
+    let Value::Instance {
+        memory_stream: Some(MemoryStream::Wrapper(wrapper)),
+        ..
+    } = ctx.heap.get(stdin)
+    else {
+        return None;
+    };
+    let buffer = wrapper.buffer.get()?;
+    let Value::File(file) = ctx.heap.get(buffer) else {
+        return None;
+    };
+    let super::BinaryFile::Descriptor(fd) = file.as_ref() else {
+        return None;
+    };
+    Some([stdin, buffer, fd.raw])
+}
+
 /// Select the default text encoding from the interpreter's startup configuration.
 pub(super) fn text_encoding(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {

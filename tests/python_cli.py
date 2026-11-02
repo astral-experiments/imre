@@ -50,7 +50,17 @@ def check_command_stdin(imre, run):
         "assert buffer.read1() == b''\n"
         "signal.alarm(0)\n"
     )
+    last_input_reference = (
+        "import sys, weakref\n"
+        "wrapper = weakref.ref(sys.stdin)\n"
+        "buffer = sys.stdin.buffer\n"
+        "sys.stdin = None\n"
+        "assert wrapper() is sys.__stdin__ and not buffer.closed\n"
+        "vars(sys)['__stdin__'] = None\n"
+        "assert wrapper() is None and buffer.closed\n"
+    )
     cases = [
+        (last_input_reference, b""),
         ("import sys; print(repr(sys.stdin.read()))", b""),
         (source, "one\r\ntwo\nλtail".encode()),
     ]
