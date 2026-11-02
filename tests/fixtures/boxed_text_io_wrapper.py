@@ -117,6 +117,51 @@ def current():
     assert iter(text) is text and text.readlines(3) == ["a\n", "b\n"] and next(text) == "c"
     assert text.readlines() == []
     text.close()
+    with io.TextIOWrapper(io.BytesIO(b"a\nb\nc\n"), encoding="ascii") as text:
+        assert iter(text) is text and text.tell() == 0
+        assert next(text) == "a\n" and text.readline() == "b\n"
+        try:
+            text.seek(0, 1)
+        except OSError as error:
+            assert str(error) == "telling position disabled by next() call"
+        else:
+            raise AssertionError("relative seek accepted during iteration")
+        text.flush()
+        assert text.tell() == 6 and next(text) == "c\n"
+        assert text.readline() == ""
+        try:
+            text.tell()
+        except OSError as error:
+            assert str(error) == "telling position disabled by next() call"
+        else:
+            raise AssertionError("readline at EOF restored telling")
+        assert next(text, None) is None and text.tell() == 6
+        text.seek(0)
+        assert io.IOBase.__next__(text) == "a\n" and text.tell() == 2
+        assert next(text) == "b\n"
+        text.flush()
+        assert text.tell() == 4  # The earlier readline retained a decoder position.
+        text.seek(0)
+        text._CHUNK_SIZE = 4
+        assert text.readline() == "a\n" and next(text) == "b\n" and next(text) == "c\n"
+        text.flush()
+        assert text.buffer.tell() == 6 and text.tell() == 4
+        text.seek(0)
+        assert next(text) == "a\n"
+        text.flush()
+        assert isinstance(text.tell(), int)
+
+    with io.TextIOWrapper(io.BytesIO("é\nXabc\n".encode()), encoding="utf-8") as text:
+        text._CHUNK_SIZE = 4
+        assert text.readline() == "é\n" and next(text) == "Xabc\n"
+        text.flush()
+        try:
+            text.tell()
+        except OSError as error:
+            assert str(error) == "can't reconstruct logical file position"
+        else:
+            raise AssertionError("position exceeded the saved decoder input")
+
     raw = io.BytesIO()
     text = io.TextIOWrapper(raw, encoding="ascii")
     text.write("kept")
