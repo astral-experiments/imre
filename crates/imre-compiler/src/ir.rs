@@ -2199,7 +2199,6 @@ pub(crate) enum ProcessOperation {
     SelectorClass(Option<bool>),
     SetSelector,
     Executable,
-    RunToStderr,
     ShellOutput {
         status: bool,
     },
@@ -2220,7 +2219,8 @@ pub(crate) enum ProcessOperation {
     },
     Call {
         streams: u32,
-        check: bool,
+        // Discarded run calls supply check as an evaluated operand.
+        fixed_check: Option<bool>,
     },
     PopenPid,
     PopenActive,
