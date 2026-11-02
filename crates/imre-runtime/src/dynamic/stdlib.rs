@@ -99,7 +99,10 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    matches!(name, "atexit" | "builtins" | "errno" | "genericpath" | "itertools")
+    matches!(
+        name,
+        "_imre_ordered_dict" | "atexit" | "builtins" | "errno" | "genericpath" | "itertools"
+    )
         || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }

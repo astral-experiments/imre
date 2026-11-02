@@ -21,6 +21,16 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "json/scanner.py",
             include_str!("../../stdlib/json/scanner.py"),
         )),
+        // A fresh _collections module exports the same accelerator type. Keep its
+        // Python wrappers around native storage in their own module namespace.
+        "_collections" => Some((
+            "_collections.py",
+            "from _imre_ordered_dict import OrderedDict\n",
+        )),
+        "_imre_ordered_dict" => Some((
+            "_imre_ordered_dict.py",
+            include_str!("../../stdlib/_imre_ordered_dict.py"),
+        )),
         "traceback" => Some((
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),
