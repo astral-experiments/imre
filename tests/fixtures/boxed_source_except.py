@@ -239,6 +239,9 @@ def suspended():
     else:
         raise AssertionError("invalid except target accepted")
 
+    code = "try: raise ValueError()\nexcept KeyError: pass\nexcept: caught = True"
+    exec(compile(code, "<handlers>", "exec"), namespace)
+    assert namespace["caught"] is True
     try:
         compile("try: pass\nexcept: pass\nexcept LookupError: pass", "<invalid>", "exec")
     except SyntaxError as error:
