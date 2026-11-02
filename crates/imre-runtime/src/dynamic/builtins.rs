@@ -460,6 +460,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "removesuffix",
     "replace",
     "rfind",
+    "rindex",
     "rjust",
     "rpartition",
     "rsplit",
