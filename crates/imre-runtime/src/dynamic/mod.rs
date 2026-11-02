@@ -2813,6 +2813,8 @@ impl Context {
                 "fsync",
                 #[cfg(target_os = "linux")]
                 "fdatasync",
+                #[cfg(target_os = "linux")]
+                "ttyname",
                 "getegid",
                 #[cfg(target_os = "linux")]
                 "getresgid",
