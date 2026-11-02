@@ -9,6 +9,8 @@ use crate::objects::{Codec, errno_error};
 pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
 mod encoding;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub(crate) use encoding::langinfo;
 mod warnoptions;
 pub(crate) use encoding::{
     file_encoding, imre_sys_utf8_mode, set_locale, strerror, with_errno_message,

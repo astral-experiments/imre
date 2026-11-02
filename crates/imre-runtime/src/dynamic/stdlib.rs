@@ -1013,6 +1013,10 @@ pub(super) fn call(
         return super::atexit::call(ctx, method, args, kwargs);
     }
 
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    if name == "_locale.nl_langinfo" {
+        return locale::nl_langinfo(ctx, args, kwargs);
+    }
     if name == "_locale.setlocale" {
         return locale::setlocale(ctx, args, kwargs);
     }

@@ -31,3 +31,48 @@ size_t imre_decode_locale_name(const char *name, size_t length,
     }
     return offset;
 }
+
+#if defined(__linux__) && defined(__GLIBC__)
+#include <langinfo.h>
+#include <locale.h>
+
+/* nl_langinfo also accepts non-string GNU data, so only expose the Python
+ * string-valued items and keep their decoding category alongside the value. */
+struct imre_langinfo_item {
+    const char *name;
+    int value;
+    int category;
+};
+
+#define ITEM(name, category) {#name, name, category}
+static const struct imre_langinfo_item langinfo_items[] = {
+    ITEM(DAY_1, LC_TIME), ITEM(DAY_2, LC_TIME), ITEM(DAY_3, LC_TIME),
+    ITEM(DAY_4, LC_TIME), ITEM(DAY_5, LC_TIME), ITEM(DAY_6, LC_TIME),
+    ITEM(DAY_7, LC_TIME), ITEM(ABDAY_1, LC_TIME), ITEM(ABDAY_2, LC_TIME),
+    ITEM(ABDAY_3, LC_TIME), ITEM(ABDAY_4, LC_TIME), ITEM(ABDAY_5, LC_TIME),
+    ITEM(ABDAY_6, LC_TIME), ITEM(ABDAY_7, LC_TIME), ITEM(MON_1, LC_TIME),
+    ITEM(MON_2, LC_TIME), ITEM(MON_3, LC_TIME), ITEM(MON_4, LC_TIME),
+    ITEM(MON_5, LC_TIME), ITEM(MON_6, LC_TIME), ITEM(MON_7, LC_TIME),
+    ITEM(MON_8, LC_TIME), ITEM(MON_9, LC_TIME), ITEM(MON_10, LC_TIME),
+    ITEM(MON_11, LC_TIME), ITEM(MON_12, LC_TIME), ITEM(ABMON_1, LC_TIME),
+    ITEM(ABMON_2, LC_TIME), ITEM(ABMON_3, LC_TIME), ITEM(ABMON_4, LC_TIME),
+    ITEM(ABMON_5, LC_TIME), ITEM(ABMON_6, LC_TIME), ITEM(ABMON_7, LC_TIME),
+    ITEM(ABMON_8, LC_TIME), ITEM(ABMON_9, LC_TIME), ITEM(ABMON_10, LC_TIME),
+    ITEM(ABMON_11, LC_TIME), ITEM(ABMON_12, LC_TIME), ITEM(D_T_FMT, LC_TIME),
+    ITEM(D_FMT, LC_TIME), ITEM(T_FMT, LC_TIME), ITEM(AM_STR, LC_TIME),
+    ITEM(PM_STR, LC_TIME), ITEM(T_FMT_AMPM, LC_TIME), ITEM(ERA, LC_TIME),
+    ITEM(ERA_D_FMT, LC_TIME), ITEM(ERA_D_T_FMT, LC_TIME), ITEM(ERA_T_FMT, LC_TIME),
+    ITEM(ALT_DIGITS, LC_TIME), ITEM(_DATE_FMT, LC_TIME),
+    ITEM(CODESET, LC_CTYPE),
+    ITEM(RADIXCHAR, LC_NUMERIC), ITEM(THOUSEP, LC_NUMERIC),
+    ITEM(CRNCYSTR, LC_MONETARY),
+    ITEM(YESEXPR, LC_MESSAGES), ITEM(NOEXPR, LC_MESSAGES),
+};
+#undef ITEM
+
+const struct imre_langinfo_item *imre_langinfo_items(size_t *count)
+{
+    *count = sizeof(langinfo_items) / sizeof(langinfo_items[0]);
+    return langinfo_items;
+}
+#endif
