@@ -3,6 +3,10 @@ import _imre_subprocess as _process
 import io
 import selectors
 
+__all__ = ["Popen", "PIPE", "STDOUT", "call", "check_call", "getstatusoutput",
+           "getoutput", "check_output", "run", "CalledProcessError", "DEVNULL",
+           "SubprocessError", "TimeoutExpired", "CompletedProcess"]
+
 _PopenSelector = selectors.PollSelector
 
 PIPE = -1
@@ -53,7 +57,7 @@ class Popen:
     _handle = None
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
-                 stderr=None, *, close_fds=True, cwd=None, env=None, restore_signals=True,
+                 stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True,
                  universal_newlines=None, encoding=None, errors=None, text=None, pipesize=-1):
         if bufsize is None:
             bufsize = -1
@@ -89,7 +93,7 @@ class Popen:
         self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
                                        restore_signals, cwd, env, bufsize, pipesize,
                                        encoding if self.text_mode else None,
-                                       errors if self.text_mode else None)
+                                       errors if self.text_mode else None, shell)
         try:
             self.stdin = _process.pipe(self._handle, 0)
             self.stdout = _process.pipe(self._handle, 1)
@@ -275,6 +279,35 @@ def check_call(*popenargs, **kwargs):
             cmd = popenargs[0]
         raise CalledProcessError(code, cmd)
     return 0
+
+
+def check_output(*popenargs, timeout=None, **kwargs):
+    for key in ("stdout", "check"):
+        if key in kwargs:
+            raise ValueError(f"{key} argument not allowed, it will be overridden.")
+    if "input" in kwargs and kwargs["input"] is None:
+        # Explicit None supplies EOF, like an empty input in the corresponding mode.
+        text = (kwargs.get("text") or kwargs.get("universal_newlines")
+                or kwargs.get("encoding") or kwargs.get("errors"))
+        kwargs["input"] = "" if text else b""
+    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True, **kwargs).stdout
+
+
+def getstatusoutput(cmd, *, encoding=None, errors=None):
+    try:
+        output = check_output(cmd, shell=True, text=True, stderr=STDOUT,
+                              encoding=encoding, errors=errors)
+        status = 0
+    except CalledProcessError as exc:
+        output = exc.output
+        status = exc.returncode
+    if output.endswith("\n"):
+        output = output[:-1]
+    return status, output
+
+
+def getoutput(cmd, *, encoding=None, errors=None):
+    return getstatusoutput(cmd, encoding=encoding, errors=errors)[1]
 
 
 class CompletedProcess:

@@ -108,6 +108,8 @@ impl Imports {
                 name,
                 "_imp"
                     | "atexit"
+                    | "code"
+                    | "codeop"
                     | "json"
                     | "json.encoder"
                     | "opcode"
@@ -451,6 +453,7 @@ pub(crate) fn compile(
             "__future__",
             "_imp",
             "atexit",
+            "code",
             "weakref",
             "pathlib",
             "sys",
@@ -609,6 +612,13 @@ pub(crate) fn compile(
         {
             names.push((0, "_collections_abc".to_owned()));
         }
+        // The native string scanner imports the decoder's exception on a syntax error.
+        if names
+            .iter()
+            .any(|(level, name)| *level == 0 && name == "_json")
+        {
+            names.push((0, "json.decoder".to_owned()));
+        }
         for (level, requested) in names {
             let Some(name) = resolve(&owner, package, level, &requested) else {
                 continue;
@@ -735,7 +745,9 @@ pub(crate) fn compile(
         "abc",
         "annotationlib",
         "ast",
+        "code",
         "codecs",
+        "codeop",
         "copyreg",
         "datetime",
         "genericpath",
@@ -752,6 +764,7 @@ pub(crate) fn compile(
         "stat",
         "string",
         "string.templatelib",
+        "subprocess",
         "token",
         "zipimport",
     ]
