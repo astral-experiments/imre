@@ -32,6 +32,7 @@ pub(super) struct TypeVariable {
     pub module: Id,
     pub bound: Id,
     pub constraints: Id,
+    pub default: Id,
     pub covariant: bool,
     pub contravariant: bool,
     pub infer_variance: bool,
@@ -1345,7 +1346,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__module__" => var.module,
             "__bound__" => var.bound,
             "__constraints__" => var.constraints,
-            "__default__" => no_default(ctx),
+            "__default__" => var.default,
+            "evaluate_default" => ctx.alloc(Value::ConstEvaluator(var.default)),
             "__typing_subst__" | "has_default" => {
                 let callable = ctx.builtin(&format!("typing.TypeVar.{name}"));
                 ctx.alloc(Value::Method {
@@ -1555,6 +1557,7 @@ fn typevar(
 ) -> Result<Id> {
     let mut name = args.first().copied();
     let mut bound = NONE;
+    let mut default = no_default(ctx);
     let mut covariant = false;
     let mut contravariant = false;
     let mut infer_variance = false;
@@ -1562,6 +1565,7 @@ fn typevar(
         match key.as_str() {
             "name" if name.is_none() => name = Some(*val),
             "bound" => bound = *val,
+            "default" => default = *val,
             "covariant" => covariant = ctx.truth(*val)?,
             "contravariant" => contravariant = ctx.truth(*val)?,
             "infer_variance" => infer_variance = ctx.truth(*val)?,
@@ -1626,6 +1630,7 @@ fn typevar(
         module,
         bound,
         constraints,
+        default,
         covariant,
         contravariant,
         infer_variance,
@@ -2150,9 +2155,9 @@ pub(super) fn call(
         ("NoDefault.__reduce__", [value]) if matches!(ctx.heap.get(*value), Value::NoDefault) => {
             Ok(ctx.text("NoDefault"))
         }
-        ("TypeVar.has_default", [var]) if matches!(ctx.heap.get(*var), Value::TypeVar(_)) => {
-            Ok(FALSE)
-        }
+        ("TypeVar.has_default", [var]) if let Value::TypeVar(var) = ctx.heap.get(*var) => Ok(
+            super::builtins::boolean(!matches!(ctx.heap.get(var.default), Value::NoDefault)),
+        ),
         ("TypeVar.has_default", _) => Err(Error::new(
             "TypeError",
             "TypeVar.has_default() takes no arguments",
