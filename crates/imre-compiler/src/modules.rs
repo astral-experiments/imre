@@ -1017,8 +1017,12 @@ impl IntrinsicModule {
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
-            (Self::Codecs, "escape_decode") => Intrinsic::ObjectRuntimeExport("codecs.escape_decode"),
-            (Self::CodecsNative, "escape_decode") => Intrinsic::ObjectRuntimeExport("_codecs.escape_decode"),
+            (Self::Codecs, "escape_decode") => {
+                Intrinsic::ObjectRuntimeExport("codecs.escape_decode")
+            }
+            (Self::CodecsNative, "escape_decode") => {
+                Intrinsic::ObjectRuntimeExport("_codecs.escape_decode")
+            }
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Struct, "Struct") => Intrinsic::ObjectRuntimeExport("struct.Struct"),

@@ -587,21 +587,17 @@ fn positional_decoder_args(
             "_codecs.{function}() takes no keyword arguments"
         )));
     }
-    Ok(match args {
-        [input] => (*input, None),
-        [input, errors] => (*input, Some(*errors)),
-        [] => {
-            return Err(type_error(format!(
-                "{function} expected at least 1 argument, got 0"
-            )));
-        }
-        _ => {
-            return Err(type_error(format!(
-                "{function} expected at most 2 arguments, got {}",
-                args.len()
-            )));
-        }
-    })
+    match args {
+        [input] => Ok((*input, None)),
+        [input, errors] => Ok((*input, Some(*errors))),
+        [] => Err(type_error(format!(
+            "{function} expected at least 1 argument, got 0"
+        ))),
+        _ => Err(type_error(format!(
+            "{function} expected at most 2 arguments, got {}",
+            args.len()
+        ))),
+    }
 }
 
 pub(super) fn escape_decode(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {

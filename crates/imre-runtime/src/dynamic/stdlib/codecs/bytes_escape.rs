@@ -1,22 +1,29 @@
 //! Byte escapes consumed by codecs.escape_decode and protocol-0 pickle strings.
 use super::{Context, Error, Id, NONE, Result, Value};
-use std::borrow::Cow;
+
+fn input_bytes(ctx: &Context, input: Id) -> Result<&[u8]> {
+    match ctx.heap.get(input) {
+        Value::Str(text) => Ok(text.as_bytes()),
+        Value::Array(array) => Ok(array.as_bytes()),
+        _ => ctx.bytes_like(input),
+    }
+}
 
 pub(super) fn decode(ctx: &mut Context, input: Id, errors: Option<Id>) -> Result<Id> {
-    let storage = ctx.scalar_value(input);
-    let data = if matches!(ctx.heap.get(storage), Value::SurrogateStr(_)) {
-        Cow::Owned(super::encode_text(ctx, input, None, None)?)
-    } else {
-        Cow::Borrowed(match ctx.heap.get(storage) {
-            Value::Str(text) => text.as_bytes(),
-            Value::Array(array) => array.as_bytes(),
-            _ => ctx.bytes_like(input)?,
-        })
-    };
-    let consumed = data.len();
+    let mut input = ctx.scalar_value(input);
+    if matches!(ctx.heap.get(input), Value::SurrogateStr(_)) {
+        let encoded = ctx.encode_utf8_codepoints(input, false, "strict")?;
+        input = ctx.alloc(Value::Bytes(encoded));
+    }
+    let consumed = input_bytes(ctx, input)?.len();
     let errors = match errors {
         None | Some(NONE) => "strict",
-        Some(id) if ctx.string_storage(id).is_some() => super::error_name(ctx, Some(id))?,
+        Some(id) if let Some(storage) = ctx.string_storage(id) => {
+            if matches!(ctx.heap.get(storage), Value::SurrogateStr(_)) {
+                ctx.encode_utf8_codepoints(id, false, "strict")?;
+            }
+            super::error_name(ctx, Some(id))?
+        }
         Some(id) => {
             return Err(Error::new(
                 "TypeError",
@@ -27,7 +34,7 @@ pub(super) fn decode(ctx: &mut Context, input: Id, errors: Option<Id>) -> Result
             ));
         }
     };
-    let (output, warning) = unescape(&data, errors)?;
+    let (output, warning) = unescape(input_bytes(ctx, input)?, errors)?;
     if let Some(escape) = warning {
         let detail = if escape > 255 {
             format!(r#"b"\{escape:o}" is an invalid octal escape sequence."#)
@@ -91,9 +98,9 @@ fn unescape(data: &[u8], errors: &str) -> Result<(Vec<u8>, Option<u16>)> {
                 octal as u8
             }
             b'x' => {
-                let start = offset - 2;
+                let digits = offset;
                 let mut hex = 0;
-                while offset - start < 4 {
+                while offset - digits < 2 {
                     let Some(digit) = data.get(offset).and_then(|&b| char::from(b).to_digit(16))
                     else {
                         break;
@@ -101,14 +108,14 @@ fn unescape(data: &[u8], errors: &str) -> Result<(Vec<u8>, Option<u16>)> {
                     hex = (hex << 4) + digit as u8;
                     offset += 1;
                 }
-                if offset - start == 4 {
+                if offset - digits == 2 {
                     hex
                 } else {
                     match errors {
                         "strict" => {
                             return Err(Error::new(
                                 "ValueError",
-                                format!(r"invalid \x escape at position {start}"),
+                                format!(r"invalid \x escape at position {}", digits - 2),
                             ));
                         }
                         "ignore" => continue,
