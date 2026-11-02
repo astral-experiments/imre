@@ -1713,6 +1713,7 @@ def report(text):
             "boxed_time.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_io_exports.py",
             "boxed_io_text_encoding.py",
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
