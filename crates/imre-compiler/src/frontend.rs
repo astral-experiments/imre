@@ -6087,6 +6087,9 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(method) = self.graph.boxed_pattern_method(self.module, expression) {
+            return Err(self.scoped_builtin_error(method, expression));
+        }
         if let ast::Expr::Attribute(attribute) = expression
             && let Some(field) = self.mime_attribute(attribute)
         {
@@ -8285,6 +8288,9 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        if let Some(method) = self.graph.boxed_pattern_method(self.module, &call.func) {
+            return Err(self.scoped_builtin_error(method, call));
+        }
         if let Some(local) = self.local_class(&call.func)?
             && let Some(base) = local.base
             && !local.abstract_methods.is_empty()
