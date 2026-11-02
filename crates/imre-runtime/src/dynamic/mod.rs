@@ -1933,8 +1933,15 @@ impl Context {
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__", "index"],
-            "set" => &["__repr__", "__reduce__", "difference", "issubset", "update"],
-            "frozenset" => &["__repr__", "__reduce__", "difference", "issubset"],
+            "set" => &[
+                "__repr__",
+                "__reduce__",
+                "difference",
+                "issubset",
+                "union",
+                "update",
+            ],
+            "frozenset" => &["__repr__", "__reduce__", "difference", "issubset", "union"],
             "bytearray" => {
                 self.builtin("bytearray.fromhex");
                 builtins::BYTEARRAY_METHODS

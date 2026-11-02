@@ -431,14 +431,44 @@ pub(in super::super) fn set_add(ctx: &mut Context, set: Id, value: Id) -> Result
 pub(in super::super) fn update_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
     let target = ctx.scalar_value(target);
     let storage = ctx.scalar_value(source);
-    if matches!(ctx.heap.get(storage), Value::Set { .. }) {
-        return merge_set(ctx, target, storage);
+    if matches!(ctx.heap.get(storage), Value::Set { .. })
+        || matches!(ctx.heap.get(source), Value::Dict(_))
+    {
+        return merge_set_entries(ctx, target, storage);
     }
+    let roots = ctx.heap.temporary_mark();
     let iterator = ctx.iterator(source)?;
-    while let Some(item) = ctx.next_item(iterator)? {
-        set_add(ctx, target, item)?;
+    ctx.heap.keep(iterator);
+    let step = ctx.heap.temporary_mark();
+    let mut failed_key = None;
+    let updated: Result<()> = (|| {
+        while let Some(key) = ctx.next_item(iterator)? {
+            ctx.heap.keep(key);
+            failed_key = Some(key);
+            set_add(ctx, target, key)?;
+            failed_key = None;
+            // An equal key stays out of the result and can finalize before the next yield.
+            ctx.discard_truth(step);
+        }
+        Ok(())
+    })();
+
+    ctx.heap.release_temporaries_since(roots);
+    if let Err(error) = &updated {
+        for id in error.roots() {
+            ctx.heap.keep(id);
+        }
     }
-    Ok(())
+    // CPython releases the iterator before a key whose insertion failed.
+    let key_mark = ctx.heap.temporary_mark();
+    if let Some(key) = failed_key {
+        ctx.heap.keep(key);
+    }
+    let iterator_mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(iterator);
+    ctx.discard_truth(iterator_mark);
+    ctx.discard_truth(key_mark);
+    updated
 }
 
 fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
@@ -506,14 +536,13 @@ fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     subset.map(boolean)
 }
 
-fn merge_set(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
+fn merge_set_entries(ctx: &mut Context, target: Id, source: Id) -> Result<()> {
     if target == source {
         return Ok(());
     }
-    if matches!(ctx.heap.get(target), Value::Set { entries, .. } if entries.is_empty()) {
-        let Value::Set { entries, .. } = ctx.heap.get(source) else {
-            unreachable!()
-        };
+    if matches!(ctx.heap.get(target), Value::Set { entries, .. } if entries.is_empty())
+        && let Value::Set { entries, .. } = ctx.heap.get(source)
+    {
         let copy = entries.try_clone()?;
         let Value::Set { entries, .. } = ctx.heap.get_mut(target) else {
             unreachable!()
@@ -820,13 +849,15 @@ pub(super) fn method(
                 name,
                 "set.discard" | "set.remove" | "set.difference_update" | "set.update"
             ) || name.ends_with(".issubset")
-                || name.ends_with(".difference") =>
+                || name.ends_with(".difference")
+                || name.ends_with(".union") =>
             {
                 type_error(format!("unbound method {name}() needs an argument"))
             }
             None => type_error("missing collection receiver"),
         })?;
-    let receiver = if let Some((kind, method @ ("difference" | "issubset"))) = name.split_once('.')
+    let receiver = if let Some((kind, method @ ("difference" | "issubset" | "union"))) =
+        name.split_once('.')
     {
         let storage = ctx.scalar_value(object);
         if !matches!(ctx.heap.get(storage), Value::Set { frozen, .. } if *frozen == (kind == "frozenset"))
@@ -924,6 +955,8 @@ pub(super) fn method(
             | "dict.popitem"
             | "set.difference"
             | "frozenset.difference"
+            | "set.union"
+            | "frozenset.union"
             | "set.issubset"
             | "frozenset.issubset"
             | "set.issuperset"
@@ -1144,6 +1177,19 @@ pub(super) fn method(
             arity(name, args, 1, 1)?;
             set_add(ctx, receiver, args[0])?;
             Ok(NONE)
+        }
+        "set.union" | "frozenset.union" => {
+            let result = ctx.alloc(Value::Set {
+                entries: Default::default(),
+                frozen: name == "frozenset.union",
+            });
+            update_set(ctx, result, receiver)?;
+            for &source in args {
+                if source != object {
+                    update_set(ctx, result, source)?;
+                }
+            }
+            Ok(result)
         }
         "set.update" => {
             for &input in args {
