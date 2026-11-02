@@ -89,6 +89,16 @@ exception_kinds!(
     StopAsyncIteration,
     Warning,
     RuntimeWarning,
+    DeprecationWarning,
+    EncodingWarning,
+    UserWarning,
+    PendingDeprecationWarning,
+    SyntaxWarning,
+    FutureWarning,
+    ImportWarning,
+    UnicodeWarning,
+    BytesWarning,
+    ResourceWarning,
 );
 
 const FUNCTIONS: &[&str] = &[
