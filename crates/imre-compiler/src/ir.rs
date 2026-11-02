@@ -453,10 +453,8 @@ pub(crate) enum SourceFrame {
 }
 
 pub(crate) struct Module {
-    /// Interpreter-style -I commands ignore Python process environment variables at startup.
-    pub ignore_python_environment: bool,
-    /// Effective UTF-8 mode of an interpreter-style command.
-    pub command_utf8_mode: Option<bool>,
+    /// Interpreter settings already selected by the Python-style launcher.
+    pub command_flags: Option<crate::CommandFlags>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -1372,6 +1370,7 @@ pub(crate) enum Builtin {
     CanElideMapperFrames([usize; 2]),
     SysGetFrameModuleName,
     SysGetRecursionLimit,
+    SysContextAwareWarnings,
     GeneratorFrameEnter(String),
     GeneratorFrameLeave,
     SysSetRecursionLimit,

@@ -565,16 +565,22 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
-    if config["isolated"].as_bool() != Some(true) {
+    let ignore_environment = config["ignore_environment"].as_bool().unwrap_or(false)
+        || config["isolated"].as_bool().unwrap_or(false);
+    crate::sys::context_warnings::imre_context_warnings_init(
+        config["context_aware_warnings"]
+            .as_bool()
+            .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
+    );
+    if !ignore_environment {
         config["pycache_prefix"] = std::env::var("PYTHONPYCACHEPREFIX")
             .ok()
             .filter(|prefix| !prefix.is_empty())
             .into();
     }
-    crate::python_hash::initialize(config["isolated"].as_bool().unwrap_or(false));
-    crate::integer_text::imre_integer_digits_init(u32::from(
-        config["isolated"].as_bool().unwrap_or(false),
-    ));
+    crate::python_hash::initialize(ignore_environment);
+    crate::integer_text::imre_integer_digits_init(u32::from(ignore_environment));
+    crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
     // SAFETY: main supplies argc pointers to NUL-terminated strings that remain
     // valid while the constructor consumes this iterator.
     let args = unsafe { slice::from_raw_parts(argv, argc as usize) }

@@ -1970,6 +1970,8 @@ impl Emitter<'_, '_> {
             ));
             self.prepare_directory_frame(&value);
         }
+        let command_flags = self.module.command_flags;
+        let ignore_env = command_flags.is_some_and(|flags| flags.ignore_environment);
         if entry {
             let startup = if self.uses_orig_argv {
                 "imre_seq_layout_with_orig_argv"
@@ -1982,14 +1984,18 @@ impl Emitter<'_, '_> {
             ));
             self.line(format!(
                 "call void @imre_integer_digits_init(i32 {})",
-                u32::from(self.module.ignore_python_environment)
+                u32::from(ignore_env)
+            ));
+            self.line(format!(
+                "call void @imre_context_warnings_init(i32 {})",
+                command_flags.map_or(-1, |flags| i32::from(flags.context_aware_warnings))
             ));
             self.line("call void @imre_record_error_init()");
-            if let Some(utf8) = self.module.command_utf8_mode {
+            if let Some(flags) = command_flags {
                 self.line(format!(
                     "call void @imre_stdio_command_init(i32 {}, i32 {})",
-                    u32::from(self.module.ignore_python_environment),
-                    u32::from(utf8)
+                    u32::from(ignore_env),
+                    u32::from(flags.utf8_mode)
                 ));
             } else {
                 self.line("call void @imre_stdio_init()");
@@ -1999,7 +2005,7 @@ impl Emitter<'_, '_> {
         if entry && self.uses_cache_paths {
             self.line(format!(
                 "call void @imre_cache_paths_init(i32 {})",
-                u32::from(!self.module.ignore_python_environment)
+                u32::from(!ignore_env)
             ));
         }
         if entry && self.uses_linecache {
@@ -5448,6 +5454,10 @@ impl Emitter<'_, '_> {
                     None => unreachable!("unused generator frames were removed"),
                 }
                 none()
+            }
+            Builtin::SysContextAwareWarnings => {
+                let raw = self.instruction("call i64 @imre_sys_context_aware_warnings()");
+                self.tag_small(&raw)
             }
             Builtin::SysGetRecursionLimit => {
                 self.call("imre_sys_getrecursionlimit", Type::Int, &[])
@@ -9605,6 +9615,8 @@ declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
 declare i32 @imre_finish_stdio()
 declare void @imre_integer_digits_init(i32)
+declare void @imre_context_warnings_init(i32)
+declare i64 @imre_sys_context_aware_warnings()
 declare void @imre_record_error_init()
 declare void @imre_stdio_init()
 declare i64 @imre_tuple_index(i64, i64)

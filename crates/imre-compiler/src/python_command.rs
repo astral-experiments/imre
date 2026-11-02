@@ -1,7 +1,7 @@
 //! Parse Python's command-string boundary before handing the body to the native compiler.
 
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use imre_compiler::{CommandFlags, PythonCommand};
@@ -15,6 +15,23 @@ pub(super) enum Invocation {
     },
 }
 
+pub(super) enum ParseError {
+    Usage(String),
+    ContextWarnings(&'static str),
+}
+
+impl From<String> for ParseError {
+    fn from(message: String) -> Self {
+        Self::Usage(message)
+    }
+}
+
+impl From<&str> for ParseError {
+    fn from(message: &str) -> Self {
+        Self::Usage(message.into())
+    }
+}
+
 enum Input {
     Command(String),
     Script(PathBuf),
@@ -24,8 +41,10 @@ enum Input {
 pub(super) fn parse(
     mut arg: OsString,
     args: &mut impl Iterator<Item = OsString>,
-) -> Result<Invocation, String> {
+) -> Result<Invocation, ParseError> {
     let mut isolated = false;
+    let mut ignore_environment = false;
+    let mut context_option = None;
     let mut optimize: i32 = 0;
     let mut dont_write_bytecode = false;
     let mut utf8 = None;
@@ -43,29 +62,40 @@ pub(super) fn parse(
             .chars();
         while let Some(flag) = flags.next() {
             match flag {
-                'I' => isolated = true,
+                'I' => {
+                    isolated = true;
+                    ignore_environment = true;
+                }
+                'E' => ignore_environment = true,
                 'O' => optimize = optimize.checked_add(1).ok_or("too many -O options")?,
                 'B' => dont_write_bytecode = true,
                 'c' => break 'options Input::Command(operand(flags.as_str(), args, "-c")?),
                 'X' => {
                     let option = operand(flags.as_str(), args, "-X")?;
+                    if option.split('=').next() == Some("context_aware_warnings") {
+                        context_option.get_or_insert(option);
+                        break;
+                    }
                     let value = match option.as_str() {
                         "utf8" | "utf8=1" => true,
                         "utf8=0" => false,
-                        _ => return Err(format!("unsupported -X option: {option}")),
+                        _ => return Err(format!("unsupported -X option: {option}").into()),
                     };
                     // CPython's preconfiguration uses the first matching -X option.
                     utf8.get_or_insert(value);
                     break;
                 }
-                _ => return Err(format!("unknown interpreter option: -{flag}")),
+                _ => return Err(format!("unknown interpreter option: -{flag}").into()),
             }
         }
         arg = args.next().ok_or("expected -c and a command string")?;
     };
     let utf8_mode = match utf8 {
         Some(value) => value,
-        None => match (!isolated).then(|| env::var_os("PYTHONUTF8")).flatten() {
+        None => match (!ignore_environment)
+            .then(|| env::var_os("PYTHONUTF8"))
+            .flatten()
+        {
             Some(value) if value == "1" => true,
             Some(value) if value == "0" => false,
             Some(value) if !value.is_empty() => return Err("PYTHONUTF8 must be 0 or 1".into()),
@@ -77,7 +107,7 @@ pub(super) fn parse(
         },
     };
     let env_flag = |key| {
-        if isolated {
+        if ignore_environment {
             return 0;
         }
         env::var_os(key)
@@ -95,10 +125,31 @@ pub(super) fn parse(
                     .unwrap_or(1)
             })
     };
+    // CPython validates the environment even when a command-line option overrides it.
+    let mut context_aware_warnings = false;
+    if !ignore_environment
+        && let Some(value) = env::var_os("PYTHON_CONTEXT_AWARE_WARNINGS").filter(|s| !s.is_empty())
+    {
+        context_aware_warnings = imre_ast::startup::parse_context_flag(&value).ok_or(
+            ParseError::ContextWarnings("PYTHON_CONTEXT_AWARE_WARNINGS=N: N is missing or invalid"),
+        )?;
+    }
+    if let Some(option) = context_option {
+        context_aware_warnings = option
+            .strip_prefix("context_aware_warnings=")
+            .and_then(|s| context_option_value(s, ignore_environment))
+            .ok_or(ParseError::ContextWarnings(
+                "-X context_aware_warnings=n: n is missing or invalid",
+            ))?;
+    }
     let flags = CommandFlags {
         isolated,
+        ignore_environment,
+        context_aware_warnings,
         optimize: optimize.max(env_flag("PYTHONOPTIMIZE")),
-        safe_path: isolated || env::var_os("PYTHONSAFEPATH").is_some_and(|s| !s.is_empty()),
+        safe_path: isolated
+            || (!ignore_environment
+                && env::var_os("PYTHONSAFEPATH").is_some_and(|s| !s.is_empty())),
         no_user_site: isolated || env_flag("PYTHONNOUSERSITE") != 0,
         dont_write_bytecode: dont_write_bytecode || env_flag("PYTHONDONTWRITEBYTECODE") != 0,
         utf8_mode,
@@ -120,6 +171,65 @@ pub(super) fn parse(
             executable,
         },
     })
+}
+
+/// CPython parses -X operands as wide characters, unlike its byte environment.
+fn context_option_value(value: &str, ignore_environment: bool) -> Option<bool> {
+    #[cfg(target_os = "linux")]
+    if !value.is_ascii() {
+        return linux_context_option_value(value, ignore_environment);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = ignore_environment;
+    imre_ast::startup::parse_context_flag(OsStr::new(value))
+}
+
+#[cfg(target_os = "linux")]
+fn linux_context_option_value(value: &str, ignore_environment: bool) -> Option<bool> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    unsafe extern "C" {
+        fn iswspace_l(wc: libc::c_uint, locale: libc::locale_t) -> libc::c_int;
+    }
+
+    // Read LC_CTYPE without changing the process or another compiler thread's locale.
+    let name = ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .find_map(|key| env::var_os(key).filter(|v| !v.is_empty()))
+        .unwrap_or_else(|| "C".into());
+    let cname = CString::new(name.as_bytes()).ok()?;
+    let open = |name: &std::ffi::CStr| {
+        // SAFETY: the name is NUL terminated and a null base creates a new locale.
+        unsafe { libc::newlocale(libc::LC_CTYPE_MASK, name.as_ptr(), std::ptr::null_mut()) }
+    };
+    let mut locale = open(&cname);
+    if (locale.is_null() || name == "C" || name == "POSIX")
+        && env::var_os("LC_ALL").is_none_or(|v| v.is_empty())
+        && (ignore_environment
+            || env::var_os("PYTHONCOERCECLOCALE").as_deref() != Some(OsStr::new("0")))
+        && let Some(coerced) = [c"C.UTF-8", c"C.utf8", c"UTF-8"]
+            .into_iter()
+            .map(open)
+            .find(|loc| !loc.is_null())
+    {
+        if !locale.is_null() {
+            // SAFETY: open returned this owned locale, which is no longer needed.
+            unsafe { libc::freelocale(locale) };
+        }
+        locale = coerced;
+    }
+    if locale.is_null() {
+        return None;
+    }
+    // SAFETY: Linux wint_t represents a Unicode scalar and the locale stays live throughout.
+    let rest = value.trim_start_matches(|c: char| unsafe { iswspace_l(c as u32, locale) != 0 });
+    // SAFETY: this call owns the non-null locale, and the trim above has finished using it.
+    unsafe { libc::freelocale(locale) };
+    if rest.is_empty() {
+        return None;
+    }
+    imre_ast::startup::parse_context_flag(OsStr::new(rest))
 }
 
 fn operand(
