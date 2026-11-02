@@ -209,6 +209,10 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         }
         (Some(weights), None) => Some(match cumulative_weights(ctx, weights) {
             Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+                ctx.heap.release_temporaries_since(preparation);
+                for root in error.roots() {
+                    ctx.heap.keep(root);
+                }
                 return Err(weights_type_error(ctx, weights, error));
             }
             result => result?,
