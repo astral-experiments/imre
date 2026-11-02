@@ -154,6 +154,43 @@ def _make_filterfalse(_allocate, _state):
 
 
 filterfalse = _make_filterfalse(_itertools._filterfalse_allocate, _itertools._filterfalse_state)
+
+
+def _make_starmap(_allocate, _advance):
+    class starmap:
+        """Apply a function to the arguments from each input row."""
+
+        __slots__ = ()
+
+        def __new__(cls, /, *args, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.starmap.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.starmap.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.starmap")
+            if kwargs and (cls is __class__ or cls.__init__ is __class__.__init__ or cls.__init__ is object.__init__):
+                raise TypeError("starmap() takes no keyword arguments")
+            if len(args) != 2:
+                raise TypeError(f"starmap expected 2 arguments, got {len(args)}")
+            return _allocate(__class__, cls, args[0], iter(args[1]))
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a starmap instance")
+            return self
+
+        def __next__(self):
+            return _advance(__class__, self)
+
+    starmap.__qualname__ = "starmap"
+    return starmap
+
+
+starmap = _make_starmap(_itertools._starmap_allocate, _itertools._starmap_next)
 del _itertools
 
 
