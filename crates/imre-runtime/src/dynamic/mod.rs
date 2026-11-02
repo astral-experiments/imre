@@ -2710,9 +2710,13 @@ impl Context {
                 self.bind(scope, "_import_lock", lock);
             }
             "itertools" => {
+                for attr in ["count", "repeat"] {
+                    let value = self.builtin(&format!("{name}.{attr}"));
+                    self.bind(scope, attr, value);
+                }
+            }
+            "_imre_itertools" => {
                 for attr in [
-                    "count",
-                    "repeat",
                     "_cycle_allocate",
                     "_cycle_next",
                     "_filterfalse_allocate",
@@ -2721,7 +2725,7 @@ impl Context {
                     "_chain_get",
                     "_chain_set",
                 ] {
-                    let value = self.builtin(&format!("itertools.{attr}"));
+                    let value = self.builtin(&format!("{name}.{attr}"));
                     self.bind(scope, attr, value);
                 }
             }
