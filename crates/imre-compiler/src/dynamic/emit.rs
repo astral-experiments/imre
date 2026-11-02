@@ -134,7 +134,8 @@ pub(crate) fn emit(
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
-    GeneratorFunction(&'a [ast::Stmt]),
+    /// A suspended suite and whether it was declared with async def.
+    GeneratorFunction((&'a [ast::Stmt], bool)),
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
         Vec<(&'a str, &'a ast::Expr)>,

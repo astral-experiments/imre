@@ -2956,8 +2956,10 @@ impl Context {
     }
 
     pub(super) fn call_source(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
-        let kind = match &self.code_object(code).body {
+        let definition = self.code_object(code);
+        let kind = match &definition.body {
             Body::Source(program) => program.kind,
+            Body::PendingGenerator { .. } if definition.coroutine => FunctionKind::Coroutine,
             Body::PendingGenerator { .. } => FunctionKind::Generator,
             Body::Native(_) => unreachable!("source function"),
         };
@@ -3022,8 +3024,10 @@ impl Context {
         }
         let signature: Signature<'_> = serde_json::from_str(self.str_value(code.parameters)?)
             .map_err(|_| Error::new("SystemError", "invalid generator signature"))?;
+        let postponed = code.flags.unwrap_or(0) & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
         let private_names = signature
             .private_scope
+            .or(postponed.then_some(("", true)))
             .map(|(owner, postponed)| Rc::new(imre_ast::lower_in(&mut def.body, owner, postponed)));
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut program = Program::new(
@@ -3035,8 +3039,13 @@ impl Context {
         program.method_imports = Rc::new(signature.method_imports);
         program.template_expressions = Rc::new(template_expressions);
         program.private_names = private_names;
+        program.qualname = self.str_value(code.qualname)?.to_owned();
         program.first_line = code.first_line;
-        program.kind = FunctionKind::Generator;
+        program.kind = if def.is_async {
+            FunctionKind::Coroutine
+        } else {
+            FunctionKind::Generator
+        };
         program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
