@@ -1477,6 +1477,24 @@ def main():
         compare("-I", parser_script, "-h")
         compare("-B", parser_script, "41")
 
+        # Python normalizes the script small L when it parses an identifier.
+        logging_command = (
+            "name = 'worker'\n"
+            "import ℓogging as log\n"
+            "record = log.makeLogRecord({'name': name, 'msg': 'items %d', 'args': (3,)})\n"
+            "print(log.Formatter('%(name)s %(message)s').format(record))\n"
+        )
+        compare("-I", "-c", logging_command, native_timeout=600)
+
+        shadow_dir = root / "logging_provider"
+        shadow_dir.mkdir()
+        (shadow_dir / "logging.py").write_text("marker = 'project logging'\n")
+        shadow_script = shadow_dir / "entry.py"
+        shadow_script.write_text(
+            "import sys\nsys.path.append('unused')\nimport logging\nprint(logging.marker)\n"
+        )
+        compare("-B", shadow_script, extra={"IMREFLAGS": "--opt-level 0"}, native_timeout=300)
+
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
