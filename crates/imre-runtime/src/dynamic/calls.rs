@@ -646,7 +646,7 @@ impl Context {
             || self.slot(value, "__call__").is_some()
     }
 
-    fn native_data_descriptor(&self, descriptor: Id) -> bool {
+    pub(super) fn native_data_descriptor(&self, descriptor: Id) -> bool {
         matches!(
             self.heap.get(descriptor),
             Value::Property(_)
@@ -3003,6 +3003,7 @@ impl Context {
                         name,
                         "__hash__"
                             | "__repr__"
+                            | "__str__"
                             | "__getattribute__"
                             | "__setattr__"
                             | "__delattr__"
@@ -3621,6 +3622,11 @@ impl Context {
 
     pub(super) fn class_instances_have_dict(&self, class: Id) -> bool {
         self.instance_layout(class, "").dictionary
+    }
+
+    /// A source slot stored inline has no boxed descriptor to return to inspect.
+    pub(super) fn is_inline_instance_slot(&self, class: Id, name: &str) -> bool {
+        self.instance_layout(class, name).active_slot
     }
 
     /// Whether instances have a dictionary and whether this particular name addresses a slot.

@@ -102,6 +102,7 @@ impl BuiltinDescriptor {
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__repr__" => ("object", "__repr__"),
+            "object.__str__" => ("object", "__str__"),
             "function.__call__" => ("function", "__call__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),

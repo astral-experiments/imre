@@ -32,7 +32,7 @@ impl Context {
         self.base_lineage(class, false)
     }
 
-    fn base_lineage(&mut self, class: Id, published: bool) -> Vec<Id> {
+    pub(super) fn base_lineage(&mut self, class: Id, published: bool) -> Vec<Id> {
         if published && let Some(mro) = self.published_mro(class) {
             return mro.to_vec();
         }

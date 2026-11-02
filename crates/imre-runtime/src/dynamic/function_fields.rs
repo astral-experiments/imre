@@ -12,7 +12,7 @@ pub(super) struct FunctionFields {
     pub annotate: Id,
     annotations: Option<Id>,
     type_params: Id,
-    dict: Id,
+    pub(super) dict: Id,
 }
 
 impl FunctionFields {
