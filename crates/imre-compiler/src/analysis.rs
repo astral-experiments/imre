@@ -480,22 +480,27 @@ impl Session {
 
     /// Resolve a bare `object` base at the point where the class is defined.
     pub(crate) fn builtin_object_base(&self, module: usize, base: &Expr) -> bool {
-        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
-        if !base.as_name_expr().is_some_and(|name| name.id == "object") {
-            return false;
-        }
+        base.as_name_expr().is_some_and(|name| name.id == "object")
+            && self.is_known_class(module, base, ty_python_semantic::types::KnownClass::Object)
+    }
+
+    /// Check the class object bound to a name or attribute at its point of use.
+    pub(crate) fn is_known_class(
+        &self,
+        module: usize,
+        expression: &Expr,
+        class: ty_python_semantic::types::KnownClass,
+    ) -> bool {
+        use ty_python_semantic::types::{ProgramEnvironment, Type as Ty};
         self.hint_reads.set(self.hint_reads.get() + 1);
         let file = self.db.program_file(self.files[module]);
         let model = SemanticModel::new(&self.db, file);
-        let Some(ty @ Ty::ClassLiteral(_)) = base.inferred_type(&model) else {
+        let Some(ty @ Ty::ClassLiteral(_)) = expression.inferred_type(&model) else {
             return false;
         };
         let env = ProgramEnvironment::from_file(file);
         ty.definition(&self.db, &env).is_some_and(|definition| {
-            KnownClass::Object
-                .to_instance(&self.db, &env)
-                .definition(&self.db, &env)
-                == Some(definition)
+            class.to_instance(&self.db, &env).definition(&self.db, &env) == Some(definition)
         })
     }
 

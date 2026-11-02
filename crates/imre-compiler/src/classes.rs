@@ -335,7 +335,33 @@ fn collect_class(
             .any(|arg| mapping_base(graph, definition.module, arg))
     });
     let mapping = direct_mapping || base.is_some_and(|(_, parent)| parent.mapping);
-    let abc = mapping
+    let keywords = node
+        .arguments
+        .as_ref()
+        .map_or(&[][..], |args| args.keywords.as_ref());
+    let abc_meta = match keywords {
+        [] => false,
+        [key]
+            if key.arg.as_deref() == Some("metaclass")
+                && graph.resolve(definition.module, &key.value)
+                    == Some(Binding::Intrinsic(Intrinsic::AbcMeta))
+                && graph.session.is_known_class(
+                    definition.module,
+                    &key.value,
+                    ty_python_semantic::types::KnownClass::ABCMeta,
+                ) =>
+        {
+            true
+        }
+        _ => {
+            return Err(module.error(
+                node,
+                "class metaclasses and keyword arguments are unsupported",
+            ));
+        }
+    };
+    let abc = abc_meta
+        || mapping
         || base.is_some_and(|(_, parent)| parent.abc)
         || node.arguments.as_ref().is_some_and(|args| {
             args.args.iter().any(|arg| {

@@ -29,12 +29,6 @@ pub(super) fn resolve(
         path.push(id);
         let mut base: Option<usize> = None;
         if let Some(args) = &node.arguments {
-            if !args.keywords.is_empty() {
-                return Err(module.error(
-                    node,
-                    "class metaclasses and keyword arguments are unsupported",
-                ));
-            }
             for argument in &args.args {
                 if mapping_base(graph, definition.module, argument)
                     || (args.args.len() == 1
@@ -55,7 +49,7 @@ pub(super) fn resolve(
                 };
                 match graph.resolve(definition.module, origin) {
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
-                        if args.args.len() == 1 => {}
+                        if args.args.len() == 1 && args.keywords.is_empty() => {}
                     Some(Binding::Intrinsic(Intrinsic::Abc)) => {}
                     Some(Binding::Definition(source)) if ids.contains_key(&source) => {
                         if source.module == definition.module
