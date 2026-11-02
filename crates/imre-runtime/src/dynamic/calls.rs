@@ -2582,6 +2582,7 @@ impl Context {
                     && matches!(
                         name,
                         "__hash__"
+                            | "__repr__"
                             | "__getattribute__"
                             | "__setattr__"
                             | "__delattr__"

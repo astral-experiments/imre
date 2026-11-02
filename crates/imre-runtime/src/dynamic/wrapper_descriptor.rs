@@ -70,6 +70,7 @@ impl BuiltinDescriptor {
             "str.islower" => ("str", "islower"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
+            "object.__repr__" => ("object", "__repr__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
