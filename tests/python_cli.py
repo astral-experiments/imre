@@ -1784,6 +1784,7 @@ def report(text):
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
+            "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
