@@ -71,8 +71,8 @@ impl BuildOptions {
     ) -> Result<Self, String> {
         use crate::python_command::Invocation;
         let flags = match &invocation {
-            Invocation::Command(command) => command.flags,
-            Invocation::Script { flags, .. } => *flags,
+            Invocation::Command(command) => &command.flags,
+            Invocation::Script { flags, .. } => flags,
         };
         let mut options = Self::initial();
         if !flags.isolated {

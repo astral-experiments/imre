@@ -1,3 +1,4 @@
+import os
 import platform
 import sys
 
@@ -20,3 +21,34 @@ def current():
             raise AssertionError(value)
     sys.version = original
     assert platform.python_version() == original.split()[0]
+
+    confstr = getattr(os, "confstr", None)
+    executable = sys.executable
+    try:
+        if confstr is not None:
+            try:
+                reported = confstr("CS_GNU_LIBC_VERSION")
+            except (ValueError, OSError):
+                reported = None
+            if reported:
+                assert platform.libc_ver() == tuple(reported.split(maxsplit=1))
+
+        def alternate(name):
+            assert name == "CS_GNU_LIBC_VERSION"
+            return "other   1.2 build"
+
+        os.confstr = alternate
+        assert platform.libc_ver(lib="fallback", version="0") == ("other", "1.2 build")
+
+        def unavailable(name):
+            raise ValueError(name)
+
+        os.confstr = unavailable
+        sys.executable = ""
+        assert platform.libc_ver(lib="fallback", version="0") == ("fallback", "0")
+    finally:
+        sys.executable = executable
+        if confstr is None:
+            del os.confstr
+        else:
+            os.confstr = confstr

@@ -1,9 +1,14 @@
-from collections.abc import MutableMapping as MutableMappingABC
-from typing import Dict, Generic, MutableMapping, TypeVar, get_args, get_origin
+from collections import defaultdict
+from collections.abc import Mapping as MappingABC, MutableMapping as MutableMappingABC
+from typing import DefaultDict, Dict, Generic, Mapping, MutableMapping, TypeVar, get_args, get_origin
 
 
 def current():
     assert get_origin(Dict) is dict
+    assert get_origin(DefaultDict) is defaultdict
+    assert DefaultDict.__doc__ == "Deprecated alias to collections.defaultdict."
+    assert get_origin(Mapping) is MappingABC
+    assert issubclass(MutableMapping, Mapping) and not issubclass(Mapping, MutableMapping)
     assert get_origin(MutableMapping) is MutableMappingABC
     assert MutableMapping.__doc__ == "Deprecated alias to collections.abc.MutableMapping."
     assert issubclass(Dict, MutableMapping) and isinstance({}, MutableMapping)
@@ -13,7 +18,7 @@ def current():
     MutableMappingABC.register(Registered)
     assert issubclass(Registered, MutableMapping) and not issubclass(Registered, Dict)
     key = TypeVar("key")
-    for alias in (Dict, MutableMapping):
+    for alias in (Dict, DefaultDict, Mapping, MutableMapping):
         typed = alias[str, int]
         assert typed is alias[str, int] and get_args(typed) == (str, int)
         assert get_origin(typed) is get_origin(alias)
@@ -34,6 +39,10 @@ def current():
     class Entries(Dict[str, int]):
         pass
     assert Entries.__bases__ == (dict, Generic)
+    for constructor in (DefaultDict, DefaultDict[str, int]):
+        instance = constructor(int, present=3)
+        assert type(instance) is defaultdict and instance.default_factory is int
+        assert instance["present"] == 3 and instance["missing"] == 0
     for constructor in (Dict, Dict[str, int]):
         try:
             constructor()

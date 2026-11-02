@@ -119,7 +119,7 @@ fn open_named(ctx: &mut Context, name: Id, on_close: Id) -> Result<Id> {
         }
     };
     closer.borrow_mut().unlink = Some(path);
-    let file = ctx.alloc(Value::BufferedRandom(owner));
+    let file = ctx.alloc(Value::BufferedRandom(owner, name));
     Ok(ctx.alloc(Value::Tuple(vec![file, guard])))
 }
 
@@ -216,7 +216,7 @@ pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         || kwargs.iter().any(|(key, _)| {
             !matches!(
                 key.as_str(),
-                "mode" | "dir" | "encoding" | "errors" | "newline"
+                "mode" | "dir" | "prefix" | "suffix" | "encoding" | "errors" | "newline"
             )
         })
     {
@@ -231,7 +231,7 @@ pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         .transpose()?
         .unwrap_or("w+b")
     {
-        "w+b" | "wb+" => false,
+        "w+b" | "wb+" | "r+b" | "rb+" => false,
         "w+" | "w+t" | "wt+" => true,
         _ => {
             return Err(Error::new(
@@ -257,10 +257,30 @@ pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         ctx.module("io")?;
     }
     let directory = option(args, 1, kwargs, "dir")?.filter(|&id| id != NONE);
-    let file = FileState::temporary(directory.map(|id| ctx.str_value(id)).transpose()?)?;
+    let file = if let (Some(dir), Some(prefix), Some(suffix)) = (
+        directory,
+        option(args, 2, kwargs, "prefix")?,
+        option(args, 3, kwargs, "suffix")?,
+    ) {
+        let path = |ctx: &mut Context, value| {
+            let value = super::posixpath::fspath(ctx, value)?;
+            super::os::c_path(ctx, value, "embedded null byte")
+        };
+        let directory = path(ctx, dir)?;
+        let prefix = path(ctx, prefix)?;
+        let suffix = path(ctx, suffix)?;
+        FileState::buffered_random(crate::objects::tempdirs::anonymous_file_in(
+            Path::new(OsStr::from_bytes(directory.as_bytes())),
+            OsStr::from_bytes(prefix.as_bytes()),
+            OsStr::from_bytes(suffix.as_bytes()),
+        )?)?
+    } else {
+        FileState::temporary(directory.map(|id| ctx.str_value(id)).transpose()?)?
+    };
+    let name = ctx.int(i64::from(file.fileno()?));
     let owner =
         crate::Shared::try_new(RefCell::new(file)).map_err(|_| crate::Error::allocation())?;
-    let buffer = ctx.alloc(Value::BufferedRandom(owner.clone()));
+    let buffer = ctx.alloc(Value::BufferedRandom(owner.clone(), name));
     if !text {
         return Ok(buffer);
     }
@@ -283,7 +303,7 @@ pub(super) fn method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let receiver = argument(args, 0)?;
-    let Value::BufferedRandom(owner) = ctx.heap.get(receiver).clone() else {
+    let Value::BufferedRandom(owner, _) = ctx.heap.get(receiver).clone() else {
         return Err(Error::new("TypeError", "expected a buffered random file"));
     };
     let args = &args[1..];

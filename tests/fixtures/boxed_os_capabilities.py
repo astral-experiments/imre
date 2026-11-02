@@ -1,5 +1,6 @@
 import os
 import posix
+import sys
 from os import supports_dir_fd, supports_effective_ids, supports_fd, supports_follow_symlinks
 
 
@@ -17,6 +18,9 @@ def current():
             assert getattr(posix, function.__name__) is function
             assert (function in functions) == member
 
+    assert os.utime is posix.utime and all(os.utime in table for table in capabilities[:3])
+    assert os.chmod is posix.chmod and os.chmod in supports_fd and os.chmod in supports_dir_fd
+    assert (os.chmod in supports_follow_symlinks) == (sys.platform == "darwin")
     assert os.mkdir is posix.mkdir and os.mkdir in supports_dir_fd
     directory = os.path.dirname(__file__) or "."
     fd = os.open(directory, os.O_RDONLY)
@@ -25,6 +29,18 @@ def current():
         assert os.mkdir(child, mode=0o700, dir_fd=fd) is None
         try:
             assert os.stat(child, dir_fd=fd).st_mode & 0o170000 == 0o040000
+            assert os.chmod(path=child, mode=0o710, dir_fd=fd) is None
+            child_fd = os.open(child, os.O_RDONLY, dir_fd=fd)
+            try:
+                assert os.fstat(child_fd).st_mode & 0o777 == 0o710
+                stamps = (1_234_567_890_123_456_789, 1_345_678_901_234_567_891)
+                assert os.utime(child_fd, ns=stamps) is None
+                changed = os.stat(child, dir_fd=fd)
+                assert (changed.st_atime_ns, changed.st_mtime_ns) == stamps
+                assert posix.chmod(child_fd, 0o700) is None
+                assert os.stat(child, dir_fd=fd).st_mode & 0o777 == 0o700
+            finally:
+                os.close(child_fd)
             try:
                 posix.mkdir(child, dir_fd=fd)
             except FileExistsError as error:

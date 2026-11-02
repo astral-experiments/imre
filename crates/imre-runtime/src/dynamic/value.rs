@@ -51,6 +51,12 @@ pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
+const EMPTY_TUPLE: Id = 5;
+
+pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
+pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
+pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
+pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Location {
@@ -237,31 +243,125 @@ impl Context {
         }
     }
 
-    pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
-        if let Some((mut loc, frame)) = self.heap.trace_location() {
-            if let Some(&[line, start, split, end]) = span {
-                loc.line = line;
-                loc.span = Some([start, split, end]);
-            }
-            let active = self.heap.active_exception();
-            if error.context == NONE
-                && active != NONE
-                && error
-                    .trace
-                    .as_ref()
-                    .is_none_or(|trace| trace.frames.is_empty() && trace.instance != Some(active))
-            {
-                error.context = active;
-            }
-            if let Some(trace) = error.try_tracing()
-                && trace.frames.try_reserve(1).is_ok()
-            {
-                trace.frames.push((loc, frame));
-                return;
-            }
-            let original = std::mem::replace(error, Error::new("MemoryError", ""));
-            error.context = self.raised_instance(original);
+    /// Return the same Python frame to introspection and traceback construction.
+    pub(super) fn active_frame(&mut self, depth: usize) -> Result<Option<(Location, Id)>> {
+        let Some((index, _)) = self
+            .heap
+            .frames
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, frame)| frame.code != NONE)
+            .nth(depth)
+        else {
+            return Ok(None);
+        };
+        self.materialize_frame(index)
+    }
+
+    fn materialize_frame(&mut self, index: usize) -> Result<Option<(Location, Id)>> {
+        let frame = &self.heap.frames[index];
+        if frame.code == NONE {
+            return Ok(None);
         }
+        let Some(location) = frame.location.clone() else {
+            return Ok(None);
+        };
+        if let Some(object) = frame.object {
+            return Ok(Some((location, object)));
+        }
+        // An escaped ordinary frame owns its caller even after both functions return.
+        // Materialize the missing prefix iteratively, stopping at a cached frame or
+        // a generator whose resumer is meaningful only during this activation.
+        let start = self.heap.frames[..=index]
+            .iter()
+            .rposition(|frame| {
+                frame.object.is_some()
+                    || (matches!(frame.owner, FrameOwner::Generator(_)) && frame.location.is_some())
+            })
+            .unwrap_or(0);
+        let mut previous = NONE;
+        for position in start..=index {
+            let frame = &self.heap.frames[position];
+            if let Some(object) = frame.object {
+                previous = object;
+                continue;
+            }
+            let Some(line) = frame.location.as_ref().map(|loc| loc.line) else {
+                continue;
+            };
+            if frame.code == NONE {
+                continue;
+            }
+            let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
+            let globals = self.module_globals(scope)?;
+            let object = self.alloc(Value::PythonFrame {
+                scope,
+                code,
+                globals,
+                back: (!matches!(owner, FrameOwner::Generator(_))).then_some(previous),
+                lineno: line,
+            });
+            if let FrameOwner::Generator(id) = owner {
+                let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
+                    unreachable!()
+                };
+                *frame = Some(object);
+            }
+            self.heap.frames[position].object = Some(object);
+            previous = object;
+        }
+        Ok(Some((location, previous)))
+    }
+
+    /// A suspended or finished generator has no resumer; an active one may have a new caller.
+    pub(super) fn generator_frame_back(&mut self, object: Id) -> Result<Id> {
+        let Some(index) = self
+            .heap
+            .frames
+            .iter()
+            .rposition(|frame| frame.object == Some(object))
+        else {
+            return Ok(NONE);
+        };
+        let Some(caller) = self.heap.frames[..index]
+            .iter()
+            .rposition(|frame| frame.code != NONE && frame.location.is_some())
+        else {
+            return Ok(NONE);
+        };
+        Ok(self.materialize_frame(caller)?.map_or(NONE, |(_, id)| id))
+    }
+
+    pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
+        let failure = match self.materialize_frame(self.heap.frames.len() - 1) {
+            Err(failure) => failure,
+            Ok(None) => return,
+            Ok(Some((mut loc, frame))) => {
+                if let Some(&[line, start, split, end]) = span {
+                    loc.line = line;
+                    loc.span = Some([start, split, end]);
+                }
+                let active = self.heap.active_exception();
+                if error.context == NONE
+                    && active != NONE
+                    && error.trace.as_ref().is_none_or(|trace| {
+                        trace.frames.is_empty() && trace.instance != Some(active)
+                    })
+                {
+                    error.context = active;
+                }
+                if let Some(trace) = error.try_tracing()
+                    && trace.frames.try_reserve(1).is_ok()
+                {
+                    trace.frames.push((loc, frame));
+                    return;
+                }
+                Error::new("MemoryError", "")
+            }
+        };
+        let original = std::mem::replace(error, failure);
+        error.context = self.raised_instance(original);
     }
 
     /// Preserve identity of an observed traceback head and reuse its tail on a later raise.
@@ -350,107 +450,30 @@ impl Context {
 
     pub(super) fn type_name(&self, value: Id) -> &str {
         match self.heap.get(value) {
-            Value::None => "NoneType",
-            Value::Weak(wr) => wr.kind.class(),
-            Value::Ellipsis => "ellipsis",
-            Value::NotImplemented => "NotImplementedType",
-            Value::Bool(_) => "bool",
-            Value::Int(_) => "int",
-            Value::Float(_) => "float",
-            Value::Complex(_) => "complex",
             Value::Calendar { value, .. } => value.class(),
-            Value::Str(_) | Value::SurrogateStr(_) => "str",
-            Value::Map { .. } => "map",
-            Value::Filter { .. } => "filter",
-            Value::Hash(state) => state.borrow().class_name(),
             Value::Poll(_) => "select.poll",
-            Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
-            Value::Array(_) => "array.array",
-            Value::Bytes(_) => "bytes",
-            Value::ByteArray(_) => "bytearray",
-            Value::File(file) => match file.as_ref() {
-                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
-            },
-            Value::TextFile(_) => "_io.TextIOWrapper",
             Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
-            Value::BufferedRandom(_) => "_io.BufferedRandom",
-            Value::SequenceIterator { .. } => "iterator",
-            Value::ReverseSequence { .. } => "reversed",
-            Value::Deque(_) => super::deque::CLASS,
-            Value::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
-            Value::DequeIterator { .. } => super::deque::ITERATOR,
-            Value::List(_) => "list",
-            Value::CallableIterator(_) => "callable_iterator",
+            Value::BufferedRandom(..) => "_io.BufferedRandom",
             Value::NamedTuple {
                 class: Some(class), ..
             } => class,
-            Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
-            Value::Slice(_) => "slice",
-            Value::Range(_) => "range",
-            Value::Scandir(_) => super::stdlib::os::scandir::ITER,
-            Value::DirEntry(_) => super::stdlib::os::scandir::ENTRY,
-            Value::RangeIterator(iter) => iter.kind,
-            Value::Enumerate { .. } => "enumerate",
-            Value::Iterator { kind, .. } => kind,
-            Value::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
-                (Some(_), _, _) => "odict_iterator",
-                (_, false, DictViewKind::Keys) => "dict_keyiterator",
-                (_, false, DictViewKind::Values) => "dict_valueiterator",
-                (_, false, DictViewKind::Items) => "dict_itemiterator",
-                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
-                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
-                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
-            },
-            Value::Set { frozen: true, .. } => "frozenset",
-            Value::Set { frozen: false, .. } => "set",
-            Value::Dict(_) => "dict",
-            Value::MappingProxy(_) => "mappingproxy",
+            Value::NamedTuple { .. } => "tuple",
             Value::DefaultDict { .. } => "defaultdict",
-            Value::Function { .. } => "function",
             Value::TupleGetter { .. } => "_tuplegetter",
-            Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) => "member_descriptor",
-            Value::ItemGetter(_) => "operator.itemgetter",
-            Value::Code(_) => "code",
-            Value::Cell(_) => "cell",
-            Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
             Value::TypeVarTuple { .. } => "TypeVarTuple",
-            Value::NoDefault => "NoDefaultType",
             Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Union(_) => "Union",
-            Value::Class { .. } => "type",
-            Value::DictView { kind, ordered, .. } => match (kind, ordered) {
-                (DictViewKind::Keys, false) => "dict_keys",
-                (DictViewKind::Items, false) => "dict_items",
-                (DictViewKind::Values, false) => "dict_values",
-                (DictViewKind::Keys, true) => "odict_keys",
-                (DictViewKind::Items, true) => "odict_items",
-                (DictViewKind::Values, true) => "odict_values",
-            },
             Value::Method { .. } => "method",
-            Value::ClassMethod(_) => "classmethod",
-            Value::ThreadLocal(_) => super::thread_local::CLASS,
-            Value::ThreadHandle(_) => "_thread._ThreadHandle",
-            Value::PrimitiveLock(_) => super::thread_lock::CLASS,
-            Value::FormatIterator { kind, .. } => match kind {
-                FormatKind::Markup => "formatteriterator",
-                FormatKind::Field => "fieldnameiterator",
-            },
             Value::Cached { .. } => "_lru_cache_wrapper",
             Value::Partial { .. } => "partial",
             Value::PartialPlaceholder => "_PlaceholderType",
             Value::KeyWrapper { .. } => "functools.KeyWrapper",
-            Value::StaticMethod { .. } => "staticmethod",
-            Value::Property(_) => "property",
-            Value::GetSetDescriptor { .. } | Value::WeakrefDescriptor(_) => "getset_descriptor",
             Value::Raised(error) => &error.kind,
-            Value::Traceback { .. } => "traceback",
-            Value::PythonFrame { .. } => "frame",
             Value::Module {
                 constructor: None, ..
             } => "module",
@@ -467,7 +490,7 @@ impl Context {
                 Value::Class { .. } | Value::Native(_) => self.class_name(*class),
                 _ => "object",
             },
-            _ => "object",
+            value => value.intrinsic_type_name().unwrap_or("object"),
         }
     }
 
@@ -616,6 +639,8 @@ pub(super) struct ClassNamespace {
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
+    /// TypedDict installs a class-wide annotation function in place of its field thunks.
+    pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
 }
@@ -678,6 +703,21 @@ pub(super) enum Value {
     DirEntry(super::stdlib::os::scandir::Entry),
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Slice([Id; 3]),
+    Template {
+        strings: Id,
+        interpolations: Id,
+    },
+    TemplateIter {
+        strings: Id,
+        interpolations: Id,
+        from_strings: bool,
+    },
+    Interpolation {
+        value: Id,
+        expression: Id,
+        conversion: Id,
+        format_spec: Id,
+    },
     Range(super::range::Range),
     RangeIterator(super::range::Cursor),
     Str(String),
@@ -765,8 +805,12 @@ pub(super) enum Value {
         kwdefaults: Id,
     },
     Code(CodeObject),
+    // The coroutine owns its private suspended frame. Each await iterator owns the coroutine.
+    Coroutine(Id),
+    CoroutineWrapper(Id),
     Generator {
         owner: FrameOwner,
+        frame: Option<Id>,
         code: Id,
         scope: Id,
         iterators: Vec<Id>,
@@ -775,6 +819,7 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        metaclass: Option<Id>,
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
@@ -798,6 +843,7 @@ pub(super) enum Value {
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
         weak_reference: Option<Box<super::weakref::Reference>>,
+        cycle: Option<Box<super::stdlib::itertools::Cycle>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -825,6 +871,9 @@ pub(super) enum Value {
     PythonFrame {
         scope: Id,
         code: Id,
+        globals: Id,
+        // Ordinary frames retain their caller. Generator frames resolve their live resumer.
+        back: Option<Id>,
         lineno: u32,
     },
     Method {
@@ -926,13 +975,20 @@ pub(super) enum Value {
     },
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
+    RegexScanner {
+        pattern: Id,
+        subject: Id,
+        start: Option<usize>,
+        end: usize,
+        retry: bool,
+    },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     NamedFileCloser(crate::Shared<std::cell::RefCell<super::stdlib::tempfile::NamedCloser>>),
-    BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
-    RegexMatch {
-        groups: Vec<Option<Id>>,
-        names: HashMap<String, usize>,
-    },
+    BufferedRandom(
+        crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
+        Id,
+    ),
+    RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
     Context(std::rc::Rc<HashMap<Id, Id>>),
     ContextVar {
         name: Id,
@@ -963,9 +1019,108 @@ pub(super) struct CachedCall {
 }
 
 impl Value {
+    /// Returns the name used for both builtin class lookup and diagnostic messages.
+    pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
+        Some(match self {
+            Self::Context(_) => "_contextvars.Context",
+            Self::ContextVar { .. } => "_contextvars.ContextVar",
+            Self::ContextToken { .. } => "_contextvars.Token",
+            Self::None => "NoneType",
+            Self::Weak(wr) => wr.kind.class(),
+            Self::Ellipsis => "ellipsis",
+            Self::NotImplemented => "NotImplementedType",
+            Self::Bool(_) => "bool",
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::Complex(_) => "complex",
+            Self::Str(_) | Self::SurrogateStr(_) => "str",
+            Self::Map { .. } => "map",
+            Self::Filter { .. } => "filter",
+            Self::Hash(state) => state.borrow().class_name(),
+            Self::Zip { .. } => "zip",
+            Self::Array(_) => "array.array",
+            Self::Bytes(_) => "bytes",
+            Self::ByteArray(_) => "bytearray",
+            Self::File(file) => match file.as_ref() {
+                super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
+            },
+            Self::TextFile(_) => "_io.TextIOWrapper",
+            Self::SequenceIterator { .. } => "iterator",
+            Self::ReverseSequence { .. } => "reversed",
+            Self::Deque(_) => super::deque::CLASS,
+            Self::DequeIterator { reverse: true, .. } => super::deque::REVERSE_ITERATOR,
+            Self::DequeIterator { .. } => super::deque::ITERATOR,
+            Self::List(_) => "list",
+            Self::CallableIterator(_) => "callable_iterator",
+            Self::RegexPattern(_) => REGEX_PATTERN_TYPE,
+            Self::RegexScanner { .. } => "_sre.SRE_Scanner",
+            Self::Tuple(_) => "tuple",
+            Self::Slice(_) => "slice",
+            Self::Template { .. } => TEMPLATE_TYPE,
+            Self::TemplateIter { .. } => TEMPLATE_ITER_TYPE,
+            Self::Interpolation { .. } => INTERPOLATION_TYPE,
+            Self::Range(_) => "range",
+            Self::Scandir(_) => super::stdlib::os::scandir::ITER,
+            Self::DirEntry(_) => super::stdlib::os::scandir::ENTRY,
+            Self::RangeIterator(iter) => iter.kind,
+            Self::Enumerate { .. } => "enumerate",
+            Self::Iterator { kind, .. } => kind,
+            Self::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
+                (Some(_), _, _) => "odict_iterator",
+                (_, false, DictViewKind::Keys) => "dict_keyiterator",
+                (_, false, DictViewKind::Values) => "dict_valueiterator",
+                (_, false, DictViewKind::Items) => "dict_itemiterator",
+                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
+                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
+                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
+            },
+            Self::Set { frozen: true, .. } => "frozenset",
+            Self::Set { frozen: false, .. } => "set",
+            Self::Dict(_) => "dict",
+            Self::MappingProxy(_) => "mappingproxy",
+            Self::Function { .. } => "function",
+            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) => "member_descriptor",
+            Self::ItemGetter(_) => "operator.itemgetter",
+            Self::Code(_) => "code",
+            Self::Cell(_) => "cell",
+            Self::Generator { .. } => "generator",
+            Self::Coroutine(_) => "coroutine",
+            Self::CoroutineWrapper(_) => "coroutine_wrapper",
+            Self::NoDefault => "NoDefaultType",
+            Self::Class { .. } => "type",
+            Self::DictView { kind, ordered, .. } => match (kind, ordered) {
+                (DictViewKind::Keys, false) => "dict_keys",
+                (DictViewKind::Items, false) => "dict_items",
+                (DictViewKind::Values, false) => "dict_values",
+                (DictViewKind::Keys, true) => "odict_keys",
+                (DictViewKind::Items, true) => "odict_items",
+                (DictViewKind::Values, true) => "odict_values",
+            },
+            Self::ClassMethod(_) => "classmethod",
+            Self::ThreadLocal(_) => super::thread_local::CLASS,
+            Self::ThreadHandle(_) => "_thread._ThreadHandle",
+            Self::HandlerLock(_) => super::thread_rlock::CLASS,
+            Self::PrimitiveLock(_) => super::thread_lock::CLASS,
+            Self::FormatIterator { kind, .. } => match kind {
+                FormatKind::Markup => "formatteriterator",
+                FormatKind::Field => "fieldnameiterator",
+            },
+            Self::StaticMethod { .. } => "staticmethod",
+            Self::Property(_) => "property",
+            Self::GetSetDescriptor { .. } | Self::WeakrefDescriptor(_) => "getset_descriptor",
+            Self::Traceback { .. } => "traceback",
+            Self::PythonFrame { .. } => "frame",
+            _ => return None,
+        })
+    }
+
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } => Some(*class),
+            Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
             _ => None,
@@ -1079,6 +1234,21 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::Template {
+                strings,
+                interpolations,
+            }
+            | Self::TemplateIter {
+                strings,
+                interpolations,
+                ..
+            } => visit.extend([*strings, *interpolations]),
+            Self::Interpolation {
+                value,
+                expression,
+                conversion,
+                format_spec,
+            } => visit.extend([*value, *expression, *conversion, *format_spec]),
             Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
@@ -1133,6 +1303,7 @@ impl Value {
                 visit.extend(constructor);
             }
             Self::Cell(value) => visit.extend(value),
+            Self::Coroutine(frame) | Self::CoroutineWrapper(frame) => visit.push(*frame),
             Self::Function {
                 closure,
                 scope,
@@ -1162,6 +1333,7 @@ impl Value {
             }
             Self::Generator {
                 owner,
+                frame,
                 code,
                 scope,
                 iterators,
@@ -1169,6 +1341,7 @@ impl Value {
                 ..
             } => {
                 visit.extend([*code, *scope, owner.root()]);
+                visit.extend(*frame);
                 visit.extend(iterators);
                 visit.extend(
                     protected
@@ -1177,8 +1350,12 @@ impl Value {
                 );
             }
             Self::Class {
-                scope, ancestors, ..
+                scope,
+                ancestors,
+                metaclass,
+                ..
             } => {
+                visit.extend(*metaclass);
                 visit.push(*scope);
                 visit.extend(ancestors);
             }
@@ -1206,6 +1383,7 @@ impl Value {
                 dictionary,
                 scalar,
                 weak_reference,
+                cycle,
                 memory_stream,
                 property,
             } => {
@@ -1214,6 +1392,9 @@ impl Value {
                 }
                 if let Some(reference) = weak_reference {
                     visit.push(reference.callback);
+                }
+                if let Some(cycle) = cycle {
+                    cycle.children(visit);
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
@@ -1269,11 +1450,30 @@ impl Value {
             }
             Self::Raised(error) => visit.extend(error.roots()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
-            Self::PythonFrame { scope, code, .. } => visit.extend([*scope, *code]),
+            Self::PythonFrame {
+                scope,
+                code,
+                globals,
+                back,
+                ..
+            } => {
+                visit.extend([*scope, *code, *globals]);
+                visit.extend(*back);
+            }
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
+            Self::RegexScanner {
+                pattern, subject, ..
+            } => visit.extend([*pattern, *subject]),
             Self::RegexPattern(pattern) => visit.push(pattern.source),
-            Self::RegexMatch { groups, .. } => visit.extend(groups.iter().flatten()),
+            Self::RegexMatch(m) => visit.extend([m.pattern, m.subject]),
+            Self::File(file) => {
+                if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
+                    visit.push(fd.raw);
+                } else if let Some((path, _)) = file.path_metadata() {
+                    visit.push(path);
+                }
+            }
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented
@@ -1302,10 +1502,9 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
-            | Self::File(_)
             | Self::TextFile(_)
-            | Self::NamedFileCloser(_)
-            | Self::BufferedRandom(_) => {}
+            | Self::NamedFileCloser(_) => {}
+            Self::BufferedRandom(_, name) => visit.push(*name),
         }
     }
 }
@@ -1646,6 +1845,7 @@ impl CycleSet {
 pub(super) struct Heap {
     slots: Vec<Slot>,
     gc_order: GcOrder,
+    linked_string_constants: HashMap<i64, Id>,
     full_collection: Option<CycleSet>,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
     interned: HashMap<crate::StrOwner, InternedString>,
@@ -1666,6 +1866,8 @@ pub(super) struct Heap {
     file_writers: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
+    // Non-owning positions of a frame, its bound-method operand, and a receiver field.
+    caller_finalizer_field: Option<(usize, usize, usize)>,
 }
 
 #[derive(Clone, Copy)]
@@ -1677,6 +1879,7 @@ struct InternedString {
 /// A Python call observes its mutable function, while bare code keeps its entry module.
 #[derive(Clone, Copy)]
 pub(super) enum FrameOwner {
+    Generator(Id),
     Function(Id),
     Module(Id),
 }
@@ -1684,7 +1887,7 @@ pub(super) enum FrameOwner {
 impl FrameOwner {
     fn root(self) -> Id {
         match self {
-            Self::Function(id) | Self::Module(id) => id,
+            Self::Function(id) | Self::Module(id) | Self::Generator(id) => id,
         }
     }
 }
@@ -1727,9 +1930,11 @@ impl Heap {
                 Slot::new(Value::Bool(true)),
                 Slot::new(Value::Ellipsis),
                 Slot::new(Value::NotImplemented),
+                Slot::new(Value::Tuple(Vec::new())),
             ],
             gc_order: GcOrder::EMPTY,
             full_collection: None,
+            linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
             free_head: END,
@@ -1743,6 +1948,7 @@ impl Heap {
             collect_next_statement: false,
             file_writers: Vec::new(),
             ordinary_finalizers: Vec::new(),
+            caller_finalizer_field: None,
         };
         for id in 0..heap.slots.len() {
             heap.gc_order.push(id, &heap.slots);
@@ -1867,7 +2073,7 @@ impl Heap {
     }
 
     pub(super) fn replace_cell(&mut self, cell: Id, value: Option<Id>) -> Option<Id> {
-        let Value::Cell(contents) = self.get_mut(cell) else {
+        let (Value::Cell(contents) | Value::ClassCell(contents)) = self.get_mut(cell) else {
             unreachable!("compiled closure cell")
         };
         let previous = std::mem::replace(contents, value);
@@ -1902,10 +2108,31 @@ impl Heap {
         self.alloc_slot(value)
     }
 
+    /// Linked code owns these immutable constants for the lifetime of its context.
+    pub(super) fn linked_string_constant(
+        &mut self,
+        slot: Id,
+        build: impl FnOnce(&mut Self) -> Id,
+    ) -> Id {
+        let Value::Int(key) = self.get(slot) else {
+            unreachable!("compiler constant slot")
+        };
+        let key = key.to_i64().expect("compiler constant slot fits in i64");
+        if let Some(&value) = self.linked_string_constants.get(&key) {
+            return value;
+        }
+        let value = build(self);
+        self.linked_string_constants.insert(key, value);
+        value
+    }
+
     /// Packing an array skips tracking when its elements all have non-GC types.
     /// Even an untracked child tuple has a GC type. A folded literal belongs to
     /// the code constants and cannot itself be garbage owned by a cycle.
     pub(super) fn packed_tuple(&mut self, items: Vec<Id>, constant: bool) -> Id {
+        if items.is_empty() {
+            return EMPTY_TUPLE;
+        }
         let untracked = constant
             || items.iter().all(|&child| {
                 !matches!(self.get(child), Value::Tuple(_) | Value::Native(_))
@@ -2072,8 +2299,14 @@ impl Heap {
             .expect("live native handle")
     }
     pub fn enter(&mut self, scope: Id, code: Id, owner: FrameOwner) {
-        self.frames
-            .push(Frame::new(scope, code, owner, self.active_exception()));
+        let mut activation = Frame::new(scope, code, owner, self.active_exception());
+        if let FrameOwner::Generator(id) = owner {
+            let Value::Generator { frame, .. } = self.get(id) else {
+                unreachable!()
+            };
+            activation.object = *frame;
+        }
+        self.frames.push(activation);
     }
     /// Release the activation and report whether a returning function may have dropped a writer.
     pub fn leave(&mut self, value: Id, returning: bool) -> bool {
@@ -2242,22 +2475,6 @@ impl Heap {
         std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
     }
 
-    /// Materialize one frame per activation only when an exception unwinds it.
-    pub fn trace_location(&mut self) -> Option<(Location, Id)> {
-        let frame = self.frames.last()?;
-        let location = frame.location.clone()?;
-        if let Some(object) = frame.object {
-            return Some((location, object));
-        }
-        let object = self.alloc(Value::PythonFrame {
-            scope: frame.scope,
-            code: frame.code,
-            lineno: location.line,
-        });
-        self.frames.last_mut().unwrap().object = Some(object);
-        Some((location, object))
-    }
-
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
     pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
         let Value::PythonFrame { scope, .. } = *self.get(value) else {
@@ -2287,7 +2504,22 @@ impl Heap {
     }
 
     pub fn caller_module(&self) -> Id {
-        match self.frames.last().unwrap().owner {
+        self.caller_module_at(0).expect("current frame")
+    }
+
+    pub fn caller_module_at(&self, depth: usize) -> Option<Id> {
+        let mut owner = self.frames.iter().rev().nth(depth)?.owner;
+        if let FrameOwner::Generator(id) = owner {
+            let Value::Generator {
+                owner: function, ..
+            } = self.get(id)
+            else {
+                unreachable!()
+            };
+            owner = *function;
+        }
+        Some(match owner {
+            FrameOwner::Generator(_) => unreachable!("a generator belongs to a function or module"),
             FrameOwner::Module(module) => module,
             FrameOwner::Function(function) => {
                 let Value::Function { fields, .. } = self.get(function) else {
@@ -2295,11 +2527,29 @@ impl Heap {
                 };
                 fields.module
             }
-        }
+        })
+    }
+
+    pub fn current_code(&self) -> Id {
+        self.frames.last().unwrap().code
     }
 
     pub fn current_scope(&self) -> Id {
         self.frames.last().unwrap().scope
+    }
+
+    /// Python stack levels start at one and exclude the native root frame.
+    pub fn warning_frame(&self, level: i32) -> Option<(Location, Id)> {
+        self.frames
+            .iter()
+            .rev()
+            .filter_map(|frame| {
+                frame
+                    .location
+                    .clone()
+                    .map(|location| (location, frame.scope))
+            })
+            .nth((level.max(1) - 1) as usize)
     }
 
     pub fn current_location(&self) -> Option<Location> {
@@ -2322,7 +2572,8 @@ impl Heap {
     fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut MarkQueue<'_>) {
         pending.extend(globals);
         pending.extend(self.full_collection_members());
-        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
+        pending.extend(self.linked_string_constants.values().copied());
+        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED, EMPTY_TUPLE]);
         pending.extend(
             self.interned
                 .values()
@@ -2472,6 +2723,49 @@ impl Heap {
         Ok(id)
     }
 
+    /// Recheck the strong path from a caller-held method to the sole pending finalizer.
+    pub(super) fn caller_keeps_only_finalizer(&mut self) -> bool {
+        let [owner] = self.ordinary_finalizers.as_slice() else {
+            return false;
+        };
+        let receiver_fields = |operand: &Id| {
+            let Value::Method { receiver, .. } = self.get(*operand) else {
+                return None;
+            };
+            let Value::Instance { fields, .. } = self.get(*receiver) else {
+                return None;
+            };
+            Some(fields)
+        };
+        // Frames, operand slots, and fields can all be removed or reused.
+        if let Some((frame, operand, field)) = self.caller_finalizer_field
+            && self
+                .frames
+                .get(frame)
+                .and_then(|frame| frame.live.get(operand))
+                .and_then(receiver_fields)
+                .and_then(|fields| fields.get_index(field))
+                .is_some_and(|(_, value)| value == owner)
+        {
+            return true;
+        }
+
+        // Earlier operands hold outer expressions such as pending context manager exits.
+        // Learn the position while its frame is the immediate caller, before recursion.
+        if let Some((frame_index, caller)) = self.frames.iter().enumerate().rev().nth(1) {
+            for (operand_index, operand) in caller.live.iter().take(8).enumerate() {
+                if let Some(fields) = receiver_fields(operand)
+                    && let Some(field) = fields.values().take(8).position(|value| value == owner)
+                {
+                    self.caller_finalizer_field = Some((frame_index, operand_index, field));
+                    return true;
+                }
+            }
+        }
+        self.caller_finalizer_field = None;
+        false
+    }
+
     /// A returned writer or a surviving name keeps a direct owner.
     pub(super) fn has_unbound_finalizer(&self, retained: Id) -> bool {
         self.file_writers
@@ -2527,14 +2821,26 @@ impl Heap {
         let active = self.caught_exception(caught);
         let frame = self.frames.last_mut().unwrap();
         frame.active = active;
-        if let Some(id) = frame.object
-            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
-        {
-            *lineno = location.line;
-        }
+        let line = location.line;
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
+        self.set_statement_line(line);
+    }
+
+    /// A match statement can execute separate pattern and guard expressions in one step.
+    pub(super) fn set_statement_line(&mut self, line: u32) {
+        let frame = self.frames.last_mut().unwrap();
+        frame
+            .location
+            .as_mut()
+            .expect("active source location")
+            .line = line;
+        if let Some(id) = frame.object
+            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
+        {
+            *lineno = line;
+        }
     }
 
     /// A discarded owner or the allocation threshold has requested a sweep.

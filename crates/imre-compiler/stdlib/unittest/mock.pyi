@@ -1,4 +1,14 @@
 from builtins import dict as _Dict
+from typing import Any, Callable
+
+class _SentinelObject:
+    name: str
+
+class _Sentinel:
+    def __getattr__(self, name: str) -> _SentinelObject: ...
+
+sentinel: _Sentinel
+DEFAULT: _SentinelObject
 
 _Scalar = bool | int | str | bytes | None
 
@@ -8,7 +18,13 @@ class _DictionaryPatch:
     def start(self) -> dict[str, str]: ...
     def stop(self) -> bool | None: ...
 
+class _AttributePatch:
+    def __enter__(self) -> Any: ...
+    def __exit__(self, *args) -> None: ...
+    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]: ...
+
 class _PatchFactory:
+    def __call__(self, target: str, new: object = ..., *, create: bool = False) -> _AttributePatch: ...
     def dict(self, in_dict: _Dict[str, str], values: _Dict[str, str] | list[tuple[str, str]] | None = None, clear: bool = False, **kwargs: str) -> _DictionaryPatch: ...
 
 patch: _PatchFactory

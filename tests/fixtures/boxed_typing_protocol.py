@@ -1,7 +1,7 @@
 import typing
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sized
-from typing import Protocol
+from typing import Protocol, is_protocol
 
 
 class HasHTML(Protocol):
@@ -28,6 +28,12 @@ class Abstract(Protocol):
 def current():
     print(typing.TYPE_CHECKING is False, typing.Protocol is Protocol)
     print(Protocol.__bases__ == (typing.Generic,), HasHTML.__mro__[1:3] == (Protocol, typing.Generic))
+    assert is_protocol(HasHTML) and typing.is_protocol(Abstract)
+    for rejected in (Protocol, typing.Generic, Concrete, Concrete(), int, 1):
+        assert not is_protocol(rejected)
+    class FalsyMarker:
+        _is_protocol = None
+    assert is_protocol(FalsyMarker) is None
     print(HasHTML._is_protocol, Concrete._is_protocol, Concrete().__html__())
     print(WithInit("explicit initializer").value)
     print(Protocol.__abstractmethods__ == frozenset(), Abstract.__abstractmethods__ == {"operation"})
@@ -56,6 +62,20 @@ def current():
         pass
 
     print(Explicit._is_protocol, GenericProtocol._is_protocol, Ordinary._is_protocol)
+    class Mixed(Abstract, ABC):
+        @classmethod
+        def __subclasshook__(cls, candidate):
+            return True if candidate is str else NotImplemented
+
+    class MixedConcrete(Mixed):
+        def operation(self):
+            return 42
+
+    assert type(Mixed) is type(Abstract) and not is_protocol(Mixed)
+    assert Mixed.__abstractmethods__ == {"operation"} and MixedConcrete().operation() == 42
+    assert Mixed.register(Concrete) is Concrete and isinstance(Concrete(), Mixed)
+    assert issubclass(str, Mixed)
+
     for base in (Concrete, Mapping, int):
         try:
             class Invalid(base, Protocol):

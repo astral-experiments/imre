@@ -23,7 +23,7 @@ const UNITS: [&str; 7] = [
     "weeks",
 ];
 
-pub(super) fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
+pub(in crate::dynamic) fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
     ctx.alloc(Value::Calendar { value, tzinfo })
 }
 
@@ -224,6 +224,12 @@ pub(super) fn call(
             } else {
                 store(ctx, zone, NONE)
             })
+        }
+        "datetime.now" => {
+            let [tz] =
+                crate::dynamic::builtins::bind_method_arguments("now", args, kwargs, ["tz"], 1)?;
+            let tz = tz.unwrap_or(NONE);
+            Ok(store(ctx, Calendar::now(zone(ctx, tz)?.as_ref())?, tz))
         }
         "datetime.fromtimestamp" => {
             let [timestamp, tz] = bind("fromtimestamp", args, kwargs, ["timestamp", "tz"])?;

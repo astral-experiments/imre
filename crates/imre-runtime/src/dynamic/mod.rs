@@ -5,6 +5,7 @@ mod abstract_class;
 mod array;
 mod builtins;
 mod calls;
+mod class_annotations;
 mod complex;
 mod deque;
 mod dictionary;
@@ -31,12 +32,15 @@ mod source_code;
 mod static_method;
 mod stdlib;
 mod super_object;
+mod templatelib;
 mod thread_callback;
 mod thread_local;
 mod thread_lock;
+mod thread_rlock;
 mod thread_worker;
 mod typing;
 mod union;
+mod unraisable;
 mod value;
 mod weakref;
 mod wrapper_descriptor;
@@ -400,6 +404,7 @@ impl Context {
         matches!(
             self.heap.get(id),
             Value::Iterator { .. }
+                | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
@@ -413,6 +418,7 @@ impl Context {
                 | Value::CallableIterator(_)
                 | Value::FormatIterator { .. }
                 | Value::Generator { .. }
+                | Value::CoroutineWrapper(_)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
@@ -444,6 +450,12 @@ impl Context {
             return Ok(id);
         }
         let (sequence, kind) = match *self.heap.get(id) {
+            Value::Template {
+                strings,
+                interpolations,
+            } => {
+                return self.template_iterator(strings, interpolations);
+            }
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::Deque(ref ring) => {
                 let cursor = deque::iterator(id, ring, false);
@@ -541,7 +553,8 @@ impl Context {
         let value = self.heap.get(source);
         if matches!(
             value,
-            Value::SequenceIterator { .. }
+            Value::TemplateIter { .. }
+                | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
                 | Value::Scandir(_)
@@ -551,6 +564,7 @@ impl Context {
                 | Value::Filter { .. }
                 | Value::Zip { .. }
                 | Value::Generator { .. }
+                | Value::CoroutineWrapper(_)
                 | Value::File(_)
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
@@ -839,6 +853,11 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        if matches!(self.heap.get(id), Value::CoroutineWrapper(_)) {
+            return self
+                .call_coroutine_method("coroutine_wrapper", "__next__", &[id])
+                .map(Some);
+        }
         if let Value::Scandir(scan) = self.heap.get(id) {
             return stdlib::os::scandir::advance(self, scan.clone());
         }
@@ -873,6 +892,7 @@ impl Context {
             }
             Value::Iterator { .. } => {}
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
+            Value::TemplateIter { .. } => return self.next_template_item(id),
             Value::DictIterator(iter) => return (*iter).next(self, id),
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Enumerate { input, .. } => {
@@ -1103,6 +1123,8 @@ impl Context {
         if matches!(
             self.heap.get(id),
             Value::AstWalk { .. }
+                | Value::Template { .. }
+                | Value::TemplateIter { .. }
                 | Value::SequenceIterator { .. }
                 | Value::ReverseSequence { .. }
                 | Value::DequeIterator { .. }
@@ -1331,7 +1353,7 @@ impl Context {
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
         if let Some(&cell) = scope.closure.cells.get(name)
-            && let Value::Cell(contents) = self.heap.get(cell)
+            && let Value::Cell(contents) | Value::ClassCell(contents) = self.heap.get(cell)
         {
             return *contents;
         }
@@ -1574,9 +1596,9 @@ impl Context {
             if name == "__class__"
                 && s.class_body.is_none()
                 && let Some(cell) = s.class_cell
-                && let Value::ClassCell(Some(class)) = self.heap.get(cell)
+                && let Value::ClassCell(value) = self.heap.get(cell)
             {
-                return Ok(*class);
+                return value.ok_or_else(|| Error::new("NameError", "cannot access free variable '__class__' where it is not associated with a value in enclosing scope"));
             }
             if let Some(parent) = s.parent {
                 scope = parent;
@@ -1618,6 +1640,12 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if let Some(constants) = crate::objects::Calendar::class_constants(name) {
+            for (field, value) in ["min", "max", "resolution"].into_iter().zip(constants) {
+                let id = stdlib::datetime::store(self, value, NONE);
+                self.builtins.insert(format!("{name}.{field}"), id);
+            }
+        }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
             self.builtin(builtins::exception_initializer(name));
@@ -1626,6 +1654,7 @@ impl Context {
         let methods = match name {
             "object" => &["__hash__", "__format__", "__init_subclass__"],
             "dict" => builtins::DICT_METHODS,
+            "function" => &["__call__"],
             "collections.defaultdict" => {
                 self.builtin("dict");
                 &[
@@ -1647,7 +1676,7 @@ impl Context {
             }
             "property" => property::METHODS,
             "int" => &["bit_length", "to_bytes", "__format__"],
-            "float" => &["__format__", "__getformat__"],
+            "float" => &["__format__", "__getformat__", "as_integer_ratio"],
             "bytes" => {
                 self.builtin("bytes.fromhex");
                 builtins::BYTES_METHODS
@@ -1996,7 +2025,22 @@ impl Context {
         origin: Option<Id>,
         source: Option<(PathBuf, importlib::SourceBody)>,
     ) -> Result<()> {
+        if name == "_thread" && source.is_none() {
+            let rlock = self.builtin(thread_rlock::CLASS);
+            self.bind(scope, "RLock", rlock);
+        }
         match name {
+            "abc" => {
+                let meta = self.abc_meta();
+                self.bind(scope, "ABCMeta", meta);
+            }
+            #[cfg(target_os = "linux")]
+            "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
+            #[cfg(target_os = "linux")]
+            "_imre_signal" if source.is_none() => {
+                let factory = self.builtin("_imre_signal.make_signals");
+                self.bind(scope, "make_signals", factory);
+            }
             "_thread" => {
                 for name in ["allocate_lock", "allocate"] {
                     let factory = self.builtin(&format!("_thread.{name}"));
@@ -2027,6 +2071,8 @@ impl Context {
                     let value = self.lookup_attr(path, name)?;
                     self.bind(scope, name, value);
                 }
+                let linesep = self.text(crate::objects::os::LINE_SEPARATOR);
+                self.bind(scope, "linesep", linesep);
                 self.bind(scope, "path", path);
                 self.publish_module("os.path", path)?;
             }
@@ -2038,6 +2084,7 @@ impl Context {
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
+            "socket" if source.is_none() => stdlib::import_socket_constants(self, scope)?,
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
@@ -2055,6 +2102,8 @@ impl Context {
                 self.module("io")?;
                 let open = self.builtin("open");
                 self.bind(scope, "open", open);
+                let text_encoding = self.builtin("_io.text_encoding");
+                self.bind(scope, "text_encoding", text_encoding);
                 for name in ["BytesIO", "StringIO", "TextIOWrapper", "FileIO"] {
                     let class = self.builtins[&format!("_io.{name}")];
                     self.bind(scope, name, class);
@@ -2066,7 +2115,13 @@ impl Context {
             }
             "sys" => {
                 self.bind(scope, "modules", self.modules);
-                for name in ["audit", "addaudithook"] {
+                for name in [
+                    "audit",
+                    "addaudithook",
+                    "_getframe",
+                    "_getframemodulename",
+                    "unraisablehook",
+                ] {
                     let callable = self.builtin(&format!("sys.{name}"));
                     let function = self.alloc(Value::Method {
                         callable,
@@ -2074,6 +2129,12 @@ impl Context {
                         explicit: false,
                     });
                     self.bind(scope, name, function);
+                    if name == "unraisablehook" {
+                        self.bind(scope, "__unraisablehook__", function);
+                        if self.threads.system_module.is_none() {
+                            self.threads.default_unraisable_hook = Some(function);
+                        }
+                    }
                 }
                 for (name, original, stderr) in [
                     ("stdout", "__stdout__", false),
@@ -2090,6 +2151,10 @@ impl Context {
                 }
                 let jit = stdlib::jit_module(self)?;
                 self.bind(scope, "_jit", jit);
+            }
+            "re" => {
+                let pattern = self.builtin(value::REGEX_PATTERN_TYPE);
+                self.bind(scope, "Pattern", pattern);
             }
             "array" => {
                 let array = self.builtin("array.array");

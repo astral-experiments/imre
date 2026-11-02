@@ -111,11 +111,11 @@ branches. Skipped tests count toward the suite size only.
 
 | Module | Paired passes | Upstream tests | How the tests ran |
 | --- | ---: | ---: | --- |
-| `argparse` | 1,397 | 1,893 | Selected cases across three builds, with intact discovery of all 1,893 cases |
-| `collections` | 505 | 659 | Selected cases and doctests, including 228 OrderedDict and 71 deque passes |
+| `argparse` | 1,425 | 1,893 | Development builds. The intact baseline contributes 1,397 pairs. Additional original cases passed in focused runs with clean teardown. |
+| `collections` | 517 | 659 | Selected tests across development builds. Twelve additional UserString originals passed at both levels. |
 | `csv` | 122 | 128 | Complete suite on `main`, six skips |
-| `dataclasses` | 231 | 276 | Selected cases across builds, including generated initializer annotations |
-| `datetime` | 406 | 1,098 | Both intact runs finished all 1,098 cases on one development build |
+| `dataclasses` | 234 | 276 | Development builds. The intact runs each passed 207 of 276. Three original cases were new to the cross-build total. |
+| `datetime` | 502 | 1,098 | Development builds. The intact runs passed 499 of 1,098. Three additional numeric registrations passed in a separate focused run. |
 | `fnmatch` | 24 | 24 | Complete suite on `main` |
 | `functools` | 91 | 329 | 89 passed in the intact 325-case primary module, plus two selected passes |
 | `hashlib` | 65 | 82 | Selected and intact runs (45 passed together on `main`) |
@@ -125,18 +125,18 @@ branches. Skipped tests count toward the suite size only.
 | `json` | 118 | 216 | 112 passed together before timeout, plus six earlier selected passes |
 | `logging` | 30 | 272 | 30 source-isolated methods run together with their fixtures |
 | `os` | 38 | 579 | 25 intact genericpath cases and 13 selected OS cases whose module teardown errored |
-| `pathlib` | 225 | 1,369 | 220 in the intact development run and five more in a 139-case selection |
+| `pathlib` | 233 | 1,369 | Both intact runs finished all 1,369 cases, with 724 errors and 412 skips |
 | `re` | 120 | 165 | 120 passed in an intact development run, 69 on a smaller set of changes |
-| `shutil` | 34 | 223 | Selected cases |
+| `shutil` | 38 | 223 | Selected tests across builds. Eight original copy cases passed on the public merge with clean teardown, and seven skipped. |
 | `socket` | 48 | 746 | Four passed in the latest intact run and 44 on earlier builds |
 | `subprocess` | 33 | 353 | Selected cases |
-| `tempfile` | 5 | 118 | Selected cases |
+| `tempfile` | 50 | 118 | Development build. All four intact runs finished 118 tests. Eleven further unittest successes raised exceptions in finalizers and are excluded. |
 | `textwrap` | 68 | 68 | Complete suite on `main` |
 | `threading` | 81 | 228 | All 228 cases ran in ordinary and boxed modes on one development build |
 | `typing` | 107 | 712 | Selected tests across development builds |
 | `unittest` | 160 | 1,090 | Intact package runner discovered 244 cases and started 213 |
 | `urllib` | 84 | 178 | Selected cases |
-| **Total** | **4,226** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **4,422** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.

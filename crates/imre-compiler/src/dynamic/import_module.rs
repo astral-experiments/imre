@@ -4,6 +4,19 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Python sources used only by the boxed importer.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "linecache" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            const UPSTREAM: &str = include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/linecache.py"
+            );
+            // Keep CPython's cache, loader fallback and invalidation. The native source
+            // decoder implements the disk path ordinarily provided by tokenize.open.
+            Some(("linecache.py", SOURCE.get_or_init(|| {
+                UPSTREAM.replace("import tokenize\n", "from _imre_linecache import source_lines\n")
+                    .replace("with tokenize.open(fullname) as fp:\n            lines = fp.readlines()",
+                             "with open(fullname, 'rb') as fp:\n            lines = source_lines(fp.read())")
+            })))
+        }
         "inspect" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some((
@@ -27,6 +40,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
+                        section("def ismodule(object):", "def isclass(object):"),
                         section("def formatannotation(", "def formatannotationrelativeto("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),
@@ -36,18 +50,37 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 }),
             ))
         }
+        "urllib.parse" => Some((
+            "urllib/parse.py",
+            include_str!("../../stdlib/urllib/parse.py"),
+        )),
         "annotationlib" => Some((
             "annotationlib.py",
             include_str!("../../stdlib/annotationlib.py"),
         )),
         "functools" => Some(("functools.py", include_str!("../../stdlib/functools.py"))),
         "hashlib" => Some(("hashlib.py", include_str!("../../stdlib/hashlib.py"))),
+        // CPython 3.14.5 pathlib and its glob and NT path dependencies. See stdlib/docstrings/LICENSE.
+        "pathlib" => Some((
+            "pathlib/__init__.py",
+            include_str!("../../stdlib/pathlib/__init__.py"),
+        )),
+        "pathlib._os" => Some((
+            "pathlib/_os.py",
+            include_str!("../../stdlib/pathlib/_os.py"),
+        )),
+        "glob" => Some(("glob.py", include_str!("../../stdlib/glob.py"))),
+        "ntpath" => Some(("ntpath.py", include_str!("../../stdlib/ntpath.py"))),
         // CPython 3.14.5 Lib/shutil.py. See stdlib/docstrings/LICENSE.
         "shutil" => Some(("shutil.py", include_str!("../../stdlib/shutil.py"))),
         "socket" => Some(("socket.py", include_str!("../../stdlib/socket.py"))),
         "tempfile" => Some((
             "tempfile.py",
-            include_str!("../../stdlib/tempfile/names.py"),
+            concat!(
+                include_str!("../../stdlib/tempfile/names.py"),
+                "\n",
+                include_str!("../../stdlib/tempfile/boxed_spool.py"),
+            ),
         )),
         "unittest" => Some((
             "unittest/__init__.py",
@@ -67,6 +100,16 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/unittest/boxed_skip.py"),
                 "\n",
                 include_str!("../../stdlib/unittest/boxed_runner.py"),
+            ),
+        )),
+        "unittest.mock" => Some((
+            "unittest/mock.py",
+            concat!(
+                include_str!("../../stdlib/unittest/mock.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_mock.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/boxed_patch.py"),
             ),
         )),
         "unittest.loader" => Some((
@@ -89,6 +132,22 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 format!("{implementation}{functions}")
             })))
         }
+        "importlib.resources._adapters" => Some((
+            "importlib/resources/_adapters.py",
+            include_str!("../../stdlib/importlib/resources/_adapters.py"),
+        )),
+        "importlib.resources" => Some((
+            "importlib/resources/__init__.py",
+            include_str!("../../stdlib/importlib/resources/__init__.py"),
+        )),
+        "importlib.resources.abc" => Some((
+            "importlib/resources/abc.py",
+            include_str!("../../stdlib/importlib/resources/abc.py"),
+        )),
+        "importlib.resources._filesystem" => Some((
+            "importlib/resources/_filesystem.py",
+            include_str!("../../stdlib/importlib/resources/_filesystem.py"),
+        )),
         "importlib.util" => Some((
             "importlib/util.py",
             include_str!("../../stdlib/importlib/util.py"),

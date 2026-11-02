@@ -864,6 +864,61 @@ pub unsafe extern "C" fn imre_json_encode(
     )
 }
 
+/// Return a fresh encoder that owns its formatting options.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_json_encoder_new(
+    ensure_ascii: u32,
+    allow_nan: u32,
+    sort_keys: u32,
+) -> *const Object {
+    let storage = Storage::JsonEncoder {
+        ensure_ascii: ensure_ascii != 0,
+        allow_nan: allow_nan != 0,
+        sort_keys: sort_keys != 0,
+    };
+    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(storage))))
+}
+
+/// # Safety
+/// The caller roots the exact encoder and a value graph matching the supplied schema.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_json_encoder_encode(
+    encoder: *const Object,
+    word: usize,
+    schema: *const Schema,
+) -> *const Str {
+    // SAFETY: the encoder, input, and immutable layout remain live throughout encoding.
+    let result = unsafe {
+        object(encoder).0.with(|storage| {
+            let Storage::JsonEncoder {
+                ensure_ascii,
+                allow_nan,
+                sort_keys,
+            } = *storage
+            else {
+                unreachable!("expected JSONEncoder")
+            };
+            encode(
+                word,
+                schema,
+                0,
+                false,
+                u32::from(ensure_ascii),
+                Some(StandardOptions {
+                    allow_nan,
+                    sort_keys,
+                    separators: None,
+                }),
+                None,
+            )
+        })
+    };
+    finish(
+        result.map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text)))),
+        std::ptr::null(),
+    )
+}
+
 /// # Safety
 /// The caller roots the value graph, schema, and tagged optional indent.
 #[unsafe(no_mangle)]

@@ -30,6 +30,7 @@ pub(super) struct Workers {
     // Thread errors use the original sys module when its registry entry changes.
     pub(super) system_module: Option<Id>,
     pub(super) default_stderr: Option<Id>,
+    pub(super) default_unraisable_hook: Option<Id>,
     running: Vec<(Arc<AtomicBool>, Vec<Id>)>,
 }
 
@@ -51,6 +52,7 @@ impl Workers {
         self.system_module
             .into_iter()
             .chain(self.default_stderr)
+            .chain(self.default_unraisable_hook)
             .chain(
                 self.running
                     .iter()
@@ -193,7 +195,7 @@ pub(super) fn call(
         && let Value::Module { scope, .. } = ctx.heap.get(sys)
         // Once exposed, the live dict can be changed through an arbitrary alias.
         && (ctx.scope_data(*scope).namespace.is_some()
-            || ctx.scope_name(*scope, "unraisablehook").is_some()
+            || ctx.scope_name(*scope, "unraisablehook").is_some_and(|hook| Some(hook) != ctx.threads.default_unraisable_hook)
             || ctx.scope_name(*scope, "stderr") != ctx.threads.default_stderr
             || ctx.threads.default_stderr.is_some_and(|stderr| {
                 matches!(ctx.heap.get(stderr), Value::TextFile(file) if file.closed())

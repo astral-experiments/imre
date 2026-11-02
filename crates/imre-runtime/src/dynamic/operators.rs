@@ -310,6 +310,28 @@ impl Context {
         Ok(self.require_index_result(value)?.1)
     }
 
+    /// Convert an index to the signed C long used by Python's native argument parser.
+    pub(super) fn index_c_long(&mut self, value: Id) -> Result<i64> {
+        self.index_integer(value)?
+            .to_i64()
+            .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C long"))
+    }
+
+    /// Convert an index to the signed C int used by Python's native argument parser.
+    pub(super) fn index_c_int(&mut self, value: Id) -> Result<i32> {
+        let long = self.index_c_long(value)?;
+        i32::try_from(long).map_err(|_| {
+            Error::new(
+                "OverflowError",
+                if long < 0 {
+                    "signed integer is less than minimum"
+                } else {
+                    "signed integer is greater than maximum"
+                },
+            )
+        })
+    }
+
     /// Require an index and retain its Python type alongside its numeric value.
     fn require_index_result(&mut self, value: Id) -> Result<(Id, crate::Int)> {
         self.index_result(value)?.ok_or_else(|| {
@@ -915,11 +937,17 @@ impl Context {
 
     /// Report an ordering operation declined by both operands.
     fn unsupported_order(&self, op: &str, a: Id, b: Id) -> Error {
+        let module = |id| match self.heap.get(id) {
+            Value::Calendar { .. } => "datetime.",
+            _ => "",
+        };
         Error::new(
             "TypeError",
             format!(
-                "'{op}' not supported between instances of '{}' and '{}'",
+                "'{op}' not supported between instances of '{}{}' and '{}{}'",
+                module(a),
                 self.type_name(a),
+                module(b),
                 self.type_name(b)
             ),
         )
@@ -972,9 +1000,9 @@ impl Context {
             }
             (Value::Float(x), Value::Float(y)) => Ok(x.partial_cmp(y)),
             (Value::Calendar { value: a, .. }, Value::Calendar { value: b, .. })
-                if a.class() == "time" && b.class() == "time" =>
+                if a.class() == b.class() && a.class() != "timezone" =>
             {
-                Ok(Some(a.clock_order(b)?))
+                Ok(Some(a.order(b, op)?))
             }
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => int_float(a, *f),
             (Value::Float(f), Value::Int(_) | Value::Bool(_)) => {
@@ -1881,6 +1909,32 @@ impl Context {
                             }
                             continue;
                         }
+                        Value::Template {
+                            strings,
+                            interpolations,
+                        } => {
+                            append_rendered_text(&mut output, "Template(strings=")?;
+                            push_frame(&mut work, Part::Text(")"))?;
+                            push_frame(&mut work, Part::Value(*interpolations, true))?;
+                            push_frame(&mut work, Part::Text(", interpolations="))?;
+                            push_frame(&mut work, Part::Value(*strings, true))?;
+                            continue;
+                        }
+                        Value::Interpolation {
+                            value,
+                            expression,
+                            conversion,
+                            format_spec,
+                        } => {
+                            append_rendered_text(&mut output, "Interpolation(")?;
+                            push_frame(&mut work, Part::Text(")"))?;
+                            for field in [*format_spec, *conversion, *expression] {
+                                push_frame(&mut work, Part::Value(field, true))?;
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                            push_frame(&mut work, Part::Value(*value, true))?;
+                            continue;
+                        }
                         Value::Slice(_) => {
                             if slice_budget.is_some_and(|limit| slice_depth >= limit) {
                                 return Err(Error::new(
@@ -2095,8 +2149,18 @@ impl Context {
         .unwrap_or_else(|_| "<exception str() failed>".to_owned())
     }
 
-    /// Render a class using its Python module and qualified name.
-    fn class_repr(&self, name: &str, scope: Id) -> String {
+    /// Render the receiver's identity without invoking its own __repr__ slot.
+    pub(super) fn object_repr(&mut self, receiver: Id) -> Result<Id> {
+        let class = self.exact_type(receiver)?;
+        let name = match self.heap.get(class) {
+            Value::Class { name, scope, .. } => self.qualified_class_name(name, *scope),
+            Value::Native(name) => name.clone(),
+            _ => self.type_name(receiver).to_owned(),
+        };
+        Ok(self.text(format!("<{name} object at {receiver:#x}>")))
+    }
+
+    fn qualified_class_name(&self, name: &str, scope: Id) -> String {
         let scope = self.scope_data(scope);
         let attr = |key: &str| {
             scope
@@ -2107,12 +2171,15 @@ impl Context {
                     _ => None,
                 })
         };
-        let module = attr("__module__").unwrap_or(&scope.module);
-        let name = attr("__qualname__").unwrap_or(name);
-        if module == "builtins" {
-            format!("<class '{name}'>")
+        let module = if scope.names.contains_key("__module__") {
+            attr("__module__")
         } else {
-            format!("<class '{module}.{name}'>")
+            Some(scope.module.as_str())
+        };
+        let name = attr("__qualname__").unwrap_or(name);
+        match module {
+            None | Some("builtins") => name.to_owned(),
+            Some(module) => format!("{module}.{name}"),
         }
     }
 
@@ -2139,6 +2206,15 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if let Value::HandlerLock(lock) = self.heap.get(self.scalar_value(id)) {
+            let (state, owner, depth) = match lock.state() {
+                Some((owner, depth)) => ("locked", owner, depth),
+                None => ("unlocked", 0, 0),
+            };
+            let class = self.type_name(id);
+            return format!("<{state} {class} object owner={owner} count={depth} at {id:#x}>");
+        }
+
         if let Value::Instance { class, .. } = value
             && self.classes.get("re.RegexFlag") == Some(class)
             && let Some((_, name, bits)) = self.enum_member(id)
@@ -2210,6 +2286,10 @@ impl Context {
                     "<Token{state} var={} at {id:#x}>",
                     self.format_value(*variable, true, active)
                 )
+            }
+            Value::Template { .. } | Value::Interpolation { .. } => self.repr(id),
+            Value::TemplateIter { .. } => {
+                format!("<{} object at {id:#x}>", super::value::TEMPLATE_ITER_TYPE)
             }
             Value::Scandir(scan) => super::stdlib::os::scandir::iterator_repr(scan),
             Value::DirEntry(entry) => {
@@ -2363,7 +2443,8 @@ impl Context {
                 format!("{variance}{}", self.display(var.name))
             }
             Value::GetSetDescriptor { owner, name, .. }
-                if crate::objects::HashState::is_provider_class(owner) =>
+                if crate::objects::HashState::is_provider_class(owner)
+                    || *owner == super::value::TEMPLATE_TYPE =>
             {
                 format!("<attribute '{name}' of '{owner}' objects>")
             }
@@ -2371,7 +2452,9 @@ impl Context {
                 "<attribute '__weakref__' of '{}' objects>",
                 self.weakref_descriptor_owner(*owner)
             ),
-            Value::Class { name, scope, .. } => self.class_repr(name, *scope),
+            Value::Class { name, scope, .. } => {
+                format!("<class '{}'>", self.qualified_class_name(name, *scope))
+            }
             Value::Method {
                 callable,
                 explicit: false,
@@ -2429,6 +2512,9 @@ impl Context {
                 "operator.itemgetter({})",
                 self.format_elements(self.itemgetter_keys(*keys), active)
             ),
+            Value::File(file) if let Some(name) = file.socket_reader_name() => {
+                format!("<_io.BufferedReader name={name}>")
+            }
             _ => "<object>".to_owned(),
         };
         if recursive.is_some() {
@@ -2581,7 +2667,12 @@ impl Context {
                 self.text_codepoints(vec![point])
             }
             Value::Str(s) => {
-                let c = s.chars().nth(position(s.chars().count())?).unwrap();
+                let index = if (0..s.chars().size_hint().0 as i128).contains(&offset) {
+                    offset as usize
+                } else {
+                    position(s.chars().count())?
+                };
+                let c = s.chars().nth(index).unwrap();
                 self.text(c.to_string())
             }
             Value::Array(array) => {
@@ -2843,7 +2934,19 @@ impl Context {
         }
         let bounds = super::slice::sequence_components(self, parts)?;
         let len = match self.heap.get(obj) {
-            Value::Str(text) => text.chars().count(),
+            Value::Str(text) => match bounds {
+                // A forward slice with nonnegative bounds only needs to know that
+                // its stop is in range. The iterator's lower bound proves that
+                // for short prefixes without counting the rest of the string.
+                [start, Some(stop), step]
+                    if start.unwrap_or(0) >= 0
+                        && step.unwrap_or(1) > 0
+                        && (0..=text.chars().size_hint().0 as i64).contains(&stop) =>
+                {
+                    stop as usize
+                }
+                _ => text.chars().count(),
+            },
             Value::SurrogateStr(points) => points.len(),
             Value::Bytes(data) | Value::ByteArray(data) => data.len(),
             Value::List(items) | Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
@@ -3312,10 +3415,10 @@ impl Context {
         matches!(self.heap.get(storage), Value::List(_)).then_some(storage)
     }
 
-    /// A Python override participates in numeric addition before list concatenation.
-    fn list_overrides_add(&self, object: Id) -> bool {
+    /// A Python override replaces the inherited sequence-concatenation slot.
+    fn overrides_add(&self, object: Id, builtin_add: &str) -> bool {
         self.slot(object, "__add__")
-            .is_some_and(|slot| self.builtins.get("list.__add__") != Some(&slot))
+            .is_some_and(|slot| self.builtins.get(builtin_add) != Some(&slot))
     }
 
     /// Concatenate the two reference arrays without invoking either operand's iterator.
@@ -3334,6 +3437,45 @@ impl Context {
         };
         let items = concat_ids(left, right)?;
         Ok(self.alloc(Value::List(items)))
+    }
+
+    /// Join the boundary strings and preserve the existing interpolation objects.
+    fn concat_template(&mut self, left: Id, right: Id) -> Result<Id> {
+        let Value::Template {
+            strings: left_strings,
+            interpolations: left_interpolations,
+        } = *self.heap.get(left)
+        else {
+            unreachable!("template addition")
+        };
+        let Value::Template {
+            strings: right_strings,
+            interpolations: right_interpolations,
+        } = *self.heap.get(right)
+        else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "can only concatenate string.templatelib.Template (not \"{}\") to string.templatelib.Template",
+                    self.type_name(right)
+                ),
+            ));
+        };
+        let (Value::Tuple(left), Value::Tuple(right)) =
+            (self.heap.get(left_strings), self.heap.get(right_strings))
+        else {
+            unreachable!("template string tuples")
+        };
+        let boundary = left.len() - 1;
+        let mut strings = concat_ids(left, &right[1..])?;
+        let (last, first) = (strings[boundary], right[0]);
+        strings[boundary] = self.concat_template_strings(last, first)?;
+        let interpolations = self.binary("+", left_interpolations, right_interpolations)?;
+        let strings = self.alloc(Value::Tuple(strings));
+        Ok(self.alloc(Value::Template {
+            strings,
+            interpolations,
+        }))
     }
 
     pub(super) fn binary(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
@@ -3466,21 +3608,38 @@ impl Context {
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
             "<" | "<=" | ">" | ">=" => return self.order(op, a, b),
+            "+" if matches!(self.heap.get(a), Value::Template { .. }) => {
+                return self.concat_template(a, b);
+            }
+            "+" if self.string_storage(a).is_some() => {
+                let message = if self.overrides_add(a, "str.__add__") {
+                    format!(
+                        "unsupported operand type(s) for +{}: '{}' and '{}'",
+                        if inplace { "=" } else { "" },
+                        self.type_name(a),
+                        self.type_name(b)
+                    )
+                } else if self.string_storage(b).is_some() {
+                    return self.concat_strings(a, b);
+                } else {
+                    let name = self.type_name(b);
+                    let name = &name[..name.floor_char_boundary(200)];
+                    format!("can only concatenate str (not \"{name}\") to str")
+                };
+                return Err(Error::new("TypeError", message));
+            }
             "+" | "-"
                 if matches!(self.heap.get(a), Value::Complex(_))
                     || matches!(self.heap.get(b), Value::Complex(_)) =>
             {
                 return self.complex_sum(op == "+", a, b);
             }
-            "+" if self.string_storage(a).is_some() && self.string_storage(b).is_some() => {
-                return self.concat_strings(a, b);
-            }
             "+" if let Some(storage) = self.list_storage(a) => {
                 if inplace && storage == a {
                     builtins::call(self, "list.extend", &[storage, b], &[])?;
                     return Ok(a);
                 }
-                if self.list_overrides_add(a) {
+                if self.overrides_add(a, "list.__add__") {
                     // A Python __add__ disables the native sequence-concatenation fallback.
                     return Err(Error::new(
                         "TypeError",
@@ -3767,7 +3926,7 @@ impl Context {
         // Without a Python addition hook, list concatenation waits for the reflected operand.
         if name == "__add__"
             && self.list_storage(obj).is_some()
-            && !self.list_overrides_add(obj)
+            && !self.overrides_add(obj, "list.__add__")
             && self.slot(obj, "__radd__").is_none()
         {
             return Ok(None);
@@ -3795,6 +3954,74 @@ impl Context {
         };
         let result = self.call(method, vec![other], vec![])?;
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
+    }
+
+    /// Try divmod's numeric slots in order, including the inherited slot of integer subclasses.
+    pub(super) fn divmod(&mut self, a: Id, b: Id) -> Result<Id> {
+        let class = |value| {
+            self.heap.get(value).instance_class().or_else(|| {
+                self.builtin_type_name(value)
+                    .and_then(|name| self.builtins.get(name).copied())
+            })
+        };
+        let (left, right) = (class(a), class(b));
+        let python_slot = |value| {
+            self.slot(value, "__divmod__").is_some() || self.slot(value, "__rdivmod__").is_some()
+        };
+        let reflected_first = match (left, right) {
+            (Some(left), Some(right))
+                if left != right && self.direct_subclass(right, left) && python_slot(b) =>
+            {
+                !python_slot(a) || self.reflected_divmod_overridden(left, right)?
+            }
+            _ => false,
+        };
+        for reflected in [reflected_first, !reflected_first] {
+            if reflected && left == right {
+                continue;
+            }
+            let (receiver, hook, other) = if reflected {
+                (b, "__rdivmod__", a)
+            } else {
+                (a, "__divmod__", b)
+            };
+            if self.slot(receiver, hook).is_some() {
+                if let Some(result) = self.operator_slot(receiver, hook, other)? {
+                    return Ok(result);
+                }
+            } else if let (Ok(x), Ok(y)) = (self.as_int(a), self.as_int(b)) {
+                let quotient = self.alloc(Value::Int(crate::integer_binary(&x, &y, 3)?));
+                let remainder = self.alloc(Value::Int(crate::integer_binary(&x, &y, 4)?));
+                return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
+            }
+        }
+        Err(Error::new(
+            "TypeError",
+            format!(
+                "unsupported operand type(s) for divmod(): '{}' and '{}'",
+                self.type_name(a),
+                self.type_name(b)
+            ),
+        ))
+    }
+
+    /// Compare the attributes on the two classes after applying descriptor binding.
+    fn reflected_divmod_overridden(&mut self, left: Id, right: Id) -> Result<bool> {
+        let right = match self.lookup_attr(right, "__rdivmod__") {
+            Ok(slot) => slot,
+            Err(error) if self.is_attribute_error(&error) => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let left = match self.lookup_attr(left, "__rdivmod__") {
+            Ok(slot) => slot,
+            Err(error) if self.is_attribute_error(&error) => return Ok(true),
+            Err(error) => return Err(error),
+        };
+        if left == right {
+            return Ok(false);
+        }
+        let different = self.binary("!=", left, right)?;
+        self.truth(different)
     }
 
     /// Call a container subclass override or its inherited native comparison.

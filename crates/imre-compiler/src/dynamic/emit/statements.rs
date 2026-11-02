@@ -288,7 +288,7 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
-                    let generator = is_generator(&v.body);
+                    let generator = imre_ast::code_flags::is_generator(&v.body);
                     let body = if v.is_async {
                         Body::Unsupported(stmt, "async function")
                     } else if generator {
@@ -317,12 +317,19 @@ impl Function<'_, '_> {
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
                     let bases = self.op("list", &[]);
-                    if let Some(args) = v.arguments.as_deref() {
-                        if !args.keywords.is_empty() {
+                    let kwargs = if let Some(args) = v.arguments.as_deref() {
+                        if args
+                            .keywords
+                            .iter()
+                            .any(|kw| !matches!(kw.arg.as_deref(), Some("total" | "metaclass")))
+                            || args.keywords.len() > 1
+                        {
                             self.unsupported("class keyword arguments");
                         }
-                        self.arguments(&bases, args, "0");
-                    }
+                        self.arguments(&bases, args, "0")
+                    } else {
+                        "0".into()
+                    };
                     let init = self.define(
                         v.start(),
                         self.source.private_names.definition(&v.name),
@@ -330,8 +337,12 @@ impl Function<'_, '_> {
                         None,
                         Body::Namespace(&v.body),
                     );
-                    let name = self.code_name(self.source.private_names.definition(&v.name));
-                    let class = self.op("class", &[&name, &bases, &init]);
+                    let operation = if v.type_params.is_some() {
+                        "parameterized_class"
+                    } else {
+                        "class"
+                    };
+                    let class = self.op(operation, &[&kwargs, &bases, &init]);
                     self.decorated(&v.name, &decorators, class);
                 }
                 ast::Stmt::Return(v) => {
@@ -546,11 +557,7 @@ impl Function<'_, '_> {
                 }
                 let kind = match &body {
                     Body::GeneratorFunction(_) | Body::Generator(..) => GENERATOR,
-                    Body::Expression(expr) => {
-                        let mut yields = Yields::default();
-                        yields.visit_expr(expr);
-                        if yields.0 { GENERATOR } else { 0 }
-                    }
+                    Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
                     Body::Unsupported(ast::Stmt::FunctionDef(f), _) if f.is_async => {
                         if is_generator(&f.body) {
                             ASYNC_GENERATOR
@@ -640,7 +647,10 @@ impl Function<'_, '_> {
         let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);
         signature["types"] = json!({});
-        signature["return_type"] = json!(returns.and_then(scalar_annotation));
+        // A generator call returns a suspended frame, before it yields or returns a value.
+        if generator.is_none() {
+            signature["return_type"] = json!(returns.and_then(scalar_annotation));
+        }
         if let Some(p) = params {
             self.output
                 .interned_identifiers
@@ -1118,31 +1128,6 @@ fn relative_import(package: &str, level: u32, name: &str) -> Option<String> {
     } else {
         format!("{base}.{name}")
     })
-}
-
-#[derive(Default)]
-struct Yields(bool);
-impl<'a> Visitor<'a> for Yields {
-    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-        if !self.0 && !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
-            visitor::walk_stmt(self, stmt);
-        }
-    }
-    fn visit_expr(&mut self, expr: &'a ast::Expr) {
-        match expr {
-            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => self.0 = true,
-            ast::Expr::Lambda(_) => {}
-            _ if !self.0 => visitor::walk_expr(self, expr),
-            _ => {}
-        }
-    }
-}
-
-/// A call to a generator must never run the statements before its first yield.
-fn is_generator(body: &[ast::Stmt]) -> bool {
-    let mut yields = Yields::default();
-    yields.visit_body(body);
-    yields.0
 }
 
 /// A nested function can close over the declaring class through its enclosing method.

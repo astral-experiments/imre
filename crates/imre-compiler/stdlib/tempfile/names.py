@@ -1,11 +1,12 @@
 """POSIX named temporary files and directories for runtime-loaded modules."""
 
 import os as _os
-from errno import EEXIST as _EEXIST
+import errno as _errno
+from _thread import allocate_lock as _allocate_lock
 
-from _imre_tempfile import abspath as _abspath, default_directory as _default_directory
+from _imre_tempfile import abspath as _abspath
 from _imre_tempfile import finish_named as _finish_named, keep_named as _keep_named, open_named as _open_named
-from _imre_tempfile import mkdir as _mkdir, random_name as _random_name
+from _imre_tempfile import mkdir as _mkdir, open_file as _open_file, random_name as _random_name
 
 TMP_MAX = 20
 template = "tmp"
@@ -23,6 +24,7 @@ class _RandomNameSequence:
 
 
 _name_sequence = _RandomNameSequence()
+_once_lock = _allocate_lock()
 
 
 def _get_candidate_names():
@@ -36,10 +38,88 @@ def _fsencode(path):
     return path
 
 
+# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+def _candidate_tempdir_list():
+    """Generate a list of candidate temporary directories which
+    _get_default_tempdir will try."""
+
+    dirlist = []
+
+    # First, try the environment.
+    for envname in 'TMPDIR', 'TEMP', 'TMP':
+        dirname = _os.getenv(envname)
+        if dirname: dirlist.append(dirname)
+
+    # Failing that, try OS-specific locations.
+    if _os.name == 'nt':
+        dirlist.extend([ _os.path.expanduser(r'~\AppData\Local\Temp'),
+                         _os.path.expandvars(r'%SYSTEMROOT%\Temp'),
+                         r'c:\temp', r'c:\tmp', r'\temp', r'\tmp' ])
+    else:
+        dirlist.extend([ '/tmp', '/var/tmp', '/usr/tmp' ])
+
+    # As a last resort, the current directory.
+    try:
+        dirlist.append(_os.getcwd())
+    except (AttributeError, OSError):
+        dirlist.append(_os.curdir)
+
+    return dirlist
+
+
+def _get_default_tempdir(dirlist=None):
+    """Calculate the default directory to use for temporary files.
+    This routine should be called exactly once.
+
+    We determine whether or not a candidate temp dir is usable by
+    trying to create and write to a file in that directory.  If this
+    is successful, the test file is deleted.  To prevent denial of
+    service, the name of the test file must be randomized."""
+
+    namer = _RandomNameSequence()
+    if dirlist is None:
+        dirlist = _candidate_tempdir_list()
+
+    for dir in dirlist:
+        if dir != _os.curdir:
+            dir = _os.path.abspath(dir)
+        for seq in range(TMP_MAX):
+            name = next(namer)
+            filename = _os.path.join(dir, name)
+            try:
+                fd = _os.open(filename, _bin_openflags, 0o600)
+                try:
+                    try:
+                        _os.write(fd, b'blat')
+                    finally:
+                        _os.close(fd)
+                finally:
+                    _os.unlink(filename)
+                return dir
+            except FileExistsError:
+                pass
+            except PermissionError:
+                # See the comment in mkdtemp().
+                if _os.name == 'nt' and _os.path.isdir(dir):
+                    continue
+                break   # no point trying more names in this directory
+            except OSError:
+                break   # no point trying more names in this directory
+    raise FileNotFoundError(_errno.ENOENT,
+                            "No usable temporary directory found in %s" %
+                            dirlist)
+
+
 def _gettempdir():
+    """Private accessor for tempfile.tempdir."""
     global tempdir
     if tempdir is None:
-        tempdir = _default_directory()
+        _once_lock.acquire()
+        try:
+            if tempdir is None:
+                tempdir = _get_default_tempdir()
+        finally:
+            _once_lock.release()
     return tempdir
 
 
@@ -109,7 +189,7 @@ def _create_file(dir, pre, suf, output_type, create, *args):
         except FileExistsError:
             continue
         return result, path
-    raise FileExistsError(_EEXIST, "No usable temporary file name found")
+    raise FileExistsError(_errno.EEXIST, "No usable temporary file name found")
 
 
 def _sanitize_params(prefix, suffix, dir):
@@ -139,7 +219,7 @@ def mkdtemp(suffix=None, prefix=None, dir=None):
         except FileExistsError:
             continue
         return _abspath(path)
-    raise FileExistsError(_EEXIST, "No usable temporary directory name found")
+    raise FileExistsError(_errno.EEXIST, "No usable temporary directory name found")
 
 
 class _TemporaryFileWrapper:
@@ -204,3 +284,12 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
     except BaseException:
         _finish_named(closer, name, True)
         raise
+
+
+def TemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
+                  suffix=None, prefix=None, dir=None, *, errors=None):
+    if buffering != -1:
+        raise NotImplementedError("TemporaryFile supports default buffering")
+    prefix, suffix, dir, _ = _sanitize_params(prefix, suffix, dir)
+    return _open_file(mode, dir=_os.fspath(dir), prefix=prefix, suffix=suffix,
+                      encoding=encoding, errors=errors, newline=newline)

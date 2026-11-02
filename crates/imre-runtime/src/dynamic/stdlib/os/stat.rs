@@ -1,6 +1,6 @@
 //! POSIX stat and its ten-element Python struct sequence.
-use super::{Context, Error, Id, NONE, Result, Value, builtins, c_int, c_path, native, posixpath};
-use std::ffi::CString;
+use super::PathArg;
+use super::{Context, Error, Id, NONE, Result, Value, builtins, c_int, native};
 use std::io;
 
 pub(in crate::dynamic) const CLASS: &str = "os.stat_result";
@@ -101,6 +101,61 @@ pub(in crate::dynamic::stdlib) fn construct(
     Ok(wrap(ctx, values, extras))
 }
 
+/// Rebuild the struct sequence from its visible tuple and all stored named-only fields.
+pub(in crate::dynamic::stdlib) fn reduce(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "unbound method stat_result.__reduce__() needs an argument",
+        ));
+    };
+    let Value::NamedTuple {
+        class: Some(CLASS),
+        values,
+        extras,
+        ..
+    } = ctx.heap.get(receiver)
+    else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '__reduce__' for '{CLASS}' objects doesn't apply to a '{}' object",
+                ctx.type_name(receiver)
+            ),
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "stat_result.__reduce__() takes no keyword arguments",
+        ));
+    }
+    if !rest.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "stat_result.__reduce__() takes no arguments ({} given)",
+                rest.len()
+            ),
+        ));
+    }
+
+    let extras = extras.clone();
+    let sequence = ctx.alloc(Value::Tuple(values.clone()));
+    let fields = extras
+        .into_iter()
+        .map(|(name, value)| (ctx.text(name), value))
+        .collect();
+    let fields = ctx.dict(fields);
+    let args = ctx.alloc(Value::Tuple(vec![sequence, fields]));
+    let class = ctx.builtin(CLASS);
+    Ok(ctx.alloc(Value::Tuple(vec![class, args])))
+}
+
 fn integer(ctx: &mut Context, value: impl Into<num_bigint::BigInt>) -> Id {
     ctx.alloc(Value::Int(crate::Int::new(value.into())))
 }
@@ -161,11 +216,6 @@ pub(super) fn warn_bool_fd(ctx: &Context, value: Id) -> Result<()> {
         crate::objects::runtime_warning(module, file, line, "bool is used as a file descriptor")?;
     }
     Ok(())
-}
-
-enum PathArg {
-    Fd(i32),
-    Name(CString),
 }
 
 pub(in crate::dynamic::stdlib) fn call(
@@ -231,32 +281,7 @@ pub(super) fn query(
             ));
         }
         let path = path.expect("path is required");
-        let spelling = matches!(
-            ctx.heap.get(ctx.scalar_value(path)),
-            Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
-        );
-        let (arg, filename) = if name == "stat"
-            && !spelling
-            && let Some(index) = ctx.index_value(path)?
-        {
-            warn_bool_fd(ctx, path)?;
-            (PathArg::Fd(native::directory_fd_number(&index)?), path)
-        } else {
-            let expected = if name == "stat" {
-                "stat: path should be string, bytes, os.PathLike or integer"
-            } else {
-                "lstat: path should be string, bytes or os.PathLike"
-            };
-            let spelling = posixpath::path_arg(ctx, path, expected)?;
-            (
-                PathArg::Name(c_path(
-                    ctx,
-                    spelling,
-                    &format!("{name}: embedded null character in path"),
-                )?),
-                spelling,
-            )
-        };
+        let (arg, filename) = super::path_or_fd(ctx, name, path, name == "stat", warn_bool_fd)?;
         let dir = if let Some(id) = dir.filter(|&v| v != NONE) {
             warn_bool_fd(ctx, id)?;
             let index = ctx.index_value(id)?.ok_or_else(|| {
@@ -326,32 +351,6 @@ pub(in crate::dynamic) fn member(ctx: &mut Context, name: &str) -> Option<Id> {
     Some(ctx.readonly_member(CLASS, field))
 }
 
-/// Enumerate struct sequence, tuple and object slots without invoking a descriptor.
-pub(in crate::dynamic) fn attribute_names() -> impl Iterator<Item = &'static str> {
-    crate::objects::OBJECT_METHODS
-        .iter()
-        .chain(&FIELDS)
-        .chain(EXTRA)
-        .copied()
-        .chain([
-            "__class__",
-            "__doc__",
-            "__module__",
-            "__match_args__",
-            "__replace__",
-            "n_fields",
-            "n_sequence_fields",
-            "n_unnamed_fields",
-            "__class_getitem__",
-            "__add__",
-            "count",
-            "__rmul__",
-            "__contains__",
-            "__mul__",
-            "__getitem__",
-            "__len__",
-            "__iter__",
-            "__getnewargs__",
-            "index",
-        ])
+pub(in crate::dynamic) fn field_names() -> impl Iterator<Item = &'static str> {
+    FIELDS.iter().chain(EXTRA).copied()
 }

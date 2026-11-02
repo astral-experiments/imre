@@ -1,15 +1,39 @@
 """Stream annotations and special forms for the runtime typing module."""
 
+import builtins as _builtins
 import typing as _typing
-from _collections_abc import MutableMapping as _MutableMapping
+from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
+from collections import defaultdict as _defaultdict
 from functools import lru_cache
-from typing import Generic, TypeVar
+from typing import Any, Callable, Generic, Protocol, TypeVar
 
 
 T = TypeVar("T")
 KT = TypeVar("KT")
 VT = TypeVar("VT")
 AnyStr = TypeVar("AnyStr", bytes, str)
+
+
+# Protocol introspection from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def is_protocol(tp: type, /) -> _builtins.bool:
+    """Return True if the given type is a Protocol.
+
+    Example::
+
+        >>> from typing import Protocol, is_protocol
+        >>> class P(Protocol):
+        ...     def a(self) -> str: ...
+        ...     b: int
+        >>> is_protocol(P)
+        True
+        >>> is_protocol(int)
+        False
+    """
+    return (
+        isinstance(tp, type)
+        and getattr(tp, '_is_protocol', False)
+        and tp != _typing.Protocol
+    )
 
 
 class IO(Generic[AnyStr]):
@@ -24,7 +48,262 @@ class TextIO(IO[str]):
     __slots__ = ()
 
 
-# Runtime assertion from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+# TypedDict creation and nominal recognition from CPython 3.14.5 Lib/typing.py.
+class _TypedDictMeta(type):
+    __call__ = dict
+
+    def __subclasscheck__(cls, other):
+        raise TypeError("TypedDict does not support instance and class checks")
+
+    __instancecheck__ = __subclasscheck__
+
+
+def _typeddict_field(value):
+    if value is None:
+        return type(None)
+    value = _type_check(value, "TypedDict field must be a type")
+    if not isinstance(value, type):
+        raise NotImplementedError("TypedDict field qualifiers and non-class annotations are unsupported")
+    return value
+
+
+def _typeddict_annotation_strings(annotations):
+    # The VALUE fallback has no source expression. Match annotationlib.type_repr.
+    from types import BuiltinFunctionType, FunctionType
+
+    result = {}
+    for name, value in annotations.items():
+        if isinstance(value, str):
+            result[name] = value
+        elif value is None:
+            result[name] = "None"
+        elif value is type(None):
+            result[name] = "NoneType"
+        elif isinstance(value, (type, FunctionType, BuiltinFunctionType)):
+            result[name] = (value.__qualname__ if value.__module__ == "builtins" else
+                            f"{value.__module__}.{value.__qualname__}")
+        elif value is ...:
+            result[name] = "..."
+        else:
+            from string.templatelib import Template
+            if isinstance(value, Template):
+                raise NotImplementedError("template annotation strings require AST unparsing")
+            result[name] = repr(value)
+    return result
+
+
+def _typeddict_base_annotations(annotate, format):
+    if format == 2:
+        raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
+    try:
+        return annotate(format)
+    except NotImplementedError:
+        pass
+
+    if format == 1:
+        raise RuntimeError("annotate function does not support VALUE format")
+    if format not in (3, 4):
+        raise ValueError(f"Invalid format: {format!r}")
+
+    from annotationlib import Format
+    probe = annotate
+    if format == Format.FORWARDREF:
+        # The forward-reference probe can read known names and closure cells,
+        # but assignments to its globals must not change the provider's module.
+        from types import FunctionType
+        namespace = dict(annotate.__globals__)
+        probe = FunctionType(annotate.__code__, namespace, argdefs=annotate.__defaults__,
+                             closure=annotate.__closure__, kwdefaults=annotate.__kwdefaults__)
+    try:
+        probe(Format.VALUE_WITH_FAKE_GLOBALS)
+    except NotImplementedError:
+        values = annotate(Format.VALUE)
+        return _typeddict_annotation_strings(values) if format == 4 else values
+    except Exception:
+        pass
+    raise NotImplementedError("replaying an annotation provider with synthetic globals is unsupported")
+
+
+def _typeddict_body_annotator(thunks):
+    # The class body annotation function is visible to descriptors in
+    # type.__new__, before the metaclass installs its merged provider.
+    def __annotate__(format):
+        if format > 2:
+            raise NotImplementedError(format)
+        return {key: thunk() for key, thunk in thunks.items()}
+    return __annotate__
+
+
+def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
+    if not hasattr(cls, "__orig_bases__"):
+        cls.__orig_bases__ = bases
+
+    # Validate concrete fields when the class is defined, retaining the original
+    # evaluators for later annotation requests in the declaring scope.
+    annotations = {}
+    for key, tp in fields.items():
+        if thunks is not None and key in thunks:
+            tp = thunks[key]()
+        annotations[key] = _typeddict_field(tp)
+
+    def __annotate__(format):
+        result = {}
+        for base in bases:
+            annotate = base.__annotate__
+            if annotate is not None:
+                result.update(_typeddict_base_annotations(annotate, format))
+        if thunks is not None and format == 2:
+            raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
+        if format == 4:
+            if thunks is not None:
+                raise NotImplementedError("TypedDict class STRING annotations require their source expressions")
+            result.update(_typeddict_annotation_strings(fields))
+            return result
+        if format in (1, 3):
+            for name, tp in annotations.items():
+                if thunks is not None and name in thunks:
+                    tp = _typeddict_field(thunks[name]())
+                result[name] = tp
+            return result
+        raise NotImplementedError(format)
+
+    cls.__annotate__ = __annotate__
+    required = set()
+    optional = set()
+    readonly = set()
+    mutable = set()
+    for base in bases:
+        namespace = base.__dict__
+        base_required = namespace.get("__required_keys__", set())
+        required |= base_required
+        optional -= base_required
+        base_optional = namespace.get("__optional_keys__", set())
+        required -= base_optional
+        optional |= base_optional
+        readonly.update(namespace.get("__readonly_keys__", ()))
+        mutable.update(namespace.get("__mutable_keys__", ()))
+    for key in annotations:
+        if total:
+            required.add(key)
+            optional.discard(key)
+        else:
+            optional.add(key)
+            required.discard(key)
+        mutable.add(key)
+        readonly.discard(key)
+    cls.__required_keys__ = frozenset(required)
+    cls.__optional_keys__ = frozenset(optional)
+    cls.__readonly_keys__ = frozenset(readonly)
+    cls.__mutable_keys__ = frozenset(mutable)
+    cls.__total__ = total
+
+
+_typeddict_sentinel = object()
+
+
+def TypedDict(typename, fields=_typeddict_sentinel, /, *, total=True):
+    """A simple typed namespace. At runtime it is equivalent to a plain dict.
+
+    TypedDict creates a dictionary type such that a type checker will expect all
+    instances to have a certain set of keys, where each key is
+    associated with a value of a consistent type. This expectation
+    is not checked at runtime.
+
+    Usage::
+
+        >>> class Point2D(TypedDict):
+        ...     x: int
+        ...     y: int
+        ...     label: str
+        ...
+        >>> a: Point2D = {'x': 1, 'y': 2, 'label': 'good'}  # OK
+        >>> b: Point2D = {'z': 3, 'label': 'bad'}           # Fails type check
+        >>> Point2D(x=1, y=2, label='first') == dict(x=1, y=2, label='first')
+        True
+
+    The type info can be accessed via the Point2D.__annotations__ dict, and
+    the Point2D.__required_keys__ and Point2D.__optional_keys__ frozensets.
+    TypedDict supports an additional equivalent form::
+
+        Point2D = TypedDict('Point2D', {'x': int, 'y': int, 'label': str})
+
+    By default, all keys must be present in a TypedDict. It is possible
+    to override this by specifying totality::
+
+        class Point2D(TypedDict, total=False):
+            x: int
+            y: int
+
+    This means that a Point2D TypedDict can have any of the keys omitted. A type
+    checker is only expected to support a literal False or True as the value of
+    the total argument. True is the default, and makes all items defined in the
+    class body be required.
+
+    The Required and NotRequired special forms can also be used to mark
+    individual keys as being required or not required::
+
+        class Point2D(TypedDict):
+            x: int               # the "x" key must always be present (Required is the default)
+            y: NotRequired[int]  # the "y" key can be omitted
+
+    See PEP 655 for more details on Required and NotRequired.
+
+    The ReadOnly special form can be used
+    to mark individual keys as immutable for type checkers::
+
+        class DatabaseUser(TypedDict):
+            id: ReadOnly[int]  # the "id" key must not be modified
+            username: str      # the "username" key can be changed
+
+    """
+    if fields is _typeddict_sentinel or fields is None:
+        raise NotImplementedError("the deprecated TypedDict fields argument requires warnings._deprecated")
+    fields = dict(fields)
+    td = _typing._new_typeddict(typename, False)
+    td.__orig_bases__ = (TypedDict,)
+    _configure_typeddict(td, fields, total)
+    return td
+
+
+_TypedDict = _typing._new_typeddict("TypedDict", True)
+TypedDict.__mro_entries__ = lambda bases: (_TypedDict,)
+
+
+def is_typeddict(tp):
+    """Check if an annotation is a TypedDict class.
+
+    For example::
+
+        >>> from typing import TypedDict
+        >>> class Film(TypedDict):
+        ...     title: str
+        ...     year: int
+        ...
+        >>> is_typeddict(Film)
+        True
+        >>> is_typeddict(dict)
+        False
+    """
+    return isinstance(tp, _TypedDictMeta)
+
+
+# Runtime assertions from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def assert_type(val, typ, /):
+    """Ask a static type checker to confirm that the value is of the given type.
+
+    At runtime this does nothing: it returns the first argument unchanged with no
+    checks or side effects, no matter the actual type of the argument.
+
+    When a static type checker encounters a call to assert_type(), it
+    emits an error if the value is not of the specified type::
+
+        def greet(name: str) -> None:
+            assert_type(name, str)  # OK
+            assert_type(name, int)  # type checker error
+    """
+    return val
+
+
 _ASSERT_NEVER_REPR_MAX_LENGTH = 100
 
 
@@ -71,6 +350,59 @@ def final(f):
         # read-only property, TypeError if it's a builtin class.
         pass
     return f
+
+
+# Based on CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def no_type_check(arg):
+    """Decorator to indicate that annotations are not type hints.
+
+    The argument must be a class or function; if it is a class, it
+    applies recursively to all methods and classes defined in that class
+    (but not to methods defined in its superclasses or subclasses).
+
+    This mutates the function(s) or class(es) in place.
+    """
+    if isinstance(arg, type):
+        from types import FunctionType, MethodType
+
+        if type(arg) is type:
+            # Only Python class dictionaries can contain definitions to mark.
+            # Native descriptor names advertised by dir() need not be materialized.
+            names = set()
+            for base in getattr(arg, '__mro__', (arg,)):
+                for key, value in getattr(base, '__dict__', {}).items():
+                    if key == '__annotations__' and type(value) is dict:
+                        # An annotations dict cannot be a declared function or class.
+                        # Looking it up can force unrelated deferred annotations.
+                        continue
+                    names.add(key)
+            names = sorted(names)
+        else:
+            names = dir(arg)
+        for key in names:
+            obj = getattr(arg, key)
+            if (
+                not hasattr(obj, '__qualname__')
+                or obj.__qualname__ != f'{arg.__qualname__}.{obj.__name__}'
+                or getattr(obj, '__module__', None) != arg.__module__
+            ):
+                # We only modify objects that are defined in this type directly.
+                # If classes / methods are nested in multiple layers,
+                # we will modify them when processing their direct holders.
+                continue
+            # Instance, class, and static methods:
+            if isinstance(obj, FunctionType):
+                obj.__no_type_check__ = True
+            if isinstance(obj, MethodType):
+                obj.__func__.__no_type_check__ = True
+            # Nested types:
+            if isinstance(obj, type):
+                no_type_check(obj)
+    try:
+        arg.__no_type_check__ = True
+    except TypeError:  # built-in classes
+        pass
+    return arg
 
 
 # Optional and the special form protocol from CPython 3.14.5 Lib/typing.py.
@@ -447,10 +779,38 @@ Tuple.__doc__ = \
     """
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
 Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
+Type = _SpecialGenericAlias(type, 1, name="Type", inst=False)
+Type.__doc__ = \
+    """Deprecated alias to builtins.type.
+
+    builtins.type or typing.Type can be used to annotate class objects.
+    For example, suppose we have the following classes::
+
+        class User: ...  # Abstract base for User classes
+        class BasicUser(User): ...
+        class ProUser(User): ...
+        class TeamUser(User): ...
+
+    And a function that takes a class argument that's a subclass of
+    User and returns an instance of the corresponding class::
+
+        def new_user[U](user_class: Type[U]) -> U:
+            user = user_class()
+            # (Here we could write the user object to a database)
+            return user
+
+        joe = new_user(BasicUser)
+
+    At this point the type checker knows that joe has type BasicUser.
+    """
+DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
+Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
 
 def _substitute_alias_argument(arg, replacements):
+    if isinstance(arg, type):
+        return arg
     for parameter, value in replacements.items():
         if arg is parameter:
             return value
@@ -462,35 +822,50 @@ def _substitute_alias_argument(arg, replacements):
         return GenericAlias(arg.__origin__, tuple(
             _substitute_alias_argument(item, replacements) for item in arg.__args__
         ))
+    if _typing.get_origin(arg) is _typing.Union:
+        return _typing.Union[tuple(_substitute_alias_argument(item, replacements) for item in arg.__args__)]
     return arg[tuple(replacements[p] for p in parameters)]
 
 
-def _specialize_named_alias_uncached(alias, args):
+def _specialize_generic_alias_uncached(alias, args):
+    if alias.__origin__ is Generic or alias.__origin__ is Protocol:
+        raise TypeError(f"Cannot subscript already-subscripted {alias}")
     parameters = alias.__parameters__
     if not parameters:
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
-    if alias._name == "Tuple" and any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
-        raise NotImplementedError("specializing a variadic typing.Tuple requires parameter-pack substitution")
-    args = tuple(_alias_type_arg(arg) for arg in args)
-    if len(args) != len(parameters):
-        which = "few" if len(args) < len(parameters) else "many"
-        expected = f"at least {len(parameters)}" if which == "few" else str(len(parameters))
-        raise TypeError(f"Too {which} arguments for {alias}; actual {len(args)}, expected {expected}")
-    replacements = dict(zip(parameters, args))
+    if any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
+        raise NotImplementedError("specializing a variadic alias requires parameter-pack substitution")
+    expanded = []
+    for arg in args:
+        unpacked = getattr(arg, "__typing_unpacked_tuple_args__", None)
+        if unpacked is not None and not (unpacked and unpacked[-1] is ...):
+            expanded.extend(unpacked)
+        else:
+            expanded.append(arg)
+    if len(expanded) != len(parameters):
+        which = "few" if len(expanded) < len(parameters) else "many"
+        expected = f"at least {len(expanded) + 1}" if which == "few" else str(len(parameters))
+        raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
+    replacements = {}
+    for parameter, arg in zip(parameters, expanded):
+        arg = _alias_type_arg(arg)
+        if _typing.get_origin(arg) is Unpack:
+            raise TypeError(f"{arg} is not valid as type argument")
+        replacements[parameter] = arg
     args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
-_cached_named_specialization = lru_cache(_specialize_named_alias_uncached)
+_cached_generic_specialization = lru_cache(_specialize_generic_alias_uncached)
 
 
-def _specialize_named_alias(alias, args):
+def _specialize_generic_alias(alias, args):
     try:
-        return _cached_named_specialization(alias, args)
+        return _cached_generic_specialization(alias, args)
     except TypeError:
-        return _specialize_named_alias_uncached(alias, args)
+        return _specialize_generic_alias_uncached(alias, args)
 
 
 class _TypedCacheSpecialForm(_SpecialForm):
@@ -620,3 +995,93 @@ def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, fo
         result = _resolve_hint(value, globalns, localns, obj, (), include_extras)
         hints[name] = type(None) if result is None else result
     return hints
+
+
+# PEP 681 decorator from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+class _IdentityCallable(Protocol):
+    def __call__[T](self, arg: T, /) -> T:
+        ...
+
+
+def dataclass_transform(
+    *,
+    eq_default: _builtins.bool = True,
+    order_default: _builtins.bool = False,
+    kw_only_default: _builtins.bool = False,
+    frozen_default: _builtins.bool = False,
+    field_specifiers: tuple[type[Any] | Callable[..., Any], ...] = (),
+    **kwargs: Any,
+) -> _IdentityCallable:
+    """Decorator to mark an object as providing dataclass-like behaviour.
+
+    The decorator can be applied to a function, class, or metaclass.
+
+    Example usage with a decorator function::
+
+        @dataclass_transform()
+        def create_model[T](cls: type[T]) -> type[T]:
+            ...
+            return cls
+
+        @create_model
+        class CustomerModel:
+            id: int
+            name: str
+
+    On a base class::
+
+        @dataclass_transform()
+        class ModelBase: ...
+
+        class CustomerModel(ModelBase):
+            id: int
+            name: str
+
+    On a metaclass::
+
+        @dataclass_transform()
+        class ModelMeta(type): ...
+
+        class ModelBase(metaclass=ModelMeta): ...
+
+        class CustomerModel(ModelBase):
+            id: int
+            name: str
+
+    The ``CustomerModel`` classes defined above will
+    be treated by type checkers similarly to classes created with
+    ``@dataclasses.dataclass``.
+    For example, type checkers will assume these classes have
+    ``__init__`` methods that accept ``id`` and ``name``.
+
+    The arguments to this decorator can be used to customize this behavior:
+    - ``eq_default`` indicates whether the ``eq`` parameter is assumed to be
+        ``True`` or ``False`` if it is omitted by the caller.
+    - ``order_default`` indicates whether the ``order`` parameter is
+        assumed to be True or False if it is omitted by the caller.
+    - ``kw_only_default`` indicates whether the ``kw_only`` parameter is
+        assumed to be True or False if it is omitted by the caller.
+    - ``frozen_default`` indicates whether the ``frozen`` parameter is
+        assumed to be True or False if it is omitted by the caller.
+    - ``field_specifiers`` specifies a static list of supported classes
+        or functions that describe fields, similar to ``dataclasses.field()``.
+    - Arbitrary other keyword arguments are accepted in order to allow for
+        possible future extensions.
+
+    At runtime, this decorator records its arguments in the
+    ``__dataclass_transform__`` attribute on the decorated object.
+    It has no other runtime effect.
+
+    See PEP 681 for more details.
+    """
+    def decorator(cls_or_fn):
+        cls_or_fn.__dataclass_transform__ = {
+            "eq_default": eq_default,
+            "order_default": order_default,
+            "kw_only_default": kw_only_default,
+            "frozen_default": frozen_default,
+            "field_specifiers": field_specifiers,
+            "kwargs": kwargs,
+        }
+        return cls_or_fn
+    return decorator

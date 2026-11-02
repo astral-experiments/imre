@@ -17,10 +17,23 @@ pub(in crate::dynamic) fn install_capabilities(
     for (capability, functions) in [
         (
             "supports_dir_fd",
-            &["lstat", "mkdir", "open", "rmdir", "stat", "unlink"][..],
+            &[
+                "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "unlink", "utime",
+            ][..],
         ),
-        ("supports_fd", &["listdir", "scandir", "stat"][..]),
-        ("supports_follow_symlinks", &["stat"][..]),
+        (
+            "supports_fd",
+            &["chmod", "listdir", "scandir", "stat", "utime"][..],
+        ),
+        (
+            "supports_follow_symlinks",
+            &[
+                #[cfg(target_os = "macos")]
+                "chmod",
+                "stat",
+                "utime",
+            ][..],
+        ),
         ("supports_effective_ids", &[][..]),
     ] {
         let set = ctx.alloc(Value::Set {
@@ -306,23 +319,30 @@ pub(super) fn change_environment(
     Ok(NONE)
 }
 
+mod chmod;
 mod unlink;
+mod utime;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
     matches!(
         name,
         "open"
+            | "readlink"
             | "scandir"
             | "remove"
             | "unlink"
             | "rmdir"
             | "mkdir"
+            | "chmod"
+            | "utime"
             | "dup"
             | "dup2"
             | "isatty"
             | "lseek"
             | "pipe"
+            | "read"
+            | "write"
             | "close"
             | "get_blocking"
             | "set_blocking"
@@ -332,11 +352,49 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
-fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
+pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+enum PathArg {
+    Fd(i32),
+    Name(CString),
+}
+
+/// Convert a POSIX path and retain the Python spelling for audits and OSError.filename.
+fn path_or_fd(
+    ctx: &mut Context,
+    name: &str,
+    path: Id,
+    allow_fd: bool,
+    warn_bool_fd: fn(&Context, Id) -> Result<()>,
+) -> Result<(PathArg, Id)> {
+    let spelling = matches!(
+        ctx.heap.get(ctx.scalar_value(path)),
+        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+    );
+    if allow_fd
+        && !spelling
+        && let Some(index) = ctx.index_value(path)?
+    {
+        warn_bool_fd(ctx, path)?;
+        return Ok((PathArg::Fd(native::directory_fd_number(&index)?), path));
+    }
+    let kinds = if allow_fd {
+        "string, bytes, os.PathLike or integer"
+    } else {
+        "string, bytes or os.PathLike"
+    };
+    let filename = posixpath::path_arg(ctx, path, &format!("{name}: path should be {kinds}"))?;
+    let pathname = c_path(
+        ctx,
+        filename,
+        &format!("{name}: embedded null character in path"),
+    )?;
+    Ok((PathArg::Name(pathname), filename))
 }
 
 /// Convert an optional dir_fd after the path and preceding arguments.
@@ -355,6 +413,57 @@ fn directory_fd(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
         )
     })?;
     Ok(native::directory_fd_number(&fd)?)
+}
+
+/// Bind the path and keyword-only directory descriptor in Argument Clinic order.
+fn path_and_dir_fd(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Id, CString, i32)> {
+    let [Some(path), dir_fd] =
+        builtins::bind_builtin_arguments(name, args, kwargs, ["path", "dir_fd"], 1)?
+    else {
+        unreachable!("path is required")
+    };
+    if args.len() > 1 {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{name}() takes exactly 1 positional argument ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    let path = posixpath::path_arg(
+        ctx,
+        path,
+        &format!("{name}: path should be string, bytes or os.PathLike"),
+    )?;
+    let pathname = c_path(
+        ctx,
+        path,
+        &format!("{name}: embedded null character in path"),
+    )?;
+    let dir_fd = directory_fd(ctx, dir_fd)?;
+    Ok((path, pathname, dir_fd))
+}
+
+/// Return the link contents with the string type of its converted path.
+fn readlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (path, pathname, dir_fd) = path_and_dir_fd(ctx, "readlink", args, kwargs)?;
+    let target = match native::readlink_at(&pathname, dir_fd) {
+        Ok(target) => target,
+        Err(error) => {
+            return Err(ctx.with_errno_filename(crate::objects::errno_error(error).into(), path)?);
+        }
+    };
+    if matches!(ctx.heap.get(ctx.scalar_value(path)), Value::Bytes(_)) {
+        return Ok(ctx.alloc(Value::Bytes(target)));
+    }
+    let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+    Ok(ctx.text_codepoints(codec.decode_filesystem(&target)?))
 }
 
 /// Create a directory relative to dir_fd using the caller's mode and process umask.
@@ -442,8 +551,17 @@ pub(super) fn descriptor(
     if matches!(name, "remove" | "unlink" | "rmdir") {
         return unlink::call(ctx, name, args, kwargs);
     }
+    if name == "utime" {
+        return utime::call(ctx, args, kwargs);
+    }
+    if name == "chmod" {
+        return chmod::call(ctx, args, kwargs);
+    }
     if name == "mkdir" {
         return mkdir(ctx, args, kwargs);
+    }
+    if name == "readlink" {
+        return readlink(ctx, args, kwargs);
     }
     if name == "open" {
         return open(ctx, args, kwargs);
@@ -497,6 +615,33 @@ pub(super) fn descriptor(
             result.push(ctx.int(i64::from(fd)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
+    }
+    if matches!(name, "read" | "write") {
+        let [fd, data] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        return if name == "read" {
+            let length = crate::signed_index(&ctx.index_integer(*data)?).ok_or_else(|| {
+                Error::new(
+                    "OverflowError",
+                    "Python int too large to convert to C ssize_t",
+                )
+            })?;
+            Ok(ctx.alloc(Value::Bytes(native::read(fd, length)?)))
+        } else {
+            // The synchronous syscall borrows the buffer after fd conversion.
+            // It cannot reenter Python, so mutable storage cannot resize underneath it.
+            let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
+                Value::Array(array) => array.as_bytes(),
+                _ => ctx.bytes_like(*data)?,
+            };
+            let count = native::write(fd, bytes)?;
+            Ok(ctx.int(count as i64))
+        };
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

@@ -467,6 +467,7 @@ impl Builtin {
             | Self::JsonLoads
             | Self::JsonEmptyObject
             | Self::JsonDecoderDecode
+            | Self::JsonEncoderEncode(_)
             | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
@@ -515,6 +516,7 @@ impl Builtin {
             | Self::NewPlainObject
             | Self::InspectSentinel
             | Self::JsonDecoderNew
+            | Self::JsonEncoderNew
             | Self::JsonDecoderMemo
             | Self::HashUpdate
             | Self::HashDigestSize
@@ -693,6 +695,7 @@ impl Builtin {
             | Self::SysStreamText { .. }
             | Self::SysEncoding(_)
             | Self::OsName
+            | Self::OsLinesep
             | Self::OsPathsep
             | Self::OsSeparator { .. }
             | Self::OptionalStrConcat
@@ -1090,6 +1093,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_flush_stdout"
                 | "imre_environ_get"
                 | "imre_getcwd"
+                | "imre_os_linesep"
                 | "imre_os_pathsep"
                 | "imre_shutil_which"
                 | "imre_environ_copy"

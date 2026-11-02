@@ -88,52 +88,27 @@ pub(super) fn select(function: &Function, storage: &mut [Type]) {
 
 fn block(body: &[Statement], storage: &mut [Type], uses: &[Uses], writes: &[usize]) {
     for (i, stmt) in body.iter().enumerate() {
-        match stmt {
-            Statement::Return(Expr {
-                kind: ExprKind::Builtin(Builtin::Bytes, args),
-                ..
-            }) => {
-                let [
-                    Expr {
-                        kind: ExprKind::Local(slot),
-                        ty: Type::ListInt,
-                    },
-                ] = args.as_slice()
-                else {
-                    continue;
-                };
-                let use_ = &uses[*slot];
-                if writes[*slot] == 1 && use_.appends != 0 && use_.reads == use_.private + 1
+        if let Statement::Return(Expr {
+            kind: ExprKind::Builtin(Builtin::Bytes, args),
+            ..
+        }) = stmt
+        {
+            let [
+                Expr {
+                    kind: ExprKind::Local(slot),
+                    ty: Type::ListInt,
+                },
+            ] = args.as_slice()
+            else {
+                continue;
+            };
+            let use_ = &uses[*slot];
+            if writes[*slot] == 1 && use_.appends != 0 && use_.reads == use_.private + 1
                     && body[..i].iter().any(|stmt| matches!(stmt, Statement::Assign(to, Expr { kind: ExprKind::List(values), .. }) if to == slot && values.is_empty()))
                 {
                     storage[*slot] = Type::ByteOutput;
                 }
-            }
-            Statement::Scope { body, .. } => block(body, storage, uses, writes),
-            Statement::If(_, yes, no)
-            | Statement::While(_, yes, no)
-            | Statement::For {
-                body: yes,
-                orelse: no,
-                ..
-            } => {
-                block(yes, storage, uses, writes);
-                block(no, storage, uses, writes);
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                block(body, storage, uses, writes);
-                for handler in handlers {
-                    block(&handler.body, storage, uses, writes);
-                }
-                block(orelse, storage, uses, writes);
-                block(finalbody, storage, uses, writes);
-            }
-            _ => {}
         }
+        stmt.suites(|nested| block(nested, storage, uses, writes));
     }
 }

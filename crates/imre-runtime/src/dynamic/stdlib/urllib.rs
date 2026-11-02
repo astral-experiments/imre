@@ -32,7 +32,14 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
         let registry = ctx.alloc(Value::List(items));
         ctx.bind(scope, name, registry);
     }
-    for name in ["urljoin", "urlparse", "urlunparse", PARSE, PARSE_BYTES] {
+    for name in [
+        "_check_netloc",
+        "urljoin",
+        "urlparse",
+        "urlunparse",
+        PARSE,
+        PARSE_BYTES,
+    ] {
         let operation = ctx.builtin(&format!("urllib.parse.{name}"));
         ctx.bind(scope, name, operation);
     }
@@ -81,6 +88,11 @@ pub(super) fn call(
             let [text, encoding, errors] =
                 bind(name, args, kwargs, ["string", "encoding", "errors"])?;
             unquote(ctx, required(text, name, "string")?, encoding, errors)
+        }
+        "_check_netloc" => {
+            let [netloc] = bind(name, args, kwargs, ["netloc"])?;
+            urlsplit::check_netloc(ctx.str_value(required(netloc, name, "netloc")?)?)?;
+            Ok(NONE)
         }
         "urlsplit" | "urlparse" => {
             let [url, scheme, fragments] =

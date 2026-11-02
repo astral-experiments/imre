@@ -50,7 +50,10 @@ impl References<'_> {
                     _ => false,
                 };
             }
-            Some(Binding::Intrinsic(Intrinsic::Adler32)) => Some(2),
+            Some(Binding::Intrinsic(
+                Intrinsic::Adler32
+                | Intrinsic::Fd(crate::ir::FdOperation::Read | crate::ir::FdOperation::Write),
+            )) => Some(2),
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 Some(super::credential_arity(name))
             }
@@ -804,7 +807,11 @@ fn known_decorator(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> b
     ) || matches!(expr, ast::Expr::Name(name) if matches!(name.id.as_str(), "property" | "classmethod" | "staticmethod") && graph.resolve(module, expr).is_none())
 }
 
-fn definition_effect(graph: &SourceGraph, module: ModuleId, func: &ast::StmtFunctionDef) -> bool {
+pub(crate) fn definition_effect(
+    graph: &SourceGraph,
+    module: ModuleId,
+    func: &ast::StmtFunctionDef,
+) -> bool {
     func.decorator_list
         .iter()
         .any(|d| !known_decorator(graph, module, &d.expression))

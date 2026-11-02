@@ -444,28 +444,9 @@ impl Session {
         owner: &str,
         name: &str,
     ) -> bool {
-        use ty_python_semantic::types::{ProgramEnvironment, Type, TypeDefinition};
         self.hint_reads.set(self.hint_reads.get() + 1);
-        let program = self.db.program_file(self.files[module]);
-        let model = SemanticModel::new(&self.db, program);
-        let Some(ty @ Type::FunctionLiteral(_)) = expression.inferred_type(&model) else {
-            return false;
-        };
-        let Some(TypeDefinition::Function(def)) =
-            ty.definition(&self.db, &ProgramEnvironment::from_file(program))
-        else {
-            return false;
-        };
-        def.name(&self.db).as_deref() == Some(name)
-            && def
-                .file(&self.db)
-                .path(&self.db)
-                .as_vendored_path()
-                .is_some()
-            && model
-                .resolve_module(Some(owner), 0)
-                .and_then(|m| m.file(&self.db))
-                == Some(def.file(&self.db))
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        resolves_to_stdlib_function(&model, expression, owner, name)
     }
 
     pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
@@ -480,22 +461,27 @@ impl Session {
 
     /// Resolve a bare `object` base at the point where the class is defined.
     pub(crate) fn builtin_object_base(&self, module: usize, base: &Expr) -> bool {
-        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
-        if !base.as_name_expr().is_some_and(|name| name.id == "object") {
-            return false;
-        }
+        base.as_name_expr().is_some_and(|name| name.id == "object")
+            && self.is_known_class(module, base, ty_python_semantic::types::KnownClass::Object)
+    }
+
+    /// Check the class object bound to a name or attribute at its point of use.
+    pub(crate) fn is_known_class(
+        &self,
+        module: usize,
+        expression: &Expr,
+        class: ty_python_semantic::types::KnownClass,
+    ) -> bool {
+        use ty_python_semantic::types::{ProgramEnvironment, Type as Ty};
         self.hint_reads.set(self.hint_reads.get() + 1);
         let file = self.db.program_file(self.files[module]);
         let model = SemanticModel::new(&self.db, file);
-        let Some(ty @ Ty::ClassLiteral(_)) = base.inferred_type(&model) else {
+        let Some(ty @ Ty::ClassLiteral(_)) = expression.inferred_type(&model) else {
             return false;
         };
         let env = ProgramEnvironment::from_file(file);
         ty.definition(&self.db, &env).is_some_and(|definition| {
-            KnownClass::Object
-                .to_instance(&self.db, &env)
-                .definition(&self.db, &env)
-                == Some(definition)
+            class.to_instance(&self.db, &env).definition(&self.db, &env) == Some(definition)
         })
     }
 
@@ -822,6 +808,11 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
+                            // ty also reports implicit None returns at the annotation span.
+                            || (diagnostic.id().as_str() == "invalid-return-type"
+                                && diagnostic.headline_message()
+                                    == "Return type does not match returned value"
+                                && contextmanager_annotation(db, file, range))
                             || (matches!(
                                 diagnostic.id().as_str(),
                                 "too-many-positional-arguments" | "missing-argument"
@@ -840,6 +831,70 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                 .to_string()
         })
         .collect()
+}
+
+fn resolves_to_stdlib_function(
+    model: &SemanticModel<'_>,
+    expression: &Expr,
+    owner: &str,
+    name: &str,
+) -> bool {
+    use ty_python_semantic::types::{Type, TypeDefinition};
+    let db = model.db();
+    let Some(ty @ Type::FunctionLiteral(_)) = expression.inferred_type(model) else {
+        return false;
+    };
+    let Some(TypeDefinition::Function(def)) = ty.definition(db, &model.program_environment())
+    else {
+        return false;
+    };
+    def.name(db).as_deref() == Some(name)
+        && def.file(db).path(db).as_vendored_path().is_some()
+        && model
+            .resolve_module(Some(owner), 0)
+            .and_then(|m| m.file(db))
+            == Some(def.file(db))
+}
+
+/// A context manager wraps a suspended generator. Its preserved annotation
+/// does not describe the generator object constructed by the raw call.
+fn contextmanager_annotation(db: &dyn Db, file: File, range: TextRange) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_core::scope::NodeWithScopeRef;
+    let program = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, program.python_file(db)).load(db);
+    let root = AnyNodeRef::from(parsed.syntax());
+    if !root.range().contains_range(range) {
+        return false;
+    }
+    let nodes = covering_node(root, range);
+    let Some(function) = nodes.ancestors().find_map(|node| match node {
+        AnyNodeRef::StmtFunctionDef(f) => Some(f),
+        _ => None,
+    }) else {
+        return false;
+    };
+    if function.is_async
+        || !function
+            .returns
+            .as_deref()
+            .is_some_and(|a| a.range() == range)
+    {
+        return false;
+    }
+    let Some(decorator) = function.decorator_list.last() else {
+        return false;
+    };
+    let index = ty_python_core::semantic_index(db, program);
+    index
+        .node_scope(NodeWithScopeRef::Function(function))
+        .is_generator_function(&index)
+        && resolves_to_stdlib_function(
+            &SemanticModel::new(db, program),
+            &decorator.expression,
+            "contextlib",
+            "contextmanager",
+        )
 }
 
 /// ty 0.0.14 counts functools.Placeholder as occupied and can leave bound

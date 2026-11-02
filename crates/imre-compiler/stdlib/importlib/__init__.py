@@ -1,11 +1,24 @@
 """Import modules registered with the native loader."""
 
 
+import sys
 from _frozen_importlib import ModuleSpec as _ModuleSpec
 import _frozen_importlib_external as _bootstrap_external
 
 _bootstrap_external.__name__ = "importlib._bootstrap_external"
 _bootstrap_external.__package__ = "importlib"
+
+
+def invalidate_caches():
+    """Call each meta path finder's cache invalidation hook when present."""
+    default = object()
+    finders = getattr(sys, "meta_path", default)
+    if finders is default:
+        # The closed native resolver has no public default meta path.
+        return _bootstrap_external._invalidate_default_path_caches()
+    for finder in finders:
+        if hasattr(finder, "invalidate_caches"):
+            finder.invalidate_caches()
 
 
 def _file_spec(name, origin, locations, loader=None):

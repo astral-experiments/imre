@@ -22,15 +22,39 @@ const CONSTANTS: &[(&str, i32)] = &[
     ("SOMAXCONN", libc::SOMAXCONN),
 ];
 
+// socket.py imports these constants once, so deletion must not fall back to a native value.
+const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
+    ("IPPROTO_UDP", libc::IPPROTO_UDP),
+    ("SOCK_DGRAM", libc::SOCK_DGRAM),
+    ("SOCK_RAW", libc::SOCK_RAW),
+    ("SOCK_RDM", libc::SOCK_RDM),
+    ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
+];
+
 /// Seed the low-level module once so normal module assignment and deletion remain observable.
 pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) -> Result<()> {
-    for &(name, value) in CONSTANTS {
+    for &(name, value) in CONSTANTS.iter().chain(IMPORTED_CONSTANTS) {
         let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
     }
-    for name in ["has_ipv6", "socket", "error"] {
+    let socket_type = attribute(ctx, "socket")?;
+    ctx.bind(scope, "SocketType", socket_type);
+    for name in ["has_ipv6", "socket", "close", "error"] {
         let value = attribute(ctx, name)?;
         ctx.bind(scope, name, value);
+    }
+    Ok(())
+}
+
+/// An ordinary importlib-only executable can load socket without its bundled Python source.
+pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) -> Result<()> {
+    let low = ctx.module("_socket")?;
+    for &(name, _) in IMPORTED_CONSTANTS {
+        match ctx.lookup_attr(low, name) {
+            Ok(value) => ctx.bind(scope, name, value),
+            Err(error) if ctx.is_attribute_error(&error) => {}
+            Err(error) => return Err(error),
+        }
     }
     Ok(())
 }
@@ -44,6 +68,7 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         // whether a particular process can create or bind an IPv6 socket.
         "has_ipv6" => Ok(super::TRUE),
         "socket" => Ok(ctx.builtin("socket.socket")),
+        "close" => Ok(ctx.builtin("_socket.close")),
         "getaddrinfo" | "getfqdn" | "gaierror" => {
             Ok(ctx.alloc(Value::Native(format!("socket.{name}"))))
         }
@@ -248,16 +273,69 @@ fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
         int_option(ctx, args, kwargs, 4, "proto", 0)?,
         int_option(ctx, args, kwargs, 5, "flags", 0)?,
     )?;
-    let family = ctx.int(i64::from(libc::AF_INET));
     let mut result = Vec::with_capacity(rows.len());
     for row in rows {
+        let family = ctx.int(i64::from(row.addr.family()));
         let ty = ctx.int(i64::from(row.ty));
         let protocol = ctx.int(i64::from(row.protocol));
         let name = ctx.text(row.canonical);
-        let addr = pack_ipv4(ctx, &row.addr);
+        let addr = pack_address(ctx, &row.addr)?;
         result.push(ctx.alloc(Value::Tuple(vec![family, ty, protocol, name, addr])));
     }
     Ok(ctx.alloc(Value::List(result)))
+}
+
+fn getsockopt(
+    ctx: &mut Context,
+    socket: &crate::objects::Object,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "socket.getsockopt() takes no keyword arguments",
+        ));
+    }
+    if !(2..=3).contains(&args.len()) {
+        let bound = if args.len() < 2 {
+            "at least 2"
+        } else {
+            "at most 3"
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "getsockopt() takes {bound} arguments ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    let level = ctx.index_c_int(args[0])?;
+    let name = ctx.index_c_int(args[1])?;
+    let len = args
+        .get(2)
+        .map(|&id| ctx.index_c_int(id))
+        .transpose()?
+        .unwrap_or(0);
+    if len == 0 {
+        return Ok(ctx.int(i64::from(native::get_option(socket, level, name)?)));
+    }
+    if !(1..=1024).contains(&len) {
+        return Err(Error::new("OSError", "getsockopt buflen out of range"));
+    }
+    let mut bytes = vec![0; len as usize];
+    let used = native::get_option_into(socket, level, name, &mut bytes)?;
+    bytes.truncate(used);
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
+pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let arg = super::super::builtins::one_positional_arg("_socket.close", args, kwargs)?;
+    // CPython converts through C long before casting to its POSIX socket descriptor.
+    let fd = ctx.index_c_long(arg)? as i32;
+    native::close_fd(fd).map_err(crate::objects::errno_error)?;
+    Ok(NONE)
 }
 
 pub(super) fn call(
@@ -301,6 +379,9 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected a socket"));
     };
     let s = handle.clone();
+    if method == "getsockopt" {
+        return getsockopt(ctx, &s, args, kwargs);
+    }
     if method == "makefile" {
         check_args(method, args, kwargs, 2, &["mode", "buffering"])?;
         let binary_reader = if let Some(mode) = option(args, 0, kwargs, "mode")? {
@@ -330,7 +411,7 @@ pub(super) fn call(
             ));
         }
         let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
-        return Ok(ctx.alloc(super::BinaryFile::reader(reader).into_value()?));
+        return Ok(ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?));
     }
     let max = match method {
         "bind" | "connect" | "listen" | "setblocking" | "shutdown" => 1,
@@ -357,8 +438,8 @@ pub(super) fn call(
         )?,
         "accept" => {
             let (child, peer) = native::accept(&s)?;
-            let child = ctx.alloc(Value::Socket(child));
             let peer = pack_address(ctx, &peer)?;
+            let child = ctx.alloc(Value::Socket(child));
             return Ok(ctx.alloc(Value::Tuple(vec![child, peer])));
         }
         "getsockname" => return pack_address(ctx, &native::sockname(&s)?),
