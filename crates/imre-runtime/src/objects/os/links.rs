@@ -3,7 +3,7 @@ use super::super::Object;
 use super::super::exceptions::Result;
 use super::super::files::errno_with_filenames;
 use super::syscall_path;
-use rustix::fs::{AtFlags, CWD, linkat, readlinkat_raw, symlinkat};
+use rustix::fs::{CWD, readlinkat_raw, symlinkat};
 use std::ffi::{CStr, OsString};
 use std::io;
 use std::os::unix::ffi::OsStringExt;
@@ -45,6 +45,22 @@ pub(crate) fn readlink_at(path: &CStr, dir_fd: i32) -> io::Result<Vec<u8>> {
     Ok(target[..count].to_vec())
 }
 
+/// Link two directory-relative paths, optionally dereferencing the final source symlink.
+pub(crate) fn link_at(
+    src_fd: i32,
+    source: &CStr,
+    dst_fd: i32,
+    destination: &CStr,
+    follow: bool,
+) -> io::Result<()> {
+    let flags = if follow { libc::AT_SYMLINK_FOLLOW } else { 0 };
+    // SAFETY: the C strings live through the call. The kernel validates both raw descriptors.
+    if unsafe { libc::linkat(src_fd, source.as_ptr(), dst_fd, destination.as_ptr(), flags) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Create the link without following the destination. The source is stored verbatim.
 pub(crate) fn symlink_at(source: &CStr, dir_fd: i32, destination: &CStr) -> io::Result<()> {
     if dir_fd == libc::AT_FDCWD {
@@ -80,14 +96,7 @@ pub(in crate::objects) unsafe fn link(
     match kind {
         0 => symlink_at(&src, libc::AT_FDCWD, &dst),
         1 => return Ok(()),
-        2 => linkat(
-            CWD,
-            src.as_c_str(),
-            CWD,
-            dst.as_c_str(),
-            AtFlags::SYMLINK_FOLLOW,
-        )
-        .map_err(io::Error::from),
+        2 => link_at(libc::AT_FDCWD, &src, libc::AT_FDCWD, &dst, true),
         _ => unreachable!("unknown pathlib link operation"),
     }
     .map_err(|e| errno_with_filenames(e, Some(source), Some(destination)))
