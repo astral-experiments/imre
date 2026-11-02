@@ -49,7 +49,13 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
         "datetime.timedelta" => (
             "datetime.timedelta",
             &["days", "seconds", "microseconds"],
-            &["__bool__", "__repr__", "__str__", "total_seconds"],
+            &[
+                "__bool__",
+                "__neg__",
+                "__repr__",
+                "__str__",
+                "total_seconds",
+            ],
         ),
         _ => return None,
     };
@@ -396,6 +402,7 @@ pub(super) fn call(
         | "time.__str__"
         | "timedelta.__str__"
         | "timedelta.__bool__"
+        | "timedelta.__neg__"
         | "datetime.timetuple"
         | "date.timetuple"
         | "date.toordinal"
@@ -416,6 +423,8 @@ pub(super) fn call(
             let value = calendar(ctx, args[0], class)
                 .ok_or_else(|| Error::new("TypeError", format!("expected datetime.{class}")))?;
             Ok(match operation {
+                "__neg__" if value.delta_parts() == (0, 0, 0) => ctx.scalar_value(args[0]),
+                "__neg__" => store(ctx, value.negate_delta()?, NONE),
                 "__bool__" => {
                     if value.delta_parts() == (0, 0, 0) {
                         FALSE
