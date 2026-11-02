@@ -9,14 +9,51 @@ use regex_syntax::hir::{Class, Hir, HirKind, translate::Translator};
 
 use super::Alphabet;
 
-/// Expand Python's additional case equivalents for an unscoped backend expression.
+/// Expand Python's additional case equivalents for the raw backend.
 pub fn expand_case(source: &str, ascii: bool) -> Result<String, String> {
     let alphabet = if ascii {
         Alphabet::AsciiIgnoreCase
     } else {
         Alphabet::UnicodeIgnoreCase
     };
-    scoped(source, &[(0, alphabet)], false)
+    let ast = ast::parse::Parser::new()
+        .parse(source)
+        .map_err(|e| e.to_string())?;
+    let mut modes = vec![(0, alphabet)];
+    if source.contains("(?") && source.contains('-') {
+        raw_case_scopes(&ast, alphabet, &mut modes);
+    }
+    Ok(fold(&ast, source, &modes))
+}
+
+// The raw backend can accept compound scopes which the Python translator cannot lower.
+// Keep the source offsets so Fold leaves case-sensitive literals and classes unchanged.
+fn raw_case_scopes(node: &Ast, mode: Alphabet, modes: &mut Vec<(usize, Alphabet)>) {
+    match node {
+        Ast::Group(group) => {
+            let inner = group
+                .flags()
+                .and_then(|flags| flags.flag_state(ast::Flag::CaseInsensitive))
+                .map_or(mode, |enabled| mode.scoped('i', enabled).unwrap());
+            if inner != mode {
+                modes.push((group.span.start.offset, inner));
+            }
+            raw_case_scopes(&group.ast, inner, modes);
+            if inner != mode {
+                modes.push((group.span.end.offset, mode));
+            }
+        }
+        Ast::Repetition(rep) => raw_case_scopes(&rep.ast, mode, modes),
+        Ast::Concat(concat) => concat
+            .asts
+            .iter()
+            .for_each(|a| raw_case_scopes(a, mode, modes)),
+        Ast::Alternation(alt) => alt
+            .asts
+            .iter()
+            .for_each(|a| raw_case_scopes(a, mode, modes)),
+        _ => {}
+    }
 }
 
 /// Expand each literal under its lexical Python alphabet before class negation or repetition.
