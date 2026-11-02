@@ -198,7 +198,11 @@ pub(super) fn exception_subclass(child: &str, parent: &str) -> Option<bool> {
 }
 
 pub(super) fn is_builtin(name: &str) -> bool {
-    (name != "UnsupportedOperation" && is_builtin_type(name)) || FUNCTIONS.contains(&name)
+    (name != "UnsupportedOperation" && is_builtin_type(name)) || is_builtin_function(name)
+}
+
+pub(super) fn is_builtin_function(name: &str) -> bool {
+    FUNCTIONS.contains(&name)
 }
 
 /// CPython compares built-in functions by their implementation and bound module.
