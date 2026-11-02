@@ -531,6 +531,26 @@ impl Session {
         })
     }
 
+    /// Identify exact OrderedDict and deque class objects even when imported under another name.
+    pub(crate) fn is_collections_storage_base(&self, module: usize, base: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let file = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, file);
+        let Some(owner @ Ty::ClassLiteral(_)) = base.inferred_type(&model) else {
+            return false;
+        };
+        let env = ProgramEnvironment::from_file(file);
+        owner.definition(&self.db, &env).is_some_and(|definition| {
+            [KnownClass::OrderedDict, KnownClass::Deque]
+                .into_iter()
+                .any(|class| {
+                    let canonical = class.to_instance(&self.db, &env);
+                    canonical.definition(&self.db, &env).as_ref() == Some(&definition)
+                })
+        })
+    }
+
     /// Check the class object bound to a name or attribute at its point of use.
     pub(crate) fn is_known_class(
         &self,
