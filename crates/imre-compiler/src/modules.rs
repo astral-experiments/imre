@@ -2156,6 +2156,9 @@ impl IntrinsicModule {
             (Self::Socket, "EAI_SERVICE") => Intrinsic::ObjectRuntimeExport("socket.EAI_SERVICE"),
             (Self::Socket, "SOL_TCP") => Intrinsic::ObjectRuntimeExport("socket.SOL_TCP"),
             (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
+            (Self::Socket, "create_connection") => {
+                Intrinsic::ObjectRuntimeExport("socket.create_connection")
+            }
             (Self::Socket, "create_server") => {
                 Intrinsic::ObjectRuntimeExport("socket.create_server")
             }
