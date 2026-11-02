@@ -1483,6 +1483,24 @@ def main():
         compare("-I", parser_script, "-h")
         compare("-B", parser_script, "41")
 
+        # Python normalizes the script small L when it parses an identifier.
+        logging_command = (
+            "name = 'worker'\n"
+            "import ℓogging as log\n"
+            "record = log.makeLogRecord({'name': name, 'msg': 'items %d', 'args': (3,)})\n"
+            "print(log.Formatter('%(name)s %(message)s').format(record))\n"
+        )
+        compare("-I", "-c", logging_command, native_timeout=600)
+
+        shadow_dir = root / "logging_provider"
+        shadow_dir.mkdir()
+        (shadow_dir / "logging.py").write_text("marker = 'project logging'\n")
+        shadow_script = shadow_dir / "entry.py"
+        shadow_script.write_text(
+            "import sys\nsys.path.append('unused')\nimport logging\nprint(logging.marker)\n"
+        )
+        compare("-B", shadow_script, extra={"IMREFLAGS": "--opt-level 0"}, native_timeout=300)
+
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
         compare("-B", ftp_script)
@@ -1578,6 +1596,17 @@ def main():
             "print(date.__module__, datetime.__qualname__, timedelta.__module__)\n"
         )
         compare("-IB", names, native_args=("run", names, "--quiet"))
+
+        date_isoformat = root / "date_isoformat.py"
+        for body in (
+            "print(d.isoformat())",
+            "print(date.isoformat(d))",
+            "render = d.isoformat\nprint(render())",
+            "print(getattr(d, 'isoformat')())",
+            "print(getattr(d, 'isoformat', None)())",
+        ):
+            date_isoformat.write_text("from datetime import date\nd = date(2, 3, 2)\n" + body + "\n")
+            compare("-IB", date_isoformat, native_args=("run", date_isoformat, "--quiet"))
 
         comparisons = root / "calendar_comparison.py"
         for expression in (
@@ -1890,6 +1919,17 @@ def main():
             extra={"PYTHONDONTWRITEBYTECODE": "1", "IMREFLAGS": "--bogus"},
         )
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
+        compare("-B", "-c", "print(list.__len__([1, 2]), tuple.__len__((3,)))")
+        if os.name == "posix":
+            for base in ("list", "tuple"):
+                compare(
+                    "-B", "-c",
+                    "import os\n"
+                    f"class Args({base}):\n"
+                    f"    def __len__(self): return {base}.__len__(self)\n"
+                    f"    def __getitem__(self, index): return {base}.__getitem__(self, index)\n"
+                    "os.execv('/bin/sh', Args(['sh', '-c', 'echo replaced']))\n",
+                )
         compare(
             "-B", "-c",
             "import atexit, gc, sys\n"
@@ -2352,6 +2392,22 @@ def report(text):
         compare("-IB", coroutine_fixture, native_args=("run", coroutine_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
+        compare(
+            "-I", "-c",
+            "import atexit, threading\n"
+            "seen = []\n"
+            "def register(value):\n"
+            "    def callback(*, suffix): seen.append(value + suffix)\n"
+            "    threading._register_atexit(callback, suffix='!')\n"
+            "register('first')\n"
+            "threading._register_atexit(seen.append, 'last')\n"
+            "def check():\n"
+            "    main = threading.main_thread()\n"
+            "    print(seen, main.is_alive(), 'stopped' in repr(main))\n"
+            "atexit.register(check)\n"
+            "threading._shutdown()\n"
+            "threading._shutdown()",
+        )
         for name in (
             "boxed_threading_deprecated_accessors.py",
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
@@ -2486,6 +2542,7 @@ def report(text):
             compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_encoded_source.py",
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
@@ -2661,9 +2718,11 @@ def report(text):
             "boxed_os_descriptor_io.py",
             "boxed_os_ftruncate.py",
             "boxed_os_pread.py",
+            "boxed_os_pwrite.py",
             "boxed_os_readinto.py",
             "boxed_os_waitpid.py",
             "boxed_os_process_signal.py",
+            "boxed_os_execv.py",
             "boxed_posix_session.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
@@ -2840,6 +2899,7 @@ def report(text):
             "boxed_json_quote.py",
             "boxed_deque.py",
             "boxed_deque_iterator_reduction.py",
+            "boxed_deque_repeat.py",
             "boxed_deque_deep_equal.py",
             "boxed_deque_cycle_callbacks.py",
             "boxed_deque_mixed_equal.py",
@@ -2947,6 +3007,10 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+        if sys.platform in ("darwin", "linux"):
+            compare("-IB", str(fixtures / "boxed_geteuid_exports.py"), "os", "posix")
+            plugin.write_bytes((fixtures / "boxed_pwd.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
             plugin.write_bytes((fixtures / "boxed_posix_fadvise.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
@@ -2955,6 +3019,9 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_posix_sched_param.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sched_getscheduler.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-IB", str(fixtures / "boxed_posix_xattr_exports.py"), "os", "posix")
+            plugin.write_bytes((fixtures / "boxed_posix_xattrs.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

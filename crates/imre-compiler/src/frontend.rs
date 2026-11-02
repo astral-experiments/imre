@@ -6142,6 +6142,9 @@ impl<'a> Checker<'a> {
             return Ok((op, Type::Int));
         }
         if op == ast::Operator::Mult {
+            if matches!(left, Type::Deque(_)) || matches!(right, Type::Deque(_)) {
+                return Err(self.object_builtin_error("collections.deque repetition", node));
+            }
             if (self.types.element(left).is_some() || matches!(left, Type::Bytes | Type::Str))
                 && right == Type::Int
             {
@@ -7731,8 +7734,11 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
-                if self.deque_repr_descriptor(attribute) {
-                    return Err(self.scoped_builtin_error("collections.deque.__repr__", attribute));
+                if self.boxed_deque_descriptor(attribute) {
+                    return Err(self.scoped_builtin_error(
+                        &format!("collections.deque.{}", attribute.attr.as_str()),
+                        attribute,
+                    ));
                 }
                 if attribute.attr.as_str() == "MISSING"
                     && self.resolve(&attribute.value)
@@ -8168,7 +8174,9 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::JsonDecoderMemo, vec![receiver]),
                     });
                 }
-                if calendar::boxed_member(receiver.ty, attribute.attr.as_str()) {
+                if calendar::boxed_member(receiver.ty, attribute.attr.as_str())
+                    || calendar::date_isoformat(receiver.ty, attribute.attr.as_str())
+                {
                     return Err(self.object_runtime_export("datetime instance member", attribute));
                 }
                 if let Type::Calendar(kind) = receiver.ty {
@@ -8888,9 +8896,18 @@ impl<'a> Checker<'a> {
             return self.counter_elements(call, None);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && self.deque_repr_descriptor(attribute)
+            && self.boxed_deque_descriptor(attribute)
         {
-            return self.boxed_deque_repr_call(call);
+            return self.boxed_deque_call(attribute.attr.as_str(), call);
+        }
+        if let ast::Expr::Attribute(method) = &*call.func
+            && method.attr.as_str() == "__len__"
+            && self
+                .graph
+                .session
+                .is_builtin_sequence_class(self.module, &method.value)
+        {
+            return Err(self.scoped_builtin_error("sequence length descriptor", call));
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "reverse"
@@ -11071,6 +11088,7 @@ impl<'a> Checker<'a> {
             && let [receiver, attribute] | [receiver, attribute, _] = args.as_slice()
             && let ExprKind::Str(member) = &attribute.kind
             && (calendar::boxed_date_arithmetic(receiver.ty, member)
+                || calendar::date_isoformat(receiver.ty, member)
                 || (args.len() == 2 && calendar::boxed_comparison(receiver.ty, member)))
         {
             return Err(self.object_runtime_export("datetime instance member", call));

@@ -209,6 +209,7 @@ impl BuiltinDescriptor {
             "str.isalpha" => ("str", "isalpha"),
             "str.isdigit" => ("str", "isdigit"),
             "str.isidentifier" => ("str", "isidentifier"),
+            "str.lower" => ("str", "lower"),
             "str.title" => ("str", "title"),
             "str.swapcase" => ("str", "swapcase"),
             "str.islower" => ("str", "islower"),
@@ -244,6 +245,7 @@ impl BuiltinDescriptor {
             "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
             "types.SimpleNamespace.__ne__" => (super::namespace::CLASS, "__ne__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
+            "tuple.__len__" => ("tuple", "__len__"),
             "tuple.count" => ("tuple", "count"),
             "tuple.index" => ("tuple", "index"),
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
@@ -273,6 +275,7 @@ impl BuiltinDescriptor {
                     | "ljust"
                     | "rjust"
                     | "zfill"
+                    | "lower"
                     | "title"
                     | "swapcase"
             ),
@@ -436,6 +439,15 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__doc__" | "__text_signature__"
+                if self.name == "__len__" && matches!(self.owner, "list" | "tuple") =>
+            {
+                ctx.text(if name == "__doc__" {
+                    "Return len(self)."
+                } else {
+                    "($self, /)"
+                })
+            }
             "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
             "__text_signature__" if self.name == "__getattribute__" => ctx.text("($self, name, /)"),
             "__doc__" if self.owner == "itertools.repeat" && self.name == "__length_hint__" => {
@@ -572,6 +584,7 @@ impl BuiltinDescriptor {
                         "Pad a numeric string with zeros on the left, to fill a field of the given width.\n\nThe string is never truncated."
                     }
                     ("zfill", _) => "($self, width, /)",
+                    ("lower", "__doc__") => "Return a copy of the string converted to lowercase.",
                     ("title", "__doc__") => {
                         "Return a version of the string where each word is titlecased.\n\nMore specifically, words start with uppercased characters and all remaining\ncased characters have lower case."
                     }
@@ -579,7 +592,7 @@ impl BuiltinDescriptor {
                         "Convert uppercase characters to lowercase and lowercase characters to uppercase."
                     }
                     (
-                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "istitle" | "title"
+                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "istitle" | "lower" | "title"
                         | "swapcase",
                         _,
                     ) => "($self, /)",

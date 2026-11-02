@@ -497,7 +497,9 @@ impl Context {
             Value::Module {
                 constructor: None, ..
             } => "module",
-            Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).heap_type() => name,
+            Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).heap_type() => {
+                name
+            }
             Value::Instance { class, .. }
                 if self.classes.get(super::namespace::CLASS) == Some(class) =>
             {

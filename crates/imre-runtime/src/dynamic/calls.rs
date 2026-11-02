@@ -81,6 +81,10 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         }
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        "pwd" if matches!(function, "getpwall" | "getpwnam" | "getpwuid") => {
+            Some((module, function))
+        }
         #[cfg(target_os = "linux")]
         "resource" if matches!(function, "getrlimit" | "setrlimit") => Some((module, function)),
         "gc" if matches!(function, "enable" | "disable" | "isenabled") => Some((module, function)),
@@ -1436,6 +1440,7 @@ impl Context {
                     Some(
                         class @ ("time.struct_time"
                         | stdlib::fixed_structseq::UNRAISABLE_ARGS
+                        | stdlib::fixed_structseq::PASSWD
                         | stdlib::fixed_structseq::HASH_INFO
                         | stdlib::fixed_structseq::THREAD_INFO
                         | stdlib::fixed_structseq::SCHED_PARAM
@@ -1592,6 +1597,7 @@ impl Context {
                         Some(
                             class @ ("time.struct_time"
                             | stdlib::fixed_structseq::UNRAISABLE_ARGS
+                            | stdlib::fixed_structseq::PASSWD
                             | stdlib::fixed_structseq::HASH_INFO
                             | stdlib::fixed_structseq::THREAD_INFO
                             | stdlib::fixed_structseq::SCHED_PARAM
@@ -2528,6 +2534,20 @@ impl Context {
                     "__text_signature__" if symbol == "posix.kill" => {
                         return Ok(self.text("($module, pid, signal, /)"));
                     }
+                    "__doc__" if symbol == "posix.WIFSTOPPED" => {
+                        return Ok(
+                            self.text("Return True if the process returning status was stopped.")
+                        );
+                    }
+                    "__text_signature__" if symbol == "posix.WIFSTOPPED" => {
+                        return Ok(self.text("($module, /, status)"));
+                    }
+                    "__doc__" if symbol == "posix.execv" => {
+                        return Ok(self.text("Execute an executable path with arguments, replacing current process.\n\n  path\n    Path of executable file.\n  argv\n    Tuple or list of strings."));
+                    }
+                    "__text_signature__" if symbol == "posix.execv" => {
+                        return Ok(self.text("($module, path, argv, /)"));
+                    }
                     "__doc__" if symbol == "posix.getppid" => {
                         return Ok(self.text("Return the parent's process id.\n\nIf the parent process has already exited, Windows machines will still\nreturn its id; others systems will return the id of the 'init' process (1)."));
                     }
@@ -2696,6 +2716,18 @@ impl Context {
                     name: method,
                 } = *self.heap.get(callable) =>
                 {
+                    if self.heap.get(owner).heap_type()
+                        == Some(stdlib::datetime::isocalendar::CLASS)
+                    {
+                        if let Some(value) =
+                            stdlib::datetime::isocalendar::method_metadata(self, method, name)
+                        {
+                            return Ok(value);
+                        }
+                        if name == "__module__" && matches!(method, "__new__" | "__reduce__") {
+                            return Ok(NONE);
+                        }
+                    }
                     match name {
                         "__name__" => return Ok(self.text(method)),
                         "__qualname__" if method == "md5" => return Ok(self.text(method)),
@@ -2848,6 +2880,13 @@ impl Context {
                 owner,
                 name: member,
             } => match name {
+                _ if self.heap.get(owner).heap_type()
+                    == Some(stdlib::datetime::isocalendar::CLASS)
+                    && let Some(value) =
+                        stdlib::datetime::isocalendar::method_metadata(self, member, name) =>
+                {
+                    return Ok(value);
+                }
                 "__name__" => return Ok(self.text(member)),
                 "__objclass__" => return Ok(owner),
                 "__qualname__" => {
@@ -2892,6 +2931,7 @@ impl Context {
                         return Ok(self.builtin(owner));
                     }
                     "__name__" => return Ok(self.text(field)),
+                    "__doc__" if owner == stdlib::datetime::isocalendar::CLASS => return Ok(NONE),
                     "__doc__" if owner == super::deque::CLASS => return Ok(self.text("maximum size of a deque or None if unbounded")),
                     "__doc__" if owner == "int" => {
                         return Ok(
@@ -3943,6 +3983,7 @@ impl Context {
                 if let Some(
                     owner @ ("time.struct_time"
                     | stdlib::fixed_structseq::UNRAISABLE_ARGS
+                    | stdlib::fixed_structseq::PASSWD
                     | stdlib::fixed_structseq::HASH_INFO
                     | stdlib::fixed_structseq::THREAD_INFO
                     | stdlib::fixed_structseq::SCHED_PARAM

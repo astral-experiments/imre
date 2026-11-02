@@ -97,7 +97,7 @@ pub(super) fn getcwd(ctx: &mut Context, as_bytes: bool) -> Result<Id> {
     Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?))
 }
 
-fn environment_argument(ctx: &mut Context, value: Id) -> Result<CString> {
+fn fs_argument(ctx: &mut Context, value: Id) -> Result<CString> {
     let path = posixpath::fspath(ctx, value)?;
     c_path(ctx, path, "embedded null byte")
 }
@@ -141,6 +141,77 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     let fd = rustix::fs::memfd_create(name.as_c_str(), MemfdFlags::from_bits_retain(flags))
         .map_err(|e| super::os_error(e.into()))?;
     Ok(ctx.int(i64::from(fd.into_raw_fd())))
+}
+
+pub(super) fn is_process_function(name: &str) -> bool {
+    cfg!(unix) && matches!(name, "execv" | "WIFSTOPPED")
+}
+
+/// Resolve arguments before auditing, then replace this process using the captured bytes.
+#[cfg(unix)]
+fn execv(ctx: &mut Context, args: &[Id]) -> Result<Id> {
+    let &[path, argv] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("execv expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let path = posixpath::path_arg(
+        ctx,
+        path,
+        "execv: path should be string, bytes or os.PathLike",
+    )?;
+    ctx.heap.keep(path);
+    let executable = c_path(ctx, path, "execv: embedded null character in path")?;
+    if !ctx.builtin_slot_accepts(argv, "list") && !ctx.builtin_slot_accepts(argv, "tuple") {
+        return Err(Error::new(
+            "TypeError",
+            "execv() arg 2 must be a tuple or list",
+        ));
+    }
+    let mark = ctx.heap.temporary_mark();
+    let count = match ctx.instance_len(argv) {
+        Ok(Some(count)) => count,
+        Ok(None) => ctx.sequence_at(argv, 0).map_or(0, |(length, _)| length),
+        // CPython replaces a failed length check with the empty-argv error.
+        Err(_) => 0,
+    };
+    ctx.discard_truth(mark);
+    if count == 0 {
+        return Err(Error::new("ValueError", "execv() arg 2 must not be empty"));
+    }
+    let mut arguments = Vec::new();
+    arguments
+        .try_reserve_exact(count)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for i in 0..count {
+        // A path conversion may mutate argv. Fetch and root just the current item.
+        let mark = ctx.heap.temporary_mark();
+        let index = ctx.int(i as i64);
+        let argument = ctx.get_item(argv, index).and_then(|item| {
+            ctx.heap.keep(item);
+            fs_argument(ctx, item)
+        });
+        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+        if let Err(error) = &argument {
+            for root in error.roots() {
+                ctx.heap.keep(root);
+            }
+        }
+        if collect {
+            ctx.collect_unreachable();
+        }
+        arguments.push(argument?);
+    }
+    if arguments[0].as_bytes().is_empty() {
+        return Err(Error::new(
+            "ValueError",
+            "execv() arg 2 first element cannot be empty",
+        ));
+    }
+    let arguments = crate::objects::CStrings::new(arguments)?;
+    super::audit::event(ctx, "os.exec", &[path, argv, NONE])?;
+    Err(arguments.execv(&executable).into())
 }
 
 /// Read cryptographically secure bytes from the operating system.
@@ -351,9 +422,9 @@ pub(super) fn change_environment(
     // posix.putenv can run before os is imported. Preserve the initial dictionary first.
     let posix = ctx.module("posix")?;
     ctx.lookup_attr(posix, "environ")?;
-    let key = environment_argument(ctx, args[0])?;
+    let key = fs_argument(ctx, args[0])?;
     let value = if set {
-        Some(environment_argument(ctx, args[1])?)
+        Some(fs_argument(ctx, args[1])?)
     } else {
         None
     };
@@ -372,13 +443,15 @@ pub(in crate::dynamic) mod sysconf;
 mod truncate;
 mod unlink;
 mod utime;
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
     if name == "_exit" {
         return cfg!(unix);
     }
-    if matches!(name, "pread" | "readinto") {
+    if matches!(name, "pread" | "pwrite" | "readinto") {
         return cfg!(unix);
     }
     matches!(
@@ -493,6 +566,28 @@ fn file_offset(ctx: &mut Context, value: Id) -> Result<i64> {
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C long"))
 }
 
+/// Hold the buffer export over offset conversion and interrupted write retries.
+fn write_fd(ctx: &mut Context, fd: i32, data: Id, offset: Option<Id>) -> Result<Id> {
+    ctx.with_buffer_export(data, |ctx| {
+        let offset = if let Some(offset) = offset {
+            // PyBUF_SIMPLE acquisition precedes the offset's __index__ call.
+            ctx.check_buffer_exporter(data)?;
+            ctx.native_buffer_bytes(data)?;
+            Some(file_offset(ctx, offset)?)
+        } else {
+            None
+        };
+        loop {
+            // Conversion or signal handlers can change bytes without resizing.
+            let bytes = ctx.native_buffer_bytes(data)?;
+            if let Some(count) = native::try_write(fd, bytes, offset)? {
+                return Ok(ctx.int(count as i64));
+            }
+            ctx.dispatch_signals()?;
+        }
+    })
+}
+
 enum PathArg {
     Fd(i32),
     Name(CString),
@@ -506,22 +601,33 @@ fn path_or_fd(
     allow_fd: bool,
     warn_bool_fd: fn(&mut Context, Id) -> Result<()>,
 ) -> Result<(PathArg, Id)> {
+    let kinds = if allow_fd {
+        "string, bytes, os.PathLike or integer"
+    } else {
+        "string, bytes or os.PathLike"
+    };
+    convert_path(ctx, name, path, kinds, allow_fd.then_some(warn_bool_fd))
+}
+
+// An optional descriptor converter keeps __index__ errors distinct from path-type diagnostics.
+fn convert_path(
+    ctx: &mut Context,
+    name: &str,
+    path: Id,
+    kinds: &str,
+    fd_warning: Option<fn(&mut Context, Id) -> Result<()>>,
+) -> Result<(PathArg, Id)> {
     let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(path)),
         Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
     );
-    if allow_fd
+    if let Some(warn_bool_fd) = fd_warning
         && !spelling
         && let Some(index) = ctx.index_value(path)?
     {
         warn_bool_fd(ctx, path)?;
         return Ok((PathArg::Fd(native::directory_fd_number(&index)?), path));
     }
-    let kinds = if allow_fd {
-        "string, bytes, os.PathLike or integer"
-    } else {
-        "string, bytes or os.PathLike"
-    };
     let filename = posixpath::path_arg(ctx, path, &format!("{name}: path should be {kinds}"))?;
     let pathname = c_path(
         ctx,
@@ -889,12 +995,15 @@ pub(super) fn descriptor(
         unsafe { libc::_exit(status) }
     }
     #[cfg(unix)]
-    if name == "waitstatus_to_exitcode" {
+    if matches!(name, "WIFSTOPPED" | "waitstatus_to_exitcode") {
         let [Some(status)] = builtins::bind_builtin_arguments(name, args, kwargs, ["status"], 1)?
         else {
             unreachable!("status is required")
         };
         let status = c_int(ctx, status)?;
+        if name == "WIFSTOPPED" {
+            return Ok(builtins::boolean(libc::WIFSTOPPED(status)));
+        }
         let code = if libc::WIFEXITED(status) {
             libc::WEXITSTATUS(status)
         } else if libc::WIFSIGNALED(status) {
@@ -992,6 +1101,10 @@ pub(super) fn descriptor(
         let sid = native::getsid(c_int(ctx, *pid)?)?;
         return Ok(ctx.int(i64::from(sid)));
     }
+    #[cfg(unix)]
+    if name == "execv" {
+        return execv(ctx, args);
+    }
     if name == "waitpid" {
         let [pid, options] = args else {
             return Err(Error::new(
@@ -1037,15 +1150,18 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
-    if name == "pread" {
-        let [fd, length, offset] = args else {
+    if matches!(name, "pread" | "pwrite") {
+        let [fd, data, offset] = args else {
             return Err(Error::new(
                 "TypeError",
-                format!("pread expected 3 arguments, got {}", args.len()),
+                format!("{name} expected 3 arguments, got {}", args.len()),
             ));
         };
         let fd = c_int(ctx, *fd)?;
-        let length = ssize_t(ctx, *length)?;
+        if name == "pwrite" {
+            return write_fd(ctx, fd, *data, Some(*offset));
+        }
+        let length = ssize_t(ctx, *data)?;
         let offset = file_offset(ctx, *offset)?;
         let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
         return Ok(ctx.alloc(Value::Bytes(bytes)));
@@ -1065,20 +1181,7 @@ pub(super) fn descriptor(
         } else if name == "readinto" {
             readinto(ctx, fd, *data)
         } else {
-            // Keep the exporter alive and its size fixed while a handler runs.
-            // Reborrow on retry so in-place changes made by the handler are visible.
-            ctx.with_buffer_export(*data, |ctx| {
-                loop {
-                    let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
-                        Value::Array(array) => array.as_bytes(),
-                        _ => ctx.bytes_like(*data)?,
-                    };
-                    if let Some(count) = native::try_write(fd, bytes)? {
-                        return Ok(ctx.int(count as i64));
-                    }
-                    ctx.dispatch_signals()?;
-                }
-            })
+            write_fd(ctx, fd, *data, None)
         };
     }
     if name == "closerange" {

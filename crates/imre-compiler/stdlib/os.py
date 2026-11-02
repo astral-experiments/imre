@@ -4,8 +4,9 @@ import sys
 from posix import openpty
 import posixpath as path
 import stat as st
+from posix import chown, fchown, geteuid, getgid, getgroups, getuid, lchown
 from posix import _exit
-from posix import pread, readinto
+from posix import pread, pwrite, readinto
 from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getppid, kill, listdir, mkdir, putenv, read, scandir, terminal_size, unsetenv, waitpid, write, WNOHANG
@@ -35,6 +36,11 @@ if sys.platform == "linux":
         SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
     )
     from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write
+
+if sys.platform == "linux":
+    from posix import (
+        XATTR_CREATE, XATTR_REPLACE, XATTR_SIZE_MAX, getxattr, listxattr, removexattr, setxattr,
+    )
 
 
 curdir = path.curdir
@@ -272,6 +278,9 @@ def makedirs(name, mode=0o777, exist_ok=False):
         # could give priority to other errors like EACCES or EROFS
         if not exist_ok or not path.isdir(name):
             raise
+
+
+from posix import WIFSTOPPED, execv
 
 
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.

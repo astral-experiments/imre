@@ -503,6 +503,29 @@ impl Session {
             && self.is_known_class(module, base, ty_python_semantic::types::KnownClass::Object)
     }
 
+    /// The native list and tuple storage belongs to the exact builtins, even through an alias.
+    pub(crate) fn is_builtin_sequence_class(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let file = self.db.program_file(self.files[module]);
+        let model = SemanticModel::new(&self.db, file);
+        let Some(ty @ Ty::ClassLiteral(_)) = expression.inferred_type(&model) else {
+            return false;
+        };
+        let env = ProgramEnvironment::from_file(file);
+        ty.definition(&self.db, &env).is_some_and(|definition| {
+            [KnownClass::List, KnownClass::Tuple]
+                .into_iter()
+                .any(|class| {
+                    class
+                        .to_subclass_of(&self.db, &env)
+                        .definition(&self.db, &env)
+                        .as_ref()
+                        == Some(&definition)
+                })
+        })
+    }
+
     /// Check the class object bound to a name or attribute at its point of use.
     pub(crate) fn is_known_class(
         &self,

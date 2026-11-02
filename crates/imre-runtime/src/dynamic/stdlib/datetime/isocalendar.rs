@@ -135,6 +135,24 @@ fn no_arguments(qualified: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result
     Ok(())
 }
 
+pub(in crate::dynamic) fn method_metadata(
+    ctx: &mut Context,
+    method: &str,
+    attr: &str,
+) -> Option<Id> {
+    let text = match (method, attr) {
+        ("__new__", "__doc__") => {
+            "Create and return a new object.  See help(type) for accurate signature."
+        }
+        ("__new__", "__text_signature__") => "($type, *args, **kwargs)",
+        ("__repr__", "__doc__") => "Return repr(self).",
+        ("__reduce__", "__doc__") => "__reduce__() -> (cls, state)",
+        ("__repr__" | "__reduce__", "__text_signature__") => "($self, /)",
+        _ => return None,
+    };
+    Some(ctx.text(text))
+}
+
 pub(in crate::dynamic) fn call(
     ctx: &mut Context,
     owner: Id,

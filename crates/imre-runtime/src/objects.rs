@@ -82,7 +82,9 @@ mod paths;
 pub(crate) use paths::{directory_entries, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
-pub(crate) use processes::{BoxedPipe, BoxedPopen, change_environment, initial_environment};
+pub(crate) use processes::{
+    BoxedPipe, BoxedPopen, CStrings, change_environment, initial_environment,
+};
 mod random;
 pub(crate) use random::{choice_index, imre_random_float, random_below, shuffle_swaps};
 pub(crate) mod readiness;
@@ -103,7 +105,7 @@ mod text;
 pub(crate) use text::{codepoint_search_window, dedent, hexadecimal, search_window};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
-pub(crate) use text::{UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
+pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
     count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
     ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,

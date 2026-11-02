@@ -245,12 +245,6 @@ impl Registry {
 }
 
 impl Registry {
-    /// Only workers present before ordinary exit callbacks participate in interpreter shutdown.
-    pub(super) fn join_before_exit_callbacks(&mut self) {
-        self.joined_at_shutdown = true;
-        self.join_non_daemon();
-    }
-
     fn join_non_daemon(&self) {
         for worker in &self.entries {
             if !worker.daemon {
@@ -286,6 +280,43 @@ struct Started {
     active: Arc<AtomicBool>,
     ident: usize,
     native_id: Option<u64>,
+}
+
+/// Match the interpreter's lookup of an already imported threading module at exit.
+pub(super) fn shutdown(ctx: &mut Context) {
+    // An exception in the Python handler can deliberately prevent a non-daemon join.
+    // Do not repeat that join in Drop or include workers started later by ordinary atexit.
+    ctx.workers.joined_at_shutdown = true;
+    let mark = ctx.heap.temporary_mark();
+    let result = (|| -> Result<()> {
+        let key = ctx.text("threading");
+        if let Some(module) = ctx.registered_module(key)? {
+            ctx.heap.keep(module);
+            if module != NONE {
+                if ctx.module_initializing(module)? {
+                    let wait = ctx.lookup_attr(ctx.bootstrap_module, "_lock_unlock_module")?;
+                    ctx.call(wait, vec![key], Vec::new())?;
+                }
+                // Fetching the spec or waiting for the import can replace the original entry.
+                if ctx.registered_module(key)? != Some(module) {
+                    return Ok(());
+                }
+            }
+            let shutdown = ctx.lookup_attr(module, "_shutdown")?;
+            ctx.call(shutdown, Vec::new(), Vec::new())?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        super::unraisable::report(
+            ctx,
+            error,
+            false,
+            None,
+            "Exception ignored on threading shutdown",
+        );
+    }
+    ctx.heap.release_temporaries_since(mark);
 }
 
 /// Both public launch paths use the same bootstrap, count guard and native startup handshake.
@@ -555,6 +586,11 @@ pub(super) fn call(
                 ctx.alloc(Value::Int(crate::Int::from_usize(id as usize)))
             });
             Ok(ctx.alloc(Value::Tuple(vec![handle, ident, tid])))
+        }
+        ("shutdown", &[]) => {
+            ctx.workers.join_non_daemon();
+            ctx.reap_thread_operands();
+            Ok(NONE)
         }
         ("join", &[handle, limit]) => {
             let limit = timeout(ctx, limit)?;

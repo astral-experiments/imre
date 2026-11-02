@@ -24,6 +24,7 @@ struct Imports {
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
     uses_import_builtin: bool,
+    imports_logging: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
     opcode_names: HashSet<String>,
@@ -211,6 +212,7 @@ impl<'a> Visitor<'a> for Imports {
                 for alias in &imp.names {
                     let name = alias.name.as_str();
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+                    self.imports_logging |= name == "logging";
                     if matches!(name, "__future__" | "_operator") {
                         self.runtime_imports = true;
                     }
@@ -234,6 +236,7 @@ impl<'a> Visitor<'a> for Imports {
             }
             Stmt::ImportFrom(imp) => {
                 let name = imp.module.as_ref().map_or("", |m| m.as_str());
+                self.imports_logging |= imp.level == 0 && name == "logging";
                 self.add(imp.level, name);
                 for a in &imp.names {
                     let suffix = a.name.as_str();
@@ -513,12 +516,12 @@ pub(crate) fn compile(
     };
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
-    if !runtime_imports
-        && !(startup.is_some()
-            && (src.contains("urllib") || src.contains("ftplib") || src.contains("argparse")))
-        && !(src.contains("class") && src.contains('='))
-        && !(cfg!(unix) && src.contains("signal"))
-        && ![
+    let object_hint = runtime_imports
+        || startup.is_some()
+            && (src.contains("urllib") || src.contains("ftplib") || src.contains("argparse"))
+        || src.contains("class") && src.contains('=')
+        || cfg!(unix) && src.contains("signal")
+        || [
             "__future__",
             "hashlib",
             "_imp",
@@ -548,8 +551,12 @@ pub(crate) fn compile(
             "templatelib",
         ]
         .iter()
-        .any(|name| src.contains(name))
-    {
+        .any(|name| src.contains(name));
+    // Python normalizes non-ASCII identifiers, including imported module names.
+    let logging_hint = startup.is_some()
+        && !options.runtime_imports
+        && (src.contains("logging") || !src.is_ascii());
+    if !object_hint && !logging_hint {
         return Ok(None);
     }
     let Ok(mut first) = imports(
@@ -575,15 +582,20 @@ pub(crate) fn compile(
     let ftp_script = imports_provider("ftplib");
     let argparse_script = imports_provider("argparse");
     let provider_script = request_script || ftp_script || argparse_script;
-    if !(module_entry.is_some()
-        || first.runtime_imports
-        || operation.is_some()
-        || (runtime_imports && !first.names.is_empty())
-        || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
-        || provider_script)
-    {
+    let object_entry = object_hint
+        && (module_entry.is_some()
+            || first.runtime_imports
+            || operation.is_some()
+            || (runtime_imports && !first.names.is_empty())
+            || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
+            || provider_script);
+    // Existing object imports keep their normal project-module lookup. Only a new
+    // startup fallback needs to verify that the imported logging package is bundled.
+    let logging_script = !object_entry && logging_hint && first.imports_logging;
+    if !object_entry && !logging_script {
         return Ok(None);
     }
+    let provider_script = provider_script || logging_script;
     if let Some(name) = module_entry {
         first.add(0, "runpy");
         // Register source candidates without interpreting a module operand as a filesystem path.
@@ -828,7 +840,8 @@ pub(crate) fn compile(
                     if initial.contains(root)
                         && ((request_script && prefix == "urllib")
                             || (ftp_script && prefix == "ftplib")
-                            || (argparse_script && prefix == "argparse"))
+                            || (argparse_script && prefix == "argparse")
+                            || (logging_script && prefix == "logging"))
                     {
                         return Ok(None);
                     }

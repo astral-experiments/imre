@@ -86,6 +86,43 @@ pub(super) fn repr(
     Ok(ctx.text(base))
 }
 
+pub(super) fn date_isoformat(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "unbound method date.isoformat() needs an argument",
+        ));
+    };
+    let value = calendar(ctx, receiver, "date").ok_or_else(|| {
+        let name = type_name(ctx, receiver);
+        Error::new(
+            "TypeError",
+            format!(
+                "descriptor 'isoformat' for 'datetime.date' objects doesn't apply to a '{}' object",
+                &name[..name.floor_char_boundary(100)]
+            ),
+        )
+    })?;
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "date.isoformat() takes no keyword arguments",
+        ));
+    }
+    if !rest.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("date.isoformat() takes no arguments ({} given)", rest.len()),
+        ));
+    }
+    let [year, month, day, ..] = value.fields();
+    Ok(ctx.text(format!("{year:04}-{month:02}-{day:02}")))
+}
+
 pub(super) fn isoformat(
     ctx: &mut Context,
     method: &str,

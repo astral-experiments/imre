@@ -352,8 +352,8 @@ pub(super) const DICT_METHODS: &[&str] = &[
 ];
 
 pub(super) const LIST_METHODS: &[&str] = &[
-    "__add__", "__getitem__", "__iadd__", "__init__", "__repr__", "append", "clear", "copy",
-    "count", "extend", "index", "insert", "pop", "remove", "reverse", "sort",
+    "__add__", "__getitem__", "__iadd__", "__init__", "__len__", "__repr__", "append", "clear",
+    "copy", "count", "extend", "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
 const FROZENSET_OPERATORS: &[&str] = &[
@@ -631,7 +631,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "TextIOWrapper"
         }
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
-        Value::Tuple(_) | Value::NamedTuple { .. } if matches!(attr, "count" | "index") => "tuple",
+        Value::Tuple(_) | Value::NamedTuple { .. }
+            if matches!(attr, "__len__" | "count" | "index") =>
+        {
+            "tuple"
+        }
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
         Value::Set { frozen: false, .. } if SET_OPERATORS.contains(&attr) => "set",
         Value::Set { frozen: true, .. } if FROZENSET_OPERATORS.contains(&attr) => "frozenset",

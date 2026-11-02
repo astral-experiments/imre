@@ -53,6 +53,17 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
             return Some(Intrinsic::Credential(known));
         }
     }
+    #[cfg(target_os = "linux")]
+    match name {
+        "getxattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.getxattr")),
+        "setxattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.setxattr")),
+        "listxattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.listxattr")),
+        "removexattr" => return Some(Intrinsic::ObjectRuntimeExport("posix.removexattr")),
+        "XATTR_CREATE" => return Some(Intrinsic::IntConstant(i64::from(libc::XATTR_CREATE))),
+        "XATTR_REPLACE" => return Some(Intrinsic::IntConstant(i64::from(libc::XATTR_REPLACE))),
+        "XATTR_SIZE_MAX" => return Some(Intrinsic::IntConstant(65536)),
+        _ => {}
+    }
     #[cfg(all(target_os = "linux", any(target_env = "gnu", target_env = "musl")))]
     if name.starts_with("RTLD_") {
         let flag = match name {
@@ -103,6 +114,8 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
         "_exit" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix._exit"),
         "getppid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getppid"),
+        "WIFSTOPPED" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.WIFSTOPPED"),
+        "execv" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.execv"),
         "kill" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.kill"),
         "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),
         "waitpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.waitpid"),
@@ -149,6 +162,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "read" => Intrinsic::Fd(FdOperation::Read),
         "readinto" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readinto"),
         "pread" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.pread"),
+        "pwrite" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.pwrite"),
         "write" => Intrinsic::Fd(FdOperation::Write),
         "open" => Intrinsic::Fd(FdOperation::Open),
         "unlink" => Intrinsic::Fd(FdOperation::Unlink),

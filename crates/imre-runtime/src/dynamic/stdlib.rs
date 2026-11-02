@@ -30,6 +30,8 @@ mod hmac;
 mod inspect;
 pub(super) mod itertools;
 pub(super) mod locale;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) mod pwd;
 pub(super) mod tempfile;
 pub(super) mod time;
 mod tokenize;
@@ -132,6 +134,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "subprocess"
             | "warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
+        || (cfg!(any(target_os = "linux", target_os = "macos")) && name == "pwd")
         || has_lazy_attributes(name)
 }
 
@@ -409,6 +412,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     {
         return Ok(ctx.int(i64::from(value)));
     }
+    #[cfg(target_os = "linux")]
+    if matches!(module, "os" | "posix") && os::xattr::FUNCTIONS.contains(&name) {
+        return Ok(ctx.builtin(&format!("posix.{name}")));
+    }
     if module == "_imre_subprocess" && subprocess::function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
@@ -506,7 +513,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "slotted_type"
             | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
-        ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
+        ("_imre_thread", "start" | "join" | "alive" | "threads" | "current" | "shutdown") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
@@ -697,7 +704,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("posix.{name}"))
         }
         #[cfg(unix)]
-        ("os" | "posix", "getuid" | "getgid" | "getgroups") => {
+        ("os" | "posix", "getuid" | "geteuid" | "getgid" | "getgroups") => {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
@@ -714,7 +721,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("os" | "posix", "listdir") if cfg!(unix) => ctx.builtin("posix.listdir"),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
-        ("os" | "posix", name) if os::is_descriptor_function(name) => {
+        ("os" | "posix", name)
+            if os::is_descriptor_function(name) || os::is_process_function(name) =>
+        {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("posixpath", "normpath") | ("posix", "_path_normpath") => {
@@ -1412,6 +1421,7 @@ pub(super) fn call(
             | "posix.abort"
             | "posix.getpid"
             | "posix.getuid"
+            | "posix.geteuid"
             | "posix.getgid"
             | "posix.getgroups"
             | "sys._jit.is_available"
@@ -1455,6 +1465,7 @@ pub(super) fn call(
             #[cfg(unix)]
             "posix.abort" => unsafe { libc::abort() },
             "posix.getpid" => ctx.int(i64::from(std::process::id())),
+            "posix.geteuid" => ctx.alloc(Value::Int(crate::objects::os::geteuid())),
             "posix.getuid" => ctx.alloc(Value::Int(crate::objects::os::getuid())),
             "posix.getgid" => ctx.alloc(Value::Int(crate::objects::os::getgid())),
             "posix.getgroups" => {
@@ -1471,6 +1482,10 @@ pub(super) fn call(
             // As in typed SysJitPredicate, Imre compiles before the process starts.
             _ => FALSE,
         });
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(function @ ("getpwall" | "getpwnam" | "getpwuid")) = name.strip_prefix("pwd.") {
+        return pwd::call(ctx, function, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "fcntl.fcntl" {
@@ -1659,6 +1674,12 @@ pub(super) fn call(
     {
         return posixpath::call(ctx, name, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if let Some(op) = name.strip_prefix("posix.")
+        && os::xattr::FUNCTIONS.contains(&op)
+    {
+        return os::xattr::call(ctx, op, args, kwargs);
+    }
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
     }
@@ -1680,7 +1701,7 @@ pub(super) fn call(
         return os::stat::call(ctx, op, args, kwargs);
     }
     if let Some(op) = name.strip_prefix("posix.")
-        && os::is_descriptor_function(op)
+        && (os::is_descriptor_function(op) || os::is_process_function(op))
     {
         return os::descriptor(ctx, op, args, kwargs);
     }
