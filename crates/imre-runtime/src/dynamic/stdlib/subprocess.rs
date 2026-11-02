@@ -9,6 +9,7 @@ pub(super) fn function(name: &str) -> bool {
             | "pid"
             | "pipe"
             | "status"
+            | "set_status"
             | "wait"
             | "signal"
             | "communicate"
@@ -337,7 +338,10 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         keep,
     );
     match child {
-        Ok(child) => Ok(ctx.alloc(Value::ProcessHandle(child))),
+        Ok(child) => Ok(ctx.alloc(Value::ProcessHandle {
+            child,
+            assigned_status: None,
+        })),
         Err(failure) => {
             let error = failure.error.into();
             match failure.directory {
@@ -365,6 +369,16 @@ fn timeout(ctx: &Context, value: Id) -> Result<Option<f64>> {
         .ok_or_else(|| Error::new("TypeError", "expected a numeric timeout"))
 }
 
+fn public_status(ctx: &mut Context, handle: Id, kernel_status: Option<i32>) -> Id {
+    match ctx.heap.get(handle) {
+        Value::ProcessHandle {
+            assigned_status: Some(id),
+            ..
+        } => *id,
+        _ => kernel_status.map_or(NONE, |n| ctx.int(i64::from(n))),
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -387,7 +401,7 @@ pub(super) fn call(
     let Some((&handle, operands)) = args.split_first() else {
         return Err(Error::new("TypeError", "missing native process handle"));
     };
-    let Value::ProcessHandle(child) = ctx.heap.get(handle) else {
+    let Value::ProcessHandle { child, .. } = ctx.heap.get(handle) else {
         return Err(Error::new("TypeError", "expected a native process handle"));
     };
     let child = child.clone();
@@ -403,13 +417,26 @@ pub(super) fn call(
                 None => Ok(NONE),
             }
         }
-        ("status", &[poll]) => Ok(child
-            .status(ctx.truth(poll)?)?
-            .map_or(NONE, |n| ctx.int(i64::from(n)))),
-        ("wait", &[seconds]) => Ok(child
-            .wait(timeout(ctx, seconds)?, || ctx.dispatch_signals())?
-            .map_or(NONE, |n| ctx.int(i64::from(n)))),
-        ("signal", &[number]) => {
+        ("set_status", &[value]) => {
+            let Value::ProcessHandle {
+                assigned_status, ..
+            } = ctx.heap.get_mut(handle)
+            else {
+                unreachable!("validated native process handle")
+            };
+            *assigned_status = (value != NONE).then_some(value);
+            child.set_assigned_status(assigned_status.is_some());
+            Ok(NONE)
+        }
+        ("status", &[poll]) => {
+            let status = child.status(ctx.truth(poll)?)?;
+            Ok(public_status(ctx, handle, status))
+        }
+        ("wait", &[seconds]) => {
+            let status = child.wait(timeout(ctx, seconds)?, || ctx.dispatch_signals())?;
+            Ok(public_status(ctx, handle, status))
+        }
+        ("signal", &[number, refresh]) => {
             let number = ctx
                 .index_integer(number)?
                 .to_i64()
@@ -417,7 +444,7 @@ pub(super) fn call(
                 .ok_or_else(|| {
                     Error::new("OverflowError", "Python int too large to convert to C int")
                 })?;
-            child.signal(number)?;
+            child.signal(number, ctx.truth(refresh)?)?;
             Ok(NONE)
         }
         ("communicate", &[input, seconds, use_select]) => {

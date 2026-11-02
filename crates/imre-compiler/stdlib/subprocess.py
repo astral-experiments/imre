@@ -2,6 +2,7 @@
 import _imre_subprocess as _process
 from _weakref import ref as _ref
 from time import monotonic as _time
+from types import MethodType as _MethodType
 from warnings import warn as _warn
 import io
 import selectors
@@ -165,6 +166,10 @@ class Popen:
     @property
     def returncode(self):
         return _process.status(self._handle, False)
+
+    @returncode.setter
+    def returncode(self, value):
+        _process.set_status(self._handle, value)
 
     def poll(self):
         return _process.status(self._handle, True)
@@ -357,7 +362,11 @@ class Popen:
         return stdout, stderr
 
     def send_signal(self, sig):
-        _process.signal(self._handle, sig)
+        poll = self.poll
+        poll()
+        if self.returncode is None:
+            refresh = type(poll) is _MethodType and poll.__func__ is _popen_poll and poll.__self__ is self
+            _process.signal(self._handle, sig, refresh)
 
     def terminate(self):
         self.send_signal(15)
@@ -388,6 +397,9 @@ class Popen:
                 self._sigint_wait_secs = 0
             else:
                 self.wait()
+
+
+_popen_poll = Popen.poll
 
 
 class SubprocessError(Exception):

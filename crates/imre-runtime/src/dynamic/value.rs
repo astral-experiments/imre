@@ -1115,7 +1115,10 @@ pub(super) enum Value {
         name: &'static str,
         unsupported: Id,
     },
-    ProcessHandle(crate::objects::BoxedPopen),
+    ProcessHandle {
+        child: crate::objects::BoxedPopen,
+        assigned_status: Option<Id>,
+    },
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(BoxedTextFile),
     RegexScanner {
@@ -1214,7 +1217,7 @@ impl Value {
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
-            Self::ProcessHandle(_) => "_imre_subprocess.Handle",
+            Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
@@ -1347,7 +1350,7 @@ impl Value {
             | Self::Native(_)
             | Self::Scope(_)
             | Self::LoopIterator { .. }
-            | Self::ProcessHandle(_)
+            | Self::ProcessHandle { .. }
             | Self::Yielded(_) => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
@@ -1786,8 +1789,10 @@ impl Value {
             | Self::ReadOnlyMember(_, _)
             | Self::NoDefault
             | Self::PartialPlaceholder
-            | Self::TokenMissing
-            | Self::ProcessHandle(_) => {}
+            | Self::TokenMissing => {}
+            Self::ProcessHandle {
+                assigned_status, ..
+            } => visit.extend(assigned_status),
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }

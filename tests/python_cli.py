@@ -2803,6 +2803,7 @@ for name in ("md4", "ripemd160"):
             "boxed_os_process_signal.py",
             "boxed_os_execv.py",
             "boxed_posix_session.py",
+            "boxed_popen_signal_race.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
             "boxed_os_fchmod.py",

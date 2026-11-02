@@ -194,6 +194,20 @@ impl BoxedPopen {
         self.0.borrow().control.pid
     }
 
+    pub(crate) fn set_assigned_status(&self, assigned: bool) {
+        self.0
+            .borrow()
+            .control
+            .set_status(assigned.then_some(ReturnCode::BoxedAssignment));
+    }
+
+    fn kernel_status(code: ReturnCode) -> Option<i32> {
+        match code {
+            ReturnCode::BoxedAssignment => None,
+            code => Some(code.kernel()),
+        }
+    }
+
     pub(crate) fn status(&self, poll: bool) -> Result<Option<i32>> {
         let process = self.0.borrow();
         let status = if poll {
@@ -201,7 +215,7 @@ impl BoxedPopen {
         } else {
             process.control.status()
         };
-        Ok(status.map(ReturnCode::kernel))
+        Ok(status.and_then(Self::kernel_status))
     }
 
     pub(crate) fn wait<E: From<Error>>(
@@ -212,11 +226,16 @@ impl BoxedPopen {
         let control = self.0.borrow().control.clone();
         Ok(control
             .wait_with(seconds.map(Deadline::Float).as_ref(), check)?
-            .map(ReturnCode::kernel))
+            .and_then(Self::kernel_status))
     }
 
-    pub(crate) fn signal(&self, number: i32) -> Result<()> {
-        self.0.borrow().signal(|| Ok(number))
+    pub(crate) fn signal(&self, number: i32, refresh: bool) -> Result<()> {
+        let process = self.0.borrow();
+        if refresh {
+            process.signal(|| Ok(number))
+        } else {
+            process.control.signal_after_poll(|| Ok(number))
+        }
     }
 
     pub(crate) fn close_wait(&self) -> Result<()> {
