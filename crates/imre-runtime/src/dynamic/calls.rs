@@ -1601,6 +1601,15 @@ impl Context {
 
     /// Resolve an immediately called attribute before its arguments are evaluated.
     pub(super) fn lookup_method(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if name == "writelines" && matches!(self.heap.get(obj), Value::File(_)) {
+            // A direct call reports the defining IOBase descriptor in argument errors.
+            let callable = self.builtin("_IOBase.writelines");
+            return Ok(self.alloc(Value::Method {
+                callable,
+                receiver: obj,
+                explicit: false,
+            }));
+        }
         if let Value::Instance { class, .. } = *self.heap.get(obj)
             && self.class_attr(class, "__getattr__").is_none()
             && self.class_attr(class, "__getattribute__").is_none_or(|hook| matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__"))
