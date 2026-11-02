@@ -502,7 +502,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
         || (cfg!(target_os = "linux")
-            && matches!(name, "lockf" | "posix_fadvise" | "posix_fallocate" | "sendfile"))
+            && matches!(name, "lockf" | "mknod" | "posix_fadvise" | "posix_fallocate" | "sendfile"))
 }
 
 /// Retry a POSIX call that returns its error number directly instead of setting errno.
@@ -930,6 +930,10 @@ pub(super) fn descriptor(
     }
     if name == "fchmod" {
         return chmod::fchmod(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "mknod" {
+        return device::mknod(ctx, args, kwargs);
     }
     if matches!(name, "mkdir" | "mkfifo") {
         return create_node(ctx, name, args, kwargs);

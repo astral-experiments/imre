@@ -102,6 +102,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         "lchown" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.lchown"),
         "mkdir" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkdir"),
         "mkfifo" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.mkfifo"),
+        "mknod" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.mknod"),
         "sched_param" if cfg!(target_os = "linux") => {
             Intrinsic::ObjectRuntimeExport("posix.sched_param")
         }
