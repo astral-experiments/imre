@@ -47,10 +47,19 @@ impl Context {
         external: Option<bool>,
     ) -> Result<()> {
         let origin = match external {
-            Some(frozen_external) => Origin::Bootstrap { globals, line, frozen_external },
+            Some(frozen_external) => Origin::Bootstrap {
+                globals,
+                line,
+                frozen_external,
+            },
             None => Origin::core(globals, line),
         };
-        self.emit_warning(crate::objects::exceptions::Kind::ImportWarning, message, origin, NONE)
+        self.emit_warning(
+            crate::objects::exceptions::Kind::ImportWarning,
+            message,
+            origin,
+            NONE,
+        )
     }
 
     pub(in crate::dynamic) fn warn_legacy_load(&mut self, source_globals: Id) -> Result<()> {

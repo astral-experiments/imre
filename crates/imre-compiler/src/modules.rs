@@ -576,7 +576,9 @@ pub(crate) enum Intrinsic {
     ContextToken,
     CopyContext,
     ModuleSpec,
-    CachePath { reverse: bool },
+    CachePath {
+        reverse: bool,
+    },
     NominalClass(&'static str),
     Number,
     GetAnnotations,
@@ -617,7 +619,9 @@ pub(crate) enum Intrinsic {
     HandlerLevelType,
     TextOutputType,
     HandlerFallback,
-    LevelMap { names: bool },
+    LevelMap {
+        names: bool,
+    },
     LogRecord,
     MakeLogRecord,
     LogFormatter,
@@ -645,7 +649,9 @@ pub(crate) enum Intrinsic {
     Linecache(crate::ir::LinecacheOperation),
     InspectGetattrStatic,
     InspectIsMethodDescriptor,
-    InspectCoroutine { mark: bool },
+    InspectCoroutine {
+        mark: bool,
+    },
     InspectSentinel,
     WrapperAttributes(WrapperAttributes),
     FunctionCache,
@@ -669,15 +675,21 @@ pub(crate) enum Intrinsic {
     Pipe,
     Devnull,
     CheckOutput,
-    ShellOutput { status: bool },
+    ShellOutput {
+        status: bool,
+    },
     NullContext,
     IntConstant(i64),
     WallTime,
     TimeSleep,
-    WarningFilter { simple: bool },
+    WarningFilter {
+        simple: bool,
+    },
     WarningReset,
     CatchWarnings,
-    WarningDisplay { show: bool },
+    WarningDisplay {
+        show: bool,
+    },
     PatchSet,
     PatchedFile,
     Hunk,
@@ -699,7 +711,9 @@ pub(crate) enum Intrinsic {
     SysVersion,
     SysHexversion,
     SysEncoding(SysEncoding),
-    SysIntern { query: bool },
+    SysIntern {
+        query: bool,
+    },
     SysException,
     SysGetFrameModuleName,
     SysGetRecursionLimit,
@@ -708,8 +722,13 @@ pub(crate) enum Intrinsic {
     Stdin,
     OsName,
     OsLinesep,
-    OsPathsep { posix: bool },
-    OsSeparator { alternate: bool, posix: bool },
+    OsPathsep {
+        posix: bool,
+    },
+    OsSeparator {
+        alternate: bool,
+        posix: bool,
+    },
     ErrnoAttribute,
     ErrnoFrom(usize),
     ModuleType,
@@ -725,7 +744,9 @@ pub(crate) enum Intrinsic {
     DocCaptureTake,
     DocDisplay,
     DocAscii,
-    MockCallList { mark: bool },
+    MockCallList {
+        mark: bool,
+    },
     DocExecute,
     Final,
     Argv,
@@ -767,12 +788,16 @@ pub(crate) enum Intrinsic {
     Sha256,
     NamedHash(&'static str),
     CodecInfoClass,
-    UnicodeNormalize { check: bool },
+    UnicodeNormalize {
+        check: bool,
+    },
     ObjectRuntimeExport(&'static str),
     /// Bind the object provider when this export is used, after checking typed calls.
     ScopedObjectExport(&'static str),
     WeakProxy,
-    WeakProxyClass { callable: bool },
+    WeakProxyClass {
+        callable: bool,
+    },
     CodecLookup,
     CodecGetWriter,
     CodecBom(&'static [u8]),
@@ -780,7 +805,9 @@ pub(crate) enum Intrinsic {
     HashFileDigest,
     HmacCompareDigest,
     SimpleNamespace,
-    HashAlgorithms { guaranteed: bool },
+    HashAlgorithms {
+        guaranteed: bool,
+    },
     ZipFile,
     ZipInfo,
     BytesIo,
@@ -856,7 +883,9 @@ pub(crate) enum Intrinsic {
     DestInSrc,
     IgnorePatterns,
     ShutilError,
-    RandomChoice { secure: bool },
+    RandomChoice {
+        secure: bool,
+    },
     Random(crate::ir::RandomOperation),
     SameFileError,
     SpecialFileError,
@@ -905,7 +934,9 @@ pub(crate) enum Intrinsic {
     EmailParseDate,
     EmailFormatDateTime,
     EmailFormatDate,
-    SplitResult { bytes: bool },
+    SplitResult {
+        bytes: bool,
+    },
 }
 
 impl Intrinsic {
@@ -2235,7 +2266,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("io.open_code")
             }
             (Self::Io, "BufferedRandom") => Intrinsic::ObjectRuntimeExport("io.BufferedRandom"),
-            (Self::IoNative, "BufferedRandom") => Intrinsic::ObjectRuntimeExport("_io.BufferedRandom"),
+            (Self::IoNative, "BufferedRandom") => {
+                Intrinsic::ObjectRuntimeExport("_io.BufferedRandom")
+            }
             (Self::Io, "BufferedReader") => Intrinsic::ObjectRuntimeExport("io.BufferedReader"),
             (Self::IoNative, "BufferedReader") => {
                 Intrinsic::ObjectRuntimeExport("_io.BufferedReader")
@@ -2288,8 +2321,12 @@ impl IntrinsicModule {
             (Self::Enum, "IntEnum") => Intrinsic::IntEnum,
             (Self::Enum, "IntFlag") => Intrinsic::ObjectRuntimeExport("enum.IntFlag"),
             (Self::Enum, "global_enum") => Intrinsic::ObjectRuntimeExport("enum.global_enum"),
-            (Self::Enum, "global_enum_repr") => Intrinsic::ObjectRuntimeExport("enum.global_enum_repr"),
-            (Self::Enum, "global_flag_repr") => Intrinsic::ObjectRuntimeExport("enum.global_flag_repr"),
+            (Self::Enum, "global_enum_repr") => {
+                Intrinsic::ObjectRuntimeExport("enum.global_enum_repr")
+            }
+            (Self::Enum, "global_flag_repr") => {
+                Intrinsic::ObjectRuntimeExport("enum.global_flag_repr")
+            }
             (Self::Enum, "global_str") => Intrinsic::ObjectRuntimeExport("enum.global_str"),
             (Self::Enum, "_simple_enum") => Intrinsic::SimpleEnum,
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
@@ -2393,7 +2430,9 @@ impl IntrinsicModule {
             (Self::Fcntl, "F_SETPIPE_SZ") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETPIPE_SZ"),
             (Self::Resource, "getrlimit") => Intrinsic::ObjectRuntimeExport("resource.getrlimit"),
             (Self::Resource, "setrlimit") => Intrinsic::ObjectRuntimeExport("resource.setrlimit"),
-            (Self::Resource, "RLIMIT_CORE") => Intrinsic::ObjectRuntimeExport("resource.RLIMIT_CORE"),
+            (Self::Resource, "RLIMIT_CORE") => {
+                Intrinsic::ObjectRuntimeExport("resource.RLIMIT_CORE")
+            }
             (Self::Resource, "RLIMIT_STACK") => {
                 Intrinsic::ObjectRuntimeExport("resource.RLIMIT_STACK")
             }
@@ -2655,7 +2694,9 @@ impl IntrinsicModule {
             (Self::UrllibParse, "clear_cache") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.clear_cache")
             }
-            (Self::UrllibParse, "urlparse") => Intrinsic::ObjectRuntimeExport("urllib.parse.urlparse"),
+            (Self::UrllibParse, "urlparse") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.urlparse")
+            }
             (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
             (Self::UrllibParse, "urlunsplit") => Intrinsic::UrlUnsplit,
             (Self::UrllibParse, "SplitResult") => Intrinsic::SplitResult { bytes: false },

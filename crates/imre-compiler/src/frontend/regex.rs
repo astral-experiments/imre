@@ -304,7 +304,8 @@ impl Checker<'_> {
             || !matches!(
                 call.arguments.args.first(),
                 Some(ast::Expr::StringLiteral(_))
-            )) && self.graph.uses_boxed_pattern_method()
+            ))
+            && self.graph.uses_boxed_pattern_method()
         {
             return Err(self.scoped_builtin_error("re.compile", call));
         }

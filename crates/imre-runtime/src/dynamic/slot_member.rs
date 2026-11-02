@@ -225,7 +225,10 @@ impl Context {
         keywords: Vec<(String, Id)>,
     ) -> Result<Id> {
         if !self.is_abc_metaclass(meta) {
-            return Err(Error::new("TypeError", "ABCMeta.__new__ requires an ABCMeta subtype"));
+            return Err(Error::new(
+                "TypeError",
+                "ABCMeta.__new__ requires an ABCMeta subtype",
+            ));
         }
         self.type_from_namespace(Some(meta), name, bases, namespace, &keywords)
     }
@@ -295,7 +298,10 @@ impl Context {
                     "type() with specialized metaclasses is unsupported",
                 ));
             };
-            if bases.iter().any(|&base| self.direct_subclass(base, type_class)) {
+            if bases
+                .iter()
+                .any(|&base| self.direct_subclass(base, type_class))
+            {
                 return Err(Error::new(
                     "NotImplementedError",
                     "type() with specialized metaclasses is unsupported",
@@ -305,12 +311,16 @@ impl Context {
             if explicit_meta != Some(winner)
                 && self.class_attr(winner, "__new__") != self.class_attr(abc, "__new__")
             {
-                let result = self.call_abc_new(winner, name, base_tuple, namespace, kwargs.to_vec())?;
+                let result =
+                    self.call_abc_new(winner, name, base_tuple, namespace, kwargs.to_vec())?;
                 if explicit_meta.is_some() {
                     // The outer ABCMeta.__new__ also initializes a more derived __new__ result.
                     let Value::Class { scope, .. } = *self.heap.get(result) else {
                         self.lookup_attr(result, "__dict__")?;
-                        return Err(Error::new("NotImplementedError", "ABC initialization requires a Python class"));
+                        return Err(Error::new(
+                            "NotImplementedError",
+                            "ABC initialization requires a Python class",
+                        ));
                     };
                     if !self.is_bundled_abc(result) {
                         return Err(Error::new(
@@ -374,7 +384,10 @@ impl Context {
         let globals = self.module_globals(creator_scope)?;
         let module = self.dict_named_item(globals, "__name__");
         let module_text = self.scope_data(creator_scope).module.clone();
-        let cell = match self.type_namespace_cell("__classcell__", self.dict_named_item(namespace, "__classcell__"))? {
+        let cell = match self.type_namespace_cell(
+            "__classcell__",
+            self.dict_named_item(namespace, "__classcell__"),
+        )? {
             Some(cell) => cell,
             None => self.alloc(Value::Cell(None)),
         };
@@ -490,8 +503,14 @@ impl Context {
         self.heap.replace_cell(cell, Some(class));
         // A valid __classcell__ is populated even when the following dictionary cell is invalid.
         if let Some(dict_cell) = self.type_namespace_cell("__classdictcell__", dict_cell)? {
-            let Value::Scope(frame) = self.heap.get_mut(scope) else { unreachable!() };
-            frame.class_namespace.as_mut().expect("namespace class").annotation_dict_cell = Some(dict_cell);
+            let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                unreachable!()
+            };
+            frame
+                .class_namespace
+                .as_mut()
+                .expect("namespace class")
+                .annotation_dict_cell = Some(dict_cell);
             let dict = self.class_namespace_dict(scope, false);
             self.heap.replace_cell(dict_cell, Some(dict));
         }

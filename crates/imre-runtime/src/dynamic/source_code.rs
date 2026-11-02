@@ -1534,7 +1534,8 @@ impl Program {
         let class = self.class_attributes.is_some();
         self.needs_class_cell =
             class && imre_ast::class_cell::needed(&body, self.string_annotations());
-        self.needs_dict_cell = class && imre_ast::class_cell::dict_needed(&body, self.string_annotations());
+        self.needs_dict_cell =
+            class && imre_ast::class_cell::dict_needed(&body, self.string_annotations());
         self.lower_with_fields(body, lines, function, None, class.then_some(&mut fields))?;
         if !fields.is_empty() {
             let provider = self.annotation_provider(fields, &self.qualname, self.first_line);
@@ -1789,7 +1790,9 @@ impl Program {
                     let spellings = child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
                     });
-                    child.class_attributes = Some(imre_ast::class_attributes::static_attributes(&s.body, spellings));
+                    child.class_attributes = Some(imre_ast::class_attributes::static_attributes(
+                        &s.body, spellings,
+                    ));
                     child.instructions.push((line, Instruction::ClassStart));
                     child.lower_namespace(s.body, lines, false)?;
                     child.instructions.push((line, Instruction::ClassEnd));
@@ -2392,7 +2395,9 @@ impl Context {
             fields[5] = self.int(end_line);
             fields[6] = self.int(end_column);
             let mut error = self.exception("SyntaxError", &[msg]);
-            error.message.push_str(&self.syntax_suffix(filename_id, line)?);
+            error
+                .message
+                .push_str(&self.syntax_suffix(filename_id, line)?);
             self.retain_syntax_fields(&mut error, fields)?;
             return Err(error);
         }
@@ -2862,9 +2867,13 @@ impl Context {
                 }
                 let reads: Reads = serde_json::from_str(signature)
                     .map_err(|err| Error::new("SystemError", err.to_string()))?;
-                names.extend(reads.scope_reads.into_iter()
-                    .filter(|name| self.is_enclosing_freevar(parent, name) == Some(true))
-                    .map(str::to_owned));
+                names.extend(
+                    reads
+                        .scope_reads
+                        .into_iter()
+                        .filter(|name| self.is_enclosing_freevar(parent, name) == Some(true))
+                        .map(str::to_owned),
+                );
             }
         }
         let mut bindings = Vec::new();
@@ -4887,8 +4896,9 @@ impl Context {
                     if let Expr::Starred(star) = item {
                         let mark = self.heap.temporary_mark();
                         let first = items.len();
-                        let expanded = eval(self, &star.value)
-                            .and_then(|iterable| self.extend_source_items(&mut items, iterable, None));
+                        let expanded = eval(self, &star.value).and_then(|iterable| {
+                            self.extend_source_items(&mut items, iterable, None)
+                        });
                         // Only yielded values outlive this operand. Release the iterator before
                         // evaluating the next tuple element or dispatching a weakref callback.
                         let collect = self.heap.discard_truth_operands(mark, self.modules);

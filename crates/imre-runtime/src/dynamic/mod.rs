@@ -2314,7 +2314,10 @@ impl Context {
 
     /// Before installing the registry, execute its dependencies and the script's explicit entry.
     fn load_bootstrap_module(
-        &mut self, name: &str, parent: Option<(Id, &str)>, source_globals: Id,
+        &mut self,
+        name: &str,
+        parent: Option<(Id, &str)>,
+        source_globals: Id,
     ) -> Result<Option<Id>> {
         let mut locations = Vec::new();
         let source = if name == "__main__" {
@@ -2577,7 +2580,10 @@ impl Context {
                 let meta = self.abc_meta();
                 // ABCMeta.__new__ supplies type.__new__'s caller globals even after
                 // sys.modules is replaced. Keep the metaclass's defining module alive.
-                let Value::Class { scope: meta_scope, .. } = *self.heap.get(meta) else {
+                let Value::Class {
+                    scope: meta_scope, ..
+                } = *self.heap.get(meta)
+                else {
                     unreachable!()
                 };
                 let Value::Scope(frame) = self.heap.get_mut(meta_scope) else {

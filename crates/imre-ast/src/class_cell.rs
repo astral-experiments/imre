@@ -115,7 +115,10 @@ impl<'a> Visitor<'a> for Scope {
                     self.visit_decorator(decorator);
                 }
                 let mut method = self.child();
-                method.shadows = f.parameters.iter().any(|arg| arg.name().as_str() == self.name);
+                method.shadows = f
+                    .parameters
+                    .iter()
+                    .any(|arg| arg.name().as_str() == self.name);
                 method.visit_body(&f.body);
                 for default in f
                     .parameters
@@ -180,7 +183,9 @@ impl<'a> Visitor<'a> for Scope {
                 self.add_annotation(alias);
             }
             ast::Stmt::Global(g) => self.shadows |= g.names.iter().any(|n| n.as_str() == self.name),
-            ast::Stmt::Nonlocal(n) => self.nonlocal |= n.names.iter().any(|n| n.as_str() == self.name),
+            ast::Stmt::Nonlocal(n) => {
+                self.nonlocal |= n.names.iter().any(|n| n.as_str() == self.name)
+            }
             _ => visitor::walk_stmt(self, stmt),
         }
     }
@@ -215,12 +220,12 @@ impl<'a> Visitor<'a> for Scope {
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         match expr {
             ast::Expr::Name(n) if n.ctx == ast::ExprContext::Load => {
-                self.direct |= n.id.as_str() == self.name || (self.name == CLASS && !self.class && n.id.as_str() == "super");
+                self.direct |= n.id.as_str() == self.name
+                    || (self.name == CLASS && !self.class && n.id.as_str() == "super");
             }
             ast::Expr::Name(n) => self.shadows |= n.id.as_str() == self.name,
             ast::Expr::Named(n) => {
-                self.walrus |=
-                    matches!(&*n.target, ast::Expr::Name(target) if target.id.as_str() == self.name);
+                self.walrus |= matches!(&*n.target, ast::Expr::Name(target) if target.id.as_str() == self.name);
                 visitor::walk_expr(self, expr);
             }
             ast::Expr::Lambda(f) => {
