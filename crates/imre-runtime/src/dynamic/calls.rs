@@ -6154,18 +6154,26 @@ impl Context {
     }
 
     /// Initialize descriptor names in class body insertion order, before subclass hooks run.
-    pub(super) fn initialize_class_members(&mut self, class: Id, scope: Id) -> Result<()> {
+    pub(super) fn initialize_class_members(
+        &mut self,
+        class: Id,
+        scope: Id,
+        namedtuple_namespace: Option<Id>,
+    ) -> Result<()> {
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         let body = class_scope.class_body.take().unwrap();
-        if let Some(namespace) = class_scope.class_namespace.as_ref()
-            && let Some(dict) = namespace.dictionary
+        let dictionary = class_scope.class_namespace.as_ref().and_then(|ns| ns.dictionary);
+        if let Some(dictionary) = dictionary
+            && class_scope.class_namespace.as_ref().unwrap().annotation_dict_cell.is_some()
         {
-            if namespace.annotation_dict_cell.is_some() {
-                class_scope.namespace = Some(dict);
-                class_scope.names.retain(|name, _| name == "__qualname__");
-            }
+            class_scope.namespace = Some(dictionary);
+            class_scope.names.retain(|name, _| name == "__qualname__");
+        }
+        if let Some(namespace) = namedtuple_namespace {
+            self.call_typing_helper("_namedtuple_set_names", vec![class, namespace]).map(|_| ())
+        } else if let Some(dict) = dictionary {
             let members = self.dict_entries(dict).expect("class dictionary").to_vec();
             for &(key, _) in &members {
                 self.heap.keep(key);
@@ -6202,10 +6210,40 @@ impl Context {
                 property.name = Some(name);
             } else if let Some(set_name) = self.bound_slot(value, "__set_name__")? {
                 let name = key_object(self, key);
-                self.call(set_name, vec![class, name], Vec::new())?;
+                if let Err(error) = self.call(set_name, vec![class, name], Vec::new()) {
+                    return Err(self.descriptor_name_error(error, class, name, value));
+                }
             }
         }
         Ok(())
+    }
+
+    /// Attach type.__new__'s descriptor context while preserving the raised exception's identity.
+    fn descriptor_name_error(&mut self, error: Error, class: Id, key: Id, value: Id) -> Error {
+        let exception = self.raised_instance(error);
+        self.heap.keep(exception);
+        let result = self.checked_format(key, true).and_then(|key| {
+            let descriptor = self.type_name(value);
+            let descriptor = &descriptor[..descriptor.floor_char_boundary(100)];
+            let owner = self.class_name(class);
+            let owner = &owner[..owner.floor_char_boundary(100)];
+            let note = self.text(format!(
+                "Error calling __set_name__ on '{descriptor}' instance {key} in '{owner}'"
+            ));
+            self.add_exception_note(exception, note)
+        });
+        if let Err(mut error) = result {
+            if error.trace.as_ref().and_then(|trace| trace.instance) != Some(exception) {
+                error.context = exception;
+            }
+            return error;
+        }
+        let Value::Raised(error) = self.heap.get(exception) else {
+            unreachable!()
+        };
+        let mut error = error.clone();
+        error.tracing().instance = Some(exception);
+        error
     }
 
     /// Bind ABCMeta.__new__'s positional-only parameters for direct and cooperating calls.
@@ -6503,6 +6541,20 @@ impl Context {
         let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
         let exposed_body = self.finish_class_namespace(scope)?;
+        // NamedTupleMeta visits the original values, including defaults replaced by tuple getters.
+        let namedtuple_namespace = if self.namedtuple_base(&bases).is_some() {
+            let namespace = if let Some(body) = &exposed_body {
+                body.mapping
+            } else {
+                let bindings = self.scope_data(scope).names.clone();
+                let entries = bindings.into_iter().map(|(name, value)| (self.text(name), value)).collect();
+                self.dict(entries)
+            };
+            self.heap.keep(namespace);
+            Some(namespace)
+        } else {
+            None
+        };
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
@@ -6613,7 +6665,7 @@ impl Context {
         } else {
             super::typing::ClassLayout::Specialized
         };
-        let class = self.allocate_class_with_slots(name.clone(), scope, bases, layout)?;
+        let class = self.allocate_class_with_slots(name.clone(), scope, bases, layout, namedtuple_namespace)?;
         let Value::Class { metaclass, .. } = self.heap.get_mut(class) else {
             unreachable!()
         };
@@ -6646,10 +6698,12 @@ impl Context {
                 .copied()
                 .filter(|&(key, _)| self.string_storage(key).is_none())
                 .collect::<Vec<_>>();
-            if let Some(cell) = body.annotation_cell {
+            // NamedTuple's annotation provider closes over the declaration namespace,
+            // which remains distinct from the generated type's dictionary.
+            if namedtuple_namespace.is_none() && let Some(cell) = body.annotation_cell {
                 self.heap.replace_cell(cell, Some(dict));
             }
-            if !extras.is_empty() {
+            if namedtuple_namespace.is_none() && !extras.is_empty() {
                 for (key, value) in extras {
                     self.put_item(dict, key, value)?;
                 }
@@ -6660,7 +6714,7 @@ impl Context {
                 )?;
             }
         }
-        self.initialize_class_members(class, scope)?;
+        self.initialize_class_members(class, scope, namedtuple_namespace)?;
         if let Some(kind) = enum_kind {
             let scalar = if let Some((member_type, first_enum)) = float_enum {
                 self.bind(scope, "_member_type_", member_type);
