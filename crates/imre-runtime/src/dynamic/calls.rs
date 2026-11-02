@@ -2079,7 +2079,7 @@ impl Context {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref class)
-                if class == "generator" && matches!(name, "send" | "throw" | "close") =>
+                if class == "generator" && super::generator_protocol::generator_method(name) =>
             {
                 return Ok(self.builtin(&format!("generator.{name}")));
             }
@@ -2980,6 +2980,12 @@ impl Context {
                     ) =>
             {
                 return Ok(self.builtin(&format!("object.{name}")));
+            }
+            Value::Native(ref class)
+                if DictIterator::METHODS.contains(&name)
+                    && DictIterator::class(class).is_some() =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
             }
             Value::Native(ref class)
                 if class == "slice" && super::slice::METHODS.contains(&name) =>
@@ -4577,6 +4583,13 @@ impl Context {
             )),
             Value::Native(name) if let Some(class) = stdlib::fixed_structseq::fixed_type(&name) => {
                 stdlib::fixed_structseq::construct(self, class, &args, &kwargs)
+            }
+            Value::Native(ref name)
+                if let Some((owner, slot)) = name.split_once('.')
+                    && DictIterator::METHODS.contains(&slot)
+                    && DictIterator::class(owner).is_some() =>
+            {
+                self.iterator_method(owner, slot, &args, &kwargs)
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),

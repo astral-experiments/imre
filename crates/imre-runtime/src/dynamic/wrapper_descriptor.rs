@@ -43,6 +43,10 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(members) = stdlib::datetime::members(owner) => {
                 Some((members.owner, attr, members.methods))
             }
+            Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
+                Some((class, attr, DictIterator::METHODS))
+            }
+            Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
@@ -176,6 +180,10 @@ impl BuiltinDescriptor {
             owner if stdlib::datetime::members(owner).is_some() => {
                 ctx.instance_of(receiver, ctx.builtins[owner])
             }
+            owner if DictIterator::class(owner).is_some() => {
+                matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
+            }
+            "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
             "object" => true,
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
@@ -256,6 +264,11 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__call__" => ctx.text("Call self as a function."),
             "__text_signature__" if self.name == "__call__" => {
                 ctx.text("($self, /, *args, **kwargs)")
+            }
+            "__doc__" if self.name == "__iter__" => ctx.text("Implement iter(self)."),
+            "__doc__" if self.name == "__next__" => ctx.text("Implement next(self)."),
+            "__text_signature__" if matches!(self.name, "__iter__" | "__next__") => {
+                ctx.text("($self, /)")
             }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
             "__text_signature__" if self.name == "__contains__" => ctx.text("($self, key, /)"),

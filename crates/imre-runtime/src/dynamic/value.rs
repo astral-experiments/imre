@@ -1099,15 +1099,7 @@ impl Value {
             Self::RangeIterator(iter) => iter.kind,
             Self::Enumerate { .. } => "enumerate",
             Self::Iterator { kind, .. } => kind,
-            Self::DictIterator(iter) => match (iter.order_state, iter.reverse, iter.kind) {
-                (Some(_), _, _) => "odict_iterator",
-                (_, false, DictViewKind::Keys) => "dict_keyiterator",
-                (_, false, DictViewKind::Values) => "dict_valueiterator",
-                (_, false, DictViewKind::Items) => "dict_itemiterator",
-                (_, true, DictViewKind::Keys) => "dict_reversekeyiterator",
-                (_, true, DictViewKind::Values) => "dict_reversevalueiterator",
-                (_, true, DictViewKind::Items) => "dict_reverseitemiterator",
-            },
+            Self::DictIterator(iter) => iter.class_name(),
             Self::Set { frozen: true, .. } => "frozenset",
             Self::Set { frozen: false, .. } => "set",
             Self::Dict(_) => "dict",
@@ -1586,6 +1578,33 @@ pub(super) struct DictIterator {
 }
 
 impl DictIterator {
+    const KEYS: [&str; 2] = ["dict_keyiterator", "dict_reversekeyiterator"];
+    const VALUES: [&str; 2] = ["dict_valueiterator", "dict_reversevalueiterator"];
+    const ITEMS: [&str; 2] = ["dict_itemiterator", "dict_reverseitemiterator"];
+    const ORDERED: &str = "odict_iterator";
+    pub(super) const METHODS: &[&str] = &["__iter__", "__next__"];
+
+    pub(super) fn class_name(&self) -> &'static str {
+        if self.order_state.is_some() {
+            return Self::ORDERED;
+        }
+        let classes = match self.kind {
+            DictViewKind::Keys => Self::KEYS,
+            DictViewKind::Values => Self::VALUES,
+            DictViewKind::Items => Self::ITEMS,
+        };
+        classes[usize::from(self.reverse)]
+    }
+
+    pub(super) fn class(name: &str) -> Option<&'static str> {
+        Self::KEYS
+            .into_iter()
+            .chain(Self::VALUES)
+            .chain(Self::ITEMS)
+            .chain([Self::ORDERED])
+            .find(|&class| class == name)
+    }
+
     /// Capture the original size while keeping the entries live.
     pub(super) fn new(
         dict: Id,
