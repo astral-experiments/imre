@@ -246,6 +246,18 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "importlib/machinery.py",
             include_str!("../../stdlib/importlib/machinery.py"),
         )),
+        "importlib._legacy_source_loader" => {
+            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            Some(("importlib/_legacy_source_loader.py", SOURCE.get_or_init(|| {
+                // Use the original module-creation and attribute initialization protocols.
+                const BOOTSTRAP: &str = include_str!(
+                    "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap.py"
+                );
+                let start = BOOTSTRAP.find("def _init_module_attrs(").unwrap();
+                let (attrs, _) = BOOTSTRAP[start..].split_once("def _module_repr_from_spec(").unwrap();
+                format!("{}\n{attrs}", include_str!("../../stdlib/importlib/legacy_source_loader.py"))
+            })))
+        }
         "_frozen_importlib" => {
             // Compile the pinned ModuleSpec definition with the boxed object protocol.
             let bootstrap = include_str!(
