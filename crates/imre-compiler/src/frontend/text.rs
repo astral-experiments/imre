@@ -407,6 +407,7 @@ impl Checker<'_> {
             call.arguments.keywords.as_ref(),
         ) else {
             let error = self.one_positional_error(call, "str.zfill", "width", Type::Str)?;
+            self.graph.checked_overload(self.module, call.range());
             return Ok(self.evaluated_receiver(Some(receiver), error));
         };
         let value = self.expr(width)?;
