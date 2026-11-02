@@ -64,8 +64,8 @@ mod joined_lines;
 mod json;
 pub(crate) use json::{
     DecodedJson, Indent as JsonIndent, JsonNumber, decode_json, decode_json_bytes, json_bom_error,
-    write_codepoints as write_json_codepoints, write_fragment as write_json_fragment,
-    write_string as write_json_string,
+    string_end as json_string_end, write_codepoints as write_json_codepoints,
+    write_fragment as write_json_fragment, write_string as write_json_string,
 };
 mod linecache;
 pub(crate) use linecache::{SourceDecodeError, decode_compile_source, decode_source_lines};

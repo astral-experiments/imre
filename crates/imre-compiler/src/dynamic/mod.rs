@@ -612,6 +612,13 @@ pub(crate) fn compile(
         {
             names.push((0, "_collections_abc".to_owned()));
         }
+        // The native string scanner imports the decoder's exception on a syntax error.
+        if names
+            .iter()
+            .any(|(level, name)| *level == 0 && name == "_json")
+        {
+            names.push((0, "json.decoder".to_owned()));
+        }
         for (level, requested) in names {
             let Some(name) = resolve(&owner, package, level, &requested) else {
                 continue;

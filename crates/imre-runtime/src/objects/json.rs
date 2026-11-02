@@ -30,6 +30,7 @@ pub(super) use encode::imre_json_dumps;
 pub(crate) use encode::{Indent, write_codepoints, write_fragment, write_string};
 pub(super) mod readonly;
 mod syntax;
+pub(crate) use syntax::string_end;
 mod toml;
 
 const INTEGER: u32 = 1;
