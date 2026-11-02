@@ -1073,8 +1073,7 @@ impl Program {
             ast::Expr::Name(n) => {
                 self.locals.insert(n.id.to_string());
             }
-            ast::Expr::Attribute(_) => {}
-            ast::Expr::Subscript(item) if !matches!(*item.slice, ast::Expr::Slice(_)) => {}
+            ast::Expr::Attribute(_) | ast::Expr::Subscript(_) => {}
             ast::Expr::Starred(_) => {
                 return Err(Error::new(
                     "SyntaxError",
