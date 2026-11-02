@@ -68,6 +68,7 @@ pub(super) struct Trace {
     /// Live members belong to the exception instance across traceback clones.
     pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
     pub import_names: Option<[Id; 3]>,
+    pub name_error_name: Option<Id>,
     pub dictionary: Option<Id>,
     stop_value: Id,
     cached: Option<(usize, Id)>,
@@ -199,6 +200,7 @@ impl Error {
                             .flat_map(|fields| fields.iter().map(std::cell::Cell::get)),
                     )
                     .chain(trace.import_names.into_iter().flatten())
+                    .chain(trace.name_error_name)
                     .chain(trace.dictionary)
                     .chain(trace.cached.map(|(_, head)| head))
             }))

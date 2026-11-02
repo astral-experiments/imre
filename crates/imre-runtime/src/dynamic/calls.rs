@@ -189,16 +189,12 @@ impl Context {
         Ok(Some(entries.remove(0)))
     }
 
-    /// Find the exception storage only when the object inherits StopIteration.
-    fn stop_iteration_error(&mut self, object: Id) -> Option<&mut Error> {
+    /// Borrow the native member storage of an exception or a Python subclass.
+    fn exception_storage(&mut self, object: Id, kind: &str) -> Option<&mut Error> {
         let Value::Raised(error) = self.heap.get(object) else {
             return None;
         };
-        let stop = error.class().map_or_else(
-            || error.kind == "StopIteration",
-            |class| self.has_base(class, "StopIteration"),
-        );
-        if !stop {
+        if !self.is_builtin_error(error, kind) {
             return None;
         }
         let Value::Raised(error) = self.heap.get_mut(object) else {
@@ -1595,8 +1591,17 @@ impl Context {
                 return Ok(self.exception_dictionary(obj));
             }
         }
+        if name == "name"
+            && let Some(error) = self.exception_storage(obj, "NameError")
+        {
+            return Ok(error
+                .trace
+                .as_ref()
+                .and_then(|t| t.name_error_name)
+                .unwrap_or(NONE));
+        }
         if name == "value"
-            && let Some(error) = self.stop_iteration_error(obj)
+            && let Some(error) = self.exception_storage(obj, "StopIteration")
         {
             return Ok(error.stop_value());
         }
@@ -3007,8 +3012,16 @@ impl Context {
         {
             return Err(Error::new("TypeError", "cannot delete __dict__"));
         }
+        if name == "name"
+            && let Some(error) = self.exception_storage(obj, "NameError")
+        {
+            if let Some(trace) = error.trace.as_mut() {
+                trace.name_error_name = None;
+            }
+            return Ok(());
+        }
         if name == "value"
-            && let Some(error) = self.stop_iteration_error(obj)
+            && let Some(error) = self.exception_storage(obj, "StopIteration")
         {
             error.set_stop_value(NONE);
             return Ok(());
@@ -3627,8 +3640,14 @@ impl Context {
             }
             return Ok(());
         }
+        if name == "name"
+            && let Some(error) = self.exception_storage(obj, "NameError")
+        {
+            error.tracing().name_error_name = Some(value);
+            return Ok(());
+        }
         if name == "value"
-            && let Some(error) = self.stop_iteration_error(obj)
+            && let Some(error) = self.exception_storage(obj, "StopIteration")
         {
             error.set_stop_value(value);
             return Ok(());

@@ -477,3 +477,109 @@ class _TypedCacheSpecialForm(_SpecialForm):
 def Literal(self, *parameters):
     """A type whose arguments are literal values."""
     return _typing._LiteralGenericAlias(self, parameters)
+
+
+# VALUE-format annotation resolution from CPython 3.14.5 Lib/typing.py.
+def _hint_scope(params, globalns, localns, is_class):
+    if params:
+        globalns = dict(globalns)
+        localns = dict(localns)
+        for param in params:
+            if not is_class or param.__name__ not in globalns:
+                globalns[param.__name__] = param
+                localns.pop(param.__name__, None)
+    return globalns, localns
+
+
+def _resolve_hint(value, globalns, localns, owner, seen, include_extras):
+    from annotationlib import ForwardRef
+    from types import GenericAlias
+    if isinstance(value, str):
+        value = ForwardRef(value, is_class=isinstance(owner, type))
+    if isinstance(value, ForwardRef):
+        expr = value.__forward_arg__
+        if expr in seen:
+            return value
+        if value.__forward_module__ is not None:
+            import sys
+            module = sys.modules.get(value.__forward_module__)
+            if module is not None:
+                globalns = module.__dict__
+        source = f'({expr},)[0]' if expr.lstrip().startswith('*') else expr
+        result = _typing._eval_type_expression(source, globalns, localns)
+        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras)
+
+    origin = _typing.get_origin(value)
+    if origin is None or origin is Literal:
+        return value
+    args = getattr(value, '__args__', ())
+    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras) for a in args)
+    if not include_extras:
+        for name in ('Required', 'NotRequired', 'ReadOnly'):
+            if origin is getattr(_typing, name, None):
+                return resolved[0]
+    if resolved == args:
+        return value
+    if origin is _typing.Union:
+        return _typing.Union[resolved]
+    if type(value) is GenericAlias:
+        return GenericAlias(origin, resolved)
+    if type(value) is _typing._GenericAlias:
+        name = getattr(value, '_name', None)
+        return _typing._GenericAlias(origin, resolved, name=name, inst=getattr(value, '_inst', True))
+    return type(value)(origin, resolved)
+
+
+def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, format=None):
+    """Resolve annotations in the defining namespace, including inherited class annotations."""
+    if getattr(obj, '__no_type_check__', None):
+        return {}
+    from annotationlib import Format, _get_value_annotations
+    if format is not None and format != Format.VALUE:
+        if format == Format.VALUE_WITH_FAKE_GLOBALS:
+            raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
+        if format not in (Format.STRING, Format.FORWARDREF):
+            raise ValueError(f"Unsupported format {format!r}")
+        raise NotImplementedError('only the VALUE annotation format is supported')
+    if isinstance(obj, type):
+        import sys
+        hints = {}
+        for base in reversed(getattr(obj, '__mro__', (obj,))):
+            ann = _get_value_annotations(base)
+            if not ann:
+                continue
+            base_globals = globalns
+            if base_globals is None:
+                module = sys.modules.get(base.__module__)
+                base_globals = getattr(module, '__dict__', {})
+            base_locals = dict(base.__dict__) if localns is None else localns
+            if localns is None and globalns is None:
+                base_globals, base_locals = base_locals, base_globals
+            base_globals, base_locals = _hint_scope(getattr(base, '__type_params__', ()),
+                                                    base_globals, base_locals, True)
+            for name, value in ann.items():
+                result = _resolve_hint(value, base_globals, base_locals, obj, (), include_extras)
+                hints[name] = type(None) if result is None else result
+        return hints
+
+    hints = _get_value_annotations(obj)
+    if globalns is None:
+        from types import ModuleType
+        if isinstance(obj, ModuleType):
+            globalns = obj.__dict__
+        else:
+            wrapped = obj
+            seen = {id(wrapped)}
+            while hasattr(wrapped, '__wrapped__'):
+                wrapped = wrapped.__wrapped__
+                if id(wrapped) in seen:
+                    raise ValueError(f'wrapper loop when unwrapping {obj!r}')
+                seen.add(id(wrapped))
+            globalns = getattr(wrapped, '__globals__', {})
+    if localns is None:
+        localns = globalns
+    globalns, localns = _hint_scope(getattr(obj, '__type_params__', ()), globalns, localns, False)
+    for name, value in hints.items():
+        result = _resolve_hint(value, globalns, localns, obj, (), include_extras)
+        hints[name] = type(None) if result is None else result
+    return hints
