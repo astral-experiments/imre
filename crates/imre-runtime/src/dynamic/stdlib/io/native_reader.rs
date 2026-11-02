@@ -164,7 +164,7 @@ pub(super) fn call(
     {
         ssize(ctx, size)?;
     }
-    if name == "writable" {
+    if name == "writable" && owner == "BufferedReader" {
         return Ok(FALSE);
     }
     if name == "_dealloc_warn" {
