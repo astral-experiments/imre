@@ -194,6 +194,53 @@ def current():
         text.flush()
         assert isinstance(text.tell(), int)
 
+    # A newline decoder holding CR can emit text at EOF without reading another byte.
+    with io.TextIOWrapper(io.BytesIO(b"line1\r"), encoding="utf-8") as text:
+        assert text.readline() == "line1\n"
+        cookie = 6 | (1 << 64) | (1 << 128) | (1 << 160)
+        assert text.tell() == cookie
+        assert text.seek(cookie) == cookie and text.buffer.tell() == 6
+        assert text.tell() == cookie and text.read() == ""
+
+    # The next multibyte character releases CR. Restore on another file and
+    # consume only the newline, leaving the character from that file to read.
+    cookie = 2 | (1 << 64) | (2 << 96) | (1 << 128)
+    with io.TextIOWrapper(io.BytesIO("a\ré".encode()), encoding="utf-8") as text:
+        text._CHUNK_SIZE = 1
+        assert text.readline() == "a\n" and text.tell() == cookie
+    with io.TextIOWrapper(io.BytesIO("a\rø!".encode()), encoding="utf-8") as text:
+        assert text.seek(cookie) == cookie and text.buffer.tell() == 4
+        assert text.tell() == cookie and text.read() == "ø!"
+    with io.TextIOWrapper(io.BytesIO(b"a\r"), encoding="utf-8") as text:
+        try:
+            text.seek(cookie)
+        except OSError as error:
+            assert str(error) == "can't restore logical file position"
+        else:
+            raise AssertionError("restored a cookie without enough decoded characters")
+
+    class Chunks(io.BytesIO):
+        def read1(self, size):
+            return self.parts.pop(0)
+
+    raw = Chunks()
+    raw.parts = [b"\xe2", b"", b"Z"]
+    with io.TextIOWrapper(raw, encoding="utf-8", errors="replace") as text:
+        assert text.read(2) == "\ufffdZ" and raw.parts == []
+
+    class InvalidReplay(io.BytesIO):
+        def read(self, size):
+            return bytearray()
+
+    with io.TextIOWrapper(InvalidReplay(b"a\rXY"), encoding="utf-8") as text:
+        try:
+            text.seek(cookie)
+        except TypeError as error:
+            assert str(error) == "underlying read() should have returned a bytes object, not 'bytearray'"
+        else:
+            raise AssertionError("accepted a bytearray during cookie restoration")
+        assert text.tell() == 2
+
     with io.TextIOWrapper(io.BytesIO("é\nXabc\n".encode()), encoding="utf-8") as text:
         text._CHUNK_SIZE = 4
         assert text.readline() == "é\n" and next(text) == "Xabc\n"
