@@ -40,8 +40,8 @@ pub(crate) fn specialize(module: &mut Module) {
                         return;
                     };
                     if facts.range_cursor(statement).is_some()
-                        || contains_loop(body)
-                        || contains_loop(orelse)
+                        || ir::contains_loop(body)
+                        || ir::contains_loop(orelse)
                     {
                         return;
                     }
@@ -89,14 +89,6 @@ fn literal(expression: &Expr) -> Option<i64> {
     } else {
         None
     }
-}
-
-fn contains_loop(body: &[Statement]) -> bool {
-    let mut found = false;
-    ir::walk_statements(body, &mut |statement| {
-        found |= matches!(statement, Statement::For { .. } | Statement::While(..));
-    });
-    found
 }
 
 /// Statement addresses identify the immutable analysis plan; they are never

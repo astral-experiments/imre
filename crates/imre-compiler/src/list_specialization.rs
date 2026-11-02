@@ -7,9 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::ir::{
-    Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions,
-};
+use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, contains_loop};
 
 /// Versions leaf range and canonical list loops after tuple scalarization.
 /// Unknown calls and mutations retain the original arbitrary-precision path.
@@ -150,42 +148,6 @@ fn rewrite_expression(expression: &mut Expr, locals: &mut Vec<Type>) {
     } else {
         crate::ir::children_mut(expression, |value| rewrite_expression(value, locals));
     }
-}
-
-/// An else suite is cloned with the loop, so nested loops there would multiply
-/// versions even though they are outside the input-stability proof's body.
-pub(crate) fn contains_loop(body: &[Statement]) -> bool {
-    let mut found = statements_contain_loop(body);
-    walk_expressions(body, &mut |value| {
-        if let ExprKind::Scope { body, .. } = &value.kind {
-            found |= statements_contain_loop(body);
-        }
-    });
-    found
-}
-
-/// Checks each statement region without entering expression scopes. The shared
-/// expression walk visits those scopes once, including their nested expressions.
-fn statements_contain_loop(body: &[Statement]) -> bool {
-    body.iter().any(|statement| match statement {
-        Statement::For { .. } | Statement::While(..) => true,
-        Statement::Scope { body, .. } => statements_contain_loop(body),
-        Statement::If(_, yes, no) => statements_contain_loop(yes) || statements_contain_loop(no),
-        Statement::Try {
-            body,
-            handlers,
-            orelse,
-            finalbody,
-        } => {
-            statements_contain_loop(body)
-                || handlers
-                    .iter()
-                    .any(|handler| statements_contain_loop(&handler.body))
-                || statements_contain_loop(orelse)
-                || statements_contain_loop(finalbody)
-        }
-        _ => false,
-    })
 }
 
 struct Plan<'a> {
@@ -516,6 +478,7 @@ fn builtin(operation: Builtin, args: Vec<Expr>) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::walk_expressions;
 
     fn optimized(source: &str) -> Module {
         let mut module =
