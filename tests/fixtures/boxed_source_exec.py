@@ -697,7 +697,7 @@ def exec_caller_namespaces():
     assert C.second == C.third == 12
     separate = {}
     assert exec(compile("40 + 2", "caller", "eval"), {}, separate) is None
-    exec("result = n", globals={"n": 8}, locals=separate)
+    exec("result = n", globals={"n": 8}, locals=separate, closure=None)
     assert separate == {"result": 8}
 
 

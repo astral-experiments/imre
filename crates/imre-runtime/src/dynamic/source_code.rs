@@ -2949,7 +2949,7 @@ impl Context {
         let filename = self.text("<string>");
         let mode = self.text("eval");
         let code = self.compile_source(text, filename, mode, false)?;
-        self.run_in_namespace(code, globals, Some(locals), None, "eval")
+        self.run_in_namespace(code, globals, Some(locals), None, "eval", None)
     }
 
     /// Run eval or exec with explicit namespaces or the active Python frame.
@@ -2960,14 +2960,26 @@ impl Context {
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        let Some((&source, namespaces)) = args.split_first() else {
+        let Some(&source) = args.first() else {
             return Err(Error::new(
                 "TypeError",
                 format!("{name}() takes at least 1 positional argument (0 given)"),
             ));
         };
-        let [globals, locals] =
-            builtins::bind_method_arguments(name, namespaces, kwargs, ["globals", "locals"], 2)?;
+        let (globals, locals, closure) = if name == "exec" {
+            let [_, globals, locals, closure] = builtins::bind_method_arguments(
+                name,
+                args,
+                kwargs,
+                ["", "globals", "locals", "closure"],
+                3,
+            )?;
+            (globals, locals, closure.filter(|&value| value != NONE))
+        } else {
+            let [_, globals, locals] =
+                builtins::bind_method_arguments(name, args, kwargs, ["", "globals", "locals"], 3)?;
+            (globals, locals, None)
+        };
         let globals = globals.filter(|&g| g != NONE);
         let locals = match locals.filter(|&l| l != NONE) {
             Some(locals) => Some(locals),
@@ -2978,11 +2990,8 @@ impl Context {
             Some(globals) => globals,
             None => self.module_globals(scope)?,
         };
-        if name == "exec" {
-            self.exec_source(source, globals, locals, None)
-        } else {
-            self.run_in_namespace(source, globals, locals, None, "eval")
-        }
+        let value = self.run_in_namespace(source, globals, locals, None, name, closure)?;
+        Ok(if name == "exec" { NONE } else { value })
     }
 
     /// Resolve the caller's namespace, copying bindings only for optimized frames.
@@ -3060,7 +3069,7 @@ impl Context {
         locals: Option<Id>,
         function: Option<Id>,
     ) -> Result<Id> {
-        self.run_in_namespace(source, globals, locals, function, "exec")
+        self.run_in_namespace(source, globals, locals, function, "exec", None)
             .map(|_| NONE)
     }
 
@@ -3071,6 +3080,7 @@ impl Context {
         locals: Option<Id>,
         function: Option<Id>,
         mode: &str,
+        closure: Option<Id>,
     ) -> Result<Id> {
         if self.dict_storage(globals).is_none() {
             let ty = self.type_name(globals);
@@ -3129,7 +3139,34 @@ impl Context {
                     "code object passed to eval() may not contain free variables",
                 ));
             }
+            Value::Code(code) if !code.freevars.is_empty() => {
+                let required = code.freevars.len();
+                if let Some(Value::Tuple(cells)) = closure.map(|id| self.heap.get(id))
+                    && cells.len() == required
+                    && cells
+                        .iter()
+                        .all(|&id| matches!(self.heap.get(id), Value::Cell(_)))
+                {
+                    return Err(unsupported("exec with an explicit closure"));
+                }
+                return Err(Error::new(
+                    "TypeError",
+                    format!("code object requires a closure of exactly length {required}"),
+                ));
+            }
+            Value::Code(_) if closure.is_some() => {
+                return Err(Error::new(
+                    "TypeError",
+                    "cannot use a closure with this code object",
+                ));
+            }
             Value::Code(_) => source,
+            _ if closure.is_some() => {
+                return Err(Error::new(
+                    "TypeError",
+                    "closure can only be used when source is a code object",
+                ));
+            }
             Value::Str(_) | Value::Bytes(_) | Value::ByteArray(_) => {
                 let filename = self.text("<string>");
                 let mode_id = self.text(mode);
