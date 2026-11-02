@@ -517,7 +517,7 @@ pub(super) fn module_call(
     let [pattern, string, flags] = bind(name, args, kwargs, ["pattern", "string", "flags"])?;
     let string = string.ok_or_else(|| missing("string"))?;
     let pattern = compiled(ctx, pattern.ok_or_else(|| missing("pattern"))?, flags)?;
-    if let Some(method @ ("search" | "finditer")) = name.strip_prefix("re.") {
+    if let Some(method @ ("search" | "finditer" | "findall")) = name.strip_prefix("re.") {
         return search(ctx, method, &[pattern, string], &[]);
     }
     call(ctx, name, &[pattern, string])
@@ -763,6 +763,11 @@ pub(super) fn search(
         }
     };
     let (start, end) = (byte(start), byte(end));
+    if method == "findall" {
+        // Keep the prefix for anchors and word boundaries before pos.
+        let text = text[..end].to_vec();
+        return findall(ctx, &pattern, &text, start);
+    }
     if matches!(method, "scanner" | "finditer") {
         // Resizing a bytearray or releasing a view requires a persistent scanner export.
         if matches!(
@@ -857,61 +862,38 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
         "re.match" | "re.fullmatch" => capture(ctx, first, regex, pattern.bytes, subject, |text| {
             Input::new(text).anchored(Anchored::Yes)
         }),
-        "re.findall" | "pattern.findall" => {
-            let text = subject_bytes(ctx, subject, pattern.bytes)?.to_vec();
-            let mut found = Vec::new();
-            let mut captures = regex.create_captures();
-            let mut start = 0;
-            let mut retry = false;
-            loop {
-                if retry
-                    && !split::nonempty(&pattern, &text, start, &mut captures).map_err(
-                        |message| pattern_error(ctx, pattern.source, pattern.flags, message),
-                    )?
-                {
-                    if start == text.len() {
-                        break;
-                    }
-                    start += 1;
-                    while !pattern.bytes && start < text.len() && text[start] & 0xc0 == 0x80 {
-                        start += 1;
-                    }
-                    retry = false;
-                }
-                if !retry {
-                    regex.captures(Input::new(&text).range(start..text.len()), &mut captures);
-                }
-                let Some(span) = captures.get_group(0) else {
-                    break;
-                };
-                let eol = captures.group_info().to_index(PatternID::ZERO, "imre.eol");
-                let end = eol
-                    .and_then(|i| captures.get_group(i))
-                    .map_or(span.end, |nl| nl.start);
-                start = end;
-                retry = end == span.start;
-                let fields: Vec<_> = group_spans(&captures)
-                    .map(|span| span.map(|s| &text[s.range()]))
-                    .collect();
-                let value = match fields.as_slice() {
-                    [complete] => group_value(complete.unwrap_or_default(), pattern.bytes),
-                    [_, one] => group_value(one.unwrap_or_default(), pattern.bytes),
-                    [_, groups @ ..] => {
-                        let values = groups
-                            .iter()
-                            .map(|s| ctx.alloc(group_value(s.unwrap_or_default(), pattern.bytes)))
-                            .collect();
-                        Value::Tuple(values)
-                    }
-                    [] => unreachable!("every regex has an overall match"),
-                };
-                found.push(ctx.alloc(value));
-            }
-            Ok(ctx.alloc(Value::List(found)))
-        }
         _ => Err(Error::new(
             "AttributeError",
             format!("no regex operation {name}"),
         )),
     }
+}
+
+/// Collect captures starting at a byte offset in the bounded subject.
+fn findall(ctx: &mut Context, pattern: &Pattern, text: &[u8], start: usize) -> Result<Id> {
+    let mut found = Vec::new();
+    let mut captures = pattern.regex.create_captures();
+    let mut previous = None;
+    while let Some(span) = split::next_span(pattern, text, start, previous, &mut captures)
+        .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?
+    {
+        previous = Some(span);
+        let fields: Vec<_> = group_spans(&captures)
+            .map(|span| span.map(|s| &text[s.range()]))
+            .collect();
+        let value = match fields.as_slice() {
+            [complete] => group_value(complete.unwrap_or_default(), pattern.bytes),
+            [_, one] => group_value(one.unwrap_or_default(), pattern.bytes),
+            [_, groups @ ..] => {
+                let values = groups
+                    .iter()
+                    .map(|s| ctx.alloc(group_value(s.unwrap_or_default(), pattern.bytes)))
+                    .collect();
+                Value::Tuple(values)
+            }
+            [] => unreachable!("every regex has an overall match"),
+        };
+        found.push(ctx.alloc(value));
+    }
+    Ok(ctx.alloc(Value::List(found)))
 }
