@@ -2821,6 +2821,8 @@ impl Context {
             }
             "_imre_itertools" => {
                 for attr in [
+                    "_accumulate_allocate",
+                    "_accumulate_state",
                     "_cycle_allocate",
                     "_cycle_next",
                     "_starmap_allocate",
@@ -3370,6 +3372,7 @@ impl Context {
             {
                 self.freeze_itertools_types(scope);
                 for (name, owner) in [
+                    ("accumulate", "itertools.accumulate"),
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),
                     ("dropwhile", "itertools.dropwhile"),

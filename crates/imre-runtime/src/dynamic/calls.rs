@@ -5488,8 +5488,20 @@ impl Context {
         };
         let new = self.class_attr(class, "__new__");
         if !self.uses_object_new(Some(base)) {
-            let name = self.class_name(class);
-            let owner = if new.is_some_and(|new| !matches!(self.heap.get(new), Value::Native(_))) {
+            let name = self.itertools_layout(class).unwrap_or_else(|| self.class_name(class));
+            let owner = if let Some(layout) = self.itertools_layout(base) {
+                // Bundled cursor constructors implement a native allocator in Python.
+                // An inherited allocator is reported on the requested subtype.
+                let callable = |value| match *self.heap.get(value) {
+                    Value::StaticMethod { callable, .. } => callable,
+                    _ => value,
+                };
+                if new.map(callable) == self.class_attr(base, "__new__").map(callable) {
+                    name
+                } else {
+                    layout
+                }
+            } else if new.is_some_and(|new| !matches!(self.heap.get(new), Value::Native(_))) {
                 self.class_name(base)
             } else {
                 name
