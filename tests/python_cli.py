@@ -2044,6 +2044,7 @@ def report(text):
             "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
+            "boxed_colorize.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
             "boxed_string_surrogates.py",
