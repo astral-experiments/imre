@@ -2285,7 +2285,9 @@ impl Context {
             Value::Socket(ref socket) if name == "family" => {
                 return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
             }
-            Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
+            Value::Socket(ref socket) if name == "type" => {
+                return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
+            }
             Value::BufferedRandom(ref file) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
