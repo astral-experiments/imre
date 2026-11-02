@@ -1261,6 +1261,11 @@ impl IntrinsicModule {
             (Self::Typing, "T") => Intrinsic::ObjectRuntimeExport("typing.T"),
             (Self::Typing, "KT") => Intrinsic::ObjectRuntimeExport("typing.KT"),
             (Self::Typing, "VT") => Intrinsic::ObjectRuntimeExport("typing.VT"),
+            (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
+            (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
+            (Self::Typing, "MutableMapping") => {
+                Intrinsic::ObjectRuntimeExport("typing.MutableMapping")
+            }
             (Self::Typing, "List") => Intrinsic::ObjectRuntimeExport("typing.List"),
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
