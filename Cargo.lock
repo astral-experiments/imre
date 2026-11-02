@@ -704,6 +704,7 @@ name = "imre-compiler"
 version = "0.1.5"
 dependencies = [
  "blake3",
+ "fancy-regex",
  "imre-ast",
  "imre-regex",
  "libc",
