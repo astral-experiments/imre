@@ -124,7 +124,7 @@ class Popen:
             if self.stdin is None or self._communication_started:
                 input = None
         single_pipe = (timeout is None and not self._communication_started
-                       and (self.stdin, self.stdout, self.stderr).count(None) >= 2)
+                       and (self.stdin is None) + (self.stdout is None) + (self.stderr is None) >= 2)
         if single_pipe:
             reader = self.stdout or self.stderr
             if isinstance(reader, io.TextIOWrapper):
