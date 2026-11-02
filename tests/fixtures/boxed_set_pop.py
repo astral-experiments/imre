@@ -25,7 +25,13 @@ def current():
 
     values = Subset((1, 2, 3))
     assert values.pop() == "override"
-    assert {set.pop(values) for _ in range(3)} == {1, 2, 3} and not values
+    assert {set.pop(values) for _ in range(3)} == {1, 2, 3}
+    try:
+        set.pop(values)
+    except KeyError as error:
+        assert error.args == ("pop from an empty set",)
+    else:
+        raise AssertionError("base descriptor left inherited storage nonempty")
     assert not hasattr(frozenset(), "pop")
 
     values = {42}
