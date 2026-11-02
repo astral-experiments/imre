@@ -1,7 +1,9 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
 use super::Context;
-use super::value::{ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value};
+use super::value::{
+    DictIterator, ELLIPSIS, Error, FALSE, Id, NONE, NOT_IMPLEMENTED, Result, TRUE, Value,
+};
 
 mod collections;
 mod dir;
@@ -213,7 +215,10 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
 
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
-    DictIterator::class(name).is_some() || matches!(
+    if DictIterator::class(name).is_some() {
+        return true;
+    }
+    matches!(
         name,
         "iterator"
             | "generator"

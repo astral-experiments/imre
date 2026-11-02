@@ -2939,7 +2939,8 @@ impl Context {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
             Value::Native(ref class)
-                if DictIterator::METHODS.contains(&name) && DictIterator::class(class).is_some() =>
+                if DictIterator::METHODS.contains(&name)
+                    && DictIterator::class(class).is_some() =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
@@ -4517,7 +4518,7 @@ impl Context {
             Value::Native(name) if let Some(class) = stdlib::fixed_structseq::fixed_type(&name) => {
                 stdlib::fixed_structseq::construct(self, class, &args, &kwargs)
             }
-            Value::Native(name)
+            Value::Native(ref name)
                 if let Some((owner, slot)) = name.split_once('.')
                     && DictIterator::METHODS.contains(&slot)
                     && DictIterator::class(owner).is_some() =>

@@ -27,6 +27,9 @@ def current():
             cursor = start(view)
             step = cursor.__next__
             assert cursor.__iter__() is cursor
+            for slot in (cursor.__iter__, type(cursor).__iter__, step, type(cursor).__next__):
+                assert slot.__text_signature__ == "($self, /)"
+                print(slot.__qualname__, slot.__doc__)
             print(step(), type(cursor).__next__(cursor))
             try:
                 step()

@@ -1579,7 +1579,8 @@ impl DictIterator {
     }
 
     pub(super) fn class(name: &str) -> Option<&'static str> {
-        Self::KEYS.into_iter()
+        Self::KEYS
+            .into_iter()
             .chain(Self::VALUES)
             .chain(Self::ITEMS)
             .chain([Self::ORDERED])

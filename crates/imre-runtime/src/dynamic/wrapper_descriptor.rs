@@ -240,6 +240,11 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__call__" => {
                 ctx.text("($self, /, *args, **kwargs)")
             }
+            "__doc__" if self.name == "__iter__" => ctx.text("Implement iter(self)."),
+            "__doc__" if self.name == "__next__" => ctx.text("Implement next(self)."),
+            "__text_signature__" if matches!(self.name, "__iter__" | "__next__") => {
+                ctx.text("($self, /)")
+            }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
             "__text_signature__" if self.name == "__contains__" => ctx.text("($self, key, /)"),
             "__doc__" if self.name == "__neg__" => ctx.text("-self"),
