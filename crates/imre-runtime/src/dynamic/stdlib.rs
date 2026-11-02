@@ -588,7 +588,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
-        ("posixpath", "join" | "abspath" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
+        ("posixpath", "join" | "dirname") => ctx.builtin(&format!("os.path.{name}")),
         ("os" | "posix", "getcwd" | "getcwdb") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -1953,7 +1953,6 @@ pub(super) fn call(
         | "sysconfig.get_config_var"
         | "sysconfig.get_preferred_scheme"
         | "os.confstr"
-        | "os.path.abspath"
         | "os.path.dirname"
         | "struct.calcsize"
         | "_string.formatter_parser"
