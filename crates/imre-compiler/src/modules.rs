@@ -51,6 +51,10 @@ fn stat_mode_source() -> Option<&'static str> {
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "unittest.signals" => Some((
+            "unittest/signals.py",
+            include_str!("../stdlib/unittest/signals.py"),
+        )),
         // CPython 3.14.5 Lib/unittest/util.py. See stdlib/docstrings/LICENSE.
         "unittest.util" => Some((
             "unittest/util.py",
@@ -1751,6 +1755,16 @@ impl SourceModule {
 
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
+        if self.is_bundled("unittest") {
+            let export = match name {
+                "registerResult" => Some("unittest.registerResult"),
+                "removeResult" => Some("unittest.removeResult"),
+                _ => None,
+            };
+            if let Some(export) = export {
+                return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(export)));
+            }
+        }
         let binding = *self.bindings.get(name)?;
         (self.archive.is_none() || matches!(binding, Binding::Definition(_))).then_some(binding)
     }
