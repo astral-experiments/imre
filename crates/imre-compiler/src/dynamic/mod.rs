@@ -202,6 +202,9 @@ impl<'a> Visitor<'a> for Imports {
                 for alias in &imp.names {
                     let name = alias.name.as_str();
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+                    if name == "__future__" {
+                        self.runtime_imports = true;
+                    }
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
@@ -401,6 +404,7 @@ pub(crate) fn compile(
     if !runtime_imports
         && !(cfg!(unix) && src.contains("signal"))
         && ![
+            "__future__",
             "_imp",
             "sys",
             "platform",
