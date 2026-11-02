@@ -124,9 +124,30 @@ def check_base_writes():
             raise AssertionError("closed base operation returned a value")
 
 
+def check_text_base():
+    from _collections_abc import _check_methods
+
+    print(_check_methods(io.TextIOBase, "read", "write"))
+    stream = io.StringIO("untouched")
+    for transfer, values in ((io.TextIOBase.read, (0, 1 << 80, None)),
+                             (io.TextIOBase.write, (b"x", "ok", "a\0b", chr(0xd800)))):
+        for value in values:
+            try:
+                transfer(stream, value)
+            except (io.UnsupportedOperation, TypeError, ValueError, OverflowError) as error:
+                print(type(error).__name__, str(error))
+            else:
+                raise AssertionError("base operation returned a value")
+    print(stream.getvalue(), stream.tell())
+    try:
+        io.TextIOBase.readline(stream, ClosingOffset(stream))
+    except io.UnsupportedOperation as error:
+        print(error.args, stream.closed)
+
 
 def exercise(path):
     check_base_writes()
+    check_text_base()
     events = []
 
     class Byte:
