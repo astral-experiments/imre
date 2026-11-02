@@ -117,6 +117,10 @@ impl Calendar {
         make_delta(mask, words).map(Self)
     }
 
+    pub(crate) fn negate_delta(&self) -> Result<Self, Error> {
+        negate_delta(&self.0).map(Self)
+    }
+
     pub(crate) fn seconds(&self) -> f64 {
         total_seconds(delta(&self.0))
     }

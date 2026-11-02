@@ -240,7 +240,38 @@ def test_subclass_construction():
         raise AssertionError("date allocated an incompatible datetime layout")
 
 
+def test_timedelta_negation():
+    class Delta(timedelta):
+        @property
+        def days(self):
+            raise AssertionError("negation read a Python attribute")
+
+    class Override(Delta):
+        def __neg__(self):
+            return "overridden"
+
+    zero = timedelta()
+    assert -zero is zero
+    assert -timedelta(microseconds=1) == timedelta(-1, 86399, 999999)
+    assert -timedelta(-1, 86399, 999999) == timedelta(microseconds=1)
+    assert -timedelta.min == timedelta(days=999999999)
+    assert -timedelta(days=999999999) == timedelta.min
+    try:
+        -timedelta.max
+    except OverflowError as error:
+        assert str(error) == "days=-1000000000; must have magnitude <= 999999999"
+    else:
+        raise AssertionError("negation exceeded the minimum duration")
+
+    inherited = -Delta(microseconds=5)
+    assert type(inherited) is timedelta and inherited == timedelta(microseconds=-5)
+    custom = Override(days=1)
+    assert -custom == "overridden"
+    assert timedelta.__neg__(custom) == timedelta(days=-1)
+
+
 def current():
+    test_timedelta_negation()
     test_subclass_construction()
     test_now()
     test_time_of_day()
