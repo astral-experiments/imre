@@ -1674,28 +1674,23 @@ pub(super) fn call(
         }
         return Ok(result);
     }
-    if name == "_imre_itertools._chain_get" || name == "_imre_itertools._chain_set" {
-        if !kwargs.is_empty()
-            || (name.ends_with("_get") && args.len() != 2)
-            || (name.ends_with("_set") && args.len() != 3)
+    if name == "_imre_itertools._chain_next" {
+        return itertools::chain_next(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._chain_set" {
+        if let [receiver, active, value] = args
+            && kwargs.is_empty()
+            && let Value::Instance { fields, .. } = ctx.heap.get_mut(*receiver)
         {
-            return Err(Error::new("TypeError", "invalid chain state arguments"));
+            let key = if *active == TRUE {
+                "_active"
+            } else {
+                "_sources"
+            };
+            fields.insert(key.to_owned(), *value);
+            return Ok(NONE);
         }
-        let key = if args[1] == TRUE {
-            "_active"
-        } else {
-            "_sources"
-        };
-        if let Value::Instance { fields, .. } = ctx.heap.get_mut(args[0]) {
-            if name.ends_with("_set") {
-                fields.insert(key.to_owned(), args[2]);
-                return Ok(NONE);
-            }
-            if let Some(&value) = fields.get(key) {
-                return Ok(value);
-            }
-        }
-        return Err(Error::new("TypeError", "invalid chain state receiver"));
+        return Err(Error::new("TypeError", "invalid chain state arguments"));
     }
     if name == super::deque::CLASS {
         return super::deque::construct(ctx, args, kwargs);
