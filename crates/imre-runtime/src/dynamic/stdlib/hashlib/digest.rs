@@ -27,6 +27,10 @@ impl SharedHash {
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the shared mutex already heap-allocates the portable hash state"
+)]
 pub(crate) enum State {
     Portable(HashState),
     OpenSsl(openssl::Stream),
