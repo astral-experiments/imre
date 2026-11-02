@@ -614,19 +614,29 @@ impl Checker<'_> {
         receiver: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        self.reject_builtin_keywords(call)?;
-        let [old, new] = call.arguments.args.as_ref() else {
-            return Err(error(
-                self.source,
-                call,
-                "str.replace requires old and new strings",
-            ));
+        let (old, new, count) = match (&*call.arguments.args, &*call.arguments.keywords) {
+            ([old, new], []) => (old, new, None),
+            ([old, new, count], []) => (old, new, Some(count)),
+            ([old, new], [kw]) if kw.arg.as_deref() == Some("count") => (old, new, Some(&kw.value)),
+            _ => return Err(self.object_builtin_error("str.replace", call)),
         };
-        let old = self.expr_expected(old, Type::Str)?;
-        let new = self.expr_expected(new, Type::Str)?;
+        let old = self
+            .expr_expected(old, Type::Str)
+            .map_err(|_| self.object_builtin_error("str.replace", call))?;
+        let new = self
+            .expr_expected(new, Type::Str)
+            .map_err(|_| self.object_builtin_error("str.replace", call))?;
+        let mut args = vec![receiver, old, new];
+        if let Some(count) = count {
+            let count = powers::integer(self.expr(count)?);
+            if count.ty != Type::Int {
+                return Err(self.object_builtin_error("str.replace", call));
+            }
+            args.push(count);
+        }
         Ok(Expr {
             ty: Type::Str,
-            kind: ExprKind::Builtin(Builtin::StringReplace, vec![receiver, old, new]),
+            kind: ExprKind::Builtin(Builtin::StringReplace, args),
         })
     }
 

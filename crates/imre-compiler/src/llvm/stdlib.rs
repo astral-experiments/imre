@@ -150,6 +150,16 @@ impl Emitter<'_, '_> {
                 Type::Str,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::StringReplace if args.len() == 4 => self.call(
+                "imre_str_replace_count",
+                Type::Str,
+                &[
+                    &args[0].value,
+                    &args[1].value,
+                    &args[2].value,
+                    &args[3].value,
+                ],
+            ),
             Builtin::StringReplace => self.call(
                 "imre_str_replace",
                 Type::Str,

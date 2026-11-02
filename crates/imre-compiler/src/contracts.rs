@@ -1151,6 +1151,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_join_buffer_new"
                 | "imre_join_buffer_finish"
                 | "imre_str_replace"
+                | "imre_str_replace_count"
                 | "imre_print_str"
                 | "imre_print_bytes"
                 | "imre_bytes_str"
