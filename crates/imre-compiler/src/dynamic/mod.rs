@@ -110,6 +110,7 @@ impl Imports {
                 name,
                 "_imp"
                     | "_hashlib"
+                    | "ssl"
                     | "atexit"
                     | "faulthandler"
                     | "code"
@@ -524,6 +525,7 @@ pub(crate) fn compile(
         || [
             "__future__",
             "hashlib",
+            "ssl",
             "_imp",
             "atexit",
             "faulthandler",
@@ -990,6 +992,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "re",
     "re._constants",
     "signal",
+    "ssl",
     "stat",
     "string",
     "string.templatelib",

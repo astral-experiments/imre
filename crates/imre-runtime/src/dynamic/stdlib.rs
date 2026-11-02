@@ -64,6 +64,8 @@ mod resource;
 mod select;
 #[cfg(unix)]
 pub(super) mod signal;
+#[cfg(unix)]
+pub(super) mod ssl;
 mod socket;
 mod structure;
 mod subprocess;
@@ -113,6 +115,10 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
+    #[cfg(unix)]
+    if name == "_imre_ssl" {
+        return ssl::provider::available();
+    }
     if name == "_hashlib" {
         return hashlib::openssl::provider().is_some();
     }
@@ -2319,6 +2325,10 @@ pub(super) fn call(
         "_operator._compare_digest" | "_hashlib.compare_digest"
     ) {
         return hmac::compare(ctx, name, args, kwargs);
+    }
+    #[cfg(unix)]
+    if let Some(function) = name.strip_prefix("_imre_ssl.") {
+        return ssl::call(ctx, function, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("_hashlib.") {
         return hashlib::call_openssl(ctx, function, args, kwargs);
