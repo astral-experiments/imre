@@ -3996,7 +3996,12 @@ impl Context {
         }
         let method = if matches!(
             name,
-            "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__"
+            "__mul__"
+                | "__rmul__"
+                | "__truediv__"
+                | "__rtruediv__"
+                | "__floordiv__"
+                | "__rfloordiv__"
         ) && self.timedelta_slot_class(obj).is_some()
         {
             Some(self.lookup_attr(obj, name)?)
@@ -4217,7 +4222,7 @@ impl Context {
         };
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "*" | "/") {
+                if matches!(op, "*" | "/" | "//") {
                     self.timedelta_slot_class(id)
                 } else {
                     None
