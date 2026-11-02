@@ -154,6 +154,7 @@ impl BuiltinDescriptor {
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 Some((layout.class, attr, &["__reduce__"][..]))
             }
+            Some((namespace::CLASS, attr)) => Some((namespace::CLASS, attr, &["__replace__"][..])),
             Some(("typing.TypeAliasType", attr)) => {
                 Some(("typing.TypeAliasType", attr, &["__reduce__"][..]))
             }
@@ -349,15 +350,15 @@ impl BuiltinDescriptor {
             }
             "typing.TypeAliasType" => matches!(ctx.heap.get(receiver), Value::TypeAlias { .. }),
             "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),
-            super::namedtuple::GETTER => matches!(ctx.heap.get(receiver), Value::TupleGetter { .. }),
+            super::namedtuple::GETTER => {
+                matches!(ctx.heap.get(receiver), Value::TupleGetter { .. })
+            }
             "object" => true,
             "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod { .. }),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
-            super::namespace::CLASS => {
-                ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
-            }
+            super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
             "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
             class @ (stdlib::fixed_structseq::SCHED_PARAM
@@ -381,7 +382,9 @@ impl BuiltinDescriptor {
             }
             "dict" => ctx.dict_storage(receiver).is_some(),
             "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
-            deque::ITERATOR | deque::REVERSE_ITERATOR => ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner),
+            deque::ITERATOR | deque::REVERSE_ITERATOR => {
+                ctx.heap.get(receiver).intrinsic_type_name() == Some(self.owner)
+            }
             deque::CLASS => matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             _ => ctx.builtin_slot_accepts(receiver, self.owner),

@@ -1,4 +1,4 @@
-//! Construction and comparison for types.SimpleNamespace.
+//! Construction, replacement and comparison for types.SimpleNamespace.
 
 use super::value::{Error, Id, NONE, NOT_IMPLEMENTED, Result, Value};
 use super::{Context, builtins};
@@ -46,6 +46,33 @@ pub(super) fn initialize(
     };
     builtins::update_dict(ctx, dictionary, input, kwargs)?;
     Ok(NONE)
+}
+
+/// Invoke the actual class with no arguments, then update its namespace storage in place.
+pub(super) fn replace(
+    ctx: &mut Context,
+    object: Id,
+    class: Id,
+    changes: &[(String, Id)],
+) -> Result<Id> {
+    let replacement = ctx.call(class, vec![], vec![])?;
+    let Some(target_class) = super::namespace::instance_class(ctx, replacement) else {
+        let returned = ctx.exact_type(replacement)?;
+        let constructor = super::stdlib::qualified_type(ctx, class)?;
+        let returned = super::stdlib::qualified_type(ctx, returned)?;
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "expect types.SimpleNamespace type, but {}() returned '{}' object",
+                ctx.str_value(constructor)?,
+                ctx.str_value(returned)?,
+            ),
+        ));
+    };
+    let source = ctx.instance_dictionary(object, class);
+    let target = ctx.instance_dictionary(replacement, target_class);
+    builtins::update_dict(ctx, target, Some(source), changes)?;
+    Ok(replacement)
 }
 
 pub(super) fn equal(ctx: &mut Context, object: Id, other: Id, invert: bool) -> Result<Id> {

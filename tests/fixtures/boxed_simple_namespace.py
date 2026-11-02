@@ -1,5 +1,6 @@
 """Exercise the boxed SimpleNamespace descriptor used by pprint's dispatch table."""
 
+from copy import replace
 from types import SimpleNamespace
 
 
@@ -30,4 +31,24 @@ def current():
         raise AssertionError("the builtin repr slot was writable")
 
     assert handlers[type(ns).__repr__] is descriptor
+    class Initialized(SimpleNamespace):
+        def __init__(self):
+            self.default = "new"
+
+    original = Initialized()
+    del original.default
+    original.items = []
+    vars(original)[1] = "non-string key"
+    replaced = replace(original, changed=True)
+    assert type(replaced) is Initialized
+    assert vars(replaced) == {"default": "new", "items": [], 1: "non-string key", "changed": True}
+    assert replaced.items is original.items
+    assert not hasattr(original, "changed")
+    assert SimpleNamespace.__replace__.__objclass__ is SimpleNamespace
+    try:
+        original.__replace__(1)
+    except TypeError as error:
+        assert str(error) == "__replace__() takes no positional arguments"
+    else:
+        raise AssertionError("accepted a positional change")
     print("passed")
