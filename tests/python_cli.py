@@ -1728,6 +1728,7 @@ def report(text):
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_registry.py",
             "boxed_unittest_class_cleanup.py",
+            "boxed_pathlib.py",
             "boxed_posixpath.py",
             "boxed_linecache.py",
             "boxed_stat.py",
