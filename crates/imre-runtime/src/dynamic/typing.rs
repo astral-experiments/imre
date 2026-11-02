@@ -1665,8 +1665,18 @@ impl Context {
         mro.push(NONE);
         mro.extend_from_slice(&ancestors);
         let slot_names = self.declared_slot_names(scope)?;
-        let members = if self.scope_data(scope).class_namespace.as_ref().is_some_and(|ns| ns.member_slots) {
-            self.prepare_slot_members(&name, scope, &bases, slot_names.as_deref().unwrap_or_default())?
+        let members = if self
+            .scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .is_some_and(|ns| ns.member_slots)
+        {
+            self.prepare_slot_members(
+                &name,
+                scope,
+                &bases,
+                slot_names.as_deref().unwrap_or_default(),
+            )?
         } else {
             Vec::new()
         };

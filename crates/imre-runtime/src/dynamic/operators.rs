@@ -2040,7 +2040,10 @@ impl Context {
                         Value::SlotMember { owner, name } => {
                             let owner = ctx.class_name(*owner);
                             let field = ctx.str_value(*name)?;
-                            append_rendered_text(&mut output, &format!("<member '{field}' of '{owner}' objects>"))?;
+                            append_rendered_text(
+                                &mut output,
+                                &format!("<member '{field}' of '{owner}' objects>"),
+                            )?;
                             continue;
                         }
                         Value::ReadOnlyMember(owner, field) => {
@@ -4108,7 +4111,10 @@ impl Context {
             if owner.is_none()
                 || matches!(
                     self.heap.get(self.scalar_value(b)),
-                    Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. } | Value::Array(_)
+                    Value::Bytes(_)
+                        | Value::ByteArray(_)
+                        | Value::MemoryView { .. }
+                        | Value::Array(_)
                 )
             {
                 return Ok(Some(builtins::boolean(self.equal(a, b) == (op == "=="))));

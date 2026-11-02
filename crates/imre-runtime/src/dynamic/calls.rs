@@ -1176,7 +1176,10 @@ impl Context {
             | ("_contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | (super::namedtuple::GETTER, Value::TupleGetter { .. })
-            | ("member_descriptor", Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. })
+            | (
+                "member_descriptor",
+                Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. },
+            )
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
@@ -1816,7 +1819,11 @@ impl Context {
                 "__doc__" => return Ok(NONE),
                 "__qualname__" => {
                     let qualname = self.lookup_attr(owner, "__qualname__")?;
-                    return Ok(self.text(format!("{}.{}", self.str_value(qualname)?, self.str_value(field)?)));
+                    return Ok(self.text(format!(
+                        "{}.{}",
+                        self.str_value(qualname)?,
+                        self.str_value(field)?
+                    )));
                 }
                 _ => {}
             },
@@ -2201,23 +2208,27 @@ impl Context {
                 owner, name: field, ..
             } if HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
-                || stdlib::datetime::members(owner).is_some() => match name
+                || stdlib::datetime::members(owner).is_some() =>
             {
-                "__objclass__" => return Ok(self.builtin(owner)),
-                "__name__" => return Ok(self.text(field)),
-                "__qualname__" => {
-                    return Ok(self.text(format!("{}.{field}", owner.rsplit_once('.').unwrap().1)));
+                match name {
+                    "__objclass__" => return Ok(self.builtin(owner)),
+                    "__name__" => return Ok(self.text(field)),
+                    "__qualname__" => {
+                        return Ok(
+                            self.text(format!("{}.{field}", owner.rsplit_once('.').unwrap().1))
+                        );
+                    }
+                    "__get__" => {
+                        let get = self.builtin("getset_descriptor.__get__");
+                        return Ok(self.alloc(Value::Method {
+                            callable: get,
+                            receiver: obj,
+                            explicit: false,
+                        }));
+                    }
+                    _ => {}
                 }
-                "__get__" => {
-                    let get = self.builtin("getset_descriptor.__get__");
-                    return Ok(self.alloc(Value::Method {
-                        callable: get,
-                        receiver: obj,
-                        explicit: false,
-                    }));
-                }
-                _ => {}
-            },
+            }
             Value::Native(ref class) if let Some(owner) = HashState::provider_class(class) => {
                 let (module, short) = owner.rsplit_once('.').unwrap();
                 match name {
@@ -3474,7 +3485,10 @@ impl Context {
                         if matches {
                             layout.declared_slot = true;
                             layout.active_slot |= !shadowed
-                                && !frame.class_namespace.as_ref().is_some_and(|ns| ns.member_slots);
+                                && !frame
+                                    .class_namespace
+                                    .as_ref()
+                                    .is_some_and(|ns| ns.member_slots);
                         }
                     }
                 }
@@ -5144,7 +5158,9 @@ impl Context {
 
     /// Initialize descriptor names in class body insertion order, before subclass hooks run.
     pub(super) fn initialize_class_members(&mut self, class: Id, scope: Id) -> Result<()> {
-        let Value::Scope(class_scope) = self.heap.get_mut(scope) else { unreachable!() };
+        let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
         let members = class_scope
             .class_body
             .take()
