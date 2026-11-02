@@ -182,13 +182,9 @@ pub unsafe extern "C" fn imre_str_encode_options(
 ) -> *const Bytes {
     // SAFETY: the typed compiler passes three live, immutable strings.
     let (encoding, errors) = unsafe { (&*encoding, &*errors) };
-    let result = Codec::for_encode(encoding, errors).and_then(|codec| {
+    let result = StrEncoder::lookup(encoding, errors).and_then(|encoder| {
         // SAFETY: the caller roots the original string through conversion and error construction.
-        unsafe {
-            codec.encode(&*text, Some(errors), || {
-                Ok(StrOwner::acquire_word(text as usize))
-            })
-        }
+        unsafe { encoder.encode(&*text, errors, || Ok(StrOwner::acquire_word(text as usize))) }
     });
     finish(result.and_then(encoded_bytes), std::ptr::null())
 }
@@ -211,6 +207,92 @@ pub unsafe extern "C" fn imre_codec_decode(
         }),
         std::ptr::null(),
     )
+}
+
+/// Explicit byte order never inserts a BOM. U+FEFF in the input encodes normally.
+#[derive(Clone, Copy)]
+pub(crate) enum Utf16Order {
+    Little,
+    Big,
+}
+
+impl Utf16Order {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Little => "utf-16-le",
+            Self::Big => "utf-16-be",
+        }
+    }
+
+    pub(crate) fn append(
+        self,
+        bytes: &mut Vec<u8>,
+        units: impl IntoIterator<Item = u16>,
+    ) -> Result<()> {
+        for unit in units {
+            bytes.try_reserve(2).map_err(|_| Error::allocation())?;
+            bytes.extend_from_slice(&match self {
+                Self::Little => unit.to_le_bytes(),
+                Self::Big => unit.to_be_bytes(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// str.encode also supports stateless encoders without a full codec registry entry.
+#[derive(Clone, Copy)]
+pub(crate) enum StrEncoder {
+    Registered(Codec),
+    Utf16(Utf16Order),
+}
+
+impl StrEncoder {
+    pub(crate) fn lookup(encoding: &str, errors: &str) -> Result<Self> {
+        let key = encode_key(encoding, errors)?;
+        match key.as_str() {
+            "utf_16_le" | "utf_16le" | "unicodelittleunmarked" => {
+                Ok(Self::Utf16(Utf16Order::Little))
+            }
+            "utf_16_be" | "utf_16be" | "unicodebigunmarked" => Ok(Self::Utf16(Utf16Order::Big)),
+            _ => Ok(Self::Registered(Codec::by_key(&key, encoding)?)),
+        }
+    }
+
+    fn encode<'a>(
+        self,
+        text: &'a str,
+        errors: &str,
+        original: impl FnOnce() -> Result<StrOwner>,
+    ) -> Result<Cow<'a, [u8]>> {
+        match self {
+            Self::Registered(codec) => codec.encode(text, Some(errors), original),
+            Self::Utf16(order) => {
+                let mut bytes = Vec::new();
+                order.append(&mut bytes, text.encode_utf16())?;
+                Ok(Cow::Owned(bytes))
+            }
+        }
+    }
+
+    /// Boxed strings retain the original scalar input only when error construction needs it.
+    pub(crate) fn encode_str(self, text: &str, errors: &str) -> Result<Vec<u8>> {
+        match self.encode(text, errors, || super::text::try_owned_string(text))? {
+            Cow::Owned(bytes) => Ok(bytes),
+            Cow::Borrowed(bytes) => {
+                let mut output = super::bytes::allocate(bytes.len())?;
+                output.extend_from_slice(bytes);
+                Ok(output)
+            }
+        }
+    }
+}
+
+fn encode_key(encoding: &str, errors: &str) -> Result<String> {
+    if encoding.contains('\0') || errors.contains('\0') {
+        return Err(Error::new(Kind::ValueError, "embedded null character"));
+    }
+    normalize(encoding)
 }
 
 #[derive(Clone, Copy)]
@@ -246,23 +328,11 @@ impl Codec {
     }
 
     pub(super) fn for_encode(encoding: &str, errors: &str) -> Result<Self> {
-        if encoding.contains('\0') || errors.contains('\0') {
-            return Err(Error::new(Kind::ValueError, "embedded null character"));
-        }
-        Self::lookup(encoding)
+        Self::by_key(&encode_key(encoding, errors)?, encoding)
     }
 
-    /// Boxed strings retain a native copy of the input only when the encoder raises.
     pub(crate) fn encode_str(text: &str, encoding: &str, errors: &str) -> Result<Vec<u8>> {
-        let codec = Self::for_encode(encoding, errors)?;
-        match codec.encode(text, Some(errors), || super::text::try_owned_string(text))? {
-            Cow::Owned(bytes) => Ok(bytes),
-            Cow::Borrowed(bytes) => {
-                let mut output = super::bytes::allocate(bytes.len())?;
-                output.extend_from_slice(bytes);
-                Ok(output)
-            }
-        }
+        StrEncoder::Registered(Self::for_encode(encoding, errors)?).encode_str(text, errors)
     }
 
     fn by_key(key: &str, value: &str) -> Result<Self> {
