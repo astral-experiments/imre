@@ -30,7 +30,7 @@ mod inspect;
 pub(super) mod itertools;
 pub(super) mod locale;
 pub(super) mod tempfile;
-mod time;
+pub(super) mod time;
 mod tokenize;
 pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::{import_socket_constants, install_lowlevel_socket};
@@ -579,7 +579,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "time",
             "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep" | "gmtime" | "localtime"
-            | "mktime" | "strftime" | "ctime" | "struct_time",
+            | "mktime" | "strftime" | "ctime" | "struct_time" | "tzset",
         ) => ctx.builtin(&format!("time.{name}")),
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
