@@ -231,7 +231,9 @@ impl Array {
                 element.try_into().unwrap(),
             )))),
             Format::Long => Value::Int(Int::from(
-                c_long::from_ne_bytes(element.try_into().unwrap()) as i64,
+                c_long::from_ne_bytes(element.try_into().unwrap())
+                    .to_i64()
+                    .expect("C long fits in i64"),
             )),
             Format::LongLong => {
                 Value::Int(Int::from(i64::from_ne_bytes(element.try_into().unwrap())))

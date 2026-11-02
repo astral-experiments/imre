@@ -243,10 +243,7 @@ fn walk_nfa(
     let entry = match input.get_anchored() {
         Anchored::Yes => nfa.start_anchored(),
         Anchored::No => nfa.start_unanchored(),
-        Anchored::Pattern(pid) => match nfa.start_pattern(pid) {
-            Some(state) => state,
-            None => return None,
-        },
+        Anchored::Pattern(pid) => nfa.start_pattern(pid)?,
     };
     let groups = caps.group_info();
     let eol_start = groups
