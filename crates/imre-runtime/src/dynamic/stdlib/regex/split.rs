@@ -142,7 +142,7 @@ pub(super) fn nonempty(
             .split_retry
             .get_or_init(|| {
                 NFA::compiler()
-                    .syntax(syntax(pattern.bytes, pattern.flags))
+                    .syntax(syntax(pattern.bytes, pattern.engine_flags()))
                     .configure(NFA::config().utf8(!pattern.bytes))
                     .build(&pattern.engine_source)
                     .map_err(|e| e.to_string())

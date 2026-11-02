@@ -588,11 +588,17 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "file"
         }
         Value::RegexPattern(_)
-            if matches!(attr, "findall" | "match" | "fullmatch" | "search" | "split") =>
+            if matches!(
+                attr,
+                "findall" | "match" | "fullmatch" | "search" | "split" | "scanner"
+            ) =>
         {
             "pattern"
         }
-        Value::RegexMatch { .. } if matches!(attr, "group" | "groups") => "match",
+        Value::RegexScanner { .. } if matches!(attr, "match" | "search") => "scanner",
+        Value::RegexMatch(_) if matches!(attr, "group" | "groups" | "start" | "end" | "span") => {
+            "match"
+        }
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
         Value::Filter { .. } if matches!(attr, "__iter__" | "__next__") => "filter",
         Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",

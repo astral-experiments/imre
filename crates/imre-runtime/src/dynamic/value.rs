@@ -904,13 +904,17 @@ pub(super) enum Value {
     },
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(crate::objects::TextFile),
+    RegexScanner {
+        pattern: Id,
+        subject: Id,
+        start: Option<usize>,
+        end: usize,
+        retry: bool,
+    },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     NamedFileCloser(crate::Shared<std::cell::RefCell<super::stdlib::tempfile::NamedCloser>>),
     BufferedRandom(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
-    RegexMatch {
-        groups: Vec<Option<Id>>,
-        names: HashMap<String, usize>,
-    },
+    RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
     Context(std::rc::Rc<HashMap<Id, Id>>),
     ContextVar {
         name: Id,
@@ -977,6 +981,7 @@ impl Value {
             Self::DequeIterator { .. } => super::deque::ITERATOR,
             Self::List(_) => "list",
             Self::CallableIterator(_) => "callable_iterator",
+            Self::RegexScanner { .. } => "_sre.SRE_Scanner",
             Self::Tuple(_) => "tuple",
             Self::Slice(_) => "slice",
             Self::Range(_) => "range",
@@ -1356,8 +1361,11 @@ impl Value {
             } => visit.extend([*scope, *code, *globals]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo { decode, .. } => visit.push(*decode),
+            Self::RegexScanner {
+                pattern, subject, ..
+            } => visit.extend([*pattern, *subject]),
             Self::RegexPattern(pattern) => visit.push(pattern.source),
-            Self::RegexMatch { groups, .. } => visit.extend(groups.iter().flatten()),
+            Self::RegexMatch(m) => visit.extend([m.pattern, m.subject]),
             Self::File(file) => {
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);

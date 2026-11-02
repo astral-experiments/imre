@@ -661,7 +661,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | ("hashlib", "new" | "file_digest")
         | ("hmac", "new" | "HMAC" | "compare_digest")
-        | ("re", "match" | "fullmatch" | "search" | "compile" | "split")
+        | ("re", "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split")
         | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
         | ("enum", "_simple_enum")
         | (
@@ -1753,7 +1753,9 @@ pub(super) fn call(
     if name == "hashlib.new" {
         return hashlib::new(ctx, args, kwargs);
     }
-    if let Some(method @ ("match" | "fullmatch" | "search")) = name.strip_prefix("pattern.") {
+    if let Some(method @ ("match" | "fullmatch" | "search" | "scanner")) =
+        name.strip_prefix("pattern.")
+    {
         return regex::search(ctx, method, args, kwargs);
     }
     if name == "pattern.split" {
@@ -1807,6 +1809,8 @@ pub(super) fn call(
         "match.group" | "os.path.join" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
         "match.groups" => (2, &["default"]),
+        "match.start" | "match.end" | "match.span" => (2, &[]),
+        "scanner.match" | "scanner.search" => (1, &[]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
         "traceback.print_exc" => return traceback::print_active(ctx, args, kwargs),
         "traceback.format_exc" => return traceback::format_active(ctx, args, kwargs),
@@ -2107,6 +2111,9 @@ pub(super) fn call(
             NONE
         }
         "sys.exception" => ctx.heap.active_exception(),
+        "scanner.match" | "scanner.search" => {
+            return regex::scanner_next(ctx, args[0], name == "scanner.match");
+        }
         "sys.exc_info" => {
             let exc = ctx.heap.active_exception();
             let (class, traceback) = if exc == NONE {
@@ -2145,7 +2152,7 @@ pub(super) fn call(
                 option(args, 1, kwargs, "default")?.unwrap_or(NONE),
             );
         }
-        name if name.starts_with("pattern.") || name == "match.group" => {
+        name if name.starts_with("pattern.") || name.starts_with("match.") => {
             return regex::call(ctx, name, args);
         }
         _ => {
