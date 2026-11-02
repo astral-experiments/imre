@@ -235,13 +235,6 @@ def _addSkip(result, test_case, reason):
     addSkip = getattr(result, 'addSkip', None)
     if addSkip is not None:
         addSkip(test_case, reason)
-        from unittest import TextTestResult
-        if isinstance(result, TextTestResult):
-            status = "skipped " + repr(reason)
-            if isinstance(test_case, _SubTest):
-                result._markSubTest(test_case._subDescription(), "s", status)
-            else:
-                result._mark("s", status)
     else:
         warnings.warn("TestResult has no addSkip method, skips not reported",
                       RuntimeWarning, 2)

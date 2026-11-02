@@ -35,23 +35,83 @@ def _resultSubTest(self, test, subtest, error):
         problems.append((subtest, _boxedResultDetail(error)))
 
 
+# Adapted from CPython 3.14.5 Lib/unittest/runner.py. See ../docstrings/LICENSE.
+def getDescription(self, test):
+    description = test.shortDescription()
+    if self.descriptions and description:
+        return "\n".join((str(test), description))
+    return str(test)
+
+
+def _textStartTest(self, test):
+    TestResult.startTest(self, test)
+    if self.showAll:
+        self.stream.write(self.getDescription(test))
+        self.stream.write(" ... ")
+        self.stream.flush()
+        self._newline = False
+
+
+def _write_status(self, test, status):
+    subtest = isinstance(test, case._SubTest)
+    if subtest or self._newline:
+        if not self._newline:
+            self.stream.writeln()
+        if subtest:
+            self.stream.write("  ")
+        self.stream.write(self.getDescription(test))
+        self.stream.write(" ... ")
+    self.stream.writeln(status)
+    self.stream.flush()
+    self._newline = True
+
+
+def _textStatus(self, test, short, status):
+    if self.showAll:
+        self._write_status(test, status)
+    elif self.dots:
+        self.stream.write(short)
+        self.stream.flush()
+
+
+def _textSuccess(self, test):
+    TestResult.addSuccess(self, test)
+    _textStatus(self, test, ".", "ok")
+
+
+def _textSkip(self, test, reason):
+    TestResult.addSkip(self, test, reason)
+    status = "skipped " + repr(reason) if self.showAll else ""
+    _textStatus(self, test, "s", status)
+
+
 def _textSubTest(self, test, subtest, error):
     if error is not None:
         if issubclass(error[0], subtest.failureException):
-            self._markSubTest(subtest._subDescription(), "F", "FAIL")
+            _textStatus(self, subtest, "F", "FAIL")
         else:
-            self._markSubTest(subtest._subDescription(), "E", "ERROR")
+            _textStatus(self, subtest, "E", "ERROR")
     _resultSubTest(self, test, subtest, error)
+
+
+def _textExpectedStatus(self, short, status):
+    if self.showAll:
+        self.stream.writeln(status)
+    elif self.dots:
+        self.stream.write(short)
+    else:
+        return
+    self.stream.flush()
 
 
 def _textExpectedFailure(self, test, error):
     _resultExpectedFailure(self, test, error)
-    self._mark("x", "expected failure")
+    _textExpectedStatus(self, "x", "expected failure")
 
 
 def _textUnexpectedSuccess(self, test):
     TestResult.addUnexpectedSuccess(self, test)
-    self._mark("u", "unexpected success")
+    _textExpectedStatus(self, "u", "unexpected success")
 
 
 def _recordBoxedException(self, case, exc, detail):
@@ -63,12 +123,12 @@ def _recordBoxedException(self, case, exc, detail):
 
 def _textError(self, test, error):
     _addError(self, test, error)
-    self._mark("E", "ERROR")
+    _textStatus(self, test, "E", "ERROR")
 
 
 def _textFailure(self, test, error):
     _addFailure(self, test, error)
-    self._mark("F", "FAIL")
+    _textStatus(self, test, "F", "FAIL")
 
 
 _resultInit = TestResult.__init__
@@ -92,20 +152,27 @@ def _printErrors(self):
     pass
 
 
+def printErrorList(self, flavour, errors):
+    for test, detail in errors:
+        self.stream.writeln(self.separator1)
+        self.stream.writeln(f"{flavour}: {self.getDescription(test)}")
+        self.stream.writeln(self.separator2)
+        self.stream.writeln("%s" % detail)
+        self.stream.flush()
+
+
 def _textPrintErrors(self):
-    if self.verbose:
+    if self.showAll or self.dots:
         self.stream.writeln()
-    self._reportProblems("ERROR", self._errorNames, self.errors)
-    self._reportProblems("FAIL", self._failureNames, self.failures)
-    if self.unexpectedSuccesses:
-        self.stream.writeln("=" * 70)
-        for test in self.unexpectedSuccesses:
-            name = str(test)
-            if self.descriptions:
-                description = test.shortDescription()
-                if description:
-                    name += "\n" + description
-            self.stream.writeln("UNEXPECTED SUCCESS: " + name)
+        self.stream.flush()
+    self.printErrorList("ERROR", self.errors)
+    self.printErrorList("FAIL", self.failures)
+    unexpected = getattr(self, "unexpectedSuccesses", ())
+    if unexpected:
+        self.stream.writeln(self.separator1)
+        for test in unexpected:
+            self.stream.writeln(f"UNEXPECTED SUCCESS: {self.getDescription(test)}")
+        self.stream.flush()
 
 
 def _wrappedStream(self):
@@ -156,6 +223,9 @@ _textResultInit = TextTestResult.__init__
 
 def _boxedTextResultInit(self, stream=None, descriptions=True, verbosity=1, *, durations=None):
     _textResultInit(self, stream, descriptions, verbosity)
+    self.showAll = verbosity > 1
+    self.dots = verbosity == 1
+    self._newline = True
     if isinstance(stream, _WritelnDecorator):
         self.stream = stream
     self.durations = durations
@@ -270,12 +340,21 @@ _wasSuccessful.__qualname__ = "TestResult.wasSuccessful"
 TestResult.wasSuccessful = _wasSuccessful
 TestResult.printErrors = _printErrors
 TextTestResult.__init__ = _boxedTextResultInit
+getDescription.__qualname__ = "TextTestResult.getDescription"
+TextTestResult.getDescription = getDescription
+TextTestResult._write_status = _write_status
+TextTestResult.startTest = _textStartTest
+TextTestResult.addSuccess = _textSuccess
+TextTestResult.addSkip = _textSkip
 TextTestResult.addSubTest = _textSubTest
 TextTestResult.addExpectedFailure = _textExpectedFailure
 TextTestResult.addUnexpectedSuccess = _textUnexpectedSuccess
 TextTestResult.addError = _textError
 TextTestResult.addFailure = _textFailure
+printErrorList.__qualname__ = "TextTestResult.printErrorList"
+TextTestResult.printErrorList = printErrorList
 TextTestResult.printErrors = _textPrintErrors
+TextTestResult.separator1 = "=" * 70
 TextTestResult.separator2 = "----------------------------------------------------------------------"
 TextTestRunner.resultclass = TextTestResult
 TextTestRunner.__init__ = _boxedRunnerInit
