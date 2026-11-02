@@ -233,7 +233,36 @@ def source_name_deletion():
     assert "name" not in namespace
 
 
+def relative_import_hooks():
+    import sys
+
+    calls = []
+    missing = ImportError("relative hook failed")
+
+    def importer(name, globals_, locals_, fromlist, level):
+        assert globals_ is namespace and locals_ is local
+        calls.append((name, fromlist, level))
+        if name == "missing":
+            raise missing
+        return sys
+
+    namespace = {"__builtins__": {"__import__": importer}}
+    local = {}
+    exec("from sys import argv as absolute\nfrom . import argv as sibling\nfrom ..helper import argv as parent",
+         namespace, local)
+    assert local["absolute"] is local["sibling"] is local["parent"] is sys.argv
+    try:
+        exec("from .missing import attr", namespace, local)
+    except ImportError as error:
+        assert error is missing
+    else:
+        raise AssertionError("relative import hook exception was lost")
+    assert calls == [("sys", ("argv",), 0), ("", ("argv",), 1),
+                     ("helper", ("argv",), 2), ("missing", ("attr",), 1)]
+
+
 def current():
+    relative_import_hooks()
     source_name_deletion()
     source_classes()
     source_test_cases()
