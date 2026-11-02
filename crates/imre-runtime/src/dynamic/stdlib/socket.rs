@@ -260,6 +260,51 @@ fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
     Ok(ctx.alloc(Value::List(result)))
 }
 
+fn getsockopt(
+    ctx: &mut Context,
+    socket: &crate::objects::Object,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "socket.getsockopt() takes no keyword arguments",
+        ));
+    }
+    if !(2..=3).contains(&args.len()) {
+        let bound = if args.len() < 2 {
+            "at least 2"
+        } else {
+            "at most 3"
+        };
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "getsockopt() takes {bound} arguments ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    let level = ctx.index_c_int(args[0])?;
+    let name = ctx.index_c_int(args[1])?;
+    let len = args
+        .get(2)
+        .map(|&id| ctx.index_c_int(id))
+        .transpose()?
+        .unwrap_or(0);
+    if len == 0 {
+        return Ok(ctx.int(i64::from(native::get_option(socket, level, name)?)));
+    }
+    if !(1..=1024).contains(&len) {
+        return Err(Error::new("OSError", "getsockopt buflen out of range"));
+    }
+    let mut bytes = vec![0; len as usize];
+    let used = native::get_option_into(socket, level, name, &mut bytes)?;
+    bytes.truncate(used);
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -301,6 +346,9 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected a socket"));
     };
     let s = handle.clone();
+    if method == "getsockopt" {
+        return getsockopt(ctx, &s, args, kwargs);
+    }
     if method == "makefile" {
         check_args(method, args, kwargs, 2, &["mode", "buffering"])?;
         let binary_reader = if let Some(mode) = option(args, 0, kwargs, "mode")? {
