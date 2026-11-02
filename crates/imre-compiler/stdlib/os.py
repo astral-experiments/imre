@@ -33,6 +33,8 @@ if sys.platform == "linux":
     for _name in vars(_posix):
         if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in (
             "posix_spawn", "posix_spawnp", "sched_get_priority_min", "sched_get_priority_max", "sched_yield",
+            "sched_getaffinity", "sched_setaffinity", "sched_rr_get_interval",
+            "sched_getparam", "sched_setparam", "sched_setscheduler",
         ):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix

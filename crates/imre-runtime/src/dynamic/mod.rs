@@ -2981,7 +2981,9 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 if source.is_none() {
                     let posix = self.module("posix")?;
-                    for attr in stdlib::os::scheduler::PRIORITY_AND_YIELD {
+                    for attr in stdlib::os::scheduler::SCHEDULER_EXPORTS
+                        .into_iter().chain(["sched_getscheduler", "sched_param"])
+                    {
                         match self.lookup_attr(posix, attr) {
                             Ok(value) => self.bind(scope, attr, value),
                             Err(error) if self.is_attribute_error(&error) => continue,
