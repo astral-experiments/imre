@@ -2372,7 +2372,7 @@ impl Context {
                 let state = if lock.locked() { "locked" } else { "unlocked" };
                 format!("<{state} _thread.lock object at {id:#x}>")
             }
-            Value::Hash(state) => state.borrow().repr(id as usize).to_string(),
+            Value::Hash(state) => state.lock().repr(id as usize).to_string(),
             Value::Context(_) => format!("<_contextvars.Context object at {id:#x}>"),
             Value::TokenMissing => "<Token.MISSING>".to_owned(),
             Value::PartialPlaceholder => "Placeholder".to_owned(),

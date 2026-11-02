@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::ptr;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use md5::Md5;
 use num_traits::{Signed, ToPrimitive};
@@ -14,6 +15,20 @@ use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Bytes, Object, Storage, StorageCell, Str, object};
 use crate::{BytesOwner, Int, ObjectOwner};
+
+/// Boxed hash handles share one digest state, including across native workers.
+#[derive(Clone)]
+pub(crate) struct SharedHash(Arc<Mutex<State>>);
+
+impl SharedHash {
+    pub(crate) fn new(state: State) -> Self {
+        Self(Arc::new(Mutex::new(state)))
+    }
+
+    pub(crate) fn lock(&self) -> MutexGuard<'_, State> {
+        self.0.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
+}
 
 #[derive(Clone)]
 pub(crate) enum State {
