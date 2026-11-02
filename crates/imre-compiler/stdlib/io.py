@@ -1,8 +1,8 @@
 # Public I/O ABCs and protocols from CPython 3.14.5, Lib/io.py. See stdlib/docstrings/LICENSE.
 import _io
 import abc
-from _io import (BufferedReader, BytesIO, DEFAULT_BUFFER_SIZE, FileIO, StringIO, TextIOWrapper,
-                 UnsupportedOperation, open, open_code, text_encoding)
+from _io import (BufferedReader, BufferedWriter, BytesIO, DEFAULT_BUFFER_SIZE, FileIO,
+                 StringIO, TextIOWrapper, UnsupportedOperation, open, open_code, text_encoding)
 from _collections_abc import _check_methods
 
 class IOBase(_io._IOBase, metaclass=abc.ABCMeta):
@@ -19,12 +19,12 @@ class TextIOBase(_io._TextIOBase, IOBase):
 
 RawIOBase.register(FileIO)
 
-for klass in (BytesIO, BufferedReader, *_buffered_types):
+for klass in (BytesIO, BufferedReader, BufferedWriter, _buffered_random):
     BufferedIOBase.register(klass)
 
 for klass in (StringIO, TextIOWrapper):
     TextIOBase.register(klass)
-del klass, _buffered_types
+del klass, _buffered_random
 
 GenericAlias = type(list[int])
 

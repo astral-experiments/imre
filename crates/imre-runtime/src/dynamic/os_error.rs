@@ -240,6 +240,18 @@ impl Context {
         eprintln!("{error}");
     }
 
+    /// Test the stored OSError errno without invoking a Python attribute hook.
+    pub(super) fn has_errno(&self, error: &Error, errno: i32) -> bool {
+        let errno = i64::from(errno);
+        match error.os_args.as_deref() {
+            Some(Args::Native { source, .. }) => source.errno == errno,
+            Some(Args::Python(fields)) => fields.errno.is_some_and(|id| {
+                matches!(self.heap.get(id), Value::Int(value) if value.to_i64() == Some(errno))
+            }),
+            None => false,
+        }
+    }
+
     pub(super) fn is_os_error(&self, error: &Error) -> bool {
         if error.os_args.is_some() {
             return true;

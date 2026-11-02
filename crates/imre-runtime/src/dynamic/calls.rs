@@ -650,6 +650,7 @@ impl Context {
                 | Value::Native(_)
                 | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
+                | Value::IoOpen { .. }
                 | Value::Method { .. }
         ) || matches!(self.heap.get(value),Value::Weak(wr) if wr.kind != weakref::Kind::Proxy)
             || self.slot(value, "__call__").is_some()
@@ -791,8 +792,16 @@ impl Context {
                 _ => false,
             };
             if method {
+                // A saved writelines method uses its receiver type in argument errors.
+                let callable = match self.heap.get(value) {
+                    Value::IoMethod {
+                        owner: defining,
+                        name: "writelines",
+                    } if self.direct_subclass(owner, *defining) => self.builtin("file.writelines"),
+                    _ => value,
+                };
                 return Ok(self.alloc(Value::Method {
-                    callable: value,
+                    callable,
                     receiver,
                     explicit: matches!(self.heap.get(value), Value::Cached { .. }),
                 }));
@@ -1059,7 +1068,9 @@ impl Context {
                     name: "__init__" | "__repr__" | "__iter__" | "__next__" | "__del__",
                     ..
                 } => "method-wrapper",
-                Value::Native(_) | Value::IoMethod { .. } => "builtin_function_or_method",
+                Value::Native(_) | Value::IoOpen { .. } | Value::IoMethod { .. } => {
+                    "builtin_function_or_method"
+                }
                 _ => return None,
             },
             Value::Native(name) if let Some(slot) = BuiltinDescriptor::lookup(name) => slot.class(),
@@ -1700,7 +1711,7 @@ impl Context {
                 return self.bind_attribute(descriptor, receiver, owner);
             }
         }
-        if self.heap.get(obj).native_io_class_name() == Some("_io.BufferedReader") {
+        if matches!(self.heap.get(obj), Value::File(_)) {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name)
                 && matches!(
@@ -1778,8 +1789,13 @@ impl Context {
             if for_call
                 && field.is_none()
                 && let Some(member) = member
-                && let Value::Native(symbol) = self.heap.get(member)
-                && BuiltinDescriptor::lookup(symbol).is_some()
+                && match self.heap.get(member) {
+                    Value::Native(symbol) => BuiltinDescriptor::lookup(symbol).is_some(),
+                    Value::IoMethod {
+                        name: "writelines", ..
+                    } => true,
+                    _ => false,
+                }
             {
                 return Ok(self.alloc(Value::Method {
                     callable: member,
@@ -2339,11 +2355,7 @@ impl Context {
                 explicit,
             } => match name {
                 "__self__" => return Ok(receiver),
-                _ if matches!(
-                    self.heap.get(callable),
-                    Value::IoMethod { name: "open", .. }
-                ) =>
-                {
+                _ if matches!(self.heap.get(callable), Value::IoOpen { .. }) => {
                     let original = self.builtin("open");
                     return self.lookup_attr(original, name);
                 }
@@ -5112,6 +5124,9 @@ impl Context {
                 }))
             }
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
+            Value::IoOpen { reader, writer } => {
+                stdlib::io::open_from_module(self, reader, writer, &args, &kwargs)
+            }
             Value::IoMethod { owner, name } => stdlib::io::call(self, owner, name, &args, &kwargs),
             Value::Partial {
                 function,
