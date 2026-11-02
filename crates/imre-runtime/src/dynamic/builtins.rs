@@ -627,7 +627,7 @@ fn arity(name: &str, args: &[Id], min: usize, max: usize) -> Result<()> {
 }
 
 /// Read the sole positional argument of a CPython `METH_O` builtin.
-fn one_positional_arg(name: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+pub(super) fn one_positional_arg(name: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if !kwargs.is_empty() {
         return Err(type_error(format!("{name}() takes no keyword arguments")));
     }

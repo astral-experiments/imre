@@ -13,6 +13,16 @@ def check_bind_error(server):
             raise AssertionError("second socket bound the live listening port")
 
 def run():
+    sock = socket.socket()
+    try:
+        assert socket.close(sock.fileno()) is None
+    finally:
+        try:
+            sock.close()
+        except OSError as exc:
+            assert exc.errno == errno.EBADF
+        else:
+            raise AssertionError("socket descriptor was still open")
     assert socket.has_ipv6 is True
     assert socket.AF_INET6 != socket.AF_INET
     try:

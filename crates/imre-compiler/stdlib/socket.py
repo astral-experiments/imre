@@ -1,7 +1,7 @@
 """Socket helpers using the runtime's native socket operations."""
 
 import _socket
-from _socket import SOCK_STREAM, error, has_ipv6, socket
+from _socket import SOCK_STREAM, close, error, has_ipv6, socket
 
 if hasattr(_socket, "AF_INET6"):
     AF_INET6 = _socket.AF_INET6
