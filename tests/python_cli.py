@@ -2044,6 +2044,9 @@ def report(text):
         compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
+        reinit_writer = fixtures / "io_buffered_writer_reinitialize.py"
+        reinit_path = root / "reinitialized-writer.bin"
+        compare("-IB", reinit_writer, reinit_path, native_args=("run", reinit_writer, "--quiet", "--", reinit_path))
         callback_writer = fixtures / "io_buffered_writer_callbacks.py"
         compare("-IB", callback_writer, native_args=("run", callback_writer, "--quiet"))
         shutdown_writer = fixtures / "io_buffered_writer_shutdown.py"
