@@ -4603,6 +4603,7 @@ impl Context {
                     class.as_str(),
                     HashState::CLASS
                         | HashState::XOF_CLASS
+                        | "datetime.timezone"
                         | "typing.TypeVar"
                         | KEY_WRAPPER
                         | stdlib::flags::TYPE

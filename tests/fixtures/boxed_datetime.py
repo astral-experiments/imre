@@ -78,6 +78,19 @@ def test_class_constants():
         assert type(edge) is timezone and edge == timezone(offset)
         assert edge.min is timezone.min and edge.max is timezone.max and edge.utc is UTC
     assert UTC.utc is UTC is timezone.utc
+    for constant in ("min", "max", "utc"):
+        try:
+            setattr(timezone, constant, None)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError(constant)
+        try:
+            delattr(UTC, constant)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError(constant)
     assert dt.resolution is not time.resolution
     assert time.resolution is not timedelta.resolution
 
