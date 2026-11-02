@@ -42,6 +42,15 @@ impl Checker<'_> {
         Ok(boxed)
     }
 
+    pub(super) fn mock_side_effect_target(
+        &self,
+        receiver: Type,
+        attr: &ast::ExprAttribute,
+    ) -> bool {
+        attr.attr.as_str() == "side_effect"
+            && matches!(receiver, Type::Class(class) if self.native_mock(class))
+    }
+
     pub(super) fn bundled_mock_class(&self, class: usize, name: &str) -> bool {
         let record = &self.classes.declarations.definitions[class];
         let module = &self.graph.modules[record.definition.module];

@@ -561,6 +561,14 @@ impl Checker<'_> {
                         clear: vec![],
                     });
                 }
+                if self.mock_side_effect_target(receiver.ty, attribute)
+                    && matches!(value.ty, Type::Callable(_) | Type::FunctionRef)
+                {
+                    return Err(self.object_runtime_export(
+                        "callable unittest.mock.Mock.side_effect",
+                        attribute,
+                    ));
+                }
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
                 let value = self.coerce(value, ty, target)?;
                 Ok(Statement::SetField(receiver, field, value))

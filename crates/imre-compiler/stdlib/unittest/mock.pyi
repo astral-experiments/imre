@@ -10,6 +10,7 @@ class _Sentinel:
 sentinel: _Sentinel
 DEFAULT: _SentinelObject
 
+_SideEffect = Exception | type[BaseException] | Callable[..., Any] | None
 _Scalar = bool | int | str | bytes | None
 
 class _DictionaryPatch:
@@ -36,8 +37,8 @@ class Mock:
     call_count: int
     call_args: _Call | None
     call_args_list: list[_Call]
-    side_effect: Exception | None
-    def __init__(self, *, name: str | None = None, side_effect: Exception | None = None, return_value: Any = ..., **attrs: Any) -> None: ...
+    side_effect: _SideEffect
+    def __init__(self, *, name: str | None = None, side_effect: _SideEffect = None, return_value: Any = ..., **attrs: Any) -> None: ...
     def configure_mock(self, /, **attrs: Any) -> None: ...
     def __getattr__(self, name: str) -> Mock: ...
     def __call__(self, /, *args: _Scalar, **kwargs: _Scalar) -> Any: ...
