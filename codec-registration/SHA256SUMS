@@ -1,4 +1,5 @@
 1da325dbfa321739b437fe74d76bdb0561dc266374652267f055bb94c15c33e2  imre-codec-consumers-4b4274a9.tar.gz
+1e4a5090534f83e723b388850f88ff4cd34b23f3841280675c9278fee24540f0  imre-codec-cwrapper-83112e95-provider-build-failure.tar.gz
 b5bceee59064708fe63914fb5a9fd669ab0f48d7c5aeeab9afb949e9418a55f4  imre-codec-cwrapper-engineering-first-12-evidence.tar.gz
 257adfbbf225662e77d2b64f90c7781b75aac1738195683f209ad484e66612d3  imre-codec-cwrapper-engineering-superseded-reaped.tar.gz
 6f412c69cd9b1cd594df2cceda66fc8eb34f177d41b3ff4e35eee7a7332bc282  imre-codec-intact-cwrapper-9d54510b-boxed-O0-early.tar.gz
@@ -10,6 +11,7 @@ fc2888dc6e09a9f45c3aa02550358e4126d00e33b8b9093470d815d114cd2919  imre-codec-int
 e7f9cf55dc71bb7b39f6f3f9e44c774ee1670a232e63b3e260e7c79a0a599d9b  imre-codec-intact-cwrapper-9d54510b-boxed-O3-first-single-3.tar.gz
 1f2b8a172f877327b68f9746b77ca3def7b7807a91db17f07e5f7604a548353a  imre-codec-mixed-lookup-4b4274a9.tar.gz
 a4e173a0a72bff6b4609fa18a4500ae1c4526df240798483f9ffceece59bb497  imre-codec-original-seek-and-tell-5e547cf0.tar.gz
+c1425cb50486233d6246f66a325220f6f720d12c79600403a5fbbbaf7c751314  imre-codec-readonly-window-f0187492.tar.gz
 0cf84e607530bbaa6c6c16447faf20a7da37b3641644d9be5779622baa116b9f  imre-codec-registration-4b4274a9.tar.gz
 28f020cf0e2fc62b86a0dacbc8186b0c6e0e4947abb3e71eea4b1f250786ad85  imre-codec-registration-5e547cf0.tar.gz
 643978d8c699e509763f35bbeae5a4ad026c50207b9b0f33ef8e0d5823f571ff  imre-codec-registration-9d54510b.tar.gz
