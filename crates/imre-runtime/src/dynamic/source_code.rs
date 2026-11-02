@@ -912,9 +912,7 @@ impl Program {
                                 self.instructions
                                     .push((line, Instruction::DeleteName(name)));
                             }
-                            ast::Expr::Subscript(item)
-                                if !matches!(*item.slice, ast::Expr::Slice(_)) =>
-                            {
+                            ast::Expr::Subscript(item) => {
                                 self.instructions
                                     .push((line, Instruction::DeleteItem(item)));
                             }
