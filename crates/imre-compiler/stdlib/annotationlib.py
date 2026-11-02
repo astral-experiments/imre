@@ -4,7 +4,10 @@ import enum
 import sys
 import types
 
-__all__ = ["Format", "ForwardRef", "get_annotations", "annotations_to_string", "type_repr"]
+__all__ = [
+    "Format", "ForwardRef", "get_annotate_from_class_namespace",
+    "get_annotations", "annotations_to_string", "type_repr",
+]
 
 
 class Format(enum.IntEnum):
@@ -398,6 +401,18 @@ def _get_and_call_annotate(obj, format):
             raise ValueError(f"{obj!r}.__annotate__ returned a non-dict")
         return ann
     return None
+
+
+def get_annotate_from_class_namespace(obj):
+    """Retrieve the annotate function from a class namespace dictionary.
+
+    Return None if the namespace does not contain an annotate function.
+    This is useful in metaclass ``__new__`` methods to retrieve the annotate function.
+    """
+    try:
+        return obj["__annotate__"]
+    except KeyError:
+        return obj.get("__annotate_func__", None)
 
 
 def get_annotations(

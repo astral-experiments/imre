@@ -1,11 +1,18 @@
 import annotationlib
 import typing
+from annotationlib import get_annotate_from_class_namespace as get_annotate
 from importlib import import_module
 from typing import evaluate_forward_ref
 
 
 def current():
     module = import_module("annotationlib")
+    assert get_annotate is module.get_annotate_from_class_namespace
+    assert get_annotate({}) is None
+    assert get_annotate({"__annotate_func__": current}) is current
+    assert get_annotate({"__annotate__": current}) is current
+    assert get_annotate({"__annotate__": None, "__annotate_func__": current}) is None
+
     assert module.Format is annotationlib.Format
     assert module.ForwardRef is annotationlib.ForwardRef
     print(module.Format.VALUE, module.Format.FORWARDREF.value, module.Format.STRING.value)
