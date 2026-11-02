@@ -2558,6 +2558,7 @@ impl Context {
                 }
             }
             "_locale" => stdlib::locale::install(self, module, scope)?,
+            "time" => stdlib::time::install_timezone(self, scope)?,
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => stdlib::io::install_native(self, scope, module),
