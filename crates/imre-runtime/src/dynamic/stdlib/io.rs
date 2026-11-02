@@ -12,6 +12,7 @@ mod native_random;
 mod native_reader;
 mod native_writer;
 mod rwpair;
+pub(in crate::dynamic) use rwpair::deallocate_exact_pair;
 pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,
 };
@@ -818,9 +819,8 @@ pub(in super::super) fn call(
                 .lookup_attr(receiver, "close")
                 .and_then(|f| ctx.call(f, Vec::new(), Vec::new()))
             {
-                eprintln!(
-                    "Exception ignored while finalizing file {}: {error}",
-                    ctx.repr(receiver)
+                super::super::unraisable::report(
+                    ctx, error, true, Some(receiver), "Exception ignored while finalizing file",
                 );
             }
         }

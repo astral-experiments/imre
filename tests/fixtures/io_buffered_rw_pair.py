@@ -3,6 +3,7 @@ import _io
 import io
 import os
 import sys
+import weakref
 from _io import BufferedRWPair as NativePair
 
 class Pair(io.BufferedRWPair):
@@ -28,6 +29,70 @@ try:
         else:
             raise AssertionError("writer initialization accepted a non-writable raw")
         assert raw.closed and not rejected.closed and rejected.calls == 2
+
+    events = []
+    def record(event):
+        events.append((event.exc_type, event.exc_value.args, event.err_msg,
+                       event.object, event.exc_traceback is not None))
+
+    class Invalidated(RejectSecondCheck):
+        def writable(self):
+            allowed = super().writable()
+            if not allowed:
+                os.close(raw.fileno())
+            return allowed
+
+    saved_hook = sys.unraisablehook
+    sys.unraisablehook = record
+    try:
+        with io.FileIO(src, "r") as raw, Invalidated(dst, "w") as rejected:
+            try:
+                NativePair(raw, rejected, 2)
+            except io.UnsupportedOperation as exc:
+                assert str(exc) == "File or stream is not writable." and exc.__context__ is None
+            else:
+                raise AssertionError("failed writer initialization returned a pair")
+            assert raw.closed and not rejected.closed and len(events) == 1
+            kind, args, message, obj, traceback = events[0]
+            assert kind is OSError and args[0] == 9  # EBADF from closing the reader.
+            assert message.startswith("Exception ignored while finalizing file <_io.BufferedReader")
+            assert obj is None and traceback
+        gc.collect()
+        assert len(events) == 1
+
+        class BadClose(io.IOBase):
+            def close(self):
+                raise RuntimeError("close failed")
+            def __repr__(self):
+                return "bad stream"
+        stream = BadClose()
+        io.IOBase.__del__(stream)
+        io.IOBase.close(stream)
+        assert events[1:] == [(RuntimeError, ("close failed",),
+                               "Exception ignored while finalizing file bad stream", None, True)]
+    finally:
+        sys.unraisablehook = saved_hook
+
+    class WithNew(NativePair):
+        def __new__(cls, *args, **kwargs):
+            return super().__new__(cls)
+    with WithNew(io.FileIO(src, "r"), io.FileIO(dst, "w"), tag=True) as pair:
+        assert pair.read(1) == b"a"
+
+    class Alias(NativePair):
+        __new__ = object.__new__
+    class Wrapped(NativePair):
+        __new__ = staticmethod(object.__new__)
+    with io.FileIO(src, "r") as raw, io.FileIO(dst, "w") as writer:
+        try:
+            NativePair.__init__(object.__new__(Alias), raw, writer, tag=True)
+        except TypeError as exc:
+            assert str(exc) == "BufferedRWPair() takes no keyword arguments"
+        else:
+            raise AssertionError("alias of the base allocator accepted keywords")
+        wrapped = object.__new__(Wrapped)
+        NativePair.__init__(wrapped, raw, writer, tag=True)
+        wrapped.close()
 
     with io.BufferedReader(io.FileIO(src, "r"), 2) as reader:
         assert reader.peek(0) == b"ab" and reader.read(1) == b"a"
@@ -62,6 +127,39 @@ try:
     assert pair.close() is None
     with io.open(dst, "rb") as check:
         assert check.read() == b"foo!"
+    class ObserveReader(io.FileIO):
+        def close(self):
+            events.append(("writer", reader.closed))
+            return super().close()
+
+    for kind, cyclic, reader_closed in ((NativePair, False, True), (Pair, False, False),
+                                        (NativePair, True, False)):
+        reader = io.FileIO(src, "r")
+        writer = ObserveReader(dst, "w")
+        pair = kind(reader, writer, 8)
+        events = []
+        assert pair.write(b"x") == 1
+        def gone(ref):
+            assert ref() is None
+            events.append(("weak", reader.closed, writer.closed))
+        ref = weakref.ref(pair, gone)
+        if cyclic:
+            pair.loop = pair
+        retained_method = pair.write
+        del pair
+        assert not events and ref() is not None
+        del retained_method
+        if cyclic:
+            assert not events
+        gc.collect()
+        # A Python subtype runs IOBase's finalizer before ordinary weakref clearing.
+        if kind is Pair:
+            assert events == [("writer", False), ("weak", True, True)]
+        else:
+            assert events == [("weak", False, False), ("writer", reader_closed)]
+        assert reader.closed and writer.closed
+        with io.FileIO(dst, "r") as check:
+            assert check.read() == b"x"
     del sys.modules["_io"]
     try:
         fresh = __import__("_io")
