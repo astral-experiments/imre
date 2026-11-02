@@ -1,4 +1,4 @@
-from typing import NoDefault, TypeVarTuple, Unpack, get_args, get_origin
+from typing import Annotated, List, NoDefault, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
 
 
 def current():
@@ -25,6 +25,17 @@ def current():
     assert repr(unpacked) == "typing.Unpack[Ts]"
     assert unpacked[int, str] == (int, str)
     assert Unpack[tuple[int, str]].__typing_unpacked_tuple_args__ == (int, str)
+
+    t = TypeVar("T")
+    marker = List[Annotated[t, ts]]
+    assert marker.__parameters__ == (t,)
+    assert marker[int] == List[Annotated[int, ts]]
+    for origin in (tuple, Tuple):
+        variadic = Annotated[origin[t, Unpack[ts], t], "metadata"]
+        assert variadic[int] == Annotated[origin[int, int], "metadata"]
+        assert variadic[int, str, bool] == Annotated[origin[int, str, bool, int], "metadata"]
+        alias = variadic[t, *TypeVarTuple("Us")]
+        assert alias[bool, float] == Annotated[origin[bool, float, bool], "metadata"]
 
     for bad in (lambda: isinstance(0, ts), lambda: isinstance(0, NoDefault),
                 lambda: Unpack[int, str], lambda: type(NoDefault)(bad=True)):

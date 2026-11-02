@@ -1566,23 +1566,77 @@ MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
 
 
+def _substitute_alias_arguments(args, replacements):
+    result = []
+    for arg in args:
+        if not isinstance(arg, type) and getattr(arg, "__typing_is_unpacked_typevartuple__", False) is True:
+            result.extend(replacements[arg.__args__[0]])
+        else:
+            result.append(_substitute_alias_argument(arg, replacements))
+    return tuple(result)
+
+
 def _substitute_alias_argument(arg, replacements):
     if isinstance(arg, type):
         return arg
     for parameter, value in replacements.items():
         if arg is parameter:
+            if isinstance(parameter, _typing.TypeVarTuple):
+                raise TypeError("Substitution of bare TypeVarTuple is not supported")
             return value
     parameters = getattr(arg, '__parameters__', ())
     if not parameters:
         return arg
     from types import GenericAlias
     if type(arg) is GenericAlias:
-        return GenericAlias(arg.__origin__, tuple(
-            _substitute_alias_argument(item, replacements) for item in arg.__args__
-        ))
+        return GenericAlias(arg.__origin__, _substitute_alias_arguments(arg.__args__, replacements))
     if _typing.get_origin(arg) is _typing.Union:
-        return _typing.Union[tuple(_substitute_alias_argument(item, replacements) for item in arg.__args__)]
-    return arg[tuple(replacements[p] for p in parameters)]
+        return _typing.Union[_substitute_alias_arguments(arg.__args__, replacements)]
+    subargs = []
+    for parameter in parameters:
+        if isinstance(parameter, _typing.TypeVarTuple):
+            subargs.extend(replacements[parameter])
+        else:
+            subargs.append(replacements[parameter])
+    return arg[tuple(subargs)]
+
+
+def _unpack_alias_args(args):
+    expanded = []
+    for arg in args:
+        unpacked = getattr(arg, "__typing_unpacked_tuple_args__", None)
+        if unpacked is not None and not (unpacked and unpacked[-1] is ...):
+            expanded.extend(unpacked)
+        else:
+            expanded.append(arg)
+    return expanded
+
+
+def _prepare_typevartuple(pack, alias, args):
+    # A single pack consumes the arguments between the fixed parameters.
+    params = alias.__parameters__
+    index = params.index(pack)
+    left = index
+    right = len(params) - index - 1
+    if any(isinstance(p, _typing.TypeVarTuple) for p in params[index + 1:]):
+        raise TypeError(f"More than one TypeVarTuple parameter in {alias}")
+    fill = None
+    for i, arg in enumerate(args):
+        unpacked = None if isinstance(arg, type) else getattr(arg, "__typing_unpacked_tuple_args__", None)
+        if unpacked and len(unpacked) == 2 and unpacked[-1] is ...:
+            if fill is not None:
+                raise TypeError("More than one unpacked arbitrary-length tuple argument")
+            fill = unpacked[0]
+            left = min(left, i)
+            right = min(right, len(args) - i - 1)
+    if fill is None and len(args) < left + right:
+        raise TypeError(f"Too few arguments for {alias}; actual {len(args)}, expected at least {len(params) - 1}")
+    end = len(args) - right
+    grouped = args[left:end]
+    if not grouped and pack.has_default():
+        grouped = _unpack_alias_args((pack.__default__,))
+    return (args[:left] + [fill] * (index - left) + [tuple(grouped)]
+            + [fill] * (len(params) - right - left - index - 1) + args[end:])
 
 
 def _specialize_generic_alias_uncached(alias, args):
@@ -1593,26 +1647,25 @@ def _specialize_generic_alias_uncached(alias, args):
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
-    if any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
-        raise NotImplementedError("specializing a variadic alias requires parameter-pack substitution")
-    expanded = []
-    for arg in args:
-        unpacked = getattr(arg, "__typing_unpacked_tuple_args__", None)
-        if unpacked is not None and not (unpacked and unpacked[-1] is ...):
-            expanded.extend(unpacked)
-        else:
-            expanded.append(arg)
+    expanded = _unpack_alias_args(args)
+    for parameter in parameters:
+        if isinstance(parameter, _typing.TypeVarTuple):
+            expanded = _prepare_typevartuple(parameter, alias, expanded)
     if len(expanded) != len(parameters):
         which = "few" if len(expanded) < len(parameters) else "many"
         expected = f"at least {len(expanded) + 1}" if which == "few" else str(len(parameters))
         raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
     replacements = {}
     for parameter, arg in zip(parameters, expanded):
+        if isinstance(parameter, _typing.TypeVarTuple):
+            replacements[parameter] = tuple(_make_forward_ref(a) if isinstance(a, str)
+                                            else type(None) if a is None else a for a in arg)
+            continue
         arg = _alias_type_arg(arg)
         if _typing.get_origin(arg) is Unpack:
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
-    args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
+    args = _substitute_alias_arguments(alias.__args__, replacements)
     if isinstance(alias, _typing.Union):
         return _typing.Union[args]
     if isinstance(alias, _AnnotatedAlias):

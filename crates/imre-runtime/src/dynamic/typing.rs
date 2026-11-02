@@ -248,6 +248,17 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
                     _ => unreachable!(),
                 }
             }
+            Value::Instance { class, .. }
+                if ctx.module_value("typing", "_AnnotatedAlias") == Some(*class) =>
+            {
+                match ctx
+                    .raw_instance_field(arg, "__parameters__")
+                    .map(|id| ctx.heap.get(id))
+                {
+                    Some(Value::Tuple(members)) => members.as_slice(),
+                    _ => continue,
+                }
+            }
             _ => continue,
         };
         for &param in members {
