@@ -1,4 +1,4 @@
-from _thread import RLock
+from _thread import RLock, allocate_lock, start_new_thread
 from weakref import ref
 
 
@@ -21,6 +21,16 @@ class SavedOwner:
         if self.value is None:
             raise ValueError("invalid saved owner")
         return self.value
+
+
+def acquire_on_worker(lock, again, started, finished):
+    if not lock.acquire(False):
+        started.release()
+    lock.acquire()
+    if again.acquire(False):
+        again.release()
+        lock.release()
+        finished.release()
 
 
 def current():
@@ -71,6 +81,15 @@ def current():
     assert repr(tagged) == f"<unlocked Tagged object owner=0 count=0 at {id(tagged):#x}>"
     with tagged:
         assert tagged._recursion_count() == 1 and tagged.locked()
+    shared = RLock()
+    started = allocate_lock()
+    finished = allocate_lock()
+    started.acquire()
+    finished.acquire()
+    with shared:
+        start_new_thread(acquire_on_worker, (shared, shared, started, finished))
+        assert started.acquire(timeout=5) and shared._is_owned()
+    assert finished.acquire(timeout=5) and not shared.locked()
     print("reentrant lock")
 
 
