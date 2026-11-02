@@ -6498,6 +6498,9 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::GetEnv if cfg!(unix) && self.graph.command_startup.is_some() => {
+                    return Err(self.scoped_builtin_error("os.getenv", expression));
+                }
                 Intrinsic::UrlSplit => {
                     return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
                 }
@@ -9406,7 +9409,14 @@ impl<'a> Checker<'a> {
                     "groupby requires direct for iteration with an immediate list(group)",
                 ));
             }
-            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => {
+                // An ordinary POSIX environment can contain surrogate-escaped text
+                // and getenv returns its default by identity, regardless of its type.
+                if cfg!(unix) && self.graph.command_startup.is_some() {
+                    return Err(self.scoped_builtin_error("os.getenv", call));
+                }
+                return self.environ_get(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Strerror)) => {
                 self.reject_builtin_keywords(call)?;
                 let [code] = call.arguments.args.as_ref() else {
