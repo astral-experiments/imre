@@ -68,7 +68,12 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
         let function = ctx.builtin(&format!("abc.mapping.{method}"));
         ctx.bind(scope, method, function);
     }
+    let meta = ctx.abc_meta();
     let result = ctx.allocate_class(name.to_owned(), scope, bases)?;
+    let Value::Class { metaclass, .. } = ctx.heap.get_mut(result) else {
+        unreachable!()
+    };
+    *metaclass = Some(meta);
     ctx.classes.insert(key, result);
     ctx.init_abstract_class(result, scope)?;
     Ok(result)
