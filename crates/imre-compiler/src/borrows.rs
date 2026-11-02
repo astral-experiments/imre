@@ -152,7 +152,7 @@ pub(crate) fn written(function: &Function) -> Vec<bool> {
     written_except(function, |_| false)
 }
 
-fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec<bool> {
+pub(crate) fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec<bool> {
     let mut written = function.expression_rebound();
     statements(&function.body, &mut |statement| match statement {
         Statement::Assign(slot, value) => written[*slot] |= !permitted(value),

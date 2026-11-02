@@ -1,6 +1,6 @@
 # Rust, CPython and Imre
 
-Median elapsed time in milliseconds, including startup, imports and file I/O. Lower is faster. The [README](../README.md#benchmarks) lists all six medians for each runtime.
+Median elapsed time in milliseconds, including startup, imports and file I/O. Lower is faster. The [original suite chart](results/runtime-suite.svg) shows all six workloads for each runtime. The project README now shows the [application benchmarks](applications/README.md).
 
 ![Six panels comparing median elapsed time for Rust, Imre and CPython on inventory reconciliation, Base45 decoding, Luhn checksums, telemetry and offline conformance reporting.](results/runtime-suite.svg)
 
@@ -27,7 +27,7 @@ The ranges below are the 25th and 75th percentiles of the same 12 measurements o
 
 We timed each command from process creation through exit on one logical CPU of an AMD EPYC Milan Linux x86-64 VM. Times include interpreter startup, imports, parsing, computation, file I/O and output. Fixture generation, compilation and validation run outside the timer. For every process the runner clears the previous output, checks the exit status and stderr, and compares stdout and the complete output file with the expected bytes.
 
-Each workload gets two warmups and twelve measured runs per implementation. The measured rounds use all six engine orders twice. The filesystem cache is warm. The README's speedup divides the CPython median by the Imre median. The [raw samples](results/runtime-suite.json) include the engine order within each round, versions, binary hashes and output hashes.
+Each workload gets two warmups and twelve measured runs per implementation. The measured rounds use all six engine orders twice. The filesystem cache is warm. The speedup column divides the CPython median by the Imre median. The [raw samples](results/runtime-suite.json) include the engine order within each round, versions, binary hashes and output hashes.
 
 The October 28, 2026 run used CPython 3.14.5 with PGO, LTO, the GIL enabled and the JIT disabled. Imre 0.1.3 compiled at optimization level 3 with Clang 18.1.3 and the system allocator. The Rust references and Imre runtime used rustc 1.98.1-dev (Ohm), release optimization level 3, 16 codegen units and LTO disabled. We passed `-Zohm-defaults=no` to Cargo because Ohm’s experimental defaults triggered a compiler error while building the runtime.
 
@@ -39,7 +39,7 @@ Run the suite from the repository root on Linux with CPython 3.14+, Clang 18 and
 python3.14 benchmarks/runtime_suite.py --output benchmarks/local/runtime-suite.json
 ```
 
-The runner builds the native executables before timing and selects the first permitted CPU. Pass `--cpu N` to select another one. The recorded run used `--cpu 30 --toolchain ohm`. This command writes the six workload panels used in the README and this guide (`runtime-suite.svg`) and prints both Markdown tables from the committed data.
+The runner builds the native executables before timing and selects the first permitted CPU. Pass `--cpu N` to select another one. The recorded run used `--cpu 30 --toolchain ohm`. This command writes the six workload panels for this suite (`runtime-suite.svg`) and prints both Markdown tables from the committed data.
 
 ```sh
 uv run --script benchmarks/render_runtime_suite.py benchmarks/results/runtime-suite.json \

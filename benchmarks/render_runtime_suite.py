@@ -157,23 +157,46 @@ def bars(
         )
 
 
-def workload_panels(rows, path):
-    row_count = (len(rows) + 1) // 2
-    height = 148 + 252 * row_count + 36
+def workload_panels(rows, path, *, applications=False):
+    row_heights = [
+        252 + 40 * (max(len(medians) for _, medians in rows[i : i + 2]) - 3)
+        for i in range(0, len(rows), 2)
+    ]
+    height = 148 + sum(row_heights) + 36
     fig, ax = canvas(800, height)
     surface(ax, 800, height)
     label(ax, 32, 30, "IMRE / RUNTIME BENCHMARKS", 11, color=MUTED, mono=True)
     label(ax, 32, 68, "RUNTIME BY WORKLOAD", 26)
-    label(ax, 32, 98, "Rust, CPython and Imre on six workloads.", 14, color=MUTED)
+    subtitle = (
+        "Imre, Bun, Rust and CPython · fresh processes on one vCPU"
+        if applications
+        else "Rust, CPython and Imre on six workloads."
+    )
+    label(ax, 32, 98, subtitle, 14, color=MUTED)
     rule(ax, 32, 122, 768, 122)
     for i, (case, medians) in enumerate(rows):
-        x, y = 32 + i % 2 * 384, 158 + i // 2 * 252
+        x, y = 32 + i % 2 * 384, 158 + sum(row_heights[: i // 2])
+        row_height = row_heights[i // 2]
         label(ax, x, y, PANEL_TITLES.get(case["name"], case["name"]), 20)
         label(ax, x, y + 28, case["input"], 12, color=MUTED)
-        bars(ax, medians, x, y + 75, 352)
-        if i % 2 == 0 and i // 2 < row_count - 1:
-            rule(ax, 32, y + 216, 768, y + 216)
-    runs = len(rows[0][0]["samples_ns"])
+        if applications:
+            engines = {
+                "rust": "Rust",
+                "imre": "Imre",
+                "bun": "Bun",
+                "cpython": "CPython",
+            }
+            if "original_cpython" in medians:
+                engines.update(
+                    cpython="CPython · typed", original_cpython="CPython · uv"
+                )
+            bars(ax, medians, x, y + 75, 352, engines=engines, label_width=100)
+        else:
+            bars(ax, medians, x, y + 75, 352)
+        if i % 2 == 0 and i // 2 < len(row_heights) - 1:
+            rule(ax, 32, y + row_height - 36, 768, y + row_height - 36)
+    counts = sorted({len(case["samples_ns"]) for case, _ in rows})
+    runs = "–".join(map(str, counts))
     label(
         ax,
         32,
@@ -191,6 +214,7 @@ def frozen_flask_panel(report, path):
         "node": "Node.js",
         "bun": "Bun",
         "rust": "Rust / Hyper",
+        "cpython": "Stock Flask / CPython",
     }
     settings = report["settings"]
     concurrency = settings["concurrency"]
@@ -209,8 +233,9 @@ def frozen_flask_panel(report, path):
             raise ValueError(f"Incomplete mixed HTTP trials for {engine}")
         medians[engine] = statistics.median(row["RPS"] for row in trials)
 
-    fig, ax = canvas(800, 352)
-    surface(ax, 800, 352)
+    height = 392
+    fig, ax = canvas(800, height)
+    surface(ax, 800, height)
     label(ax, 32, 30, "IMRE / HTTP BENCHMARKS", 11, color=MUTED, mono=True)
     label(ax, 32, 68, "FROZEN FLASK THROUGHPUT", 26)
     label(
@@ -228,7 +253,7 @@ def frozen_flask_panel(report, path):
     label(
         ax,
         32,
-        330,
+        height - 22,
         f"Median requests/s · {rounds} rounds of {settings['requests']:,} requests · "
         f"{concurrency} clients · Higher is faster",
         12,
@@ -245,7 +270,11 @@ def main():
         "--flask-results", type=Path, help="also chart a mixed HTTP comparison receipt"
     )
     args = parser.parse_args()
-    cases = json.loads(args.results.read_bytes())["cases"]
+    report = json.loads(args.results.read_bytes())
+    if not report.get("complete", True):
+        parser.error("the measurement is incomplete")
+    cases = report["cases"]
+    applications = "bun" in cases[0]["samples_ns"][0]
     args.output_dir.mkdir(parents=True, exist_ok=True)
     mpl.rcParams.update(
         {
@@ -255,31 +284,44 @@ def main():
             "svg.hashsalt": "imre-runtime-suite",
         }
     )
+    engines = {"rust": "Rust", "cpython": "CPython", "imre": "Imre"}
+    if applications:
+        engines = {
+            "rust": "Rust",
+            "imre": "Imre",
+            "bun": "Bun",
+            "cpython": "CPython",
+            "original_cpython": "CPython (original uv)",
+        }
+    title = " | ".join(f"{name} (ms)" for name in engines.values())
+    right = " | ".join(["---:"] * len(engines))
     times = [
-        "| Workload | Input per process | Rust (ms) | CPython (ms) | Imre (ms) | CPython / Imre |",
-        "| --- | --- | ---: | ---: | ---: | ---: |",
+        f"| Workload | Input per process | {title} | CPython / Imre |",
+        f"| --- | --- | {right} | ---: |",
     ]
-    spreads = [
-        "| Workload | Rust (ms) | CPython (ms) | Imre (ms) | Output file (bytes) |",
-        "| --- | ---: | ---: | ---: | ---: |",
-    ]
+    spreads = [f"| Workload | {title} | Output (bytes) |", f"| --- | {right} | ---: |"]
     rows = []
     for case in cases:
-        medians, intervals = {}, []
-        for engine in ("rust", "cpython", "imre"):
+        medians, values, intervals = {}, [], []
+        for engine in engines:
+            if engine not in case["samples_ns"][0]:
+                values.append("—")
+                intervals.append("—")
+                continue
             samples = [r[engine] / 1e6 for r in case["samples_ns"]]
             low, mid, high = statistics.quantiles(samples, n=4, method="inclusive")
             medians[engine] = mid
+            values.append(f"{mid:.2f}")
             intervals.append(f"{low:.2f}–{high:.2f}")
-        cells = " | ".join(f"{mid:.2f}" for mid in medians.values())
+        cells = " | ".join(values)
         speedup = medians["cpython"] / medians["imre"]
         times.append(f"| {case['name']} | {case['input']} | {cells} | {speedup:.2f}× |")
         spreads.append(
             f"| {case['name']} | {' | '.join(intervals)} | {case['report_bytes']:,} |"
         )
         rows.append((case, medians))
-
-    workload_panels(rows, args.output_dir / "runtime-suite.svg")
+    filename = "applications.svg" if applications else "runtime-suite.svg"
+    workload_panels(rows, args.output_dir / filename, applications=applications)
     if args.flask_results:
         opener = gzip.open if args.flask_results.suffix == ".gz" else open
         with opener(args.flask_results, "rt") as stream:

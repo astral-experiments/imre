@@ -1166,16 +1166,245 @@ pub unsafe extern "C" fn imre_optional_str_equal(a: usize, b: usize) -> u32 {
 pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
     // SAFETY: the caller keeps the immutable string alive.
     let original = unsafe { &*value };
-    finish(
-        parse_decimal_int_with_limit(original, integer_text::decimal_digit_limit()).and_then(
-            |value| {
-                value
-                    .map(Int::into_raw)
-                    .ok_or_else(|| integer_text::invalid_literal(original))
-            },
-        ),
-        1,
-    )
+    finish(decimal_word(original), 1)
+}
+
+fn decimal_word(original: &str) -> Result<usize> {
+    parse_decimal_int_with_limit(original, integer_text::decimal_digit_limit())?
+        .map(Int::into_raw)
+        .ok_or_else(|| integer_text::invalid_literal(original))
+}
+
+/// Decode one to eight leading ASCII digits without reading outside the line.
+#[inline]
+fn short_decimal(bytes: &[u8], at: usize) -> Option<(usize, i64)> {
+    if bytes.len() < 8 || at == bytes.len() {
+        return None;
+    }
+    let base = at.min(bytes.len() - 8);
+    let word = u64::from_le_bytes(bytes[base..base + 8].try_into().unwrap()) >> ((at - base) * 8);
+    let nondigits = (word.wrapping_add(0x4646_4646_4646_4646)
+        | word.wrapping_sub(0x3030_3030_3030_3030))
+        & 0x8080_8080_8080_8080;
+    let count = (nondigits.trailing_zeros() / 8) as usize;
+    if count == 0 {
+        return None;
+    }
+    Some((count, decimal_digits_word(word, count)))
+}
+
+#[inline]
+fn decimal_digits_word(word: u64, count: usize) -> i64 {
+    // Right-align the digits and combine adjacent pairs, then groups of four.
+    let digits = (word & 0x0f0f_0f0f_0f0f_0f0f) << (64 - 8 * count);
+    let pairs = (digits.wrapping_mul(10).wrapping_add(digits >> 8)) & 0x00ff_00ff_00ff_00ff;
+    let quads = (pairs.wrapping_mul(100).wrapping_add(pairs >> 16)) & 0x0000_ffff_0000_ffff;
+    i64::from(quads.wrapping_mul(10_000).wrapping_add(quads >> 32) as u32)
+}
+
+/// Cache only short, valid, nonnegative ASCII integers. Zero is an unavailable
+/// entry; its original bounds check and full Python conversion run on demand.
+///
+/// # Safety
+/// The source is rooted, mask uses at most eight bits, and output has one
+/// writable native word through the highest selected bit.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_prepare_int_fields(
+    source: *const Str,
+    output: *mut usize,
+    mask: u32,
+) {
+    // SAFETY: the immutable source and output are rooted as required above.
+    unsafe { prepare_int_fields((&*source).as_bytes(), output, mask) };
+}
+
+/// # Safety
+/// The compiler roots the entire UTF-8 span and provides one word per field
+/// through the highest selected bit of the eight-bit mask.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_span_prepare_int_fields(
+    data: *const u8,
+    len: usize,
+    output: *mut usize,
+    mask: u32,
+) {
+    // SAFETY: the span and field array are valid for the duration of the call.
+    unsafe { prepare_int_fields(std::slice::from_raw_parts(data, len), output, mask) };
+}
+
+/// Classify a short, space/newline-delimited ASCII record in two vector
+/// loads. Other whitespace and Unicode use the full tokenizer below.
+#[cfg(target_arch = "x86_64")]
+fn short_record_fields(bytes: &[u8], slots: &mut [usize], mask: u32) -> bool {
+    use std::arch::x86_64::*;
+    let n = bytes.len();
+    if !(16..=32).contains(&n) {
+        return false;
+    }
+    // SAFETY: SSE2 is baseline on x86-64, and each 16-byte load is in bounds.
+    let (spaces, digits) = unsafe {
+        #[inline]
+        unsafe fn classify(ptr: *const u8) -> (u32, u32, bool) {
+            unsafe {
+                let v = _mm_loadu_si128(ptr.cast());
+                let spaces = _mm_or_si128(
+                    _mm_cmpeq_epi8(v, _mm_set1_epi8(32)),
+                    _mm_cmpeq_epi8(v, _mm_set1_epi8(10)),
+                );
+                let control = _mm_cmpgt_epi8(_mm_set1_epi8(33), v);
+                let other = _mm_movemask_epi8(_mm_andnot_si128(spaces, control));
+                let digits = _mm_and_si128(
+                    _mm_cmpgt_epi8(v, _mm_set1_epi8(47)),
+                    _mm_cmpgt_epi8(_mm_set1_epi8(58), v),
+                );
+                (
+                    _mm_movemask_epi8(spaces) as u32,
+                    _mm_movemask_epi8(digits) as u32,
+                    other == 0,
+                )
+            }
+        }
+        let (w1, d1, ok1) = classify(bytes.as_ptr());
+        let (w2, d2, ok2) = classify(bytes.as_ptr().add(n - 16));
+        if !(ok1 && ok2) {
+            return false;
+        }
+        (w1 | (w2 << (n - 16)), d1 | (d2 << (n - 16)))
+    };
+    let words = !spaces & (u32::MAX >> (32 - n));
+    let mut first = words & !(words << 1);
+    let mut last = words & !(words >> 1);
+    for (field, slot) in slots.iter_mut().enumerate() {
+        if first == 0 {
+            break;
+        }
+        let begin = first.trailing_zeros() as usize;
+        let end = last.trailing_zeros() as usize + 1;
+        first &= first - 1;
+        last &= last - 1;
+        let width = end - begin;
+        if (mask >> field) & 1 == 0 || width > 8 {
+            continue;
+        }
+        let selected = ((1u32 << width) - 1) << begin;
+        if digits & selected != selected {
+            continue;
+        }
+        let base = begin.min(n - 8);
+        let word =
+            u64::from_le_bytes(bytes[base..base + 8].try_into().unwrap()) >> ((begin - base) * 8);
+        *slot = Int::small(decimal_digits_word(word, width))
+            .unwrap()
+            .into_raw();
+    }
+    true
+}
+
+unsafe fn prepare_int_fields(bytes: &[u8], output: *mut usize, mask: u32) {
+    let len = (u32::BITS - mask.leading_zeros()) as usize;
+    // SAFETY: both callers supply the complete field prefix.
+    let slots = unsafe {
+        output.write_bytes(0, len);
+        std::slice::from_raw_parts_mut(output, len)
+    };
+    #[cfg(target_arch = "x86_64")]
+    if short_record_fields(bytes, slots, mask) {
+        return;
+    }
+    let whitespace = |b| matches!(b, b' ' | 9..=13 | 28..=31);
+    let mut at = 0;
+    for (field, slot) in slots.iter_mut().enumerate() {
+        while at < bytes.len() && whitespace(bytes[at]) {
+            at += 1;
+        }
+        if at == bytes.len() {
+            break;
+        }
+        if mask & (1 << field) != 0 {
+            let negative = bytes[at] == b'-';
+            at += usize::from(negative || bytes[at] == b'+');
+            let start = at;
+            if let Some((count, number)) = short_decimal(bytes, at) {
+                let end = at + count;
+                if end == bytes.len() || whitespace(bytes[end]) {
+                    *slot = Int::small(if negative { -number } else { number })
+                        .unwrap()
+                        .into_raw();
+                    at = end;
+                    continue;
+                }
+            }
+            let mut magnitude = 0_i64;
+            while let Some(&byte) = bytes.get(at) {
+                let digit = byte.wrapping_sub(b'0');
+                if digit > 9 {
+                    break;
+                }
+                magnitude = magnitude.wrapping_mul(10).wrapping_add(i64::from(digit));
+                at += 1;
+            }
+            if at == bytes.len() || whitespace(bytes[at]) {
+                if (1..=18).contains(&(at - start)) {
+                    let number = if negative { -magnitude } else { magnitude };
+                    *slot = Int::small(number).unwrap().into_raw();
+                }
+                continue;
+            }
+        }
+        // Non-ASCII whitespace can change field numbering. Already completed
+        // ASCII fields are valid; this field and later ones use Python parsing.
+        while at < bytes.len() && !whitespace(bytes[at]) {
+            if !bytes[at].is_ascii() {
+                return;
+            }
+            at += 1;
+        }
+    }
+}
+
+/// Parses one selected field of a whitespace split. Both the bounds check and
+/// conversion run when the original subscript would have been evaluated.
+///
+/// # Safety
+/// The caller roots the exact, immutable string for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_split_int_field(value: *const Str, index: u32) -> usize {
+    // SAFETY: the immutable source owns every field slice for the duration of parsing.
+    split_integer_field(unsafe { &*value }, index)
+}
+
+/// # Safety
+/// The caller roots this valid UTF-8 span through the Python integer conversion.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_span_split_int_field(
+    data: *const u8,
+    len: usize,
+    index: u32,
+) -> usize {
+    // SAFETY: the span is copied from a successfully decoded line.
+    let text = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(data, len)) };
+    split_integer_field(text, index)
+}
+
+fn split_integer_field(source: &str, index: u32) -> usize {
+    let field = if source.is_ascii() {
+        // Python also splits at vertical tab and the four information separators.
+        source
+            .as_bytes()
+            .split(|byte| matches!(byte, b' ' | 9..=13 | 28..=31))
+            .filter(|field| !field.is_empty())
+            .nth(index as usize)
+            .map(|bytes| {
+                // SAFETY: this branch checked that every input byte is ASCII.
+                unsafe { std::str::from_utf8_unchecked(bytes) }
+            })
+    } else {
+        source
+            .split(objects::python_whitespace)
+            .filter(|field| !field.is_empty())
+            .nth(index as usize)
+    };
+    finish(field.ok_or_else(Error::index).and_then(decimal_word), 1)
 }
 
 /// Parses a decimal integer without setting a pending Python exception. Callers
@@ -1313,6 +1542,16 @@ fn decode_index(value: &Int) -> Result<isize> {
     signed_index(value).ok_or_else(Error::index)
 }
 
+/// Subscription reports an unrepresentable Python index before checking bounds.
+fn list_subscript_index(value: &Int) -> Result<isize> {
+    signed_index(value).ok_or_else(|| {
+        Error::new(
+            Kind::IndexError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+    })
+}
+
 #[inline]
 fn normalized_index(raw: isize, length: usize) -> Option<usize> {
     // An underflow wraps above length, so the same bounds check rejects it.
@@ -1395,7 +1634,7 @@ pub unsafe extern "C" fn imre_list_reverse(list: *const List) {
 pub unsafe extern "C" fn imre_list_get(list: *const List, at: usize) -> usize {
     // SAFETY: the caller roots the index; conversion cannot call user code.
     let at = unsafe { Int::borrow(at) };
-    let at = match decode_index(&at) {
+    let at = match list_subscript_index(&at) {
         Ok(at) => at,
         Err(error) => return error.returning(0),
     };
@@ -1476,6 +1715,44 @@ pub unsafe extern "C" fn imre_list_data_readonly(list: *const List) -> *const us
     unsafe { (&*(*list).0.0.get()).as_ptr().cast() }
 }
 
+/// Normalize an index into a rooted fixed-size integer buffer. Zero denotes
+/// the same pending error as an ordinary list subscript.
+///
+/// # Safety
+/// The caller roots `word` and passes the length of a live integer list.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_view_index(word: usize, len: usize) -> usize {
+    // SAFETY: converting the rooted integer cannot reenter Python.
+    let at = unsafe { Int::borrow(word) };
+    finish(
+        list_subscript_index(&at)
+            .and_then(|at| index(at, len))
+            .map(|i| Int::from_usize(i).into_raw()),
+        0,
+    )
+}
+
+/// Returns writable integer slots for a compiler-proven fixed-size loop.
+///
+/// # Safety
+/// The caller roots this list, passes writable length storage, and excludes
+/// resizing or reentrant operations while using the pointer. All stores
+/// must acquire the incoming integer before releasing the displaced owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_update_view(
+    list: *const List,
+    length: *mut usize,
+) -> *mut usize {
+    // SAFETY: the short Vec borrow ends before the generated loop. Aliased
+    // lists may be updated through their raw pointers without moving storage.
+    unsafe {
+        (&*list).0.with_mut(|values| {
+            length.write(values.len());
+            values.as_mut_ptr().cast()
+        })
+    }
+}
+
 /// Returns one after replacement, or zero with a pending error and no mutation.
 ///
 /// # Safety
@@ -1484,7 +1761,7 @@ pub unsafe extern "C" fn imre_list_data_readonly(list: *const List) -> *const us
 pub unsafe extern "C" fn imre_list_set(list: *const List, at: usize, value: usize) -> u32 {
     // SAFETY: the caller roots both integers; conversion and acquisition cannot reenter.
     let (at, value) = unsafe { (Int::borrow(at), Int::borrow(value)) };
-    let at = match decode_index(&at) {
+    let at = match list_subscript_index(&at) {
         Ok(at) => at,
         Err(error) => return error.returning(0),
     };
@@ -1880,7 +2157,13 @@ pub unsafe extern "C" fn imre_list_repeat(list: *const List, count: usize) -> *c
             result
                 .try_reserve_exact(length)
                 .map_err(|_| Error::allocation())?;
-            if !list.is_empty() {
+            if let [item] = list.as_slice()
+                && item.as_small().is_some()
+            {
+                // Immediate words own no references; the reserved buffer can
+                // be filled in one pass without cloning or growing per item.
+                result.resize_with(length, || Int(item.0));
+            } else if !list.is_empty() {
                 for _ in 0..count {
                     result.extend(list.iter().cloned());
                 }
@@ -1904,6 +2187,58 @@ pub extern "C" fn imre_range_step_zero() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cached_decimal_fields_preserve_whitespace_split_and_integer_values() {
+        for width in 1..=10 {
+            for padding in 0..32 {
+                let digits = "0123456789"[..width].to_owned();
+                for separator in [" ", "  ", "\n", "\t", "\u{1c}", "\u{2003}"] {
+                    let text = format!(
+                        "{}{}{}{}{}{}{}",
+                        "a".repeat(padding),
+                        separator,
+                        digits,
+                        separator,
+                        "+12",
+                        separator,
+                        "9x"
+                    );
+                    for mask in [1, 3, 6, 14, 31] {
+                        let mut slots = [usize::MAX; 8];
+                        // SAFETY: eight slots cover all selected fields.
+                        unsafe { prepare_int_fields(text.as_bytes(), slots.as_mut_ptr(), mask) };
+                        let fields: Vec<_> = text
+                            .split(|c: char| {
+                                c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
+                            })
+                            .filter(|v| !v.is_empty())
+                            .collect();
+                        for (index, &word) in slots[..(32 - mask.leading_zeros()) as usize]
+                            .iter()
+                            .enumerate()
+                        {
+                            let expected = fields.get(index).and_then(|s| s.parse::<i64>().ok());
+                            if word != 0 {
+                                assert_ne!(mask & (1 << index), 0);
+                                assert_eq!(
+                                    unsafe { Int::borrow(word) }.as_small(),
+                                    expected,
+                                    "{text:?} {index}"
+                                );
+                            } else if mask & (1 << index) != 0
+                                && width <= 8
+                                && fields.get(index) == Some(&digits.as_str())
+                                && separator == " "
+                            {
+                                assert!(word != 0, "missing short decimal in {text:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     use objects::exceptions::{
         imre_error_pending, imre_error_take, imre_exception_matches, imre_exception_message,
     };

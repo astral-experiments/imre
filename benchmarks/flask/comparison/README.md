@@ -75,7 +75,44 @@ An October 2026 experiment ran LLVM-compiled views inside CPython. Its timings m
 
 The frozen Flask fork registers the three routes and parses the Jinja template at build time. Imre compiles the resulting dispatch, views and HTTP transport into one executable. Node.js and Bun share the JavaScript handlers, and Rust uses single-threaded Hyper. All three controls implement the routes directly. [Frozen app, supported Flask features and build prerequisites](https://github.com/astral-experiments/imre/tree/0b9700be0341f718ffae864fa7d6d1c1c9fc8a42/benchmarks/flask/frozen)
 
-The README chart shows median requests per second across ten rounds on an AMD EPYC Milan. Each server ran on one CPU, with eight clients on three separate CPUs. Each round used 180 warmup requests followed by 1,800 timed requests, split equally among the three routes. Every request opened a fresh loopback connection and had its status, content type and body checked. The five-server rotation also included stock CPython Flask. [Per-round throughput, latency, versions and native admission checks](results/2026-10-28-frozen-mixed.json.gz)
+### README results
+
+The November 2, 2026 UTC run used the same 32-vCPU AMD EPYC Milan host as the [application benchmarks](../../applications/README.md). The server ran on vCPU 13, with eight clients on vCPUs 8–10. Each of ten rounds used 180 warm-up requests followed by 1,800 timed requests, split evenly across the three routes. Each request opened a new loopback connection and the client checked its status, content type and body. The native preflight verified ten responses and the server executable’s identity. [All 50 trials, latency distributions and native admission receipt](results/2026-11-02-frozen-mixed.json.gz)
+
+| Server | Median requests/s | Trial range (requests/s) | Median trial p95 (ms) |
+| --- | ---: | ---: | ---: |
+| Frozen Flask on Imre 0.1.5 | 9,305 | 6,846–9,870 | 1.482 |
+| Node.js 22.23.3 | 2,157 | 1,781–2,293 | 7.969 |
+| Bun 1.4.4 | 7,940 | 6,191–8,509 | 2.049 |
+| Rust / Hyper | 9,077 | 7,779–9,805 | 1.725 |
+| Stock Flask on CPython 3.14.5 | 1,017 | 902–1,073 | 8.788 |
+
+Across the ten matched rounds, the median Imre/Hyper throughput ratio was 1.035×. The 95% percentile interval for that median was 0.949–1.073× (20,000 paired bootstrap resamples, seed 20261102).
+
+Over the HTTP rotation, the other vCPUs averaged 6.64% busy. Steal time was 0.00% on the server vCPU. The server and client CPUs were at most 5% busy during the five-second idle checks on either side of the rotation. Earlier rotations exceeded the background-activity limit on a 16-vCPU host or the client idle limit on this host. [All excluded HTTP samples and the reason for each exclusion](results/2026-11-02-excluded.json.gz)
+
+To reproduce this run, use the current benchmark sources with the Imre 0.1.5 Linux release, CPython 3.14.5, Bun 1.4.4 and Node.js 22.23.3. The build needs clang 18, Go, Rust and `patch`. Run on Linux with `strace`, `readelf` and disjoint server and client CPUs.
+
+```sh
+work=$(mktemp -d)
+bench="$PWD/benchmarks/flask"
+python=/path/to/cpython-3.14.5/bin/python3
+imre=/path/to/imre-x86_64-unknown-linux-gnu
+"$python" -IB "$bench/frozen/prepare.py" "$work/prepared" --imre "$imre/imre" \
+  --runtime "$imre/libimre_runtime.a" --clang clang-18
+go build -o "$work/client" "$bench/comparison/client.go"
+cargo +ohm -Zohm-defaults=no build --release --locked --target-dir "$work/target" \
+  --manifest-path "$bench/comparison/rust/Cargo.toml"
+FLASK_SECRET_KEY=local-probe-key "$python" -IB "$bench/comparison/compare.py" \
+  --imre-binary "$work/prepared/mixed/server-O3" --wheelhouse "$work/prepared/wheels" \
+  --client "$work/client" --rust "$work/target/release/imre-flask-hyper-control" \
+  --node "$(command -v node)" --bun "$(command -v bun)" --server-cpu 13 --client-cpus 8,9,10 \
+  --mixed-only --concurrency 8 --rounds 10 --warmup 180 --requests 1800 --output "$work/mixed.json"
+```
+
+### October 28 comparison
+
+The October 28 comparison reports median requests per second across ten rounds on an AMD EPYC Milan. Each server ran on one CPU, with eight clients on three separate CPUs. Each round used 180 warmup requests followed by 1,800 timed requests, split equally among the three routes. Every request opened a fresh loopback connection and had its status, content type and body checked. The five-server rotation also included stock CPython Flask. [Per-round throughput, latency, versions and native admission checks](results/2026-10-28-frozen-mixed.json.gz)
 
 | Server | Median req/s | Trial range (req/s) | Median trial p95 (ms) |
 | --- | ---: | ---: | ---: |
@@ -112,7 +149,7 @@ FLASK_SECRET_KEY=local-probe-key python3.14 benchmarks/flask/comparison/compare.
 To render the README charts from their published samples, run this in the checkout containing the charts.
 
 ```sh
-uv run --script benchmarks/render_runtime_suite.py benchmarks/results/runtime-suite.json \
-  --flask-results benchmarks/flask/comparison/results/2026-10-28-frozen-mixed.json.gz \
+uv run --script benchmarks/render_runtime_suite.py benchmarks/results/applications.json \
+  --flask-results benchmarks/flask/comparison/results/2026-11-02-frozen-mixed.json.gz \
   --output-dir benchmarks/local
 ```

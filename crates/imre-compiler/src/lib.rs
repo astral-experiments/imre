@@ -16,6 +16,7 @@ mod llvm;
 mod loop_fusion;
 mod modules;
 mod narrowing;
+mod pair_tables;
 mod range_specialization;
 mod ranges;
 mod record_copies;
@@ -23,6 +24,7 @@ mod reductions;
 #[cfg(test)]
 mod slice_sum_validation;
 mod sorted_rows;
+mod split_fields;
 mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
@@ -495,6 +497,8 @@ fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "tuple scalarization")?;
     digit_sums::specialize(module);
     verify_after(module, "digit reduction fusion")?;
+    split_fields::specialize(module);
+    verify_after(module, "integer split fields")?;
     list_bounds::specialize(module);
     verify_after(module, "list bounds specialization")?;
     list_specialization::specialize(module);
@@ -505,6 +509,8 @@ fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "reduction specialization")?;
     guarded_text::specialize(module);
     verify_after(module, "guarded text specialization")?;
+    pair_tables::specialize(module);
+    verify_after(module, "packed integer-pair tables")?;
     Ok(reader_origins)
 }
 

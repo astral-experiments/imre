@@ -1,0 +1,814 @@
+{
+  "schema": 1,
+  "builds": {
+    "base_revision": "fcba9a56fa23067ca33e2ed3a23af6cd66e7d2e8",
+    "imre_options": "-O3 --reachable-only --no-cache --clang clang-18, same Python source and command line in every Imre build",
+    "baseline": "release build of the pinned revision, default runtime",
+    "candidate": "release build of the pinned revision with the routing changes, default runtime",
+    "baseline_lto_jem": "same unmodified revision, ThinLTO and bundled jemalloc runtime",
+    "candidate_lto_jem": "same candidate compiler, ThinLTO and bundled jemalloc runtime",
+    "rust": "same Cargo release executable as the four-runtime suite",
+    "cargo": "cargo +ohm -Zohm-defaults=no build --release --locked",
+    "thinlto": "RUSTFLAGS=-Clinker-plugin-lto, imre-runtime-jemalloc, --target x86_64-unknown-linux-gnu and Rust toolchain ld.lld"
+  },
+  "road_graph_and_routes": {
+    "host": "charlie-ohm-perf-1022",
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39",
+    "cpu": 13,
+    "date": "2026-11-02T04:28:52.770638+00:00",
+    "graph": "37f5b3eff82330850466956b6c036a8ab8551512bdc7509edca1d4c6cf943fa3",
+    "queries": [
+      "1,12637",
+      "120000,230000",
+      "264346,4321",
+      "63789,130000"
+    ],
+    "kernel": "7.0.0-38-generic",
+    "revision": "fcba9a56fa23067ca33e2ed3a23af6cd66e7d2e8",
+    "programs": {
+      "baseline": {
+        "command": "road-perf/deploy/baseline/roads",
+        "sha256": "1b213a50d01d7e1fd85925d069d47ac2aafe8159646bf1c3a9f9f7d26a1cb072"
+      },
+      "candidate": {
+        "command": "road-perf/deploy/harden/roads",
+        "sha256": "261422fc38003155898efa3568e963c11e503b70edd22a16a0a405fdbd438a28"
+      },
+      "baseline_lto_jem": {
+        "command": "road-perf/controls/imre_runtime_jemalloc",
+        "sha256": "0f63ea4c47f18705032fa3385ef69872f49e6120f33a1ea0e2ff8145647fae52"
+      },
+      "candidate_lto_jem": {
+        "command": "road-perf/final/roads",
+        "sha256": "aa1aacd51a45262fecba2384416607fc2201c42b9efc12eb98ac21f337c0e958"
+      },
+      "rust": {
+        "command": "build/target/release/road-routing",
+        "sha256": "eb3053652f0be3dbebf2b660707bb5561667bf54ca707cc6771f7175b4ea0d76"
+      }
+    },
+    "cases": {
+      "load": [
+        {
+          "before": {
+            "selected": {
+              "busy_pct": 0.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.34,
+              "steal_pct": 0.0
+            }
+          },
+          "warmups_ns": {
+            "baseline": 563290292,
+            "candidate": 207482371,
+            "baseline_lto_jem": 308723465,
+            "candidate_lto_jem": 186234938,
+            "rust": 403418594
+          },
+          "expected_sha256": "6bd6c1ed761d2703a969c8033ea59b81967bf2a2afaa1adbc5e33f742ca055f5",
+          "samples_ns": [
+            {
+              "rust": 458664845,
+              "baseline_lto_jem": 348987746,
+              "candidate_lto_jem": 206858575,
+              "baseline": 483893072,
+              "candidate": 219944612
+            },
+            {
+              "baseline_lto_jem": 308412228,
+              "candidate_lto_jem": 188142131,
+              "baseline": 457375701,
+              "candidate": 210151275,
+              "rust": 415432606
+            },
+            {
+              "candidate_lto_jem": 310269938,
+              "baseline": 472765837,
+              "candidate": 222466389,
+              "rust": 87281500,
+              "baseline_lto_jem": 319539499
+            },
+            {
+              "baseline": 442883393,
+              "candidate": 555161968,
+              "rust": 129530114,
+              "baseline_lto_jem": 324333816,
+              "candidate_lto_jem": 206727595
+            },
+            {
+              "candidate": 218943794,
+              "rust": 87432682,
+              "baseline_lto_jem": 309795199,
+              "candidate_lto_jem": 188013256,
+              "baseline": 468144293
+            },
+            {
+              "baseline": 437756726,
+              "rust": 86216599,
+              "baseline_lto_jem": 647205731,
+              "candidate_lto_jem": 263644143,
+              "candidate": 213043093
+            },
+            {
+              "rust": 88680154,
+              "baseline_lto_jem": 311482494,
+              "candidate_lto_jem": 188095972,
+              "candidate": 212849724,
+              "baseline": 810525300
+            },
+            {
+              "baseline_lto_jem": 351185934,
+              "candidate_lto_jem": 195956874,
+              "candidate": 213564587,
+              "baseline": 442614255,
+              "rust": 88196686
+            },
+            {
+              "candidate_lto_jem": 190737289,
+              "candidate": 218242254,
+              "baseline": 466361626,
+              "rust": 86109292,
+              "baseline_lto_jem": 309371518
+            },
+            {
+              "candidate": 208860653,
+              "baseline": 436600105,
+              "rust": 86909380,
+              "baseline_lto_jem": 307895422,
+              "candidate_lto_jem": 193270437
+            },
+            {
+              "rust": 86944687,
+              "candidate_lto_jem": 206141433,
+              "baseline": 872386862,
+              "baseline_lto_jem": 337205830,
+              "candidate": 218302324
+            },
+            {
+              "candidate_lto_jem": 199691429,
+              "baseline": 453348155,
+              "baseline_lto_jem": 307836757,
+              "candidate": 213338562,
+              "rust": 88791115
+            },
+            {
+              "baseline": 842370984,
+              "baseline_lto_jem": 335512142,
+              "candidate": 212207398,
+              "rust": 88773012,
+              "candidate_lto_jem": 195297173
+            },
+            {
+              "baseline_lto_jem": 310052796,
+              "candidate": 208054068,
+              "rust": 86971438,
+              "candidate_lto_jem": 187312741,
+              "baseline": 446620889
+            },
+            {
+              "candidate": 209615606,
+              "rust": 86491185,
+              "candidate_lto_jem": 187842529,
+              "baseline": 843679222,
+              "baseline_lto_jem": 333223436
+            },
+            {
+              "rust": 87656995,
+              "candidate_lto_jem": 194029627,
+              "baseline_lto_jem": 310898324,
+              "candidate": 212853544,
+              "baseline": 861179861
+            },
+            {
+              "candidate_lto_jem": 219819581,
+              "baseline_lto_jem": 316348449,
+              "candidate": 213216992,
+              "baseline": 444839311,
+              "rust": 88367339
+            },
+            {
+              "baseline_lto_jem": 310984878,
+              "candidate": 208508468,
+              "baseline": 851825963,
+              "rust": 118926049,
+              "candidate_lto_jem": 195046352
+            },
+            {
+              "candidate": 213074428,
+              "baseline": 445246124,
+              "rust": 87348744,
+              "candidate_lto_jem": 187273545,
+              "baseline_lto_jem": 315829520
+            },
+            {
+              "baseline": 881778162,
+              "rust": 94553764,
+              "candidate_lto_jem": 197675928,
+              "baseline_lto_jem": 317386960,
+              "candidate": 214196590
+            }
+          ],
+          "during": {
+            "selected": {
+              "busy_pct": 99.93,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.6,
+              "steal_pct": 0.0
+            }
+          },
+          "after": {
+            "selected": {
+              "busy_pct": 0.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.24,
+              "steal_pct": 0.0
+            }
+          },
+          "accepted": true
+        }
+      ],
+      "routes": [
+        {
+          "before": {
+            "selected": {
+              "busy_pct": 0.33,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.22,
+              "steal_pct": 0.0
+            }
+          },
+          "warmups_ns": {
+            "baseline": 1087652452,
+            "candidate": 371773349,
+            "baseline_lto_jem": 450656437,
+            "candidate_lto_jem": 315604800,
+            "rust": 132081148
+          },
+          "expected_sha256": "61730c3f11848b5937b271a5e9aaf57bee3f190c3ce46a139569fdf8fe0286a1",
+          "samples_ns": [
+            {
+              "rust": 133568658,
+              "baseline_lto_jem": 442024590,
+              "candidate_lto_jem": 308017942,
+              "baseline": 1097137759,
+              "candidate": 361904649
+            },
+            {
+              "baseline_lto_jem": 448955022,
+              "candidate_lto_jem": 317677757,
+              "baseline": 756448076,
+              "candidate": 646316501,
+              "rust": 137291582
+            },
+            {
+              "candidate_lto_jem": 329936638,
+              "baseline": 651846357,
+              "candidate": 340194123,
+              "rust": 133808038,
+              "baseline_lto_jem": 448071424
+            },
+            {
+              "baseline": 623510675,
+              "candidate": 641010512,
+              "rust": 168521675,
+              "baseline_lto_jem": 450653223,
+              "candidate_lto_jem": 317224021
+            },
+            {
+              "candidate": 349659329,
+              "rust": 424626651,
+              "baseline_lto_jem": 569049830,
+              "candidate_lto_jem": 331486763,
+              "baseline": 663935905
+            },
+            {
+              "baseline": 992292002,
+              "rust": 157679469,
+              "baseline_lto_jem": 457259449,
+              "candidate_lto_jem": 318187499,
+              "candidate": 358895847
+            },
+            {
+              "rust": 138770450,
+              "baseline_lto_jem": 692869500,
+              "candidate_lto_jem": 638372625,
+              "candidate": 374917501,
+              "baseline": 648603207
+            },
+            {
+              "baseline_lto_jem": 582524549,
+              "candidate_lto_jem": 477714187,
+              "candidate": 560591644,
+              "baseline": 694652211,
+              "rust": 142229111
+            },
+            {
+              "candidate_lto_jem": 317705498,
+              "candidate": 360997985,
+              "baseline": 640080862,
+              "rust": 133803428,
+              "baseline_lto_jem": 461626032
+            },
+            {
+              "candidate": 349614954,
+              "baseline": 875655207,
+              "rust": 191567864,
+              "baseline_lto_jem": 472770960,
+              "candidate_lto_jem": 329851935
+            },
+            {
+              "rust": 137400825,
+              "candidate_lto_jem": 312130987,
+              "baseline": 891281082,
+              "baseline_lto_jem": 474562768,
+              "candidate": 348596780
+            },
+            {
+              "candidate_lto_jem": 325744782,
+              "baseline": 659752604,
+              "baseline_lto_jem": 472783820,
+              "candidate": 353829944,
+              "rust": 133655957
+            },
+            {
+              "baseline": 663397540,
+              "baseline_lto_jem": 710214903,
+              "candidate": 368663499,
+              "rust": 136920305,
+              "candidate_lto_jem": 320804601
+            },
+            {
+              "baseline_lto_jem": 453466327,
+              "candidate": 543758829,
+              "rust": 173396565,
+              "candidate_lto_jem": 328870598,
+              "baseline": 642309791
+            },
+            {
+              "candidate": 351071165,
+              "rust": 133878614,
+              "candidate_lto_jem": 323328504,
+              "baseline": 907102037,
+              "baseline_lto_jem": 472630530
+            },
+            {
+              "rust": 134041368,
+              "candidate_lto_jem": 319969072,
+              "baseline_lto_jem": 459877531,
+              "candidate": 350863193,
+              "baseline": 627074581
+            },
+            {
+              "candidate_lto_jem": 664942255,
+              "baseline_lto_jem": 485568518,
+              "candidate": 348018800,
+              "baseline": 642585425,
+              "rust": 136288723
+            },
+            {
+              "baseline_lto_jem": 448161058,
+              "candidate": 344723589,
+              "baseline": 997342234,
+              "rust": 178801302,
+              "candidate_lto_jem": 321268618
+            },
+            {
+              "candidate": 340723385,
+              "baseline": 649904282,
+              "rust": 133896793,
+              "candidate_lto_jem": 315714791,
+              "baseline_lto_jem": 457884295
+            },
+            {
+              "baseline": 975056675,
+              "rust": 154893931,
+              "candidate_lto_jem": 311766463,
+              "baseline_lto_jem": 449191956,
+              "candidate": 340531131
+            }
+          ],
+          "during": {
+            "selected": {
+              "busy_pct": 100.0,
+              "steal_pct": 0.02
+            },
+            "other_cpus": {
+              "busy_pct": 3.51,
+              "steal_pct": 0.0
+            }
+          },
+          "after": {
+            "selected": {
+              "busy_pct": 0.66,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.76,
+              "steal_pct": 0.0
+            }
+          },
+          "accepted": true
+        }
+      ]
+    }
+  },
+  "other_applications": {
+    "date_utc": "2026-11-02T04:25:50.760817+00:00",
+    "host": "charlie-ohm-perf-1022",
+    "logical_cpu": 13,
+    "cases": {
+      "uv download catalog": {
+        "expected_sha256": "753cd906307c1b4f830e9348703e0110ba38fddd97293780f146f78f0ed9a3f6",
+        "executables_sha256": {
+          "baseline": "a854c591763b610b618c9dca023f7dfc0b50197740fc6f861a48db0eb85e3ccb",
+          "harden": "f18220a524e3ea8925dda52533384e1ffbbc487d5c5ed6e6a3106954815e897d"
+        },
+        "batches": [
+          {
+            "warmups_ns": {
+              "baseline": 168725917,
+              "harden": 178490362
+            },
+            "before": {
+              "selected": {
+                "busy_pct": 0.33,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.78,
+                "steal_pct": 0.0
+              }
+            },
+            "samples_ns": [
+              {
+                "baseline": 250617008,
+                "harden": 148010955
+              },
+              {
+                "harden": 345826661,
+                "baseline": 184946697
+              },
+              {
+                "baseline": 148878841,
+                "harden": 152105944
+              },
+              {
+                "harden": 146728590,
+                "baseline": 148324199
+              },
+              {
+                "baseline": 146098569,
+                "harden": 145002411
+              },
+              {
+                "harden": 144330992,
+                "baseline": 147798592
+              },
+              {
+                "baseline": 146395142,
+                "harden": 145871016
+              },
+              {
+                "harden": 144164051,
+                "baseline": 146513593
+              },
+              {
+                "baseline": 148502562,
+                "harden": 144405641
+              },
+              {
+                "harden": 146514214,
+                "baseline": 372204306
+              },
+              {
+                "baseline": 168907933,
+                "harden": 153831478
+              },
+              {
+                "harden": 146846293,
+                "baseline": 147961007
+              }
+            ],
+            "during": {
+              "selected": {
+                "busy_pct": 100.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.89,
+                "steal_pct": 0.0
+              }
+            },
+            "after": {
+              "selected": {
+                "busy_pct": 0.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.09,
+                "steal_pct": 0.0
+              }
+            },
+            "accepted": true
+          }
+        ]
+      },
+      "Source search": {
+        "expected_sha256": "8119d1d18f39ed6ae1de612a0b9b1799e7f8ac1e63d487b221e59b162e40a941",
+        "executables_sha256": {
+          "baseline": "1320fe032eada6d26f4ace975f84bcca0519de5be98517b3a88c6422d182cfe9",
+          "harden": "8be7a3ca23a13ce6f33db0cc1e1eeb2b2c4539ed1aef2d5b61e8bf7c8130d0a5"
+        },
+        "batches": [
+          {
+            "warmups_ns": {
+              "baseline": 230780938,
+              "harden": 168732758
+            },
+            "before": {
+              "selected": {
+                "busy_pct": 0.33,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 1.78,
+                "steal_pct": 0.0
+              }
+            },
+            "samples_ns": [
+              {
+                "baseline": 280769167,
+                "harden": 174368189
+              },
+              {
+                "harden": 172030220,
+                "baseline": 171238386
+              },
+              {
+                "baseline": 172516297,
+                "harden": 164235689
+              },
+              {
+                "harden": 162930452,
+                "baseline": 347532088
+              },
+              {
+                "baseline": 260925792,
+                "harden": 170597526
+              },
+              {
+                "harden": 165560330,
+                "baseline": 167144703
+              },
+              {
+                "baseline": 162716576,
+                "harden": 161664868
+              },
+              {
+                "harden": 162213760,
+                "baseline": 162267572
+              },
+              {
+                "baseline": 162673996,
+                "harden": 161308145
+              },
+              {
+                "harden": 161918892,
+                "baseline": 161780303
+              },
+              {
+                "baseline": 162146345,
+                "harden": 163778172
+              },
+              {
+                "harden": 162977431,
+                "baseline": 163833385
+              }
+            ],
+            "during": {
+              "selected": {
+                "busy_pct": 100.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.47,
+                "steal_pct": 0.0
+              }
+            },
+            "after": {
+              "selected": {
+                "busy_pct": 0.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.12,
+                "steal_pct": 0.0
+              }
+            },
+            "accepted": true
+          }
+        ]
+      },
+      "Wheel verification": {
+        "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "executables_sha256": {
+          "baseline": "ca7e9d6f04b5505312564c9a0a942d5a96210b2b1031d7843ae8eb67607db513",
+          "harden": "923b53bc3b12bb9d6c20336eb7df1b02a8bd6a6f125ef3a9672ba4c45d1ec047"
+        },
+        "batches": [
+          {
+            "warmups_ns": {
+              "baseline": 50933955,
+              "harden": 35914303
+            },
+            "before": {
+              "selected": {
+                "busy_pct": 0.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.22,
+                "steal_pct": 0.0
+              }
+            },
+            "samples_ns": [
+              {
+                "baseline": 65739490,
+                "harden": 43747578
+              },
+              {
+                "harden": 35254688,
+                "baseline": 35696279
+              },
+              {
+                "baseline": 35682171,
+                "harden": 35258725
+              },
+              {
+                "harden": 35670562,
+                "baseline": 35041450
+              },
+              {
+                "baseline": 34638472,
+                "harden": 140221006
+              },
+              {
+                "harden": 69669101,
+                "baseline": 65868021
+              },
+              {
+                "baseline": 35529860,
+                "harden": 35227447
+              },
+              {
+                "harden": 35151185,
+                "baseline": 35322373
+              },
+              {
+                "baseline": 37313217,
+                "harden": 35331211
+              },
+              {
+                "harden": 34312134,
+                "baseline": 34830819
+              },
+              {
+                "baseline": 35268111,
+                "harden": 34774665
+              },
+              {
+                "harden": 35328214,
+                "baseline": 34768964
+              }
+            ],
+            "during": {
+              "selected": {
+                "busy_pct": 100.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 1.22,
+                "steal_pct": 0.0
+              }
+            },
+            "after": {
+              "selected": {
+                "busy_pct": 4.33,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 2.48,
+                "steal_pct": 0.0
+              }
+            },
+            "accepted": true
+          }
+        ]
+      },
+      "Conformance report": {
+        "expected_sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2",
+        "executables_sha256": {
+          "baseline": "c7d530b60568c5ebac006cf50f9f35e049a9194229ce16d1f7060da2387198b8",
+          "harden": "e6dbf83294773d19222601763b742fc1d3694511d0448c40bc923d848a867be1"
+        },
+        "batches": [
+          {
+            "warmups_ns": {
+              "baseline": 65207824,
+              "harden": 29635124
+            },
+            "before": {
+              "selected": {
+                "busy_pct": 2.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 1.54,
+                "steal_pct": 0.0
+              }
+            },
+            "samples_ns": [
+              {
+                "baseline": 68033180,
+                "harden": 35586877
+              },
+              {
+                "harden": 26989724,
+                "baseline": 26931826
+              },
+              {
+                "baseline": 31517967,
+                "harden": 27209332
+              },
+              {
+                "harden": 27449849,
+                "baseline": 27258212
+              },
+              {
+                "baseline": 27403662,
+                "harden": 169265888
+              },
+              {
+                "harden": 34835229,
+                "baseline": 42274850
+              },
+              {
+                "baseline": 27673024,
+                "harden": 32087096
+              },
+              {
+                "harden": 28063290,
+                "baseline": 29371364
+              },
+              {
+                "baseline": 27985155,
+                "harden": 27969235
+              },
+              {
+                "harden": 27982839,
+                "baseline": 27609557
+              },
+              {
+                "baseline": 28374128,
+                "harden": 28996816
+              },
+              {
+                "harden": 29618795,
+                "baseline": 29677884
+              }
+            ],
+            "during": {
+              "selected": {
+                "busy_pct": 100.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 1.93,
+                "steal_pct": 0.0
+              }
+            },
+            "after": {
+              "selected": {
+                "busy_pct": 0.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.56,
+                "steal_pct": 0.0
+              }
+            },
+            "accepted": true
+          }
+        ]
+      }
+    }
+  }
+}

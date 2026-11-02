@@ -1,0 +1,10 @@
+{
+  "name": "imre-runtime-benchmarks",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "csv-parse": "6.1.0",
+    "fflate": "0.8.2",
+    "tinyqueue": "3.0.0"
+  }
+}

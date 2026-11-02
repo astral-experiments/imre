@@ -23,8 +23,10 @@ mod calendar;
 mod callables;
 mod conditionals;
 mod contextvars;
+mod int_buffers;
 mod integer_regions;
 mod json;
+mod line_views;
 mod literals;
 mod paths;
 mod posixpath;
@@ -433,6 +435,9 @@ fn emit_program(
         rooted_locals: Vec::new(),
         length_roots: Vec::new(),
         length_snapshots: Vec::new(),
+        int_buffers: BTreeMap::new(),
+        fixed_int_lists: Vec::new(),
+        line_slots: Vec::new(),
         expression_rebound: Vec::new(),
         small_locals: Vec::new(),
         temporaries: Vec::new(),
@@ -641,6 +646,9 @@ struct Emitter<'a, 'module> {
     rooted_locals: Vec<bool>,
     length_roots: Vec<Option<usize>>,
     length_snapshots: Vec<Option<LengthSnapshot>>,
+    int_buffers: BTreeMap<usize, (String, String)>,
+    fixed_int_lists: Vec<bool>,
+    line_slots: Vec<bool>,
     expression_rebound: Vec<bool>,
     small_locals: Vec<bool>,
     temporaries: Vec<Value>,
@@ -1581,7 +1589,7 @@ impl Emitter<'_, '_> {
         };
         same_local
             && self.ranges.integer(left).is_some()
-            && expression_preserves_local(right, slot, self.locals.len())
+            && ir::expression_preserves_local(right, slot, self.locals.len())
     }
 
     fn cleanup(&mut self, slots: &[usize]) {
@@ -1866,6 +1874,8 @@ impl Emitter<'_, '_> {
         self.rooted_locals = borrows.rooted.clone();
         self.length_roots = borrows.length_roots.clone();
         self.length_snapshots = vec![None; self.locals.len()];
+        self.int_buffers.clear();
+        self.fixed_int_lists = int_buffers::fixed_locals(function);
         self.small_locals = self.ranges.small_locals(function);
         self.expression_rebound = function.expression_rebound();
         let rebound = borrows::written(function);
@@ -1925,7 +1935,54 @@ impl Emitter<'_, '_> {
             self.line("%directory_frame = alloca ptr");
             self.line("store ptr null, ptr %directory_frame");
         }
+        self.line_slots = line_views::select(function);
+        if self
+            .line_slots
+            .iter()
+            .zip(&self.borrowed_locals)
+            .any(|(&selected, &borrowed)| selected && borrowed)
+        {
+            self.line_slots.fill(false);
+        }
+        for slot in 0..self.line_slots.len() {
+            if self.line_slots[slot] {
+                self.line(format!("%line{slot} = alloca [4 x i64], align 8"));
+                self.line(format!("store [4 x i64] zeroinitializer, ptr %line{slot}"));
+            }
+        }
         let allocas_at = self.code.len();
+        let mut pair_views = BTreeSet::new();
+        ir::walk_expressions(&function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::PairTable(ir::PairTableOp::Snapshot(slot)), _) =
+                expr.kind
+            {
+                pair_views.insert(slot);
+            }
+        });
+        for slot in pair_views {
+            self.line(format!("%pair_view{slot} = alloca {{ ptr, i64 }}"));
+        }
+        let mut field_masks = vec![0_u8; self.locals.len()];
+        borrows::statements(&function.body, &mut |stmt| {
+            if let Statement::Assign(
+                slot,
+                Expr {
+                    kind: ExprKind::Builtin(Builtin::SplitIntSource(mask), _),
+                    ..
+                },
+            ) = stmt
+            {
+                field_masks[*slot] |= mask;
+            }
+        });
+        for (slot, mask) in field_masks.into_iter().enumerate() {
+            if mask != 0 {
+                self.line(format!(
+                    "%split_fields{slot} = alloca [{} x i64]",
+                    8 - mask.leading_zeros()
+                ));
+            }
+        }
         self.line(format!(
             "%function_return = alloca {}",
             function.returns.llvm()
@@ -2013,7 +2070,7 @@ impl Emitter<'_, '_> {
             Some(ir::SourceFrame::Depth) => Some(self.enter_frame(None)),
             None => None,
         };
-        self.block(&function.body);
+        self.int_buffer_body(function);
         if !self.terminated {
             self.jump(&self.return_exit.clone());
         }
@@ -2195,6 +2252,16 @@ impl Emitter<'_, '_> {
     fn statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Assign(slot, expression) => {
+                if self.line_slots[*slot] {
+                    self.assign_line(*slot, expression);
+                    return;
+                }
+                if let ExprKind::Builtin(Builtin::SplitIntSource(mask), args) = &expression.kind {
+                    let value = self.expr(&args[0]);
+                    self.line(format!("call void @imre_str_prepare_int_fields(ptr {}, ptr %split_fields{slot}, i32 {mask})", value.operand));
+                    self.store(*slot, &value);
+                    return;
+                }
                 if self.locals[*slot] == Type::ByteOutput
                     && matches!(&expression.kind, ExprKind::List(values) if values.is_empty())
                 {
@@ -2226,9 +2293,16 @@ impl Emitter<'_, '_> {
                 let previous_small = self.assignment_replaces_small(*slot, expression);
                 let value = self.expr(expression);
                 self.store_with_previous_small(*slot, &value, previous_small);
+                if self.fixed_int_lists[*slot] {
+                    self.remember_int_buffer(*slot, &value);
+                }
             }
             Statement::Move(target, source) => {
                 debug_assert_eq!(self.locals[*target], self.locals[*source]);
+                if self.line_slots[*target] {
+                    debug_assert!(self.line_slots[*source]);
+                    self.copy_line(*source, *target);
+                }
                 if self.borrowed_locals[*source] {
                     let value = self.borrow_slot(*source);
                     if self.borrowed_locals[*target] {
@@ -2286,10 +2360,22 @@ impl Emitter<'_, '_> {
                 }
                 // Python evaluates an assignment's RHS before its target expressions.
                 let nonnegative = self.nonnegative_index(index);
+                let fixed_slot = match list.kind {
+                    ExprKind::Local(slot)
+                        if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot) =>
+                    {
+                        Some(slot)
+                    }
+                    _ => None,
+                };
                 let value = self.operand(expression);
                 let list = self.operand(list);
                 let index = self.operand(index);
-                self.set_item(&list.value, &index.value, &value.value, nonnegative);
+                if let Some(slot) = fixed_slot {
+                    self.fixed_int_set(slot, &index.value, &value.value);
+                } else {
+                    self.set_item(&list.value, &index.value, &value.value, nonnegative);
+                }
                 if self.module.types.mapping(list.value.ty).is_some()
                     && self.module.types.may_own_file(
                         value.value.ty,
@@ -2425,6 +2511,7 @@ impl Emitter<'_, '_> {
             }
             Statement::While(test, body, orelse) => {
                 let previous_lengths = self.snapshot_loop_lengths(statement);
+                let previous_buffers = self.int_buffer_loop(statement);
                 let raw_subtotal = self.raw_subtotal(body);
                 let (condition, body_label, end) = (self.label(), self.label(), self.label());
                 let exhausted = if orelse.is_empty() {
@@ -2460,6 +2547,7 @@ impl Emitter<'_, '_> {
                 }
                 self.start(&end);
                 self.length_snapshots = previous_lengths;
+                self.int_buffers = previous_buffers;
             }
             Statement::For {
                 target,
@@ -2496,7 +2584,7 @@ impl Emitter<'_, '_> {
                 } else {
                     self.label()
                 };
-                self.uniform_struct_append(body, &args, *target, *cursor, &exhausted);
+                self.uniform_append(body, &args, *target, *cursor, &exhausted);
                 self.branch(&zero.operand, &fail, &condition);
                 self.start(&fail);
                 self.checked_line("call void @imre_range_step_zero()");
@@ -3899,8 +3987,19 @@ impl Emitter<'_, '_> {
         {
             let list = self.operand(receiver);
             let index = self.operand(index);
-            let at = self.native_index(&index.value);
-            let borrowed = self.runtime_call(&LIST_BORROW_INDEX, [&list.value, &at]);
+            let ExprKind::Local(slot) = receiver.kind else {
+                unreachable!()
+            };
+            let borrowed =
+                if let Some(value) = self.int_buffer_borrow(slot, &list.value, &index.value) {
+                    Operand {
+                        value,
+                        ownership: Ownership::Borrowed,
+                    }
+                } else {
+                    let at = self.native_index(&index.value);
+                    self.runtime_call(&LIST_BORROW_INDEX, [&list.value, &at])
+                };
             self.release_operand(&index);
             self.release_operand(&list);
             return borrowed;
@@ -3971,6 +4070,9 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
+        if let Some(v) = self.line_builtin(builtin, expressions) {
+            return v;
+        }
         if let (Builtin::Append, [receiver, item]) = (builtin, expressions)
             && self.module.types.is_value_struct(item.ty)
             && matches!(item.kind, ExprKind::Construct { .. })
@@ -4125,6 +4227,99 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::PairTable(ir::PairTableOp::ViewLen(slot)) => {
+                let count = self.instruction(format!(
+                    "getelementptr inbounds {{ ptr, i64 }}, ptr %pair_view{slot}, i32 0, i32 1"
+                ));
+                Value {
+                    ty: Type::Int,
+                    operand: self.instruction(format!("load i64, ptr {count}")),
+                    small_integer: true,
+                }
+            }
+            Builtin::PairTable(ir::PairTableOp::ViewField(slot, field)) => {
+                let data = self.instruction(format!("load ptr, ptr %pair_view{slot}"));
+                let at = self.instruction(format!("lshr i64 {}, 1", args[2].value.operand));
+                let cell = self.load_list_word(&data, &at);
+                let small = self.instruction(format!("trunc i64 {cell} to i1"));
+                let (fast, wide, done) = (self.label(), self.label(), self.label());
+                self.branch(&small, &fast, &wide);
+                self.start(&fast);
+                let immediate = if *field == 0 {
+                    let low = self.instruction(format!("trunc i64 {cell} to i32"));
+                    self.instruction(format!("sext i32 {low} to i64"))
+                } else {
+                    self.instruction(format!("ashr i64 {cell}, 32"))
+                };
+                self.jump(&done);
+                self.start(&wide);
+                let word = self.checked_int_list_word(format!(
+                    "call i64 @imre_pair_table_field(ptr {}, i64 {}, i64 {}, i32 {field})",
+                    args[0].value.operand, args[1].value.operand, args[2].value.operand
+                ));
+                let other = self.current.clone();
+                self.jump(&done);
+                self.start(&done);
+                let value = self.instruction(format!(
+                    "phi i64 [{immediate}, %{fast}], [{word}, %{other}]"
+                ));
+                self.unpack_word(value, Type::Int)
+            }
+            Builtin::PairTable(op) => {
+                use ir::PairTableOp::*;
+                let name = match op {
+                    New => "new",
+                    AddRow => "add_row",
+                    Index => "index",
+                    Push => "push",
+                    Len => "len",
+                    RowLen => "row_len",
+                    Field(_) => "field",
+                    Snapshot(_) => "view",
+                    ViewLen(_) | ViewField(..) => unreachable!(),
+                };
+                let mut operands = args
+                    .iter()
+                    .map(|arg| format!("{} {}", arg.value.ty.llvm(), arg.value.operand))
+                    .collect::<Vec<_>>();
+                if let Field(field) = op {
+                    operands.push(format!("i32 {field}"));
+                }
+                if let Snapshot(slot) = op {
+                    operands.push(format!("ptr %pair_view{slot}"));
+                }
+                let params = operands.join(", ");
+                let call = |ret| format!("call {ret} @imre_pair_table_{name}({params})");
+                match op {
+                    New => {
+                        let word = self.checked_pointer(call("ptr"));
+                        self.owned(Value {
+                            ty: returns,
+                            operand: word,
+                            small_integer: false,
+                        })
+                    }
+                    AddRow | Push => {
+                        self.checked_status(call("i32"));
+                        none()
+                    }
+                    Len | RowLen => Value {
+                        ty: Type::Int,
+                        operand: self.instruction(call("i64")),
+                        small_integer: true,
+                    },
+                    Index | Snapshot(_) => Value {
+                        ty: Type::Int,
+                        operand: self.checked_int_list_word(call("i64")),
+                        small_integer: true,
+                    },
+                    ViewLen(_) | ViewField(..) => unreachable!(),
+                    Field(_) => {
+                        let word = self.checked_int_list_word(call("i64"));
+                        self.unpack_word(word, Type::Int)
+                    }
+                }
+            }
             Builtin::ExtensionImport(module) => {
                 self.checked_line(format!(
                     "call void @imre_extension_import(ptr @PyInit_{module})"
@@ -6666,6 +6861,13 @@ impl Emitter<'_, '_> {
                 self.retain(&selected);
                 selected
             }
+            Builtin::ListGet if matches!(expressions[0].kind, ExprKind::Local(slot) if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot)) =>
+            {
+                let ExprKind::Local(slot) = expressions[0].kind else {
+                    unreachable!()
+                };
+                self.fixed_int_get(slot, &args[1].value)
+            }
             Builtin::ListGet => self.get_item(
                 &args[0].value,
                 &args[1].value,
@@ -7634,6 +7836,24 @@ impl Emitter<'_, '_> {
                         "call i32 @imre_join_buffer_append(ptr {}, ptr {})",
                         args[0].value.operand, args[1].value.operand
                     ));
+                } else if matches!(args[1].ownership, Ownership::Owned)
+                    && matches!(args[0].value.ty, Type::List(_))
+                    && matches!(
+                        args[1].value.ty,
+                        Type::Tuple(_) | Type::List(_) | Type::ListInt
+                    )
+                {
+                    let item = &args[1].value;
+                    let word = self.word(item);
+                    self.checked_status(format!(
+                        "call i32 @imre_seq_append_owned(ptr {}, i64 {word}, i32 {})",
+                        args[0].value.operand,
+                        representation_kind(item.ty, &self.module.types)
+                    ));
+                    // The failure branch already emitted cleanup with this owner armed.
+                    self.forget(item);
+                    self.release_operand(&args[0]);
+                    return none();
                 } else {
                     self.append(&args[0].value, &args[1].value);
                 }
@@ -7663,6 +7883,54 @@ impl Emitter<'_, '_> {
                         args[0].value.operand
                     ));
                     self.unpack_word(word, returns)
+                }
+            }
+            Builtin::SplitIntSource(_) => {
+                return self.own_operand(args.into_iter().next().unwrap());
+            }
+            Builtin::SplitIntCached(index) => {
+                let ExprKind::Local(slot) = expressions[0].kind else {
+                    unreachable!()
+                };
+                let ptr = self.instruction(format!(
+                    "getelementptr inbounds i64, ptr %split_fields{slot}, i64 {index}"
+                ));
+                let word = self.instruction(format!("load i64, ptr {ptr}"));
+                let ready = self.instruction(format!("icmp ne i64 {word}, 0"));
+                let (before, slow, end) = (self.current.clone(), self.label(), self.label());
+                self.branch(&ready, &end, &slow);
+                self.start(&slow);
+                let fallback = if self.line_slots[slot] {
+                    let (data, len) = self.line_data(slot);
+                    self.checked_instruction(format!(
+                        "call i64 @imre_span_split_int_field(ptr {data}, i64 {len}, i32 {index})"
+                    ))
+                } else {
+                    self.checked_instruction(format!(
+                        "call i64 @imre_str_split_int_field(ptr {}, i32 {index})",
+                        args[0].value.operand
+                    ))
+                };
+                let after = self.current.clone();
+                self.jump(&end);
+                self.start(&end);
+                Value {
+                    ty: Type::Int,
+                    operand: self.instruction(format!(
+                        "phi i64 [{word}, %{before}], [{fallback}, %{after}]"
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::SplitIntField(index) => {
+                let operand = self.checked_instruction(format!(
+                    "call i64 @imre_str_split_int_field(ptr {}, i32 {index})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: false,
                 }
             }
             Builtin::Split => self.call("imre_str_split_whitespace", returns, &[&args[0].value]),
@@ -8353,9 +8621,24 @@ impl Emitter<'_, '_> {
 
     fn record_with_layout(&mut self, ty: Type, name: &str) -> Value {
         let layout = self.output.global_ref(format!("layout_{name}"));
+        // A loop can produce many small, independently escaping ordinary tuples.
+        // Batch only the layouts for which several records fit in one block.
+        let allocate = if !self.loops.is_empty()
+            && matches!(ty, Type::Tuple(_))
+            && self.module.types.tuple_origin(ty).is_none()
+            && self
+                .module
+                .types
+                .fields(ty)
+                .is_some_and(|fields| (1..=8).contains(&fields.len()))
+        {
+            "imre_tuple_batch_try_new"
+        } else {
+            "imre_record_try_new"
+        };
         let value = Value {
             ty,
-            operand: self.checked_pointer(format!("call ptr @imre_record_try_new(ptr @{layout})")),
+            operand: self.checked_pointer(format!("call ptr @{allocate}(ptr @{layout})")),
             small_integer: false,
         };
         self.owned(value)
@@ -8540,9 +8823,11 @@ impl Emitter<'_, '_> {
         let list = self.operand(source_receiver);
         let source = self.operand(source);
         let destination = self.operand(index);
-        let from = self.native_index(&source.value);
-        let to = self.native_index(&destination.value);
-        self.runtime_call(&LIST_COPY_INDEX, [&list.value, &to, &from]);
+        if !self.int_buffer_copy(*target, &list.value, &source.value, &destination.value) {
+            let from = self.native_index(&source.value);
+            let to = self.native_index(&destination.value);
+            self.runtime_call(&LIST_COPY_INDEX, [&list.value, &to, &from]);
+        }
         self.release_operand(&destination);
         self.release_operand(&source);
         self.release_operand(&list);
@@ -8707,91 +8992,6 @@ fn read_only_integer(expression: &Expr) -> bool {
         }
         _ => false,
     }
-}
-
-/// Rejects every local replacement hidden inside an operand. Statement regions
-/// and expression scopes are each visited once, so nested scopes do not cause
-/// repeated recursive walks of their bodies.
-fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> bool {
-    fn expression_writes(expression: &Expr, written: &mut [bool]) {
-        match &expression.kind {
-            ExprKind::Scope { body, value, clear } => {
-                crate::list_specialization::mark_writes(body, written);
-                for &slot in clear {
-                    written[slot] = true;
-                }
-                crate::ir::walk_expressions(body, &mut |value| match &value.kind {
-                    ExprKind::Scope { body, clear, .. } => {
-                        crate::list_specialization::mark_writes(body, written);
-                        for &slot in clear {
-                            written[slot] = true;
-                        }
-                    }
-                    ExprKind::Bind(slot, _) => written[*slot] = true,
-                    _ => {}
-                });
-                expression_writes(value, written);
-            }
-            ExprKind::Bind(slot, value) => {
-                written[*slot] = true;
-                expression_writes(value, written);
-            }
-            ExprKind::List(values)
-            | ExprKind::Tuple(values)
-            | ExprKind::Set { values, .. }
-            | ExprKind::Compare(values, _)
-            | ExprKind::Boolean(_, values)
-            | ExprKind::Builtin(_, values) => {
-                for value in values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-                for value in &args.values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Callable {
-                receiver: Some(receiver),
-                ..
-            } => expression_writes(receiver, written),
-            ExprKind::Invoke { callable, args } => {
-                expression_writes(callable, written);
-                for value in &args.values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    expression_writes(key, written);
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-                expression_writes(left, written);
-                expression_writes(right, written);
-            }
-            ExprKind::Conditional(test, yes, no) => {
-                expression_writes(test, written);
-                expression_writes(yes, written);
-                expression_writes(no, written);
-            }
-            ExprKind::Present(value)
-            | ExprKind::Absent(value)
-            | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
-            | ExprKind::Field(value, _) => expression_writes(value, written),
-            ExprKind::Exception {
-                message: Some(message),
-                ..
-            } => expression_writes(message, written),
-            _ => {}
-        }
-    }
-    let mut written = vec![false; locals];
-    expression_writes(expression, &mut written);
-    !written[slot]
 }
 
 // Keep literals that fit in CompactString's three inline words on the raw append path.
@@ -9617,6 +9817,7 @@ declare ptr @imre_sys_default_encoding()
 declare ptr @imre_sys_filesystem_encoding()
 declare ptr @imre_sys_filesystem_errors()
 declare ptr @imre_record_try_new(ptr)
+declare ptr @imre_tuple_batch_try_new(ptr)
 declare ptr @imre_record_class_factory(ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
@@ -9681,6 +9882,16 @@ declare i64 @imre_seq_take_index_proven(ptr, i64) nounwind
 declare ptr @imre_seq_data_readonly(ptr) nounwind
 declare void @imre_seq_set_index(ptr, i64, i64, i32)
 declare i32 @imre_seq_append(ptr, i64, i32)
+declare i32 @imre_seq_append_owned(ptr, i64, i32)
+declare ptr @imre_pair_table_new()
+declare i32 @imre_pair_table_add_row(ptr)
+declare i1 @imre_pair_table_try_add_rows(ptr, i64)
+declare i64 @imre_pair_table_index(ptr, i64)
+declare i64 @imre_pair_table_view(ptr, i64, ptr)
+declare i32 @imre_pair_table_push(ptr, i64, i64, i64)
+declare i64 @imre_pair_table_len(ptr)
+declare i64 @imre_pair_table_row_len(ptr, i64)
+declare i64 @imre_pair_table_field(ptr, i64, i64, i32)
 declare i64 @imre_seq_pop(ptr)
 declare void @imre_list_clear(ptr)
 declare void @imre_seq_clear(ptr)
@@ -9913,6 +10124,8 @@ declare ptr @imre_str_append_literal_owned(ptr, ptr, ptr, i64)
 declare i32 @imre_str_get_part(ptr, i64, ptr, ptr)
 declare ptr @imre_int_str_part(i64, ptr, ptr)
 declare ptr @imre_str_split_whitespace(ptr)
+declare i64 @imre_str_split_int_field(ptr, i32)
+declare void @imre_str_prepare_int_fields(ptr, ptr, i32) nounwind
 declare ptr @imre_str_split(ptr, ptr, i64, i32)
 declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
@@ -9982,6 +10195,10 @@ declare ptr @imre_text_metadata(ptr, i32)
 declare i32 @imre_text_enter(ptr)
 declare ptr @imre_text_read(ptr)
 declare ptr @imre_text_readline(ptr)
+declare ptr @imre_text_readline_inline(ptr, ptr)
+declare void @imre_span_prepare_int_fields(ptr, i64, ptr, i32) nounwind
+declare i64 @imre_span_split_int_field(ptr, i64, i32)
+declare i32 @memcmp(ptr, ptr, i64) nounwind memory(argmem: read)
 declare i64 @imre_text_write(ptr, ptr)
 declare i32 @imre_text_write_discard(ptr, ptr)
 declare i32 @imre_text_write_parts(ptr, ptr, i64)
@@ -10305,6 +10522,8 @@ declare void @imre_list_release(ptr)
 {LIST_BORROW_INDEX}
 declare i64 @imre_list_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
 declare ptr @imre_list_data_readonly(ptr) nounwind memory(argmem: read)
+declare ptr @imre_list_update_view(ptr, ptr)
+declare i64 @imre_list_view_index(i64, i64) nounwind
 {LIST_COPY_INDEX}
 {LIST_APPEND}
 {LIST_APPEND_PAIR}

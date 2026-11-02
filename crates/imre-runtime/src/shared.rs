@@ -35,12 +35,39 @@ fn increment(count: &Cell<usize>) {
     );
 }
 
+// A stream of short strings otherwise competes with long-lived records for
+// the same allocator size class. Keep one already-dead header per thread.
+type SpareHeader = Box<MaybeUninit<Allocation<crate::Str>>>;
+thread_local! { static SPARE_HEADER: Cell<Option<SpareHeader>> = const { Cell::new(None) }; }
+
+fn string_header_layout<T>() -> bool {
+    std::alloc::Layout::new::<Allocation<T>>()
+        == std::alloc::Layout::new::<Allocation<crate::Str>>()
+}
+
+fn new_header<T>() -> Result<Box<MaybeUninit<Allocation<T>>>, AllocError> {
+    if string_header_layout::<T>()
+        && let Ok(Some(spare)) = SPARE_HEADER.try_with(Cell::take)
+    {
+        // SAFETY: this box is uninitialized and its size, alignment and allocator match.
+        return Ok(unsafe { Box::from_raw(Box::into_raw(spare).cast()) });
+    }
+    Box::try_new_uninit()
+}
+
 fn release_weak<T>(pointer: NonNull<Allocation<T>>) {
     // SAFETY: the caller transfers a live weak count, including the implicit one.
     let allocation = unsafe { pointer.as_ref() };
     let count = allocation.weak.get() - 1;
     allocation.weak.set(count);
     if count == 0 {
+        if string_header_layout::<T>() {
+            // SAFETY: no strong or weak observer remains. The value has dropped,
+            // and the spare box uses the original allocation's exact layout.
+            let mut spare = Some(unsafe { Box::from_raw(pointer.as_ptr().cast()) });
+            let _ = SPARE_HEADER.try_with(|cache| drop(cache.replace(spare.take())));
+            return;
+        }
         // SAFETY: the last strong owner already dropped value. The final weak
         // owner releases the original Box with its exact type and allocator.
         drop(unsafe { Box::from_raw(pointer.as_ptr()) });
@@ -51,7 +78,7 @@ impl<T> Shared<T> {
     pub(crate) fn try_new(value: T) -> Result<Self, AllocError> {
         // Allocate before suppressing the value's destructor so a refused
         // slot allocation also drops any resources owned by value.
-        let mut slot = Box::<Allocation<T>>::try_new_uninit()?;
+        let mut slot = new_header::<T>()?;
         slot.write(Allocation {
             value: UnsafeCell::new(MaybeUninit::new(value)),
             strong: Cell::new(1),

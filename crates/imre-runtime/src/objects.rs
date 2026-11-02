@@ -71,6 +71,7 @@ mod module_specs;
 mod namespaces;
 pub(crate) mod os;
 pub(crate) use os::os_separator;
+mod pair_tables;
 mod patchset;
 mod paths;
 pub(crate) use paths::{directory_entries, exists, is_file, path_utf8};
@@ -257,6 +258,7 @@ enum Storage {
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
     JsonDecoder(crate::ObjectOwner),
+    PairTable(allocator_api2::boxed::Box<pair_tables::Table>),
 }
 
 /// Borrows a rooted object for one nonreentrant operation.
@@ -380,7 +382,7 @@ pub unsafe extern "C" fn imre_str_list_contains(needle: *const Str, list: *const
 pub unsafe extern "C" fn imre_seq_get(value: *const Object, at: usize) -> usize {
     // SAFETY: the index remains rooted for conversion.
     let at = unsafe { Int::borrow(at) };
-    let at = match decode_index(&at) {
+    let at = match crate::list_subscript_index(&at) {
         Ok(at) => at,
         Err(error) => return error.returning(0),
     };
@@ -511,7 +513,7 @@ unsafe fn replacement(value: *const Object, word: usize, kind: u32) -> Result<Ow
 pub unsafe extern "C" fn imre_seq_set(value: *const Object, at: usize, word: usize, kind: u32) {
     // SAFETY: the caller roots the exact canonical integer index.
     let at = unsafe { Int::borrow(at) };
-    let at = match decode_index(&at) {
+    let at = match crate::list_subscript_index(&at) {
         Ok(at) => at,
         Err(error) => return error.raise(),
     };
@@ -572,6 +574,51 @@ pub unsafe extern "C" fn imre_seq_set_index(
     finish(old.map(drop), ());
 }
 
+/// Append one list or tuple owner without taking a redundant reference. On
+/// failure, the caller still owns the word for ordinary exception cleanup.
+///
+/// # Safety
+/// The receiver is a list of exact tuples or lists. The caller transfers a
+/// rooted element of that kind on success. Neither operation can reenter Python.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_append_owned(
+    value: *const Object,
+    word: usize,
+    kind: u32,
+) -> i32 {
+    // SAFETY: these element types have ordinary word storage; value-struct rows
+    // would copy their argument and therefore cannot take this ownership path.
+    let appended = unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| append_sequence_word(storage.sequence_mut()?, word, kind, true))
+    };
+    finish(appended.map(|()| 1), 0)
+}
+
+/// Reserve before acquiring or transferring the argument on either entry path.
+unsafe fn append_sequence_word(
+    sequence: &mut Words,
+    word: usize,
+    kind: u32,
+    owned: bool,
+) -> Result<(), Error> {
+    sequence.check_kind(kind);
+    sequence
+        .values
+        .try_reserve(1)
+        .map_err(|_| Error::allocation())?;
+    // SAFETY: word is rooted and agrees with the sequence's declared kind.
+    let word = if owned {
+        word
+    } else {
+        unsafe { sequence.kind.acquire(word) }.into_word()
+    };
+    sequence.values.push(word);
+    sequence.update_header();
+    Ok(())
+}
+
 /// # Safety
 /// The rooted word matches this sequence's element kind and preserves acyclicity.
 #[unsafe(no_mangle)]
@@ -592,17 +639,7 @@ pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind
                 words.update_header();
                 return result;
             }
-            let sequence = storage.sequence_mut()?;
-            sequence.check_kind(kind);
-            sequence
-                .values
-                .try_reserve(1)
-                .map_err(|_| Error::allocation())?;
-            sequence
-                .values
-                .push(sequence.kind.acquire(word).into_word());
-            sequence.update_header();
-            Ok(())
+            append_sequence_word(storage.sequence_mut()?, word, kind, false)
         })
     };
     finish(appended.map(|()| 1), 0)

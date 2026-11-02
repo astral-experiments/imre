@@ -1,6 +1,6 @@
 //! Fixed native records with a compact header and compiler-described payload.
 
-use crate::StrOwner;
+use crate::{StrOwner, shared::Shared};
 use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::rc::Rc;
@@ -254,7 +254,7 @@ impl Header {
     }
 
     fn descriptor(&self) -> &RecordDescriptor {
-        // SAFETY: a tagged header owns its Rc until its last record owner drops.
+        // SAFETY: a tagged header roots its block until its last record owner drops.
         let layout = self.layout_pointer();
         let descriptor = if layout.addr() & 1 == 0 {
             layout.map_addr(|addr| addr & !tuples::LAYOUT_TAG)
@@ -276,7 +276,7 @@ fn layout(length: usize) -> Layout {
         .unwrap_or_else(|_| fail("MemoryError", "record allocation is too large"))
 }
 
-// Each surviving record pins at most 512 bytes of slots and one small Rc header.
+// Each surviving record pins at most 512 bytes of slots and one reference-counted header.
 // Other records in the block release their field owners at their own last drop.
 const BLOCK_WORDS: usize = 64;
 
@@ -291,7 +291,7 @@ struct Block {
 pub(super) struct RecordBatch<'a> {
     descriptor: &'a RecordDescriptor,
     words: usize,
-    block: Option<Rc<Block>>,
+    block: Option<Shared<Block>>,
     next: usize,
 }
 
@@ -314,16 +314,22 @@ impl<'a> RecordBatch<'a> {
     /// # Safety
     /// The descriptor must describe valid kinds and outlive all returned record owners.
     pub(super) unsafe fn allocate(&mut self) -> *mut usize {
+        // SAFETY: the infallible caller provides the same descriptor as try_allocate.
+        unsafe { self.try_allocate() }
+            .unwrap_or_else(|_| handle_alloc_error(Layout::new::<Block>()))
+    }
+
+    unsafe fn try_allocate(&mut self) -> Result<*mut usize, allocator_api2::alloc::AllocError> {
         if self.next + self.words > BLOCK_WORDS {
-            self.block = Some(Rc::new(Block {
+            self.block = Some(Shared::try_new(Block {
                 descriptor: self.descriptor,
                 slots: UnsafeCell::new([0; BLOCK_WORDS]),
-            }));
+            })?);
             self.next = 0;
         }
-        let block = Rc::into_raw(Rc::clone(self.block.as_ref().unwrap()));
+        let block = Shared::into_raw(self.block.as_ref().unwrap().clone());
         // SAFETY: the block's distinct, never-reused slots are aligned for headers
-        // and payloads. This record owns the Rc stored in its tagged header.
+        // and payloads. This record owns the block reference stored in its tagged header.
         unsafe {
             let slot = (*block)
                 .slots
@@ -336,7 +342,7 @@ impl<'a> RecordBatch<'a> {
                 references: Cell::new(1),
                 descriptor: Cell::new(block.cast::<RecordDescriptor>().map_addr(|addr| addr | 1)),
             });
-            slot.add(1).cast()
+            Ok(slot.add(1).cast())
         }
     }
 }
@@ -372,6 +378,46 @@ pub unsafe extern "C" fn imre_record_try_new(descriptor: *const RecordDescriptor
         super::exceptions::record_allocation_failed();
     }
     record
+}
+
+thread_local! {
+    static TUPLE_BATCH: RefCell<Option<RecordBatch<'static>>> = const { RefCell::new(None) };
+}
+
+/// Allocate a distinct tuple from a bounded block of stable record slots.
+/// Surviving tuples keep their block alive and release their fields independently.
+///
+/// # Safety
+/// The compiler supplies a static tuple descriptor. The caller initializes its
+/// zeroed fields under the same ownership contract as `imre_record_try_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_tuple_batch_try_new(
+    descriptor: *const RecordDescriptor,
+) -> *mut usize {
+    // SAFETY: compiler-owned literal descriptors remain live for the native module.
+    let layout = unsafe { &*descriptor };
+    let result = TUPLE_BATCH.try_with(|cell| {
+        let mut current = cell.borrow_mut();
+        if !current
+            .as_ref()
+            .is_some_and(|batch| batch.accepts(descriptor))
+        {
+            *current = RecordBatch::new(layout);
+        }
+        current.as_mut().map(|batch| {
+            // SAFETY: the static descriptor and its kinds remain valid for each record.
+            unsafe { batch.try_allocate() }
+        })
+    });
+    match result {
+        Ok(Some(Ok(record))) => record,
+        Ok(Some(Err(_))) => {
+            super::exceptions::record_allocation_failed();
+            std::ptr::null_mut()
+        }
+        // A wide tuple or thread-local teardown uses ordinary standalone storage.
+        _ => unsafe { imre_record_try_new(descriptor) },
+    }
 }
 
 /// Returns an owned reference to a module's unique class constructor.
@@ -575,6 +621,17 @@ fn release(owner: Release) {
         {
             return;
         }
+        if let Release::Record(payload) = &owner {
+            // SAFETY: this entry owns a live record. With no active traversal,
+            // a nonfinal decrement has no children to queue. The last external
+            // function owner must still run the wrapper-cycle check below.
+            let header = unsafe { &*payload.cast::<Header>().sub(1) };
+            let count = header.references.get();
+            if count > 1 && (count != 2 || !wrappers::is_function(header.descriptor())) {
+                header.references.set(count - 1);
+                return;
+            }
+        }
         let pending = ReleaseQueue::default();
         slot.set(&pending);
         let mut current = owner;
@@ -645,7 +702,7 @@ unsafe fn release_record_owner(payload: *const usize, pending: &ReleaseQueue) {
         // the block, and an active cursor, keep their own storage alive.
         unsafe {
             release_fields::<true>(payload, descriptor, 0..descriptor.length);
-            Rc::decrement_strong_count(block);
+            Shared::decrement_strong_count(block);
         }
     } else {
         // SAFETY: the final owner transfers this standalone allocation and all its fields.
@@ -733,7 +790,43 @@ mod tests {
     use crate::shared::Shared;
     use crate::{Int, Str, imre_list_new};
     use num_bigint::BigInt;
-    use std::rc::Rc;
+
+    #[test]
+    fn batched_tuples_have_distinct_addresses_and_independent_fields() {
+        fn layout<const N: usize>() -> &'static RecordDescriptor {
+            const {
+                &RecordDescriptor {
+                    length: N,
+                    kinds: [3; N].as_ptr(),
+                    semantics: std::ptr::null(),
+                }
+            }
+        }
+        // SAFETY: both static layouts contain only string fields. Every
+        // successfully allocated record is released exactly once.
+        unsafe {
+            let first = imre_tuple_batch_try_new(layout::<2>());
+            assert!(!first.is_null());
+            let text = StrOwner::new(Str::new("retained across blocks"));
+            let weak = StrOwner::downgrade(&text);
+            replace(first, 0, StrOwner::as_ptr(&text) as usize, 3);
+            drop(text);
+            for _ in 0..100 {
+                let next = imre_tuple_batch_try_new(layout::<2>());
+                assert!(!next.is_null());
+                assert_ne!(first, next);
+                assert_eq!(*next, 0);
+                imre_record_release(next);
+            }
+            let other = imre_tuple_batch_try_new(layout::<3>());
+            assert!(!other.is_null());
+            assert_ne!(first, other);
+            assert_eq!(weak.strong_count(), 1);
+            imre_record_release(first);
+            assert_eq!(weak.strong_count(), 0);
+            imre_record_release(other);
+        }
+    }
 
     unsafe fn replace(record: *mut usize, field: usize, word: usize, kind: u32) {
         let kind = WordKind::new(kind);
@@ -993,8 +1086,13 @@ mod tests {
         unsafe {
             for _ in 0..100 {
                 let row = batch.allocate();
-                let block = Rc::downgrade(batch.block.as_ref().unwrap());
-                if blocks.last().is_none_or(|previous| !block.ptr_eq(previous)) {
+                let block = Shared::downgrade(batch.block.as_ref().unwrap());
+                if blocks
+                    .last()
+                    .is_none_or(|previous: &crate::shared::Weak<Block>| {
+                        block.as_ptr() != previous.as_ptr()
+                    })
+                {
                     blocks.push(block);
                 }
                 let field = StrOwner::new(Str::new("owned field"));

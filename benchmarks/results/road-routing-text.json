@@ -1,0 +1,2341 @@
+{
+  "description": "Fresh processes on the same warm graph, with exact stdout checks. The primary comparison rotates five prebuilt executables. An independent three-executable run follows the four-runtime suite. Each interval is a 20,000-resample percentile bootstrap of the median within-round time ratio. Rejected batches are retained.",
+  "base_revision": "fcba9a56fa23067ca33e2ed3a23af6cd66e7d2e8",
+  "prior_complete_patch_sha256": "934021954299e95687d61e02ff24f8915ce54b149139d2c059fdb994e7310b7a",
+  "incremental_compiler_test_patch_sha256": "af4e40af74f9f6bde9dbeff47b0005ebfc79e3573fcd0f5443dc2f22a600d87a",
+  "previous_compiler_sources_sha256": {
+    "crates/imre-compiler/src/contracts.rs": "d47406f3b66d6608afc16b193850759d32211219d270aff76776a5f2e4dd1741",
+    "crates/imre-compiler/src/ir.rs": "f4bad06e561e22b849f3e2f6e7f7e0f4e69032a1ee2ff3b3399a2c7fcc2fa640",
+    "crates/imre-compiler/src/lib.rs": "60b032fc54b55b388297c4818c089663131225d3f0d9787c386a00306a596816",
+    "crates/imre-compiler/src/llvm.rs": "44e5696cfd80f72ac17d97512cc15c8c70baaf650ef088f189f52822000fe1cc",
+    "crates/imre-compiler/src/llvm/int_buffers.rs": "f3e512ecf8c962fa4e2b3b6c0e7ff6eff26398749c37151bc32e07bafe742a8c",
+    "crates/imre-compiler/src/pair_tables.rs": "146b2731509b19a4484f6a4e987a92430e7d7df2247cff5db6a3c86400e04179",
+    "crates/imre-compiler/src/split_fields.rs": "5cb6794b1e8e084b05724c971e2919087ced0761372ce7d642536bfb52217038",
+    "crates/imre-runtime/src/lib.rs": "885170bc562ae55c4300b85725a44b00f01026a7b5fbc17a5c1f5b1b2782b0fe",
+    "crates/imre-runtime/src/objects.rs": "85b2f23878f6f0c8f247db70f842d17398ca282faf0d8a384d1ca591cd298add",
+    "crates/imre-runtime/src/objects/pair_tables.rs": "dfd3eeddee0801dd710effc1e97c2f030e6631e084bbddcff5035ced81d4a955",
+    "crates/imre-runtime/src/objects/records.rs": "4b400d74a0b4a18cd900171569551afc67175a8159e47e543587992506993957",
+    "crates/imre-runtime/src/shared.rs": "36141d607bd5627b5f3a956dfebb6534a3983eff0131c7a76d818e0469de2385"
+  },
+  "candidate_compiler_sources_sha256": {
+    "crates/imre-compiler/src/borrows.rs": "a7e1facc693cd603316fc576c5885f7e9b73213773b7b30638b88ab35c6b8f71",
+    "crates/imre-compiler/src/contracts.rs": "d47406f3b66d6608afc16b193850759d32211219d270aff76776a5f2e4dd1741",
+    "crates/imre-compiler/src/ir.rs": "f4bad06e561e22b849f3e2f6e7f7e0f4e69032a1ee2ff3b3399a2c7fcc2fa640",
+    "crates/imre-compiler/src/lib.rs": "60b032fc54b55b388297c4818c089663131225d3f0d9787c386a00306a596816",
+    "crates/imre-compiler/src/llvm.rs": "aa6547e2b2bed495a9b6acc0e512a3ae9c6f3594ca5fecdeb52322b682d50326",
+    "crates/imre-compiler/src/llvm/int_buffers.rs": "e3ba4590975722d9193ec0c81421963c9e9a92019566a29f27a60e98803ab7b5",
+    "crates/imre-compiler/src/llvm/line_views.rs": "b6b52725eb757f6a2857e88fb824d8632fda7bfd4cbdf1ab3247deafd9ed2988",
+    "crates/imre-compiler/src/llvm/structs.rs": "b845c41f8896ada152f6e42ef24d050cb8b49a5e6f3ea4c14f7c1ae8bbb85e76",
+    "crates/imre-compiler/src/pair_tables.rs": "146b2731509b19a4484f6a4e987a92430e7d7df2247cff5db6a3c86400e04179",
+    "crates/imre-compiler/src/split_fields.rs": "5cb6794b1e8e084b05724c971e2919087ced0761372ce7d642536bfb52217038",
+    "crates/imre-runtime/src/lib.rs": "439c29cfaa6653602259cc86453e9925f78c1e34902c7d32ff9475854a03bb3e",
+    "crates/imre-runtime/src/objects.rs": "85b2f23878f6f0c8f247db70f842d17398ca282faf0d8a384d1ca591cd298add",
+    "crates/imre-runtime/src/objects/files.rs": "db41942fdf220496cd9fde011a4cc19a262ccd2aa69d5d1581f82f1f7b05abc0",
+    "crates/imre-runtime/src/objects/files/buffered.rs": "98b1856ff05708e31d610574cfdfe281e824f1326d49ce9946e694bab30ea555",
+    "crates/imre-runtime/src/objects/pair_tables.rs": "60738d079db4a017f124c0f1f1ec376e1b712f5e2027ed3f716a6edcbc9e9e19",
+    "crates/imre-runtime/src/objects/records.rs": "4b400d74a0b4a18cd900171569551afc67175a8159e47e543587992506993957",
+    "crates/imre-runtime/src/shared.rs": "36141d607bd5627b5f3a956dfebb6534a3983eff0131c7a76d818e0469de2385"
+  },
+  "program_sha256": "be6c3d8d1ef4aea4b596e6fc7770c1bd8923b2368cd3997843675796ab03489a",
+  "compiler_options": {
+    "imre": "--opt-level 3 --reachable-only --no-cache, clang-18, system allocator",
+    "rust": "Cargo release, system allocator",
+    "imre_lto": "Same source, matching runtime compiled with -Clinker-plugin-lto and Imre --lto-linker",
+    "rust_lto": "Same Rust source and system allocator, Cargo release with profile.release.lto=thin"
+  },
+  "summary": {
+    "load": {
+      "median_ms": {
+        "previous": 95.3330045,
+        "candidate": 63.378302,
+        "rust": 86.084272,
+        "candidate_lto": 60.1571265,
+        "rust_lto": 82.7328535
+      },
+      "previous_over_candidate": [
+        1.5057355430008932,
+        1.4930426225209046,
+        1.514465082486211
+      ],
+      "candidate_over_rust": [
+        0.7306447670748021,
+        0.7266488416502872,
+        0.7358926513039796
+      ],
+      "candidate_lto_over_rust_lto": [
+        0.7273734648499403,
+        0.7246983604836224,
+        0.7358745225291992
+      ]
+    },
+    "routes": {
+      "median_ms": {
+        "previous": 156.7383065,
+        "candidate": 113.3613315,
+        "rust": 129.8766315,
+        "candidate_lto": 105.5171205,
+        "rust_lto": 126.3385415
+      },
+      "previous_over_candidate": [
+        1.3775628564594546,
+        1.3678114955238923,
+        1.3845552265163636
+      ],
+      "candidate_over_rust": [
+        0.8657460870619782,
+        0.8511448101025438,
+        0.8778759638232467
+      ],
+      "candidate_lto_over_rust_lto": [
+        0.8373510667426111,
+        0.8246151604367009,
+        0.8456482670704898
+      ]
+    }
+  },
+  "replication_summary": {
+    "load": {
+      "median_ms": {
+        "previous": 97.2141505,
+        "candidate": 64.164561,
+        "rust": 87.5209645
+      },
+      "previous_over_candidate": [
+        1.5177438345531833,
+        1.4998935120617152,
+        1.5303429251421412
+      ],
+      "candidate_over_rust": [
+        0.7257204094373172,
+        0.7160878472504938,
+        0.7313493235038906
+      ]
+    },
+    "routes": {
+      "median_ms": {
+        "previous": 157.6498565,
+        "candidate": 114.1523295,
+        "rust": 134.0347765
+      },
+      "previous_over_candidate": [
+        1.3894808985711422,
+        1.3649559652401715,
+        1.396131371342325
+      ],
+      "candidate_over_rust": [
+        0.8684824262640698,
+        0.8483753907701984,
+        0.8772878583264073
+      ]
+    }
+  },
+  "control_summary": {
+    "uv download catalog": {
+      "previous_ms": 144.7859205,
+      "candidate_ms": 145.9778205,
+      "candidate_over_previous": [
+        1.0040788032553403,
+        1.000020814221426,
+        1.013005937056626
+      ]
+    },
+    "Source search": {
+      "previous_ms": 166.396562,
+      "candidate_ms": 166.1556035,
+      "candidate_over_previous": [
+        1.0065983815757615,
+        0.9524167888507618,
+        1.0190713003266287
+      ]
+    },
+    "Wheel verification": {
+      "previous_ms": 37.1648405,
+      "candidate_ms": 36.279532,
+      "candidate_over_previous": [
+        0.9984595601047641,
+        0.9827877965276828,
+        1.0124833914438067
+      ]
+    },
+    "Conformance report": {
+      "previous_ms": 29.327005,
+      "candidate_ms": 28.6352625,
+      "candidate_over_previous": [
+        0.9920449726559091,
+        0.7461974255445674,
+        1.02859565204791
+      ]
+    }
+  },
+  "median_peak_mib": {
+    "previous": 16.11328125,
+    "candidate": 14.1953125,
+    "rust": 41.62890625
+  },
+  "paired": {
+    "host": "charlie-ohm-perf-1022",
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39",
+    "cpu": 13,
+    "date": "2026-11-02T14:29:48.774988+00:00",
+    "graph": "37f5b3eff82330850466956b6c036a8ab8551512bdc7509edca1d4c6cf943fa3",
+    "queries": [
+      "1,12637",
+      "120000,230000",
+      "264346,4321",
+      "63789,130000"
+    ],
+    "maximum_peer_busy_pct": 2,
+    "kernel": "7.0.0-38-generic",
+    "revision": "fcba9a56fa23067ca33e2ed3a23af6cd66e7d2e8",
+    "programs": {
+      "previous": {
+        "command": "road-perf/deploy/packed-pairs/roads",
+        "sha256": "ab6f2bd1b95c2b9d0d92dc975c35823b8c6056a2f6123f37e1b1f6a53c864a51"
+      },
+      "candidate": {
+        "command": "road-perf/deploy/road3-production/roads",
+        "sha256": "6f69fe05c7e69148b227b1a13bbbf93c59f91bed17318060aae40ed663c3a2c8"
+      },
+      "rust": {
+        "command": "build/target/release/road-routing",
+        "sha256": "eb3053652f0be3dbebf2b660707bb5561667bf54ca707cc6771f7175b4ea0d76"
+      },
+      "candidate_lto": {
+        "command": "road-perf/deploy/road3-production/roads-lto",
+        "sha256": "33e0ff4469dacd5e07976da032105933720ec0dfb29ffd66ee40b5da5ed65749"
+      },
+      "rust_lto": {
+        "command": "road-perf/deploy/road3/rust-lto",
+        "sha256": "c9b2c22e748a25d83c4ba5dcf96ec436516003c990522a33d08770ae0f97b6cb"
+      }
+    },
+    "cases": {
+      "load": [
+        {
+          "before": {
+            "selected": {
+              "busy_pct": 0.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.47,
+              "steal_pct": 0.0
+            }
+          },
+          "warmups_ns": {
+            "previous": 100541121,
+            "candidate": 62706895,
+            "rust": 95810598,
+            "candidate_lto": 59619675,
+            "rust_lto": 84096980
+          },
+          "expected_sha256": "6bd6c1ed761d2703a969c8033ea59b81967bf2a2afaa1adbc5e33f742ca055f5",
+          "samples_ns": [
+            {
+              "rust_lto": 311104903,
+              "rust": 167686915,
+              "candidate_lto": 69637525,
+              "previous": 102757238,
+              "candidate": 68883040
+            },
+            {
+              "rust": 87702385,
+              "candidate_lto": 61502362,
+              "previous": 98385034,
+              "candidate": 62761317,
+              "rust_lto": 91076159
+            },
+            {
+              "candidate_lto": 63737616,
+              "previous": 95998148,
+              "candidate": 63681541,
+              "rust_lto": 83127163,
+              "rust": 87214516
+            },
+            {
+              "previous": 95226692,
+              "candidate": 66963213,
+              "rust_lto": 82721638,
+              "rust": 87905995,
+              "candidate_lto": 60508080
+            },
+            {
+              "candidate": 64059636,
+              "rust_lto": 85018566,
+              "rust": 86464820,
+              "candidate_lto": 61121432,
+              "previous": 94657452
+            },
+            {
+              "previous": 94493296,
+              "rust_lto": 81028984,
+              "rust": 85724812,
+              "candidate_lto": 59671832,
+              "candidate": 63477750
+            },
+            {
+              "rust_lto": 82035650,
+              "rust": 85826421,
+              "candidate_lto": 247529148,
+              "candidate": 74691980,
+              "previous": 107587857
+            },
+            {
+              "rust": 182478147,
+              "candidate_lto": 62177819,
+              "candidate": 62764744,
+              "previous": 95579509,
+              "rust_lto": 85469946
+            },
+            {
+              "candidate_lto": 60338292,
+              "candidate": 63028565,
+              "previous": 94129737,
+              "rust_lto": 84570101,
+              "rust": 84901688
+            },
+            {
+              "candidate": 63571396,
+              "previous": 94889182,
+              "rust_lto": 80302452,
+              "rust": 85185877,
+              "candidate_lto": 60153701
+            },
+            {
+              "rust_lto": 81754656,
+              "candidate_lto": 60988885,
+              "previous": 95631515,
+              "rust": 85047571,
+              "candidate": 62322739
+            },
+            {
+              "candidate_lto": 58618711,
+              "previous": 94468979,
+              "rust": 85617954,
+              "candidate": 63459487,
+              "rust_lto": 83548057
+            },
+            {
+              "previous": 95908591,
+              "rust": 85213771,
+              "candidate": 62358295,
+              "rust_lto": 81254735,
+              "candidate_lto": 59093746
+            },
+            {
+              "rust": 85980588,
+              "candidate": 62518294,
+              "rust_lto": 81059381,
+              "candidate_lto": 59848060,
+              "previous": 94645729
+            },
+            {
+              "candidate": 62541858,
+              "rust_lto": 83933024,
+              "candidate_lto": 59539848,
+              "previous": 94753518,
+              "rust": 86682005
+            },
+            {
+              "rust_lto": 82113094,
+              "candidate_lto": 59702560,
+              "rust": 85804841,
+              "candidate": 198950700,
+              "previous": 166372578
+            },
+            {
+              "candidate_lto": 64278514,
+              "rust": 181153689,
+              "candidate": 65741449,
+              "previous": 94585578,
+              "rust_lto": 83003583
+            },
+            {
+              "rust": 86588700,
+              "candidate": 63306573,
+              "previous": 94649016,
+              "rust_lto": 83127083,
+              "candidate_lto": 60264306
+            },
+            {
+              "candidate": 62428768,
+              "previous": 98194102,
+              "rust_lto": 84990494,
+              "candidate_lto": 60470329,
+              "rust": 85843051
+            },
+            {
+              "previous": 96460029,
+              "rust_lto": 81591222,
+              "candidate_lto": 61083031,
+              "rust": 86097247,
+              "candidate": 64058564
+            },
+            {
+              "candidate": 61794165,
+              "previous": 96007746,
+              "rust_lto": 82381384,
+              "rust": 86621812,
+              "candidate_lto": 59862045
+            },
+            {
+              "previous": 93763225,
+              "rust_lto": 81699064,
+              "rust": 90061259,
+              "candidate_lto": 63082265,
+              "candidate": 63636637
+            },
+            {
+              "rust_lto": 83284326,
+              "rust": 87186975,
+              "candidate_lto": 59016021,
+              "candidate": 61714968,
+              "previous": 93344336
+            },
+            {
+              "rust": 85805523,
+              "candidate_lto": 59468774,
+              "candidate": 62360371,
+              "previous": 94577864,
+              "rust_lto": 82744069
+            },
+            {
+              "candidate_lto": 59468273,
+              "candidate": 61948814,
+              "previous": 94356471,
+              "rust_lto": 80796311,
+              "rust": 85468094
+            },
+            {
+              "rust": 85131136,
+              "rust_lto": 80898932,
+              "candidate": 62649319,
+              "candidate_lto": 58684171,
+              "previous": 94328639
+            },
+            {
+              "rust_lto": 80937043,
+              "candidate": 62797455,
+              "candidate_lto": 58719909,
+              "previous": 104902384,
+              "rust": 86513762
+            },
+            {
+              "candidate": 63057820,
+              "candidate_lto": 58906307,
+              "previous": 100200446,
+              "rust": 85861516,
+              "rust_lto": 81642057
+            },
+            {
+              "candidate_lto": 60089190,
+              "previous": 262096324,
+              "rust": 198689454,
+              "rust_lto": 84311770,
+              "candidate": 70667042
+            },
+            {
+              "previous": 100655454,
+              "rust": 85858100,
+              "rust_lto": 82991751,
+              "candidate": 63316542,
+              "candidate_lto": 62937755
+            },
+            {
+              "previous": 95582044,
+              "rust_lto": 83705971,
+              "candidate_lto": 61198436,
+              "rust": 86303629,
+              "candidate": 63508238
+            },
+            {
+              "rust_lto": 81155391,
+              "candidate_lto": 60160552,
+              "rust": 85778241,
+              "candidate": 63081644,
+              "previous": 95439317
+            },
+            {
+              "candidate_lto": 59053650,
+              "rust": 84868086,
+              "candidate": 62669185,
+              "previous": 94261284,
+              "rust_lto": 82031412
+            },
+            {
+              "rust": 86071297,
+              "candidate": 62633520,
+              "previous": 93612625,
+              "rust_lto": 80693180,
+              "candidate_lto": 59318174
+            },
+            {
+              "candidate": 63440062,
+              "previous": 94268135,
+              "rust_lto": 81075482,
+              "candidate_lto": 59211856,
+              "rust": 84583716
+            },
+            {
+              "rust_lto": 81551089,
+              "rust": 85049495,
+              "candidate_lto": 59078117,
+              "candidate": 201087642,
+              "previous": 124721162
+            },
+            {
+              "rust": 181380082,
+              "candidate_lto": 68714826,
+              "candidate": 65857455,
+              "previous": 94504487,
+              "rust_lto": 83420449
+            },
+            {
+              "candidate_lto": 61413419,
+              "candidate": 65126524,
+              "previous": 95170637,
+              "rust_lto": 83473679,
+              "rust": 92172221
+            },
+            {
+              "candidate": 64583811,
+              "previous": 97612777,
+              "rust_lto": 83374895,
+              "rust": 88565244,
+              "candidate_lto": 61866290
+            },
+            {
+              "previous": 109622298,
+              "rust_lto": 84525457,
+              "rust": 89975351,
+              "candidate_lto": 60127973,
+              "candidate": 65370117
+            }
+          ],
+          "during": {
+            "selected": {
+              "busy_pct": 100.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.75,
+              "steal_pct": 0.0
+            }
+          },
+          "after": {
+            "selected": {
+              "busy_pct": 0.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.52,
+              "steal_pct": 0.0
+            }
+          },
+          "accepted": true
+        }
+      ],
+      "routes": [
+        {
+          "before": {
+            "selected": {
+              "busy_pct": 0.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.26,
+              "steal_pct": 0.0
+            }
+          },
+          "warmups_ns": {
+            "previous": 364936762,
+            "candidate": 122978516,
+            "rust": 233122535,
+            "candidate_lto": 113442964,
+            "rust_lto": 127650849
+          },
+          "expected_sha256": "61730c3f11848b5937b271a5e9aaf57bee3f190c3ce46a139569fdf8fe0286a1",
+          "samples_ns": [
+            {
+              "rust_lto": 127757478,
+              "rust": 128963235,
+              "candidate_lto": 109429829,
+              "previous": 155575146,
+              "candidate": 112644796
+            },
+            {
+              "rust": 132505122,
+              "candidate_lto": 109395444,
+              "previous": 157891340,
+              "candidate": 235520983,
+              "rust_lto": 308789091
+            },
+            {
+              "candidate_lto": 118088467,
+              "previous": 167185563,
+              "candidate": 120814225,
+              "rust_lto": 128534876,
+              "rust": 132143778
+            },
+            {
+              "previous": 158417951,
+              "candidate": 115788753,
+              "rust_lto": 134292080,
+              "rust": 137346079,
+              "candidate_lto": 108759510
+            },
+            {
+              "candidate": 115833327,
+              "rust_lto": 125758174,
+              "rust": 127776184,
+              "candidate_lto": 105598803,
+              "previous": 158623544
+            },
+            {
+              "previous": 155121681,
+              "rust_lto": 132342279,
+              "rust": 139135253,
+              "candidate_lto": 107974469,
+              "candidate": 113278857
+            },
+            {
+              "rust_lto": 124574158,
+              "rust": 127673351,
+              "candidate_lto": 104966594,
+              "candidate": 111149682,
+              "previous": 329575692
+            },
+            {
+              "rust": 282130153,
+              "candidate_lto": 113421945,
+              "candidate": 115701532,
+              "previous": 159974950,
+              "rust_lto": 128880300
+            },
+            {
+              "candidate_lto": 105300417,
+              "candidate": 112962148,
+              "previous": 161880561,
+              "rust_lto": 154878208,
+              "rust": 145394619
+            },
+            {
+              "candidate": 115496139,
+              "previous": 155059345,
+              "rust_lto": 123705139,
+              "rust": 129916500,
+              "candidate_lto": 105558467
+            },
+            {
+              "rust_lto": 127532429,
+              "candidate_lto": 103365111,
+              "previous": 155604058,
+              "rust": 128473172,
+              "candidate": 111361647
+            },
+            {
+              "candidate_lto": 103074720,
+              "previous": 156154255,
+              "rust": 127240195,
+              "candidate": 111969760,
+              "rust_lto": 128538894
+            },
+            {
+              "previous": 154184004,
+              "rust": 127401175,
+              "candidate": 111922291,
+              "rust_lto": 125325939,
+              "candidate_lto": 104647761
+            },
+            {
+              "rust": 133631209,
+              "candidate": 112535604,
+              "rust_lto": 123215899,
+              "candidate_lto": 103854974,
+              "previous": 155020833
+            },
+            {
+              "candidate": 112678980,
+              "rust_lto": 127846765,
+              "candidate_lto": 106299849,
+              "previous": 157498939,
+              "rust": 132618393
+            },
+            {
+              "rust_lto": 123891617,
+              "candidate_lto": 103052209,
+              "rust": 394282845,
+              "candidate": 168601460,
+              "previous": 164908070
+            },
+            {
+              "candidate_lto": 117437044,
+              "rust": 138730017,
+              "candidate": 113848140,
+              "previous": 157334492,
+              "rust_lto": 128843722
+            },
+            {
+              "rust": 127894944,
+              "candidate": 114044445,
+              "previous": 158032423,
+              "rust_lto": 131905906,
+              "candidate_lto": 106766708
+            },
+            {
+              "candidate": 113443806,
+              "previous": 156855850,
+              "rust_lto": 124933148,
+              "candidate_lto": 106167532,
+              "rust": 135798006
+            },
+            {
+              "previous": 161532850,
+              "rust_lto": 122508402,
+              "candidate_lto": 103076735,
+              "rust": 127629099,
+              "candidate": 111434904
+            },
+            {
+              "candidate": 112379564,
+              "previous": 156620763,
+              "rust_lto": 129862480,
+              "rust": 126646570,
+              "candidate_lto": 103594338
+            },
+            {
+              "previous": 154486678,
+              "rust_lto": 126172948,
+              "rust": 130660517,
+              "candidate_lto": 105210690,
+              "candidate": 111519622
+            },
+            {
+              "rust_lto": 122354624,
+              "rust": 394779210,
+              "candidate_lto": 161400409,
+              "candidate": 117802124,
+              "previous": 161089627
+            },
+            {
+              "rust": 140681443,
+              "candidate_lto": 104507721,
+              "candidate": 112496632,
+              "previous": 154820559,
+              "rust_lto": 126533700
+            },
+            {
+              "candidate_lto": 105366129,
+              "candidate": 111662490,
+              "previous": 160714128,
+              "rust_lto": 124670680,
+              "rust": 129476431
+            },
+            {
+              "rust": 128696608,
+              "rust_lto": 130984403,
+              "candidate": 113213798,
+              "candidate_lto": 104260900,
+              "previous": 154351616
+            },
+            {
+              "rust_lto": 127099072,
+              "candidate": 113899185,
+              "candidate_lto": 104175791,
+              "previous": 163006702,
+              "rust": 129836763
+            },
+            {
+              "candidate": 112055260,
+              "candidate_lto": 103796064,
+              "previous": 153011500,
+              "rust": 129591055,
+              "rust_lto": 126281520
+            },
+            {
+              "candidate_lto": 103325067,
+              "previous": 151612014,
+              "rust": 361221822,
+              "rust_lto": 214362671,
+              "candidate": 118971924
+            },
+            {
+              "previous": 165414665,
+              "rust": 134735757,
+              "rust_lto": 125052270,
+              "candidate": 113263690,
+              "candidate_lto": 108711210
+            },
+            {
+              "previous": 156961018,
+              "rust_lto": 128930674,
+              "candidate_lto": 106148928,
+              "rust": 129049656,
+              "candidate": 114181801
+            },
+            {
+              "rust_lto": 122153140,
+              "candidate_lto": 106730331,
+              "rust": 127641042,
+              "candidate": 113717446,
+              "previous": 155099851
+            },
+            {
+              "candidate_lto": 105475774,
+              "rust": 131833271,
+              "candidate": 112688089,
+              "previous": 152890225,
+              "rust_lto": 367892558
+            },
+            {
+              "rust": 233948766,
+              "candidate": 116893332,
+              "previous": 159774159,
+              "rust_lto": 124380649,
+              "candidate_lto": 109145810
+            },
+            {
+              "candidate": 116994470,
+              "previous": 157751480,
+              "rust_lto": 124070631,
+              "candidate_lto": 107574844,
+              "rust": 137214154
+            },
+            {
+              "rust_lto": 124969376,
+              "rust": 126794586,
+              "candidate_lto": 104317375,
+              "candidate": 111039879,
+              "previous": 155424665
+            },
+            {
+              "rust": 127509628,
+              "candidate_lto": 105764302,
+              "candidate": 118361217,
+              "previous": 152661299,
+              "rust_lto": 122985269
+            },
+            {
+              "candidate_lto": 104987965,
+              "candidate": 110749859,
+              "previous": 154020400,
+              "rust_lto": 124256729,
+              "rust": 128267989
+            },
+            {
+              "candidate": 119521097,
+              "previous": 155547705,
+              "rust_lto": 123156288,
+              "rust": 126106803,
+              "candidate_lto": 104207571
+            },
+            {
+              "previous": 154390318,
+              "rust_lto": 126395563,
+              "rust": 125829156,
+              "candidate_lto": 110434381,
+              "candidate": 114677752
+            }
+          ],
+          "during": {
+            "selected": {
+              "busy_pct": 100.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.47,
+              "steal_pct": 0.0
+            }
+          },
+          "after": {
+            "selected": {
+              "busy_pct": 0.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.11,
+              "steal_pct": 0.0
+            }
+          },
+          "accepted": true
+        }
+      ]
+    }
+  },
+  "replication": {
+    "host": "charlie-ohm-perf-1022",
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39",
+    "cpu": 13,
+    "date": "2026-11-02T14:34:29.002244+00:00",
+    "graph": "37f5b3eff82330850466956b6c036a8ab8551512bdc7509edca1d4c6cf943fa3",
+    "queries": [
+      "1,12637",
+      "120000,230000",
+      "264346,4321",
+      "63789,130000"
+    ],
+    "maximum_peer_busy_pct": 2,
+    "kernel": "7.0.0-38-generic",
+    "revision": "fcba9a56fa23067ca33e2ed3a23af6cd66e7d2e8",
+    "programs": {
+      "previous": {
+        "command": "road-perf/deploy/packed-pairs/roads",
+        "sha256": "ab6f2bd1b95c2b9d0d92dc975c35823b8c6056a2f6123f37e1b1f6a53c864a51"
+      },
+      "candidate": {
+        "command": "road-perf/deploy/road3-production/roads",
+        "sha256": "6f69fe05c7e69148b227b1a13bbbf93c59f91bed17318060aae40ed663c3a2c8"
+      },
+      "rust": {
+        "command": "build/target/release/road-routing",
+        "sha256": "eb3053652f0be3dbebf2b660707bb5561667bf54ca707cc6771f7175b4ea0d76"
+      }
+    },
+    "cases": {
+      "load": [
+        {
+          "before": {
+            "selected": {
+              "busy_pct": 0.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.36,
+              "steal_pct": 0.0
+            }
+          },
+          "warmups_ns": {
+            "previous": 117103720,
+            "candidate": 63646521,
+            "rust": 137944824
+          },
+          "expected_sha256": "6bd6c1ed761d2703a969c8033ea59b81967bf2a2afaa1adbc5e33f742ca055f5",
+          "samples_ns": [
+            {
+              "candidate": 63427702,
+              "rust": 91639655,
+              "previous": 96930423
+            },
+            {
+              "rust": 86715193,
+              "previous": 255461494,
+              "candidate": 148998585
+            },
+            {
+              "previous": 102002931,
+              "candidate": 66653643,
+              "rust": 209118776
+            },
+            {
+              "rust": 87267612,
+              "previous": 96093403,
+              "candidate": 63823109
+            },
+            {
+              "previous": 97362146,
+              "candidate": 64638019,
+              "rust": 88416342
+            },
+            {
+              "candidate": 63630891,
+              "rust": 86895409,
+              "previous": 97746992
+            },
+            {
+              "rust": 89363306,
+              "previous": 97844244,
+              "candidate": 63368403
+            },
+            {
+              "previous": 96997666,
+              "candidate": 63932985,
+              "rust": 87329116
+            },
+            {
+              "candidate": 67018612,
+              "rust": 87259377,
+              "previous": 94679508
+            },
+            {
+              "candidate": 62536633,
+              "rust": 87314981,
+              "previous": 95278244
+            },
+            {
+              "rust": 88609201,
+              "previous": 95414980,
+              "candidate": 64364228
+            },
+            {
+              "previous": 96518164,
+              "candidate": 64350011,
+              "rust": 85814574
+            },
+            {
+              "candidate": 62714856,
+              "rust": 86378946,
+              "previous": 254946073
+            },
+            {
+              "rust": 278788769,
+              "previous": 98955694,
+              "candidate": 67863896
+            },
+            {
+              "previous": 97066155,
+              "candidate": 63368323,
+              "rust": 87356687
+            },
+            {
+              "rust": 89241079,
+              "previous": 95877540,
+              "candidate": 64314795
+            },
+            {
+              "previous": 101360655,
+              "candidate": 63178810,
+              "rust": 87501198
+            },
+            {
+              "candidate": 64699612,
+              "rust": 86729408,
+              "previous": 96095858
+            },
+            {
+              "rust": 322911861,
+              "candidate": 117740477,
+              "previous": 102622615
+            },
+            {
+              "candidate": 65407991,
+              "previous": 97362678,
+              "rust": 137141437
+            },
+            {
+              "previous": 96939659,
+              "rust": 86427367,
+              "candidate": 63777194
+            },
+            {
+              "rust": 87540731,
+              "candidate": 64014327,
+              "previous": 96514838
+            },
+            {
+              "candidate": 64359319,
+              "previous": 97717429,
+              "rust": 89008936
+            },
+            {
+              "previous": 97472783,
+              "rust": 89652185,
+              "candidate": 63478296
+            }
+          ],
+          "during": {
+            "selected": {
+              "busy_pct": 100.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.57,
+              "steal_pct": 0.0
+            }
+          },
+          "after": {
+            "selected": {
+              "busy_pct": 0.66,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.48,
+              "steal_pct": 0.0
+            }
+          },
+          "accepted": true
+        }
+      ],
+      "routes": [
+        {
+          "before": {
+            "selected": {
+              "busy_pct": 0.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 1.47,
+              "steal_pct": 0.0
+            }
+          },
+          "warmups_ns": {
+            "previous": 261875101,
+            "candidate": 116512710,
+            "rust": 226386094
+          },
+          "expected_sha256": "61730c3f11848b5937b271a5e9aaf57bee3f190c3ce46a139569fdf8fe0286a1",
+          "samples_ns": [
+            {
+              "candidate": 182729267,
+              "rust": 200788859,
+              "previous": 165520272
+            },
+            {
+              "rust": 139680216,
+              "previous": 159172127,
+              "candidate": 128971844
+            },
+            {
+              "previous": 168822051,
+              "candidate": 119224963,
+              "rust": 136689746
+            },
+            {
+              "rust": 136226283,
+              "previous": 160948576,
+              "candidate": 115585725
+            },
+            {
+              "previous": 159478567,
+              "candidate": 118154388,
+              "rust": 378685396
+            },
+            {
+              "candidate": 164002765,
+              "rust": 179811955,
+              "previous": 168394866
+            },
+            {
+              "rust": 145506831,
+              "previous": 165627621,
+              "candidate": 117985164
+            },
+            {
+              "previous": 164373897,
+              "candidate": 127363794,
+              "rust": 144578191
+            },
+            {
+              "candidate": 121310599,
+              "rust": 139587353,
+              "previous": 284251113
+            },
+            {
+              "candidate": 179767731,
+              "rust": 220774780,
+              "previous": 169199556
+            },
+            {
+              "rust": 145417544,
+              "previous": 162059835,
+              "candidate": 120972919
+            },
+            {
+              "previous": 168967634,
+              "candidate": 125055412,
+              "rust": 145028940
+            },
+            {
+              "candidate": 126891083,
+              "rust": 141237768,
+              "previous": 278455668
+            },
+            {
+              "rust": 272140996,
+              "previous": 180740204,
+              "candidate": 119444812
+            },
+            {
+              "previous": 164575071,
+              "candidate": 128660079,
+              "rust": 128521932
+            },
+            {
+              "rust": 140940354,
+              "previous": 165935125,
+              "candidate": 122732011
+            },
+            {
+              "previous": 157951404,
+              "candidate": 134762305,
+              "rust": 133152637
+            },
+            {
+              "candidate": 118774423,
+              "rust": 142585559,
+              "previous": 160438595
+            },
+            {
+              "rust": 140482973,
+              "candidate": 119828015,
+              "previous": 164924983
+            },
+            {
+              "candidate": 200385810,
+              "previous": 240513190,
+              "rust": 221064509
+            },
+            {
+              "previous": 164409673,
+              "rust": 141198385,
+              "candidate": 120925410
+            },
+            {
+              "rust": 146083668,
+              "candidate": 115065154,
+              "previous": 162574815
+            },
+            {
+              "candidate": 113654996,
+              "previous": 160698309,
+              "rust": 133948199
+            },
+            {
+              "previous": 164916669,
+              "rust": 144993214,
+              "candidate": 121749044
+            }
+          ],
+          "during": {
+            "selected": {
+              "busy_pct": 100.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 4.7,
+              "steal_pct": 0.01
+            }
+          },
+          "after": {
+            "selected": {
+              "busy_pct": 8.75,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 6.04,
+              "steal_pct": 0.01
+            }
+          },
+          "accepted": false
+        },
+        {
+          "before": {
+            "selected": {
+              "busy_pct": 2.02,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 6.54,
+              "steal_pct": 0.01
+            }
+          },
+          "warmups_ns": {
+            "previous": 200160509,
+            "candidate": 117715401,
+            "rust": 334362043
+          },
+          "expected_sha256": "61730c3f11848b5937b271a5e9aaf57bee3f190c3ce46a139569fdf8fe0286a1",
+          "samples_ns": [
+            {
+              "candidate": 175541940,
+              "rust": 195523592,
+              "previous": 171670259
+            },
+            {
+              "rust": 143266466,
+              "previous": 161921239,
+              "candidate": 121717647
+            },
+            {
+              "previous": 170443904,
+              "candidate": 123503663,
+              "rust": 143639974
+            },
+            {
+              "rust": 135178541,
+              "previous": 256318883,
+              "candidate": 207411958
+            },
+            {
+              "previous": 171668997,
+              "candidate": 118787378,
+              "rust": 202314282
+            },
+            {
+              "candidate": 120655828,
+              "rust": 137804393,
+              "previous": 163473780
+            },
+            {
+              "rust": 144369093,
+              "previous": 166852825,
+              "candidate": 211810151
+            },
+            {
+              "previous": 247279143,
+              "candidate": 124282234,
+              "rust": 192531939
+            },
+            {
+              "candidate": 118478673,
+              "rust": 133522566,
+              "previous": 165521215
+            },
+            {
+              "candidate": 114383395,
+              "rust": 137225384,
+              "previous": 164197629
+            },
+            {
+              "rust": 138295609,
+              "previous": 227605034,
+              "candidate": 179991209
+            },
+            {
+              "previous": 165283452,
+              "candidate": 116886506,
+              "rust": 187906403
+            },
+            {
+              "candidate": 119077338,
+              "rust": 137723973,
+              "previous": 157824818
+            },
+            {
+              "rust": 131027538,
+              "previous": 156086140,
+              "candidate": 114526762
+            },
+            {
+              "previous": 164423338,
+              "candidate": 124517582,
+              "rust": 140646598
+            },
+            {
+              "rust": 137042764,
+              "previous": 162243629,
+              "candidate": 116234493
+            },
+            {
+              "previous": 155066879,
+              "candidate": 113347194,
+              "rust": 282727307
+            },
+            {
+              "candidate": 187985010,
+              "rust": 154154881,
+              "previous": 171383745
+            },
+            {
+              "rust": 136123952,
+              "candidate": 117514877,
+              "previous": 158901643
+            },
+            {
+              "candidate": 113225347,
+              "previous": 159878083,
+              "rust": 130592960
+            },
+            {
+              "previous": 154839526,
+              "rust": 130345027,
+              "candidate": 186519600
+            },
+            {
+              "rust": 282558081,
+              "candidate": 121963435,
+              "previous": 169562333
+            },
+            {
+              "candidate": 115285045,
+              "previous": 160072023,
+              "rust": 135241679
+            },
+            {
+              "previous": 174288196,
+              "rust": 151369251,
+              "candidate": 119328095
+            }
+          ],
+          "during": {
+            "selected": {
+              "busy_pct": 100.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 5.14,
+              "steal_pct": 0.0
+            }
+          },
+          "after": {
+            "selected": {
+              "busy_pct": 1.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 5.63,
+              "steal_pct": 0.0
+            }
+          },
+          "accepted": false
+        },
+        {
+          "before": {
+            "selected": {
+              "busy_pct": 1.34,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 6.04,
+              "steal_pct": 0.0
+            }
+          },
+          "warmups_ns": {
+            "previous": 209367331,
+            "candidate": 119051911,
+            "rust": 166456458
+          },
+          "expected_sha256": "61730c3f11848b5937b271a5e9aaf57bee3f190c3ce46a139569fdf8fe0286a1",
+          "samples_ns": [
+            {
+              "candidate": 157081824,
+              "rust": 177875397,
+              "previous": 164858161
+            },
+            {
+              "rust": 139343801,
+              "previous": 229689949,
+              "candidate": 188397589
+            },
+            {
+              "previous": 171110447,
+              "candidate": 122132570,
+              "rust": 190343334
+            },
+            {
+              "rust": 138550563,
+              "previous": 170157170,
+              "candidate": 118185407
+            },
+            {
+              "previous": 165367969,
+              "candidate": 128425452,
+              "rust": 145561825
+            },
+            {
+              "candidate": 120468250,
+              "rust": 130488857,
+              "previous": 163065871
+            },
+            {
+              "rust": 141587701,
+              "previous": 163733775,
+              "candidate": 120209649
+            },
+            {
+              "previous": 163917728,
+              "candidate": 152005197,
+              "rust": 133904479
+            },
+            {
+              "candidate": 115366024,
+              "rust": 287492485,
+              "previous": 233599442
+            },
+            {
+              "candidate": 117356723,
+              "rust": 147408335,
+              "previous": 160240147
+            },
+            {
+              "rust": 130906403,
+              "previous": 162250623,
+              "candidate": 113963461
+            },
+            {
+              "previous": 154911090,
+              "candidate": 113158604,
+              "rust": 141794616
+            },
+            {
+              "candidate": 112468308,
+              "rust": 132493310,
+              "previous": 160682081
+            },
+            {
+              "rust": 128817984,
+              "previous": 156067995,
+              "candidate": 112365676
+            },
+            {
+              "previous": 163336215,
+              "candidate": 112030802,
+              "rust": 368595123
+            },
+            {
+              "rust": 210620316,
+              "previous": 169622284,
+              "candidate": 118638943
+            },
+            {
+              "previous": 156570000,
+              "candidate": 118474605,
+              "rust": 144843857
+            },
+            {
+              "candidate": 112112915,
+              "rust": 129944662,
+              "previous": 157460489
+            },
+            {
+              "rust": 129903046,
+              "candidate": 111873248,
+              "previous": 154097164
+            },
+            {
+              "candidate": 116854939,
+              "previous": 160902992,
+              "rust": 136315040
+            },
+            {
+              "previous": 157854413,
+              "rust": 139630576,
+              "candidate": 111704735
+            },
+            {
+              "rust": 127571402,
+              "candidate": 116838097,
+              "previous": 165732498
+            },
+            {
+              "candidate": 111645125,
+              "previous": 161888818,
+              "rust": 338783741
+            },
+            {
+              "previous": 209200261,
+              "rust": 146432826,
+              "candidate": 115370865
+            }
+          ],
+          "during": {
+            "selected": {
+              "busy_pct": 100.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 3.03,
+              "steal_pct": 0.0
+            }
+          },
+          "after": {
+            "selected": {
+              "busy_pct": 0.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.3,
+              "steal_pct": 0.0
+            }
+          },
+          "accepted": false
+        },
+        {
+          "before": {
+            "selected": {
+              "busy_pct": 0.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.68,
+              "steal_pct": 0.0
+            }
+          },
+          "warmups_ns": {
+            "previous": 165141638,
+            "candidate": 113571634,
+            "rust": 146286414
+          },
+          "expected_sha256": "61730c3f11848b5937b271a5e9aaf57bee3f190c3ce46a139569fdf8fe0286a1",
+          "samples_ns": [
+            {
+              "candidate": 190231826,
+              "rust": 202242700,
+              "previous": 167866044
+            },
+            {
+              "rust": 134152611,
+              "previous": 158985170,
+              "candidate": 116457009
+            },
+            {
+              "previous": 155075156,
+              "candidate": 113611838,
+              "rust": 133916942
+            },
+            {
+              "rust": 315989771,
+              "previous": 227273518,
+              "candidate": 120129609
+            },
+            {
+              "previous": 156540807,
+              "candidate": 112648333,
+              "rust": 166091558
+            },
+            {
+              "candidate": 114252511,
+              "rust": 130498956,
+              "previous": 162810776
+            },
+            {
+              "rust": 152318364,
+              "previous": 156984694,
+              "candidate": 115719250
+            },
+            {
+              "previous": 154519460,
+              "candidate": 110907960,
+              "rust": 128026249
+            },
+            {
+              "candidate": 114052148,
+              "rust": 128684585,
+              "previous": 153854643
+            },
+            {
+              "candidate": 121715073,
+              "rust": 128700644,
+              "previous": 165737072
+            },
+            {
+              "rust": 135139182,
+              "previous": 274436651,
+              "candidate": 186203623
+            },
+            {
+              "previous": 162556832,
+              "candidate": 116433765,
+              "rust": 206156992
+            },
+            {
+              "candidate": 119037244,
+              "rust": 137002150,
+              "previous": 156993289
+            },
+            {
+              "rust": 128934120,
+              "previous": 157469225,
+              "candidate": 113112338
+            },
+            {
+              "previous": 161672205,
+              "candidate": 111857831,
+              "rust": 130720748
+            },
+            {
+              "rust": 127695462,
+              "previous": 153470467,
+              "candidate": 111765559
+            },
+            {
+              "previous": 166239207,
+              "candidate": 113197296,
+              "rust": 128876533
+            },
+            {
+              "candidate": 119822767,
+              "rust": 135153046,
+              "previous": 154534479
+            },
+            {
+              "rust": 130355920,
+              "candidate": 113602671,
+              "previous": 157830488
+            },
+            {
+              "candidate": 111754849,
+              "previous": 155359186,
+              "rust": 311328737
+            },
+            {
+              "previous": 218431608,
+              "rust": 169995390,
+              "candidate": 117841937
+            },
+            {
+              "rust": 131319615,
+              "candidate": 113732383,
+              "previous": 161565818
+            },
+            {
+              "candidate": 112456095,
+              "previous": 154028848,
+              "rust": 134725978
+            },
+            {
+              "previous": 155803042,
+              "rust": 130714607,
+              "candidate": 119843426
+            }
+          ],
+          "during": {
+            "selected": {
+              "busy_pct": 100.0,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.55,
+              "steal_pct": 0.0
+            }
+          },
+          "after": {
+            "selected": {
+              "busy_pct": 0.66,
+              "steal_pct": 0.0
+            },
+            "other_cpus": {
+              "busy_pct": 0.29,
+              "steal_pct": 0.0
+            }
+          },
+          "accepted": true
+        }
+      ]
+    }
+  },
+  "controls": {
+    "date_utc": "2026-11-02T14:33:47.553332+00:00",
+    "host": "charlie-ohm-perf-1022",
+    "logical_cpu": 13,
+    "cases": {
+      "uv download catalog": {
+        "expected_sha256": "753cd906307c1b4f830e9348703e0110ba38fddd97293780f146f78f0ed9a3f6",
+        "executables_sha256": {
+          "previous": "88bbe82a30629b18a40788a117e68fd317a8ce712eb689ff63228e6523237c17",
+          "candidate": "be72c7f2e37e9df1fdb9e05e9a9f40169f11461304bfa1bc2cee26cd9ad58c06"
+        },
+        "batches": [
+          {
+            "warmups_ns": {
+              "previous": 359609317,
+              "candidate": 176519019
+            },
+            "before": {
+              "selected": {
+                "busy_pct": 0.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.31,
+                "steal_pct": 0.0
+              }
+            },
+            "samples_ns": [
+              {
+                "previous": 143786415,
+                "candidate": 331952518
+              },
+              {
+                "candidate": 176089197,
+                "previous": 157305036
+              },
+              {
+                "previous": 144728689,
+                "candidate": 144946566
+              },
+              {
+                "candidate": 145910259,
+                "previous": 144611421
+              },
+              {
+                "previous": 144906751,
+                "candidate": 146599084
+              },
+              {
+                "candidate": 143779772,
+                "previous": 143509518
+              },
+              {
+                "previous": 144843152,
+                "candidate": 143500092
+              },
+              {
+                "candidate": 146271664,
+                "previous": 146095145
+              },
+              {
+                "previous": 144487690,
+                "candidate": 144319128
+              },
+              {
+                "candidate": 146045382,
+                "previous": 143981678
+              },
+              {
+                "previous": 145476362,
+                "candidate": 146389143
+              },
+              {
+                "candidate": 145376997,
+                "previous": 145989639
+              }
+            ],
+            "during": {
+              "selected": {
+                "busy_pct": 100.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.49,
+                "steal_pct": 0.0
+              }
+            },
+            "after": {
+              "selected": {
+                "busy_pct": 0.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.42,
+                "steal_pct": 0.0
+              }
+            },
+            "accepted": true
+          }
+        ]
+      },
+      "Source search": {
+        "expected_sha256": "8119d1d18f39ed6ae1de612a0b9b1799e7f8ac1e63d487b221e59b162e40a941",
+        "executables_sha256": {
+          "previous": "5f5e8949e26e55baaaa3a974b338dae74fd2c5b510496d213f6d701a9283eeba",
+          "candidate": "658663bd5eaf8ce92389947a4d638f093c611ade1caac99d660fd94de065c050"
+        },
+        "batches": [
+          {
+            "warmups_ns": {
+              "previous": 200799668,
+              "candidate": 164381368
+            },
+            "before": {
+              "selected": {
+                "busy_pct": 0.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.08,
+                "steal_pct": 0.0
+              }
+            },
+            "samples_ns": [
+              {
+                "previous": 177058783,
+                "candidate": 163183277
+              },
+              {
+                "candidate": 328413396,
+                "previous": 214878264
+              },
+              {
+                "previous": 165622811,
+                "candidate": 166987784
+              },
+              {
+                "candidate": 164361892,
+                "previous": 167170313
+              },
+              {
+                "previous": 164323851,
+                "candidate": 165567969
+              },
+              {
+                "candidate": 165864802,
+                "previous": 162820621
+              },
+              {
+                "previous": 164255825,
+                "candidate": 167449955
+              },
+              {
+                "candidate": 164897190,
+                "previous": 161584049
+              },
+              {
+                "previous": 163176434,
+                "candidate": 164094404
+              },
+              {
+                "candidate": 167494548,
+                "previous": 269972674
+              },
+              {
+                "previous": 254358268,
+                "candidate": 168355131
+              },
+              {
+                "candidate": 166446405,
+                "previous": 169084149
+              }
+            ],
+            "during": {
+              "selected": {
+                "busy_pct": 100.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.89,
+                "steal_pct": 0.0
+              }
+            },
+            "after": {
+              "selected": {
+                "busy_pct": 0.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.28,
+                "steal_pct": 0.0
+              }
+            },
+            "accepted": true
+          }
+        ]
+      },
+      "Wheel verification": {
+        "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "executables_sha256": {
+          "previous": "4ebc9343aece4cc269a84f9e886246deeab66e4f852e15e37727c2edcdd3c5a1",
+          "candidate": "ba7e93422010371b4f2f04429ae7006676b26504e63e6e9716bfc58d0230302b"
+        },
+        "batches": [
+          {
+            "warmups_ns": {
+              "previous": 47632169,
+              "candidate": 36335666
+            },
+            "before": {
+              "selected": {
+                "busy_pct": 2.68,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 1.16,
+                "steal_pct": 0.0
+              }
+            },
+            "samples_ns": [
+              {
+                "previous": 37846821,
+                "candidate": 36086171
+              },
+              {
+                "candidate": 35148684,
+                "previous": 35417306
+              },
+              {
+                "previous": 35507343,
+                "candidate": 35935441
+              },
+              {
+                "candidate": 131187937,
+                "previous": 77016135
+              },
+              {
+                "previous": 37452568,
+                "candidate": 45490830
+              },
+              {
+                "candidate": 36564613,
+                "previous": 36606040
+              },
+              {
+                "previous": 37056068,
+                "candidate": 36061486
+              },
+              {
+                "candidate": 36103745,
+                "previous": 37702632
+              },
+              {
+                "previous": 38306098,
+                "candidate": 38761955
+              },
+              {
+                "candidate": 37119035,
+                "previous": 37273613
+              },
+              {
+                "previous": 35947913,
+                "candidate": 35877844
+              },
+              {
+                "candidate": 36455319,
+                "previous": 35990673
+              }
+            ],
+            "during": {
+              "selected": {
+                "busy_pct": 100.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 1.04,
+                "steal_pct": 0.0
+              }
+            },
+            "after": {
+              "selected": {
+                "busy_pct": 0.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.39,
+                "steal_pct": 0.0
+              }
+            },
+            "accepted": true
+          }
+        ]
+      },
+      "Conformance report": {
+        "expected_sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2",
+        "executables_sha256": {
+          "previous": "ab8f1ec9610ee820623e2b894126b2462bcb2a5e1c7b8908349cb09b67245f3e",
+          "candidate": "e08c0e46ee8dc2804aa6f8149a1e443bf43a495edeabb2d8d4b4e70327ec49ff"
+        },
+        "batches": [
+          {
+            "warmups_ns": {
+              "previous": 42056553,
+              "candidate": 31092349
+            },
+            "before": {
+              "selected": {
+                "busy_pct": 0.33,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.78,
+                "steal_pct": 0.0
+              }
+            },
+            "samples_ns": [
+              {
+                "previous": 82540918,
+                "candidate": 39255836
+              },
+              {
+                "candidate": 28758833,
+                "previous": 29226643
+              },
+              {
+                "previous": 28338037,
+                "candidate": 28340764
+              },
+              {
+                "candidate": 29382253,
+                "previous": 28064348
+              },
+              {
+                "previous": 30642480,
+                "candidate": 42884616
+              },
+              {
+                "candidate": 28258610,
+                "previous": 27905382
+              },
+              {
+                "previous": 27764079,
+                "candidate": 28511692
+              },
+              {
+                "candidate": 30308779,
+                "previous": 29418460
+              },
+              {
+                "previous": 29235550,
+                "candidate": 28229156
+              },
+              {
+                "candidate": 27035141,
+                "previous": 141559879
+              },
+              {
+                "previous": 61951914,
+                "candidate": 41370305
+              },
+              {
+                "candidate": 27945827,
+                "previous": 33889588
+              }
+            ],
+            "during": {
+              "selected": {
+                "busy_pct": 100.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 1.79,
+                "steal_pct": 0.0
+              }
+            },
+            "after": {
+              "selected": {
+                "busy_pct": 0.0,
+                "steal_pct": 0.0
+              },
+              "other_cpus": {
+                "busy_pct": 0.34,
+                "steal_pct": 0.0
+              }
+            },
+            "accepted": true
+          }
+        ]
+      }
+    }
+  },
+  "rss": {
+    "unit": "KiB",
+    "metric": "Linux maximum resident set size from GNU time %M",
+    "host": "charlie-ohm-perf-1022",
+    "graph_sha256": "37f5b3eff82330850466956b6c036a8ab8551512bdc7509edca1d4c6cf943fa3",
+    "output_sha256": "61730c3f11848b5937b271a5e9aaf57bee3f190c3ce46a139569fdf8fe0286a1",
+    "programs": {
+      "previous": {
+        "command": "road-perf/deploy/packed-pairs/roads",
+        "sha256": "ab6f2bd1b95c2b9d0d92dc975c35823b8c6056a2f6123f37e1b1f6a53c864a51"
+      },
+      "candidate": {
+        "command": "road-perf/deploy/road3-production/roads",
+        "sha256": "6f69fe05c7e69148b227b1a13bbbf93c59f91bed17318060aae40ed663c3a2c8"
+      },
+      "rust": {
+        "command": "build/target/release/road-routing",
+        "sha256": "eb3053652f0be3dbebf2b660707bb5561667bf54ca707cc6771f7175b4ea0d76"
+      }
+    },
+    "samples": [
+      {
+        "previous": 16364,
+        "candidate": 14680,
+        "rust": 42664
+      },
+      {
+        "candidate": 14456,
+        "rust": 42628,
+        "previous": 16668
+      },
+      {
+        "rust": 42584,
+        "previous": 16512,
+        "candidate": 14536
+      },
+      {
+        "previous": 16520,
+        "candidate": 14356,
+        "rust": 42648
+      },
+      {
+        "candidate": 14708,
+        "rust": 42608,
+        "previous": 16464
+      },
+      {
+        "rust": 42628,
+        "previous": 16488,
+        "candidate": 14536
+      }
+    ]
+  },
+  "validation": {
+    "python": "/home/dev-user/.local/share/uv/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3",
+    "compiler_sha256": "3474aa0d4d15d3bef2a960181a853f6666b2f2665e99730294c7336ac0a3840e",
+    "runtime_sha256": "fe7bce17e38a12ae67127608b6ccdbe7422fdccfe06c6534ffa487f97348c2a1",
+    "roads_sha256": "6f69fe05c7e69148b227b1a13bbbf93c59f91bed17318060aae40ed663c3a2c8",
+    "fixtures": [
+      {
+        "name": "packed_pair_table",
+        "optimization": 0,
+        "asan": true,
+        "stdout_sha256": "7f45a3e06f050de1dcab1a722aac3056bbeea7aa24dd79ac8242bf332b085ae9",
+        "table_constructors": 1,
+        "mutable_views": 0,
+        "short_line_reads": 0,
+        "row_fills": 0
+      },
+      {
+        "name": "packed_pair_table",
+        "optimization": 3,
+        "asan": true,
+        "stdout_sha256": "7f45a3e06f050de1dcab1a722aac3056bbeea7aa24dd79ac8242bf332b085ae9",
+        "table_constructors": 1,
+        "mutable_views": 0,
+        "short_line_reads": 0,
+        "row_fills": 0
+      },
+      {
+        "name": "pair_table_identity",
+        "optimization": 0,
+        "asan": true,
+        "stdout_sha256": "f1bab70dd44b9b2bebb1378364b9605200247be8eaa5934b650200c8f7e7b2d9",
+        "table_constructors": 0,
+        "mutable_views": 0,
+        "short_line_reads": 0,
+        "row_fills": 0
+      },
+      {
+        "name": "pair_table_identity",
+        "optimization": 3,
+        "asan": true,
+        "stdout_sha256": "f1bab70dd44b9b2bebb1378364b9605200247be8eaa5934b650200c8f7e7b2d9",
+        "table_constructors": 0,
+        "mutable_views": 0,
+        "short_line_reads": 0,
+        "row_fills": 0
+      },
+      {
+        "name": "fixed_int_list_copies",
+        "optimization": 0,
+        "asan": true,
+        "stdout_sha256": "3c70440a235d456aafd10e0317b25fb348ef5e3ee2e7be56cd4710fe47294591",
+        "table_constructors": 0,
+        "mutable_views": 2,
+        "short_line_reads": 0,
+        "row_fills": 0
+      },
+      {
+        "name": "fixed_int_list_copies",
+        "optimization": 3,
+        "asan": true,
+        "stdout_sha256": "3c70440a235d456aafd10e0317b25fb348ef5e3ee2e7be56cd4710fe47294591",
+        "table_constructors": 0,
+        "mutable_views": 2,
+        "short_line_reads": 0,
+        "row_fills": 0
+      },
+      {
+        "name": "fixed_int_buffer",
+        "optimization": 0,
+        "asan": true,
+        "stdout_sha256": "2f729c9c30995e293230b73e6298e97b0f9c47f484fb0878b441c0f7a8a62284",
+        "table_constructors": 0,
+        "mutable_views": 1,
+        "short_line_reads": 0,
+        "row_fills": 0
+      },
+      {
+        "name": "fixed_int_buffer",
+        "optimization": 3,
+        "asan": true,
+        "stdout_sha256": "2f729c9c30995e293230b73e6298e97b0f9c47f484fb0878b441c0f7a8a62284",
+        "table_constructors": 0,
+        "mutable_views": 1,
+        "short_line_reads": 0,
+        "row_fills": 0
+      },
+      {
+        "name": "pair_table_fill",
+        "optimization": 0,
+        "asan": true,
+        "stdout_sha256": "708878d0deb04240a490aa3a23cd86617001ae8499bcbf05268b786b503d9c39",
+        "table_constructors": 1,
+        "mutable_views": 0,
+        "short_line_reads": 0,
+        "row_fills": 2
+      },
+      {
+        "name": "pair_table_fill",
+        "optimization": 3,
+        "asan": true,
+        "stdout_sha256": "708878d0deb04240a490aa3a23cd86617001ae8499bcbf05268b786b503d9c39",
+        "table_constructors": 1,
+        "mutable_views": 0,
+        "short_line_reads": 0,
+        "row_fills": 2
+      },
+      {
+        "name": "short_text_records",
+        "optimization": 0,
+        "asan": true,
+        "stdout_sha256": "27e31f040400a186a3f812cfd69e8ebb506cac7acd48c037a4b578ce56ba5d98",
+        "table_constructors": 0,
+        "mutable_views": 0,
+        "short_line_reads": 3,
+        "row_fills": 0
+      },
+      {
+        "name": "short_text_records",
+        "optimization": 3,
+        "asan": true,
+        "stdout_sha256": "27e31f040400a186a3f812cfd69e8ebb506cac7acd48c037a4b578ce56ba5d98",
+        "table_constructors": 0,
+        "mutable_views": 0,
+        "short_line_reads": 3,
+        "row_fills": 0
+      }
+    ],
+    "graphs": [
+      {
+        "nodes": 1,
+        "arcs": 4,
+        "queries": 1,
+        "input_sha256": "1cf1dea4e96e241358068310176261a156bc449cd4cf04d95cfd9c3825eec63e",
+        "stdout_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      },
+      {
+        "nodes": 3,
+        "arcs": 15,
+        "queries": 9,
+        "input_sha256": "ef6ae254a9f2a72c572e3a408d1d34f3750e04da9f34086cb52424329b4173ed",
+        "stdout_sha256": "1e97dd8580ce7d4ddcef32520e4052176dbfec1a8978f10999b198a21d22c7d2"
+      },
+      {
+        "nodes": 9,
+        "arcs": 39,
+        "queries": 81,
+        "input_sha256": "3f678dcfad218bd606f6540754309da29a344884922e4e147f80d2dddef03620",
+        "stdout_sha256": "64606684e1849903739e84d4831fc831451a5e7b82b97cbe5b420c602879e974"
+      },
+      {
+        "nodes": 13,
+        "arcs": 55,
+        "queries": 169,
+        "input_sha256": "77fa6e46c74bbc4be2b6d17f51dca817d97cfd8594e544864171374e04104977",
+        "stdout_sha256": "34f62b4bc4db429f51fe53e584cac5289b72beacbc9d8b5ee8d6d9dcfa9333ea"
+      },
+      {
+        "nodes": 17,
+        "arcs": 71,
+        "queries": 289,
+        "input_sha256": "06b3ebf9ab447ca72478c294e0a5aa0e7382f64b6ea00e6bb39396d6f1c6c4a0",
+        "stdout_sha256": "65983c49074d54a5e9d77739b6bb60af2b48d8bc7147efc63db92e482dcd45a8"
+      }
+    ],
+    "invalid": [
+      {
+        "case": 0,
+        "diagnostic": "IndexError: list index out of range"
+      },
+      {
+        "case": 1,
+        "diagnostic": "ValueError: invalid literal for int() with base 10: 'bad'"
+      },
+      {
+        "case": 2,
+        "diagnostic": "IndexError: list index out of range"
+      },
+      {
+        "case": 3,
+        "diagnostic": "ValueError: Exceeds the limit (4300 digits) for integer string conversion: value has 5000 digits; use sys.set_int_max_str_digits() to increase the limit"
+      },
+      {
+        "case": 4,
+        "diagnostic": "IndexError: cannot fit 'int' into an index-sized integer"
+      },
+      {
+        "case": 5,
+        "diagnostic": "ValueError: invalid literal for int() with base 10: 'bad'"
+      }
+    ]
+  }
+}
