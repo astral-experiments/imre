@@ -11,22 +11,13 @@ use ruff_python_literal::format::{
 };
 
 use super::super::operators::append_rendered_text;
-use super::super::stdlib::codecs::encode_text;
+use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
 
 mod bytes_fields;
 mod maketrans;
-
-fn decode(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) -> Result<Id> {
-    let encoding = encoding
-        .map(|id| ctx.str_value(id))
-        .transpose()?
-        .unwrap_or("utf-8");
-    let codec = crate::objects::Codec::lookup(encoding)?;
-    super::super::stdlib::codecs::decode_bytes(ctx, codec, ctx.scalar_value(id), errors)
-}
 
 pub(super) fn construct(
     ctx: &mut Context,
@@ -75,11 +66,8 @@ pub(super) fn construct(
             let number = match value.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
                 Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
-                Some(Value::Bytes(b)) if b.is_ascii() => {
-                    crate::integer_text::parse_radix(std::str::from_utf8(b).unwrap(), radix as u32)?
-                }
-                Some(Value::Bytes(_)) => {
-                    return Err(Error::new("ValueError", "invalid byte literal for int()"));
+                Some(Value::Bytes(b) | Value::ByteArray(b)) => {
+                    crate::integer_text::parse_bytes_radix(b, radix as u32)?
                 }
                 _ if base.is_some() => {
                     return Err(type_error(
@@ -108,15 +96,21 @@ pub(super) fn construct(
                 return Ok(ctx.text(""));
             };
             if encoding.is_some() || errors.is_some() {
-                return decode(ctx, value, encoding, errors);
+                return decode_named(ctx, ctx.scalar_value(value), encoding, errors);
             }
             let target = ctx.weak_proxy_target(value)?;
             if target != value {
                 ctx.heap.keep(target);
             }
-            let value = target;
+            // mappingproxy.__str__ returns the backing mapping's string object directly.
+            let value = ctx.mapping_proxy_target(target);
             if matches!(ctx.heap.get(value), Value::Str(_) | Value::SurrogateStr(_)) {
                 return Ok(value);
+            }
+            if let Value::Calendar { tzname, .. } = *ctx.heap.get(value)
+                && tzname != NONE
+            {
+                return Ok(tzname);
             }
             let string_hook = ctx.bound_slot(value, "__str__")?;
             if string_hook.is_none()
@@ -186,15 +180,27 @@ pub(super) fn construct(
         "bytes" | "bytearray" => {
             let [value, encoding_id, errors] =
                 bind(name, args, kwargs, ["source", "encoding", "errors"])?;
+            if let ("bytes", Some(source), None, None) = (name, value, encoding_id, errors)
+                && let Some(result) = call_bytes_method(ctx, source)?
+            {
+                return Ok(result);
+            }
             let bytes = match value.map(|id| ctx.heap.get(id)) {
                 Some(_) if value.is_some_and(|id| ctx.string_storage(id).is_some()) => {
                     if encoding_id.is_none() {
                         return Err(type_error("string argument without an encoding"));
                     }
-                    encode_text(ctx, value.unwrap(), encoding_id, errors)?
+                    let result = encode_text_object(ctx, value.unwrap(), encoding_id, errors)?;
+                    if name == "bytes" {
+                        return Ok(result);
+                    }
+                    ctx.bytes_like(result)?.to_vec()
                 }
-                _ if encoding_id.is_some() || errors.is_some() => {
+                _ if encoding_id.is_some() => {
                     return Err(type_error("encoding without a string argument"));
+                }
+                _ if errors.is_some() => {
+                    return Err(type_error("errors without a string argument"));
                 }
                 None => Vec::new(),
                 Some(Value::Bytes(_)) if name == "bytes" => return Ok(value.unwrap()),
@@ -372,9 +378,31 @@ pub(super) fn bytearray_method(
     Ok(NONE)
 }
 
+/// Call the type's `__bytes__` hook and preserve the identity of its bytes result.
+pub(super) fn call_bytes_method(ctx: &mut Context, source: Id) -> Result<Option<Id>> {
+    let Some(method) = ctx.bound_slot(source, "__bytes__")? else {
+        return Ok(None);
+    };
+    let result = ctx.call(method, Vec::new(), Vec::new())?;
+    if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Bytes(_)) {
+        let name = ctx.type_name(result);
+        return Err(type_error(format!(
+            "__bytes__ returned non-bytes (type {})",
+            &name[..name.floor_char_boundary(200)]
+        )));
+    }
+    Ok(Some(result))
+}
+
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
-    if let Value::Bytes(data) | Value::ByteArray(data) = ctx.heap.get(ctx.scalar_value(obj)) {
-        return super::super::copy_ids(data);
+    if matches!(ctx.heap.get(obj), Value::MemoryView { .. }) {
+        return ctx.memoryview_bytes(obj);
+    }
+    if matches!(
+        ctx.heap.get(ctx.scalar_value(obj)),
+        Value::Bytes(_) | Value::ByteArray(_) | Value::BytesIoBuffer { .. }
+    ) {
+        return super::super::copy_ids(ctx.bytes_like(obj)?);
     }
     let iter = ctx.iterator(obj)?;
     ctx.heap.keep(iter);
@@ -405,24 +433,75 @@ pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-/// Parse the sign and bounded precision of a fixed-point or percentage field.
-fn fixed_float_spec(spec: &str) -> Option<(u32, bool, u8)> {
-    let prefix = spec.strip_suffix(['f', '%'])?;
-    let (digits, sign) = match prefix.as_bytes().first() {
-        Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
-        Some(b'-') => (&prefix[1..], 0),
-        _ => (prefix, 0),
-    };
-    let precision = if digits.is_empty() {
-        6
-    } else {
-        let digits = digits.strip_prefix('.')?;
-        if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
+struct FixedFloatSpec {
+    sign: u8,
+    width: usize,
+    zero: bool,
+    precision: u32,
+    percent: bool,
+}
+
+impl FixedFloatSpec {
+    /// Parse the supported sign, decimal width and bounded precision for f and %.
+    fn parse(spec: &str) -> Result<Option<Self>> {
+        let Some(prefix) = spec.strip_suffix(['f', '%']) else {
+            return Ok(None);
+        };
+        let (digits, sign) = match prefix.as_bytes().first() {
+            Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
+            Some(b'-') => (&prefix[1..], 0),
+            _ => (prefix, 0),
+        };
+        let (width, places) = digits.split_once('.').unwrap_or((digits, "6"));
+        let Ok(precision) = places.parse::<u32>() else {
+            return Ok(None);
+        };
+        if precision > 1000
+            || !width
+                .bytes()
+                .chain(places.bytes())
+                .all(|b| b.is_ascii_digit())
+        {
+            return Ok(None);
         }
-        digits.parse().ok()?
-    };
-    (precision <= 1000).then_some((precision, spec.ends_with('%'), sign))
+        let zero = width.starts_with('0');
+        let width = if width.is_empty() {
+            0
+        } else {
+            width
+                .parse::<isize>()
+                .map_err(|_| Error::new("ValueError", "Too many decimal digits in format string"))?
+                as usize
+        };
+        Ok(Some(Self {
+            sign,
+            width,
+            zero,
+            precision,
+            percent: spec.ends_with('%'),
+        }))
+    }
+
+    /// Pad the rounded ASCII result, keeping a numeric sign ahead of zero fill.
+    fn render(&self, number: f64) -> Result<String> {
+        let text =
+            crate::objects::format_fixed_float(number, self.precision, self.percent, self.sign)?;
+        if self.width <= text.len() {
+            return Ok(text.into_string());
+        }
+        let head = usize::from(self.zero && text.starts_with(['+', '-', ' ']));
+        let mut padded = String::new();
+        padded
+            .try_reserve_exact(self.width)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        padded.push_str(&text[..head]);
+        padded.extend(std::iter::repeat_n(
+            if self.zero { '0' } else { ' ' },
+            self.width - text.len(),
+        ));
+        padded.push_str(&text[head..]);
+        Ok(padded)
+    }
 }
 
 /// Convert a numeric formatting operand to binary64, checking large integers first.
@@ -445,7 +524,15 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
             ctx.type_name(spec)
         )));
     }
-    if let Some(method) = ctx.bound_slot(value, "__format__")? {
+    let method = match ctx.heap.get(value) {
+        Value::Calendar {
+            value: calendar, ..
+        } if matches!(calendar.class(), "date" | "datetime" | "time") => {
+            Some(ctx.lookup_attr(value, "__format__")?)
+        }
+        _ => ctx.bound_slot(value, "__format__")?,
+    };
+    if let Some(method) = method {
         let spec = match spec {
             Some(spec) => spec,
             None => ctx
@@ -493,12 +580,10 @@ pub(super) fn builtin_format(
     if ctx.string_storage(value).is_some() && spec == "s" {
         return Ok(value);
     }
-    if let Some((precision, percent, sign)) = fixed_float_spec(spec) {
+    if let Some(field) = FixedFloatSpec::parse(spec)? {
         let number = float_operand(ctx, value)?
             .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
-        return Ok(ctx.text(
-            crate::objects::format_fixed_float(number, precision, percent, sign)?.into_string(),
-        ));
+        return Ok(ctx.text(field.render(number)?));
     }
     if matches!(
         ctx.heap.get(ctx.scalar_value(value)),
@@ -533,22 +618,29 @@ pub(in super::super) fn format_conversion(ctx: &mut Context, value: Id, conv: ch
     })
 }
 
-fn format_string(
-    ctx: &mut Context,
-    source: &str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
+#[derive(Clone, Copy)]
+enum FormatSource<'a> {
+    Arguments(&'a [Id], &'a [(String, Id)]),
+    Mapping(Id),
+}
+
+fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> Result<Id> {
     #[derive(Default)]
     struct Indices {
         next: usize,
         manual: bool,
     }
+    fn append_format_text(points: &mut Vec<u32>, text: &str) -> Result<()> {
+        points
+            .try_reserve(text.chars().count())
+            .map_err(|_| crate::Error::memory_error())?;
+        points.extend(text.chars().map(u32::from));
+        Ok(())
+    }
     fn render(
         ctx: &mut Context,
         s: &str,
-        args: &[Id],
-        kwargs: &[(String, Id)],
+        fields: FormatSource<'_>,
         indices: &mut Indices,
         nested: bool,
     ) -> Result<Id> {
@@ -556,6 +648,7 @@ fn format_string(
             FormatString::from_raw_str(s).map_err(|e| Error::new("ValueError", e.to_string()))?;
         let single = parsed.format_parts.len() == 1;
         let mut output = String::new();
+        let mut codepoints = Vec::new();
         for part in parsed.format_parts {
             let FormatPart::Field {
                 field_name,
@@ -571,6 +664,12 @@ fn format_string(
             let field = FieldName::parse(&field_name)
                 .map_err(|e| Error::new("ValueError", e.to_string()))?;
             let positional = |index| {
+                let FormatSource::Arguments(args, _) = fields else {
+                    return Err(Error::new(
+                        "ValueError",
+                        "Format string contains positional fields",
+                    ));
+                };
                 args.get(index).copied().ok_or_else(|| {
                     Error::new(
                         "IndexError",
@@ -600,11 +699,20 @@ fn format_string(
                     indices.manual = true;
                     positional(index)?
                 }
-                FieldType::Keyword(key) => kwargs
-                    .iter()
-                    .find(|(k, _)| k == &key)
-                    .map(|(_, id)| *id)
-                    .ok_or_else(|| Error::new("KeyError", key))?,
+                FieldType::Keyword(key) => match fields {
+                    FormatSource::Arguments(_, kwargs) => kwargs
+                        .iter()
+                        .find(|(k, _)| k == &key)
+                        .map(|(_, id)| *id)
+                        .ok_or_else(|| {
+                            let key = ctx.text(key);
+                            ctx.lookup_error("KeyError", key)
+                        })?,
+                    FormatSource::Mapping(mapping) => {
+                        let key = ctx.text(key);
+                        ctx.get_item(mapping, key)?
+                    }
+                },
             };
             for access in field.parts {
                 value = match access {
@@ -631,7 +739,7 @@ fn format_string(
                         "format specifier nested too deeply",
                     ));
                 }
-                Some(render(ctx, &format_spec, args, kwargs, indices, true)?)
+                Some(render(ctx, &format_spec, fields, indices, true)?)
             } else {
                 (!format_spec.is_empty()).then(|| ctx.text(format_spec))
             };
@@ -639,11 +747,25 @@ fn format_string(
             if single {
                 return Ok(rendered);
             }
-            append_rendered_text(&mut output, ctx.str_value(rendered)?)?;
+            if let Value::SurrogateStr(field) = ctx.heap.get(ctx.scalar_value(rendered)) {
+                // Keep ordinary fields in UTF-8 until a field needs Python code points.
+                append_format_text(&mut codepoints, &output)?;
+                output.clear();
+                codepoints
+                    .try_reserve(field.len())
+                    .map_err(|_| crate::Error::memory_error())?;
+                codepoints.extend_from_slice(field);
+            } else {
+                append_rendered_text(&mut output, ctx.str_value(rendered)?)?;
+            }
         }
-        Ok(ctx.text(output))
+        if codepoints.is_empty() {
+            return Ok(ctx.text(output));
+        }
+        append_format_text(&mut codepoints, &output)?;
+        Ok(ctx.text_codepoints(codepoints))
     }
-    render(ctx, source, args, kwargs, &mut Indices::default(), false)
+    render(ctx, source, fields, &mut Indices::default(), false)
 }
 
 fn ascii(s: &str) -> String {
@@ -1064,6 +1186,20 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     Ok(ctx.text(output))
 }
 
+/// Convert the optional start and end in argument order, honoring the index protocol.
+fn search_bounds(
+    ctx: &mut Context,
+    args: &[Id],
+) -> Result<(Option<crate::Int>, Option<crate::Int>)> {
+    let mut bound = |arg: Option<&Id>| match arg {
+        None | Some(&NONE) => Ok(None),
+        Some(&arg) => ctx.index_value(arg)?.map(Some).ok_or_else(|| {
+            type_error("slice indices must be integers or None or have an __index__ method")
+        }),
+    };
+    Ok((bound(args.get(1))?, bound(args.get(2))?))
+}
+
 /// Convert a split limit through the index protocol, treating negative limits as unlimited.
 fn split_limit(ctx: &mut Context, max: Option<Id>) -> Result<usize> {
     let Some(id) = max else {
@@ -1082,6 +1218,341 @@ fn split_limit(ctx: &mut Context, max: Option<Id>) -> Result<usize> {
     Ok(usize::try_from(count).unwrap_or(usize::MAX))
 }
 
+/// Split code points in the requested direction without scalarizing lone surrogates.
+fn split_codepoints(
+    source: &[u32],
+    separator: Option<&[u32]>,
+    mut limit: usize,
+    reverse: bool,
+    mut push: impl FnMut(&[u32]),
+) {
+    let whitespace = |&point: &u32| char::from_u32(point).is_some_and(python_whitespace);
+    let mut rest = source;
+    loop {
+        if separator.is_none() {
+            rest = if reverse {
+                &rest[..rest
+                    .iter()
+                    .rposition(|p| !whitespace(p))
+                    .map_or(0, |i| i + 1)]
+            } else {
+                &rest[rest
+                    .iter()
+                    .position(|p| !whitespace(p))
+                    .unwrap_or(rest.len())..]
+            };
+            if rest.is_empty() {
+                break;
+            }
+        }
+        let boundary = if limit == 0 {
+            None
+        } else if let Some(sep) = separator {
+            let mut windows = rest.windows(sep.len());
+            if reverse {
+                windows.rposition(|s| s == sep)
+            } else {
+                windows.position(|s| s == sep)
+            }
+        } else if reverse {
+            rest.iter().rposition(whitespace)
+        } else {
+            rest.iter().position(whitespace)
+        };
+        let Some(at) = boundary else {
+            push(rest);
+            break;
+        };
+        let left = &rest[..at];
+        let right = &rest[at + separator.map_or(1, <[u32]>::len)..];
+        if reverse {
+            push(right);
+            rest = left;
+        } else {
+            push(left);
+            rest = right;
+        }
+        limit -= 1;
+    }
+}
+
+fn split_string(
+    ctx: &mut Context,
+    receiver: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [sep, max] = bind(name, args, kwargs, ["sep", "maxsplit"])?;
+    let limit = split_limit(ctx, max)?;
+    let sep = sep
+        .filter(|&v| v != NONE)
+        .map(|v| {
+            ctx.string_storage(v)
+                .ok_or_else(|| type_error(format!("must be str or None, not {}", ctx.type_name(v))))
+        })
+        .transpose()?;
+    let storage = ctx
+        .string_storage(receiver)
+        .expect("validated str receiver");
+    if receiver != storage
+        && let Some(sep) = sep
+    {
+        // CPython returns the original subtype when the separator cannot fit its length or kind.
+        let source = ctx.string_codepoints(storage)?;
+        let needle = ctx.string_codepoints(sep)?;
+        let kind = |s: &[u32]| match s.iter().max().copied().unwrap_or(0) {
+            0..=0xff => 1,
+            0x100..=0xffff => 2,
+            _ => 4,
+        };
+        if needle.len() > source.len() || kind(&needle) > kind(&source) {
+            return Ok(ctx.alloc(Value::List(vec![receiver])));
+        }
+    }
+    let reverse = name == "rsplit";
+    let reuse_whole = receiver == storage && (sep.is_some() || limit != 0);
+    let surrogate = |id| matches!(ctx.heap.get(id), Value::SurrogateStr(_));
+    let mut values = Vec::new();
+    if surrogate(storage) || sep.is_some_and(surrogate) {
+        let source = ctx.string_codepoints(storage)?.into_owned();
+        let needle = sep
+            .map(|id| ctx.string_codepoints(id).map(Cow::into_owned))
+            .transpose()?;
+        if needle.as_deref() == Some(&[][..]) {
+            return Err(Error::new("ValueError", "empty separator"));
+        }
+        split_codepoints(&source, needle.as_deref(), limit, reverse, |field| {
+            values.push(if reuse_whole && field.len() == source.len() {
+                storage
+            } else {
+                ctx.text_codepoints(field.to_vec())
+            });
+        });
+    } else {
+        let source = ctx.str_value(storage)?.to_owned();
+        let needle = sep
+            .map(|id| ctx.str_value(id).map(str::to_owned))
+            .transpose()?;
+        split_parts(&source, needle.as_deref(), limit, reverse, |field| {
+            values.push(if reuse_whole && field.len() == source.len() {
+                storage
+            } else {
+                ctx.text(field)
+            });
+        })
+        .map_err(|msg| Error::new("ValueError", msg))?;
+    }
+    if reverse {
+        values.reverse();
+    }
+    Ok(ctx.alloc(Value::List(values)))
+}
+
+/// Materialize the iterable before inspecting its buffers, as PySequence_Fast does for bytes.join.
+fn bytes_join(ctx: &mut Context, receiver: Id, iterable: Id) -> Result<Id> {
+    let sequence = if matches!(ctx.heap.get(iterable), Value::List(_) | Value::Tuple(_)) {
+        iterable
+    } else {
+        let iter = ctx.iterator(iterable).map_err(|error| {
+            let ty = ctx.builtin("TypeError");
+            if ctx.raised_error_matches(&error, ty) {
+                type_error("can only join an iterable")
+            } else {
+                error
+            }
+        })?;
+        ctx.heap.keep(iter);
+        let sequence = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap.keep(sequence);
+        list_extend(ctx, sequence, iter)?;
+        sequence
+    };
+    let (Value::List(items) | Value::Tuple(items)) = ctx.heap.get(sequence) else {
+        unreachable!()
+    };
+    if let [item] = items.as_slice()
+        && matches!(ctx.heap.get(*item), Value::Bytes(_))
+    {
+        return Ok(*item);
+    }
+    let separator = ctx.bytes_like(receiver)?;
+    let too_long = || Error::new("OverflowError", "join() result is too long");
+    let mut size = separator
+        .len()
+        .checked_mul(items.len().saturating_sub(1))
+        .ok_or_else(too_long)?;
+    let mut buffers = Vec::new();
+    buffers
+        .try_reserve_exact(items.len())
+        .map_err(|_| crate::Error::memory_error())?;
+    for (i, &item) in items.iter().enumerate() {
+        ctx.check_buffer_exporter(item)?;
+        let buffer = match ctx.heap.get(ctx.scalar_value(item)) {
+            Value::Array(array) => array.as_bytes(),
+            _ => ctx.bytes_like(item).map_err(|_| {
+                let name = ctx.type_name(item);
+                type_error(format!(
+                    "sequence item {i}: expected a bytes-like object, {} found",
+                    &name[..name.floor_char_boundary(80)]
+                ))
+            })?,
+        };
+        size = size.checked_add(buffer.len()).ok_or_else(too_long)?;
+        buffers.push(buffer);
+    }
+    if size > isize::MAX as usize {
+        return Err(too_long());
+    }
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(size)
+        .map_err(|_| crate::Error::memory_error())?;
+    for (i, buffer) in buffers.into_iter().enumerate() {
+        if i != 0 {
+            result.extend_from_slice(separator);
+        }
+        result.extend_from_slice(buffer);
+    }
+    Ok(ctx.alloc(Value::Bytes(result)))
+}
+
+// Rust strings cannot hold lone surrogates. Match these inputs in Python code points.
+fn replace_points(ctx: &mut Context, receiver: Id, old: Id, new: Id, limit: usize) -> Result<Id> {
+    let value = ctx.string_codepoints(receiver)?;
+    let needle = ctx.string_codepoints(old)?;
+    let replacement = ctx.string_codepoints(new)?;
+    let (value, needle, replacement) = (value.as_ref(), needle.as_ref(), replacement.as_ref());
+    let matches = || {
+        let mut next = 0;
+        (0..=value.len())
+            .filter(move |&i| {
+                if i < next || !value[i..].starts_with(needle) {
+                    return false;
+                }
+                next = i + needle.len();
+                true
+            })
+            .take(limit)
+    };
+    let count = matches().count();
+    if count == 0 || old == new || (needle.is_empty() && replacement.is_empty()) {
+        return Ok(ctx.string_storage(receiver).unwrap());
+    }
+    let retained = value.len() - count * needle.len();
+    let memory_error = || Error::new("MemoryError", "");
+    let size = replacement
+        .len()
+        .checked_mul(count)
+        .and_then(|extra| retained.checked_add(extra))
+        .ok_or_else(memory_error)?;
+    let mut result = Vec::new();
+    result.try_reserve_exact(size).map_err(|_| memory_error())?;
+    let mut copied = 0;
+    for i in matches() {
+        result.extend_from_slice(&value[copied..i]);
+        result.extend_from_slice(replacement);
+        copied = i + needle.len();
+    }
+    result.extend_from_slice(&value[copied..]);
+    Ok(ctx.text_codepoints(result))
+}
+
+/// Justify a Unicode string using Python code point widths, including lone surrogates.
+fn justify(
+    ctx: &mut Context,
+    receiver: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(type_error(format!(
+            "str.{name}() takes no keyword arguments"
+        )));
+    }
+    let Some((&width, extra)) = args.split_first() else {
+        return Err(type_error(format!(
+            "{name} expected at least 1 argument, got 0"
+        )));
+    };
+    if extra.len() > 1 {
+        return Err(type_error(format!(
+            "{name} expected at most 2 arguments, got {}",
+            args.len()
+        )));
+    }
+    let width = crate::objects::zfill::width(&ctx.index_integer(width)?)?;
+    let fill = if let Some(&id) = extra.first() {
+        match ctx.heap.get(ctx.scalar_value(id)) {
+            Value::Str(s) => s
+                .chars()
+                .next()
+                .filter(|c| c.len_utf8() == s.len())
+                .map(u32::from),
+            Value::SurrogateStr(points) => match points.as_slice() {
+                [point] => Some(*point),
+                _ => None,
+            },
+            _ => {
+                return Err(type_error(format!(
+                    "The fill character must be a unicode character, not {}",
+                    ctx.type_name(id)
+                )));
+            }
+        }
+        .ok_or_else(|| type_error("The fill character must be exactly one character long"))?
+    } else {
+        u32::from(' ')
+    };
+    let storage = ctx.string_storage(receiver).unwrap();
+    let source = ctx.heap.get(storage);
+    let len = match source {
+        Value::Str(s) => s.chars().count(),
+        Value::SurrogateStr(s) => s.len(),
+        _ => unreachable!(),
+    };
+    let margin = width.saturating_sub(len);
+    if margin == 0 && (receiver == storage || len == 0) {
+        return Ok(storage);
+    }
+    let left = match name {
+        "ljust" => 0,
+        "rjust" => margin,
+        // CPython assigns the extra character on the left only for an odd target width.
+        _ => margin / 2 + (margin & width & 1),
+    };
+    let memory_error = || Error::new("MemoryError", "");
+    let result = if let Value::Str(s) = source
+        && let Some(ch) = char::from_u32(fill).or((margin == 0).then_some(' '))
+    {
+        let size = margin
+            .checked_mul(ch.len_utf8())
+            .and_then(|bytes| bytes.checked_add(s.len()))
+            .ok_or_else(memory_error)?;
+        let mut padded = String::new();
+        padded.try_reserve_exact(size).map_err(|_| memory_error())?;
+        padded.extend(std::iter::repeat_n(ch, left));
+        padded.push_str(s);
+        padded.extend(std::iter::repeat_n(ch, margin - left));
+        Value::Str(padded)
+    } else {
+        let mut points = Vec::new();
+        points
+            .try_reserve_exact(len + margin)
+            .map_err(|_| memory_error())?;
+        points.resize(left, fill);
+        match source {
+            Value::Str(s) => points.extend(s.chars().map(u32::from)),
+            Value::SurrogateStr(s) => points.extend_from_slice(s),
+            _ => unreachable!(),
+        }
+        points.resize(len + margin, fill);
+        Value::SurrogateStr(points)
+    };
+    ctx.heap.fresh_string(result)
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -1092,44 +1563,72 @@ pub(super) fn method(
     if owner == "str" && name == "maketrans" {
         return maketrans::table(ctx, args, kwargs);
     }
-    if owner == "bytes" && name == "__mod__" {
-        let (receiver, args) = args.split_first().ok_or_else(|| {
-            type_error("descriptor '__mod__' of 'bytes' object needs an argument")
+    if matches!(
+        (owner, name),
+        ("str", "__mod__" | "__rmod__") | ("bytes", "__mod__")
+    ) {
+        let (&receiver, args) = args.split_first().ok_or_else(|| {
+            type_error(format!(
+                "descriptor '{name}' of '{owner}' object needs an argument"
+            ))
         })?;
-        let Value::Bytes(format) = ctx.heap.get(ctx.scalar_value(*receiver)) else {
+        if !ctx.builtin_slot_accepts(receiver, owner) {
             return Err(type_error(format!(
-                "descriptor '__mod__' requires a 'bytes' object but received a '{}'",
-                ctx.type_name(*receiver)
+                "descriptor '{name}' requires a '{owner}' object but received a '{}'",
+                ctx.type_name(receiver)
             )));
-        };
-        if !kwargs.is_empty() {
-            return Err(type_error("wrapper __mod__() takes no keyword arguments"));
         }
-        let [rhs] = args else {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "wrapper {name}() takes no keyword arguments"
+            )));
+        }
+        let &[other] = args else {
             return Err(type_error(format!(
                 "expected 1 argument, got {}",
                 args.len()
             )));
         };
-        return bytes_percent(ctx, &format.clone(), *rhs);
+        if let Value::Bytes(format) = ctx.heap.get(ctx.scalar_value(receiver)) {
+            return bytes_percent(ctx, &format.clone(), other);
+        }
+        let (format, value) = if name == "__rmod__" {
+            if ctx.string_storage(other).is_none() {
+                return Ok(NOT_IMPLEMENTED);
+            }
+            (other, receiver)
+        } else {
+            (receiver, other)
+        };
+        let format = ctx.str_value(format)?.to_owned();
+        return percent(ctx, &format, value);
     }
     let (&receiver, args) = args.split_first().ok_or_else(|| {
         if name == "__new__" {
             type_error("str.__new__(): not enough arguments")
-        } else if matches!(owner, "str" | "bytes") {
+        } else if matches!(owner, "str" | "bytes" | "bytearray") {
             type_error(format!("unbound method {owner}.{name}() needs an argument"))
         } else {
             type_error("missing string receiver")
         }
     })?;
     if name == "__new__" {
-        return ctx.new_string(owner, receiver, args, kwargs);
+        return ctx.new_immutable_scalar(owner, receiver, args, kwargs);
     }
-    let receiver = if owner == "bytes" {
+    let original_receiver = receiver;
+    let receiver = if owner == "bytes"
+        || (owner == "bytearray"
+            && matches!(
+                name,
+                "endswith" | "lstrip" | "rstrip" | "split" | "splitlines" | "startswith" | "strip"
+            )) {
         let storage = ctx.scalar_value(receiver);
-        if !matches!(ctx.heap.get(storage), Value::Bytes(_)) {
+        if !matches!(
+            (owner, ctx.heap.get(storage)),
+            ("bytes", Value::Bytes(_)) | ("bytearray", Value::ByteArray(_))
+        ) {
             return Err(type_error(format!(
-                "descriptor '{name}' for 'bytes' objects doesn't apply to a '{}' object",
+                "descriptor '{name}' for '{owner}' objects doesn't apply to a '{}' object",
                 ctx.type_name(receiver)
             )));
         }
@@ -1146,10 +1645,30 @@ pub(super) fn method(
     if name == "decode" || name == "encode" {
         let [encoding, errors] = bind(name, args, kwargs, ["encoding", "errors"])?;
         return if name == "decode" {
-            decode(ctx, receiver, encoding, errors)
+            decode_named(ctx, ctx.scalar_value(receiver), encoding, errors)
         } else {
-            let b = encode_text(ctx, receiver, encoding, errors)?;
-            Ok(ctx.alloc(Value::Bytes(b)))
+            encode_text_object(ctx, receiver, encoding, errors)
+        };
+    }
+    if owner == "str" && matches!(name, "center" | "ljust" | "rjust") {
+        return justify(ctx, receiver, name, args, kwargs);
+    }
+    if name == "zfill" {
+        let width = one_positional_arg("str.zfill", args, kwargs)?;
+        let width = crate::objects::zfill::width(&ctx.index_integer(width)?)?;
+        let storage = ctx.string_storage(receiver).unwrap();
+        let copy = storage != receiver;
+        let result = match ctx.heap.get(storage) {
+            Value::Str(text) => crate::objects::zfill::text(text, width, copy)?.map(Value::Str),
+            Value::SurrogateStr(points) => {
+                crate::objects::zfill::units(points, points.len(), width, copy)?
+                    .map(Value::SurrogateStr)
+            }
+            _ => unreachable!(),
+        };
+        return match result {
+            Some(value) => ctx.heap.fresh_string(value),
+            None => Ok(storage),
         };
     }
     if name == "expandtabs" {
@@ -1180,7 +1699,9 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "find" | "rfind" | "count") | ("bytes", "rfind" | "startswith")
+        ("str", "find" | "rfind" | "index" | "rindex" | "count")
+            | ("bytes", "count" | "find" | "index" | "rfind")
+            | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
@@ -1198,12 +1719,7 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        let invalid_needle = match (owner, name) {
-            ("str", "count") => ctx.string_storage(needle).is_none(),
-            ("str", _) => ctx.str_value(needle).is_err(),
-            _ => false,
-        };
-        if invalid_needle {
+        if owner == "str" && ctx.string_storage(needle).is_none() {
             let kind = if needle == NONE {
                 "None"
             } else {
@@ -1213,15 +1729,8 @@ pub(super) fn method(
                 "{name}() argument 1 must be str, not {kind}"
             )));
         }
-        let mut bound = |arg: Option<&Id>| match arg {
-            None | Some(&NONE) => Ok(None),
-            Some(&arg) => ctx.index_value(arg)?.map(Some).ok_or_else(|| {
-                type_error("slice indices must be integers or None or have an __index__ method")
-            }),
-        };
-        let start = bound(args.get(1))?;
-        let end = bound(args.get(2))?;
-        if owner == "bytes" {
+        let (start, end) = search_bounds(ctx, args)?;
+        if owner != "str" {
             let len = ctx.bytes_like(receiver)?.len() as i64;
             let index = |n: &crate::Int| {
                 let n = n.to_i64().unwrap_or(if n.big().is_negative() {
@@ -1235,43 +1744,80 @@ pub(super) fn method(
                     n
                 }
             };
-            let start = start.as_ref().map_or(0, index) as usize;
+            let start = usize::try_from(start.as_ref().map_or(0, index)).unwrap_or(usize::MAX);
             let end = end.as_ref().map_or(len, index).min(len) as usize;
-            if name == "startswith" {
+            if matches!(name, "startswith" | "endswith") {
                 let tuple = ctx.tuple_items(needle)?;
                 let candidates = tuple.as_deref().unwrap_or(&args[..1]);
                 let value = ctx.bytes_like(receiver)?.get(start..end);
                 for &candidate in candidates {
-                    let prefix = ctx.bytes_like(candidate).map_err(|error| {
+                    let affix = match ctx.heap.get(ctx.scalar_value(candidate)) {
+                        Value::Array(array) => Ok(array.as_bytes()),
+                        _ => ctx.bytes_like(candidate),
+                    }
+                    .map_err(|error| {
                         if tuple.is_some() {
                             error
                         } else {
                             type_error(format!(
-                                "startswith first arg must be bytes or a tuple of bytes, not {}",
+                                "{name} first arg must be bytes or a tuple of bytes, not {}",
                                 ctx.type_name(candidate)
                             ))
                         }
                     })?;
-                    if value.is_some_and(|slice| slice.starts_with(prefix)) {
+                    if value.is_some_and(|slice| {
+                        if name == "startswith" {
+                            slice.starts_with(affix)
+                        } else {
+                            slice.ends_with(affix)
+                        }
+                    }) {
                         return Ok(TRUE);
                     }
                 }
                 return Ok(FALSE);
             }
-            let needle = if let Some(index) = ctx.index_value(needle)? {
-                vec![
-                    index
+            ctx.check_buffer_exporter(needle)?;
+            let byte;
+            let needle = match ctx.heap.get(ctx.scalar_value(needle)) {
+                Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::MemoryView { .. }
+                | Value::BytesIoBuffer { .. }
+                | Value::Array(_) => ctx.native_buffer_bytes(needle)?,
+                _ => {
+                    let index = ctx.index_value(needle)?.ok_or_else(|| {
+                        type_error(format!(
+                            "argument should be integer or bytes-like object, not '{}'",
+                            ctx.type_name(needle)
+                        ))
+                    })?;
+                    byte = index
                         .to_i64()
                         .and_then(|n| u8::try_from(n).ok())
-                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?,
-                ]
-            } else {
-                ctx.bytes_like(needle)?.to_vec()
+                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?;
+                    std::slice::from_ref(&byte)
+                }
             };
-            let value = ctx.bytes_like(receiver)?;
-            let offset = value
-                .get(start..end)
-                .and_then(|v| memchr::memmem::rfind(v, &needle));
+            let window = ctx.bytes_like(receiver)?.get(start..end);
+            if name == "count" {
+                let count = window.map_or(0, |v| match needle {
+                    [] => v.len() + 1,
+                    [byte] => memchr::memchr_iter(*byte, v).count(),
+                    _ => memchr::memmem::find_iter(v, needle).count(),
+                });
+                return Ok(ctx.int(count as i64));
+            }
+            let offset = window.and_then(|v| {
+                if name == "rfind" {
+                    memchr::memmem::rfind(v, needle)
+                } else {
+                    memchr::memmem::find(v, needle)
+                }
+            });
+            if name == "index" && offset.is_none() {
+                return Err(Error::new("ValueError", "subsection not found"));
+            }
             return Ok(ctx.int(offset.map_or(-1, |at| (start + at) as i64)));
         }
         if name == "count" {
@@ -1291,24 +1837,42 @@ pub(super) fn method(
             };
             return Ok(ctx.alloc(Value::Int(value)));
         }
-        let found = crate::objects::find_text(
-            ctx.str_value(receiver)?,
-            ctx.str_value(needle)?,
-            start.as_ref(),
-            end.as_ref(),
-            name == "rfind",
-        );
+        let reverse = matches!(name, "rfind" | "rindex");
+        let found = if [receiver, needle]
+            .iter()
+            .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
+        {
+            crate::objects::find_codepoints(
+                &ctx.string_codepoints(receiver)?,
+                &ctx.string_codepoints(needle)?,
+                start.as_ref(),
+                end.as_ref(),
+                reverse,
+            )
+        } else {
+            crate::objects::find_text(
+                ctx.str_value(receiver)?,
+                ctx.str_value(needle)?,
+                start.as_ref(),
+                end.as_ref(),
+                reverse,
+            )
+        };
+        if matches!(name, "index" | "rindex") && found.as_small() == Some(-1) {
+            return Err(Error::new("ValueError", "substring not found"));
+        }
         return Ok(ctx.alloc(Value::Int(found)));
     }
-    if name == "rstrip"
-        && let Value::Bytes(data) = ctx.heap.get(receiver)
-    {
+    if matches!(owner, "bytes" | "bytearray") && matches!(name, "strip" | "lstrip" | "rstrip") {
         if !kwargs.is_empty() {
-            return Err(type_error("bytes.rstrip() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "{}.{name}() takes no keyword arguments",
+                ctx.type_name(original_receiver)
+            )));
         }
         if args.len() > 1 {
             return Err(type_error(format!(
-                "rstrip expected at most 1 argument, got {}",
+                "{name} expected at most 1 argument, got {}",
                 args.len()
             )));
         }
@@ -1316,40 +1880,105 @@ pub(super) fn method(
             .first()
             .copied()
             .filter(|&id| id != NONE)
-            .map(|id| ctx.bytes_like(id))
+            .map(|id| match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::Array(array) => Ok(array.as_bytes()),
+                _ => ctx.bytes_like(id),
+            })
             .transpose()?
             .unwrap_or(b" \t\n\x0b\x0c\r");
-        return Ok(match crate::objects::rstrip_bytes(data, chars)? {
-            Some(trimmed) => ctx.alloc(Value::Bytes(trimmed)),
+        let immutable = owner == "bytes";
+        let trimmed = crate::objects::strip_bytes(
+            ctx.bytes_like(receiver)?,
+            chars,
+            name != "rstrip",
+            name != "lstrip",
+            immutable && original_receiver == receiver,
+        )?;
+        return Ok(match trimmed {
+            Some(data) if immutable => ctx.alloc(Value::Bytes(data)),
+            Some(data) => ctx.alloc(Value::ByteArray(data)),
             None => receiver,
         });
     }
-    if name == "rsplit" && matches!(ctx.heap.get(receiver), Value::Bytes(_)) {
-        let [sep, max] =
-            super::bind_method_arguments("rsplit", args, kwargs, ["sep", "maxsplit"], 2)?;
+    if matches!(owner, "bytes" | "bytearray") && name == "splitlines" {
+        let [keepends] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
+        // Truth conversion can mutate a bytearray receiver before it is split.
+        let keep = ctx.optional_truth(keepends, false)?;
+        let mut fields = Vec::new();
+        let mut start = 0;
+        loop {
+            let data = ctx.bytes_like(receiver)?;
+            let rest = &data[start..];
+            if rest.is_empty() {
+                break;
+            }
+            let end = memchr::memchr2(b'\r', b'\n', rest).unwrap_or(rest.len());
+            let boundary = match &rest[end..] {
+                [b'\r', b'\n', ..] => 2,
+                [] => 0,
+                _ => 1,
+            };
+            let field = &rest[..if keep { end + boundary } else { end }];
+            let line =
+                if owner == "bytes" && original_receiver == receiver && field.len() == data.len() {
+                    receiver
+                } else {
+                    let copy = super::super::copy_ids(field)?;
+                    ctx.alloc(if owner == "bytes" {
+                        Value::Bytes(copy)
+                    } else {
+                        Value::ByteArray(copy)
+                    })
+                };
+            fields
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            fields.push(line);
+            start += end + boundary;
+        }
+        return Ok(ctx.alloc(Value::List(fields)));
+    }
+    if matches!(owner, "bytes" | "bytearray") && matches!(name, "split" | "rsplit") {
+        let [sep, max] = super::bind_method_arguments(name, args, kwargs, ["sep", "maxsplit"], 2)?;
         let limit = split_limit(ctx, max)?;
         let separator = sep
             .filter(|&id| id != NONE)
-            .map(|id| ctx.bytes_like(id))
+            .map(|id| match ctx.heap.get(ctx.scalar_value(id)) {
+                Value::Array(array) => Ok(array.as_bytes()),
+                _ => ctx.bytes_like(id),
+            })
             .transpose()?;
-        let Value::Bytes(data) = ctx.heap.get(receiver) else {
-            unreachable!()
-        };
-        let parts = crate::objects::rsplit_bytes(data, separator, limit)?;
+        let immutable = owner == "bytes";
+        let parts = crate::objects::split_bytes(
+            ctx.bytes_like(receiver)?,
+            separator,
+            limit,
+            name == "rsplit",
+            immutable,
+        )?;
         let fields = parts
             .into_iter()
-            .map(|part| part.map_or(receiver, |bytes| ctx.alloc(Value::Bytes(bytes))))
+            .map(|part| match part {
+                None => receiver,
+                Some(bytes) if immutable => ctx.alloc(Value::Bytes(bytes)),
+                Some(bytes) => ctx.alloc(Value::ByteArray(bytes)),
+            })
             .collect();
         return Ok(ctx.alloc(Value::List(fields)));
     }
     let predicate: Option<fn(&str) -> bool> = match name {
         "isalnum" => Some(crate::objects::python_alnum),
+        "isascii" => Some(str::is_ascii),
+        "isalpha" => Some(crate::objects::python_isalpha),
+        "isdigit" => Some(crate::objects::python_isdigit),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
         "isspace" => Some(crate::objects::python_isspace),
+        "istitle" => Some(|text| crate::objects::python_istitle(text.chars())),
         "isupper" => Some(crate::objects::python_isupper),
         _ => None,
     };
-    if let Some(predicate) = predicate {
+    let mapping = matches!(name, "title" | "swapcase");
+    if predicate.is_some() || mapping {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "str.{name}() takes no keyword arguments"
@@ -1361,6 +1990,30 @@ pub(super) fn method(
                 args.len()
             )));
         }
+    }
+    if mapping {
+        let title = name == "title";
+        let storage = ctx.string_storage(receiver).unwrap();
+        let mapped = match ctx.heap.get(storage) {
+            Value::Str(text) if text.is_empty() => return ctx.heap.string_literal(""),
+            Value::Str(text) => Value::Str(crate::objects::case_map(text, title)?),
+            Value::SurrogateStr(points) => {
+                Value::SurrogateStr(crate::objects::case_map_points(points, title)?)
+            }
+            _ => unreachable!(),
+        };
+        return ctx.heap.fresh_string(mapped);
+    }
+    if let Some(predicate) = predicate {
+        if matches!(name, "isascii" | "isalpha" | "isdigit")
+            && matches!(
+                ctx.heap.get(ctx.scalar_value(receiver)),
+                Value::SurrogateStr(_)
+            )
+        {
+            // This representation always contains at least one non-ASCII surrogate.
+            return Ok(boolean(false));
+        }
         if name == "islower"
             && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))
         {
@@ -1368,6 +2021,14 @@ pub(super) fn method(
             return Ok(boolean(crate::objects::python_islower(
                 points.iter().copied().filter_map(char::from_u32),
             )));
+        }
+        if name == "istitle"
+            && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(receiver))
+        {
+            // A surrogate ends a cased run, just like the uncased replacement character.
+            return Ok(boolean(crate::objects::python_istitle(points.iter().map(
+                |&cp| char::from_u32(cp).unwrap_or(char::REPLACEMENT_CHARACTER),
+            ))));
         }
         return Ok(boolean(predicate(ctx.str_value(receiver)?)));
     }
@@ -1403,6 +2064,13 @@ pub(super) fn method(
         return Ok(ctx.text(text.into_string()));
     }
     if name == "join" {
+        if owner == "bytes" {
+            return bytes_join(
+                ctx,
+                receiver,
+                one_positional_arg("bytes.join", args, kwargs)?,
+            );
+        }
         positional(name, kwargs)?;
         arity(name, args, 1, 1)?;
         let collected;
@@ -1413,13 +2081,25 @@ pub(super) fn method(
                 &collected
             }
         };
-        if let [item] = values {
-            return ctx
-                .string_storage(*item)
-                .ok_or_else(|| type_error("expected str"));
+        let mut surrogate = matches!(
+            ctx.heap.get(ctx.scalar_value(receiver)),
+            Value::SurrogateStr(_)
+        );
+        for (index, &item) in values.iter().enumerate() {
+            let Some(storage) = ctx.string_storage(item) else {
+                let class = ctx.exact_type(item)?;
+                let name = ctx.class_name(class);
+                return Err(type_error(format!(
+                    "sequence item {index}: expected str instance, {} found",
+                    &name[..name.floor_char_boundary(80)]
+                )));
+            };
+            if values.len() == 1 {
+                return Ok(storage);
+            }
+            surrogate |= matches!(ctx.heap.get(storage), Value::SurrogateStr(_));
         }
-        let surrogate = |id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_));
-        if surrogate(receiver) || values.iter().copied().any(surrogate) {
+        if surrogate {
             let sep = ctx.string_codepoints(receiver)?;
             let mut output = Vec::new();
             for (index, &item) in values.iter().enumerate() {
@@ -1465,72 +2145,108 @@ pub(super) fn method(
     if matches!(name, "startswith" | "endswith") {
         positional(name, kwargs)?;
         arity(name, args, 1, 3)?;
-        let source = ctx.str_value(receiver)?;
-        let length = source.chars().count() as i64;
-        let bound = |i: i64| {
-            if i < 0 {
-                length.saturating_add(i).max(0)
-            } else {
-                i
+        let (start, end) = search_bounds(ctx, args)?;
+        enum Window<'a> {
+            Utf8(&'a str),
+            Points(&'a [u32]),
+        }
+        let start = start.as_ref();
+        let end = end.as_ref();
+        let part = match ctx.heap.get(ctx.scalar_value(receiver)) {
+            Value::Str(text) => {
+                crate::objects::search_window(text, start, end).map(|(part, _)| Window::Utf8(part))
             }
-        };
-        let start = args
-            .get(1)
-            .filter(|&&id| id != NONE)
-            .map(|&x| ctx.as_integer(x))
-            .transpose()?
-            .map(bound)
-            .unwrap_or(0);
-        let end = args
-            .get(2)
-            .filter(|&&id| id != NONE)
-            .map(|&x| ctx.as_integer(x))
-            .transpose()?
-            .map(bound)
-            .unwrap_or(length)
-            .min(length);
-        let byte_at = |index: i64| {
-            if index >= length {
-                source.len()
-            } else {
-                source
-                    .char_indices()
-                    .nth(index as usize)
-                    .map_or(source.len(), |(byte, _)| byte)
+            Value::SurrogateStr(points) => {
+                crate::objects::codepoint_search_window(points, start, end)
+                    .map(|(part, _)| Window::Points(part))
             }
+            _ => return Err(type_error("expected str")),
         };
-        let part = source.get(byte_at(start)..byte_at(end)).unwrap_or_default();
-        let candidates = match ctx.heap.get(args[0]) {
-            Value::Tuple(values) => values.as_slice(),
-            _ => &args[..1],
-        };
+        let prefix = name == "startswith";
+        let tuple = ctx.tuple_items(args[0])?;
+        let candidates = tuple.as_deref().unwrap_or(&args[..1]);
         for &id in candidates {
-            let needle = ctx.str_value(id)?;
-            if start <= end
-                && (if name == "startswith" {
-                    part.starts_with(needle)
+            let Some(storage) = ctx.string_storage(id) else {
+                let kind = ctx.type_name(id);
+                return Err(type_error(if tuple.is_some() {
+                    format!("tuple for {name} must only contain str, not {kind:.100}")
                 } else {
-                    part.ends_with(needle)
-                })
-            {
+                    format!("{name} first arg must be str or a tuple of str, not {kind:.100}")
+                }));
+            };
+            let Some(part) = &part else {
+                continue;
+            };
+            let matched = match (part, ctx.heap.get(storage), prefix) {
+                (Window::Utf8(text), Value::Str(needle), true) => text.starts_with(needle),
+                (Window::Utf8(text), Value::Str(needle), false) => text.ends_with(needle),
+                // SurrogateStr storage always contains at least one surrogate.
+                (Window::Utf8(_), Value::SurrogateStr(_), _) => false,
+                (Window::Points(points), Value::SurrogateStr(needle), true) => {
+                    points.starts_with(needle)
+                }
+                (Window::Points(points), Value::SurrogateStr(needle), false) => {
+                    points.ends_with(needle)
+                }
+                (Window::Points(points), Value::Str(needle), _) => {
+                    let mut input = points.iter().copied();
+                    if prefix {
+                        needle.chars().all(|ch| input.next() == Some(u32::from(ch)))
+                    } else {
+                        needle
+                            .chars()
+                            .rev()
+                            .all(|ch| input.next_back() == Some(u32::from(ch)))
+                    }
+                }
+                _ => unreachable!("validated str affix"),
+            };
+            if matched {
                 return Ok(TRUE);
             }
         }
         return Ok(FALSE);
     }
     if name == "replace" {
-        positional(name, kwargs)?;
-        arity(name, args, 2, 3)?;
-        let count = args
-            .get(2)
-            .map(|&x| ctx.as_integer(x))
-            .transpose()?
-            .unwrap_or(-1);
+        let total = args.len() + kwargs.len();
+        if total > 3 {
+            let kind = if args.is_empty() { "keyword " } else { "" };
+            return Err(type_error(format!(
+                "replace() takes at most 3 {kind}arguments ({total} given)"
+            )));
+        }
+        if args.len() < 2 {
+            return Err(type_error(format!(
+                "replace() takes at least 2 positional arguments ({} given)",
+                args.len()
+            )));
+        }
+        let [count] = bind_builtin_arguments(name, &args[2..], kwargs, ["count"], 0)?;
+        for (i, &id) in args[..2].iter().enumerate() {
+            if ctx.string_storage(id).is_none() {
+                let kind = if id == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(id)
+                };
+                return Err(type_error(format!(
+                    "replace() argument {} must be str, not {kind}",
+                    i + 1
+                )));
+            }
+        }
+        let limit = split_limit(ctx, count)?;
+        if [receiver, args[0], args[1]]
+            .iter()
+            .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
+        {
+            return replace_points(ctx, receiver, args[0], args[1], limit);
+        }
         let value = crate::objects::replace_text(
             ctx.str_value(receiver)?,
             ctx.str_value(args[0])?,
             ctx.str_value(args[1])?,
-            usize::try_from(count).unwrap_or(usize::MAX),
+            limit,
             args[0] == args[1],
             |length| {
                 let mut text = String::new();
@@ -1543,9 +2259,24 @@ pub(super) fn method(
             None => ctx.string_storage(receiver).unwrap(),
         });
     }
+    if owner == "str" && matches!(name, "split" | "rsplit") {
+        return split_string(ctx, receiver, name, args, kwargs);
+    }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
-        "format" => format_string(ctx, &source, args, kwargs),
+        "format" => format_string(ctx, &source, FormatSource::Arguments(args, kwargs)),
+        "format_map" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("str.format_map() takes no keyword arguments"));
+            }
+            let [mapping] = args else {
+                return Err(type_error(format!(
+                    "str.format_map() takes exactly one argument ({} given)",
+                    args.len()
+                )));
+            };
+            format_string(ctx, &source, FormatSource::Mapping(*mapping))
+        }
         "partition" | "rpartition" => {
             if !kwargs.is_empty() {
                 return Err(type_error(format!(
@@ -1575,24 +2306,6 @@ pub(super) fn method(
                 }
             };
             Ok(ctx.alloc(Value::Tuple(fields)))
-        }
-        "split" | "rsplit" => {
-            let [sep, max] = bind(name, args, kwargs, ["sep", "maxsplit"])?;
-            let limit = split_limit(ctx, max)?;
-            let sep = sep
-                .filter(|&x| x != NONE)
-                .map(|x| ctx.str_value(x).map(str::to_owned))
-                .transpose()?;
-            let mut values = Vec::new();
-            let reverse = name == "rsplit";
-            split_parts(&source, sep.as_deref(), limit, reverse, |field| {
-                values.push(ctx.text(field))
-            })
-            .map_err(|message| Error::new("ValueError", message))?;
-            if reverse {
-                values.reverse();
-            }
-            Ok(ctx.alloc(Value::List(values)))
         }
         "splitlines" => {
             let [keep] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;

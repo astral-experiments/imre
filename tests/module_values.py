@@ -5,6 +5,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -15,9 +16,6 @@ from imports import require_success, run, write_files
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "module_values"
 ERRORS = {"initialization_error": "ValueError", "entry_error": "ValueError"}
 REJECTED = {
-    "metadata_entry_points": {
-        "main.py": "import importlib.metadata\nimport sys\nprint(importlib.metadata.entry_points(group=sys.argv[1]))\n",
-    },
     "metadata_local_before_import": {
         "main.py": "import importlib.metadata as info\ndef lookup() -> str:\n    result = info.version('example')\n    import importlib.metadata as info\n    return result\nprint(lookup())\n",
     },
@@ -85,6 +83,20 @@ REJECTED = {
 }
 
 
+def write_distribution_archive(directory: Path) -> None:
+    with ZipFile(directory / "unsupported.zip", "w") as archive:
+        member = ZipInfo("unsupported")
+        member.extract_version = 99
+        archive.writestr(member, b"")
+    with ZipFile(directory / "packages.whl", "w", ZIP_DEFLATED) as archive:
+        archive.writestr("demo_tools-7.dist-info/METADATA", "Name: Renamed-Tools\r\nVersion: 2.9\r\n")
+        archive.writestr("demo_tools-7.dist-info/entry_points.txt", "[cli]\nrun = demo:main\n")
+        archive.writestr("demo_tools-7.dist-info/RECORD", "demo_tools-7.dist-info/METADATA,,\nmissing,,\n")
+        archive.writestr("legacy.egg-info", "Name: Other\nVersion: 1\n")
+    with ZipFile(directory / "replacement.whl", "w", ZIP_DEFLATED) as archive:
+        archive.writestr("demo_tools-7.dist-info/METADATA", "Name: Renamed-Tools\nVersion: 3.1\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -121,6 +133,7 @@ def main() -> None:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
+        write_distribution_archive(project / "distribution_archive")
         for case in sorted(project.iterdir()):
             source = case / "main.py"
             error = ERRORS.get(case.name)
@@ -184,8 +197,6 @@ def main() -> None:
                 assert "references a class before it is available" in actual.stderr, actual.stderr
             if name == "uninitialized_rebinding":
                 assert "module value is not initialized on this path" in actual.stderr, actual.stderr
-            if name == "metadata_entry_points":
-                assert "importlib.metadata.entry_points" in actual.stderr, actual.stderr
             checks += 1
     print(
         f"Passed {checks} module value checks ({len(REJECTED)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"

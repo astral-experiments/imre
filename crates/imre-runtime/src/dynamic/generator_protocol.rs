@@ -2,7 +2,111 @@ use super::source_code::{DelegateOutcome, GeneratorInput};
 use super::value::{Body, FrameOwner, Location};
 use super::{Context, Error, Id, NONE, Result, Value};
 
+pub(super) fn generator_method(name: &str) -> bool {
+    matches!(name, "__iter__" | "__next__" | "send" | "throw" | "close")
+}
+
+pub(super) fn coroutine_method(owner: &str, name: &str) -> bool {
+    match owner {
+        "coroutine" => matches!(name, "send" | "throw" | "close" | "__await__"),
+        "coroutine_wrapper" => matches!(name, "send" | "throw" | "close" | "__iter__" | "__next__"),
+        _ => false,
+    }
+}
+
 impl Context {
+    /// A coroutine is awaitable but does not implement the iterator protocol itself.
+    pub(super) fn await_iterator(
+        &mut self,
+        awaitable: Id,
+        context_method: Option<&str>,
+    ) -> Result<Id> {
+        if let Value::Coroutine(frame) = *self.heap.get(awaitable) {
+            if matches!(self.heap.get(frame), Value::Generator { running: false, offset: Some(ip), .. } if *ip != 0)
+            {
+                return Err(Error::new(
+                    "RuntimeError",
+                    "coroutine is being awaited already",
+                ));
+            }
+            return Ok(self.alloc(Value::CoroutineWrapper(awaitable)));
+        }
+        if self.is_generator_coroutine(awaitable) {
+            return Ok(awaitable);
+        }
+        let Some(method) = self.bound_slot(awaitable, "__await__")? else {
+            let kind = self.type_name(awaitable);
+            let message = match context_method {
+                Some(method) => format!(
+                    "'async with' received an object from {method} that does not implement __await__: {kind:.100}"
+                ),
+                None => format!("'{kind}' object can't be awaited"),
+            };
+            return Err(Error::new("TypeError", message));
+        };
+        let iter = self.call(method, Vec::new(), Vec::new())?;
+        if matches!(self.heap.get(iter), Value::Coroutine(_)) || self.is_generator_coroutine(iter) {
+            return Err(Error::new("TypeError", "__await__() returned a coroutine"));
+        }
+        if !self.is_native_iterator(iter) && self.slot(iter, "__next__").is_none() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "__await__() returned non-iterator of type '{}'",
+                    self.type_name(iter)
+                ),
+            ));
+        }
+        Ok(iter)
+    }
+
+    fn is_generator_coroutine(&self, id: Id) -> bool {
+        matches!(self.heap.get(id), Value::Generator { code, .. }
+            if self.code_object(*code).flags.is_some_and(|flags| flags & imre_ast::code_flags::ITERABLE_COROUTINE != 0))
+    }
+
+    pub(super) fn call_coroutine_method(
+        &mut self,
+        owner: &str,
+        method: &str,
+        args: &[Id],
+    ) -> Result<Id> {
+        let receiver = args[0];
+        let coroutine = match (owner, self.heap.get(receiver)) {
+            ("coroutine", Value::Coroutine(_)) => receiver,
+            ("coroutine_wrapper", Value::CoroutineWrapper(coroutine)) => *coroutine,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "descriptor '{method}' requires a '{owner}' object but received a '{}'",
+                        self.type_name(receiver)
+                    ),
+                ));
+            }
+        };
+        let Value::Coroutine(frame) = *self.heap.get(coroutine) else {
+            unreachable!("coroutine receiver")
+        };
+        match method {
+            "__await__" => return Ok(self.alloc(Value::CoroutineWrapper(coroutine))),
+            "__iter__" => return Ok(receiver),
+            _ => {}
+        }
+        // Calling an async function creates a cold frame. Count it while it is executing.
+        self.check_call_depth(0)?;
+        self.call_depth += 1;
+        let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || match method {
+            "__next__" => self.generator_send(frame, NONE),
+            "send" => self.generator_send(frame, args[1]),
+            "throw" => self.generator_throw(frame, &args[1..]),
+            "close" => self.generator_close(frame),
+            _ => unreachable!("known coroutine method"),
+        });
+        self.call_depth -= 1;
+        result
+    }
+
     /// Normalize throw's class, instance and optional traceback before mutating the frame.
     fn generator_exception(&mut self, args: &[Id]) -> Result<Error> {
         let typ = args[0];
@@ -107,6 +211,7 @@ impl Context {
         let Value::Generator {
             offset,
             owner,
+            frame,
             scope,
             iterators,
             ..
@@ -116,6 +221,7 @@ impl Context {
         };
         *offset = None;
         *owner = FrameOwner::Module(NONE);
+        *frame = None;
         *scope = NONE;
         iterators.clear();
         self.heap.disarm_generator_finalizer(id);
@@ -126,7 +232,6 @@ impl Context {
         let Value::Generator {
             code,
             scope,
-            owner,
             offset,
             running,
             ..
@@ -138,10 +243,22 @@ impl Context {
             ));
         };
         if running {
-            return Err(Error::new("ValueError", "generator already executing"));
+            let message = if self.code_object(code).coroutine {
+                "coroutine already executing"
+            } else {
+                "generator already executing"
+            };
+            return Err(Error::new("ValueError", message));
         }
         if offset.is_none() {
-            return Err(error);
+            return if self.code_object(code).coroutine {
+                Err(Error::new(
+                    "RuntimeError",
+                    "cannot reuse already awaited coroutine",
+                ))
+            } else {
+                Err(error)
+            };
         }
         if offset == Some(0) {
             // Throwing into a fresh generator unwinds at its definition before any body instruction.
@@ -151,7 +268,7 @@ impl Context {
                 line: definition.first_line,
                 span: None,
             };
-            self.heap.enter(scope, code, owner);
+            self.heap.enter(scope, code, FrameOwner::Generator(id));
             self.heap.publish_statement(&[], location, NONE);
             self.record_exception_frame(&mut error, None);
             self.heap.leave(NONE, false);
@@ -160,7 +277,7 @@ impl Context {
         }
         if matches!(self.code_object(code).body, Body::Native(_)) {
             self.discard_generator_frame(id);
-            return Err(self.generator_error(error));
+            return Err(self.frame_error(error, code));
         }
         self.resume_source_input(
             id,
@@ -186,7 +303,12 @@ impl Context {
             ));
         };
         if running {
-            return Err(Error::new("ValueError", "generator already executing"));
+            let message = if self.code_object(code).coroutine {
+                "coroutine already executing"
+            } else {
+                "generator already executing"
+            };
+            return Err(Error::new("ValueError", message));
         }
         if offset.is_none() {
             return Ok(NONE);
@@ -206,7 +328,11 @@ impl Context {
             Ok(None) => Ok(NONE),
             Ok(Some(_)) => Err(Error::new(
                 "RuntimeError",
-                "generator ignored GeneratorExit",
+                if self.code_object(code).coroutine {
+                    "coroutine ignored GeneratorExit"
+                } else {
+                    "generator ignored GeneratorExit"
+                },
             )),
             Err(error) if self.is_builtin_error(&error, "GeneratorExit") => Ok(NONE),
             Err(error) if self.is_stop_iteration(&error) => Ok(error.stop_value()),

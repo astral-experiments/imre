@@ -81,6 +81,60 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         use FdOperation::*;
 
+        if matches!(op, Read | Write) {
+            let (name, returns) = if op == Read {
+                ("read", Type::Bytes)
+            } else {
+                ("write", Type::Int)
+            };
+            return self.posix_positional(call, name, 2, returns, |checker, scope, args| {
+                let Ok([fd, data]) = <[Expr; 2]>::try_from(args) else {
+                    unreachable!()
+                };
+                checker.graph.checked_overload(checker.module, call.range());
+                for argument in &call.arguments.args {
+                    checker
+                        .graph
+                        .checked_argument_type(checker.module, argument.range());
+                }
+                let index = checker.index_word(fd, &call.func, false)?;
+                // Convert fd before consulting the length or buffer protocol.
+                let fd = scope.hold(
+                    checker,
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ProcessOperation::Fd(TransferFd)),
+                            vec![index],
+                        ),
+                    },
+                );
+                let data = if op == Read {
+                    checker.index_word(data, &call.func, false)?
+                } else if data.ty == Type::Bytes {
+                    data
+                } else {
+                    let owner = checker.known_nonbuffer_type(data.ty).ok_or_else(|| {
+                        error(
+                            checker.source,
+                            call,
+                            "os.write requires a known native bytes-like argument",
+                        )
+                    })?;
+                    return Ok(posix_type_error(
+                        returns,
+                        format!("a bytes-like object is required, not '{owner}'"),
+                    ));
+                };
+                Ok(Expr {
+                    ty: returns,
+                    kind: ExprKind::Builtin(
+                        Builtin::Process(ProcessOperation::Fd(op)),
+                        vec![fd, data],
+                    ),
+                })
+            });
+        }
         if op == Pipe2 {
             let returns = self.types.tuple(vec![Type::Int; 2]);
             return self.posix_positional(call, "pipe2", 1, returns, |checker, _, args| {
@@ -143,7 +197,8 @@ impl Checker<'_> {
         })?;
         let returns = match op {
             Close | SetBlocking | SetInheritable | Unlink | Remove => Type::None,
-            Open | Seek | Dup | Dup2 => Type::Int,
+            TransferFd | Write | Open | Seek | Dup | Dup2 => Type::Int,
+            Read => Type::Bytes,
             Pipe | Pipe2 => self.types.tuple(vec![Type::Int, Type::Int]),
             Isatty | GetBlocking | GetInheritable => Type::Bool,
         };

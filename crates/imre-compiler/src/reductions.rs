@@ -443,78 +443,7 @@ fn bound_accumulator(body: &mut [Statement], accumulator: usize, bounds: IntRang
 
 /// Counts every replacement and cleanup, including expression-owned regions.
 pub(crate) fn count_writes(body: &[Statement], writes: &mut [usize]) {
-    statement_writes(body, writes);
-    walk_expressions(body, &mut |value| match &value.kind {
-        ExprKind::Scope { body, clear, .. } => {
-            statement_writes(body, writes);
-            for &slot in clear {
-                writes[slot] += 1;
-            }
-        }
-        ExprKind::Bind(slot, _) => writes[*slot] += 1,
-        _ => {}
-    });
-}
-
-fn statement_writes(body: &[Statement], writes: &mut [usize]) {
-    for statement in body {
-        match statement {
-            Statement::Assign(slot, _) | Statement::Clear(slot) => writes[*slot] += 1,
-            Statement::Move(target, source) => {
-                writes[*target] += 1;
-                writes[*source] += 1;
-            }
-            Statement::Scope { body, clear } => {
-                statement_writes(body, writes);
-                for &slot in clear {
-                    writes[slot] += 1;
-                }
-            }
-            Statement::If(_, yes, no) | Statement::While(_, yes, no) => {
-                statement_writes(yes, writes);
-                statement_writes(no, writes);
-            }
-            Statement::For {
-                target,
-                cursor,
-                stop,
-                step,
-                body,
-                orelse,
-                ..
-            } => {
-                for &slot in [target, cursor, stop, step] {
-                    writes[slot] += 1;
-                }
-                statement_writes(body, writes);
-                statement_writes(orelse, writes);
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                for body in [body, orelse, finalbody] {
-                    statement_writes(body, writes);
-                }
-                for handler in handlers {
-                    if let Some(slot) = handler.name {
-                        writes[slot] += 1;
-                    }
-                    statement_writes(&handler.body, writes);
-                }
-            }
-            Statement::IterNext {
-                key, value, ready, ..
-            } => {
-                for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
-                    writes[slot] += 1;
-                }
-            }
-            _ => {}
-        }
-    }
+    crate::ir::walk_writes(body, |slot, _| writes[slot] += 1);
 }
 
 pub(crate) fn contains_continue(body: &[Statement]) -> bool {
@@ -541,31 +470,11 @@ fn install(body: &mut [Statement], plans: &mut HashMap<*const Statement, Stateme
             *statement = version;
             continue;
         }
-        match statement {
-            Statement::Scope { body, .. } => install(body, plans),
-            Statement::If(_, yes, no) | Statement::While(_, yes, no) => {
-                install(yes, plans);
-                install(no, plans);
-            }
-            Statement::For { body, orelse, .. } => {
+        crate::ir::statement_children_mut(statement, |child| {
+            if let crate::ir::ChildMut::Suite(body) = child {
                 install(body, plans);
-                install(orelse, plans);
             }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                for body in [body, orelse, finalbody] {
-                    install(body, plans);
-                }
-                for handler in handlers {
-                    install(&mut handler.body, plans);
-                }
-            }
-            _ => {}
-        }
+        });
     }
 }
 

@@ -1222,7 +1222,7 @@ impl Checker<'_> {
 
     /// List cursors re-read the live length; reverse cursors capture only their
     /// starting index. Dict/set/string cursors use the rooted runtime protocol.
-    fn prepare_container(
+    pub(super) fn prepare_container(
         &mut self,
         iterable: Expr,
         items: bool,
@@ -2275,6 +2275,26 @@ impl Checker<'_> {
         consumer: &str,
         call: &ast::ExprCall,
     ) -> Result<(Expr, Option<usize>), String> {
+        if let Type::StrDescriptor(method) = callback.ty {
+            // Evaluate the descriptor at construction and apply it only when an item is pulled.
+            let item = self.local(input.value);
+            if matches!(item.ty, Type::Class(_) | Type::Enum(_))
+                || (!matches!(item.ty, Type::Str | Type::StrLiteral(_))
+                    && self.exact_argument_type_name(item.ty).is_none())
+            {
+                return Err(self.object_builtin_error("str descriptor callback", call));
+            }
+            let slot = self.hidden(callback.ty);
+            input
+                .evaluate
+                .insert(evaluation_index, Statement::Assign(slot, callback));
+            input.clear.push(slot);
+            let mut bound = call.clone();
+            bound.arguments.keywords.clear();
+            let result =
+                self.apply_str_descriptor(&bound, self.local(slot), method, item, call, &[])?;
+            return Ok((result, Some(slot)));
+        }
         let message = || {
             error(
                 self.source,

@@ -18,7 +18,7 @@ Each process inherits affinity to one Linux vCPU. The driver uses warm filesyste
 
 Before a workload, the driver waits up to one minute for a three-second window with at most 5% activity on the selected vCPU and at most 10% on the other vCPUs. It applies the same check immediately after the workload. During timing, the other vCPUs must average at most 10% busy and the selected vCPU may have at most 1% steal time. A rejected batch is checkpointed with every timing and retried as a unit, up to four attempts. The chart uses the first accepted batch of each workload. The receipt includes the activity windows, individual timings in execution order, source and executable hashes, output hashes and runtime versions. The build manifest identifies the original executables and sources. The runner records its own current SHA-256 separately so those executables can be reused after a driver change.
 
-Median elapsed milliseconds with the inclusive interquartile range in parentheses. The November 2, 2026 UTC run used vCPU 13 on a 32-vCPU AMD EPYC Milan VM. The other CPUs averaged 0.40–0.89% busy during the workloads. The CLI chart uses Imre built from this checkout, based on `fcba9a56`, with clang 18.1.3, Bun 1.4.4, Rust 1.98.1-dev (Ohm commit `f62703110`) and CPython 3.14.5. A second uncached compilation reproduced all five measured Imre executables byte for byte. [All warm-ups, samples, source hashes and activity windows](../results/applications.json)
+Median elapsed milliseconds with the inclusive interquartile range in parentheses. The November 2, 2026 UTC run used vCPU 13 on a 32-vCPU AMD EPYC Milan VM. The other CPUs averaged 0.40–0.89% busy during the workloads. The CLI chart uses Imre built from `8596d21f`, based on `fcba9a56`, with clang 18.1.3, Bun 1.4.4, Rust 1.98.1-dev (Ohm commit `f62703110`) and CPython 3.14.5. A second uncached compilation reproduced all five measured Imre executables byte for byte. [All warm-ups, samples, source hashes and activity windows](../results/applications.json)
 
 | Workload | Imre | Bun | Rust | CPython |
 | --- | ---: | ---: | ---: | ---: |
@@ -35,7 +35,7 @@ The suite previously ran on a 16-vCPU Milan host. Its CLI workloads passed the s
 
 ## Road graph loading and four routes
 
-The previous Imre build and this checkout compiled the same Python source from revision `fcba9a56fa23`. Every process loaded all 733,846 directed arcs from the DIMACS New York file. The routing case also ran four Dijkstra queries in their original order. The five executables rotated through 40 rounds on vCPU 13 with warm filesystem caches. For each accepted batch the other CPUs stayed at or below 2% busy before, during and after timing.
+The previous Imre build and `8596d21f` compiled the same Python source from revision `fcba9a56fa23`. Every process loaded all 733,846 directed arcs from the DIMACS New York file. The routing case also ran four Dijkstra queries in their original order. The five executables rotated through 40 rounds on vCPU 13 with warm filesystem caches. For each accepted batch the other CPUs stayed at or below 2% busy before, during and after timing.
 
 | Median elapsed time (ms) | Previous Imre | Imre | Rust | Imre ThinLTO | Rust ThinLTO |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -46,7 +46,7 @@ With the standard builds, the median within-round Imre/Rust routing time ratio w
 
 Imre reads short lines from the validated UTF-8 buffer and keeps their bytes in local slots when every use can consume them there. Longer lines keep an owning string. The numeric-field cache recognizes short ASCII decimals and defers other fields to Python’s conversion at the original subscript. The compiler also borrows fixed-size integer-list buffers and allocates private rows in batches. Median peak process memory across six separate runs was 14.2 MiB for Imre, 16.1 MiB for the previous build and 41.6 MiB for Rust.
 
-Each of the other CLI workloads ran in 12 alternating pairs. Ratios below 1 indicate a shorter elapsed time in this checkout.
+Each of the other CLI workloads ran in 12 alternating pairs. Ratios below 1 indicate a shorter elapsed time on `8596d21f`.
 
 | Control | Previous Imre (ms) | Imre (ms) | Imre/previous (95% paired interval) |
 | --- | ---: | ---: | ---: |
@@ -59,7 +59,7 @@ Each of the other CLI workloads ran in 12 alternating pairs. Ratios below 1 indi
 
 ## Reproduce on Linux x86-64
 
-Use CPython 3.14.5, Bun 1.4.4, a Rust release toolchain and clang 18. Build the compiler and runtime from this checkout into the same release directory. The tracked uv index and conformance capture ship with the repository. The runner checks the Ruff corpus, pip wheel and uncompressed road graph by SHA-256. [Earlier CLI run using the published Imre 0.1.5 release](../results/applications-release-0.1.5.json)
+Use CPython 3.14.5, Bun 1.4.4, a Rust release toolchain and clang 18. To reproduce the published timings, build the compiler and runtime at `8596d21f` into the same release directory. The tracked uv index and conformance capture ship with the repository. The runner checks the Ruff corpus, pip wheel and uncompressed road graph by SHA-256. [Earlier CLI run using the published Imre 0.1.5 release](../results/applications-release-0.1.5.json)
 
 ```sh
 # From the repository root, with these executables and an available CPU.

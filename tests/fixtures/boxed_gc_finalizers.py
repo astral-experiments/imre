@@ -1,4 +1,5 @@
 import gc
+import sys
 from weakref import ref
 
 
@@ -73,12 +74,91 @@ def check_arguments(owner, witness):
     assert events == ["weak"]
 
 
+class Receiver:
+    def check(self, witness):
+        assert witness() is None and self.owner is None
+        assert events == ["weak", "finalize"], events
+
+
+def bound_method(receivers):
+    receiver = Receiver()
+    receiver.owner = Owner()
+    receivers.append(ref(receiver))
+    return receiver.check
+
+
+def detach_owner(receivers, depth):
+    if depth:
+        return detach_owner(receivers, depth - 1)
+    witness = clear_weak_target()
+    receivers[0]().owner = None
+    assert events == ["weak", "finalize"], events
+    return witness
+
+
+def check_unraisable():
+    failures = []
+    problem = ValueError("in the destructor")
+
+    class Rejected:
+        def __del__(self):
+            raise problem
+
+    before = sys.unraisablehook
+    try:
+        sys.unraisablehook = failures.append
+        obj = Rejected()
+        del obj
+        gc.collect()
+        event, = failures
+        assert type(type(event)) is type and isinstance(event, tuple)
+        assert event.exc_type is ValueError and event.exc_value is problem
+        assert event.exc_traceback is problem.__traceback__
+        assert event.object is None
+        assert event.err_msg == f"Exception ignored while calling deallocator {Rejected.__del__!r}"
+        assert tuple(event) == (ValueError, problem, event.exc_traceback, event.err_msg, None)
+    finally:
+        sys.unraisablehook = before
+
+
 def current():
+    check_unraisable()
+    # Keep another pending finalizer reachable while cyclic and acyclic owners die.
+    held = [Owner()]
+    witness = ref(held[0])
     exercise(True, False)
     exercise(True, True)
     exercise(False, False)
+    assert witness() is held[0]
+    held.clear()
+    assert events == ["finalize"] and witness() is saved[0]
+    saved.clear()
+    assert witness() is None
+    events.clear()
     # The first argument stays live while the second releases an unrelated target.
     check_arguments(Owner(), clear_weak_target())
     assert events == ["weak", "finalize"]
+    saved.clear()
+    events.clear()
+    # The receiver stays live as a bound method while its owner is detached.
+    receivers = []
+    bound_method(receivers)(detach_owner(receivers, 3))
+    assert receivers[0]() is None and events == ["weak", "finalize"]
+    saved.clear()
+    events.clear()
+    # Nested fields keep a finalizer alive until its last strong path changes.
+    outer = Receiver()
+    outer.inner = Receiver()
+    outer.inner.owner = Owner()
+    alias = outer.inner
+    assert (setattr(outer, "inner", None), events.copy()) == (None, [])
+    del alias
+    assert events == ["finalize"]
+    saved.clear()
+    events.clear()
+    # Reusing the same field must not preserve the old reachability result.
+    outer.inner = Receiver()
+    outer.inner.owner = Owner()
+    assert (setattr(outer, "inner", None), events.copy()) == (None, ["finalize"])
     saved.clear()
     events.clear()

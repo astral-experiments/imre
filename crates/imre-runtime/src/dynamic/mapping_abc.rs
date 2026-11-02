@@ -4,12 +4,27 @@ use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 /// Return the raw methods used by each structural collection ABC.
 fn structural_methods(name: &str) -> Option<&'static [&'static str]> {
     match name {
+        "Callable" => Some(&["__call__"]),
         "Iterable" => Some(&["__iter__"]),
         "Sized" => Some(&["__len__"]),
         "Container" => Some(&["__contains__"]),
         "Collection" => Some(&["__len__", "__iter__", "__contains__"]),
         _ => None,
     }
+}
+
+/// Class namespaces bootstrapped here provide ABC methods without native instance storage.
+pub(super) fn bootstrapped(name: &str) -> bool {
+    matches!(
+        name,
+        "Callable"
+            | "Sized"
+            | "Iterable"
+            | "Container"
+            | "Collection"
+            | "Mapping"
+            | "MutableMapping"
+    )
 }
 
 /// Allocate the real class objects with their CPython direct bases and C3 lineage.
@@ -19,6 +34,7 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
         return Ok(class);
     }
     let (parents, abstract_methods, methods): (&[&str], &[&str], &[&str]) = match name {
+        "Callable" => (&[], &["__call__"], &[]),
         "Sized" => (&[], &["__len__"], &[]),
         "Iterable" => (&[], &["__iter__"], &[]),
         "Container" => (&[], &["__contains__"], &[]),
@@ -44,12 +60,21 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     ctx.bind(scope, "__module__", module);
     let qualname = ctx.text(name);
     ctx.bind(scope, "__qualname__", qualname);
+    if name == "Callable" {
+        let slots = ctx.alloc(Value::Tuple(Vec::new()));
+        ctx.bind(scope, "__slots__", slots);
+    }
     if name == "Mapping" {
         ctx.bind(scope, "__reversed__", NONE);
     }
+    if matches!(name, "Iterable" | "Container") {
+        let alias = ctx.builtin("types.GenericAlias");
+        let method = super::method_decorator::class_method(ctx, alias)?;
+        ctx.bind(scope, "__class_getitem__", method);
+    }
     if structural_methods(name).is_some() {
         let function = ctx.builtin(&format!("abc.hook.{name}.__subclasshook__"));
-        let hook = ctx.alloc(Value::ClassMethod(function));
+        let hook = super::method_decorator::class_method(ctx, function)?;
         ctx.bind(scope, "__subclasshook__", hook);
     }
     for &method in abstract_methods {
@@ -60,18 +85,15 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
         let function = ctx.builtin(&format!("abc.mapping.{method}"));
         ctx.bind(scope, method, function);
     }
+    let meta = ctx.abc_meta();
     let result = ctx.allocate_class(name.to_owned(), scope, bases)?;
+    let Value::Class { metaclass, .. } = ctx.heap.get_mut(result) else {
+        unreachable!()
+    };
+    *metaclass = Some(meta);
     ctx.classes.insert(key, result);
-    ctx.init_abstract_class(result, name, scope)?;
+    ctx.init_abstract_class(result, scope)?;
     Ok(result)
-}
-
-/// Iterable and Container supply the generic alias inherited by the collection ABCs.
-pub(super) fn is_generic_abc(ctx: &Context, class: Id) -> bool {
-    ["collections.abc.Iterable", "collections.abc.Container"]
-        .iter()
-        .filter_map(|&name| ctx.classes.get(name))
-        .any(|&base| ctx.direct_subclass(class, base))
 }
 
 /// A subclass of a collections ABC inherits its metaclass's registration method.
@@ -106,20 +128,35 @@ pub(super) fn registered_subclass(ctx: &Context, cls: Id, parent: Id) -> bool {
     false
 }
 
+/// Resolve explicit registry overrides before using an ABC's native registry.
+pub(super) fn check_impl(ctx: &mut Context, class: Id) -> Result<()> {
+    if ctx.class_attr(class, "_abc_impl").is_some()
+        || (!ctx.is_bundled_abc(class) && !is_abc_class(ctx, class))
+    {
+        ctx.lookup_attr(class, "_abc_impl")?;
+        return Err(Error::new("TypeError", "_abc_impl is set to a wrong type"));
+    }
+    Ok(())
+}
+
 fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let owner = args[0];
-    let mut cls = args.get(1).copied();
+    let mut owner = args.first().copied();
+    let mut subclass = args.get(1).copied();
     for (name, value) in kwargs {
-        if name != "subclass" {
+        let slot = match name.as_str() {
+            "cls" => &mut owner,
+            "subclass" => &mut subclass,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("ABCMeta.register() got an unexpected keyword argument '{name}'"),
+                ));
+            }
+        };
+        if slot.replace(*value).is_some() {
             return Err(Error::new(
                 "TypeError",
-                format!("ABCMeta.register() got an unexpected keyword argument '{name}'"),
-            ));
-        }
-        if cls.replace(*value).is_some() {
-            return Err(Error::new(
-                "TypeError",
-                "ABCMeta.register() got multiple values for argument 'subclass'",
+                format!("ABCMeta.register() got multiple values for argument '{name}'"),
             ));
         }
     }
@@ -132,25 +169,51 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
             ),
         ));
     }
-    let cls = cls.ok_or_else(|| {
-        Error::new(
+    let (Some(owner), Some(cls)) = (owner, subclass) else {
+        let missing = match (owner, subclass) {
+            (None, None) => "2 required positional arguments: 'cls' and 'subclass'",
+            (None, Some(_)) => "1 required positional argument: 'cls'",
+            _ => "1 required positional argument: 'subclass'",
+        };
+        return Err(Error::new(
             "TypeError",
-            "ABCMeta.register() missing 1 required positional argument: 'subclass'",
-        )
-    })?;
-    if ctx.builtin_type_name(cls) != Some("type") {
+            format!("ABCMeta.register() missing {missing}"),
+        ));
+    };
+    if !matches!(ctx.builtin_type_name(cls), Some("type" | "typing._AnyMeta")) {
         return Err(Error::new("TypeError", "Can only register classes"));
     }
-    if ctx.python_subclass_check(cls, owner)? {
+    let subclass = |ctx: &mut Context, child, parent| {
+        if ctx.is_protocol_declaration(parent) {
+            ctx.abc_subclass_check(child, parent)
+        } else {
+            ctx.python_subclass_check(child, parent)
+        }
+    };
+    if subclass(ctx, cls, owner)? {
         return Ok(cls);
     }
-    if ctx.python_subclass_check(owner, cls)? {
+    if subclass(ctx, owner, cls)? {
         return Err(Error::new(
             "RuntimeError",
             "Refusing to create an inheritance cycle",
         ));
     }
+    // Check for an existing subclass and cycles before looking up the ABC registry.
+    if !ctx.is_bundled_abc(owner) && !is_abc_class(ctx, owner) {
+        if ctx.class_attr(owner, "_abc_impl").is_some() {
+            return Err(Error::new("TypeError", "_abc_impl is set to a wrong type"));
+        }
+        let name = ctx.lookup_attr(owner, "__name__")?;
+        let name = ctx.str_value(name)?;
+        return Err(Error::new(
+            "AttributeError",
+            format!("type object '{name}' has no attribute '_abc_impl'"),
+        ));
+    }
     ctx.heap.abc_registrations.push([owner, cls]);
+    ctx.heap.abc_subclass_cache.retain(|_, matched| *matched);
+    ctx.heap.abc_cache_token = ctx.heap.abc_cache_token.wrapping_add(1);
     Ok(cls)
 }
 
@@ -160,6 +223,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "ABCMeta.__new__" {
+        return ctx.abc_new(args, kwargs);
+    }
     if let Some(owner) = name
         .strip_prefix("hook.")
         .and_then(|n| n.strip_suffix(".__subclasshook__"))
@@ -187,11 +253,85 @@ pub(super) fn call(
         }
         return ctx.abc_check_methods(candidate, &names[..methods.len()]);
     }
+    if matches!(name, "_abc_registry_clear" | "_abc_caches_clear") {
+        let [Some(owner)] = super::builtins::bind_builtin_arguments(
+            &format!("ABCMeta.{name}"),
+            args,
+            kwargs,
+            ["cls"],
+            1,
+        )?
+        else {
+            unreachable!("ABCMeta clearing methods require a class")
+        };
+        check_impl(ctx, owner)?;
+        if name == "_abc_registry_clear" {
+            ctx.heap.abc_registrations.retain(|pair| pair[0] != owner);
+        } else {
+            ctx.heap
+                .abc_subclass_cache
+                .retain(|pair, _| pair[0] != owner);
+        }
+        return Ok(NONE);
+    }
+    if name == "get_cache_token" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "_abc.get_cache_token() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "_abc.get_cache_token() takes no arguments ({} given)",
+                    args.len()
+                ),
+            ));
+        }
+        return Ok(ctx.alloc(Value::Int(crate::Int::new(ctx.heap.abc_cache_token.into()))));
+    }
+    if matches!(name, "__instancecheck__" | "__subclasscheck__") {
+        let instance = name == "__instancecheck__";
+        let argument = if instance { "instance" } else { "subclass" };
+        let [Some(class), Some(object)] = super::builtins::bind_builtin_arguments(
+            &format!("ABCMeta.{name}"),
+            args,
+            kwargs,
+            ["cls", argument],
+            2,
+        )?
+        else {
+            unreachable!("both ABCMeta check arguments are required")
+        };
+        return if instance {
+            ctx.abc_meta_instance_check(object, class)
+        } else {
+            ctx.abc_meta_subclass_check(object, class)
+        };
+    }
     if name == "register" {
         return register(ctx, args, kwargs);
     }
     if let Some(name) = name.strip_prefix("abstract.") {
         return match name {
+            "Callable.__call__" => {
+                let keyword_self = kwargs.iter().any(|(name, _)| name == "self");
+                if args.is_empty() && !keyword_self {
+                    Err(Error::new(
+                        "TypeError",
+                        "Callable.__call__() missing 1 required positional argument: 'self'",
+                    ))
+                } else if !args.is_empty() && keyword_self {
+                    Err(Error::new(
+                        "TypeError",
+                        "Callable.__call__() got multiple values for argument 'self'",
+                    ))
+                } else {
+                    Ok(FALSE)
+                }
+            }
             "Sized.__len__" => Ok(ctx.int(0)),
             "Container.__contains__" => Ok(FALSE),
             "Iterable.__iter__" => {

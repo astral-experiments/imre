@@ -17,6 +17,24 @@ from suite_inventory import cases, load_suite, verify_files, verify_interpreter_
 # A completed method earns native operation credit only after inspecting what
 # its original assertions (or, in CONTROL, its retry loop) actually observe.
 OPERATIONS = {
+    "test.test_subprocess.ProcessTestCase.test_communicate_epipe":
+        "attempt to write 1 MiB to an exiting child and return without propagating EPIPE",
+    "test.test_subprocess.ProcessTestCase.test_communicate_epipe_only_stdin":
+        "reap the child and attempt to write 1 MiB to its stdin pipe without propagating EPIPE",
+    "test.test_subprocess.ProcessTestCase.test_communicate_pipe_buf":
+        "communicate across three pipes under backpressure and compare all echoed stdout bytes",
+    "test.test_subprocess.ProcessTestCase.test_communicate_pipe_fd_leak":
+        "communicate on seven pipe configurations and check each redirected stream is closed",
+    "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input":
+        "send a byte memoryview to the child, compare stdout bytes and check that stderr is None",
+    "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input_nonbyte":
+        "send an integer array memoryview and compare the child's binary echo with the array bytes",
+    "test.test_subprocess.ProcessTestCase.test_post_timeout_communicate_sends_input":
+        "retry communication after a zero timeout, check the child's exit status and the returned text",
+    "test.test_subprocess.ProcessTestCase.test_communicate_timeout":
+        "time out after sending text, retry the same child, and check its complete stdout and stderr",
+    "test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output":
+        "time out during communication, retry on the same child, and check the captured stdout length",
     "test_call_kwargs": "call with a child environment; wait for its exit status",
     "test_call_seq": "call with a sequence; wait for its exit status",
     "test_check_call_zero": "check_call returns the successful child's status",
@@ -197,7 +215,8 @@ def report(args, level, discovered, reference):
                 fixture_variant=variant,
             )
             continue
-        if body["status"] == "body-completed-needs-operation-review":
+        operation = OPERATIONS.get(name, OPERATIONS.get(method))
+        if body["status"] == "body-completed-needs-operation-review" and operation is not None:
             if "ProcessTestCaseNoPoll." in name or name == CONTROL:
                 [trace] = traced[name]
                 if trace["method_sha256"] != body["method_sha256"] or (
@@ -208,14 +227,14 @@ def report(args, level, discovered, reference):
                     )
                 ev["native_parent_selector_syscalls"] = trace["native_parent_syscalls"]
             ev.update(
-                operation=OPERATIONS[method],
+                operation=operation,
                 fixture=body["fixture_execution"],
                 method_sha256=body["method_sha256"],
                 opt_level=level,
             )
             loc = roles(
                 body="imre",
-                assertions="none" if name == CONTROL else "imre",
+                assertions="none" if name == CONTROL or body.get("assertions") == "none" else "imre",
                 operation="imre",
                 fixture="mixed",
             )

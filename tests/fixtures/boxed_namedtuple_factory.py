@@ -1,4 +1,4 @@
-from collections import namedtuple
+from collections import Counter, namedtuple
 
 
 class BrokenBlock:
@@ -31,6 +31,56 @@ def layout_read_allocation():
 
 
 def current():
+    from annotationlib import Format
+    from typing import NamedTuple
+
+    Typed = NamedTuple("Typed", [("x", int), ("tag", None)])
+    assert Typed.__module__ == __name__
+    assert Typed.__orig_bases__ == (NamedTuple,)
+    assert Typed.__annotations__ is Typed.__new__.__annotations__
+    assert Typed.__annotate__(Format.STRING) == {"x": "int", "tag": "NoneType"}
+    assert Typed(tag=None, x=3) == (3, None)
+
+    class Declared(NamedTuple):
+        label: str
+
+    assert Declared.__orig_bases__ == (NamedTuple,)
+    assert Declared("kept").label == "kept"
+    assert Declared("kept")._asdict() == {"label": "kept"}
+
+    Point = namedtuple('Point', 'self y')
+    class Pixel(Point):
+        pass
+    before = Pixel(1, 2)
+    after = before._replace(self=3)
+    assert type(after) is Pixel and tuple(after) == (3, 2) and tuple(before) == (1, 2)
+    assert Point.__replace__ is Point._replace
+
+    items = []
+    bound = Point(items, items)._asdict
+    result = bound()
+    assert type(result) is dict and list(result) == ["self", "y"]
+    assert result["self"] is result["y"] is items and result is not bound()
+
+    class Reordered(Point):
+        _fields = ("a", "b", "a", "extra")
+
+        def __iter__(self):
+            return iter((2, 4, 6))
+
+    assert Point._asdict(self=Reordered(1, 2)) == {"a": 6, "b": 4}
+
+    try:
+        before._replace(y=4, width=5)
+    except TypeError as error:
+        assert str(error) == "Got unexpected field names: ['width']"
+    else:
+        raise AssertionError("unknown field name accepted")
+
+    assert namedtuple.__module__ == "collections" and namedtuple.__name__ == "namedtuple"
+    assert type(namedtuple) is type(current)
+    assert ">>> Point =" in namedtuple.__doc__
+    assert ">>> c = Counter(" in Counter.__doc__ and ">>> Counter(" in Counter.most_common.__doc__
     Fields = namedtuple("Fields", "left right")
     getter = Fields.right
     assert getter.__get__((2, 3), tuple) == 3
@@ -57,6 +107,18 @@ def current():
     tagged = Tagged((1, 2), tag="set by init")
     assert tagged == (1, 2) and tagged.tag == "set by init"
     assert tuple.__new__(Tagged, (3,), tag="unused") == (3,)
+
+    from copyreg import _reconstructor
+    assert tuple.__init__ is Fields.__init__ is object.__init__
+    assert _reconstructor(Fields, tuple, (1, 2)) == (1, 2)
+    assert Fields(1, 2).__init__(1, 2) is None
+    assert tuple.__init__((), ()) is None
+    try:
+        tuple.__init__(tagged, ())
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("extra arguments with an overridden initializer")
 
     short = tuple.__new__(Fields, (7,))
     assert {short: "one"}[(7,)] == "one" and short.left == 7

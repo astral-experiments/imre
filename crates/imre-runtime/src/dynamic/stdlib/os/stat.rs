@@ -1,10 +1,10 @@
 //! POSIX stat and its ten-element Python struct sequence.
-use super::{Context, Error, Id, NONE, Result, Value, builtins, c_int, c_path, native, posixpath};
-use std::ffi::CString;
+use super::PathArg;
+use super::{Context, Error, Id, NONE, Result, Value, builtins, c_int, native};
 use std::io;
 
 pub(in crate::dynamic) const CLASS: &str = "os.stat_result";
-pub(in crate::dynamic) const FIELDS: [&str; 10] = [
+const FIELDS: [&str; 10] = [
     "st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size", "st_atime",
     "st_mtime", "st_ctime",
 ];
@@ -26,82 +26,223 @@ const EXTRA: &[&str] = &[
     "st_birthtime",
 ];
 
-fn wrap(ctx: &mut Context, values: Vec<Id>, extras: Vec<Id>) -> Id {
+pub(in crate::dynamic) const VFS_CLASS: &str = "os.statvfs_result";
+pub(in crate::dynamic) struct Layout {
+    pub(in crate::dynamic) class: &'static str,
+    fields: &'static [&'static str; 10],
+    extra: &'static [&'static str],
+    unnamed: usize,
+}
+
+static FILE: Layout = Layout {
+    class: CLASS,
+    fields: &FIELDS,
+    extra: EXTRA,
+    unnamed: 3,
+};
+#[cfg(target_os = "linux")]
+pub(super) static VFS: Layout = Layout {
+    class: VFS_CLASS,
+    fields: &[
+        "f_bsize",
+        "f_frsize",
+        "f_blocks",
+        "f_bfree",
+        "f_bavail",
+        "f_files",
+        "f_ffree",
+        "f_favail",
+        "f_flag",
+        "f_namemax",
+    ],
+    extra: &["f_fsid"],
+    unnamed: 0,
+};
+
+pub(in crate::dynamic) fn layout(class: &str) -> Option<&'static Layout> {
+    match class {
+        CLASS => Some(&FILE),
+        #[cfg(target_os = "linux")]
+        VFS_CLASS => Some(&VFS),
+        _ => None,
+    }
+}
+
+impl Layout {
+    pub(in crate::dynamic) fn name(&self) -> &'static str {
+        self.class.trim_start_matches("os.")
+    }
+
+    pub(in crate::dynamic) fn match_fields(&self) -> &'static [&'static str] {
+        &self.fields[..self.fields.len() - self.unnamed]
+    }
+}
+
+pub(super) fn wrap(ctx: &mut Context, layout: &Layout, values: Vec<Id>, extras: Vec<Id>) -> Id {
     ctx.alloc(Value::NamedTuple {
-        class: Some(CLASS),
-        names: FIELDS.map(str::to_owned).into(),
+        class: Some(layout.class),
+        names: layout.fields.map(str::to_owned).into(),
         values,
-        extras: EXTRA.iter().copied().zip(extras).collect(),
+        extras: layout.extra.iter().copied().zip(extras).collect(),
     })
 }
 
-pub(in crate::dynamic) fn count_attribute(name: &str) -> Option<i64> {
+pub(in crate::dynamic) fn count_attribute(layout: &Layout, name: &str) -> Option<i64> {
     Some(match name {
-        "n_fields" => (FIELDS.len() + EXTRA.len()) as i64,
-        "n_sequence_fields" => FIELDS.len() as i64,
-        "n_unnamed_fields" => 3,
+        "n_fields" => (layout.fields.len() + layout.extra.len()) as i64,
+        "n_sequence_fields" => layout.fields.len() as i64,
+        "n_unnamed_fields" => layout.unnamed as i64,
         _ => return None,
     })
 }
 
 pub(in crate::dynamic::stdlib) fn construct(
     ctx: &mut Context,
+    layout: &Layout,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let class = layout.class;
     let [Some(sequence), attributes] =
         builtins::bind_builtin_arguments("structseq", args, kwargs, ["sequence", "dict"], 1)?
     else {
         unreachable!()
     };
-    let mut values = ctx.items(sequence)?;
+    let mut values = super::super::fixed_structseq::sequence_values(ctx, sequence)?;
+    let dictionary = attributes
+        .map(|value| {
+            ctx.dict_storage(value).ok_or_else(|| {
+                Error::new(
+                    "TypeError",
+                    format!("{class}() takes a dict as second arg, if any"),
+                )
+            })
+        })
+        .transpose()?;
     let len = values.len();
-    let max = FIELDS.len() + EXTRA.len();
-    if !(FIELDS.len()..=max).contains(&len) {
-        let (bound, limit) = if len < FIELDS.len() {
-            ("least", FIELDS.len())
+    let max = layout.fields.len() + layout.extra.len();
+    if !(layout.fields.len()..=max).contains(&len) {
+        let (bound, limit) = if len < layout.fields.len() {
+            ("least", layout.fields.len())
         } else {
             ("most", max)
         };
         return Err(Error::new(
             "TypeError",
-            format!("{CLASS}() takes an at {bound} {limit}-sequence ({len}-sequence given)"),
+            format!("{class}() takes an at {bound} {limit}-sequence ({len}-sequence given)"),
         ));
     }
-    let mut extras = values.split_off(FIELDS.len());
+    // Python equality during dictionary lookup may mutate the input sequence or trigger GC.
+    if dictionary.is_some() {
+        ctx.heap
+            .reserve_temporaries(values.len() + layout.extra.len())?;
+        for &value in &values {
+            ctx.heap.keep(value);
+        }
+    }
+    let mut extras = values.split_off(layout.fields.len());
     let positional = extras.len();
-    extras.resize(EXTRA.len(), NONE);
-    if let Some(dict) = attributes {
-        let entries = ctx.dict_entries(dict).ok_or_else(|| {
-            Error::new(
+    extras.resize(layout.extra.len(), NONE);
+    if let Some(dict) = dictionary
+        && !ctx
+            .dict_entries(dict)
+            .expect("dictionary storage")
+            .is_empty()
+    {
+        let mut found = 0;
+        for (field, slot) in layout.extra[positional..]
+            .iter()
+            .zip(&mut extras[positional..])
+        {
+            let key = ctx.text(*field);
+            if let (_, Some(i)) = ctx.find_dictionary_key(dict, key, None)? {
+                *slot = ctx.dict_entries(dict).expect("dictionary storage")[i].1;
+                ctx.heap.keep(*slot);
+                found += 1;
+            }
+        }
+        if ctx.dict_entries(dict).expect("dictionary storage").len() > found {
+            return Err(Error::new(
                 "TypeError",
-                format!("{CLASS}() takes a dict as second arg, if any"),
-            )
-        })?;
-        for &(key, value) in entries {
-            let index = ctx
-                .str_value(key)
-                .ok()
-                .and_then(|name| EXTRA.iter().position(|&field| field == name));
-            let Some(index) = index.filter(|&i| i >= positional) else {
-                return Err(Error::new(
-                    "TypeError",
-                    format!("{CLASS}() got duplicate or unexpected field name(s)"),
-                ));
-            };
-            extras[index] = value;
+                format!("{class}() got duplicate or unexpected field name(s)"),
+            ));
         }
     }
     // Integer times remain the tuple elements and supply missing named times in a constructed result.
-    for (slot, &fallback) in extras[..3].iter_mut().zip(&values[7..]) {
-        if *slot == NONE {
-            *slot = fallback;
+    if class == CLASS {
+        for (slot, &fallback) in extras[..3].iter_mut().zip(&values[7..]) {
+            if *slot == NONE {
+                *slot = fallback;
+            }
         }
     }
-    Ok(wrap(ctx, values, extras))
+    Ok(wrap(ctx, layout, values, extras))
 }
 
-fn integer(ctx: &mut Context, value: impl Into<num_bigint::BigInt>) -> Id {
+/// Rebuild the struct sequence from its visible tuple and all stored named-only fields.
+pub(in crate::dynamic::stdlib) fn reduce(
+    ctx: &mut Context,
+    layout: &Layout,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let class = layout.class;
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "unbound method {}.__reduce__() needs an argument",
+                layout.name()
+            ),
+        ));
+    };
+    let (values, extras) = match ctx.heap.get(receiver) {
+        Value::NamedTuple {
+            class: Some(owner),
+            values,
+            extras,
+            ..
+        } if *owner == class => (values, extras),
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__reduce__' for '{class}' objects doesn't apply to a '{}' object",
+                    ctx.type_name(receiver)
+                ),
+            ));
+        }
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{}.__reduce__() takes no keyword arguments", layout.name()),
+        ));
+    }
+    if !rest.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{}.__reduce__() takes no arguments ({} given)",
+                layout.name(),
+                rest.len()
+            ),
+        ));
+    }
+
+    let extras = extras.clone();
+    let sequence = ctx.alloc(Value::Tuple(values.clone()));
+    let fields = extras
+        .into_iter()
+        .map(|(name, value)| (ctx.text(name), value))
+        .collect();
+    let fields = ctx.dict(fields);
+    let args = ctx.alloc(Value::Tuple(vec![sequence, fields]));
+    let class = ctx.builtin(class);
+    Ok(ctx.alloc(Value::Tuple(vec![class, args])))
+}
+
+pub(super) fn integer(ctx: &mut Context, value: impl Into<num_bigint::BigInt>) -> Id {
     ctx.alloc(Value::Int(crate::Int::new(value.into())))
 }
 
@@ -148,24 +289,18 @@ pub(super) fn packed(ctx: &mut Context, stat: &libc::stat) -> Id {
             stat.st_birthtime_nsec,
         ))),
     ]);
-    wrap(ctx, values, extras)
+    wrap(ctx, &FILE, values, extras)
 }
 
-pub(super) fn warn_bool_fd(ctx: &Context, value: Id) -> Result<()> {
+pub(in crate::dynamic::stdlib) fn warn_bool_fd(ctx: &mut Context, value: Id) -> Result<()> {
     if matches!(ctx.heap.get(value), Value::Bool(_)) {
-        let location = ctx.heap.current_location();
-        let (file, line) = location.as_ref().map_or(("<string>", 1), |loc| {
-            (loc.file.as_ref(), loc.line as isize)
-        });
-        let module = &ctx.scope_data(ctx.heap.current_scope()).module;
-        crate::objects::runtime_warning(module, file, line, "bool is used as a file descriptor")?;
+        ctx.emit_builtin_warning(
+            crate::objects::exceptions::Kind::RuntimeWarning,
+            "bool is used as a file descriptor",
+            1,
+        )?;
     }
     Ok(())
-}
-
-enum PathArg {
-    Fd(i32),
-    Name(CString),
 }
 
 pub(in crate::dynamic::stdlib) fn call(
@@ -184,7 +319,7 @@ pub(super) fn query(
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
-    warn_bool_fd: fn(&Context, Id) -> Result<()>,
+    warn_bool_fd: fn(&mut Context, Id) -> Result<()>,
 ) -> Result<libc::stat> {
     let mut output = std::mem::MaybeUninit::<libc::stat>::uninit();
     let (rc, filename) = if name == "fstat" {
@@ -231,32 +366,7 @@ pub(super) fn query(
             ));
         }
         let path = path.expect("path is required");
-        let spelling = matches!(
-            ctx.heap.get(ctx.scalar_value(path)),
-            Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
-        );
-        let (arg, filename) = if name == "stat"
-            && !spelling
-            && let Some(index) = ctx.index_value(path)?
-        {
-            warn_bool_fd(ctx, path)?;
-            (PathArg::Fd(native::directory_fd_number(&index)?), path)
-        } else {
-            let expected = if name == "stat" {
-                "stat: path should be string, bytes, os.PathLike or integer"
-            } else {
-                "lstat: path should be string, bytes or os.PathLike"
-            };
-            let spelling = posixpath::path_arg(ctx, path, expected)?;
-            (
-                PathArg::Name(c_path(
-                    ctx,
-                    spelling,
-                    &format!("{name}: embedded null character in path"),
-                )?),
-                spelling,
-            )
-        };
+        let (arg, filename) = super::path_or_fd(ctx, name, path, name == "stat", warn_bool_fd)?;
         let dir = if let Some(id) = dir.filter(|&v| v != NONE) {
             warn_bool_fd(ctx, id)?;
             let index = ctx.index_value(id)?.ok_or_else(|| {
@@ -318,40 +428,15 @@ pub(super) fn query(
 }
 
 /// The shared immutable descriptor exposes the named field independently of the sequence index.
-pub(in crate::dynamic) fn member(ctx: &mut Context, name: &str) -> Option<Id> {
-    let &field = FIELDS[..7]
+pub(in crate::dynamic) fn member(ctx: &mut Context, layout: &Layout, name: &str) -> Option<Id> {
+    let &field = layout
+        .match_fields()
         .iter()
-        .chain(EXTRA)
+        .chain(layout.extra)
         .find(|&&field| field == name)?;
-    Some(ctx.readonly_member(CLASS, field))
+    Some(ctx.readonly_member(layout.class, field))
 }
 
-/// Enumerate struct sequence, tuple and object slots without invoking a descriptor.
-pub(in crate::dynamic) fn attribute_names() -> impl Iterator<Item = &'static str> {
-    crate::objects::OBJECT_METHODS
-        .iter()
-        .chain(&FIELDS)
-        .chain(EXTRA)
-        .copied()
-        .chain([
-            "__class__",
-            "__doc__",
-            "__module__",
-            "__match_args__",
-            "__replace__",
-            "n_fields",
-            "n_sequence_fields",
-            "n_unnamed_fields",
-            "__class_getitem__",
-            "__add__",
-            "count",
-            "__rmul__",
-            "__contains__",
-            "__mul__",
-            "__getitem__",
-            "__len__",
-            "__iter__",
-            "__getnewargs__",
-            "index",
-        ])
+pub(in crate::dynamic) fn field_names(layout: &Layout) -> impl Iterator<Item = &'static str> {
+    layout.fields.iter().chain(layout.extra).copied()
 }

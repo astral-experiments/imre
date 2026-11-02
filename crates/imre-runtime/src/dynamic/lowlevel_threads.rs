@@ -1,9 +1,7 @@
 //! Count only the Python callbacks launched by this interpreter.
 use super::{Context, Error, Id, Result, Value, thread_callback::Callback};
-use std::io::Write;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
-use std::thread;
 
 pub(super) fn function_name(symbol: &str) -> Option<&'static str> {
     match symbol {
@@ -27,10 +25,14 @@ pub(super) fn doc(function: &str) -> &'static str {
 
 #[derive(Default)]
 pub(super) struct Workers {
-    count: Arc<AtomicUsize>,
+    pub(super) count: Arc<AtomicUsize>,
+    pub(super) private_context: bool,
+    // Startup may resume once the Python frame has bound its only captured receiver.
+    pub(super) acquire_bound: Option<std::sync::mpsc::Sender<()>>,
     // Thread errors use the original sys module when its registry entry changes.
     pub(super) system_module: Option<Id>,
     pub(super) default_stderr: Option<Id>,
+    pub(super) default_unraisable_hook: Option<Id>,
     running: Vec<(Arc<AtomicBool>, Vec<Id>)>,
 }
 
@@ -52,6 +54,7 @@ impl Workers {
         self.system_module
             .into_iter()
             .chain(self.default_stderr)
+            .chain(self.default_unraisable_hook)
             .chain(
                 self.running
                     .iter()
@@ -63,7 +66,12 @@ impl Workers {
 impl Context {
     /// The worker cannot route an error through an object on the caller's heap.
     pub(super) fn check_thread_reporter_mutable(&self) -> Result<()> {
-        if self.threads.count.load(Ordering::SeqCst) != 0 {
+        if self
+            .threads
+            .running
+            .iter()
+            .any(|(active, _)| active.load(Ordering::Acquire))
+        {
             return Err(Error::new(
                 "NotImplementedError",
                 "changing thread exception reporting while a worker runs requires the boxed Python heap",
@@ -89,12 +97,12 @@ impl Context {
     }
 }
 
-struct Running {
+pub(super) struct Running {
     count: Arc<AtomicUsize>,
     roots_active: Arc<AtomicBool>,
 }
 impl Running {
-    fn enter(count: Arc<AtomicUsize>, roots_active: Arc<AtomicBool>) -> Self {
+    pub(super) fn enter(count: Arc<AtomicUsize>, roots_active: Arc<AtomicBool>) -> Self {
         count.fetch_add(1, Ordering::SeqCst);
         Self {
             count,
@@ -139,6 +147,7 @@ pub(super) fn call(
         }
         let count = ctx.threads.count.load(Ordering::SeqCst);
         ctx.threads.reap(&mut ctx.heap);
+        ctx.reap_thread_operands();
         return Ok(ctx.int(count as i64));
     }
     let [function, positional, rest @ ..] = args else {
@@ -188,7 +197,7 @@ pub(super) fn call(
         && let Value::Module { scope, .. } = ctx.heap.get(sys)
         // Once exposed, the live dict can be changed through an arbitrary alias.
         && (ctx.scope_data(*scope).namespace.is_some()
-            || ctx.scope_name(*scope, "unraisablehook").is_some()
+            || ctx.scope_name(*scope, "unraisablehook").is_some_and(|hook| Some(hook) != ctx.threads.default_unraisable_hook)
             || ctx.scope_name(*scope, "stderr") != ctx.threads.default_stderr
             || ctx.threads.default_stderr.is_some_and(|stderr| {
                 matches!(ctx.heap.get(stderr), Value::TextFile(file) if file.closed())
@@ -205,38 +214,7 @@ pub(super) fn call(
         .try_reserve(1)
         .map_err(|_| Error::new("MemoryError", ""))?;
     let label = ctx.repr(*function);
-    let count = Arc::clone(&ctx.threads.count);
-    let (ready, started) = mpsc::sync_channel(0);
-    let roots_active = Arc::new(AtomicBool::new(true));
-    let worker_roots = Arc::clone(&roots_active);
-    let _handle = thread::Builder::new()
-        .spawn(move || {
-            let (mut worker, func, arguments) = match callback.load() {
-                Ok(frame) => frame,
-                Err(error) => {
-                    let _ = ready.send(Err(error.to_string()));
-                    return;
-                }
-            };
-            worker.threads.count = Arc::clone(&count);
-            let _running = Running::enter(count, worker_roots);
-            // SAFETY: pthread_self takes no arguments and returns the caller's id.
-            let ident = unsafe { libc::pthread_self() } as usize;
-            if ready.send(Ok(ident)).is_ok()
-                && let Err(error) = worker.call(func, arguments, Vec::new())
-                && error.kind != "SystemExit"
-            {
-                let _ = writeln!(
-                    crate::sys::stderr_writer(),
-                    "Exception ignored in thread started by {label}:\n{error}"
-                );
-            }
-        })
-        .map_err(|_| Error::new("RuntimeError", "can't start new thread"))?;
-    let ident = started
-        .recv()
-        .map_err(|_| Error::new("RuntimeError", "thread initialization failed"))?
-        .map_err(|message| Error::new("RuntimeError", message))?;
+    let (ident, roots_active) = super::thread_worker::start_detached(ctx, callback, label)?;
     ctx.threads.running.push((roots_active, roots));
     Ok(ctx.int(ident as i64))
 }

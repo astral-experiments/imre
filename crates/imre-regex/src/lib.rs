@@ -1,6 +1,10 @@
 //! Translate the supported Python lexical forms, then let the native regex parser
 //! validate precedence, character ranges, repetition, captures, and engine limits.
 
+mod casefold;
+
+pub use casefold::expand_case;
+
 use std::fmt::Write;
 
 use regex_syntax::hir::HirKind;
@@ -97,56 +101,474 @@ pub fn translate_with_flags(
     pattern: &str,
     verbose: bool,
     ascii: bool,
-    mut dotall: bool,
+    dotall: bool,
 ) -> Result<FixedPattern, String> {
+    translate_for_runtime(pattern, verbose, ascii, dotall, true)
+}
+
+/// Character and case rules for Python pattern escapes.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Alphabet {
+    Unicode,
+    UnicodeIgnoreCase,
+    Ascii,
+    AsciiIgnoreCase,
+    Bytes,
+}
+
+impl Alphabet {
+    fn ignores_case(self) -> bool {
+        matches!(self, Self::UnicodeIgnoreCase | Self::AsciiIgnoreCase)
+    }
+
+    fn ascii(self) -> bool {
+        matches!(self, Self::Ascii | Self::AsciiIgnoreCase | Self::Bytes)
+    }
+
+    fn scoped(self, flag: char, enable: bool) -> Result<Self, String> {
+        if self == Self::Bytes {
+            return Err("scoped text modes require a str pattern".into());
+        }
+        let (ascii, ignore_case) = match flag {
+            'a' | 'u' if enable => (flag == 'a', self.ignores_case()),
+            'i' => (self.ascii(), enable),
+            _ => return Err("cannot turn off a text alphabet".into()),
+        };
+        Ok(match (ascii, ignore_case) {
+            (false, false) => Self::Unicode,
+            (false, true) => Self::UnicodeIgnoreCase,
+            (true, false) => Self::Ascii,
+            (true, true) => Self::AsciiIgnoreCase,
+        })
+    }
+}
+
+struct Escapes {
+    alphabet: Alphabet,
+    bracketed_word: bool,
+}
+
+/// Use the caller's regex flags to limit literal guards to sound text modes.
+pub fn translate_for_runtime(
+    pattern: &str,
+    verbose: bool,
+    ascii: bool,
+    dotall: bool,
+    literal_guards: bool,
+) -> Result<FixedPattern, String> {
+    translate_pattern(
+        pattern,
+        verbose,
+        if ascii {
+            Alphabet::Ascii
+        } else {
+            Alphabet::Unicode
+        },
+        dotall,
+        literal_guards,
+    )
+}
+
+/// Translate a boxed pattern with its byte and Unicode escape rules.
+pub fn translate_pattern(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    literal_guards: bool,
+) -> Result<FixedPattern, String> {
+    translate_pattern_with_line_mode(pattern, verbose, alphabet, dotall, literal_guards, false)
+}
+
+/// Translate a boxed pattern with the matcher's line mode for zero-width anchors.
+pub fn translate_pattern_with_line_mode(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    literal_guards: bool,
+    multiline: bool,
+) -> Result<FixedPattern, String> {
+    let (output, groups) = tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        literal_guards,
+        Grammar::Standard { multiline },
+    )?;
+    analyze(output, groups)
+}
+
+/// Normalize a text pattern requiring a lookaround without accepting backend-specific syntax.
+pub fn lookahead_source(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+) -> Result<(String, Vec<Option<String>>), String> {
+    tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        false,
+        Grammar::Lookahead,
+    )
+}
+
+/// Translate a pattern needing native backtracking, retaining Python capture slots.
+/// Bytes patterns use this matcher for references, forward assertions and atomic operations.
+pub fn backtracking_source(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+) -> Result<(String, Vec<Option<String>>), String> {
+    tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        false,
+        Grammar::Backtracking,
+    )
+}
+
+/// Translate Python syntax for validation without requiring a particular matcher.
+pub fn validation_source(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+) -> Result<(String, Vec<Option<String>>), String> {
+    tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        false,
+        Grammar::Validation,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Grammar {
+    Validation,
+    Standard { multiline: bool },
+    Lookahead,
+    Backtracking,
+}
+
+enum Scope {
+    Plain,
+    Capture(usize),
+    Conditional { has_else: bool },
+    Lookahead,
+    Lookbehind { first_local_group: usize },
+}
+
+// Widths count Python characters rather than UTF-8 bytes. Saturation also
+// covers widths beyond Python's maximum representable lookbehind distance.
+const VARIABLE_WIDTH: u64 = u64::MAX;
+
+#[derive(Clone, Copy, Default)]
+struct Width {
+    min: u64,
+    max: u64,
+}
+
+impl Width {
+    const UNKNOWN: Self = Self {
+        min: 0,
+        max: VARIABLE_WIDTH,
+    };
+
+    fn fixed(n: u64) -> Self {
+        Self { min: n, max: n }
+    }
+
+    fn exact(self) -> u64 {
+        if self.min == self.max {
+            self.min
+        } else {
+            VARIABLE_WIDTH
+        }
+    }
+}
+
+#[derive(Default)]
+struct BranchWidth {
+    prefix: Width,
+    atom: Width,
+    previous: Option<Width>,
+}
+
+impl BranchWidth {
+    fn push(&mut self, atom: Width) {
+        self.prefix.min = self.prefix.min.saturating_add(self.atom.min);
+        self.prefix.max = self.prefix.max.saturating_add(self.atom.max);
+        self.atom = atom;
+    }
+
+    fn width(&self) -> Width {
+        let mut min = self.prefix.min.saturating_add(self.atom.min);
+        let mut max = self.prefix.max.saturating_add(self.atom.max);
+        if let Some(previous) = self.previous {
+            min = min.min(previous.min);
+            max = max.max(previous.max);
+        }
+        Width { min, max }
+    }
+
+    fn finish_branch(&mut self) {
+        *self = Self {
+            previous: Some(self.width()),
+            ..Self::default()
+        };
+    }
+}
+
+struct GroupState {
+    alphabet: Alphabet,
+    backtrack: bool,
+    dotall: bool,
+    verbose: bool,
+    atomic_assertion: bool,
+    width: BranchWidth,
+    scope: Scope,
+}
+
+/// Python can retain an earlier end slot while a repeated capture is open.
+/// The backend tests only the start slot, so reject open conditions as well
+/// as Python's invalid backreferences to an open group.
+fn check_reference(id: usize, open: &[GroupState]) -> Result<(), String> {
+    if id == 0
+        || open.iter().any(|g| match g.scope {
+            Scope::Capture(n) => n == id,
+            Scope::Lookbehind { first_local_group } => id >= first_local_group,
+            _ => false,
+        })
+    {
+        return Err("invalid or open regex group reference".into());
+    }
+    Ok(())
+}
+
+fn reference_id(
+    input: &mut Input<'_>,
+    groups: &[Option<String>],
+    conditional: bool,
+) -> Result<usize, String> {
+    let name: String = std::iter::from_fn(|| input.next_if(|c| *c != ')')).collect();
+    if input.next() != Some(')') {
+        return Err("unterminated group reference".into());
+    }
+    if conditional && !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()) {
+        return name
+            .parse()
+            .map_err(|_| "invalid regex group reference".into());
+    }
+    groups
+        .iter()
+        .position(|g| g.as_deref() == Some(&name))
+        .ok_or_else(|| "unknown regex group name".into())
+}
+
+fn skip_comment(input: &mut impl Iterator<Item = char>) -> Result<(), String> {
+    // The closing parenthesis must be unescaped, even inside verbose patterns.
+    loop {
+        match input.next() {
+            Some(')') => return Ok(()),
+            Some('\\') => {
+                input.next().ok_or("bad escape (end of pattern)")?;
+            }
+            Some(_) => {}
+            None => return Err("missing ), unterminated comment".into()),
+        }
+    }
+}
+
+fn tokenize(
+    pattern: &str,
+    mut verbose: bool,
+    alphabet: Alphabet,
+    mut dotall: bool,
+    literal_guards: bool,
+    grammar: Grammar,
+) -> Result<(String, Vec<Option<String>>), String> {
+    let lookahead = !matches!(grammar, Grammar::Standard { .. });
+    let mut escapes = Escapes {
+        alphabet,
+        bracketed_word: false,
+    };
+    let mut modes = vec![(0, alphabet)];
+    let mut scoped_mode = false;
+    // Earlier captures can provide the width of a later lookbehind backreference.
+    let needs_lookbehind_width = lookahead && pattern.contains("(?<");
+    let mut has_lookaround = false;
+    let mut has_lookbehind = false;
+    let mut has_reference = false;
+    let mut has_atomic = false;
+    let mut nullable_repeat = false;
+    let mut width = BranchWidth::default();
+    let mut group_widths = Vec::new(); // Indexed by capture number minus one.
+    let mut has_boundary = false;
+    let mut highest_condition = 0;
+    let mut literal_brace = false;
     let mut input = pattern.chars().peekable();
     let mut output = String::new();
     let mut groups = vec![None]; // Group zero is the whole match.
     let mut can_repeat = false;
     let mut may_backtrack = false;
     let mut outer_prefixes = Vec::new();
-    while let Some(c) = input.next() {
-        match c {
-            c if verbose && verbose_space(c) => continue,
-            '#' if verbose => {
-                // The Python tokenizer consumes a backslash and its next character
-                // as one token even inside a comment, including a physical newline.
-                while let Some(ch) = input.next() {
-                    match ch {
-                        '\\' => {
-                            input.next().ok_or("incomplete regex escape in comment")?;
-                        }
-                        '\n' => break,
-                        _ => {}
-                    }
-                }
-                continue;
-            }
+    while let Some(c) = next_token(&mut input, verbose)? {
+        let atom_width = match c {
             '(' => {
-                outer_prefixes.push((may_backtrack, dotall));
+                let extension = input.next_if_eq(&'?').is_some();
+                if extension && input.next_if_eq(&'#').is_some() {
+                    skip_comment(&mut input)?;
+                    continue;
+                }
+                if literal_guards
+                    && escapes.alphabet != Alphabet::UnicodeIgnoreCase
+                    && extension
+                    && input.next_if_eq(&'!').is_some()
+                {
+                    guarded_class(&mut input, &mut output, verbose, &mut escapes)?;
+                    // A following quantifier would repeat the consumed class alone.
+                    can_repeat = false;
+                    width.push(Width::fixed(1));
+                    continue;
+                }
+                // A standalone (?x) may follow only earlier global flags and ignored layout.
+                if extension && input.clone().take(2).eq(['x', ')']) {
+                    if !output.is_empty() {
+                        return Err("global flags not at the start of the expression".into());
+                    }
+                    input.next();
+                    input.next();
+                    verbose = true;
+                    continue;
+                }
+                if lookahead && extension && input.clone().take(2).eq(['P', '=']) {
+                    input.next();
+                    input.next();
+                    let id = reference_id(&mut input, &groups, false)?;
+                    check_reference(id, &outer_prefixes)?;
+                    has_reference = true;
+                    write!(output, r"\k<{id}>").unwrap();
+                    can_repeat = true;
+                    width.push(group_widths[id - 1]);
+                    continue;
+                }
+                let behind = lookahead && extension && input.next_if_eq(&'<').is_some();
+                let assertion = if lookahead && extension {
+                    input.next_if(|c| matches!(c, '=' | '!'))
+                } else {
+                    None
+                };
+                if behind && assertion.is_none() {
+                    return Err("expected Python lookbehind assertion".into());
+                }
+                let atomic_assertion = assertion == Some('=');
+                let mut group = GroupState {
+                    alphabet: escapes.alphabet,
+                    backtrack: may_backtrack,
+                    dotall,
+                    verbose,
+                    atomic_assertion,
+                    scope: Scope::Plain,
+                    width: std::mem::take(&mut width),
+                };
                 may_backtrack = false;
                 output.push('(');
-                if input.next_if_eq(&'?').is_some() {
-                    if input.next_if_eq(&':').is_some() {
-                        output.push_str("?:");
-                    } else if input.next_if_eq(&'s').is_some() {
-                        if input.next() != Some(':') {
-                            return Err("expected scoped dotall group".into());
+                if extension {
+                    if let Some(assertion) = assertion {
+                        has_lookaround = true;
+                        output.push('?');
+                        group.scope = if behind {
+                            has_lookbehind = true;
+                            output.push('<');
+                            Scope::Lookbehind {
+                                first_local_group: groups.len(),
+                            }
+                        } else {
+                            Scope::Lookahead
+                        };
+                        output.push(assertion);
+                        if atomic_assertion {
+                            // CPython commits to the first successful positive assertion.
+                            output.push_str("(?>");
                         }
-                        output.push_str("?s:");
-                        dotall = true;
+                    } else if lookahead && input.next_if_eq(&'(').is_some() {
+                        let id = reference_id(&mut input, &groups, true)?;
+                        check_reference(id, &outer_prefixes)?;
+                        highest_condition = highest_condition.max(id);
+                        write!(output, "?({id})").unwrap();
+                        group.scope = Scope::Conditional { has_else: false };
+                    } else if input.next_if_eq(&':').is_some() {
+                        output.push_str("?:");
+                    } else if matches!(input.peek(), Some('a' | 'u' | 'i' | 's' | 'x' | '-')) {
+                        let enable = input.next_if_eq(&'-').is_none();
+                        let flag = input.next().ok_or("expected scoped flag")?;
+                        if input.next() != Some(':') {
+                            return Err("expected a single scoped flag".into());
+                        }
+                        let opener = match flag {
+                            'x' => {
+                                verbose = enable;
+                                "?:"
+                            }
+                            's' => {
+                                dotall = enable;
+                                if enable { "?s:" } else { "?-s:" }
+                            }
+                            'a' | 'u' | 'i' => {
+                                scoped_mode = true;
+                                let parent = escapes.alphabet;
+                                let next = parent.scoped(flag, enable)?;
+                                if next != parent {
+                                    escapes.alphabet = next;
+                                    modes.push((output.len(), next));
+                                }
+                                // Only Unicode ignorecase uses the engine's fold.
+                                // Even under ASCII, text dot and negated classes consume scalars.
+                                match (parent, next) {
+                                    (Alphabet::UnicodeIgnoreCase, n) if n != parent => "?-i:",
+                                    (p, Alphabet::UnicodeIgnoreCase) if p != next => "?i:",
+                                    _ => "?:",
+                                }
+                            }
+                            _ => return Err("unsupported scoped flag".into()),
+                        };
+                        output.push_str(opener);
                     } else if input.next_if_eq(&'>').is_some() {
-                        atomic_delimited(&mut input, &mut output, dotall, verbose, ascii)?;
-                        (may_backtrack, dotall) = outer_prefixes.pop().unwrap();
-                        can_repeat = true;
-                        continue;
+                        if grammar == Grammar::Backtracking {
+                            has_atomic = true;
+                            output.push_str("?>");
+                        } else {
+                            atomic_delimited(
+                                &mut input,
+                                &mut output,
+                                dotall,
+                                verbose,
+                                &mut escapes,
+                            )?;
+                            may_backtrack = group.backtrack;
+                            width = group.width;
+                            width.push(Width::UNKNOWN);
+                            can_repeat = true;
+                            continue;
+                        }
                     } else if input.next_if_eq(&'P').is_some() && input.next_if_eq(&'<').is_some() {
                         let mut name = String::new();
                         loop {
                             match input.next() {
                                 Some('>') if !name.is_empty() => break,
                                 Some(c)
-                                    if c == '_'
+                                    if lookahead && c != '>'
+                                        || c == '_'
                                         || c.is_ascii_alphabetic()
                                         || !name.is_empty() && c.is_ascii_digit() =>
                                 {
@@ -155,54 +577,172 @@ pub fn translate_with_flags(
                                 _ => return Err("expected an ASCII Python capture name".into()),
                             }
                         }
-                        write!(output, "?P<{name}>").unwrap();
+                        // The text lookahead backend uses the original Python names
+                        // separately, including identifiers outside its own name syntax.
+                        if !lookahead {
+                            write!(output, "?P<{name}>").unwrap();
+                        }
+                        group.scope = Scope::Capture(groups.len());
                         groups.push(Some(name));
+                        group_widths.push(Width::UNKNOWN);
                     } else {
                         return Err("unsupported regex group, assertion, or inline flag".into());
                     }
                 } else {
+                    group.scope = Scope::Capture(groups.len());
                     groups.push(None);
+                    group_widths.push(Width::UNKNOWN);
                 }
+                outer_prefixes.push(group);
                 can_repeat = false;
+                continue;
             }
             '|' => {
                 // regex-syntax factors identical prefixes. Moving a repetition
                 // or nested choice before the branch can change the first match.
                 // An empty character class is an unreachable branch that keeps
                 // these alternatives separate without adding a capture.
-                output.push_str(if may_backtrack { r"|[^\s\S]|" } else { "|" });
-                if let Some((outer, _)) = outer_prefixes.last_mut() {
-                    *outer = true; // The enclosing prefix now contains a choice.
+                if let Some(group) = outer_prefixes.last_mut() {
+                    group.backtrack = true;
+                    if let Scope::Conditional { has_else } = &mut group.scope {
+                        if *has_else {
+                            return Err("conditional backref with more than two branches".into());
+                        }
+                        *has_else = true;
+                        may_backtrack = false; // A conditional cannot take an extra unreachable branch.
+                    }
+                }
+                output.push('|');
+                if may_backtrack {
+                    // A synthetic branch must preserve the backend's fixed-width
+                    // analysis inside lookbehinds and the captures they reference.
+                    let size = if needs_lookbehind_width {
+                        width.width().exact()
+                    } else {
+                        1
+                    };
+                    if size == 0 {
+                        output.push_str("(?!)");
+                    } else {
+                        output.push_str(r"[^\s\S]");
+                        if (2..u64::from(u32::MAX)).contains(&size) {
+                            write!(output, "{{{size}}}").unwrap();
+                        }
+                    }
+                    output.push('|');
                 }
                 may_backtrack = false;
                 can_repeat = false;
+                width.finish_branch();
+                continue;
             }
             ')' => {
-                if let Some((backtrack, previous_dotall)) = outer_prefixes.pop() {
-                    may_backtrack |= backtrack;
-                    dotall = previous_dotall;
+                let mut body_width = width.width();
+                if let Some(group) = outer_prefixes.pop() {
+                    match group.scope {
+                        Scope::Lookbehind { .. } if body_width.exact() > u64::from(u32::MAX) => {
+                            return Err("look-behind requires fixed-width pattern".into());
+                        }
+                        Scope::Lookbehind { .. } | Scope::Lookahead => body_width = Width::fixed(0),
+                        Scope::Capture(id) => group_widths[id - 1] = body_width,
+                        Scope::Conditional { has_else: false } => body_width.min = 0,
+                        _ => {}
+                    }
+                    width = group.width;
+                    may_backtrack |= group.backtrack;
+                    dotall = group.dotall;
+                    verbose = group.verbose;
+                    if escapes.alphabet != group.alphabet {
+                        escapes.alphabet = group.alphabet;
+                        modes.push((output.len(), group.alphabet));
+                    }
+                    if group.atomic_assertion {
+                        output.push(')');
+                    }
                 }
                 output.push(c);
                 can_repeat = true;
+                body_width
             }
             '.' | '^' => {
                 output.push(c);
                 can_repeat = c == '.';
+                Width::fixed(u64::from(can_repeat))
             }
-            '$' if input.peek().is_none() || verbose && verbose_tail(input.clone()) => {
+            '$' if grammar != (Grammar::Standard { multiline: false }) => {
+                // Literals are escaped, so the runtime can lower this anchor using its line mode.
+                output.push('$');
+                can_repeat = false;
+                Width::fixed(0)
+            }
+            '$' if input.peek().is_none()
+                || verbose && next_token(&mut input.clone(), true)?.is_none() =>
+            {
                 // Remember a consumed final newline so the runtime can exclude it
                 // from group zero. Dots are not valid in Python group names.
                 output.push_str(FINAL_NEWLINE_ANCHOR);
                 can_repeat = false;
+                Width::fixed(0)
             }
             '$' => return Err("the $ anchor is supported only at the end of a pattern".into()),
             '[' => {
-                class(&mut input, &mut output, ascii)?;
+                class(&mut input, &mut output, &mut escapes)?;
                 can_repeat = true;
+                Width::fixed(1)
+            }
+            '\\' if lookahead && matches!(input.peek(), Some('b' | 'B')) => {
+                // Compare the Python word status on either side without consuming a scalar.
+                // The lookahead engine cannot switch its Unicode mode even for ASCII boundaries.
+                has_boundary = true;
+                let word = if escapes.alphabet.ascii() {
+                    r"[A-Za-z0-9_]"
+                } else if escapes.alphabet.ignores_case() {
+                    r"(?-i:[\p{L}\p{N}_])"
+                } else {
+                    r"[\p{L}\p{N}_]"
+                };
+                let (after_word, after_nonword) = if input.next() == Some('b') {
+                    ('!', '=')
+                } else {
+                    ('=', '!')
+                };
+                write!(
+                    output,
+                    "(?:(?<={word})(?{after_word}{word})|(?<!{word})(?{after_nonword}{word}))"
+                )
+                .unwrap();
+                can_repeat = false;
+                Width::fixed(0)
+            }
+            '\\' if lookahead && push_octal_escape(&mut input, &mut output, false)? => {
+                can_repeat = true;
+                Width::fixed(1)
+            }
+            '\\' if lookahead && matches!(input.peek(), Some('1'..='9')) => {
+                let first = input.next().unwrap();
+                let mut id = (first as u8 - b'0') as usize;
+                if let Some(second) = input.next_if(char::is_ascii_digit) {
+                    id = id * 10 + (second as u8 - b'0') as usize;
+                }
+                if id >= groups.len() {
+                    return Err("invalid regex group reference".into());
+                }
+                check_reference(id, &outer_prefixes)?;
+                has_reference = true;
+                write!(output, r"\k<{id}>").unwrap();
+                can_repeat = true;
+                group_widths[id - 1]
             }
             '\\' => {
-                let kind = escaped(&mut input, &mut output, false, ascii)?;
+                let kind = escaped(&mut input, &mut output, false, &mut escapes)?;
                 can_repeat = kind != Escape::Anchor;
+                Width::fixed(u64::from(can_repeat))
+            }
+            '{' if !starts_counted_repeat(input.clone()) => {
+                literal_brace = true;
+                literal(&mut output, c);
+                can_repeat = true;
+                Width::fixed(1)
             }
             '*' | '+' | '?' | '{' => {
                 may_backtrack = true;
@@ -210,35 +750,108 @@ pub fn translate_with_flags(
                     return Err("regex quantifier requires a preceding atom".into());
                 }
                 output.push(c);
-                if c == '{' {
-                    if input.peek() == Some(&',') {
+                let (lo, hi) = if c == '{' {
+                    let lo = if input.peek() == Some(&',') {
                         output.push('0');
-                    } else if !count(&mut input, &mut output)? {
-                        return Err("expected a compact regex repetition count".into());
-                    }
-                    if input.next_if_eq(&',').is_some() {
+                        0
+                    } else {
+                        count(&mut input, &mut output)?
+                            .ok_or("expected a compact regex repetition count")?
+                    };
+                    let hi = if input.next_if_eq(&',').is_some() {
                         output.push(',');
-                        count(&mut input, &mut output)?;
-                    }
+                        count(&mut input, &mut output)?.map_or(VARIABLE_WIDTH, u64::from)
+                    } else {
+                        u64::from(lo)
+                    };
                     if input.next_if_eq(&'}').is_none() {
                         return Err("expected a compact regex repetition count".into());
                     }
+                    if hi < u64::from(lo) {
+                        return Err("min repeat greater than max repeat".into());
+                    }
                     output.push('}');
-                }
+                    (u64::from(lo), hi)
+                } else {
+                    (
+                        u64::from(c == '+'),
+                        if c == '?' { 1 } else { VARIABLE_WIDTH },
+                    )
+                };
+                // Another optional iteration at the same offset can change the last capture.
+                nullable_repeat |= width.atom.min == 0 && hi.saturating_sub(lo) > 1;
+                width.atom.min = width.atom.min.saturating_mul(lo);
+                width.atom.max = width.atom.max.saturating_mul(hi);
+                // Modifiers must be adjacent even in verbose mode.
                 if input.next_if_eq(&'?').is_some() {
                     output.push('?');
+                } else if grammar == Grammar::Backtracking && input.next_if_eq(&'+').is_some() {
+                    has_atomic = true;
+                    output.push('+');
                 }
-                // Python requires lazy modifiers to be adjacent and rejects nested
-                // or possessive quantifiers in this subset. Verbose stripping must
-                // not accidentally turn a separated '?' into a modifier.
                 can_repeat = false;
+                continue;
             }
             c => {
                 literal(&mut output, c);
                 can_repeat = true;
+                Width::fixed(1)
             }
-        }
+        };
+        width.push(atom_width);
     }
+    if (literal_brace || lookahead || scoped_mode) && escapes.bracketed_word {
+        return Err(
+            "case-insensitive Unicode word sets inside bracket expressions are unsupported".into(),
+        );
+    }
+    if highest_condition >= groups.len() {
+        return Err("invalid conditional group reference".into());
+    }
+    let casefold = modes.iter().any(|(_, mode)| mode.ignores_case());
+    let text_assertions =
+        alphabet != Alphabet::Bytes && (has_lookaround || scoped_mode || has_boundary);
+    // Bytes lookbehind has its own bounded matcher. Keep nullable repeats out
+    // of the forward-assertion fallback so a stalled iteration cannot change a capture.
+    let byte_lookahead =
+        alphabet == Alphabet::Bytes && has_lookaround && !has_lookbehind && !nullable_repeat;
+    // A conditional reads capture participation even without a backreference.
+    // A stalled optional iteration can change which capture is set.
+    let standalone_condition = highest_condition != 0 && !has_lookaround && !nullable_repeat;
+    match grammar {
+        Grammar::Lookahead if !has_lookaround => {
+            return Err("expected a Python lookahead assertion".into());
+        }
+        Grammar::Backtracking
+            if !has_reference
+                && !text_assertions
+                && !byte_lookahead
+                && !standalone_condition
+                && !(has_atomic && (alphabet != Alphabet::Bytes || !has_lookbehind)) =>
+        {
+            return Err("pattern does not require backtracking".into());
+        }
+        // Keep previously supported case-sensitive text assertions on their existing matcher.
+        // For newly admitted references, a stalled repeat could leave the wrong capture.
+        Grammar::Backtracking
+            if nullable_repeat
+                && (has_atomic || has_reference && (!text_assertions || casefold)) =>
+        {
+            return Err("a repeated empty match could change the referenced capture".into());
+        }
+        _ => {}
+    }
+    if casefold {
+        output = if grammar == Grammar::Backtracking && has_reference {
+            casefold::backrefs(&output, &modes)?
+        } else {
+            casefold::scoped(&output, &modes, lookahead)?
+        };
+    }
+    Ok((output, groups))
+}
+
+fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, String> {
     let output = preserve_zero_repeat_groups(output)?;
     let hir = regex_syntax::Parser::new()
         .parse(&output)
@@ -288,144 +901,186 @@ pub fn translate_with_flags(
     })
 }
 
-/// Encode a literal replacement as UTF-8 runs and capture indices. The high
-/// bit distinguishes a group from a byte count, so user text needs no sentinel.
-pub fn replacement(template: &str, groups: &[Capture]) -> Result<Vec<u8>, &'static str> {
-    fn flush(out: &mut Vec<u8>, literal: &mut String) -> Result<(), &'static str> {
-        if !literal.is_empty() {
-            let n = u32::try_from(literal.len())
-                .ok()
-                .filter(|&n| n < 1 << 31)
-                .ok_or("replacement literal is too long")?;
-            out.extend(n.to_le_bytes());
-            out.extend_from_slice(literal.as_bytes());
-            literal.clear();
-        }
-        Ok(())
-    }
-    let mut chars = template.chars().peekable();
-    let mut out = Vec::new();
-    let mut literal = String::new();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            literal.push(c);
-            continue;
-        }
-        let escape = chars.next().ok_or("incomplete replacement escape")?;
-        let group = match escape {
-            'g' => {
-                if chars.next() != Some('<') {
-                    return Err("expected < in replacement group");
-                }
-                let mut name = String::new();
-                loop {
-                    match chars.next() {
-                        Some('>') => break,
-                        Some(c) => name.push(c),
-                        None => return Err("unterminated replacement group"),
-                    }
-                }
-                if !name.is_empty() && name.bytes().all(|c| c.is_ascii_digit()) {
-                    name.parse().ok()
-                } else {
-                    groups.iter().position(|g| g.name.as_deref() == Some(&name))
-                }
-            }
-            '1'..='9' => {
-                let mut digits = String::from(escape);
-                if let Some(c) = chars.next_if(char::is_ascii_digit) {
-                    digits.push(c);
-                    if digits.bytes().all(|d| (b'0'..=b'7').contains(&d))
-                        && let Some(c) = chars.next_if(|c| matches!(c, '0'..='7'))
-                    {
-                        digits.push(c);
-                        let octal = u8::from_str_radix(&digits, 8)
-                            .map_err(|_| "octal escape exceeds 0o377")?;
-                        literal.push(char::from(octal));
-                        continue;
-                    }
-                }
-                digits.parse().ok()
-            }
-            '0' => {
-                let mut octal = 0;
-                for _ in 0..2 {
-                    if let Some(c) = chars.next_if(|c| matches!(c, '0'..='7')) {
-                        octal = octal * 8 + c.to_digit(8).unwrap() as u8;
-                    } else {
-                        break;
-                    }
-                }
-                literal.push(char::from(octal));
-                continue;
-            }
-            _ => {
-                let decoded = match escape {
-                    '\\' => '\\',
-                    'a' => '\x07',
-                    'b' => '\x08',
-                    'f' => '\x0c',
-                    'v' => '\x0b',
-                    'n' => '\n',
-                    'r' => '\r',
-                    't' => '\t',
-                    c if c.is_ascii_alphabetic() => return Err("invalid replacement escape"),
-                    c => {
-                        literal.push('\\');
-                        c
-                    }
-                };
-                literal.push(decoded);
-                continue;
-            }
-        };
-        let group = group
-            .filter(|&i| i < groups.len())
-            .ok_or("unknown replacement group")?;
-        flush(&mut out, &mut literal)?;
-        out.extend((group as u32 | 1 << 31).to_le_bytes());
-    }
-    flush(&mut out, &mut literal)?;
-    Ok(out)
-}
+mod replacement;
+pub use replacement::{ReplacementError, ReplacementPart, parse_replacement, replacement};
 
 type Input<'a> = std::iter::Peekable<std::str::Chars<'a>>;
 
-fn count(input: &mut Input<'_>, output: &mut String) -> Result<bool, String> {
-    let digits: String = std::iter::from_fn(|| input.next_if(char::is_ascii_digit)).collect();
-    if digits.is_empty() {
-        return Ok(false);
+/// Does the text after an unescaped opening brace form a Python repetition count?
+/// Only a complete ASCII bound (including an omitted bound in `{,}`) is a quantifier.
+pub fn starts_counted_repeat(mut input: Input<'_>) -> bool {
+    if !matches!(input.peek(), Some('0'..='9' | ',')) {
+        return false;
     }
-    // Python reserves UINT32_MAX to mean unbounded repetition.
-    if digits.parse::<u32>().ok().is_none_or(|n| n == u32::MAX) {
-        return Err("regex repetition count is too large".into());
+    let mut suffix = input.skip_while(char::is_ascii_digit);
+    match suffix.next() {
+        Some('}') => true,
+        Some(',') => suffix.find(|c| !c.is_ascii_digit()) == Some('}'),
+        _ => false,
     }
-    output.push_str(&digits);
-    Ok(true)
 }
 
-/// A terminal dollar may be followed by ignored layout and comments in VERBOSE mode.
-fn verbose_tail(mut input: Input<'_>) -> bool {
-    while let Some(c) = input.next() {
-        if verbose_space(c) {
-            continue;
-        }
-        if c != '#' {
-            return false;
-        }
-        while let Some(c) = input.next() {
-            match c {
-                '\\' => {
-                    if input.next().is_none() {
-                        return false;
-                    }
+/// Find a quantified anchor or repeated quantifier in a pattern accepted by the raw backend.
+/// Offsets are byte indices into the Python spelling, before escape or alphabet translation.
+pub fn repeat_diagnostic(source: &str, verbose: bool) -> Option<(&'static str, usize)> {
+    use regex_syntax::ast::{Ast, parse::ParserBuilder};
+    use std::borrow::Cow;
+
+    let layout = verbose
+        || source.match_indices("(?").any(|(i, _)| {
+            source[i + 2..]
+                .bytes()
+                .take_while(|b| b"aiLmsux-".contains(b))
+                .any(|b| b == b'x')
+        });
+    if !layout
+        && !source
+            .as_bytes()
+            .windows(2)
+            .any(|p| b"*+?}^$AbBZz".contains(&p[0]) && b"*+?{".contains(&p[1]))
+    {
+        return None;
+    }
+    // Rust and Python can disagree about which characters are tokens in these verbose
+    // patterns. Leave those to the Python tokenizer rather than reject a literal or comment.
+    if layout
+        && (source.contains('[')
+            || source.contains("\\\n")
+            || source.chars().any(|c| !c.is_ascii() && c.is_whitespace()))
+    {
+        return None;
+    }
+    let spelling = if source.contains(r"\Z") {
+        Cow::Owned(source.replace(r"\Z", r"\z"))
+    } else {
+        Cow::Borrowed(source)
+    };
+    let ast = ParserBuilder::new()
+        .ignore_whitespace(verbose)
+        .empty_min_range(true)
+        .build()
+        .parse(&spelling)
+        .ok()?;
+    let mut first = None;
+    let mut pending = vec![&ast];
+    while let Some(node) = pending.pop() {
+        match node {
+            Ast::Repetition(outer) => {
+                // Parentheses make a new operand. Only adjacent repetitions share this span.
+                let mut inner = outer.as_ref();
+                while let Ast::Repetition(child) = inner.ast.as_ref() {
+                    inner = child;
                 }
-                '\n' => break,
-                _ => {}
+                pending.push(&inner.ast);
+                let start = inner.op.span.start.offset;
+                let end = outer.op.span.end.offset;
+                let mut chars = source[start..end].chars().peekable();
+                if chars.next() == Some('{') {
+                    if !starts_counted_repeat(chars.clone()) {
+                        continue;
+                    }
+                    chars.by_ref().find(|&c| c == '}');
+                }
+                // The backend also calls escaped angles and \b{start} assertions.
+                // Those spellings contain repeatable literals in Python.
+                let anchor = matches!(inner.ast.as_ref(), Ast::Assertion(a) if matches!(
+                    &source[a.span.start.offset..a.span.end.offset],
+                    "^" | "$" | r"\A" | r"\Z" | r"\z" | r"\b" | r"\B"));
+                let error = if anchor {
+                    ("nothing to repeat", start)
+                } else {
+                    // Python permits exactly one adjacent lazy or possessive modifier.
+                    chars.next_if(|c| matches!(c, '?' | '+'));
+                    match next_token(&mut chars, layout) {
+                        Ok(Some('*' | '+' | '?')) => {}
+                        Ok(Some('{')) if starts_counted_repeat(chars.clone()) => {}
+                        _ => continue,
+                    }
+                    (
+                        "multiple repeat",
+                        end - chars.map(char::len_utf8).sum::<usize>() - 1,
+                    )
+                };
+                if first.is_none_or(|(_, pos)| error.1 < pos) {
+                    first = Some(error);
+                }
+            }
+            Ast::Group(g) => pending.push(&g.ast),
+            Ast::Concat(c) => pending.extend(c.asts.iter().rev()),
+            Ast::Alternation(a) => pending.extend(a.asts.iter().rev()),
+            _ => {}
+        }
+    }
+    first
+}
+
+fn count(input: &mut Input<'_>, output: &mut String) -> Result<Option<u32>, String> {
+    let digits: String = std::iter::from_fn(|| input.next_if(char::is_ascii_digit)).collect();
+    if digits.is_empty() {
+        return Ok(None);
+    }
+    // Python reserves UINT32_MAX to mean unbounded repetition.
+    let value = digits
+        .parse::<u32>()
+        .ok()
+        .filter(|&n| n != u32::MAX)
+        .ok_or("regex repetition count is too large")?;
+    output.push_str(&digits);
+    Ok(Some(value))
+}
+
+/// Skip ignored VERBOSE layout outside character classes.
+fn next_token(input: &mut Input<'_>, verbose: bool) -> Result<Option<char>, String> {
+    while let Some(c) = input.next() {
+        if !verbose || !(verbose_space(c) || c == '#') {
+            return Ok(Some(c));
+        }
+        if c == '#' {
+            while let Some(ch) = input.next() {
+                match ch {
+                    '\\' => {
+                        input.next().ok_or("incomplete regex escape in comment")?;
+                    }
+                    '\n' => break,
+                    _ => {}
+                }
             }
         }
     }
-    true
+    Ok(None)
+}
+
+/// A negative choice of single literals directly before one class excludes those
+/// characters from the class. Captures and multi-character alternatives need a real assertion.
+fn guarded_class(
+    input: &mut Input<'_>,
+    output: &mut String,
+    verbose: bool,
+    escapes: &mut Escapes,
+) -> Result<(), String> {
+    let unsupported =
+        "negative regex guard requires single literal alternatives followed by a class";
+    let mut excluded = String::new();
+    loop {
+        match next_token(input, verbose)? {
+            Some('\\') if escaped(input, &mut excluded, false, escapes)? == Escape::Scalar => {}
+            Some(c) if !r"\.^$*+?{}[]()|".contains(c) => literal(&mut excluded, c),
+            _ => return Err(unsupported.into()),
+        }
+        match next_token(input, verbose)? {
+            Some('|') => {}
+            Some(')') => break,
+            _ => return Err(unsupported.into()),
+        }
+    }
+    output.push('[');
+    match next_token(input, verbose)? {
+        Some('[') => class(input, output, escapes)?,
+        Some('\\') if escaped(input, output, false, escapes)? == Escape::Class => {}
+        _ => return Err(unsupported.into()),
+    }
+    write!(output, "--[{excluded}]]").unwrap();
+    Ok(())
 }
 
 /// A lazy scan inside an atomic group commits to its first matching delimiter.
@@ -436,16 +1091,18 @@ fn atomic_delimited(
     output: &mut String,
     dotall: bool,
     verbose: bool,
-    ascii: bool,
+    escapes: &mut Escapes,
 ) -> Result<(), String> {
     if !['.', '*', '?'].into_iter().all(|c| input.next() == Some(c)) {
         return Err("unsupported atomic regex group".into());
     }
     let mut delimiter = String::new();
     match input.next() {
-        Some('[') => class(input, &mut delimiter, ascii)?,
+        Some('[') => class(input, &mut delimiter, escapes)?,
         Some('\\') => {
-            if escaped(input, &mut delimiter, false, ascii)? == Escape::Anchor {
+            // The delimiter also appears inside a negated class in the lowered scan.
+            let word_delimiter = matches!(input.peek(), Some('w' | 'W'));
+            if escaped(input, &mut delimiter, word_delimiter, escapes)? == Escape::Anchor {
                 return Err("an atomic scan delimiter must consume a character".into());
             }
         }
@@ -483,13 +1140,49 @@ enum Escape {
     Anchor,
 }
 
+/// Consume a Python pattern octal and emit one scalar (or one octet in a bytes pattern).
+/// Outside a class, a nonzero escape with fewer than three octal digits is a group reference.
+fn push_octal_escape(
+    input: &mut Input<'_>,
+    output: &mut String,
+    in_class: bool,
+) -> Result<bool, String> {
+    let Some(&first @ '0'..='7') = input.peek() else {
+        return Ok(false);
+    };
+    let mut digits = input.clone();
+    let mut value = 0u16;
+    let mut count = 0;
+    while count < 3
+        && let Some(c) = digits.next_if(|c| matches!(c, '0'..='7'))
+    {
+        value = value * 8 + (c as u16 - u16::from(b'0'));
+        count += 1;
+    }
+    if !in_class && first != '0' && count < 3 {
+        return Ok(false);
+    }
+    if value > 0xff {
+        return Err(format!(
+            r"octal escape value \{value:o} outside of range 0-0o377"
+        ));
+    }
+    *input = digits;
+    write!(output, r"\x{value:02x}").unwrap();
+    Ok(true)
+}
+
 fn escaped(
     input: &mut Input<'_>,
     output: &mut String,
     in_class: bool,
-    ascii: bool,
+    escapes: &mut Escapes,
 ) -> Result<Escape, String> {
+    if push_octal_escape(input, output, in_class)? {
+        return Ok(Escape::Scalar);
+    }
     let c = input.next().ok_or("incomplete regex escape")?;
+    let ascii = escapes.alphabet.ascii();
     if ascii && let Some(class) = ascii_class(c) {
         output.push_str(class);
         return Ok(Escape::Class);
@@ -503,11 +1196,19 @@ fn escaped(
             // Python uses Unicode letters, numbers and the literal underscore.
             // Rust's shorthand additionally includes marks, connector characters,
             // and join controls, all of which Python treats as non-word.
+            let protect_word = escapes.alphabet == Alphabet::UnicodeIgnoreCase && !in_class;
+            if protect_word {
+                output.push_str("(?-i:");
+            }
+            escapes.bracketed_word |= in_class && escapes.alphabet.ignores_case();
             output.push_str(if c == 'w' {
                 r"[\p{L}\p{N}_]"
             } else {
                 r"[^\p{L}\p{N}_]"
             });
+            if protect_word {
+                output.push(')');
+            }
             return Ok(Escape::Class);
         }
         'd' | 'D' => {
@@ -534,6 +1235,9 @@ fn escaped(
         'v' => '\x0b',
         'f' => '\x0c',
         'r' => '\r',
+        'u' | 'U' if escapes.alphabet == Alphabet::Bytes => {
+            return Err(format!("bad escape \\{c} in bytes pattern"));
+        }
         'x' | 'u' | 'U' => {
             let digits = match c {
                 'x' => 2,
@@ -548,6 +1252,11 @@ fn escaped(
                     .ok_or("invalid hexadecimal regex escape")?;
                 result = result * 16 + next;
             }
+            if c == 'x' {
+                // The same escape denotes a scalar in text and a single octet in bytes.
+                write!(output, "\\x{result:02x}").unwrap();
+                return Ok(Escape::Scalar);
+            }
             char::from_u32(result).ok_or("regex escape is not a Unicode scalar")?
         }
         c if c.is_ascii_punctuation() || verbose_space(c) => c,
@@ -557,7 +1266,7 @@ fn escaped(
     Ok(Escape::Scalar)
 }
 
-fn class(input: &mut Input<'_>, output: &mut String, ascii: bool) -> Result<(), String> {
+fn class(input: &mut Input<'_>, output: &mut String, escapes: &mut Escapes) -> Result<(), String> {
     output.push('[');
     // An immediate second '[' is CPython's possible nested set (FutureWarning).
     if input.peek() == Some(&'[') {
@@ -592,7 +1301,7 @@ fn class(input: &mut Input<'_>, output: &mut String, ascii: bool) -> Result<(), 
             continue;
         }
         let scalar = if c == '\\' {
-            escaped(input, output, true, ascii)? == Escape::Scalar
+            escaped(input, output, true, escapes)? == Escape::Scalar
         } else {
             literal(output, c);
             true
@@ -611,6 +1320,88 @@ fn class(input: &mut Input<'_>, output: &mut String, ascii: bool) -> Result<(), 
 mod tests {
     use super::translate;
     use regex::Regex;
+
+    #[test]
+    fn scoped_text_modes_restore_classes_and_case_equivalents() {
+        use super::{Alphabet::*, translate_pattern};
+
+        for (mode, pattern, yes, no) in [
+            (
+                UnicodeIgnoreCase,
+                r"é(?a:(?P<letter>[a-z])(?u:\w))(?-i:I)[a-z]",
+                "éAéIı",
+                "éKéIı",
+            ),
+            (AsciiIgnoreCase, r"(?u:[a-z])(?a:[a-z])[^a-z]", "KKı", "KKı"),
+            (Unicode, r"(?a:(?i:[^\x69])(?i:i))(?i:i)i", "İIıi", "iIıi"),
+            (UnicodeIgnoreCase, r"(?a:(?u:ſ)ſ).", "Sſé", "SSé"),
+            (Unicode, r"(?a:\w(?u:\w)\W).", "aéé🌍", "ééé🌍"),
+            (UnicodeIgnoreCase, r"(?-i:I)(?a:\x6b)\u0130", "IKı", "ıKı"),
+        ] {
+            let translated = translate_pattern(pattern, false, mode, false, true).unwrap();
+            let regex = regex::RegexBuilder::new(&format!(r"\A(?:{})\z", translated.source))
+                .case_insensitive(mode == UnicodeIgnoreCase)
+                .build()
+                .unwrap();
+            assert!(regex.is_match(yes), "{pattern} on {yes}");
+            assert!(!regex.is_match(no), "{pattern} on {no}");
+        }
+        for pattern in [r"(?-a:a)", r"(?au:a)"] {
+            assert!(
+                translate_pattern(pattern, false, Unicode, false, false).is_err(),
+                "{pattern}"
+            );
+        }
+        assert!(super::lookahead_source(r"(?i:(?=\w)(a)\1)", false, Unicode, false).is_err());
+        assert!(translate_pattern(r"(?u:.)", false, Bytes, false, false).is_err());
+        let named = "(?P<é>.)(?-i:I)";
+        assert!(super::lookahead_source(named, false, UnicodeIgnoreCase, false).is_err());
+        assert!(super::lookahead_source(r"(?u:\b)", false, Unicode, false).is_err());
+        let (source, groups) =
+            super::backtracking_source(named, false, UnicodeIgnoreCase, false).unwrap();
+        assert_eq!(groups, [None, Some("é".to_owned())]);
+        let compiled = regex::RegexBuilder::new(&source)
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+        assert!(compiled.is_match("aI"));
+        assert!(!compiled.is_match("aİ"));
+    }
+
+    #[test]
+    fn subtracts_single_literal_guards_from_consuming_classes() {
+        let opts = r"(?P<option>(?:(?!=|:)\S)*(?:\s+(?:(?!=|:)\S)+)*)
+                     \s*(?P<vi>=|:)\s*(?P<value>.*)$";
+        let regex = Regex::new(&translate(opts, true).unwrap().source).unwrap();
+        let caps = regex.captures("two words : =value").unwrap();
+        assert_eq!(
+            (&caps["option"], &caps["vi"], &caps["value"]),
+            ("two words", ":", "=value")
+        );
+        let spaced = r"(?:(?! \# |  # a second excluded literal
+                         \| ) [^!])+";
+        let regex = Regex::new(&translate(spaced, true).unwrap().source).unwrap();
+        let runs: Vec<_> = regex.find_iter("a#b|c!d").map(|m| m.as_str()).collect();
+        assert_eq!(runs, ["a", "b", "c", "d"]);
+        for (ascii, expected) in [(false, "a"), (true, "a\u{1c}b\u{a0}c")] {
+            let pattern =
+                super::translate_with_flags(r"(?:(?!\x3a)\S)+", false, ascii, false).unwrap();
+            let regex = Regex::new(&pattern.source).unwrap();
+            assert_eq!(regex.find("a\u{1c}b\u{a0}c:d").unwrap().as_str(), expected);
+        }
+        for unsupported in [
+            r"(?!ab)\S",
+            r"(?!a|)\S",
+            r"(?![ab])\S",
+            r"(?!(a))\S",
+            r"(?!\d)\S",
+            r"(?!a)b",
+            r"(?!a)\S+",
+            r"(?!a)\S {1,2}",
+        ] {
+            assert!(translate(unsupported, true).is_err(), "{unsupported}");
+        }
+    }
 
     #[test]
     fn preserves_verbose_class_contents_and_python_whitespace() {
@@ -694,6 +1485,24 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_counts_leave_the_brace_and_following_pattern_intact() {
+        for (pattern, text) in [
+            (r"^{\w+}$", "{width}"),
+            (r"a{1, 3}", "a{1,3}"),
+            (r"a{4294967295x", "a{4294967295x"),
+            (r"a{１}", "a{１}"),
+            (r"a{{2}", "a{{"),
+            (r"{}?", "{"),
+        ] {
+            let regex = Regex::new(&translate(pattern, true).unwrap().source).unwrap();
+            assert_eq!(regex.find(text).unwrap().as_str(), text, "{pattern}");
+        }
+        for pattern in ["{2}", "a{2,1}", "a*{2}", "a{4294967295}"] {
+            assert!(translate(pattern, false).is_err(), "{pattern}");
+        }
+    }
+
+    #[test]
     fn rejects_semantics_the_engine_does_not_share() {
         for source in [
             r"a$b",
@@ -701,10 +1510,9 @@ mod tests {
             r"\b",
             r"(?=a)",
             r"(?P<a>x)(?P=a)",
-            r"(?i:a)",
+            r"(?au:a)",
             r"a*+",
             r"a* ?",
-            r"a{1, 3}",
             r"((a)?b)+",
             r"(x?)*",
             r"[a&&b]",

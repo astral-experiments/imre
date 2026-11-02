@@ -26,6 +26,11 @@ def current():
     assert UserString is collections.UserString
     for cls in (UserDict, UserList, UserString):
         assert cls.__module__ == "collections"
+        method = cls.__class_getitem__
+        assert method.__self__ is cls
+        alias = method(str)
+        assert alias.__origin__ is cls and alias.__args__ == (str,)
+        assert alias == cls[str]
     d = Default(a=1)
     assert list(d.items()) == [("a", 1)] and UserDict(d).data is not d.data
     assert d["x"] == ("missing", "x") and d.get("x") is None
@@ -38,3 +43,9 @@ def current():
     assert UserString(text).data == "ééé" and text.count(UserString("éé")) == 1
     assert UserString("a\udcff" * 3).count(UserString("\udcffa")) == 2
     assert type(TextChild("word")[1:]) is TextChild
+
+    for cls, value, method in ((str, "", "rindex"), (dict, {}, "__ror__"), (list, [], "__imul__")):
+        names = dir(cls)
+        assert names == dir(value) and method in names
+        names.remove(method)
+        assert method in dir(cls)

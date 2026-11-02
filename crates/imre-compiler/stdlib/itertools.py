@@ -1,12 +1,12 @@
 """Iterator tools for runtime-loaded Python."""
 
 
-import itertools as _itertools
+import _imre_itertools as _itertools
 from operator import index as _index
 from sys import maxsize as _maxsize
 
 
-def _make_chain(_get, _set, _allocate):
+def _make_chain(_advance, _set, _allocate):
     class chain:
         """Yield items from each iterable in order."""
 
@@ -24,26 +24,227 @@ def _make_chain(_get, _set, _allocate):
             return self
 
         def __next__(self):
-            while _get(self, False) is not None:
-                if _get(self, True) is None:
-                    try:
-                        active = iter(next(_get(self, False)))
-                        _set(self, True, active)
-                    except BaseException:
-                        _set(self, False, None)
-                        raise
-                try:
-                    return next(_get(self, True))
-                except StopIteration:
-                    _set(self, True, None)
-            raise StopIteration
+            return _advance(__class__, self)
 
 
     chain.__qualname__ = "chain"
     return chain
 
 
-chain = _make_chain(_itertools._chain_get, _itertools._chain_set, _itertools._chain_allocate)
+chain = _make_chain(_itertools._chain_next, _itertools._chain_set, _itertools._chain_allocate)
+
+
+def _make_cycle(_allocate, _advance):
+    def object_state(obj):
+        getstate = getattr(type(obj), "__getstate__", None)
+        if getstate is not None and getstate is not getattr(object, "__getstate__", None):
+            return getstate(obj)
+        state = getattr(obj, "__dict__", None) or None
+        slots = {}
+        for base in type(obj).__mro__:
+            names = getattr(base, "__dict__", {}).get("__slots__", ())
+            for name in (names,) if isinstance(names, str) else names:
+                if name in ("__dict__", "__weakref__"):
+                    continue
+                if name.startswith("__") and not name.endswith("__") and base.__name__.lstrip("_"):
+                    name = "_" + base.__name__.lstrip("_") + name
+                if hasattr(obj, name):
+                    slots[name] = getattr(obj, name)
+        return (state, slots) if slots else state
+
+    class cycle:
+        """Repeat an iterable, saving each element as the input produces it."""
+
+        __slots__ = ()
+
+        def __new__(cls, *args, **kwargs):
+            if kwargs and getattr(cls, "__init__", None) is getattr(__class__, "__init__", None):
+                raise TypeError("cycle() takes no keyword arguments")
+            if len(args) != 1:
+                raise TypeError(f"cycle expected 1 argument, got {len(args)}")
+            return _allocate(__class__, cls, args[0])
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return _advance(self)
+
+        def __reduce__(self):
+            cls = type(self)
+            if cls is __class__:
+                raise TypeError("cannot pickle 'cycle' object")
+            from copyreg import _reconstructor
+            args = (cls, __class__, __class__(self))
+            if getattr(cls, "__slots__", ()) and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None):
+                raise TypeError("a class that defines __slots__ without defining __getstate__ cannot be pickled")
+            state = object_state(self)
+            return (_reconstructor, args, state) if state else (_reconstructor, args)
+
+        def __reduce_ex__(self, protocol, /):
+            protocol = _index(protocol)
+            cls = type(self)
+            if protocol < 2 or cls.__reduce__ is not __class__.__reduce__:
+                return self.__reduce__()
+            getargs_ex = getattr(cls, "__getnewargs_ex__", None)
+            getargs = getattr(cls, "__getnewargs__", None)
+            custom_state = getattr(cls, "__getstate__", None) is not getattr(object, "__getstate__", None)
+            if getargs_ex is None and getargs is None and not custom_state:
+                name = "itertools.cycle" if cls is __class__ else cls.__name__
+                raise TypeError(f"cannot pickle {name!r} object")
+            from copyreg import __newobj__, __newobj_ex__
+            args, kwargs = (), {}
+            if getargs_ex is not None:
+                pair = getargs_ex(self)
+                if not isinstance(pair, tuple):
+                    raise TypeError(f"__getnewargs_ex__ should return a tuple, not {type(pair).__name__!r}")
+                if len(pair) != 2:
+                    raise ValueError(f"__getnewargs_ex__ should return a tuple of length 2, not {len(pair)}")
+                args, kwargs = pair
+                if not isinstance(args, tuple):
+                    raise TypeError(f"first item of the tuple returned by __getnewargs_ex__ must be a tuple, not {type(args).__name__!r}")
+                if not isinstance(kwargs, dict):
+                    raise TypeError(f"second item of the tuple returned by __getnewargs_ex__ must be a dict, not {type(kwargs).__name__!r}")
+            elif getargs is not None:
+                args = getargs(self)
+                if not isinstance(args, tuple):
+                    raise TypeError(f"__getnewargs__ should return a tuple, not {type(args).__name__!r}")
+            factory, arguments = (__newobj_ex__, (cls, args, kwargs)) if kwargs else (__newobj__, (cls, *args))
+            return factory, arguments, object_state(self), None, None
+
+    cycle.__qualname__ = "cycle"
+    return cycle
+
+
+cycle = _make_cycle(_itertools._cycle_allocate, _itertools._cycle_next)
+
+
+def _make_filterfalse(_allocate, _state):
+    class filterfalse:
+        """Yield items for which the predicate is false, testing items directly for None."""
+
+        __slots__ = ()
+
+        def __new__(cls, predicate, iterable, /, **kwargs):
+            if kwargs and getattr(cls, "__init__", None) is getattr(__class__, "__init__", None):
+                raise TypeError("filterfalse() takes no keyword arguments")
+            return _allocate(__class__, cls, bool if predicate is None else predicate, iterable)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            source, predicate = _state(__class__, self)
+            while True:
+                item = next(source)
+                if not predicate(item):
+                    return item
+
+        def __reduce__(self):
+            raise TypeError("cannot pickle 'filterfalse' object")
+
+        def __reduce_ex__(self, protocol, /):
+            if _index(protocol) < 2 or type(self).__reduce__ is not __class__.__reduce__:
+                return self.__reduce__()
+            name = "itertools.filterfalse" if type(self) is __class__ else type(self).__name__
+            raise TypeError(f"cannot pickle '{name}' object")
+
+    filterfalse.__qualname__ = "filterfalse"
+    return filterfalse
+
+
+filterfalse = _make_filterfalse(_itertools._filterfalse_allocate, _itertools._filterfalse_state)
+del _itertools
+
+
+class _TeeBlock:
+    # Forks only root their current block. Once all forks move past it, its
+    # items can be collected without retaining any preceding blocks.
+    __slots__ = ("source", "values", "filled", "following", "running")
+
+    def __init__(self, source):
+        self.source = source
+        self.values = [None] * 57
+        self.filled = 0
+        self.following = None
+        self.running = False
+
+
+class _tee:
+    __slots__ = ("_block", "_index", "__weakref__")
+
+    def __new__(cls, iterable, /):
+        if cls is not __class__:
+            raise TypeError("expected the itertools._tee class")
+        source = iter(iterable)
+        fork = object.__new__(cls)
+        if type(source) is cls:
+            fork._block = source._block
+            fork._index = source._index
+        else:
+            fork._block = _TeeBlock(source)
+            fork._index = 0
+        return fork
+
+    def __init__(self, *args, **kwargs):
+        # Reinitialization leaves the existing cursor in place.
+        pass
+
+    def __init_subclass__(cls):
+        raise TypeError("type 'itertools._tee' is not an acceptable base type")
+
+    def __copy__(self):
+        return type(self)(self)
+
+    def __reduce__(self):
+        raise TypeError("cannot pickle '_tee' object")
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        block = self._block
+        index = self._index
+        if index == len(block.values):
+            if block.following is None:
+                block.following = _TeeBlock(block.source)
+            self._block = block = block.following
+            self._index = index = 0
+        if index == block.filled:
+            if block.running:
+                raise RuntimeError("cannot re-enter the tee iterator")
+            block.running = True
+            try:
+                value = next(block.source)
+            except StopIteration:
+                pass
+            else:
+                block.values[index] = value
+                block.filled = index + 1
+            finally:
+                block.running = False
+            if index == block.filled:
+                raise StopIteration
+        self._index = index + 1
+        return block.values[index]
+
+
+def tee(iterable, n=2, /):
+    """Return n independent iterators sharing the same input stream."""
+    n = _ssize_index(n)
+    if n < 0:
+        raise ValueError("n must be >= 0")
+    if n == 0:
+        return ()
+    if n > _maxsize // 8:
+        raise MemoryError
+    forks = [None] * n
+    # Both tee() and the first fork acquire an iterator, as in CPython.
+    first = _tee(iter(iterable))
+    forks[0] = first
+    for i in range(1, n):
+        forks[i] = _tee(first)
+    return tuple(forks)
 
 
 class _Combination:
@@ -141,6 +342,71 @@ class product:
             indices[position] = 0
         self._stopped = True
         return result
+
+
+class batched:
+    """Batch data into tuples of length n. The last batch may be shorter than n.
+
+Loops over the input iterable and accumulates data into tuples
+up to size n.  The input is consumed lazily, just enough to
+fill a batch.  The result is yielded as soon as a batch is full
+or when the input iterable is exhausted.
+
+    >>> for batch in batched('ABCDEFG', 3):
+    ...     print(batch)
+    ...
+    ('A', 'B', 'C')
+    ('D', 'E', 'F')
+    ('G',)
+
+If "strict" is True, raises a ValueError if the final batch is shorter
+than n."""
+
+    __slots__ = ()
+
+    def __new__(cls, /, iterable, n, *, strict=False):
+        if not issubclass(cls, __class__):
+            raise TypeError("expected a batched subclass")
+        size = _ssize_index(n)
+        strict = bool(strict)
+        if size < 1:
+            raise ValueError("n must be at least one")
+        source = iter(iterable)
+        self = object.__new__(cls)
+        _batched_state.__set__(self, (source, size, strict))
+        return self
+
+    def __init__(self, *args, **kwargs):
+        # All state is set by __new__; calling the inherited initializer is inert.
+        if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+            object.__init__(self, *args, **kwargs)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        state = _batched_state.__get__(self)
+        if state is None:
+            raise StopIteration
+        source, size, strict = state
+        # Reserve the entire batch before advancing the input.
+        items = [None] * size
+        for i in range(size):
+            try:
+                items[i] = next(source)
+            except StopIteration:
+                break
+            except BaseException:
+                _batched_state.__set__(self, None)
+                raise
+        else:
+            return tuple(items)
+        if i and not strict:
+            return tuple(items[:i])
+        _batched_state.__set__(self, None)
+        if i:
+            raise ValueError("batched(): incomplete batch")
+        raise StopIteration
 
 
 class groupby:

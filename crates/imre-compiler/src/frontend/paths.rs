@@ -24,6 +24,36 @@ pub(super) fn is_raw_binary_mode(mode: &str) -> bool {
         && mode.iter().any(|c| matches!(c, b'r' | b'w' | b'x' | b'a'))
 }
 
+/// An update mode has one access letter, one '+' and optionally 'b' or 't', in any order.
+pub(super) fn is_update_open(args: &ast::Arguments, mode: &str) -> bool {
+    let mode = mode.as_bytes();
+    let expected_len = if mode.contains(&b't') || mode.contains(&b'b') {
+        3
+    } else {
+        2
+    };
+    let parameters = [
+        "file",
+        "mode",
+        "buffering",
+        "encoding",
+        "errors",
+        "newline",
+        "closefd",
+    ];
+    mode.len() == expected_len
+        && mode.contains(&b'+')
+        && mode.iter().any(|c| matches!(c, b'r' | b'w' | b'x' | b'a'))
+        && !args.args.iter().any(ast::Expr::is_starred_expr)
+        && parameters.get(args.args.len()..).is_some_and(|available| {
+            args.keywords.iter().all(|kw| {
+                kw.arg
+                    .as_deref()
+                    .is_some_and(|name| available.contains(&name))
+            })
+        })
+}
+
 pub(super) fn file_open_mode(mode: &str) -> Option<(Type, Builtin)> {
     Some(match mode {
         "r" => (Type::TextIO, Builtin::TextOpen(0)),

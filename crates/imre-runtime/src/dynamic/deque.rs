@@ -4,29 +4,116 @@ use super::{Context, Error, Id, NONE, Result, Value, builtins};
 pub(super) const CLASS: &str = "collections.deque";
 pub(super) const ITERATOR: &str = "collections._deque_iterator";
 pub(super) const REVERSE_ITERATOR: &str = "collections._deque_reverse_iterator";
-pub(super) const METHODS: &[&str] = &[
-    "__init__",
-    "append",
-    "appendleft",
-    "clear",
-    "copy",
-    "__copy__",
-    "__iadd__",
-    "extend",
-    "extendleft",
-    "remove",
-    "index",
-    "pop",
-    "popleft",
-    "reverse",
-    "__len__",
-    "__contains__",
-    "__iter__",
-    "__reversed__",
-    "__getitem__",
-    "__setitem__",
-    "__delitem__",
+pub(super) struct Member {
+    pub(super) name: &'static str,
+    pub(super) doc: &'static str,
+    pub(super) signature: &'static str,
+}
+
+impl Member {
+    const fn new(name: &'static str, doc: &'static str, signature: &'static str) -> Self {
+        Self {
+            name,
+            doc,
+            signature,
+        }
+    }
+
+    pub(super) fn is_method(&self) -> bool {
+        !self.name.starts_with("__") || matches!(self.name, "__copy__" | "__reversed__")
+    }
+}
+
+// The implemented members in CPython 3.14.5 type dictionary order, with their clinic metadata.
+const MEMBERS: &[Member] = &[
+    Member::new("__repr__", "Return repr(self).", "($self, /)"),
+    Member::new("__iter__", "Implement iter(self).", "($self, /)"),
+    Member::new(
+        "__init__",
+        "Initialize self.  See help(type(self)) for accurate signature.",
+        "($self, /, *args, **kwargs)",
+    ),
+    Member::new("__len__", "Return len(self).", "($self, /)"),
+    Member::new("__getitem__", "Return self[key].", "($self, key, /)"),
+    Member::new(
+        "__setitem__",
+        "Set self[key] to value.",
+        "($self, key, value, /)",
+    ),
+    Member::new("__delitem__", "Delete self[key].", "($self, key, /)"),
+    Member::new(
+        "__contains__",
+        "Return bool(key in self).",
+        "($self, key, /)",
+    ),
+    Member::new("__iadd__", "Implement self+=value.", "($self, value, /)"),
+    Member::new(
+        "append",
+        "Add an element to the right side of the deque.",
+        "($self, item, /)",
+    ),
+    Member::new(
+        "appendleft",
+        "Add an element to the left side of the deque.",
+        "($self, item, /)",
+    ),
+    Member::new("clear", "Remove all elements from the deque.", "($self, /)"),
+    Member::new(
+        "__copy__",
+        "Return a shallow copy of a deque.",
+        "($self, /)",
+    ),
+    Member::new("copy", "Return a shallow copy of a deque.", "($self, /)"),
+    Member::new(
+        "extend",
+        "Extend the right side of the deque with elements from the iterable.",
+        "($self, iterable, /)",
+    ),
+    Member::new(
+        "extendleft",
+        "Extend the left side of the deque with elements from the iterable.",
+        "($self, iterable, /)",
+    ),
+    Member::new(
+        "index",
+        "Return first index of value.\n\nRaises ValueError if the value is not present.",
+        "($self, value, [start, [stop]])",
+    ),
+    Member::new(
+        "pop",
+        "Remove and return the rightmost element.",
+        "($self, /)",
+    ),
+    Member::new(
+        "popleft",
+        "Remove and return the leftmost element.",
+        "($self, /)",
+    ),
+    Member::new(
+        "remove",
+        "Remove first occurrence of value.",
+        "($self, value, /)",
+    ),
+    Member::new(
+        "__reversed__",
+        "Return a reverse iterator over the deque.",
+        "($self, /)",
+    ),
+    Member::new("reverse", "Reverse *IN PLACE*.", "($self, /)"),
 ];
+
+pub(super) fn member(name: &str) -> Option<&'static Member> {
+    MEMBERS.iter().find(|entry| entry.name == name)
+}
+
+/// Expose the immutable native type's own members through the same objects as class lookup.
+pub(super) fn class_dictionary(ctx: &mut Context, class: Id) -> Result<Id> {
+    ctx.native_class_dictionary(
+        class,
+        "<collections.deque namespace>",
+        MEMBERS.iter().map(|entry| entry.name),
+    )
+}
 
 pub(super) enum IndexOp {
     Get,
@@ -487,7 +574,7 @@ pub(super) fn method(
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            if matches!(name, "__init__" | "__contains__") {
+            if member(name).is_some_and(|entry| !entry.is_method()) {
                 format!("descriptor '{name}' of 'collections.deque' object needs an argument")
             } else {
                 format!("unbound method deque.{name}() needs an argument")
@@ -498,7 +585,7 @@ pub(super) fn method(
         let actual = ctx.type_name(receiver);
         return Err(Error::new(
             "TypeError",
-            if matches!(name, "__init__" | "__contains__") {
+            if member(name).is_some_and(|entry| !entry.is_method()) {
                 format!(
                     "descriptor '{name}' requires a 'collections.deque' object but received a '{actual}'"
                 )
@@ -516,12 +603,22 @@ pub(super) fn method(
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            if matches!(name, "__iadd__" | "__contains__") {
+            if matches!(name, "__iadd__" | "__contains__" | "__repr__") {
                 format!("wrapper {name}() takes no keyword arguments")
             } else {
                 format!("deque.{name}() takes no keyword arguments")
             },
         ));
+    }
+    if name == "__repr__" {
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 0 arguments, got {}", rest.len()),
+            ));
+        }
+        let text = ctx.checked_format(receiver, true)?;
+        return Ok(ctx.text(text));
     }
     if name == "index" {
         return index(ctx, receiver, rest);

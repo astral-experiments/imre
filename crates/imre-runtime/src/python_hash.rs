@@ -15,11 +15,12 @@ pub(crate) const MODULUS: i64 = (1_i64 << 61) - 1;
 pub(crate) const INF: i64 = 314_159;
 pub(crate) const IMAG: i64 = 1_000_003;
 
-static HASHER: OnceLock<SipHasher13> = OnceLock::new();
+static HASHER: OnceLock<(SipHasher13, bool)> = OnceLock::new();
 
 /// Capture PYTHONHASHSEED before user code can change the environment.
 pub(crate) fn initialize(isolated: bool) -> &'static SipHasher13 {
-    HASHER.get_or_init(|| {
+    &HASHER.get_or_init(|| {
+        let mut randomized = true;
         let mut key = [0; 16];
         let seed = (!isolated).then(|| std::env::var_os("PYTHONHASHSEED")).flatten();
         match seed.as_deref().map(OsStrExt::as_bytes) {
@@ -41,7 +42,8 @@ pub(crate) fn initialize(isolated: bool) -> &'static SipHasher13 {
                     eprintln!("Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\nPython runtime state: preinitialized\n");
                     std::process::exit(1);
                 }
-                if seed != 0 {
+                randomized = seed != 0;
+                if randomized {
                     let mut state = seed as u32;
                     // CPython expands an explicit seed with this 32-bit LCG.
                     for byte in &mut key {
@@ -51,8 +53,13 @@ pub(crate) fn initialize(isolated: bool) -> &'static SipHasher13 {
                 }
             }
         }
-        SipHasher13::new_with_key(&key)
-    })
+        (SipHasher13::new_with_key(&key), randomized)
+    }).0
+}
+
+/// Report whether the seed used to initialize the process hash function was nonzero or random.
+pub(crate) fn randomized() -> bool {
+    HASHER.get().is_none_or(|(_, randomized)| *randomized)
 }
 
 fn normalized(hash: u64) -> i64 {

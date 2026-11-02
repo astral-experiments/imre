@@ -16,14 +16,46 @@ impl Context {
         }
     }
 
+    pub(super) fn class_qualname(&self, class: Id) -> &str {
+        self.own_class_attr(class, "__qualname__")
+            .and_then(|qualname| self.str_value(qualname).ok())
+            .unwrap_or_else(|| self.class_name(class).rsplit('.').next().unwrap())
+    }
+
+    /// Borrow the immutable MRO tuple retained by a completed Python class.
+    pub(super) fn published_mro(&self, class: Id) -> Option<&[Id]> {
+        let Value::Class { scope, .. } = self.heap.get(class) else {
+            return None;
+        };
+        let namespace = self.scope_data(*scope).class_namespace.as_ref()?;
+        match self.heap.get(namespace.mro) {
+            Value::Tuple(bases) => Some(bases),
+            _ => None,
+        }
+    }
+
     pub(super) fn lineage(&mut self, class: Id) -> Vec<Id> {
+        self.base_lineage(class, false)
+    }
+
+    pub(super) fn base_lineage(&mut self, class: Id, published: bool) -> Vec<Id> {
+        if published && let Some(mro) = self.published_mro(class) {
+            return mro.to_vec();
+        }
         let mut lineage = vec![class];
         if let Value::Class { ancestors, .. } = self.heap.get(class) {
             lineage.extend(ancestors);
         } else {
             if let Value::Native(name) = self.heap.get(class) {
                 match name.as_str() {
-                    "bool" => lineage.push(self.builtin("int")),
+                    name if published && let Some(kind) = builtins::exception_kind(name) => {
+                        for base in builtins::exception_ancestors(kind) {
+                            lineage.push(self.builtin(base));
+                        }
+                    }
+                    name if let Some(parent) = Self::native_base(name) => {
+                        lineage.push(self.builtin(parent));
+                    }
                     "enum.IntEnum" | "enum.IntFlag" | "enum.StrEnum" => {
                         let scalar = if name == "enum.StrEnum" { "str" } else { "int" };
                         lineage.push(self.builtin(scalar));
@@ -40,13 +72,70 @@ impl Context {
         lineage
     }
 
+    pub(super) fn type_mro(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let Some((&class, args)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "unbound method type.mro() needs an argument",
+            ));
+        };
+        if !self.is_type_object(class) {
+            let kind = self
+                .builtin_type_name(class)
+                .unwrap_or_else(|| self.type_name(class));
+            return Err(Error::new(
+                "TypeError",
+                format!("descriptor 'mro' for 'type' objects doesn't apply to a '{kind}' object"),
+            ));
+        }
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{}.mro() takes no keyword arguments",
+                    self.class_qualname(class)
+                ),
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{}.mro() takes no arguments ({} given)",
+                    self.class_qualname(class),
+                    args.len()
+                ),
+            ));
+        }
+        let mro = self.base_lineage(class, true);
+        Ok(self.alloc(Value::List(mro)))
+    }
+
+    /// Type metadata lives on the metaclass, outside the class's instance attributes.
+    pub(super) fn builtin_hierarchy_tuple(&mut self, class: Id, name: &str) -> Id {
+        let key = format!("{name}:{}", self.class_name(class));
+        if let Some(&tuple) = self.builtins.get(&key) {
+            return tuple;
+        }
+        let lineage = self.base_lineage(class, true);
+        // The classes exported directly by builtins have at most one direct base.
+        let types = if name == "__bases__" {
+            lineage.get(1).copied().into_iter().collect()
+        } else {
+            lineage
+        };
+        let tuple = self.alloc(Value::Tuple(types));
+        self.builtins.insert(key, tuple);
+        tuple
+    }
+
     /// Merge the base lineages in C3 order so cooperative methods visit each base once.
-    pub(super) fn linearized_bases(&mut self, bases: &[Id]) -> Result<Vec<Id>> {
+    pub(super) fn linearized_bases(&mut self, bases: &[Id], published: bool) -> Result<Vec<Id>> {
         if bases.is_empty() {
             return Ok(vec![self.builtin("object")]);
         }
         if let [base] = bases {
-            return Ok(self.lineage(*base));
+            return Ok(self.base_lineage(*base, published));
         }
         for (index, base) in bases.iter().enumerate() {
             if bases[..index].contains(base) {
@@ -56,7 +145,10 @@ impl Context {
                 ));
             }
         }
-        let lineages: Vec<_> = bases.iter().map(|&base| self.lineage(base)).collect();
+        let lineages: Vec<_> = bases
+            .iter()
+            .map(|&base| self.base_lineage(base, published))
+            .collect();
         let mut paths: Vec<&[Id]> = lineages.iter().map(Vec::as_slice).collect();
         paths.push(bases);
         let mut order = Vec::new();
@@ -108,9 +200,18 @@ impl Context {
                 let cell = frame.class_cell.ok_or_else(|| {
                     Error::new("RuntimeError", "super(): __class__ cell not found")
                 })?;
-                let Value::ClassCell(Some(class)) = self.heap.get(cell) else {
+                let Value::Cell(Some(class)) = self.heap.get(cell) else {
                     return Err(Error::new("RuntimeError", "super(): empty __class__ cell"));
                 };
+                if self.builtin_type_name(*class) != Some("type") {
+                    return Err(Error::new(
+                        "RuntimeError",
+                        format!(
+                            "super(): __class__ is not a type ({})",
+                            self.type_name(*class)
+                        ),
+                    ));
+                }
                 (*class, receiver)
             }
             [start] => (*start, NONE),
@@ -189,16 +290,22 @@ impl Context {
             _ => {}
         }
         if owner != NONE {
-            let lineage = self.lineage(owner);
+            let exception_method = builtins::base_exception_method(name).is_some();
+            let lineage = self.base_lineage(owner, exception_method);
             let after = lineage.iter().skip_while(|&&class| class != start).skip(1);
             let instance = if owner == receiver { NONE } else { receiver };
             for &class in after {
                 if let Some(value) = self.own_class_attr(class, name) {
                     return self.bind_attribute(value, instance, owner);
                 }
-                // Native types inherit object's subclass hook. An intervening Python
-                // mixin still takes precedence over object in the new class's MRO.
-                if name != "__init_subclass__" && matches!(self.heap.get(class), Value::Native(_)) {
+                // Resolve inherited object methods at their real position, after any Python mixin.
+                if let Value::Native(kind) = self.heap.get(class)
+                    && !matches!(
+                        name,
+                        "__init_subclass__" | "__getstate__" | "__reduce_ex__" | "mro"
+                    )
+                    && !(exception_method && builtins::is_exception(kind))
+                {
                     match self.lookup_attr(class, name) {
                         Ok(value) => return self.bind_attribute(value, instance, owner),
                         Err(error) if error.kind == "AttributeError" => {}

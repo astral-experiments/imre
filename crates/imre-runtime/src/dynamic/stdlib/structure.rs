@@ -82,6 +82,7 @@ pub(super) fn unpack(ctx: &mut Context, layout: &StructFormat, buffer: Id) -> Re
         .map(|field| match field {
             UnpackedField::Integer(word) => ctx.alloc(Value::Int(crate::Int::new(word.into()))),
             UnpackedField::Signed(number) => ctx.int(number),
+            UnpackedField::Float(number) => ctx.alloc(Value::Float(number)),
             UnpackedField::Bytes(bytes) => ctx.alloc(Value::Bytes(bytes)),
         })
         .collect();
@@ -140,18 +141,36 @@ pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Res
             let length = target.len().min(bytes.len());
             target[..length].copy_from_slice(&bytes[..length]);
         } else {
-            let word = integer_field(ctx, id, code, target.len())?;
+            let word = if code == b'd' {
+                double_field(ctx, id)?.to_bits()
+            } else {
+                integer_field(ctx, id, code, target.len())?
+            };
             layout.write_integer(target, word);
         }
     }
     Ok(ctx.alloc(Value::Bytes(output)))
 }
 
+fn double_field(ctx: &mut Context, id: Id) -> Result<f64> {
+    // PyFloat_AsDouble reads float subclasses directly, bypassing their __float__.
+    if let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(id)) {
+        return Ok(value);
+    }
+    let Ok(Some(number)) = super::super::builtins::from_numeric(ctx, id) else {
+        return Err(format_error("required argument is not a float"));
+    };
+    let Value::Float(value) = *ctx.heap.get(number) else {
+        unreachable!("float conversion returned a non-float")
+    };
+    Ok(value)
+}
+
 fn integer_field(ctx: &mut Context, id: Id, code: u8, width: usize) -> Result<u64> {
     let value = ctx
         .index_value(id)
         .and_then(|value| value.ok_or_else(|| format_error("required argument is not an integer")));
-    if code == b'l' {
+    if matches!(code, b'b' | b'i' | b'l') {
         let max = i64::MAX >> ((8 - width) * 8);
         let min = !max;
         let number = match value {
@@ -167,7 +186,12 @@ fn integer_field(ctx: &mut Context, id: Id, code: u8, width: usize) -> Result<u6
         return number
             .filter(|n| (min..=max).contains(n))
             .map(|n| n as u64)
-            .ok_or_else(|| format_error(format!("'l' format requires {min} <= number <= {max}")));
+            .ok_or_else(|| {
+                format_error(format!(
+                    "'{}' format requires {min} <= number <= {max}",
+                    char::from(code)
+                ))
+            });
     }
     let value = value?;
     let number = value.big().to_u64();

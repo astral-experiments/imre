@@ -19,9 +19,9 @@ pub unsafe extern "C" fn imre_zlib_adler32(data: *const Bytes, seed: usize) -> u
     crate::Int::from_usize(adler32(data, &seed) as usize).into_raw()
 }
 
-/// Compute zlib's unsigned Adler-32 over a borrowed buffer and an arbitrary Python integer seed.
-pub(crate) fn adler32(data: &[u8], seed: &crate::Int) -> u32 {
-    let seed = if let Some(small) = seed.as_small() {
+/// Apply the unsigned 32-bit mask used by both zlib checksum seeds.
+fn checksum_seed(seed: &crate::Int) -> u32 {
+    if let Some(small) = seed.as_small() {
         small as u32
     } else {
         let big = seed.big();
@@ -31,7 +31,17 @@ pub(crate) fn adler32(data: &[u8], seed: &crate::Int) -> u32 {
         } else {
             low
         }
-    };
+    }
+}
+
+/// Compute the unsigned ZIP-compatible CRC over a borrowed buffer.
+pub(crate) fn crc32(data: &[u8], seed: &crate::Int) -> u32 {
+    zlib_rs::crc32::crc32(checksum_seed(seed), data)
+}
+
+/// Compute zlib's unsigned Adler-32 over a borrowed buffer and an arbitrary Python integer seed.
+pub(crate) fn adler32(data: &[u8], seed: &crate::Int) -> u32 {
+    let seed = checksum_seed(seed);
     const BASE: u32 = 65_521;
     if data.len() == 1 {
         // Match zlib's observable one-byte fast path, including its single

@@ -8,6 +8,7 @@ def _validateCaseMethod(case, methodName):
         case._testMethodDoc = "No test"
     else:
         case._testMethodDoc = getattr(method, "__doc__", None)
+    case._cleanups = []
 
 
 def _boxedCheckFixtures(cls):
@@ -16,7 +17,7 @@ def _boxedCheckFixtures(cls):
             if getattr(cls, name, None) is not None:
                 raise NotImplementedError("native unittest does not yet support class cleanup hooks: " + name)
         return
-    for name in ("run", "__call__", "defaultTestResult"):
+    for name in ("run", "__call__"):
         for owner in cls.__mro__:
             if owner is object:
                 break
@@ -27,23 +28,86 @@ def _boxedCheckFixtures(cls):
                 break
 
 
-def _runRegistered(self, case, name):
-    cls = type(case)
-    method_name = case._testMethodName
-    method = getattr(case, method_name)
-    if not name and isinstance(self, TextTestResult):
-        name = str(case)
-        if self.descriptions:
-            description = case.shortDescription()
-            if description:
-                name += "\n" + description
+def _runRegistered(result, test, name, stopTestRun=None):
+    result.startTest(test)
+    try:
+        _runBoxedCase(result, test)
+    finally:
+        result.stopTest(test)
+        if stopTestRun is not None:
+            stopTestRun()
+
+
+def _runBoxedCase(result, test):
+    cls = type(test)
+    method = getattr(test, test._testMethodName)
     if getattr(cls, "__unittest_skip__", False) or getattr(method, "__unittest_skip__", False):
         reason = getattr(cls, "__unittest_skip_why__", "") or getattr(method, "__unittest_skip_why__", "")
-        self._skipCase(case, name, reason)
-    else:
-        if getattr(cls, "__unittest_expecting_failure__", False) or getattr(method, "__unittest_expecting_failure__", False):
-            raise NotImplementedError("native unittest does not yet support expectedFailure")
-        self._runCase(case, name, case.setUp, method, case.tearDown)
+        case._addSkip(result, test, reason)
+        return
+    expecting_failure = (getattr(test, "__unittest_expecting_failure__", False)
+                         or getattr(method, "__unittest_expecting_failure__", False))
+    outcome = case._Outcome(result)
+    start_time = case.time.perf_counter()
+    try:
+        test._outcome = outcome
+        with outcome.testPartExecutor(test):
+            test._callSetUp()
+        if outcome.success:
+            outcome.expecting_failure = expecting_failure
+            with outcome.testPartExecutor(test):
+                test._callTestMethod(method)
+            outcome.expecting_failure = False
+            with outcome.testPartExecutor(test):
+                test._callTearDown()
+        test.doCleanups()
+        test._addDuration(result, case.time.perf_counter() - start_time)
+        if outcome.success:
+            if not expecting_failure:
+                result.addSuccess(test)
+            elif outcome.expectedFailure is None:
+                test._addUnexpectedSuccess(result)
+            else:
+                test._addExpectedFailure(result, outcome.expectedFailure)
+    finally:
+        outcome.expectedFailure = None
+        test._outcome = None
+
+
+def _boxedSubTestEnter(self):
+    if self.entered:
+        raise AttributeError("'_GeneratorContextManager' object has no attribute 'args'")
+    self.entered = True
+    outcome = getattr(self.case, "_outcome", None)
+    if outcome is not None and outcome.result_supports_subtests:
+        self.parent = self.case._subtest
+        parents = () if self.parent is None else self.parent.params.maps
+        params = case._OrderedChainMap(self.params, *parents)
+        message = self.message if self.has_message else case._subtest_msg_sentinel
+        subtest = case._SubTest(self.case, message, params)
+        self.case._subtest = subtest
+        self._executor = outcome.testPartExecutor(subtest, True)
+        self._executor.__enter__()
+
+
+def _boxedSubTestExit(self, typ, value, tb):
+    outcome = getattr(self.case, "_outcome", None)
+    if outcome is None or not outcome.result_supports_subtests:
+        return False
+    try:
+        suppressed = self._executor.__exit__(typ, value, tb)
+        if typ is not None and not suppressed:
+            return False
+        if outcome.expectedFailure or (not outcome.success and getattr(outcome.result, "failfast", False)):
+            raise case._ShouldStop
+        return suppressed
+    finally:
+        self.case._subtest = self.parent
+
+
+TestCase._subtest = None
+_SubTestContext.__enter__ = _boxedSubTestEnter
+_SubTestContext.__exit__ = _boxedSubTestExit
 
 
 TestResult._runRegistered = _runRegistered
@@ -105,16 +169,14 @@ def _caseDebug(self):
 
 
 def _caseRun(self, result=None):
+    stopTestRun = None
     if result is None:
-        result = TestResult()
-        result.startTestRun()
-        try:
-            result._runRegistered(self, "")
-        finally:
-            result.stopTestRun()
-    else:
-        dispatch = result if isinstance(result, TestResult) else _CaseResultDispatch(result)
-        dispatch._runRegistered(self, "")
+        result = self.defaultTestResult()
+        startTestRun = getattr(result, "startTestRun", None)
+        stopTestRun = getattr(result, "stopTestRun", None)
+        if startTestRun is not None:
+            startTestRun()
+    _runRegistered(result, self, "", stopTestRun)
     return result
 
 
@@ -246,12 +308,8 @@ def _boxedFixturePhase(hook, method, parent, result):
 def _boxedFixtureProblem(parent, method, result, exc, tb):
     label = method + " (" + parent + ")"
     holder = _ErrorHolder(label)
-    if isinstance(result, TextTestResult):
-        result._startCase(label)
     if isinstance(exc, SkipTest):
         result.addSkip(holder, str(exc))
-        if isinstance(result, TextTestResult):
-            result._mark("s", "skipped " + repr(str(exc)))
     else:
         result.addError(holder, (type(exc), exc, tb))
 

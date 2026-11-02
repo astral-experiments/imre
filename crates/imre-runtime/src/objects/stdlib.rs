@@ -789,17 +789,57 @@ pub unsafe extern "C" fn imre_str_replace(
     old: *const Str,
     new: *const Str,
 ) -> *const Str {
-    // SAFETY: inputs remain immutable and rooted through both sizing and copying.
-    let (value, old, new) = unsafe { (&*value, &*old, &*new) };
-    match replace_text(value, old, new, usize::MAX, old == new, |len| {
+    // SAFETY: the three rooted string allocations have the required lifetime.
+    unsafe { replace_string(value, old, new, usize::MAX) }
+}
+
+/// # Safety
+/// The caller roots all three immutable strings and the tagged integer count.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_replace_count(
+    value: *const Str,
+    old: *const Str,
+    new: *const Str,
+    count: usize,
+) -> *const Str {
+    // SAFETY: the tagged integer stays rooted during conversion.
+    let count = unsafe { crate::Int::borrow(count) };
+    let Some(count) = crate::signed_index(&count) else {
+        Error::new(
+            Kind::OverflowError,
+            "Python int too large to convert to C ssize_t",
+        )
+        .raise();
+        return std::ptr::null();
+    };
+    // SAFETY: the three string operands remain rooted for the call.
+    unsafe {
+        replace_string(
+            value,
+            old,
+            new,
+            usize::try_from(count).unwrap_or(usize::MAX),
+        )
+    }
+}
+
+/// The raw receiver keeps the provenance of the allocation containing its strong count.
+unsafe fn replace_string(
+    value: *const Str,
+    old: *const Str,
+    new: *const Str,
+    limit: usize,
+) -> *const Str {
+    // SAFETY: all input strings stay rooted until replacement completes.
+    let (text, old, new) = unsafe { (&*value, &*old, &*new) };
+    match replace_text(text, old, new, limit, old == new, |len| {
         Str::try_with_capacity(len).ok()
     }) {
         Ok(Some(result)) => StrOwner::into_raw(StrOwner::new(result)),
         Ok(None) => {
-            // SAFETY: the original string is rooted and the result takes its own owner.
-            StrOwner::into_raw(unsafe {
-                StrOwner::acquire_word(std::ptr::from_ref(value) as usize)
-            })
+            // SAFETY: transfer one additional strong count from the original allocation.
+            unsafe { StrOwner::increment_strong_count(value) };
+            value
         }
         Err(_) => {
             super::exceptions::sequence_allocation_failed();
@@ -909,34 +949,34 @@ pub(crate) fn format_fixed_float(
     Ok(result)
 }
 
+pub(super) fn check_interrupt() -> Result<(), Error> {
+    if crate::signals::take_interrupt() {
+        Err(Error::without_args(Kind::KeyboardInterrupt))
+    } else {
+        Ok(())
+    }
+}
+
+/// Slow edge of a typed loop's pending-signal check. Worker threads leave the
+/// main thread's SIGINT pending and continue without raising an exception.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_typed_interrupt() -> bool {
+    if let Err(error) = check_interrupt() {
+        error.raise();
+        true
+    } else {
+        false
+    }
+}
+
 /// Suspend the current native thread, rounding a positive timeout up to nanoseconds.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_time_sleep(seconds: f64) {
-    let error = if seconds.is_nan() {
-        Some(Error::new(
-            Kind::ValueError,
-            "Invalid value NaN (not a number)",
-        ))
-    } else if !seconds.is_finite() || seconds.abs() >= i64::MAX as f64 / 1e9 {
-        Some(Error::new(
-            Kind::OverflowError,
-            "timestamp out of range for platform time_t",
-        ))
-    } else if seconds < 0.0 {
-        Some(Error::new(
-            Kind::ValueError,
-            "sleep length must be non-negative",
-        ))
-    } else {
-        None
-    };
-    if let Some(e) = error {
-        e.raise();
-        return;
+    let result = super::time::sleep_float_ns(seconds)
+        .and_then(|nanos| super::time::sleep_ns(nanos, check_interrupt));
+    if let Err(error) = result {
+        error.raise();
     }
-    let duration = std::time::Duration::from_secs(seconds.trunc() as u64)
-        + std::time::Duration::from_nanos((seconds.fract() * 1e9).ceil() as u64);
-    std::thread::sleep(duration);
 }
 
 /// Seconds since the Unix epoch, including the subsecond fraction.

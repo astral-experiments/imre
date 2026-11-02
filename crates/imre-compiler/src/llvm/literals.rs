@@ -155,7 +155,7 @@ impl Emitter<'_, '_> {
             (
                 &self.regex_literals,
                 Type::RegexPattern,
-                "imre_regex_compile",
+                "imre_regex_literal",
                 "imre_object_release",
             ),
             (
@@ -286,7 +286,7 @@ ready:
         if !self.enum_members.is_empty() {
             self.output
                 .entry_buffer()
-                .push_str("  call void @imre_str_enum_table(ptr null, i64 0)\n");
+                .push_str("  call void @imre_enum_display_table(ptr null, i64 0, ptr null)\n");
         }
         if !self.http_members.is_empty() {
             self.output

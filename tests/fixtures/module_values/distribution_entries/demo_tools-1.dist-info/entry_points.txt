@@ -1,0 +1,3 @@
+[imre-test]
+# A name may contain a colon.
+tool:run = demo:main [fast, compat]

@@ -832,53 +832,6 @@ pub unsafe extern "C" fn imre_path_resolve(path: *const Object, strict: u32) -> 
 }
 
 /// # Safety
-/// Root an exact Path. Like Python 3.14, failed metadata queries (including NUL
-/// paths) return false and do not install or modify a pending language error.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_path_exists(path: *const Object) -> u32 {
-    // SAFETY: filesystem queries have no callbacks; only a boolean escapes.
-    unsafe {
-        object(path)
-            .0
-            .with(|storage| u32::from(exists(storage.path().as_ref())))
-    }
-}
-
-/// Follow symlinks and return false for every failed stat, including permission errors.
-pub(crate) fn exists(path: &std::path::Path) -> bool {
-    fs::metadata(path).is_ok()
-}
-
-/// Test the target of a filesystem spelling, following symlinks and suppressing stat errors.
-pub(crate) fn is_file(path: &std::path::Path) -> bool {
-    fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
-}
-
-/// # Safety
-/// Root an exact Path. This follows symlinks and suppresses metadata errors.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_path_is_file(path: *const Object) -> u32 {
-    // SAFETY: filesystem queries have no callbacks; only a boolean escapes.
-    unsafe {
-        object(path)
-            .0
-            .with(|storage| u32::from(is_file(storage.path().as_ref())))
-    }
-}
-
-/// # Safety
-/// Root an exact Path. This follows symlinks and suppresses metadata errors.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_path_is_dir(path: *const Object) -> u32 {
-    // SAFETY: filesystem queries have no callbacks; only a boolean escapes.
-    unsafe {
-        object(path).0.with(|storage| {
-            u32::from(fs::metadata(storage.path()).is_ok_and(|metadata| metadata.is_dir()))
-        })
-    }
-}
-
-/// # Safety
 /// Root an exact Path with clear pending error state. Strict UTF-8 reads perform
 /// universal-newline conversion and close the descriptor before returning.
 #[unsafe(no_mangle)]
@@ -1093,14 +1046,12 @@ pub unsafe extern "C" fn imre_path_replace(
     finish(result, std::ptr::null())
 }
 
-pub(super) struct PathIterator {
-    root: Str,
-    state: IterationState,
-}
-
-enum IterationState {
+pub(super) enum PathIterator {
     Glob(traversal::Glob),
-    Snapshot(std::vec::IntoIter<(OsString, rustix::fs::FileType)>),
+    Snapshot {
+        root: Str,
+        names: std::vec::IntoIter<(OsString, rustix::fs::FileType)>,
+    },
     Exhausted,
 }
 
@@ -1124,47 +1075,33 @@ pub(crate) fn directory_entries<T>(
         .collect()
 }
 
-fn snapshot(root: &str, suppress_errors: bool) -> Result<Vec<OsString>> {
+fn snapshot(root: &str) -> Result<Vec<OsString>> {
     check_directory_path(root)?;
-    let entries = directory_entries(root, |entry| entry.file_name()).map_err(files::os_error);
-    if suppress_errors {
-        Ok(entries.unwrap_or_default())
-    } else {
-        entries
-    }
+    Ok(directory_entries(root, |entry| entry.file_name()).unwrap_or_default())
 }
 
 impl PathIterator {
-    fn new(root: Str, pattern: Option<&str>) -> Result<Self> {
-        let state = if let Some(pattern) = pattern {
-            IterationState::Glob(traversal::Glob::new(
-                root.clone(),
-                pattern,
-                0,
-                false,
-                false,
-            )?)
-        } else {
-            check_directory_path(&root)?;
-            let entries = super::os::directory_entry_types(&root)
-                .map_err(|error| files::errno_with_filename(error, Some(&root)))?;
-            IterationState::Snapshot(entries.into_iter())
-        };
-        Ok(Self { root, state })
+    /// Snapshot a directory before yielding its first entry.
+    fn iterdir(root: Str) -> Result<Self> {
+        check_directory_path(&root)?;
+        let entries = super::os::directory_entry_types(&root)
+            .map_err(|error| files::errno_with_filename(error, Some(&root)))?;
+        Ok(Self::Snapshot {
+            root,
+            names: entries.into_iter(),
+        })
     }
 
     pub(super) fn next(&mut self) -> Result<*const Object> {
-        let next = match &mut self.state {
-            IterationState::Glob(glob) => glob
+        let next = match self {
+            Self::Glob(glob) => glob
                 .next()
                 .map(|next| next.map(|path| path_with_text(PathText::from_parsed_string(path)))),
-            IterationState::Snapshot(names) => names
+            Self::Snapshot { root, names } => names
                 .next()
                 .map(|(name, kind)| {
                     name.into_string()
-                        .map(|name| {
-                            path_with_text(PathText::from_entry(join(&self.root, &name), kind))
-                        })
+                        .map(|name| path_with_text(PathText::from_entry(join(root, &name), kind)))
                         .map_err(|_| {
                             Error::new(
                                 Kind::UnicodeDecodeError,
@@ -1173,12 +1110,12 @@ impl PathIterator {
                         })
                 })
                 .transpose(),
-            IterationState::Exhausted => Ok(None),
+            Self::Exhausted => Ok(None),
         };
         match next {
             Ok(Some(path)) => Ok(path),
             result => {
-                self.state = IterationState::Exhausted;
+                *self = Self::Exhausted;
                 result.map(|_| std::ptr::null())
             }
         }
@@ -1205,32 +1142,28 @@ pub unsafe extern "C" fn imre_path_glob(
     // SAFETY: construction has no user callbacks and no borrowed input escapes.
     let result = unsafe {
         object(path).0.with(|storage| {
-            let root = Str::from(storage.path());
-            let glob =
-                traversal::Glob::new(root.clone(), &*pattern, case, follow != 0, recursive != 0)?;
-            Ok(PathIterator {
-                root,
-                state: IterationState::Glob(glob),
-            })
+            traversal::Glob::new(
+                Str::from(storage.path()),
+                &*pattern,
+                case,
+                follow != 0,
+                recursive != 0,
+            )
+            .map(PathIterator::Glob)
         })
     };
     finish(result.map(PathIterator::into_object), std::ptr::null())
 }
 
 /// # Safety
-/// Root an exact Path and either a string pattern or null. Null selects iterdir:
-/// it snapshots names now and propagates directory errors. A glob validates now,
-/// scans on its first next call, and suppresses OS scan errors. Returns one owner.
+/// The caller roots an exact Path while its directory entries are read.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_path_iter(path: *const Object, pattern: *const Str) -> *const Object {
-    // SAFETY: only the copied root and pattern survive this immutable borrow.
+pub unsafe extern "C" fn imre_path_iterdir(path: *const Object) -> *const Object {
+    // SAFETY: the snapshot owns the copied root and directory entries.
     let result = unsafe {
-        object(path).0.with(|storage| {
-            PathIterator::new(
-                Str::from(storage.path()),
-                pattern.as_ref().map(|text| text.as_str()),
-            )
-        })
+        object(path)
+            .0
+            .with(|storage| PathIterator::iterdir(Str::from(storage.path())))
     };
     finish(result.map(PathIterator::into_object), std::ptr::null())
 }
@@ -1498,10 +1431,8 @@ mod tests {
         // and its view outlive the directory iterator's snapshot.
         let scanned = unsafe {
             let dir = directory.path();
-            let it = crate::ObjectOwner::from_raw(imre_path_iter(
-                crate::ObjectOwner::as_ptr(&dir),
-                std::ptr::null(),
-            ));
+            let it =
+                crate::ObjectOwner::from_raw(imre_path_iterdir(crate::ObjectOwner::as_ptr(&dir)));
             let item = imre_path_next(crate::ObjectOwner::as_ptr(&it));
             assert!(!item.is_null());
             crate::ObjectOwner::from_raw(item)
@@ -1750,6 +1681,11 @@ mod tests {
 
     #[test]
     fn path_reads_writes_predicates_and_errors_share_text_file_semantics() {
+        use metadata::imre_path_query;
+        const EXISTS: u32 = 0;
+        const DIRECTORY: u32 = 1;
+        const FILE: u32 = 2;
+
         let directory = Directory::new();
         let filename = directory.0.join("text");
         let value = path(filename.to_str().unwrap());
@@ -1757,11 +1693,14 @@ mod tests {
         // SAFETY: all exact roots outlive their ABI calls, which transfer owned results.
         unsafe {
             let pointer = crate::ObjectOwner::as_ptr(&value);
-            assert_eq!(imre_path_exists(pointer), 0);
-            assert_eq!(imre_path_is_dir(crate::ObjectOwner::as_ptr(&root)), 1);
+            assert_eq!(imre_path_query(pointer, EXISTS, 1), 0);
+            assert_eq!(
+                imre_path_query(crate::ObjectOwner::as_ptr(&root), DIRECTORY, 1),
+                1
+            );
             let count = Int(imre_path_write_text(pointer, &Str::from("é\r\n🦀\r")));
             assert_eq!(count.as_small(), Some(5));
-            assert_eq!(imre_path_is_file(pointer), 1);
+            assert_eq!(imre_path_query(pointer, FILE, 1), 1);
             assert_eq!(
                 StrOwner::from_raw(imre_path_read_text(pointer)).as_str(),
                 "é\n🦀\n"
@@ -1775,9 +1714,12 @@ mod tests {
             assert!(imre_path_read_text(crate::ObjectOwner::as_ptr(&root)).is_null());
             take_error(Kind::IsADirectoryError);
             let nul = path("a\0b");
-            assert_eq!(imre_path_exists(crate::ObjectOwner::as_ptr(&nul)), 0);
-            assert_eq!(imre_path_is_file(crate::ObjectOwner::as_ptr(&nul)), 0);
-            assert_eq!(imre_path_is_dir(crate::ObjectOwner::as_ptr(&nul)), 0);
+            for kind in [EXISTS, DIRECTORY, FILE] {
+                assert_eq!(
+                    imre_path_query(crate::ObjectOwner::as_ptr(&nul), kind, 1),
+                    0
+                );
+            }
             assert!(imre_path_read_text(crate::ObjectOwner::as_ptr(&nul)).is_null());
             take_error(Kind::ValueError);
         }
@@ -1894,8 +1836,13 @@ mod tests {
         let directory = Directory::new();
         fs::write(directory.0.join("old.json"), "").unwrap();
         let root = Str::from(directory.0.to_str().unwrap());
-        let mut eager = PathIterator::new(root.clone(), None).unwrap_or_else(|_| panic!());
-        let mut lazy = PathIterator::new(root.clone(), Some("*.json")).unwrap_or_else(|_| panic!());
+        let glob = |root, pattern| {
+            PathIterator::Glob(
+                traversal::Glob::new(root, pattern, 0, false, false).unwrap_or_else(|_| panic!()),
+            )
+        };
+        let mut eager = PathIterator::iterdir(root.clone()).unwrap_or_else(|_| panic!());
+        let mut lazy = glob(root.clone(), "*.json");
         fs::write(directory.0.join("new.json"), "").unwrap();
         assert_eq!(names(&mut eager), ["old.json"]);
         let first = lazy.next().unwrap_or_else(|_| panic!());
@@ -1909,11 +1856,11 @@ mod tests {
         assert_eq!(rest.len(), 1);
         assert_ne!(rest[0], "later.json");
         symlink("missing", directory.0.join("broken")).unwrap();
-        let mut literal = PathIterator::new(root, Some("broken")).unwrap_or_else(|_| panic!());
+        let mut literal = glob(root, "broken");
         assert_eq!(names(&mut literal), ["broken"]);
         let absent = Str::from(directory.0.join("absent").to_str().unwrap());
-        assert!(PathIterator::new(absent.clone(), None).is_err());
-        let mut empty = PathIterator::new(absent, Some("*")).unwrap_or_else(|_| panic!());
+        assert!(PathIterator::iterdir(absent.clone()).is_err());
+        let mut empty = glob(absent, "*");
         assert!(names(&mut empty).is_empty());
     }
 

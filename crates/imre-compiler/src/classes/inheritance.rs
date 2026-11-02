@@ -29,13 +29,11 @@ pub(super) fn resolve(
         path.push(id);
         let mut base: Option<usize> = None;
         if let Some(args) = &node.arguments {
-            if !args.keywords.is_empty() {
-                return Err(module.error(
-                    node,
-                    "class metaclasses and keyword arguments are unsupported",
-                ));
-            }
             for argument in &args.args {
+                if graph.is_protocol_base(definition.module, argument) {
+                    graph.needs_object_runtime.set(true);
+                    return Err(module.error(argument, "Protocol bases require object lowering"));
+                }
                 if mapping_base(graph, definition.module, argument)
                     || (args.args.len() == 1
                         && graph
@@ -54,8 +52,53 @@ pub(super) fn resolve(
                     other => other,
                 };
                 match graph.resolve(definition.module, origin) {
+                    Some(Binding::Intrinsic(Intrinsic::PICKLER)) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "pickle.Pickler requires object lowering")
+                        );
+                    }
+                    Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                        "codecs.IncrementalDecoder" | "codecs.CodecInfo",
+                    ))) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "codec base class requires object lowering")
+                        );
+                    }
+                    Some(Binding::Intrinsic(
+                        Intrinsic::IO_BASE
+                        | Intrinsic::RAW_IO_BASE
+                        | Intrinsic::BUFFERED_IO_BASE
+                        | Intrinsic::TEXT_IO_BASE
+                        | Intrinsic::ObjectRuntimeExport(
+                            "io.BufferedReader"
+                            | "_io.BufferedReader"
+                            | "io.BufferedRandom"
+                            | "_io.BufferedRandom"
+                            | "io.BufferedWriter"
+                            | "_io.BufferedWriter"
+                            | "io.BufferedRWPair"
+                            | "_io.BufferedRWPair"
+                            | "_io._IOBase"
+                            | "_io._RawIOBase"
+                            | "_io._BufferedIOBase"
+                            | "_io._TextIOBase",
+                        ),
+                    )) => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "I/O base subclasses require object lowering")
+                        );
+                    }
+                    Some(Binding::Intrinsic(base)) if base.is_subclassable_calendar() => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "calendar subclasses require object lowering")
+                        );
+                    }
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
-                        if args.args.len() == 1 => {}
+                        if args.args.len() == 1 && args.keywords.is_empty() => {}
                     Some(Binding::Intrinsic(Intrinsic::Abc)) => {}
                     Some(Binding::Definition(source)) if ids.contains_key(&source) => {
                         if source.module == definition.module
@@ -138,6 +181,44 @@ pub(crate) fn super_method(call: &ast::ExprCall) -> Option<(&ast::ExprAttribute,
 
 pub(crate) fn super_init(call: &ast::ExprCall) -> bool {
     super_method(call).is_some_and(|(method, _)| method.attr.as_str() == "__init__")
+}
+
+/// Resolve an explicit initializer on the lexical parent and the current receiver.
+pub(crate) fn direct_base_init(
+    graph: &SourceGraph,
+    module: usize,
+    parent: DefinitionId,
+    initializer: &ast::StmtFunctionDef,
+    call: &ast::ExprCall,
+) -> bool {
+    let Some(method) = call.func.as_attribute_expr() else {
+        return false;
+    };
+    let Some(receiver) = initializer.parameters.iter_non_variadic_params().next() else {
+        return false;
+    };
+    if method.attr.as_str() != "__init__"
+        || !matches!(call.arguments.args.first(), Some(ast::Expr::Name(n)) if n.id.as_str() == receiver.name().as_str())
+        || graph.resolve(module, &method.value) != Some(Binding::Definition(parent))
+    {
+        return false;
+    }
+    let mut root = &*method.value;
+    while let ast::Expr::Attribute(attr) = root {
+        root = &attr.value;
+    }
+    let Some(root) = root.as_name_expr() else {
+        return false;
+    };
+    // A parameter or local variable with the same spelling takes precedence over the module binding.
+    !initializer
+        .parameters
+        .iter()
+        .any(|p| p.name() == root.id.as_str())
+        && !ast::helpers::any_over_body(
+            &initializer.body,
+            |expr| matches!(expr, ast::Expr::Name(n) if n.id == root.id && n.ctx != ast::ExprContext::Load),
+        )
 }
 
 /// Infer storage from an exact builtin value. The constructor still evaluates
@@ -253,11 +334,11 @@ pub(super) fn infer_fields(
     module: usize,
     init: &ast::StmtFunctionDef,
     fields: &mut Vec<Field>,
-) -> Result<(), String> {
+) {
     let params = init
         .parameters
         .iter_non_variadic_params()
-        .filter_map(|p| p.annotation().map(|ann| (p.name().as_str(), ann.clone())))
+        .filter_map(|p| p.annotation().map(|ann| (p.name().as_str(), ann)))
         .collect::<HashMap<_, _>>();
     for stmt in &init.body {
         let ast::Stmt::Assign(assign) = stmt else {
@@ -274,7 +355,7 @@ pub(super) fn infer_fields(
             continue;
         }
         let ann = match &*assign.value {
-            ast::Expr::Name(name) => params.get(name.id.as_str()).cloned(),
+            ast::Expr::Name(name) => params.get(name.id.as_str()).map(|&ann| ann.clone()),
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "list")
                     && graph.resolve(module, &call.func).is_none()
@@ -332,5 +413,4 @@ pub(super) fn infer_fields(
             });
         }
     }
-    Ok(())
 }

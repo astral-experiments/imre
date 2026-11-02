@@ -48,12 +48,31 @@ def current():
     word = Word("text")
     print(repr([word, (word,), {word: word}]), [word])
 
+    class Plain:
+        pass
+
+    plain = Plain()
+    expected = f"<{Plain.__module__}.{Plain.__qualname__} object at {id(plain):#x}>"
+    assert repr(plain) == str(plain) == object.__repr__(plain) == expected
+    assert repr([plain]) == f"[{expected}]"
+    Plain.__name__ = "Renamed"
+    Plain.__module__ = "builtins"
+    assert repr(plain) == f"<Renamed object at {id(plain):#x}>"
+    assert repr(Plain) == "<class 'Renamed'>"
+
     class Broken:
         def __repr__(self):
             raise LookupError("rendered")
 
+    broken = Broken()
+    slot = object.__repr__
+    bound = slot.__get__(broken, Broken)
+    expected = f"<{Broken.__module__}.{Broken.__qualname__} object at {id(broken):#x}>"
+    assert slot(broken) == bound() == expected
+    assert slot([]).startswith("<list object at 0x")
+
     try:
-        repr([Broken()])
+        repr([broken])
     except LookupError as exc:
         print(exc.args)
 

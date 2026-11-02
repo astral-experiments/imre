@@ -1,6 +1,13 @@
 //! Apply Python's lexical class-name mangling before lowering boxed modules.
 
+/// CPython 3.14.5's pyc magic number followed by CRLF in little-endian wire order.
+pub const PYC_MAGIC_NUMBER_TOKEN: u32 = 3627 | ((b'\r' as u32) << 16) | ((b'\n' as u32) << 24);
+
+pub mod exceptions;
+pub mod startup;
 pub mod strings;
+mod type_aliases;
+pub use type_aliases::type_alias_error;
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -25,6 +32,9 @@ pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
     }
 }
 
+pub mod annotations;
+pub mod class_attributes;
+pub mod class_cell;
 pub mod code_flags;
 
 /// Names imported by the module scope disable method binding even after reassignment.
@@ -77,9 +87,51 @@ pub fn direct_method<'a>(
     .then_some(field)
 }
 
+/// Check explicit keyword names before lowering can mangle class-private names.
+pub fn repeated_keyword(node: ast::AnyNodeRef<'_>) -> Option<&ast::Keyword> {
+    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
+
+    struct Children<'a>(Vec<ast::AnyNodeRef<'a>>);
+    impl<'a> SourceOrderVisitor<'a> for Children<'a> {
+        fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
+            self.0.push(node);
+            TraversalSignal::Skip
+        }
+    }
+
+    let mut pending = Children(vec![node]);
+    while let Some(node) = pending.0.pop() {
+        let args = match node {
+            // A call's own keyword list is validated before its callable is compiled.
+            ast::AnyNodeRef::ExprCall(call) => Some(&call.arguments),
+            ast::AnyNodeRef::StmtClassDef(class) => class.arguments.as_deref(),
+            _ => None,
+        };
+        if let Some(args) = args {
+            for (index, keyword) in args.keywords.iter().enumerate() {
+                if let Some(name) = &keyword.arg
+                    && let Some(repeated) = args.keywords[index + 1..].iter().find(|other| {
+                        other
+                            .arg
+                            .as_ref()
+                            .is_some_and(|id| id.as_str() == name.as_str())
+                    })
+                {
+                    return Some(repeated);
+                }
+            }
+        }
+        let start = pending.0.len();
+        node.visit_source_order(&mut pending);
+        pending.0[start..].reverse();
+    }
+    None
+}
+
 #[derive(Default)]
 pub struct Names {
     pub string_annotations: bool,
+    pub duplicate_type_parameter: Option<Identifier>,
     original: HashMap<TextSize, Name>,
     owners: HashMap<TextSize, Name>,
     import_roots: HashSet<TextSize>,
@@ -104,13 +156,17 @@ impl Names {
     }
 }
 
-pub fn lower(body: &mut [ast::Stmt]) -> Names {
-    let string_annotations = body.iter().any(|s| {
+/// Whether source opts in to stringized annotations via a future import.
+pub fn future_annotations(body: &[ast::Stmt]) -> bool {
+    body.iter().any(|s| {
         matches!(s, ast::Stmt::ImportFrom(i) if i.level == 0
             && i.module.as_ref().is_some_and(|m| m.as_str() == "__future__")
             && i.names.iter().any(|n| n.name.as_str() == "annotations"))
-    });
-    lower_in(body, "", string_annotations)
+    })
+}
+
+pub fn lower(body: &mut [ast::Stmt]) -> Names {
+    lower_in(body, "", future_annotations(body))
 }
 
 /// Apply the same lexical names when reparsing a generator's original suite.
@@ -123,6 +179,7 @@ pub fn lower_in(body: &mut [ast::Stmt], owner: &str, string_annotations: bool) -
         owner,
         names: &names,
         string_annotations,
+        only_parameters: None,
     }
     .visit_body(body);
     names.into_inner()
@@ -132,10 +189,17 @@ struct Mangler<'a> {
     owner: &'a str,
     names: &'a RefCell<Names>,
     string_annotations: bool,
+    only_parameters: Option<&'a HashSet<Name>>,
 }
 
 impl Mangler<'_> {
     fn replacement(&self, name: &str) -> Option<Name> {
+        if self
+            .only_parameters
+            .is_some_and(|params| !params.contains(name))
+        {
+            return None;
+        }
         let owner = self.owner.trim_start_matches('_');
         (is_mangled_private(name) && !name.contains('.') && !owner.is_empty())
             .then(|| Name::new(format!("_{owner}{name}")))
@@ -169,17 +233,42 @@ impl Transformer for Mangler<'_> {
                 for decorator in &mut class.decorator_list {
                     self.visit_decorator(decorator);
                 }
+                let body = Mangler {
+                    owner: owner.as_str(),
+                    only_parameters: None,
+                    ..*self
+                };
                 if let Some(params) = &mut class.type_params {
-                    self.visit_type_params(params);
-                }
-                if let Some(arguments) = &mut class.arguments {
+                    // Only its declared private type parameters are mangled in a
+                    // generic class's header. The body uses normal class mangling.
+                    let names = params.iter().map(|param| param.name().id.clone()).collect();
+                    let header = Mangler {
+                        only_parameters: Some(&names),
+                        ..body
+                    };
+                    let mut bindings = HashSet::new();
+                    for param in &mut params.type_params {
+                        let name = match param {
+                            ast::TypeParam::TypeVar(p) => &mut p.name,
+                            ast::TypeParam::TypeVarTuple(p) => &mut p.name,
+                            ast::TypeParam::ParamSpec(p) => &mut p.name,
+                        };
+                        header.definition(name);
+                        if !bindings.insert(name.id.clone()) {
+                            self.names
+                                .borrow_mut()
+                                .duplicate_type_parameter
+                                .get_or_insert_with(|| name.clone());
+                        }
+                    }
+                    header.visit_type_params(params);
+                    if let Some(arguments) = &mut class.arguments {
+                        header.visit_arguments(arguments);
+                    }
+                } else if let Some(arguments) = &mut class.arguments {
                     self.visit_arguments(arguments);
                 }
-                Mangler {
-                    owner: owner.as_str(),
-                    ..*self
-                }
-                .visit_body(&mut class.body);
+                body.visit_body(&mut class.body);
                 return;
             }
             ast::Stmt::FunctionDef(function) => {
@@ -216,6 +305,14 @@ impl Transformer for Mangler<'_> {
 
     fn visit_expr(&self, expr: &mut ast::Expr) {
         match expr {
+            ast::Expr::Lambda(lambda)
+                if !self.owner.is_empty() && matches!(*lambda.body, ast::Expr::Yield(_)) =>
+            {
+                self.names
+                    .borrow_mut()
+                    .owners
+                    .insert(lambda.body.start(), Name::new(self.owner));
+            }
             ast::Expr::Name(name) => self.remember(name.start(), &mut name.id),
             ast::Expr::Attribute(attr) => self.definition(&mut attr.attr),
             _ => {}

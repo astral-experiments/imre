@@ -71,8 +71,8 @@ impl BuildOptions {
     ) -> Result<Self, String> {
         use crate::python_command::Invocation;
         let flags = match &invocation {
-            Invocation::Command(command) => command.flags,
-            Invocation::Script { flags, .. } => *flags,
+            Invocation::Command(command) => &command.flags,
+            Invocation::Module { flags, .. } | Invocation::Script { flags, .. } => flags,
         };
         let mut options = Self::initial();
         if !flags.isolated {
@@ -82,7 +82,7 @@ impl BuildOptions {
                 false,
             )?;
         }
-        if !flags.isolated
+        if !flags.ignore_environment
             && let Some(paths) = env::var_os("PYTHONPATH")
         {
             for path in env::split_paths(&paths) {
@@ -108,11 +108,24 @@ impl BuildOptions {
                 options.source_path = Some("-c".into());
                 options.compile.command = Some(command);
             }
+            Invocation::Module {
+                name,
+                flags,
+                executable,
+            } => {
+                options.source_path = Some("-m".into());
+                options.compile.module_entry = Some(name);
+                options.compile.script_startup = Some((flags, executable));
+            }
             Invocation::Script {
                 path,
                 flags,
                 executable,
             } => {
+                if path.is_dir() || imre_compiler::is_zip_path(&path) {
+                    options.compile.module_entry = Some("__main__".into());
+                    options.compile.path_entry = true;
+                }
                 options.source_path = Some(path);
                 options.compile.script_startup = Some((flags, executable));
             }

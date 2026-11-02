@@ -1,6 +1,9 @@
 """Definition identity, executable binding and the code registry used by Jinja."""
 
+import sys
 from types import CodeType
+
+assert sys._getframe().f_code.co_qualname == "<module>"
 
 registered = set()
 
@@ -37,6 +40,7 @@ def current():
 
     before = values()
     original = values.__code__
+    assert original.co_qualname == "current.<locals>.values"
     assert coroutine(values) is values
     after = values()
     assert type(after) is GeneratorType
@@ -47,6 +51,17 @@ def current():
 
     saved = view.__code__
     method = Views().get
+    assert saved.co_qualname == "view" and method.__code__.co_qualname == "Views.get"
+    view.__qualname__ = "renamed"
+    assert saved.co_qualname == "view"
+    view.__qualname__ = saved.co_qualname
+    for action in (lambda: setattr(saved, "co_qualname", "wrong"), lambda: delattr(saved, "co_qualname")):
+        try:
+            action()
+        except AttributeError as error:
+            assert str(error) == "readonly attribute"
+        else:
+            raise AssertionError("code qualified name is writable")
     print(view.__code__ is saved, method.__code__ is Views.get.__code__)
     print(len(registered), saved in registered, method.__code__ in registered)
     print(replacement.__code__ in registered, view(), method())

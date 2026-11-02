@@ -1,6 +1,14 @@
 """Retained endings, Python whitespace, option truth, and exception ordering."""
 
 
+from enum import StrEnum
+
+
+class Token(StrEnum):
+    LETTER = "東"
+    DIGIT = "²"
+
+
 class Flag:
     def __init__(self, value: int):
         self.value = value
@@ -94,6 +102,24 @@ try:
     print("".isspace(wrong=argument(-1)))
 except TypeError as err:
     print(err)
+unbound_ascii = str.isascii
+for text in ("", "\0\x7f", "ascii\x80", "🦊"):
+    print(text.isascii())
+    print(unbound_ascii(text))
+try:
+    unbound_ascii(3)
+except TypeError as err:
+    print(err)
+unbound_title = str.istitle
+print(str.istitle(Token.LETTER))
+for text in ("", "!?7", "Title Case", "Not a Title", "ABC", "ǅuro", "Aǅ", "Ⅰⅰ", "Aʕ",
+             "A\u0301B", "A\u0301b"):
+    print(text.istitle())
+    print(unbound_title(text))
+try:
+    unbound_title(3)
+except TypeError as err:
+    print(err)
 unbound_lower = str.islower
 for text in ("", "7東", "ʕ東", "aǅ", "ⅷ", "𐐨", "𐐀"):
     print(text.islower())
@@ -109,4 +135,22 @@ except TypeError as err:
 try:
     print(source("A").isupper(argument(-1), later()))
 except ValueError as err:
+    print(err)
+
+unbound_alpha = str.isalpha
+unbound_digit = str.isdigit
+for text in ("", "Ab東", "A\u0345", "Ⅰ", "\u1c89", "1²", "⑨", "⑩", "½", "\U00010d40"):
+    print(text.isalpha())
+    print(unbound_alpha(text))
+    print(text.isdigit())
+    print(unbound_digit(text))
+print(unbound_alpha(Token.LETTER))
+print(str.isdigit(Token.DIGIT))
+try:
+    unbound_alpha(3)
+except TypeError as err:
+    print(err)
+try:
+    source("1").isdigit(wrong=argument(1))
+except TypeError as err:
     print(err)

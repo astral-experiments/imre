@@ -13,19 +13,238 @@ use super::{
 pub(super) enum SourceBody {
     Compiled(Code),
     Filesystem,
+    Namespace,
     Zip(Id),
 }
 
 impl SourceBody {
     fn loader(self) -> Id {
         match self {
-            Self::Compiled(_) | Self::Filesystem => NONE,
+            Self::Compiled(_) | Self::Filesystem | Self::Namespace => NONE,
             Self::Zip(loader) => loader,
         }
     }
 }
 
 impl Context {
+    /// Receive the launcher's argument vector before imports can run Python code.
+    pub(super) fn startup_sys(&mut self) -> Result<Id> {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let arguments =
+            if self.config["module_entry"].is_string() || self.config["executable"].is_string() {
+                crate::run_start::wait_for_cleanup(true).map_err(crate::objects::errno_error)?
+            } else {
+                None
+            };
+        let sys = self.module("sys")?;
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if let Some(bytes) = arguments {
+            let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+            let mut original = Vec::new();
+            for arg in bytes
+                .strip_suffix(&[0])
+                .unwrap_or(&bytes)
+                .split(|byte| *byte == 0)
+            {
+                original.push(self.text_codepoints(codec.decode_filesystem(arg)?));
+            }
+            let original = self.alloc(Value::List(original));
+            self.set_attr(sys, "orig_argv", original)?;
+        }
+        Ok(sys)
+    }
+
+    /// Enter the selected module in the startup __main__ namespace via the frozen runpy.
+    pub(super) fn run_module_as_main(&mut self, name: String) -> Result<Id> {
+        let mark = self.heap.temporary_mark();
+        let requested = self.text(&name);
+        stdlib::audit::event(self, "cpython.run_module", &[requested])?;
+        let runpy = self.module("runpy")?;
+        let run = self.lookup_attr(runpy, "_run_module_as_main")?;
+        // sys and runpy now own their initialization results. Keep only the callable
+        // for this invocation before running arbitrary parent-package and target code.
+        self.heap.release_temporaries_since(mark);
+        self.heap.keep(run);
+        let name = self.text(name);
+        let alter_argv = if self.config["path_entry"].as_bool() == Some(true) { FALSE } else { TRUE };
+        self.call(run, vec![name, alter_argv], Vec::new())
+    }
+
+    /// Infer the package from import globals, following the CPython fallback order.
+    fn import_package(&mut self, globals: Option<Id>) -> Result<String> {
+        use crate::objects::exceptions::Kind::{DeprecationWarning, ImportWarning};
+        let missing_name = |ctx: &mut Self| {
+            let key = ctx.text("'__name__' not in globals");
+            ctx.lookup_error("KeyError", key)
+        };
+        let globals = globals.ok_or_else(|| missing_name(self))?;
+        let globals = self
+            .dict_storage(globals)
+            .ok_or_else(|| Error::new("TypeError", "globals must be a dict"))?;
+        let package = self
+            .dict_named_item(globals, "__package__")
+            .filter(|id| *id != NONE);
+        let spec = self
+            .dict_named_item(globals, "__spec__")
+            .filter(|id| *id != NONE);
+        Ok(if let Some(package) = package {
+            let name = self
+                .str_value(package)
+                .map_err(|_| Error::new("TypeError", "package must be a string"))?
+                .to_owned();
+            if let Some(spec) = spec {
+                let parent = self.lookup_attr(spec, "parent")?;
+                let equal = self.binary("==", package, parent)?;
+                if !self.truth(equal)? {
+                    self.emit_builtin_warning(
+                        DeprecationWarning,
+                        "__package__ != __spec__.parent",
+                        1,
+                    )?;
+                }
+            }
+            name
+        } else if let Some(spec) = spec {
+            let parent = self.lookup_attr(spec, "parent")?;
+            self.str_value(parent)
+                .map_err(|_| Error::new("TypeError", "__spec__.parent must be a string"))?
+                .to_owned()
+        } else {
+            self.emit_builtin_warning(ImportWarning, "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__", 1)?;
+            let name = self
+                .dict_named_item(globals, "__name__")
+                .ok_or_else(|| missing_name(self))?;
+            let name = self
+                .str_value(name)
+                .map_err(|_| Error::new("TypeError", "__name__ must be a string"))?;
+            if self.dict_named_item(globals, "__path__").is_some() {
+                name.to_owned()
+            } else {
+                name.rsplit_once('.')
+                    .map_or("", |(parent, _)| parent)
+                    .to_owned()
+            }
+        })
+    }
+
+    /// Resolve the package supplied by the caller of a relative builtin import.
+    pub(super) fn relative_import(
+        &mut self,
+        name: &str,
+        globals: Option<Id>,
+        fromlist: Option<Id>,
+        level: i32,
+    ) -> Result<Id> {
+        let parent = self.import_package(globals)?;
+        if parent.is_empty() {
+            return Err(Error::new(
+                "ImportError",
+                "attempted relative import with no known parent package",
+            ));
+        }
+        let mut base = parent.as_str();
+        for _ in 1..level {
+            base = base
+                .rsplit_once('.')
+                .ok_or_else(|| {
+                    Error::new(
+                        "ImportError",
+                        "attempted relative import beyond top-level package",
+                    )
+                })?
+                .0;
+        }
+        let absolute = if name.is_empty() {
+            base.to_owned()
+        } else {
+            format!("{base}.{name}")
+        };
+        let module = self.module(&absolute)?;
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(module);
+        if let Some(list) = fromlist
+            && self.truth(list)?
+        {
+            self.prepare_fromlist(module, list)?;
+        } else if let Some((first, _)) = name.split_once('.') {
+            let head = format!("{base}.{first}");
+            let key = self.text(&head);
+            return self.registered_module(key)?.ok_or_else(|| {
+                let key = self.text(format!("'{}' not in sys.modules as expected", head));
+                self.lookup_error("KeyError", key)
+            });
+        }
+        Ok(module)
+    }
+
+    /// A nonempty fromlist probes the live package path once before binding any names.
+    pub(super) fn prepare_fromlist(&mut self, module: Id, list: Id) -> Result<Id> {
+        match self.lookup_attr(module, "__path__") {
+            Ok(_) => self.load_fromlist(module, list, false)?,
+            Err(err) if self.is_attribute_error(&err) => {}
+            Err(err) => return Err(err),
+        }
+        Ok(module)
+    }
+
+    /// Import missing children of a package requested by a nonempty fromlist.
+    fn load_fromlist(&mut self, module: Id, list: Id, recursive: bool) -> Result<()> {
+        let iterator = self.iterator(list)?;
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(iterator);
+        while let Some(item) = self.next_item(iterator)? {
+            let name = match self.str_value(item) {
+                Ok(name) => name.to_owned(),
+                Err(_) => {
+                    let owner = if recursive {
+                        let id = self.lookup_attr(module, "__name__")?;
+                        format!("{}.__all__", self.str_value(id)?)
+                    } else {
+                        "``from list''".to_owned()
+                    };
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("Item in {owner} must be str, not {}", self.type_name(item)),
+                    ));
+                }
+            };
+            if name == "*" {
+                if !recursive {
+                    match self.lookup_attr(module, "__all__") {
+                        Ok(_) => {
+                            let names = self.lookup_attr(module, "__all__")?;
+                            self.load_fromlist(module, names, true)?;
+                        }
+                        Err(err) if self.is_attribute_error(&err) => {}
+                        Err(err) => return Err(err),
+                    }
+                }
+                continue;
+            }
+            match self.lookup_named_attr(module, &name, Some(item)) {
+                Ok(_) => continue,
+                Err(err) if self.is_attribute_error(&err) => {}
+                Err(err) => return Err(err),
+            }
+            let id = self.lookup_attr(module, "__name__")?;
+            let child = format!("{}.{name}", self.str_value(id)?);
+            // Missing children are ignored, but a missing dependency inside a child propagates.
+            if let Err(error) = self.find_module(&child) {
+                let fields = error.import.as_ref();
+                if !self.is_builtin_error(&error, "ModuleNotFoundError")
+                    || fields.and_then(|fields| fields.name.as_deref()) != Some(&child)
+                {
+                    return Err(error);
+                }
+                let key = self.text(&child);
+                if self.public_registered_module(key)? == Some(NONE) {
+                    return Err(error);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Bootstrap modules remain available even while ordinary frozen imports are disabled.
     pub(super) fn is_frozen(&self, name: &str) -> bool {
         match name {
@@ -34,7 +253,7 @@ impl Context {
             "stat" => {
                 cfg!(any(target_os = "linux", target_os = "macos")) && self.frozen_override >= 0
             }
-            "__hello__" => self.frozen_override >= 0,
+            "__hello__" | "runpy" => self.frozen_override >= 0,
             _ => false,
         }
     }
@@ -50,6 +269,23 @@ impl Context {
                 "TypeError",
                 format!("_imp.{method}() takes no keyword arguments"),
             ));
+        }
+        if method == "extension_suffixes" {
+            if !args.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "_imp.extension_suffixes() takes no arguments ({} given)",
+                        args.len()
+                    ),
+                ));
+            }
+            let suffix = self.config["archive_suffix"]
+                .as_str()
+                .unwrap_or(".imre.a")
+                .to_owned();
+            let suffix = self.text(suffix);
+            return Ok(self.alloc(Value::List(vec![suffix])));
         }
         let [arg] = args else {
             return Err(Error::new(
@@ -142,10 +378,7 @@ impl Context {
             let entry = choices.iter().find(|m| m.path == stem).map(|m| m.code);
             if entry.is_some() || (disk && stem.is_dir()) {
                 locations.push(stem.clone());
-                namespace.get_or_insert((
-                    stem,
-                    entry.map_or(SourceBody::Filesystem, SourceBody::Compiled),
-                ));
+                namespace.get_or_insert((stem, SourceBody::Namespace));
                 continue;
             }
             // A path below an archive is virtual. Preserve its spelling because the
@@ -160,7 +393,7 @@ impl Context {
             {
                 if loader == NONE {
                     locations.push(origin.clone());
-                    namespace.get_or_insert((origin, SourceBody::Zip(NONE)));
+                    namespace.get_or_insert((origin, SourceBody::Namespace));
                 } else {
                     locations.clear();
                     if origin.ends_with("__init__.py") {
@@ -231,9 +464,49 @@ impl Context {
     }
 
     fn file_spec(&mut self, name: Id, origin: Id, locations: Id, loader: Id) -> Result<Id> {
-        let importlib = self.module("importlib")?;
-        let make = self.lookup_attr(importlib, "_file_spec")?;
+        let make = if self.bootstrap_file_spec != NONE
+            && matches!(
+                self.str_value(name)?,
+                "importlib" | "importlib._bootstrap" | "importlib._bootstrap_external"
+            ) {
+            self.bootstrap_file_spec
+        } else {
+            let importlib = self.module("importlib")?;
+            self.lookup_attr(importlib, "_file_spec")?
+        };
         self.call(make, vec![name, origin, locations, loader], vec![])
+    }
+
+    fn location_list(&mut self, locations: &[PathBuf]) -> Id {
+        let values = locations
+            .iter()
+            .map(|p| self.text(p.to_string_lossy()))
+            .collect();
+        self.alloc(Value::List(values))
+    }
+
+    /// Recheck the search roots supplied by _NamespacePath, ignoring already loaded modules.
+    pub(super) fn namespace_locations(&mut self, name: &str, search: Id) -> Result<Id> {
+        let child = name.rsplit('.').next().unwrap_or(name);
+        let mut locations = Vec::new();
+        let source = self.source_on_path(name, child, search, child == name, &mut locations)?;
+        if matches!(source, Some((_, SourceBody::Namespace))) {
+            Ok(self.location_list(&locations))
+        } else {
+            Ok(NONE)
+        }
+    }
+
+    pub(super) fn namespace_spec(
+        &mut self,
+        name: Id,
+        locations: Id,
+        module: Id,
+        source_globals: Id,
+    ) -> Result<Id> {
+        let importlib = self.module("importlib")?;
+        let make = self.lookup_attr(importlib, "_namespace_spec")?;
+        self.call(make, vec![name, locations, module, source_globals], vec![])
     }
 
     pub(super) fn initialize_source(
@@ -261,9 +534,13 @@ impl Context {
         fullname: &str,
         original: &str,
         for_resource: bool,
+        finder: Option<Id>,
     ) -> Result<Id> {
         let key = self.text(fullname);
-        if let Some(module) = self.registered_module(key)? {
+        let modules = self.public_modules()?;
+        if self.contains(key, modules)? {
+            let modules = self.public_modules()?;
+            let module = self.get_item(modules, key)?;
             if module == NONE {
                 return Ok(NONE);
             }
@@ -274,11 +551,11 @@ impl Context {
                 )),
                 Err(e)
                     if self.is_attribute_error(&e)
-                        && (stdlib::is_module(fullname)
-                            || matches!(
-                                self.heap.get(module),
-                                Value::Module { origin: None, .. }
-                            )) =>
+                        && matches!(
+                            self.heap.get(module),
+                            Value::Module { constructor: None, origin, .. }
+                                if origin.is_none() || stdlib::is_module(fullname)
+                        ) =>
                 {
                     if for_resource {
                         return Ok(NONE);
@@ -300,9 +577,8 @@ impl Context {
         }
         let (child, search, top_level) =
             if let Some((parent_name, child)) = fullname.rsplit_once('.') {
-                let parent = self
-                    .find_module(parent_name)?
-                    .ok_or_else(|| Self::missing_module(parent_name))?;
+                // util.find_spec imports the parent through the ordinary __import__ fast path.
+                let parent = self.module(parent_name)?;
                 let path = match self.lookup_attr(parent, "__path__") {
                     Err(cause) if self.is_attribute_error(&cause) => {
                         let mut error = Error::new(
@@ -325,6 +601,15 @@ impl Context {
             } else {
                 (fullname, self.sys_path, true)
             };
+        if self.import_registry_installed {
+            let name = self.text(fullname);
+            let path = if top_level { NONE } else { search };
+            let args = vec![name, path];
+            return match finder {
+                Some(finder) => self.call(finder, args, vec![]),
+                None => self.meta_call(NONE, "_find_spec", args),
+            };
+        }
         if stdlib::is_module(fullname) || self.is_frozen(fullname) {
             if for_resource {
                 return Ok(NONE);
@@ -340,25 +625,16 @@ impl Context {
         else {
             return Ok(NONE);
         };
-        if locations.contains(&path) {
-            if for_resource {
-                return Ok(NONE);
-            }
-            return Err(Error::new(
-                "NotImplementedError",
-                "find_spec for namespace packages",
-            ));
-        }
         let name = self.text(fullname);
+        if matches!(body, SourceBody::Namespace) {
+            let paths = self.location_list(&locations);
+            return self.namespace_spec(name, paths, NONE, NONE);
+        }
         let origin = self.text(path.to_string_lossy());
         let locations = if locations.is_empty() {
             NONE
         } else {
-            let values = locations
-                .iter()
-                .map(|p| self.text(p.to_string_lossy()))
-                .collect();
-            self.alloc(Value::List(values))
+            self.location_list(&locations)
         };
         self.file_spec(name, origin, locations, body.loader())
     }

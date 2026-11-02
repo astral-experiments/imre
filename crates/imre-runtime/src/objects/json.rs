@@ -19,17 +19,17 @@ use super::records::{RecordBatch, RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
-pub(crate) use binary::decode as decode_json_bytes;
-pub(crate) use readonly::{DecodedJson, JsonNumber, decode_json, json_bom_error};
+pub(crate) use readonly::{DecodedJson, JsonNumber, JsonTokenError, decode_json_tokens_at};
 mod binary;
 mod decoder;
 mod encode;
 
 #[cfg(test)]
 pub(super) use encode::imre_json_dumps;
-pub(crate) use encode::{Indent, write_fragment, write_string};
+pub(crate) use encode::{Indent, write_codepoints, write_fragment, write_string};
 pub(super) mod readonly;
 mod syntax;
+pub(crate) use syntax::string_end;
 mod toml;
 
 const INTEGER: u32 = 1;

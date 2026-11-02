@@ -23,7 +23,21 @@ impl Checker<'_> {
             parameter("tzinfo", Type::None, Some(Expr::none())),
             fold,
         ];
-        let args = self.arguments(call, &params, None)?;
+        let args = self.arguments(call, &params, None).map_err(|error| {
+            let zone = call
+                .arguments
+                .args
+                .get(4)
+                .or_else(|| call.arguments.find_keyword("tzinfo").map(|kw| &kw.value));
+            if zone.is_some_and(|e| {
+                self.expr(e)
+                    .is_ok_and(|v| v.ty == Type::Calendar(ir::CalendarType::Zone))
+            }) {
+                self.object_builtin_error("fixed-offset datetime.time", call)
+            } else {
+                self.packed_calendar_error(call, 2, error)
+            }
+        })?;
         Ok(self.ordered_builtin(Builtin::Timed(Op::Clock), Type::ClockTime, args))
     }
 

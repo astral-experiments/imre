@@ -23,6 +23,23 @@ class Child(Base):
         super().__init__(label=label)
 
 
+class Shadow:
+    value: int
+
+    def __init__(self, super: int) -> None:
+        self.value = super
+
+
+class MappingFixture:
+    reference: dict[str, str]
+    key: str
+
+    def __init__(self, key: str, value: str):
+        self.reference = {}
+        self.key = key
+        self.reference[self.key] = value
+
+
 events: list[str] = []
 print(Child("one", events).label)
 try:
@@ -31,13 +48,5 @@ except AssertionError as error:
     print(str(error))
 for event in events:
     print(event)
-
-
-class Shadow:
-    value: int
-
-    def __init__(self, super: int) -> None:
-        self.value = super
-
-
 print(Shadow(42).value)
+print(MappingFixture("key", "value").reference["key"])

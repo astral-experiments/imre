@@ -3,9 +3,9 @@ import os
 import os.path
 import posix
 import posixpath
-from os import altsep, fspath, pathsep, sep
+from os import altsep, fspath, linesep, pathsep, sep
 from os.path import altsep as path_altsep, pathsep as path_list_sep, sep as path_sep
-from posixpath import normpath
+from posixpath import abspath, ismount, normpath
 
 
 class Path:
@@ -53,6 +53,15 @@ def current():
     ):
         result = normpath(path=Path(value))
         assert result == expected and type(result) is type(expected)
+    assert os.path.splitroot is posixpath.splitroot is posix._path_splitroot_ex
+    for path, expected in (
+        (Text("relative"), ("", "", "relative")),
+        (Text("///a"), ("", "/", "//a")),
+        (Raw(b"//\xff"), (b"", b"//", b"\xff")),
+        ("/\udcff\x00", ("", "/", "\udcff\x00")),
+    ):
+        parts = os.path.splitroot(p=Path(path))
+        assert parts == expected and all(type(item) is type(expected[0]) for item in parts)
     assert os.path.commonprefix is posixpath.commonprefix is genericpath.commonprefix
     for paths, expected in (
         ([], ""), (["café", "cafés"], "café"), ([Path(b"/a"), Path(b"/b")], b"/"),
@@ -70,14 +79,48 @@ def current():
         assert os.path.samefile(f1=__file__, f2=__file__)
         assert os.path.sameopenfile(fp1=fd, fp2=fd)
     missing = __file__ + ".missing"
+    assert ismount is posixpath.ismount is os.path.ismount
+    assert os.path.ismount(path=Path(b"/"))
+    assert not os.path.ismount(__file__)
+    assert not os.path.ismount(missing)
+    mount_link = "imre-boxed-link-to-root"
+    os.symlink("/", mount_link)
+    try:
+        assert not ismount(mount_link)
+        assert ismount(mount_link + "/")
+    finally:
+        os.unlink(mount_link)
     try:
         os.path.getsize(missing)
     except FileNotFoundError as error:
         assert error.filename == missing
     else:
         raise AssertionError("missing file unexpectedly had a size")
+    result = os.stat(__file__)
+    for name, expected in (
+        ("getmtime", result.st_mtime), ("getatime", result.st_atime), ("getctime", result.st_ctime),
+    ):
+        function = getattr(genericpath, name)
+        assert function is getattr(posixpath, name) is getattr(os.path, name)
+        assert function(filename=Path(__file__)) == expected
+        try:
+            function(missing)
+        except FileNotFoundError as error:
+            assert error.filename == missing
+        else:
+            raise AssertionError("missing file unexpectedly had a timestamp")
     assert os.path.exists is posixpath.exists is genericpath.exists
+    assert os.path.lexists is posixpath.lexists is genericpath.lexists
+    assert os.path.lexists(Path(__file__)) and not os.path.lexists(missing)
     assert os.path.isfile is posixpath.isfile is genericpath.isfile
+    assert os.path.isjunction is posixpath.isjunction is genericpath.isjunction
+    assert not os.path.isjunction(Path(missing))
+    try:
+        os.path.isjunction(42)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("isjunction accepted an invalid path")
     assert os.listdir is posix.listdir
     module_dir = os.path.dirname(__file__) or "."
     module_file = os.path.basename(__file__)
@@ -85,9 +128,28 @@ def current():
     assert os.path.realpath(os.fsencode(__file__), strict=os.path.ALLOW_MISSING) == os.fsencode(os.path.realpath(__file__))
     assert module_file in os.listdir(Path(module_dir))
     assert os.fsencode(module_file) in os.listdir(Path(os.fsencode(module_dir)))
+    assert os.path.join(b"root", b"sub", b"") == b"root/sub/"
+    assert os.path.join(b"root", b"before", b"/other", b"child") == b"/other/child"
+    try:
+        os.path.join(b"root", "text")
+    except TypeError as error:
+        assert str(error) == "Can't mix strings and bytes in path components"
+    else:
+        raise AssertionError("join accepted mixed bytes and text")
     assert os.path.join(Path("root"), "dirA") == "root/dirA"
     assert os.path.join("root", Path("/other"), Path("child")) == "/other/child"
     assert os.path.isabs(Path(b"/test"))
+    assert abspath is os.path.abspath is posixpath.abspath
+    assert abspath(path=Path(b"sub/../\xff")) == os.getcwdb().rstrip(b"/") + b"/\xff"
+    assert abspath(Path(os.fsdecode(b"//host/\xff/./name/.."))) == os.fsdecode(b"//host/\xff")
+    assert abspath(Raw(b"///host/../../dir")) == b"/dir"
+
+    class Rooted(Text):
+        def startswith(self, sep):
+            assert sep == "/"
+            return True
+
+    assert abspath(Rooted("a/../relative")) == "relative"
     assert os.path.relpath(Path("/a/./b"), start="/a/c") == "../b"
     assert os.path.relpath(Path(b"/a/\xff"), start=b"/a") == b"\xff"
     try:
@@ -111,6 +173,11 @@ def current():
         os.putenv(key, "native only")
         assert os.getenv(key, missing) == ""
         assert posix.environ[key.encode()] == b""
+        snapshot = os.environ.copy()
+        assert type(snapshot) is dict
+        assert snapshot[key] == ""
+        snapshot[key] = "copy only"
+        assert os.environ[key] == ""
         try:
             os.getenv(key.encode())
         except TypeError as error:
@@ -125,7 +192,20 @@ def current():
     assert sep is os.sep is path_sep is posixpath.sep and sep == "/"
     assert altsep is os.altsep is path_altsep is posixpath.altsep is None
     assert pathsep is os.pathsep is path_list_sep is os.path.pathsep is posixpath.pathsep
+    assert linesep is os.linesep and linesep == "\n"
+    assert not hasattr(posixpath, "linesep")
+    assert os.extsep == os.path.extsep == posixpath.extsep == "."
     assert pathsep == ":"
+    assert os.defpath is posixpath.defpath and os.defpath == "/bin:/usr/bin"
+    assert os.get_exec_path({}) == ["/bin", "/usr/bin"]
+    assert os.get_exec_path({"PATH": ":/bin:"}) == ["", "/bin", ""]
+    assert os.get_exec_path({b"PATH": b"/tools/\xff"}) == [os.fsdecode(b"/tools/\xff")]
+    try:
+        os.get_exec_path({"PATH": "first", b"PATH": b"second"})
+    except ValueError as error:
+        assert str(error) == "env cannot contain 'PATH' and b'PATH' keys"
+    else:
+        raise AssertionError("accepted conflicting PATH keys")
     assert ":λ::some path:".split(pathsep) == ["", "λ", "", "some path", ""]
     assert os.path.splitext is posixpath.splitext and os.path.join is posixpath.join
     assert fspath is os.fspath is posix.fspath
@@ -170,6 +250,103 @@ def current():
         os.fspath = original
     assert calls == ["werkzeug/serving.py"] * 4 + ["serving.py"]
 
+    with open(Path(__file__), "rb", -1, None, None, None) as stream:
+        assert stream.read(6) == b"import"
+    with open(Path(__file__), encoding="utf-8", errors=None, newline=None) as stream:
+        assert stream.readline() == "import genericpath\n"
+    class DescriptorPath:
+        def __index__(self):
+            return fd
+
+        def __fspath__(self):
+            raise AssertionError("open selected the pathname of a valid descriptor")
+
+    fd = os.open(__file__, os.O_RDONLY)
+    try:
+        with open(DescriptorPath(), "rb", closefd=False) as stream:
+            assert stream.fileno() == fd
+            assert stream.read(6) == b"import"
+        assert os.lseek(fd, 0, os.SEEK_SET) == 0
+    finally:
+        os.close(fd)
+    fd = os.open(__file__, os.O_RDONLY)
+    with open(DescriptorPath(), "rb") as stream:
+        assert stream.read(6) == b"import"
+    try:
+        os.fstat(fd)
+    except OSError:
+        pass
+    else:
+        os.close(fd)
+        raise AssertionError("closing a buffered reader left its owned descriptor open")
+
+    path = "imre-boxed-buffer-position"
+    with open(path, "xb") as stream:
+        stream.write(b"abcdefghij")
+    try:
+        for refresh, target, whence, position, next_byte, raw_position in (
+            (False, 6, os.SEEK_SET, 6, b"g", 0),
+            (True, 6, os.SEEK_SET, 6, b"g", 10),
+            (True, 2, os.SEEK_CUR, 0, b"d", 0),
+            (False, 13, os.SEEK_CUR, 4, b"e", 10),
+            (False, 14, os.SEEK_SET, 14, b"", 14),
+        ):
+            with open(os.open(path, os.O_RDONLY), "rb") as stream:
+                assert stream.read(1) == b"a"
+                os.lseek(stream.fileno(), 0, os.SEEK_SET)
+                if refresh:
+                    assert stream.tell() == 0
+                assert stream.seek(target, whence) == position
+                assert stream.read(1) == next_byte
+                assert os.lseek(stream.fileno(), 0, os.SEEK_CUR) == raw_position
+
+        fd = os.open(path, os.O_WRONLY)
+        stream = open(fd, "wb")
+        stream.write(b"XX")
+        stream.raw.close()
+        replacement = os.open(path, os.O_RDWR)
+        try:
+            assert replacement == fd
+            assert stream.close() is None
+            with open(replacement, "rb", 0, closefd=False) as borrowed:
+                assert borrowed.read() == b"abcdefghij"
+        finally:
+            os.close(replacement)
+
+        with open(path, "wb") as stream:
+            stream.write(b"first\r\nsecond\n\rlast")
+        for newline in ("\n", "\r", "\r\n"):
+            with open(Path(path), "r", -1, "utf-8", None, newline) as stream:
+                assert stream.read() == "first\r\nsecond\n\rlast"
+
+        calls = []
+        class FallbackPath(Path):
+            def __index__(self):
+                calls.append("index")
+                if len(calls) == 1:
+                    raise TypeError("use the pathname")
+                return alternate.fileno()
+
+            def __fspath__(self):
+                calls.append("fspath")
+                return self.value
+
+        value = FallbackPath(path)
+        with open(__file__, "rb", buffering=0) as alternate:
+            with open(value, "rt", encoding="utf-8", newline="\n") as stream:
+                assert stream.name is value and stream.read() == "first\r\nsecond\n\rlast"
+            assert calls == ["index", "fspath"]
+            assert alternate.read(6) == b"import"
+    finally:
+        os.unlink(path)
+
+    # Conversion runs before incompatible binary options are rejected.
+    try:
+        open(Raises(), "rb", -1, None, "replace", None)
+    except RuntimeError as exc:
+        assert str(exc) == "method call"
+    else:
+        raise AssertionError("open ignored the failing filesystem protocol")
     assert os.fsdecode(Path(b"caf\xc3\xa9")) == "café"
     assert not os.path.isfile(Path("missing\0file"))
 

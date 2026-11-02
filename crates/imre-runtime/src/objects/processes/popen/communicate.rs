@@ -12,9 +12,46 @@ pub(super) struct Communication {
     observed: [bool; 2],
 }
 
-enum Exchange {
+pub(super) enum Exchange {
     Done([Vec<u8>; 2]),
     Timeout([Option<Vec<u8>>; 2], Option<f64>),
+}
+
+pub(super) enum PipeProgress {
+    Drained([Vec<u8>; 2]),
+    Timeout([Option<Vec<u8>>; 2]),
+    Interrupted,
+}
+
+/// A boxed handler can reenter Popen. Suspend the pipe borrow before calling it
+/// and resume from the saved input offset and output, on the same deadline.
+pub(crate) struct PendingExchange {
+    progress: PipeProgress,
+    start: Instant,
+    timeout: Option<f64>,
+    select: bool,
+}
+
+impl PendingExchange {
+    pub(super) fn drain<E: From<Error>>(
+        self,
+        mut resume: impl FnMut(Option<f64>, bool) -> Result<PipeProgress>,
+        mut check: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<Exchange, E> {
+        let remaining = || self.timeout.map(|t| t - self.start.elapsed().as_secs_f64());
+        let mut progress = self.progress;
+        let streams = loop {
+            match progress {
+                PipeProgress::Drained(streams) => break streams,
+                PipeProgress::Timeout(streams) => return Ok(Exchange::Timeout(streams, None)),
+                PipeProgress::Interrupted => {
+                    check()?;
+                    progress = resume(remaining(), self.select)?;
+                }
+            }
+        };
+        Ok(Exchange::Done(streams))
+    }
 }
 
 /// Decode the rooted input using the stream mode chosen at the call site.
@@ -64,7 +101,7 @@ pub unsafe extern "C" fn imre_run_config(
         2 => Some("check argument not allowed, it will be overridden."),
         3 => Some("stdin and input arguments may not both be used."),
         4 => Some("stdout and stderr arguments may not be used with capture_output."),
-        5 => return Error::new(Kind::SubprocessError, "Cannot disambiguate when both text and universal_newlines are supplied but different. Pass one or the other.").returning(std::ptr::null()),
+        5 => return super::ambiguous_text_mode().returning(std::ptr::null()),
         _ => fail("SystemError", "unknown check_output validation"),
     };
     if let Some(message) = invalid {
@@ -102,7 +139,7 @@ pub unsafe extern "C" fn imre_run_config(
     let result = process.and_then(|mut p| {
         // No caller can have consumed the freshly opened streams. Decode them
         // once after communication so timeouts keep their original raw bytes.
-        let exchange = p.communicate(input, timeout.as_ref(), false);
+        let exchange = p.communicate(input, timeout.as_ref(), false, selector::current());
         let killed = if matches!(exchange, Ok(Exchange::Done(_))) {
             Ok(())
         } else {
@@ -171,28 +208,76 @@ fn copy(bytes: &[u8]) -> Result<Vec<u8>> {
 }
 
 impl Communication {
-    fn timeout(&self) -> Result<Exchange> {
+    fn timeout(&self) -> Result<PipeProgress> {
         let snapshot = |i: usize| self.observed[i].then(|| copy(&self.output[i])).transpose();
-        Ok(Exchange::Timeout([snapshot(0)?, snapshot(1)?], None))
+        Ok(PipeProgress::Timeout([snapshot(0)?, snapshot(1)?]))
     }
 }
 
 impl Popen {
-    fn communicate(
+    pub(super) fn communicate(
         &mut self,
         input: &[u8],
         deadline: Option<&Deadline>,
         text: bool,
+        select: bool,
     ) -> Result<Exchange> {
-        let data = &mut self.communication;
-        if data.started && !input.is_empty() {
+        let pending = self.begin_exchange(input, deadline, text, select)?;
+        let start = pending.start;
+        let timeout = pending.timeout;
+        let exchange = pending.drain(
+            |timeout, select| self.exchange_pipes(&[], timeout, false, select),
+            crate::objects::stdlib::check_interrupt,
+        )?;
+        if matches!(exchange, Exchange::Done(_)) {
+            let budget = timeout.map(|t| t - start.elapsed().as_secs_f64());
+            if self
+                .control
+                .wait_with(
+                    budget.map(Deadline::Float).as_ref(),
+                    crate::objects::stdlib::check_interrupt,
+                )?
+                .is_none()
+            {
+                return Ok(Exchange::Timeout([None, None], budget));
+            }
+        }
+        Ok(exchange)
+    }
+
+    pub(super) fn begin_exchange(
+        &mut self,
+        input: &[u8],
+        deadline: Option<&Deadline>,
+        text: bool,
+        select: bool,
+    ) -> Result<PendingExchange> {
+        if self.communication.started && !input.is_empty() {
             return Err(Error::new(
                 Kind::ValueError,
                 "Cannot send input after starting communication",
             ));
         }
+        let timeout = deadline.map(Deadline::seconds).transpose()?;
+        let start = Instant::now();
+        Ok(PendingExchange {
+            progress: self.exchange_pipes(input, timeout, text, select)?,
+            start,
+            timeout,
+            select,
+        })
+    }
+
+    pub(super) fn exchange_pipes(
+        &mut self,
+        input: &[u8],
+        timeout: Option<f64>,
+        text: bool,
+        select: bool,
+    ) -> Result<PipeProgress> {
+        let data = &mut self.communication;
         let mut out = [Vec::new(), Vec::new()];
-        if deadline.is_none() && !data.started && self.pipes.iter().flatten().count() <= 1 {
+        if timeout.is_none() && !data.started && self.pipes.iter().flatten().count() <= 1 {
             if let Some(stdin) = &self.pipes[0] {
                 file(stdin, |f| f.communicate_stdin(input, true))?;
             } else {
@@ -210,12 +295,10 @@ impl Popen {
                     }
                 }
             }
-            self.wait(None)?;
-            return Ok(Exchange::Done(out));
+            return Ok(PipeProgress::Drained(out));
         }
 
         let start = Instant::now();
-        let timeout = deadline.map(Deadline::seconds).transpose()?;
         if !data.started {
             data.started = true;
             if let Some(stdin) = &self.pipes[0] {
@@ -241,14 +324,13 @@ impl Popen {
                 };
             }
         }
-        let select = selector::current();
         while pollfds.iter().any(|poll| poll.fd >= 0) {
             let remaining = timeout.map(|t| t - start.elapsed().as_secs_f64());
             if remaining.is_some_and(|t| t <= 0.0) {
                 return data.timeout();
             }
             if !selector::wait(select, &mut pollfds, remaining)? {
-                continue;
+                return Ok(PipeProgress::Interrupted);
             }
             if timeout.is_some_and(|t| start.elapsed().as_secs_f64() >= t) {
                 return data.timeout();
@@ -269,7 +351,8 @@ impl Popen {
                     if n < 0 {
                         let error = io::Error::last_os_error();
                         match error.kind() {
-                            io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock => continue,
+                            io::ErrorKind::Interrupted => return Ok(PipeProgress::Interrupted),
+                            io::ErrorKind::WouldBlock => continue,
                             io::ErrorKind::BrokenPipe => true,
                             _ => return Err(errno_error(error)),
                         }
@@ -283,13 +366,11 @@ impl Popen {
                     let n = unsafe { libc::read(poll.fd, bytes.as_mut_ptr().cast(), bytes.len()) };
                     if n < 0 {
                         let error = io::Error::last_os_error();
-                        if matches!(
-                            error.kind(),
-                            io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
-                        ) {
-                            continue;
+                        match error.kind() {
+                            io::ErrorKind::Interrupted => return Ok(PipeProgress::Interrupted),
+                            io::ErrorKind::WouldBlock => continue,
+                            _ => return Err(errno_error(error)),
                         }
-                        return Err(errno_error(error));
                     }
                     data.observed[index - 1] = true;
                     append_output(&mut data.output[index - 1], &bytes[..n as usize])
@@ -303,15 +384,7 @@ impl Popen {
                 }
             }
         }
-        let remaining = timeout.map(|t| t - start.elapsed().as_secs_f64());
-        if self
-            .wait(remaining.map(Deadline::Float).as_ref())?
-            .is_none()
-        {
-            // A timeout raised by wait itself has no captured streams.
-            return Ok(Exchange::Timeout([None, None], remaining));
-        }
-        Ok(Exchange::Done([
+        Ok(PipeProgress::Drained([
             copy(&self.communication.output[0])?,
             copy(&self.communication.output[1])?,
         ]))
@@ -335,7 +408,7 @@ pub unsafe extern "C" fn imre_popen_communicate(
         let timeout = Deadline::from_word(deadline_kind, deadline);
         let bytes = input_bytes(input, text);
         let result = with_process(handle, |p| -> Result<_> {
-            match p.communicate(bytes, timeout.as_ref(), text)? {
+            match p.communicate(bytes, timeout.as_ref(), text, selector::current())? {
                 Exchange::Done([stdout, stderr]) => {
                     let stream = |bytes, index| {
                         completed_stream(bytes, WordKind::new(*(*descriptor).kinds.add(index)))
@@ -385,7 +458,6 @@ fn deadline_capture_drains_both_full_pipes_before_expiry() {
         std::ptr::null(),
         0x11,
         Int::small(-1).unwrap().0,
-        true,
     );
     // SAFETY: argv remains rooted and both configured output pipes belong to the child.
     let mut child = unsafe { spawn(&config, LaunchExtras::default()) }
@@ -401,7 +473,7 @@ fn deadline_capture_drains_both_full_pipes_before_expiry() {
     let mut ready = [0];
     std::fs::File::from(stdout).read_exact(&mut ready).unwrap();
     assert_eq!(ready, [b'!']);
-    let result = child.communicate(&[], Some(&Deadline::Float(1.0)), false);
+    let result = child.communicate(&[], Some(&Deadline::Float(1.0)), false, selector::current());
     assert!(child.signal(|| Ok(libc::SIGKILL)).is_ok());
     assert!(child.close_wait().is_ok());
     let Ok(Exchange::Timeout([Some(stdout), Some(stderr)], None)) = result else {

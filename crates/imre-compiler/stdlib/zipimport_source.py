@@ -1,10 +1,14 @@
 """Source package imports for the native module registry."""
-from _imre_zipimport import contains as _contains
+from _imre_importlib import _zip_path_importers as _path_importers
 
 _ENCODING_NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
 
 
 class zipimporter(_ZipResourceLoader):
+    def invalidate_caches(self):
+        """Invalidate the cached directory of this importer's archive."""
+        _invalidate(self.archive)
+
     def _member(self, fullname):
         stem = self.prefix + fullname.rpartition('.')[2]
         for suffix in ('/__init__.pyc', '/__init__.py', '.pyc', '.py'):
@@ -49,6 +53,10 @@ class zipimporter(_ZipResourceLoader):
                     offset = line.find(marker, offset)
         return compile(text, filename, 'exec')
 
+    def create_module(self, spec):
+        # Use the standard module object allocated by module_from_spec.
+        return None
+
     def exec_module(self, module):
         exec(self.get_code(module.__name__), module.__dict__)
 
@@ -68,12 +76,12 @@ class zipimporter(_ZipResourceLoader):
             return None
         origin, loader = resolved
         if loader is None:
-            raise NotImplementedError('ZIP namespace packages are unsupported')
+            from _frozen_importlib import ModuleSpec
+            spec = ModuleSpec(fullname, None, is_package=True)
+            spec.submodule_search_locations.append(origin)
+            return spec
         locations = [origin.rpartition('/')[0]] if origin.endswith('/__init__.py') else None
         return _file_spec(fullname, origin, locations, loader)
-
-
-_path_importers = {}
 
 
 def _find_at(root, fullname):
@@ -81,5 +89,6 @@ def _find_at(root, fullname):
         try:
             _path_importers[root] = zipimporter(root)
         except ZipImportError:
-            return None
-    return _path_importers[root]._origin(fullname)
+            _path_importers[root] = None
+    finder = _path_importers[root]
+    return None if finder is None else finder._origin(fullname)

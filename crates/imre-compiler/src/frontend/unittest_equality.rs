@@ -4,6 +4,16 @@
 use super::*;
 
 impl Checker<'_> {
+    fn bundled_case_method_owner(&self, class: usize, name: &str) -> Option<usize> {
+        let method = self.classes.methods[class].get(name)?.method?;
+        let declarations = &self.classes.declarations;
+        let origin = declarations.definitions[method.class].method_origins[method.index];
+        let owner = declarations.ids[&origin];
+        (declarations.definitions[owner].name == "TestCase"
+            && self.graph.modules[origin.module].is_bundled("unittest"))
+        .then_some(owner)
+    }
+
     /// Resolve a membership assertion from its container. The ordinary argument
     /// binder still evaluates the receiver, member, container, and message in
     /// source order, including when they are supplied by keyword.
@@ -17,15 +27,10 @@ impl Checker<'_> {
         if !self.unittest_case(class) {
             return Ok(None);
         }
-        if let Some(signature) = self.classes.methods[class].get(name) {
-            let method = signature.method.unwrap();
-            let declarations = &self.classes.declarations;
-            let origin = declarations.definitions[method.class].method_origins[method.index];
-            let owner = &declarations.definitions[declarations.ids[&origin]];
-            let module = &self.graph.modules[origin.module];
-            if owner.name != "TestCase" || !module.bundled || module.name != "unittest" {
-                return Ok(None);
-            }
+        if self.classes.methods[class].contains_key(name)
+            && self.bundled_case_method_owner(class, name).is_none()
+        {
+            return Ok(None);
         }
         let operand = |i: usize, key: &str| {
             call.arguments.args.get(i).or_else(|| {
@@ -148,6 +153,13 @@ impl Checker<'_> {
         } else {
             Type::Int
         };
+        let optional_text = self.types.optional(Type::Str);
+        let right_can_be_optional_text = matches!(ty, Type::None | Type::Str | Type::StrLiteral(_))
+            && right
+                .map(|arg| self.expr(arg))
+                .transpose()?
+                .is_some_and(|arg| arg.ty == optional_text);
+        let mut owner = class;
         let method =
             if matches!(ty, Type::List(_) | Type::ListInt) {
                 if self.classes.methods[class].contains_key("assertListEqual") {
@@ -178,8 +190,23 @@ impl Checker<'_> {
                 "_assertTextOrListEqual"
             } else if self.types.mapping(ty) == Some((Type::Str, Type::Str)) {
                 "assertDictEqual"
+            } else if (ty == optional_text || right_can_be_optional_text)
+                && let Some(base) = self.bundled_case_method_owner(class, "_baseAssertEqual")
+            {
+                owner = base;
+                "_assertOptionalTextEqual"
             } else if matches!(ty, Type::Str | Type::StrLiteral(_)) {
                 "assertMultiLineEqual"
+            } else if matches!(ty, Type::Bytes | Type::BuiltinClass)
+                && let Some(base) = self.bundled_case_method_owner(class, "_baseAssertEqual")
+            {
+                // Only specialize the bundled default. The private helper isn't a user hook.
+                owner = base;
+                if ty == Type::Bytes {
+                    "_assertBytesEqual"
+                } else {
+                    "_assertClassEqual"
+                }
             } else if matches!(
                 ty,
                 Type::Calendar(ir::CalendarType::Date | ir::CalendarType::DateTime)
@@ -190,7 +217,7 @@ impl Checker<'_> {
             } else {
                 "_baseAssertEqual"
             };
-        let mut signature = self.classes.methods[class]
+        let mut signature = self.classes.methods[owner]
             .get(method)
             .cloned()
             .ok_or_else(|| {
@@ -202,7 +229,8 @@ impl Checker<'_> {
             })?;
         signature.params[1].name = a.into();
         signature.params[2].name = b.into();
-        self.source_call(call, &signature, Some(receiver.clone()), 1)
+        let receiver = self.coerce(receiver.clone(), Type::Class(owner), call)?;
+        self.source_call(call, &signature, Some(receiver), 1)
             .map(Some)
     }
 }

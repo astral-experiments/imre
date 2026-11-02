@@ -1,4 +1,6 @@
 //! Convert the Rust parser's tree into mutable Python AST nodes.
+use std::collections::{BTreeMap, HashMap};
+
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
@@ -8,9 +10,12 @@ use crate::dynamic::value::{ELLIPSIS, FALSE, TRUE};
 
 struct Parser<'a> {
     ctx: &'a mut Context,
+    source: &'a str,
     literal: bool,
     lines: Vec<usize>,
     function_starts: Vec<TextSize>,
+    template_expressions: HashMap<TextSize, String>,
+    replacements: BTreeMap<TextSize, Vec<u32>>,
     load: Id,
     store: Id,
 }
@@ -217,6 +222,141 @@ impl Parser<'_> {
         }
     }
 
+    fn prepare_strings<'a>(
+        &mut self,
+        source: &str,
+        tokens: &ast::token::Tokens,
+        syntax: impl Into<ast::ModRef<'a>>,
+    ) {
+        self.replacements = crate::dynamic::source_code::string_replacements(source, tokens);
+        if !self.literal {
+            self.template_expressions =
+                imre_ast::strings::template_expressions(source, tokens, syntax);
+        }
+    }
+
+    /// Ruff decodes both isolated surrogates and U+FFFD to its replacement character.
+    fn append_template_text(
+        &self,
+        points: &mut Vec<u32>,
+        literal: &ast::InterpolatedStringLiteralElement,
+    ) -> Result<()> {
+        let mut original = self
+            .replacements
+            .range(literal.start()..literal.end())
+            .flat_map(|(_, points)| points.iter().copied());
+        let mismatch = || Error::new("NotImplementedError", "ast.parse: t-string escape spelling");
+        points
+            .try_reserve(literal.value.chars().count())
+            .map_err(|_| crate::Error::allocation())?;
+        for ch in literal.value.chars() {
+            points.push(if ch == char::REPLACEMENT_CHARACTER {
+                original.next().ok_or_else(mismatch)?
+            } else {
+                u32::from(ch)
+            });
+        }
+        if original.next().is_some() {
+            return Err(mismatch());
+        }
+        Ok(())
+    }
+
+    fn template_values(&mut self, template: &mut ast::ExprTString) -> Result<Id> {
+        let mut values = Vec::new();
+        let mut text = Vec::new();
+        let mut text_range: Option<TextRange> = None;
+        for part in template.value.iter_mut() {
+            let raw = part.flags.prefix().is_raw();
+            for element in &mut part.elements {
+                match element {
+                    ast::InterpolatedStringElement::Literal(lit) => {
+                        if !lit.value.is_empty() {
+                            let source = &self.source[lit.range()];
+                            // CPython may discard an empty middle token after a brace boundary.
+                            // Ruff merges that token into the range of its preceding literal.
+                            let prefix = source.trim_end_matches("\\\n");
+                            if !raw && prefix.len() != source.len() && prefix.ends_with(['{', '}'])
+                            {
+                                return Err(Error::new(
+                                    "NotImplementedError",
+                                    "ast.parse: continued t-string brace literal",
+                                ));
+                            }
+                            self.append_template_text(&mut text, lit)?;
+                            text_range =
+                                Some(text_range.map_or(lit.range(), |r| r.cover(lit.range())));
+                        }
+                    }
+                    ast::InterpolatedStringElement::Interpolation(field) => {
+                        if let Some(range) = text_range.take() {
+                            let value = self.ctx.text_codepoints(std::mem::take(&mut text));
+                            values.push(self.node("Constant", &[value, NONE], range));
+                        }
+                        values.push(self.template_field(field, raw)?);
+                    }
+                }
+            }
+        }
+        if let Some(range) = text_range {
+            let value = self.ctx.text_codepoints(text);
+            values.push(self.node("Constant", &[value, NONE], range));
+        }
+        Ok(self.list(values))
+    }
+
+    fn template_field(&mut self, field: &mut ast::InterpolatedElement, raw: bool) -> Result<Id> {
+        let lit = imre_ast::strings::template_format_spec(field)
+            .map_err(|why| Error::new("NotImplementedError", why))?;
+        let format_spec = if let Some(spec) = &field.format_spec {
+            // CPython can fold multiple middle tokens into a Constant here.
+            if !raw && self.source[spec.range()].contains(r"\N{") {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "ast.parse: named Unicode escape in t-string format spec",
+                ));
+            }
+            let mut parts = Vec::new();
+            if let Some(lit) = lit.filter(|lit| !lit.value.is_empty()) {
+                let mut points = Vec::new();
+                self.append_template_text(&mut points, lit)?;
+                let value = self.ctx.text_codepoints(points);
+                parts.push(self.node("Constant", &[value, NONE], lit.range()));
+            }
+            let parts = self.list(parts);
+            // CPython includes the colon, but excludes the field's closing brace.
+            let range = TextRange::new(
+                spec.start() - TextSize::new(1),
+                field.end() - TextSize::new(1),
+            );
+            self.node("JoinedStr", &[parts], range)
+        } else {
+            NONE
+        };
+        let spelling = self
+            .template_expressions
+            .remove(&field.start())
+            .ok_or_else(|| {
+                Error::new(
+                    "NotImplementedError",
+                    "ast.parse: commented t-string expression",
+                )
+            })?;
+        let spelling = self.ctx.text(spelling);
+        let conversion = self.ctx.int(i64::from(field.conversion as i8));
+        // Take the expression so long operator chains follow the existing iterative path.
+        let placeholder = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: field.expression.range(),
+            node_index: ast::AtomicNodeIndex::NONE,
+        });
+        let expression = self.expr(std::mem::replace(&mut *field.expression, placeholder))?;
+        Ok(self.node(
+            "Interpolation",
+            &[expression, spelling, conversion, format_spec],
+            field.range(),
+        ))
+    }
+
     fn expr(&mut self, e: ast::Expr) -> Result<Id> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.expr_inner(e))
     }
@@ -258,7 +398,23 @@ impl Parser<'_> {
                 "Name",
                 vec![self.ctx.text(v.id.as_str()), self.context(v.ctx)?],
             ),
-            Expr::StringLiteral(v) => ("Constant", vec![self.ctx.text(v.value.to_string()), NONE]),
+            Expr::TString(mut v) if !self.literal => {
+                ("TemplateStr", vec![self.template_values(&mut v)?])
+            }
+            Expr::StringLiteral(v) => {
+                let text = v.value.to_str();
+                let points = crate::dynamic::source_code::original_points(
+                    text,
+                    self.replacements
+                        .range(v.start()..v.end())
+                        .flat_map(|(_, points)| points.iter().copied()),
+                )?;
+                let value = match points {
+                    Some(points) => self.ctx.text_codepoints(points),
+                    None => self.ctx.text(text),
+                };
+                ("Constant", vec![value, NONE])
+            }
             Expr::BytesLiteral(v) => (
                 "Constant",
                 vec![
@@ -297,6 +453,18 @@ impl Parser<'_> {
                     values.push(self.expr(item.value)?);
                 }
                 ("Dict", vec![self.list(keys), self.list(values)])
+            }
+            // literal_eval rejects the outer comparison regardless of its operands.
+            Expr::Compare(v) if !self.literal => {
+                let mut operands = v.operands.into_iter();
+                let left = self.expr(operands.next().expect("comparison has a left operand"))?;
+                let ops = v
+                    .ops
+                    .iter()
+                    .map(|op| self.ctx.builtins[&format!("ast._{op:?}")])
+                    .collect();
+                let comparators = self.exprs(operands)?;
+                ("Compare", vec![left, self.list(ops), comparators])
             }
             Expr::If(v) => (
                 "IfExp",
@@ -389,19 +557,27 @@ pub(super) fn parse_source(
     mode: &str,
     literal: bool,
 ) -> Result<Id> {
-    let bytes = source.as_bytes();
-    let lines = crate::dynamic::source_code::line_starts(bytes.iter().enumerate().filter_map(
-        |(i, &byte)| {
-            (byte == b'\n' || (byte == b'\r' && bytes.get(i + 1) != Some(&b'\n'))).then_some(i + 1)
-        },
-    ))?;
+    // Python normalizes physical newlines before decoding literals and computing AST positions.
+    let normalized;
+    let source = if source.contains('\r') {
+        normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+        &normalized
+    } else {
+        source
+    };
+    let lines = crate::dynamic::source_code::line_starts(
+        source.match_indices('\n').map(|(offset, _)| offset + 1),
+    )?;
     let load = ctx.builtins["ast._Load"];
     let store = ctx.builtins["ast._Store"];
     let mut parser = Parser {
         ctx,
+        source,
         literal,
         lines,
         function_starts: Vec::new(),
+        template_expressions: HashMap::new(),
+        replacements: BTreeMap::new(),
         load,
         store,
     };
@@ -414,7 +590,7 @@ pub(super) fn parse_source(
     match mode {
         "exec" => {
             let body = ruff_python_parser::parse_module(source).map_err(syntax)?;
-            crate::dynamic::source_code::check_runtime_strings(source, body.tokens())?;
+            parser.prepare_strings(source, body.tokens(), body.syntax());
             parser.function_starts = body
                 .tokens()
                 .iter()
@@ -439,7 +615,7 @@ pub(super) fn parse_source(
                     syntax(err)
                 }
             })?;
-            crate::dynamic::source_code::check_runtime_strings(source, expr.tokens())?;
+            parser.prepare_strings(source, expr.tokens(), expr.syntax());
             let body = parser.expr(*expr.into_syntax().body)?;
             Ok(parsed_instance(parser.ctx, "Expression", &[body], None))
         }

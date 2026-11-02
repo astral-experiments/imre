@@ -51,7 +51,9 @@ impl Checker<'_> {
         }
         for (index, name, arg) in arguments {
             let value = match index {
-                Some(0) => self.expr_expected(arg, dict)?,
+                Some(0) => self.expr_expected_if(arg, dict, |_, ty| {
+                    matches!(ty, Type::Str | Type::StrLiteral(_))
+                })?,
                 Some(1) if matches!(arg, ast::Expr::List(_) | ast::Expr::Tuple(_)) => {
                     let items = match arg {
                         ast::Expr::List(list) => &list.elts,
@@ -114,6 +116,9 @@ impl Checker<'_> {
         }
         let target =
             slots[0].ok_or_else(|| error(self.source, call, "patch.dict requires a mapping"))?;
+        if self.locals[target] != dict {
+            return Err(self.object_runtime_export("unittest.mock.patch.dict", call));
+        }
         let values = if let Some(slot) = slots[1] {
             self.local(slot)
         } else {

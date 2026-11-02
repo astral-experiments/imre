@@ -2,6 +2,16 @@
 
 import json
 
+for cls, bases, mro in (
+    (object, (), (object,)),
+    (dict, (object,), (dict, object)),
+    (bool, (int,), (bool, int, object)),
+    (KeyError, (LookupError,), (KeyError, LookupError, Exception, BaseException, object)),
+):
+    assert cls.__bases__ == bases and cls.__mro__ == mro
+    assert cls.__bases__ is cls.__bases__ and cls.__mro__ is cls.__mro__
+
+
 class Plain:
     declaring_module = __module__
 
@@ -117,7 +127,32 @@ def class_patterns():
             raise AssertionError("missed the declared field")
 
 
+def ordinary_slot_members():
+    class Base:
+        __slots__ = ("field", "__weakref__")
+
+    class Child(Base):
+        __slots__ = ("field", "__dict__")
+
+    obj = Child()
+    root = Base.__dict__["field"]
+    child = Child.__dict__["field"]
+    root.__set__(obj, 1)
+    child.__set__(obj, 2)
+    obj.__dict__["field"] = 3
+    assert obj.field == 2 and root.__get__(obj, Child) == 1
+    del obj.field
+    try:
+        obj.field
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("uninitialized slot fell through to instance dictionary")
+    assert obj.__dict__["field"] == 3 and root.__get__(obj, Child) == 1
+
+
 def current():
+    ordinary_slot_members()
     class_patterns()
 
     class Journal:

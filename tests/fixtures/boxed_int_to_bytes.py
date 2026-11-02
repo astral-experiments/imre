@@ -9,6 +9,17 @@ def current():
     assert [x.bit_length() for x in (0, True, -8, 1 << 400)] == [0, 1, 4, 401]
     assert int.bit_length(Number(-9)) == 4 and Number(-9).bit_length() == 42
 
+    for literal in (bytes, bytearray):
+        assert int(literal(b"  -0x_FF\t"), base=0) == -255
+        assert int(literal(b"+42")) == 42
+        for invalid in (b"1\xff", b"12\x003"):
+            try:
+                int(literal(invalid), base=10)
+            except ValueError as error:
+                assert str(error) == f"invalid literal for int() with base 10: {invalid!r}"
+            else:
+                raise AssertionError("invalid bytes accepted as an integer")
+
     assert bytes(divmod(65535, 256)) == b"\xff\xff"
     for value in (1 << 65, -(1 << 65)):
         try:

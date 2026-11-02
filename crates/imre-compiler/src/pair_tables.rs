@@ -347,7 +347,7 @@ impl Rewrite<'_> {
                     let direct = local(&source).is_some_and(|slot| {
                         [&index, &*x, &*y]
                             .into_iter()
-                            .all(|arg| ir::expression_preserves_local(arg, slot, self.locals.len()))
+                            .all(|arg| ir::expression_preserves_local(arg, slot))
                     });
                     let temp = (!direct).then(|| self.temp(self.table));
                     let table = temp.map_or_else(|| source.clone(), |s| Expr::local(s, self.table));

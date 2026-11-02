@@ -378,6 +378,9 @@ impl Checker<'_> {
                 op == ast::CmpOp::IsNot,
             ));
         }
+        if self.types.is_url_split_result(left.ty) || self.types.is_url_split_result(right.ty) {
+            return Err(self.scoped_builtin_error("urllib.parse.urlsplit result identity", node));
+        }
         let operands = [&left, &right];
         let tuple = |e: &Expr| {
             matches!(e.ty, Type::Tuple(_))
@@ -425,11 +428,23 @@ impl Checker<'_> {
                 same
             });
         }
+        let retained_owner = |ty| {
+            matches!(
+                ty,
+                Type::Str
+                    | Type::StrLiteral(_)
+                    | Type::Bytes
+                    | Type::ListInt
+                    | Type::List(_)
+                    | Type::BytesIO
+                    | Type::StringIO
+            )
+        };
         let identity = match (left.ty, right.ty) {
-            (Type::ObjectValue, Type::ListInt | Type::List(_) | Type::BytesIO | Type::StringIO) => {
+            (Type::ObjectValue, ty) if retained_owner(ty) => {
                 Some(Builtin::ExceptionFieldIdentity { reversed: false })
             }
-            (Type::ListInt | Type::List(_) | Type::BytesIO | Type::StringIO, Type::ObjectValue) => {
+            (ty, Type::ObjectValue) if retained_owner(ty) => {
                 Some(Builtin::ExceptionFieldIdentity { reversed: true })
             }
             (Type::ObjectValue, Type::Class(class)) if self.boxed_dataclass(class) => {
@@ -757,6 +772,7 @@ impl Checker<'_> {
             || types == [Type::PathInfo; 2]
             || types == [Type::CodecInfo; 2]
             || types == [Type::JsonDecoder; 2]
+            || types == [Type::JsonEncoder; 2]
             || types == [Type::Poll; 2]
             || types == [Type::Socket; 2]
             || types == [Type::ProcessSelectorClass; 2]

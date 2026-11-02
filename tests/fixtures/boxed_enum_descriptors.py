@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, IntEnum, IntFlag
 
 class Descriptor:
     def __get__(self, obj, owner):
@@ -53,3 +53,27 @@ def current():
             entry = Interrupted()
     except ValueError as error:
         print(error.args)
+
+    # Integer enums inherit int's numeric string slot independently of their repr.
+    class Status(IntEnum):
+        OK = 1
+        def __repr__(self):
+            return "status"
+
+    class Bits(IntFlag):
+        READ = 1
+        WRITE = 2
+        def __repr__(self):
+            return "bits"
+
+    assert IntEnum.__str__ is IntFlag.__str__ is int.__repr__
+    assert (repr(Status.OK), str(Status.OK)) == ("status", "1")
+    assert (repr(Bits(3)), str(Bits(3))) == ("bits", "3")
+
+    Status.__str__ = lambda self: self.name
+    assert str(Status.OK) == "OK" and repr(Status.OK) == "status"
+
+    # RegexFlag explicitly chooses object's delegation to its own repr.
+    import re
+    assert re.RegexFlag.__str__ is object.__str__
+    assert str(re.RegexFlag(2)) == repr(re.RegexFlag(2))

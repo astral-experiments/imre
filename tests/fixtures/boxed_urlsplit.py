@@ -1,9 +1,38 @@
 import urllib
 from urllib import parse
-from urllib.parse import SplitResult, SplitResultBytes, unquote, urlsplit, urlunsplit
+from urllib.parse import SplitResult, SplitResultBytes, unquote, unquote_plus, urlsplit, urlunsplit
 
 
 def current():
+    urlsplit.cache_clear()
+    result = urlsplit("https://example.org/a")
+    assert urlsplit("https://example.org/a") is result
+    urlsplit("https://example.org/a", "", True)
+    urlsplit("https://example.org/a", "", 1)
+    assert tuple(urlsplit.cache_info()) == (1, 3, 128, 3)
+    assert urlsplit.__wrapped__("https://example.org/a") is not result
+    assert repr(urlsplit) == f"<functools._lru_cache_wrapper object at {id(urlsplit):#x}>"
+    assert repr(parse.urlparse) == f"<function urlparse at {id(parse.urlparse):#x}>"
+    urlsplit.cache_clear()
+    assert urlsplit("https://example.org/a") is not result
+
+    parse.clear_cache()
+    parse.quote_from_bytes(b'!/:', safe=b'/')
+    getter = parse._byte_quoter_factory(b'/')
+    assert getter(ord('!')) == '%21' and getter(ord('/')) == '/'
+    assert getter.__self__[ord(':')] == '%3A'
+    assert parse._byte_quoter_factory.cache_info().hits == 1
+    assert parse.urlencode.__defaults__[-1] is parse.quote_plus
+    assert set(parse.__all__) <= set(dir(parse))
+    original_quote = parse.quote
+    del parse.quote
+    try:
+        assert 'quote' not in dir(parse) and not hasattr(parse, 'quote')
+    finally:
+        parse.quote = original_quote
+    parse.clear_cache()
+    assert parse._byte_quoter_factory.cache_info().currsize == 0
+
     values = ["first", "old"]
     def change_next(value, safe, encoding=None, errors=None):
         if value == "first":
@@ -16,6 +45,78 @@ def current():
         result_type = parse.ParseResultBytes if isinstance(url, bytes) else parse.ParseResult
         print(type(parsed) is result_type, isinstance(parsed, result_type), tuple(parsed), parsed.params)
         print(parsed.geturl(), parse.urlunparse(parsed))
+    for parser, text_class, byte_class in (
+        (parse.urlsplit, SplitResult, SplitResultBytes),
+        (parse.urlparse, parse.ParseResult, parse.ParseResultBytes),
+    ):
+        text = parser('http://USER:pw@Example:80/Málaga;p?q#f')
+        binary = text.encode('utf-8')
+        assert type(text) is text_class and type(binary) is byte_class
+        assert binary.decode('utf-8') == text
+        assert binary.hostname == b'example' and binary.port == 80
+        assert binary.decode('utf-8').geturl() == text.geturl()
+        assert type(parser(b'https://example.test/')) is byte_class
+
+    class CustomSplit(str):
+        def lstrip(self, chars):
+            return self
+        def replace(self, old, new):
+            return self
+        def split(self, sep, maxsplit):
+            return ('changed?', 'override')
+    assert parse.urldefrag(CustomSplit('path#frag')).geturl() == 'changed?#override'
+
+    assert parse.unwrap(' < URL:https://example.test/a?b#c > ') == 'https://example.test/a?b#c'
+    assert parse.unwrap('url:path') == 'url:path'
+
+    from importlib import import_module
+    module = import_module('.'.join(('urllib', 'parse')))
+    original_plus = module.unquote_plus
+    original_bytes = module.unquote_to_bytes
+
+    def first_name(s, *, encoding, errors):
+        assert (s, encoding, errors) == ('k', 'ascii', 'strict')
+        module.unquote_plus = lambda value, **options: value + '!'
+        return s.upper()
+
+    class Buffer(bytes):
+        def __bytes__(self):
+            raise AssertionError('query parsing must read the buffer')
+
+    assert module.unquote_to_bytes(Buffer(b'%41+')) == b'A+'
+    assert module.parse_qsl(memoryview(b'x=%ff')) == [(b'x', b'\xff')]
+
+    class Limited(str):
+        def split(self, sep):
+            raise AssertionError('field limit must be checked before splitting')
+
+    try:
+        module.unquote_plus = first_name
+        module.unquote_to_bytes = lambda s: s
+        try:
+            module.parse_qsl(Limited('a=b&c=d'), max_num_fields=1)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('field limit not enforced')
+        assert module.parse_qs('&&ignored&blank=&k=v', encoding='ascii', errors='strict') == {'K': ['v!']}
+        assert module.parse_qsl(Buffer(b'ignored&+k=%FF+')) == [(b' k', b'%FF ')]
+    finally:
+        module.unquote_plus = original_plus
+        module.unquote_to_bytes = original_bytes
+
+    class Redirect(str):
+        def lstrip(self, chars):
+            return 'ALT:path?#changed'
+
+    assert parse.urldefrag(Redirect('other:path#old')).geturl() == 'alt:path?#changed'
+    regular = Redirect('other:path')
+    assert parse.urldefrag(regular).url is regular
+    for url in ("doc?#", "doc?#part", b"doc?#", b"doc?#part"):
+        result = parse.urldefrag(url)
+        result_type = parse.DefragResultBytes if isinstance(url, bytes) else parse.DefragResult
+        print(type(result) is result_type, isinstance(result, tuple), result._fields)
+        print(tuple(result), result.url, result.fragment, result.geturl())
     try:
         print(parse.urlparse("http://example:oracle").port)
     except ValueError as error:
@@ -56,6 +157,7 @@ def current():
     print(urlsplit(url=" /a\tb#f", scheme="http", allow_fragments=False))
     print(unquote(string="%FF+caf%C3%A9"), unquote(b"%FF", encoding="latin-1"))
     print(unquote("%", errors="werkzeug.url_quote"), unquote("untouched", encoding=None))
+    print(unquote_plus("x+%2B%FF", encoding="latin-1"), parse.unquote_plus("a+b%FF", errors="ignore"))
     parts = urlsplit("https://example:bad/path")
     print(parts.path, parts.hostname)
     try:
@@ -75,6 +177,15 @@ def current():
     from urllib.parse import quote, quote_from_bytes, quote_plus, urlencode
 
     print(quote("Málaga <&> 東京", safe="!$&'()*+,/:;=@"), quote("/", safe="%!$&'()*+,/:=@"))
+    undecodable = chr(0xdcff)
+    assert quote_plus(undecodable, errors="surrogateescape") == "%FF"
+    assert quote_plus(" +" + undecodable, safe="+" + undecodable, errors="surrogateescape") == "++%FF"
+    try:
+        quote_plus(" " + undecodable)
+    except UnicodeEncodeError as error:
+        assert (error.start, error.end) == (1, 2)
+    else:
+        raise AssertionError("strict quoting accepted a surrogate")
     print(quote_from_bytes(bytearray(b"/%\xff")), quote_plus("a b+c"))
     pairs = [("k", ["first", "second"])]
     def detach(value, *options):

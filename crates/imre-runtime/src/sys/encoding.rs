@@ -4,10 +4,10 @@ use std::borrow::Cow;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
-use std::sync::OnceLock;
+use std::sync::{Mutex, Once, OnceLock};
 
 struct Locale {
-    ctype_name: OsString,
+    coerced_ctype: Option<OsString>,
     codeset: String,
     utf8_mode: bool,
 }
@@ -40,11 +40,12 @@ impl Settings {
 }
 
 /// Explicit `locale` asks for the locale even when UTF-8 mode overrides the file default.
-pub(crate) fn file_encoding(name: Option<&str>) -> &str {
+pub(crate) fn file_encoding(name: Option<&str>) -> Cow<'_, str> {
     match name {
-        Some("locale") => &settings(false, None).locale.codeset,
-        None => settings(false, None).locale.default_text_encoding(),
-        Some(name) => name,
+        Some("locale") => with_process_locale(current_codeset).into(),
+        Some(name) => name.into(),
+        None if settings(false, None).locale.utf8_mode => "utf-8".into(),
+        None => with_process_locale(current_codeset).into(),
     }
 }
 
@@ -106,6 +107,24 @@ pub(super) fn settings(isolated: bool, utf8: Option<bool>) -> &'static Settings 
     })
 }
 
+/// Publish locale coercion only in native main, before the program starts workers.
+pub(super) fn initialize(isolated: bool, utf8: Option<bool>) {
+    static START: Once = Once::new();
+    let settings = settings(isolated, utf8);
+    START.call_once(|| {
+        if let Some(name) = &settings.locale.coerced_ctype {
+            // SAFETY: both interpreter entry points initialize before running user code
+            // or starting threads. Do not mutate the environment from lazy settings reads.
+            unsafe { std::env::set_var("LC_CTYPE", name) };
+            with_process_locale(|| {
+                // SAFETY: the locale lock serializes this startup update, and the
+                // static empty C string selects the environment for all categories.
+                unsafe { libc::setlocale(libc::LC_ALL, c"".as_ptr()) };
+            });
+        }
+    });
+}
+
 fn lookup(name: &str) -> Codec {
     Codec::lookup(name).unwrap_or_else(|_| fatal(&format!("LookupError: unknown encoding: {name}")))
 }
@@ -133,8 +152,9 @@ fn default_encoding(isolated: bool, utf8: Option<bool>) -> (Locale, &'static str
             .into_iter()
             .find_map(|name| locale_codeset(name).map(|codeset| (OsString::from(name), codeset)))
     });
+    let coerced = coerced.flatten();
+    let coerced_ctype = coerced.as_ref().map(|(name, _)| name.clone());
     let (ctype_name, codeset) = coerced
-        .flatten()
         .or_else(|| charset.map(|codeset| (locale.clone(), codeset)))
         .unwrap_or_else(|| {
             (
@@ -142,6 +162,14 @@ fn default_encoding(isolated: bool, utf8: Option<bool>) -> (Locale, &'static str
                 locale_codeset("C").unwrap_or_else(|| "utf-8".to_owned()),
             )
         });
+    // Python starts in the environment's character locale. Other categories
+    // retain the C library defaults until the program changes them.
+    if let Ok(name) = CString::new(ctype_name.as_bytes()) {
+        locked_locale(|| {
+            // SAFETY: the name was accepted by newlocale; locale changes hold the lock.
+            unsafe { libc::setlocale(libc::LC_CTYPE, name.as_ptr()) };
+        });
+    }
     let errors =
         if utf8_mode || legacy || matches!(locale.to_str(), Some("C.UTF-8" | "C.utf8" | "UTF-8")) {
             "surrogateescape"
@@ -150,7 +178,7 @@ fn default_encoding(isolated: bool, utf8: Option<bool>) -> (Locale, &'static str
         };
     (
         Locale {
-            ctype_name,
+            coerced_ctype,
             codeset,
             utf8_mode,
         },
@@ -177,9 +205,121 @@ fn locale_codeset(name: impl AsRef<OsStr>) -> Option<String> {
     .flatten()
 }
 
-/// Use the character locale selected at startup, independent of later environment changes.
-pub(crate) fn with_startup_ctype<T>(op: impl FnOnce() -> T) -> Option<T> {
-    with_ctype_locale(&settings(false, None).locale.ctype_name, op)
+fn locked_locale<T>(operation: impl FnOnce() -> T) -> T {
+    static LOCK: Mutex<()> = Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    operation()
+}
+
+/// Serialize process-locale queries and consumers with locale changes.
+pub(crate) fn with_process_locale<T>(operation: impl FnOnce() -> T) -> T {
+    settings(false, None);
+    locked_locale(operation)
+}
+
+fn current_codeset() -> String {
+    // SAFETY: the caller holds the process-locale lock while copying libc's storage.
+    let name = unsafe { libc::nl_langinfo(libc::CODESET) };
+    if name.is_null() {
+        return "UTF-8".to_owned();
+    }
+    // SAFETY: the non-null NUL-terminated encoding name remains valid under the lock.
+    let name = unsafe { CStr::from_ptr(name) };
+    if name.to_bytes().is_empty() {
+        "UTF-8".to_owned()
+    } else {
+        name.to_string_lossy().into_owned()
+    }
+}
+
+/// Consume libc's errno message while the active locale and message storage are stable.
+pub(crate) fn with_errno_message<T>(
+    code: i32,
+    consume: impl FnOnce(&CStr) -> crate::Result<T>,
+) -> crate::Result<T> {
+    with_process_locale(|| {
+        // SAFETY: strerror accepts any C int and returns a borrowed, terminated message or null.
+        let message = unsafe { libc::strerror(code) };
+        if message.is_null() {
+            return Err(crate::Error::new(
+                crate::Kind::ValueError,
+                "strerror() argument out of range",
+            ));
+        }
+        // SAFETY: consume borrows the message only for the duration of this locked call.
+        consume(unsafe { CStr::from_ptr(message) })
+    })
+}
+
+/// Decode the errno message using the active locale and CPython's surrogateescape policy.
+pub(crate) fn strerror(code: i32) -> crate::Result<Vec<u32>> {
+    with_errno_message(code, |message| decode_locale_points(message, true))
+}
+
+/// Decode a C string using the active character locale, while holding the locale lock.
+fn decode_locale_points(value: &CStr, surrogateescape: bool) -> crate::Result<Vec<u32>> {
+    unsafe extern "C" {
+        fn imre_decode_locale_name(
+            name: *const libc::c_char,
+            length: usize,
+            points: *mut u32,
+            count: *mut usize,
+            surrogateescape: libc::c_int,
+        ) -> usize;
+    }
+    let bytes = value.to_bytes();
+    let mut points = vec![0; bytes.len()];
+    let mut count = 0;
+    // SAFETY: name is NUL-terminated; each decoded scalar uses at least one input
+    // byte. The C helper owns its mbstate_t and validates scalars under the locale lock.
+    let start = unsafe {
+        imre_decode_locale_name(
+            value.as_ptr(),
+            bytes.len(),
+            points.as_mut_ptr(),
+            &mut count,
+            i32::from(surrogateescape),
+        )
+    };
+    if start == bytes.len() {
+        points.truncate(count);
+        return Ok(points);
+    }
+    let byte = bytes[start];
+    Err(crate::Error::unicode_decode(
+        "locale",
+        crate::BytesOwner::new(bytes.to_vec()),
+        start..start + 1,
+        "decoding error",
+        format!(
+            "'locale' codec can't decode byte 0x{byte:02x} in position {start}: decoding error"
+        ),
+    ))
+}
+
+fn decode_locale(value: &CStr) -> crate::Result<String> {
+    Ok(decode_locale_points(value, false)?
+        .into_iter()
+        .map(|point| char::from_u32(point).expect("strict locale decoder emits scalar values"))
+        .collect())
+}
+
+/// Copy and decode the selected category before another change can invalidate its name.
+pub(crate) fn set_locale(
+    category: libc::c_int,
+    name: Option<&CStr>,
+) -> Option<crate::Result<String>> {
+    with_process_locale(|| {
+        // SAFETY: a null name queries the category, otherwise the CString is live.
+        let value =
+            unsafe { libc::setlocale(category, name.map_or(std::ptr::null(), CStr::as_ptr)) };
+        if value.is_null() {
+            return None;
+        }
+        // SAFETY: a successful setlocale returns a NUL-terminated name.
+        let value = unsafe { CStr::from_ptr(value) };
+        Some(decode_locale(value))
+    })
 }
 
 /// Use the selected character locale on this thread and restore the previous locale.
@@ -201,5 +341,32 @@ fn with_ctype_locale<T>(name: impl AsRef<OsStr>, op: impl FnOnce() -> T) -> Opti
         libc::uselocale(previous);
         libc::freelocale(local);
         Some(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_locale, with_ctype_locale};
+
+    #[test]
+    fn locale_decoder_reports_the_first_invalid_character() {
+        let check = || {
+            for (name, start) in [
+                (c"abc\xf4\x90\x80\x80abc", 3),
+                (c"a\xf4\x90\x80\x80\xff", 1),
+                (c"xx\xe2\x82", 2),
+            ] {
+                let error = decode_locale(name).unwrap_err();
+                let args = error.decode_args().expect("UnicodeDecodeError");
+                assert_eq!(args.encoding, "locale");
+                assert_eq!(args.object, name.to_bytes());
+                assert_eq!((args.start, args.end), (start, start + 1));
+            }
+        };
+        // C is required by POSIX. Where installed, also exercise a multibyte locale.
+        with_ctype_locale("C", check).expect("C character locale");
+        let _ = ["C.UTF-8", "C.utf8", "UTF-8"]
+            .into_iter()
+            .find_map(|name| with_ctype_locale(name, check));
     }
 }

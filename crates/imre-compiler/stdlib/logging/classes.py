@@ -12,8 +12,25 @@ from pathlib import Path
 from typing import TextIO
 from logging import Logger as _AdapterLogger
 
-_default_formatter = Formatter()
+_defaultFormatter = Formatter()
 _config_lock = _Lock()
+
+
+def _set_handler_name(handler: Handler, name: str | None) -> None:
+    _rename_handler(handler, handler._name, name)
+    handler._name = name
+
+
+def _close_handler(handler: Handler) -> None:
+    handler._closed = True
+    _rename_handler(handler, handler._name, None)
+
+
+def _flush_handler_stream(handler: StreamHandler) -> None:
+    # Every fixed-layout _TextOutput provides flush().
+    stream = handler.stream
+    if stream is not None:
+        stream.flush()
 
 
 def _handle_error(record: LogRecord) -> None:
@@ -268,25 +285,11 @@ class FileHandler(StreamHandler):
                 StreamHandler.close(self)
 
 
-class NullHandler(Handler):
-    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
-        pass
-
-    def emit(self, record: LogRecord | None) -> None:
-        pass
-
-    def createLock(self) -> None:
-        self.lock = None
-
-    def _at_fork_reinit(self) -> None:
-        pass
-
-
 class BufferingFormatter:
     linefmt: Formatter
 
     def __init__(self, linefmt: Formatter | None = None) -> None:
-        self.linefmt = _default_formatter if linefmt is None else linefmt
+        self.linefmt = _defaultFormatter if linefmt is None else linefmt
 
     def formatHeader(self, records: list[LogRecord]) -> str:
         return ""
@@ -301,3 +304,16 @@ class BufferingFormatter:
         for record in records:
             result += self.linefmt.format(record)
         return result + self.formatFooter(records)
+
+def _deliver(logger: Logger, level: int, record: LogRecord) -> None:
+    current: Logger | None = logger
+    found = False
+    while current is not None:
+        for handler in current.handlers:
+            found = True
+            if level >= handler.level:
+                handler.handle(record)
+        if not current.propagate:
+            break
+        current = current.parent
+    _fallback(logger, level, record, found)

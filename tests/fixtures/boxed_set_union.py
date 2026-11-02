@@ -11,6 +11,70 @@ def current():
     assert values.__contains__(2)
     assert values.issuperset((1, 2, 3))
 
+    class Override(set):
+        def update(self, *args):
+            raise AssertionError("called subclass update")
+        def add(self, item):
+            raise AssertionError("called subclass add")
+
+    target = Override([1])
+    update = set.update
+    assert update(target, (2,), {3}) is None
+    assert target == {1, 2, 3}
+    assert Child.update(target, target) is None
+    assert update.__get__(target, set)([4]) is None
+    assert target == {1, 2, 3, 4}
+    for args, kwargs in (((), {}), ((frozenset(),), {}), ((target,), {"items": ()})):
+        try:
+            update(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invalid set.update call")
+
+    for kind in (set, frozenset):
+        original = kind([1])
+        combine = original.union
+        assert combine() == original and combine() is not original
+        assert kind.union(original, (2,), iter([3]), {4: None}) == {1, 2, 3, 4}
+        assert type(combine(original)) is kind
+        try:
+            combine([5], [[]])
+        except TypeError:
+            assert original == {1}
+        else:
+            raise AssertionError("unhashable union element accepted")
+
+    class Key:
+        def __hash__(self):
+            if self.locked:
+                raise AssertionError("rehashing an exact dict key")
+            return 17
+
+    key = Key()
+    key.locked = False
+    mapping = {key: None}
+    key.locked = True
+    assert list(set().union(mapping)) == [key]
+
+    events = []
+    class EqualKey:
+        def __init__(self, name):
+            self.name = name
+        def __hash__(self):
+            return 1
+        def __eq__(self, other):
+            return True
+        def __del__(self):
+            events.append(self.name)
+
+    def duplicates():
+        yield EqualKey("duplicate")
+        assert events == ["duplicate"]
+
+    resident = EqualKey("resident")
+    assert {resident}.union(duplicates()) == {resident}
+
     for left_type in (set, frozenset):
         for right_type in (set, frozenset):
             left = left_type(["GET"])

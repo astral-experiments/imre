@@ -1,7 +1,7 @@
 """Rounding function objects and the original operands they dispatch on."""
 
 import math
-from math import ceil, floor, trunc
+from math import ceil, floor, isnan, modf, trunc
 
 
 class Hooks:
@@ -47,7 +47,59 @@ class IndexOnly:
         return 5
 
 
+class Xéééééééééééééééééééééééééééé:
+    pass
+
+
+class FloatOverride(float):
+    def __float__(self):
+        raise AssertionError("modf consulted a float subclass override")
+
+
 def current():
+    assert float.__trunc__(Real(-1.75)) == -1
+    assert type(int.__trunc__(True)) is int
+    assert bool.__trunc__ is int.__trunc__
+    assert int.__trunc__.__objclass__ is int
+    assert float.__trunc__.__get__(2.5, float)() == 2
+
+    pi = math.pi
+    assert pi == 3.141592653589793 and vars(math)["pi"] is pi
+    math.pi = None
+    assert math.pi is None
+    del math.pi
+    assert not hasattr(math, "pi")
+    math.pi = pi
+    assert math.pi is pi
+
+    assert isnan is math.isnan
+    assert isnan(FloatOverride("nan")) is True
+    for value in (float("inf"), -0.0, FloatOnly(), IndexOnly()):
+        assert isnan(value) is False
+
+    assert math.modf(FloatOnly()) == (-0.25, -1.0)
+    assert modf(IndexOnly()) == (0.0, 5.0)
+    assert modf(FloatOverride(-1.5)) == (-0.5, -1.0)
+    assert modf(True) == (0.0, 1.0)
+    try:
+        modf(Xéééééééééééééééééééééééééééé())
+    except TypeError as error:
+        assert str(error) == "must be real number, not " + "X" + "é" * 24
+    else:
+        raise AssertionError("modf accepted a nonnumeric class")
+    for value in (-0.0, -1.0, -float("inf")):
+        fraction, integral = modf(value)
+        assert str(fraction) == "-0.0" and str(integral) == str(value)
+    fraction, integral = modf(float("nan"))
+    assert fraction != fraction and integral != integral
+    for bad, error in (("1.5", TypeError), (10**1000, OverflowError)):
+        try:
+            modf(bad)
+        except error:
+            pass
+        else:
+            raise AssertionError("modf accepted an invalid operand")
+
     big = (1 << 200) + 1
     obj = Number()
     obj.marker = []

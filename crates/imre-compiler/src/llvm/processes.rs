@@ -463,13 +463,16 @@ impl Emitter<'_, '_> {
                     ));
                 }
                 self.line(format!("store {layout} {aggregate}, ptr {config}"));
-                if let ProcessOperation::Call { check, .. } = operation {
+                if let ProcessOperation::Call { fixed_check, .. } = operation {
                     let timeout = &args[12].value;
                     let kind = if timeout.ty == Type::Int { 2 } else { 7 };
+                    let check = fixed_check.map_or_else(
+                        || args[14].value.operand.clone(),
+                        |check| u8::from(check).to_string(),
+                    );
                     let word = self.checked_instruction(format!(
-                        "call i64 @imre_call_config(ptr {config}, i32 {kind}, i64 {}, i1 {})",
+                        "call i64 @imre_call_config(ptr {config}, i32 {kind}, i64 {}, i1 {check})",
                         timeout.operand,
-                        u8::from(check)
                     ));
                     return self.unpack_word(word, returns);
                 }
@@ -528,7 +531,7 @@ impl Emitter<'_, '_> {
             }
             ProcessOperation::PopenStatus { poll: true } => {
                 let word = self.checked_instruction(format!(
-                    "call i64 @imre_popen_status(ptr {}, i1 true)",
+                    "call i64 @imre_popen_poll(ptr {})",
                     args[0].value.operand
                 ));
                 self.unpack_word(word, returns)
@@ -661,11 +664,32 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::Executable => self.call("imre_sys_executable", Type::Str, &[]),
-            ProcessOperation::RunToStderr => {
-                let check = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+            ProcessOperation::EnvironKeys => self.call("imre_environ_keys", returns, &[]),
+            ProcessOperation::EnvironIndex { bytes } => {
+                let function = if bytes {
+                    "imre_environb_index"
+                } else {
+                    "imre_environ_index"
+                };
+                self.call(function, returns, &[&args[0].value])
+            }
+            ProcessOperation::EnvironDelete { bytes } => {
                 self.checked_line(format!(
-                    "call void @imre_subprocess_to_stderr(ptr {}, i32 {check})",
-                    args[0].value.operand
+                    "call void @imre_environ_delete(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(bytes)
+                ));
+                none()
+            }
+            ProcessOperation::EnvironSet { bytes } => {
+                let name = if bytes {
+                    "imre_environ_set_bytes"
+                } else {
+                    "imre_environ_set"
+                };
+                self.checked_line(format!(
+                    "call void @{name}(ptr {}, ptr {})",
+                    args[1].value.operand, args[0].value.operand
                 ));
                 none()
             }
@@ -860,13 +884,32 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
-            ProcessOperation::EnvironCopy => {
-                let operand = self.checked_instruction("call ptr @imre_environ_copy()");
+            ProcessOperation::EnvironCopy { bytes } => {
+                let function = if bytes {
+                    "imre_environb_copy"
+                } else {
+                    "imre_environ_copy"
+                };
+                let operand = self.checked_instruction(format!("call ptr @{function}()"));
                 self.owned(Value {
                     ty: returns,
                     operand,
                     small_integer: false,
                 })
+            }
+            ProcessOperation::EnvironClear => {
+                self.checked_line("call void @imre_environ_clear()");
+                none()
+            }
+            ProcessOperation::EnvironUpdate { bytes } => {
+                for source in args {
+                    self.checked_line(format!(
+                        "call void @imre_environ_update(ptr {}, i32 {})",
+                        source.value.operand,
+                        u8::from(bytes)
+                    ));
+                }
+                none()
             }
             ProcessOperation::CheckReturnCode => {
                 self.checked_line(format!(

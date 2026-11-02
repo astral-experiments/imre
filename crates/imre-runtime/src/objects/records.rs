@@ -529,6 +529,7 @@ pub unsafe extern "C" fn imre_record_retain(payload: *const usize) {
 /// Acquires the next private iterator result, reusing its cache only when no
 /// earlier yielded tuple still aliases it. A shared cache remains unchanged;
 /// the returned fresh record starts with cleanup-safe zero fields instead.
+/// Returns null with MemoryError pending if allocation fails.
 ///
 /// # Safety
 /// `payload` is the live, fully rooted cache record on its execution thread.
@@ -536,26 +537,7 @@ pub unsafe extern "C" fn imre_record_retain(payload: *const usize) {
 /// Before publishing the returned owner, initialize every field to its declared
 /// representation. A reused record may be mutated only through this result.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_record_cached_result(payload: *const usize) -> *mut usize {
-    // SAFETY: the caller borrows its rooted cache without a temporary owner.
-    unsafe { cached_result(payload, imre_record_new) }
-}
-
-/// Returns a retained cache or a fresh record, raising MemoryError on allocation failure.
-///
-/// # Safety
-/// The cache and returned record have the same ownership and initialization
-/// requirements as `imre_record_cached_result`.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_record_try_cached_result(payload: *const usize) -> *mut usize {
-    // SAFETY: the caller borrows its rooted cache without a temporary owner.
-    unsafe { cached_result(payload, imre_record_try_new) }
-}
-
-unsafe fn cached_result(
-    payload: *const usize,
-    allocate: unsafe extern "C" fn(*const RecordDescriptor) -> *mut usize,
-) -> *mut usize {
     // SAFETY: the caller roots this cache and its immutable descriptor.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
     if header.references.get() == 1 && !header.has_weak_anchor() {
@@ -565,7 +547,7 @@ unsafe fn cached_result(
         // SAFETY: a fresh record uses the cache's static descriptor; it does not
         // expose or mutate any existing tuple's observable field values.
         unsafe {
-            let next = allocate(header.descriptor());
+            let next = imre_record_try_new(header.descriptor());
             if let Some(layout) = header.tuple_layout()
                 && !next.is_null()
             {
@@ -1145,13 +1127,13 @@ mod tests {
         // is released once, and only a returned result mutates record fields.
         unsafe {
             let cache = imre_record_new(&descriptor);
-            let exclusive = imre_record_cached_result(cache);
+            let exclusive = imre_record_try_cached_result(cache);
             assert_eq!(exclusive, cache);
             replace(exclusive, 0, StrOwner::as_ptr(&original) as usize, 3);
             replace(exclusive, 1, Int::small(7).unwrap().into_raw(), 258);
             drop(original);
 
-            let shared = imre_record_cached_result(cache);
+            let shared = imre_record_try_cached_result(cache);
             assert_ne!(shared, cache);
             assert_eq!(shared.read(), 0);
             assert_eq!(shared.add(1).read(), 0);
@@ -1165,7 +1147,7 @@ mod tests {
             assert_eq!(cache.add(1).read(), Int::small(7).unwrap().into_raw());
 
             imre_record_release(exclusive);
-            let reused = imre_record_cached_result(cache);
+            let reused = imre_record_try_cached_result(cache);
             assert_eq!(reused, cache);
             imre_record_release(cache);
             assert!(original_weak.upgrade().is_some());

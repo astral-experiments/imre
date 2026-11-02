@@ -26,7 +26,7 @@ pub(super) fn fixed_locals(f: &Function) -> Vec<bool> {
     }
     let changed = borrows::written_except(f, |value| starts.contains(&std::ptr::from_ref(value)));
     let mut uses = vec![0_isize; f.locals.len()];
-    borrows::statements(&f.body, &mut |s| {
+    ir::walk_statements(&f.body, &mut |s| {
         if let Statement::SetItem(
             Expr {
                 kind: ExprKind::Local(slot),
@@ -141,7 +141,7 @@ impl Emitter<'_, '_> {
             .map_or(0, |i| i + 1);
         let tail = &f.body[start..];
         let mut has_loop = false;
-        borrows::statements(tail, &mut |s| has_loop |= matches!(s, Statement::While(..)));
+        ir::walk_statements(tail, &mut |s| has_loop |= matches!(s, Statement::While(..)));
         if !has_loop {
             return self.block(&f.body);
         }

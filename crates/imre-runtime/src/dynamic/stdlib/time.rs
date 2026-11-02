@@ -2,7 +2,23 @@
 use super::*;
 use crate::dynamic::builtins::bind;
 use crate::objects::Calendar;
-use crate::objects::time::{ClockParts, LocalTime, wall_time};
+use crate::objects::time::{ClockParts, LocalTime, wall_time, wall_time_ns};
+
+/// Install the snapshot of local standard and daylight time exported by time.
+pub(in crate::dynamic) fn install_timezone(ctx: &mut Context, scope: Id) -> Result<()> {
+    let [(standard, std_name), (summer, dst_name)] = crate::objects::time::timezone_samples()?;
+    let std_name = ctx.text(std_name);
+    let dst_name = ctx.text(dst_name);
+    let names = ctx.alloc(Value::Tuple(vec![std_name, dst_name]));
+    let zone = ctx.int(standard);
+    let altzone = ctx.int(summer);
+    let daylight = ctx.int(i64::from(standard != summer));
+    ctx.bind(scope, "timezone", zone);
+    ctx.bind(scope, "altzone", altzone);
+    ctx.bind(scope, "daylight", daylight);
+    ctx.bind(scope, "tzname", names);
+    Ok(())
+}
 
 const FIELDS: [&str; 9] = [
     "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday", "tm_isdst",
@@ -15,6 +31,21 @@ pub(super) fn struct_time(ctx: &mut Context, values: Vec<Id>, zone: Id, offset: 
         values,
         extras: vec![("tm_zone", zone), ("tm_gmtoff", offset)],
     })
+}
+
+/// Format local civil fields with fixed English names and the caller's year width.
+pub(super) fn ctime_text(fields: [i64; 9], year_width: usize) -> String {
+    // CPython uses fixed English abbreviations regardless of LC_TIME.
+    const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let [year, month, day, hour, minute, second, weekday, ..] = fields;
+    let weekday = DAYS[weekday as usize];
+    let month = MONTHS[(month - 1) as usize];
+    // _asctime formats the calendar year as a C int.
+    let year = year as libc::c_int;
+    format!("{weekday} {month} {day:2} {hour:02}:{minute:02}:{second:02} {year:0year_width$}")
 }
 
 fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -60,30 +91,13 @@ fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<
     Ok(struct_time(ctx, values, zone, offset))
 }
 
-fn civil(ctx: &mut Context, stamp: Id, utc: bool) -> Result<ClockParts> {
-    match ctx.heap.get(stamp) {
-        Value::None => Ok(ClockParts::from_float(wall_time(), utc)?),
+pub(super) fn civil(ctx: &mut Context, stamp: Option<Id>, utc: bool) -> Result<ClockParts> {
+    let Some(stamp) = stamp else {
+        return Ok(ClockParts::from_float(wall_time(), utc)?);
+    };
+    match ctx.heap.get(ctx.scalar_value(stamp)) {
         Value::Float(n) => Ok(ClockParts::from_float(*n, utc)?),
-        Value::Int(_) | Value::Bool(_) => Ok(ClockParts::from_int(&ctx.as_int(stamp)?, utc)?),
-        _ => {
-            let index = ctx.bound_slot(stamp, "__index__")?.ok_or_else(|| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "'{}' object cannot be interpreted as an integer",
-                        ctx.type_name(stamp)
-                    ),
-                )
-            })?;
-            let value = ctx.call(index, Vec::new(), Vec::new())?;
-            let n = ctx.as_int(value).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    format!("__index__ returned non-int (type {})", ctx.type_name(value)),
-                )
-            })?;
-            Ok(ClockParts::from_int(&n, utc)?)
-        }
+        _ => Ok(ClockParts::from_int(&ctx.index_integer(stamp)?, utc)?),
     }
 }
 
@@ -148,9 +162,12 @@ pub(super) fn call(
     }
     let function = match name {
         "time" => "time.time",
+        "time_ns" => "time.time_ns",
+        "sleep" => "time.sleep",
         "monotonic" => "time.monotonic",
         "perf_counter" => "time.perf_counter",
         "mktime" => "time.mktime",
+        "tzset" => "time.tzset",
         _ => name,
     };
     if !kwargs.is_empty() {
@@ -160,13 +177,121 @@ pub(super) fn call(
         ));
     }
     match name {
+        "get_clock_info" => {
+            let [name] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "get_clock_info() takes exactly 1 argument ({} given)",
+                        args.len()
+                    ),
+                ));
+            };
+            let Some(name) = ctx.string_storage(*name) else {
+                let kind = if *name == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(*name)
+                };
+                // PyArg formats at most 50 bytes of tp_name, then decodes the full diagnostic.
+                let mut message = b"get_clock_info() argument 1 must be str, not ".to_vec();
+                message.extend_from_slice(&kind.as_bytes()[..kind.len().min(50)]);
+                let text = crate::objects::Codec::Utf8 { signature: false }
+                    .decode(&message, None)
+                    .map_err(|error| ctx.decode_error(error))?;
+                return Err(Error::new("TypeError", text));
+            };
+            // PyArg_ParseTuple's "s" rejects unencodable Unicode and embedded NULs.
+            let name = codecs::encode_text(ctx, name, None, None)?;
+            if name.contains(&0) {
+                return Err(Error::new("ValueError", "embedded null character"));
+            }
+            let (implementation, monotonic, resolution) = crate::objects::time::clock_info(&name)?;
+            let class = crate::dynamic::namespace::class(ctx)?;
+            let info = ctx.instance(class, None);
+            let implementation = ctx.text(implementation);
+            ctx.set_attr(info, "implementation", implementation)?;
+            ctx.set_attr(info, "monotonic", builtins::boolean(monotonic))?;
+            ctx.set_attr(info, "adjustable", builtins::boolean(!monotonic))?;
+            let resolution = ctx.alloc(Value::Float(resolution));
+            ctx.set_attr(info, "resolution", resolution)?;
+            Ok(info)
+        }
+        "sleep" => {
+            let [seconds] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "time.sleep() takes exactly one argument ({} given)",
+                        args.len()
+                    ),
+                ));
+            };
+            audit::event(ctx, "time.sleep", args)?;
+            let nanos = if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(*seconds)) {
+                crate::objects::time::sleep_float_ns(*value)?
+            } else {
+                let overflow = || {
+                    Error::new(
+                        "OverflowError",
+                        "timestamp too large to convert to C PyTime_t",
+                    )
+                };
+                let seconds = match ctx.index_integer(*seconds) {
+                    Ok(seconds) => seconds,
+                    Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+                        let class = ctx.exact_type(*seconds)?;
+                        let name = super::qualified_type(ctx, class)?;
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "'{}' object cannot be interpreted as an integer or float",
+                                ctx.str_value(name)?
+                            ),
+                        ));
+                    }
+                    Err(error) if ctx.is_builtin_error(&error, "OverflowError") => {
+                        return Err(overflow());
+                    }
+                    Err(error) => return Err(error),
+                };
+                seconds
+                    .to_i64()
+                    .and_then(|n| n.checked_mul(1_000_000_000))
+                    .ok_or_else(overflow)?
+            };
+            crate::objects::time::sleep_ns(nanos, || ctx.dispatch_signals())?;
+            Ok(NONE)
+        }
         "time" if args.is_empty() => Ok(ctx.alloc(Value::Float(wall_time()))),
+        "time_ns" if args.is_empty() => {
+            let nanos = i64::try_from(wall_time_ns()).map_err(|_| {
+                Error::new(
+                    "OverflowError",
+                    "timestamp too large to convert to C PyTime_t",
+                )
+            })?;
+            Ok(ctx.int(nanos))
+        }
         "monotonic" | "perf_counter" if args.is_empty() => {
             let stamp =
                 crate::objects::time::monotonic_time().map_err(crate::objects::errno_error)?;
             Ok(ctx.alloc(Value::Float(stamp.as_secs_f64())))
         }
-        "time" | "monotonic" | "perf_counter" => Err(Error::new(
+        "tzset" if args.is_empty() => {
+            let module = ctx.module("time")?;
+            let Value::Module { scope, .. } = *ctx.heap.get(module) else {
+                return Err(Error::new("TypeError", "time must be a module"));
+            };
+            unsafe extern "C" {
+                fn tzset();
+            }
+            // SAFETY: POSIX tzset has no arguments and refreshes libc's local-time rules.
+            unsafe { tzset() };
+            install_timezone(ctx, scope)?;
+            Ok(NONE)
+        }
+        "time" | "time_ns" | "monotonic" | "perf_counter" | "tzset" => Err(Error::new(
             "TypeError",
             format!("{function}() takes no arguments ({} given)", args.len()),
         )),
@@ -218,7 +343,7 @@ pub(super) fn call(
             let points = clock.strftime(&ctx.string_codepoints(format)?)?;
             Ok(ctx.text_codepoints(points))
         }
-        "gmtime" | "localtime" => {
+        "gmtime" | "localtime" | "ctime" => {
             if args.len() > 1 {
                 return Err(Error::new(
                     "TypeError",
@@ -228,7 +353,14 @@ pub(super) fn call(
                     ),
                 ));
             }
-            let parts = civil(ctx, args.first().copied().unwrap_or(NONE), name == "gmtime")?;
+            let parts = civil(
+                ctx,
+                args.first().copied().filter(|&stamp| stamp != NONE),
+                name == "gmtime",
+            )?;
+            if name == "ctime" {
+                return Ok(ctx.text(ctime_text(parts.fields, 0)));
+            }
             let fields = parts.fields.map(|n| ctx.int(n));
             let zone = parts.zone.map_or(NONE, |s| ctx.text(s.as_str()));
             let offset = ctx.int(parts.offset);

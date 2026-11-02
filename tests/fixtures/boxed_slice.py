@@ -16,7 +16,12 @@ class Index:
 
 
 def current():
-    holder = []
+    holder = [0, 1, 2, 3]
+    exec("holder[::2] = [4, 5]", {"holder": holder})
+    assert holder == [4, 1, 5, 3]
+    exec("del holder[:1], holder[::-2]", {"holder": holder})
+    assert holder == [5]
+    exec("holder[:] = []", {"holder": holder})
     part = slice(holder)
     print(type(part) is slice, isinstance(part, slice), isinstance(slice, type))
     print(part.start is None, part.stop is holder, part.step is None)
@@ -60,6 +65,13 @@ def current():
     visits = []
     s = slice(Index("start", -6, visits), Index("stop", 12, visits), Index("step", 2, visits))
     print(s.indices(Index("length", 8, visits)), visits)
+    text = "aé中🙂" * 16
+    visits.clear()
+    assert text[Index("scalar", -1, visits)] == "🙂"
+    assert text[Index("start", 1, visits):Index("stop", 4, visits):Index("step", 2, visits)] == "é🙂"
+    assert visits == ["scalar", "step", "start", "stop"]
+    assert text[len(text):2] == "" and text[-4:-1] == "aé中"
+    assert "\ud800🙂z"[::-1] == "z🙂\ud800"
     huge = 10 ** 65
     print(slice(-huge, None, -huge).indices(2 * huge))
     print(list(range(-(2 ** 63), 2 ** 63 - 1)[-3:]))

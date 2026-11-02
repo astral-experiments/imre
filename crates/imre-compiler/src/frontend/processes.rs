@@ -17,7 +17,7 @@ enum LaunchApi {
     Popen,
     Call(bool),
     CheckOutput,
-    Run,
+    Run { discarded: bool },
 }
 
 fn integer_deadline(value: &ast::Expr) -> bool {
@@ -178,14 +178,6 @@ pub(super) fn process_error_view(
                 precise = false;
                 return;
             }
-            ExprKind::Builtin(Builtin::Process(ProcessOperation::RunToStderr), _) => (
-                ProcessCapture {
-                    stdout: false,
-                    stderr: false,
-                    text: false,
-                },
-                types.list(Type::Str),
-            ),
             ExprKind::Builtin(
                 Builtin::Process(ProcessOperation::CheckOutput { capture, .. }),
                 args,
@@ -216,10 +208,18 @@ pub(super) fn process_error_view(
                 (capture, types.command_type(cmd))
             }
             ExprKind::Builtin(
-                Builtin::Process(ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
+                Builtin::Process(
+                    op @ (ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
+                ),
                 args,
             ) => {
-                timed = true;
+                timed |= !matches!(
+                    op,
+                    ProcessOperation::Call {
+                        fixed_check: None,
+                        ..
+                    }
+                );
                 let command = match args[0].ty {
                     Type::Popen(_, _, id) => types.command_type(id),
                     ty => ty,
@@ -622,42 +622,6 @@ impl Checker<'_> {
         ))
     }
 
-    /// An immediately discarded process result can inherit the parent's stderr
-    /// directly without materializing a CompletedProcess or buffering its output.
-    pub(super) fn process_to_stderr(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let [argv] = call.arguments.args.as_ref() else {
-            return self.process_run(call);
-        };
-        let mut redirected = false;
-        let mut check = None;
-        for kw in &call.arguments.keywords {
-            match kw.arg.as_ref().map(|name| name.as_str()) {
-                Some("check") if check.is_none() => check = Some(&kw.value),
-                Some("stdout")
-                    if !redirected
-                        && self.resolve(&kw.value)
-                            == Some(Binding::Intrinsic(Intrinsic::Stderr)) =>
-                {
-                    redirected = true
-                }
-                _ => return self.process_run(call),
-            }
-        }
-        let argv = self.command_argument(argv)?;
-        if argv.ty != self.types.list(Type::Str) {
-            return self.process_run(call);
-        }
-        let check = match check {
-            Some(value) => self.expr_expected(value, Type::Bool)?,
-            None => Expr::boolean(false),
-        };
-        Ok(operation(
-            ProcessOperation::RunToStderr,
-            Type::None,
-            vec![argv, check],
-        ))
-    }
-
     /// Keywords capture their values in source order before applying the filesystem ABI.
     pub(super) fn shutil_which(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
@@ -994,7 +958,7 @@ impl Checker<'_> {
                 Some(Expr::absent(deadline)),
             ));
         }
-        if matches!(api, LaunchApi::CheckOutput | LaunchApi::Run) {
+        if matches!(api, LaunchApi::CheckOutput | LaunchApi::Run { .. }) {
             let input = self
                 .types
                 .optional(if capture.text { Type::Str } else { Type::Bytes });
@@ -1012,6 +976,19 @@ impl Checker<'_> {
                     sign_only: false,
                     kind: ParameterKind::KeywordOnly,
                 });
+            }
+        }
+        if matches!(api, LaunchApi::Popen | LaunchApi::Call(_))
+            && keyword("universal_newlines").is_some()
+        {
+            // stream_plan already checked the literal alias and selected the pipe type.
+            params.push(ParameterKind::KeywordOnly.parameter(
+                "universal_newlines",
+                Type::Bool,
+                None,
+            ));
+            if validation == 5 {
+                streams |= 1 << 22; // Popen must reject the conflicting flags before spawning.
             }
         }
         let child_options = params.len();
@@ -1091,6 +1068,9 @@ impl Checker<'_> {
                     checker.coerce(value, Type::Int, arg)
                 };
             }
+            if params[index].name == "universal_newlines" {
+                return Ok(Expr::boolean(false));
+            }
             match index {
                 0 => checker.command_argument(arg),
                 1 if matches!(arg, ast::Expr::NoneLiteral(_)) => Ok(default_bufsize()),
@@ -1116,7 +1096,7 @@ impl Checker<'_> {
                 }
                 4..=8 => Ok(Expr::boolean(false)), // effect-free literals checked by stream_plan
                 11 => checker.condition(arg),
-                14 if api == LaunchApi::Run => checker.expr_expected(arg, Type::Bool),
+                14 if matches!(api, LaunchApi::Run { .. }) => checker.expr_expected(arg, Type::Bool),
                 14 => checker.expr(arg), // evaluated before reporting a forbidden check keyword
                 15..=17 => Ok(Expr::boolean(false)), // literals validated by stream_plan
                 12 => checker.deadline_value(arg),
@@ -1143,7 +1123,26 @@ impl Checker<'_> {
                 },
                 capture.stream(true),
             ),
-            LaunchApi::Run => (
+            // A discarded list[str] run forwarding stdout to stderr only needs the exit status.
+            LaunchApi::Run { discarded: true }
+                if streams == 4
+                    && args.values[args.order[0]].ty == self.types.list(Type::Str)
+                    && call.arguments.keywords.iter().all(|kw| {
+                        matches!(
+                            kw.arg.as_ref().map(|name| name.as_str()),
+                            Some("stdout" | "check")
+                        )
+                    }) =>
+            {
+                (
+                    ProcessOperation::Call {
+                        streams,
+                        fixed_check: None,
+                    },
+                    Type::Int,
+                )
+            }
+            LaunchApi::Run { .. } => (
                 ProcessOperation::Run {
                     streams,
                     validation,
@@ -1152,7 +1151,13 @@ impl Checker<'_> {
                 },
                 self.types.completed(capture, args.values[args.order[0]].ty),
             ),
-            LaunchApi::Call(check) => (ProcessOperation::Call { streams, check }, Type::Int),
+            LaunchApi::Call(check) => (
+                ProcessOperation::Call {
+                    streams,
+                    fixed_check: Some(check),
+                },
+                Type::Int,
+            ),
             LaunchApi::Popen => (
                 ProcessOperation::Popen { streams },
                 Type::Popen(
@@ -1320,8 +1325,12 @@ impl Checker<'_> {
         self.coerce(value, timeout, argument)
     }
 
-    pub(super) fn process_run(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        self.launch_process(call, LaunchApi::Run)
+    pub(super) fn process_run(
+        &mut self,
+        call: &ast::ExprCall,
+        discarded: bool,
+    ) -> Result<Expr, String> {
+        self.launch_process(call, LaunchApi::Run { discarded })
     }
 
     /// Path conversion is sealed and pure; optional paths retain their absence.
@@ -1404,27 +1413,121 @@ impl Checker<'_> {
         ))
     }
 
+    pub(super) fn environ_item_type(&self, receiver: &ast::Expr) -> Option<Type> {
+        match self.resolve(receiver) {
+            Some(Binding::Intrinsic(Intrinsic::Environ)) => Some(Type::Str),
+            Some(Binding::Intrinsic(Intrinsic::EnvironBytes)) => Some(Type::Bytes),
+            _ => None,
+        }
+    }
+
+    /// A direct loop acquires its keys immediately. Each pull decodes just the
+    /// current key and looks up its value in the live process mapping.
+    pub(super) fn environ_items_loop(
+        &mut self,
+        expression: &ast::Expr,
+    ) -> Result<Option<Iteration>, String> {
+        let Some(call) = expression.as_call_expr() else {
+            return Ok(None);
+        };
+        let Some(method) = call.func.as_attribute_expr() else {
+            return Ok(None);
+        };
+        if method.attr.as_str() != "items" {
+            return Ok(None);
+        }
+        let Some(ty) = self.environ_item_type(&method.value) else {
+            return Ok(None);
+        };
+        if !call.arguments.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "environment items() takes no arguments",
+            ));
+        }
+        let keys = operation(
+            ProcessOperation::EnvironKeys,
+            self.types.list(Type::Bytes),
+            vec![],
+        );
+        let mut input = self.prepare_container(keys, false, call, false)?;
+        let raw = input.value;
+        let key = self.hidden(ty);
+        let decoded = self.filesystem_codec(self.local(raw), expression, ty)?;
+        let pair_ty = self.types.tuple(vec![ty, ty]);
+        let pair = self.hidden(pair_ty);
+        let value = operation(
+            ProcessOperation::EnvironIndex {
+                bytes: ty == Type::Bytes,
+            },
+            ty,
+            vec![self.local(key)],
+        );
+        input.next.push(Statement::If(
+            self.local(input.ready),
+            vec![
+                Statement::Assign(key, decoded),
+                Statement::Assign(
+                    pair,
+                    Expr {
+                        ty: pair_ty,
+                        kind: ExprKind::Tuple(vec![self.local(key), value]),
+                    },
+                ),
+                Statement::Clear(key),
+                Statement::Clear(raw),
+            ],
+            vec![],
+        ));
+        input.clear.extend([key, pair]);
+        input.value = pair;
+        Ok(Some(Iteration::Prepared(input)))
+    }
+
     pub(super) fn environ_method(
         &mut self,
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
+        bytes: bool,
     ) -> Result<Expr, String> {
-        if attribute.attr.as_str() == "get" {
+        let name = attribute.attr.as_str();
+        if name == "get" && !bytes {
             return self.environ_get(call);
         }
-        self.reject_builtin_keywords(call)?;
-        if attribute.attr.as_str() != "copy" || !call.arguments.args.is_empty() {
-            return Err(error(
-                self.source,
-                call,
-                "os.environ accepts copy() or get(key, default=None)",
+        if name == "update" {
+            let field = if bytes { Type::Bytes } else { Type::Str };
+            let mut sources = Vec::new();
+            self.mapping_update_sources(call, field, field, &mut sources)?;
+            return Ok(operation(
+                ProcessOperation::EnvironUpdate { bytes },
+                Type::None,
+                sources,
             ));
         }
-        Ok(operation(
-            ProcessOperation::EnvironCopy,
-            self.types.dict(Type::Str, Type::Str),
+        self.reject_builtin_keywords(call)?;
+        match (name, call.arguments.args.as_slice()) {
+            ("copy", []) => Ok(self.environ_copy(bytes)),
+            ("clear", []) => Ok(operation(
+                ProcessOperation::EnvironClear,
+                Type::None,
+                vec![],
+            )),
+            _ => Err(error(
+                self.source,
+                call,
+                "unsupported environment mapping method or arguments",
+            )),
+        }
+    }
+
+    pub(super) fn environ_copy(&self, bytes: bool) -> Expr {
+        let field = if bytes { Type::Bytes } else { Type::Str };
+        operation(
+            ProcessOperation::EnvironCopy { bytes },
+            self.types.dict(field, field),
             vec![],
-        ))
+        )
     }
 
     pub(super) fn process_attribute(

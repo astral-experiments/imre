@@ -71,7 +71,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — | — |
 | `py_compile` | Yes | No API example recorded. | — | — | — |
 | `random` | Yes | Seed the shared generator and draw floats, bits, integer ranges, and choices from supported sequences. [Evidence](../benchmarks/cpython_stdlib/full/shutil/random.md) | — | — | — |
-| `re` | Yes | Fixed regular expressions, captures and replacement escapes in `sub`. [Evidence](../benchmarks/cpython_stdlib/README.md) | — | — | — |
+| `re` | Yes | Fixed regular expressions, captures and replacement escapes in `sub`. [`escape`](../tests/fixtures/boxed_re_escape.py) quotes literal text and byte strings for use in patterns. [Evidence](../benchmarks/cpython_stdlib/README.md) | — | — | — |
 | `secrets` | Yes | Draw an unpredictable item from native strings, bytes, lists, homogeneous tuples, or integer ranges with OS randomness. [Evidence](../tests/fixtures/iterables/secrets_choice.py) | — | — | — |
 | `select` | Yes | Wait for readable or writable POSIX file descriptors with `poll` or `select`. [Evidence](../benchmarks/cpython_stdlib/full/select/operations.py) | [0 / 134](../benchmarks/cpython_stdlib/full/select/) | 7 | 6 |
 | `selectors` | Yes | Use `SelectSelector` and `PollSelector` with `subprocess._PopenSelector` to choose how `Popen.communicate` waits for pipes. [Evidence](../tests/fixtures/processes/select_backend.py) | — | — | — |
@@ -79,7 +79,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `shutil` | Yes | `which`, file and directory copies, removal and selected moves. [Evidence](../benchmarks/cpython_stdlib/full/shutil/README.md) | [0 / 223](../benchmarks/cpython_stdlib/full/shutil/) | 12 | 59 |
 | `signal` | Yes | `SIGINT` and `SIGTERM` constants for supported event-loop handlers. [Evidence](../tests/fixtures/processes/async_gather_cancel.py) | — | — | — |
 | `site` | Yes | `getsitepackages()` returns the site-packages directory under the interpreter’s prefix. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
-| `socket` | Yes | Bind an IPv4 TCP listener to port zero, accept a client, read bytes, and send a reply. [Evidence](../tests/fixtures/socket/listener.py) | [0 / 746](../benchmarks/cpython_stdlib/full/socket/) | 7 | 2 |
+| `socket` | Yes | Listen, connect, accept, and exchange bytes over IPv4 and IPv6 TCP. Runtime-imported IPv6 sockets accept numeric addresses and ASCII hostnames and return four-field endpoints. `has_dualstack_ipv6()` probes the kernel with a fresh IPv6 TCP socket. [Evidence](../tests/fixtures/socket/boxed/ipv6_stream.py) | [0 / 746](../benchmarks/cpython_stdlib/full/socket/) | 7 | 2 |
 | `socketserver` | Yes | Serve consecutive TCP clients with a polled listener and buffered request streams. [Evidence](../tests/fixtures/socketserver/boxed_stream.py) | [0 / 27](../benchmarks/cpython_stdlib/full/socketserver/) | 2 | 1 |
 | `stat` | Yes | POSIX mode constants and predicates, permission masks and `filemode`. [Evidence](../benchmarks/cpython_stdlib/full/stat/README.md) | [0 / 22](../benchmarks/cpython_stdlib/full/stat/) | 0 | 18 |
 | `string` | Yes | Selected `Template` substitution, validation and identifier operations. [Evidence](../benchmarks/cpython_stdlib/full/string/README.md) | [15 / 54](../benchmarks/cpython_stdlib/full/string/) | 0 | 0 |

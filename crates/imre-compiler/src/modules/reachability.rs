@@ -50,7 +50,10 @@ impl References<'_> {
                     _ => false,
                 };
             }
-            Some(Binding::Intrinsic(Intrinsic::Adler32)) => Some(2),
+            Some(Binding::Intrinsic(
+                Intrinsic::Adler32
+                | Intrinsic::Fd(crate::ir::FdOperation::Read | crate::ir::FdOperation::Write),
+            )) => Some(2),
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 Some(super::credential_arity(name))
             }
@@ -73,6 +76,16 @@ impl References<'_> {
             return false;
         };
         let keyword = match attr.attr.as_str() {
+            "zfill" => {
+                let unbound = attr
+                    .value
+                    .as_name_expr()
+                    .is_some_and(|name| name.id == "str")
+                    && self.graph.resolve(self.module, &attr.value).is_none();
+                return call.arguments.keywords.is_empty()
+                    && call.arguments.args.len() == 1 + usize::from(unbound)
+                    && !literal(call.arguments.args.last().unwrap());
+            }
             "expandtabs" => "tabsize",
             "digest" | "hexdigest" => {
                 // An unknown hash receiver can be an XOF. Direct fixed-output
@@ -327,6 +340,7 @@ impl<'a> Visitor<'a> for References<'_> {
                 self.found.attributes.extend(
                     [
                         "_baseAssertEqual",
+                        "_assertClassEqual",
                         "_assertDateEqual",
                         "_assertDeltaEqual",
                         "assertMultiLineEqual",
@@ -632,9 +646,13 @@ impl Reachable {
                                     || matches!(&d.expression, ast::Expr::Attribute(a) if a.attr.as_str() == "setter"
                                         && matches!(&*a.value, ast::Expr::Name(n) if n.id.as_str() == name))
                                     || graph.resolve(id.module, &d.expression) == Some(Binding::Intrinsic(Intrinsic::CachedProperty))));
-                            let assertion_exit = source.bundled
+                            let assertion_helper = source.bundled
                                 && source.name == "unittest"
                                 && match class.name.as_str() {
+                                    "TestCase" => {
+                                        name == "_assertBytesEqual"
+                                            && refs.found.attributes.contains("_bound_assertEqual")
+                                    }
                                     "_AssertRaisesContext" => {
                                         matches!(name, "_missing" | "_check_regex")
                                     }
@@ -680,7 +698,7 @@ impl Reachable {
                                 };
                             if (property
                                 || unittest_method
-                                || assertion_exit
+                                || assertion_helper
                                 || mock_dispatch
                                 || (source.closes_context(class.name.as_str())
                                     && matches!(name, "__enter__" | "close"))
@@ -804,7 +822,11 @@ fn known_decorator(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> b
     ) || matches!(expr, ast::Expr::Name(name) if matches!(name.id.as_str(), "property" | "classmethod" | "staticmethod") && graph.resolve(module, expr).is_none())
 }
 
-fn definition_effect(graph: &SourceGraph, module: ModuleId, func: &ast::StmtFunctionDef) -> bool {
+pub(crate) fn definition_effect(
+    graph: &SourceGraph,
+    module: ModuleId,
+    func: &ast::StmtFunctionDef,
+) -> bool {
     func.decorator_list
         .iter()
         .any(|d| !known_decorator(graph, module, &d.expression))

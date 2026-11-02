@@ -13,6 +13,9 @@ def current():
     print(SequenceMatcher(None, "", "").ratio())
     print(get_close_matches("healt", ["health", "hello", "visits"]))
     assert list(ndiff(["old\n"], ["new\n"])) == ["- old\n", "+ new\n"]
+    assert list(ndiff(["alpha one\n"], ["alpha two\n"])) == [
+        "- alpha one\n", "?        --\n", "+ alpha two\n", "?       ++\n",
+    ]
     assert list(unified_diff(["old\n"], ["new\n"])) == [
         "--- \n", "+++ \n", "@@ -1 +1 @@\n", "-old\n", "+new\n"
     ]

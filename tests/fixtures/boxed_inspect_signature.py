@@ -101,3 +101,25 @@ except ValueError:
 
 assert omitted() and not omitted(None) and not omitted(object())
 assert type(inspect._sentinel) is object
+
+assert inspect.ismodule(inspect)
+assert not inspect.ismodule(inspect.Parameter)
+
+
+class ConstructorBase:
+    def __init__(self, count: int = 2, *, flag=False) -> None: pass
+
+
+class ConstructorChild(ConstructorBase):
+    pass
+
+
+class NewFirst(ConstructorBase):
+    def __new__(cls, /, name: str): pass
+
+
+class DefaultInit(ConstructorBase):
+    __init__ = object.__init__
+
+
+print(inspect.signature(ConstructorChild), inspect.signature(NewFirst), inspect.signature(DefaultInit))

@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::ir::{Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions};
+use crate::ir::{self, ChildMut, Compare, Expr, ExprKind, Module, Statement, Type};
 use crate::ranges;
 
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
@@ -32,7 +32,7 @@ pub(crate) fn specialize(module: &mut Module) {
                 if function.expression_rebound().into_iter().any(|value| value) {
                     return plans;
                 }
-                visit_statements(&function.body, &mut |statement| {
+                ir::walk_statements(&function.body, &mut |statement| {
                     let Statement::For {
                         args, body, orelse, ..
                     } = statement
@@ -91,51 +91,9 @@ fn literal(expression: &Expr) -> Option<i64> {
     }
 }
 
-/// Visits ordinary statement blocks and, separately, every eager expression's
-/// statement roots. The shared expression walker already visits nested scopes.
-fn visit_statements(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
-    visit_block(body, visit);
-    walk_expressions(body, &mut |expression| {
-        if let ExprKind::Scope { body, .. } = &expression.kind {
-            visit_block(body, visit);
-        }
-    });
-}
-
-fn visit_block(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
-    for statement in body {
-        visit(statement);
-        match statement {
-            Statement::Scope { body, .. } => visit_block(body, visit),
-            Statement::If(_, yes, no) | Statement::While(_, yes, no) => {
-                visit_block(yes, visit);
-                visit_block(no, visit);
-            }
-            Statement::For { body, orelse, .. } => {
-                visit_block(body, visit);
-                visit_block(orelse, visit);
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                visit_block(body, visit);
-                for handler in handlers {
-                    visit_block(&handler.body, visit);
-                }
-                visit_block(orelse, visit);
-                visit_block(finalbody, visit);
-            }
-            _ => {}
-        }
-    }
-}
-
 fn contains_loop(body: &[Statement]) -> bool {
     let mut found = false;
-    visit_statements(body, &mut |statement| {
+    ir::walk_statements(body, &mut |statement| {
         found |= matches!(statement, Statement::For { .. } | Statement::While(..));
     });
     found
@@ -150,60 +108,10 @@ fn rewrite_block(
     plans: &mut HashMap<*const Statement, Plan>,
 ) {
     for statement in body {
-        match statement {
-            Statement::Assign(_, value)
-            | Statement::Expr(value)
-            | Statement::Return(value)
-            | Statement::Assert(value) => rewrite_expression(value, locals, plans),
-            Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
-                for value in [a, b, c] {
-                    rewrite_expression(value, locals, plans);
-                }
-            }
-            Statement::SetField(a, _, b) | Statement::AugmentField(a, _, _, b) => {
-                rewrite_expression(a, locals, plans);
-                rewrite_expression(b, locals, plans);
-            }
-            Statement::Scope { body, .. } => rewrite_block(body, locals, plans),
-            Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
-                rewrite_expression(test, locals, plans);
-                rewrite_block(yes, locals, plans);
-                rewrite_block(no, locals, plans);
-            }
-            Statement::For {
-                args, body, orelse, ..
-            } => {
-                for arg in args {
-                    rewrite_expression(arg, locals, plans);
-                }
-                rewrite_block(body, locals, plans);
-                rewrite_block(orelse, locals, plans);
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                rewrite_block(body, locals, plans);
-                for handler in handlers {
-                    rewrite_block(&mut handler.body, locals, plans);
-                }
-                rewrite_block(orelse, locals, plans);
-                rewrite_block(finalbody, locals, plans);
-            }
-            Statement::Raise(value) => {
-                if let Some(value) = value {
-                    rewrite_expression(value, locals, plans);
-                }
-            }
-            Statement::Move(..)
-            | Statement::Clear(_)
-            | Statement::IterNext { .. }
-            | Statement::Break
-            | Statement::Continue
-            | Statement::Exhaust => {}
-        }
+        ir::statement_children_mut(statement, |child| match child {
+            ChildMut::Expression(value) => rewrite_expression(value, locals, plans),
+            ChildMut::Suite(body) => rewrite_block(body, locals, plans),
+        });
         if let Some(plan) = plans.remove(&std::ptr::from_ref(statement)) {
             rewrite_loop(statement, locals, plan);
         }
@@ -215,71 +123,11 @@ fn rewrite_expression(
     locals: &mut Vec<Type>,
     plans: &mut HashMap<*const Statement, Plan>,
 ) {
-    match &mut expression.kind {
-        ExprKind::Scope { body, value, .. } => {
-            rewrite_block(body, locals, plans);
-            rewrite_expression(value, locals, plans);
-        }
-        ExprKind::List(values)
-        | ExprKind::Tuple(values)
-        | ExprKind::Set { values, .. }
-        | ExprKind::Compare(values, _)
-        | ExprKind::Boolean(_, values)
-        | ExprKind::Builtin(_, values) => {
-            for value in values {
-                rewrite_expression(value, locals, plans);
-            }
-        }
-        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-            for value in &mut args.values {
-                rewrite_expression(value, locals, plans);
-            }
-        }
-        ExprKind::Callable { receiver, .. } => {
-            if let Some(receiver) = receiver {
-                rewrite_expression(receiver, locals, plans);
-            }
-        }
-        ExprKind::Invoke { callable, args } => {
-            rewrite_expression(callable, locals, plans);
-            for value in &mut args.values {
-                rewrite_expression(value, locals, plans);
-            }
-        }
-        ExprKind::Dict { entries, .. } => {
-            for (key, value) in entries {
-                rewrite_expression(key, locals, plans);
-                rewrite_expression(value, locals, plans);
-            }
-        }
-        ExprKind::Bind(_, value)
-        | ExprKind::Present(value)
-        | ExprKind::Absent(value)
-        | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
-        | ExprKind::Field(value, _) => rewrite_expression(value, locals, plans),
-        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-            rewrite_expression(left, locals, plans);
-            rewrite_expression(right, locals, plans);
-        }
-        ExprKind::Conditional(test, yes, no) => {
-            rewrite_expression(test, locals, plans);
-            rewrite_expression(yes, locals, plans);
-            rewrite_expression(no, locals, plans);
-        }
-        ExprKind::Exception { message, .. } => {
-            if let Some(message) = message {
-                rewrite_expression(message, locals, plans);
-            }
-        }
-        ExprKind::Int(_)
-        | ExprKind::Float(_)
-        | ExprKind::Bool(_)
-        | ExprKind::Str(_)
-        | ExprKind::Bytes(_)
-        | ExprKind::None
-        | ExprKind::Local(_) => {}
+    if let ExprKind::Scope { body, value, .. } = &mut expression.kind {
+        rewrite_block(body, locals, plans);
+        rewrite_expression(value, locals, plans);
+    } else {
+        ir::children_mut(expression, |child| rewrite_expression(child, locals, plans));
     }
 }
 
@@ -363,7 +211,7 @@ fn local(slot: usize) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::Binary;
+    use crate::ir::{Binary, walk_expressions};
     use crate::ranges::IntRange;
 
     fn module(source: &str) -> Module {
@@ -391,7 +239,7 @@ def scan(data: bytes) -> None:
         let small = facts.small_locals(function);
         let mut fast = 0;
         let mut fallback = 0;
-        visit_statements(&function.body, &mut |statement| {
+        ir::walk_statements(&function.body, &mut |statement| {
             let Statement::For {
                 target,
                 cursor,
@@ -466,7 +314,7 @@ def scan(limit: int) -> None:
         });
         let mut fast = 0;
         let mut fallback = 0;
-        visit_statements(body, &mut |statement| {
+        ir::walk_statements(body, &mut |statement| {
             if matches!(statement, Statement::For { .. }) {
                 if facts.range_cursor(statement).is_some() {
                     fast += 1;
@@ -504,7 +352,7 @@ def nested_else(outer: int, inner: int) -> None:
         for function in &module.functions {
             let mut loops = 0;
             let mut fast = 0;
-            visit_statements(&function.body, &mut |statement| {
+            ir::walk_statements(&function.body, &mut |statement| {
                 if matches!(statement, Statement::For { .. }) {
                     loops += 1;
                     fast += usize::from(facts.range_cursor(statement).is_some());

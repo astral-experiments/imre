@@ -1,7 +1,3 @@
-use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
-
 use super::{Context, Error, Id, NONE, Result, Value};
 
 fn spelling(ctx: &Context, value: Id) -> bool {
@@ -28,6 +24,8 @@ pub(super) fn path_arg(ctx: &mut Context, path: Id, expected: &str) -> Result<Id
     if let Some(method) = method.filter(|&method| method != NONE) {
         let value = ctx.call(method, Vec::new(), Vec::new())?;
         if spelling(ctx, value) {
+            // A native slot can return a borrowed value. Keep it through later argument conversions.
+            ctx.heap.keep(value);
             return Ok(value);
         }
         return Err(Error::new(
@@ -72,67 +70,27 @@ fn normpath(ctx: &mut Context, path: Id) -> Result<Id> {
     Ok(ctx.alloc(result))
 }
 
-fn stat_predicate(ctx: &mut Context, path: Id, operation: &str) -> Result<bool> {
-    let lstat = operation == "islink";
-    if !lstat
-        && !spelling(ctx, path)
-        && let Some(index) = ctx.index_value(path)?
-    {
-        let fd = index
-            .to_i64()
-            .and_then(|n| libc::c_int::try_from(n).ok())
-            .ok_or_else(|| {
-                Error::new(
-                    "OverflowError",
-                    if index.big().sign() == num_bigint::Sign::Minus {
-                        "fd is less than minimum"
-                    } else {
-                        "fd is greater than maximum"
-                    },
-                )
-            })?;
-        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-        // SAFETY: fstat initializes the full buffer on success and never takes ownership of fd.
-        return Ok(unsafe {
-            if libc::fstat(fd, stat.as_mut_ptr()) != 0 {
-                false
-            } else {
-                let mode = stat.assume_init().st_mode & libc::S_IFMT;
-                match operation {
-                    "exists" => true,
-                    "isdir" => mode == libc::S_IFDIR,
-                    "isfile" => mode == libc::S_IFREG,
-                    _ => unreachable!("registered stat predicate"),
-                }
-            }
-        });
-    }
-    let value = path_arg(
+fn splitroot(ctx: &mut Context, path: Id) -> Result<Id> {
+    use crate::objects::posixpath::root_length;
+
+    let path = path_arg(
         ctx,
         path,
-        if lstat {
-            "lstat: path should be string, bytes or os.PathLike"
-        } else {
-            "stat: path should be string, bytes, os.PathLike or integer"
-        },
+        "_path_splitroot_ex: path should be string, bytes or os.PathLike",
     )?;
-    let encoded;
-    let path = match ctx.heap.get(ctx.scalar_value(value)) {
-        Value::Str(text) => Path::new(text),
-        Value::SurrogateStr(_) => {
-            encoded = ctx.encode_filesystem_string(value)?;
-            Path::new(OsStr::from_bytes(&encoded))
-        }
-        Value::Bytes(bytes) => Path::new(OsStr::from_bytes(bytes)),
-        _ => unreachable!(),
+    let path = ctx.scalar_value(path);
+    let (cut, drive) = match ctx.heap.get(path) {
+        Value::Str(text) => (root_length(text.as_bytes()), ctx.text("")),
+        Value::SurrogateStr(points) => (root_length(points), ctx.text("")),
+        Value::Bytes(bytes) => (root_length(bytes), ctx.alloc(Value::Bytes(Vec::new()))),
+        _ => unreachable!("filesystem spelling"),
     };
-    Ok(match operation {
-        "exists" => crate::objects::exists(path),
-        "isdir" => path.is_dir(),
-        "isfile" => crate::objects::is_file(path),
-        "islink" => std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()),
-        _ => unreachable!("registered path predicate"),
-    })
+    let cut = ctx.int(cut as i64);
+    let prefix = ctx.alloc(Value::Slice([NONE, cut, NONE]));
+    let suffix = ctx.alloc(Value::Slice([cut, NONE, NONE]));
+    let root = ctx.get_item(path, prefix)?;
+    let tail = ctx.get_item(path, suffix)?;
+    Ok(ctx.alloc(Value::Tuple(vec![drive, root, tail])))
 }
 
 /// Join unmatched components of two normalized POSIX spellings into a relative path.
@@ -279,15 +237,21 @@ pub(super) fn call(
                 format!("{function}() takes at most 1 {kind}argument ({count} given)"),
             ));
         }
-        let path = super::option(args, 0, kwargs, "path")?.ok_or_else(|| {
+        let parameter = if function == "_path_splitroot_ex" {
+            "p"
+        } else {
+            "path"
+        };
+        let path = super::option(args, 0, kwargs, parameter)?.ok_or_else(|| {
             Error::new(
                 "TypeError",
-                format!("{function}() missing required argument 'path' (pos 1)"),
+                format!("{function}() missing required argument '{parameter}' (pos 1)"),
             )
         })?;
         return match function {
             "fspath" => fspath(ctx, path),
             "_path_normpath" => normpath(ctx, path),
+            "_path_splitroot_ex" => splitroot(ctx, path),
             _ => unreachable!("registered POSIX path builtin"),
         };
     }
@@ -295,21 +259,13 @@ pub(super) fn call(
         return Err(Error::new("TypeError", "expected one path argument"));
     };
     let path = *path;
-    match name.strip_prefix("_imre_posixpath.") {
-        Some("extension_start") => {
-            let cut = match ctx.heap.get(path) {
-                Value::Str(text) => text
-                    [..crate::objects::posixpath::extension_start(text.as_bytes())]
-                    .chars()
-                    .count(),
-                Value::Bytes(bytes) => crate::objects::posixpath::extension_start(bytes),
-                _ => return Err(Error::new("TypeError", "expected str or bytes")),
-            };
-            Ok(ctx.int(cut as i64))
-        }
-        Some(op @ ("exists" | "isdir" | "isfile" | "islink")) => Ok(
-            super::super::builtins::boolean(stat_predicate(ctx, path, op)?),
-        ),
-        _ => unreachable!(),
-    }
+    debug_assert_eq!(name, "_imre_posixpath.extension_start");
+    let cut = match ctx.heap.get(path) {
+        Value::Str(text) => text[..crate::objects::posixpath::extension_start(text.as_bytes())]
+            .chars()
+            .count(),
+        Value::Bytes(bytes) => crate::objects::posixpath::extension_start(bytes),
+        _ => return Err(Error::new("TypeError", "expected str or bytes")),
+    };
+    Ok(ctx.int(cut as i64))
 }

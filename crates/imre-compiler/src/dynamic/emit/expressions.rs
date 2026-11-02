@@ -43,6 +43,9 @@ impl Function<'_, '_> {
             ast::Expr::List(v) => self.display("list", &v.elts),
             ast::Expr::Set(v) => self.display("set", &v.elts),
             ast::Expr::Tuple(v) => {
+                if let Some(tuple) = self.literal_string_tuple(&v.elts) {
+                    return tuple;
+                }
                 let list = self.display("list", &v.elts);
                 let op = if v.elts.iter().all(imre_ast::literal_tuple_element) {
                     "constant_tuple"
@@ -123,10 +126,16 @@ impl Function<'_, '_> {
             ast::Expr::Lambda(v) => self.define(
                 v.start(),
                 "<lambda>",
+                false,
                 v.parameters.as_deref(),
                 None,
-                Body::Expression(&v.body),
+                None,
+                match v.body.as_ref() {
+                    ast::Expr::Yield(_) => Body::YieldingLambda(&v.body),
+                    body => Body::Expression(body),
+                },
             ),
+            ast::Expr::TString(v) => self.template(&v.value),
             ast::Expr::FString(v) => {
                 let mut parts = Vec::new();
                 for part in v.value.iter() {
@@ -152,6 +161,8 @@ impl Function<'_, '_> {
                 let step = self.define(
                     v.start(),
                     "<genexpr>",
+                    false,
+                    None,
                     None,
                     None,
                     Body::Generator(&v.generators, &v.elt),
@@ -374,6 +385,34 @@ impl Function<'_, '_> {
             }
         }
         kwargs
+    }
+
+    /// Capture values once, leaving conversion and formatting to the template consumer.
+    fn template(&mut self, template: &ast::TStringValue) -> String {
+        let strings = self.template_strings(template);
+        let parts = self.op("list", &[]);
+        for field in template.iter().flat_map(|t| t.elements.interpolations()) {
+            let spec = match imre_ast::strings::template_format_spec(field) {
+                Ok(Some(lit)) => self.format_literal(lit),
+                Ok(None) => self.text(""),
+                Err(reason) => return self.unsupported(reason),
+            };
+            let Some(spelling) = self.source.template_expressions.get(&field.start()) else {
+                return self.unsupported("t-string expression spelling");
+            };
+            let expression = self.text(spelling);
+            let value = self.expr(&field.expression);
+            let conversion = field
+                .conversion
+                .to_char()
+                .map_or_else(|| "0".to_owned(), |c| self.text(&c.to_string()));
+            let metadata = self.op("list", &[]);
+            self.op("append", &[&metadata, &conversion]);
+            self.op("append", &[&metadata, &spec]);
+            let part = self.op("template_interpolation", &[&value, &expression, &metadata]);
+            self.op("append", &[&parts, &part]);
+        }
+        self.op("build_template", &[&strings, &parts])
     }
 
     /// Evaluate the fields and their conversions in source order before joining their text.

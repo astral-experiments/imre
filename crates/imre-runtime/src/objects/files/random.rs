@@ -1,14 +1,14 @@
-//! Buffered read/write windows on anonymous seekable binary files.
+//! Buffered read/write windows on seekable binary files.
 
 use std::fs::File;
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::ops::Range;
 
 use super::super::exceptions::Result;
-use super::{Bytes, Error, close_file, errno_error};
+use super::{Bytes, Error, FileState, Kind, Stream, close_file, errno_error};
 
-pub(super) struct Random {
-    file: File,
+pub(crate) struct Random<F = File> {
+    file: F,
     buffer: Vec<u8>,
     // Kernel and Python positions relative to the same window. The descriptor
     // can also move through fileno(), so an absolute starting offset can go stale.
@@ -16,10 +16,74 @@ pub(super) struct Random {
     pos: usize,
     read_end: usize,
     dirty: Option<Range<usize>>,
+    truncating_name: Option<String>,
 }
 
-impl Random {
-    pub(super) fn new(file: File, capacity: usize) -> Result<Self> {
+impl FileState {
+    pub(crate) fn random_peek(&mut self) -> Result<Bytes> {
+        self.check_random_reentry()?;
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "peek of closed file"));
+        };
+        file.peek()
+    }
+
+    /// Return buffered bytes or make one read through the retained anonymous file.
+    pub(crate) fn random_read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+        self.check_random_reentry()?;
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "read of closed file"));
+        };
+        let size = file.read_once_size(size);
+        let mut data = Vec::new();
+        data.try_reserve_exact(size)
+            .map_err(|_| Error::allocation())?;
+        data.resize(size, 0);
+        let count = file.read_once(&mut data).map_err(errno_error)?;
+        data.truncate(count);
+        Ok(data)
+    }
+
+    /// A size object's index method can call back into the same buffered stream.
+    pub(crate) fn check_random_reentry(&self) -> Result<()> {
+        if let Some(Stream::Random(file)) = &self.stream
+            && let Some(name) = &file.truncating_name
+        {
+            return Err(Error::new(
+                Kind::RuntimeError,
+                format!("reentrant call inside <_io.BufferedRandom name={name}>"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Flush and rewind to the logical cursor before converting the optional Python size.
+    pub(crate) fn begin_random_truncate(&mut self, name: Option<String>) -> Result<()> {
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "truncate of closed file"));
+        };
+        file.flush().map_err(errno_error)?;
+        file.truncating_name = name;
+        Ok(())
+    }
+
+    /// Release the reentrancy guard even if size conversion failed. A resize preserves the cursor.
+    pub(crate) fn finish_random_truncate(&mut self, size: Option<i64>) -> Result<()> {
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "truncate of closed file"));
+        };
+        file.truncating_name = None;
+        if let Some(size) = size {
+            let size = u64::try_from(size)
+                .map_err(|_| errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?;
+            file.file.set_len(size).map_err(errno_error)?;
+        }
+        Ok(())
+    }
+}
+
+impl<F: Read + Write + Seek> Random<F> {
+    pub(crate) fn new(file: F, capacity: usize) -> Result<Self> {
         let mut buffer = Vec::new();
         buffer
             .try_reserve_exact(capacity)
@@ -32,10 +96,11 @@ impl Random {
             pos: 0,
             read_end: 0,
             dirty: None,
+            truncating_name: None,
         })
     }
 
-    pub(super) fn tell(&mut self) -> io::Result<u64> {
+    pub(crate) fn tell(&mut self) -> io::Result<u64> {
         let raw = self.file.stream_position()?;
         Ok(raw.saturating_add_signed(self.pos as i64 - self.raw_pos as i64))
     }
@@ -71,7 +136,7 @@ impl Random {
     }
 
     /// Flush pending edits and leave the descriptor at the caller's logical position.
-    pub(super) fn flush(&mut self) -> io::Result<()> {
+    pub(crate) fn flush(&mut self) -> io::Result<()> {
         self.write_back()?;
         if self.raw_pos != self.pos {
             self.file
@@ -81,12 +146,7 @@ impl Random {
         Ok(())
     }
 
-    pub(super) fn close(mut self) -> io::Result<()> {
-        let flushed = self.flush();
-        close_file(self.file).and(flushed)
-    }
-
-    pub(super) fn seek(&mut self, at: SeekFrom) -> io::Result<u64> {
+    pub(crate) fn seek(&mut self, at: SeekFrom) -> io::Result<u64> {
         let current = self.tell()?;
         let target = match at {
             SeekFrom::Start(n) => Some(n),
@@ -107,13 +167,21 @@ impl Random {
                 return Ok(target);
             }
         }
+        self.seek_raw(|raw| raw.seek(target.map_or(at, SeekFrom::Start)))
+    }
+
+    /// A failed raw seek leaves unread bytes available at the logical cursor.
+    pub(crate) fn seek_raw(
+        &mut self,
+        seek: impl FnOnce(&mut F) -> io::Result<u64>,
+    ) -> io::Result<u64> {
         self.write_back()?;
-        let position = self.file.seek(target.map_or(at, SeekFrom::Start))?;
+        let position = seek(&mut self.file)?;
         self.reset();
         Ok(position)
     }
 
-    pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+    pub(crate) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
@@ -136,7 +204,7 @@ impl Random {
         Ok(())
     }
 
-    pub(super) fn read_bytes(&mut self, limit: Option<usize>) -> Result<Bytes> {
+    pub(crate) fn read_bytes(&mut self, limit: Option<usize>) -> Result<Bytes> {
         let mut result = Vec::new();
         match limit {
             Some(n) => self.take(n as u64).read_to_end(&mut result),
@@ -158,6 +226,38 @@ impl Random {
         Ok(offset)
     }
 
+    /// BufferedRandom synchronizes pending writes and refills from its logical cursor.
+    pub(crate) fn peek(&mut self) -> Result<Bytes> {
+        self.flush().map_err(errno_error)?;
+        super::peek_bytes(self)
+    }
+
+    /// A read1 with read-ahead returns only the buffered prefix, regardless of the limit.
+    pub(crate) fn read_once_size(&self, limit: Option<usize>) -> usize {
+        let size = limit.unwrap_or(self.buffer.len());
+        if self.pos < self.read_end {
+            size.min(self.read_end - self.pos)
+        } else {
+            size
+        }
+    }
+
+    /// Read buffered data or issue a single raw read without reading ahead.
+    pub(crate) fn read_once(&mut self, dest: &mut [u8]) -> io::Result<usize> {
+        if dest.is_empty() {
+            return Ok(0);
+        }
+        if self.pos < self.read_end {
+            let count = dest.len().min(self.read_end - self.pos);
+            dest[..count].copy_from_slice(&self.buffer[self.pos..self.pos + count]);
+            self.pos += count;
+            Ok(count)
+        } else {
+            self.flush()?;
+            self.file.read(dest)
+        }
+    }
+
     pub(super) fn readline(&mut self) -> Result<Bytes> {
         let mut result = Vec::new();
         self.read_until(b'\n', &mut result).map_err(errno_error)?;
@@ -165,7 +265,14 @@ impl Random {
     }
 }
 
-impl BufRead for Random {
+impl Random<File> {
+    pub(super) fn close(mut self) -> io::Result<()> {
+        let flushed = self.flush();
+        close_file(self.file).and(flushed)
+    }
+}
+
+impl<F: Read + Write + Seek> BufRead for Random<F> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         if self.pos >= self.read_end {
             self.flush()?;
@@ -180,7 +287,7 @@ impl BufRead for Random {
     }
 }
 
-impl Read for Random {
+impl<F: Read + Write + Seek> Read for Random<F> {
     fn read(&mut self, dest: &mut [u8]) -> io::Result<usize> {
         if dest.is_empty() {
             return Ok(0);

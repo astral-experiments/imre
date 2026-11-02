@@ -1,0 +1,50 @@
+selected_ordinals	revision	python_optimization	rust_runtime_profile	passed	failed	errored	skipped	successful_subtests	raw_count	raw_result	exit
+55,66,79,99,112,122	5607950ef232dad16d75c0cf53101d9649d89115	reference	n/a	6	0	0	0	10	Ran 6 tests in 0.002s	OK	0
+55,66,79,99,112,122	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O0	dev (debug=0)	0	0	6	0	0	Ran 6 tests in 14.441s	FAILED (errors=6)	1
+55,66,79,99,112,122	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	dev (debug=0)	0	0	6	0	0	Ran 6 tests in 5.944s	FAILED (errors=6)	1
+147	5607950ef232dad16d75c0cf53101d9649d89115	reference	n/a	1	0	0	0	0	Ran 1 test in 0.008s	OK	0
+147	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O0	dev (debug=0)	0	0	1	0	0	Ran 1 test in 2.027s	FAILED (errors=1)	1
+147	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	dev (debug=0)	0	0	1	0	0	Ran 1 test in 2.938s	FAILED (errors=1)	1
+105,106,113	5607950ef232dad16d75c0cf53101d9649d89115	reference	n/a	0	0	0	3	0	Ran 3 tests in 0.000s	OK (skipped=3)	0
+105,106,113	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O0	dev (debug=0)	0	0	0	3	0	Ran 3 tests in 2.642s	OK (skipped=3)	0
+105,106,113	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	dev (debug=0)	0	0	0	3	0	Ran 3 tests in 2.260s	OK (skipped=3)	0
+112	5607950ef232dad16d75c0cf53101d9649d89115	reference	n/a	1	0	0	0	0	Ran 1 test in 0.005s	OK	0
+112	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O0	dev (debug=0)	0	0	1	0	0	Ran 1 test in 3.143s	FAILED (errors=1)	1
+112	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	dev (debug=0)	0	0	1	0	0	Ran 1 test in 3.669s	FAILED (errors=1)	1
+112	666d9ba9cc363c4b84def416a5d89a5d12128324	O0	dev (debug=0)	0	1	0	0	0	Ran 1 test in 3.469s	FAILED (failures=1)	1
+112	666d9ba9cc363c4b84def416a5d89a5d12128324	O3	dev (debug=0)	0	1	0	0	0	Ran 1 test in 1.286s	FAILED (failures=1)	1
+112	b823210dcbf84bab24d2c2005cc367c1e0a0dec4	O0	dev (debug=0)	1	0	0	0	0	Ran 1 test in 2.364s	OK	0
+112	b823210dcbf84bab24d2c2005cc367c1e0a0dec4	O3	dev (debug=0)	1	0	0	0	0	Ran 1 test in 4.367s	OK	0
+79	5607950ef232dad16d75c0cf53101d9649d89115	reference	n/a	1	0	0	0	0	Ran 1 test in 0.000s	OK	0
+79	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O0	dev (debug=0)	0	0	1	0	0	Ran 1 test in 2.163s	FAILED (errors=1)	1
+79	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	dev (debug=0)	0	0	1	0	0	Ran 1 test in 2.468s	FAILED (errors=1)	1
+79	eb628d6ca8f72c61224be2a45a44b17444539887	O0	dev (debug=0)	1	0	0	0	0	Ran 1 test in 4.861s	OK	0
+79	eb628d6ca8f72c61224be2a45a44b17444539887	O3	dev (debug=0)	1	0	0	0	0	Ran 1 test in 3.596s	OK	0
+55	5607950ef232dad16d75c0cf53101d9649d89115	reference	n/a	1	0	0	0	0	Ran 1 test in 0.001s	OK	0
+55	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O0	dev (debug=0)	0	0	1	0	0	Ran 1 test in 1.699s	FAILED (errors=1)	1
+55	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	dev (debug=0)	0	0	1	0	0	Ran 1 test in 4.177s	FAILED (errors=1)	1
+55	463b9fe28ccc91606dd5f5c402e7493df08a2d8f	O0	dev (debug=0)	1	0	0	0	0	Ran 1 test in 2.242s	OK	0
+55	463b9fe28ccc91606dd5f5c402e7493df08a2d8f	O3	dev (debug=0)	1	0	0	0	0	Ran 1 test in 3.113s	OK	0
+158	5607950ef232dad16d75c0cf53101d9649d89115	reference	n/a	1	0	0	0	0	Ran 1 test in 0.002s	OK	0
+158	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O0	dev (debug=0)	0	0	1	0	0	Ran 1 test in 0.771s	FAILED (errors=1)	1
+158	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	dev (debug=0)	0	0	1	0	0	Ran 1 test in 2.946s	FAILED (errors=1)	1
+158	463b9fe28ccc91606dd5f5c402e7493df08a2d8f	O0	dev (debug=0)	0	0	1	0	0	Ran 1 test in 1.660s	FAILED (errors=1)	1
+158	463b9fe28ccc91606dd5f5c402e7493df08a2d8f	O3	dev (debug=0)	0	0	1	0	0	Ran 1 test in 0.880s	FAILED (errors=1)	1
+122	5607950ef232dad16d75c0cf53101d9649d89115	reference	n/a	1	0	0	0	0	Ran 1 test in 0.001s	OK	0
+122	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O0	dev (debug=0)	0	0	1	0	0	Ran 1 test in 0.751s	FAILED (errors=1)	1
+122	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	dev (debug=0)	0	0	1	0	0	Ran 1 test in 1.212s	FAILED (errors=1)	1
+122	fd73f631466c6d440fd2b84838ffa2d9fc329fa8	O0	dev (debug=0)	1	0	0	0	0	Ran 1 test in 1.728s	OK	0
+122	fd73f631466c6d440fd2b84838ffa2d9fc329fa8	O3	dev (debug=0)	1	0	0	0	0	Ran 1 test in 2.908s	OK	0
+147	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O0	release (debug=0)	0	0	1	0	0	Ran 1 test in 0.260s	FAILED (errors=1)	1
+147	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	release (debug=0)	0	0	1	0	0	Ran 1 test in 0.567s	FAILED (errors=1)	1
+147	d21a657056f1ccea4f01d5654bdf541be6e660ac	O0	release (debug=0)	0	1	0	0	0	Ran 1 test in 0.806s	FAILED (failures=1)	1
+147	d21a657056f1ccea4f01d5654bdf541be6e660ac	O3	release (debug=0)	0	1	0	0	0	Ran 1 test in 0.757s	FAILED (failures=1)	1
+55,66,79,99,112,122	d7816c3e6e7379903cb09683a96b17c1420124ee	O0	dev (debug=0)	6	0	0	0	10	Ran 6 tests in 26.860s	OK	0
+55,66,79,99,112,122	d7816c3e6e7379903cb09683a96b17c1420124ee	O3	dev (debug=0)	6	0	0	0	10	Ran 6 tests in 16.082s	OK	0
+158	d7816c3e6e7379903cb09683a96b17c1420124ee	O0	dev (debug=0)	1	0	0	0	0	Ran 1 test in 2.463s	OK	0
+158	d7816c3e6e7379903cb09683a96b17c1420124ee	O3	dev (debug=0)	1	0	0	0	0	Ran 1 test in 1.351s	OK	0
+83,101,111,140,126,141	5607950ef232dad16d75c0cf53101d9649d89115	reference	n/a	6	0	0	0	8	Ran 6 tests in 0.015s	OK	0
+83,101,111,140,126,141	d7816c3e6e7379903cb09683a96b17c1420124ee	O0	dev (debug=0)	6	0	0	0	8	Ran 6 tests in 12.702s	OK	0
+83,101,111,140,126,141	d7816c3e6e7379903cb09683a96b17c1420124ee	O3	dev (debug=0)	6	0	0	0	8	Ran 6 tests in 15.148s	OK	0
+147	0f221c6b4e06310c8b8496d55ae7fc28557bc718	O0	release (debug=0)	0	1	0	0	0	Ran 1 test in 0.574s	FAILED (failures=1)	1
+147	0f221c6b4e06310c8b8496d55ae7fc28557bc718	O3	release (debug=0)	0	1	0	0	0	Ran 1 test in 0.656s	FAILED (failures=1)	1

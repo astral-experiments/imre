@@ -296,16 +296,19 @@ pub(crate) fn bytes_contains_int(haystack: &[u8], needle: &Int) -> Result<bool> 
     Ok(memchr::memchr(byte, haystack).is_some())
 }
 
-/// A field covering the entire immutable input retains its original owner.
-pub(crate) fn rsplit_bytes(
+/// Split a byte buffer at a subsequence or runs of ASCII whitespace. A field
+/// covering the full input can reuse its owner only for immutable bytes.
+pub(crate) fn split_bytes(
     data: &[u8],
     separator: Option<&[u8]>,
     limit: usize,
+    reverse: bool,
+    immutable: bool,
 ) -> Result<Vec<Option<Bytes>>> {
     let mut parts = Vec::new();
     let mut push = |field: &[u8]| -> Result<()> {
         parts.try_reserve(1).map_err(|_| Error::memory_error())?;
-        let owned = if field.len() == data.len() {
+        let owned = if immutable && field.len() == data.len() {
             None
         } else {
             let mut bytes = allocate(field.len())?;
@@ -315,40 +318,69 @@ pub(crate) fn rsplit_bytes(
         parts.push(owned);
         Ok(())
     };
-    let mut end = data.len();
     if let Some(sep) = separator {
         if sep.is_empty() {
             return Err(Error::new(Kind::ValueError, "empty separator"));
         }
-        for start in memchr::memmem::rfind_iter(data, sep).take(limit) {
-            push(&data[start + sep.len()..end])?;
-            end = start;
+        if reverse {
+            let mut end = data.len();
+            for start in memchr::memmem::rfind_iter(data, sep).take(limit) {
+                push(&data[start + sep.len()..end])?;
+                end = start;
+            }
+            push(&data[..end])?;
+        } else {
+            let mut start = 0;
+            for end in memchr::memmem::find_iter(data, sep).take(limit) {
+                push(&data[start..end])?;
+                start = end + sep.len();
+            }
+            push(&data[start..])?;
         }
-        push(&data[..end])?;
     } else {
         let whitespace = |b: u8| matches!(b, b' ' | b'\t'..=b'\r');
-        let mut splits = 0;
-        loop {
-            while end > 0 && whitespace(data[end - 1]) {
-                end -= 1;
-            }
-            if end == 0 {
+        let mut rest = data;
+        for splits in 0.. {
+            rest = if reverse {
+                let end = rest
+                    .iter()
+                    .rposition(|&b| !whitespace(b))
+                    .map_or(0, |i| i + 1);
+                &rest[..end]
+            } else {
+                let start = rest
+                    .iter()
+                    .position(|&b| !whitespace(b))
+                    .unwrap_or(rest.len());
+                &rest[start..]
+            };
+            if rest.is_empty() {
                 break;
             }
             if splits == limit {
-                push(&data[..end])?;
+                push(rest)?;
                 break;
             }
-            let start = data[..end]
-                .iter()
-                .rposition(|&b| whitespace(b))
-                .map_or(0, |i| i + 1);
-            push(&data[start..end])?;
-            end = start;
-            splits += 1;
+            if reverse {
+                let start = rest
+                    .iter()
+                    .rposition(|&b| whitespace(b))
+                    .map_or(0, |i| i + 1);
+                push(&rest[start..])?;
+                rest = &rest[..start];
+            } else {
+                let end = rest
+                    .iter()
+                    .position(|&b| whitespace(b))
+                    .unwrap_or(rest.len());
+                push(&rest[..end])?;
+                rest = &rest[end..];
+            }
         }
     }
-    parts.reverse();
+    if reverse {
+        parts.reverse();
+    }
     Ok(parts)
 }
 
@@ -558,20 +590,35 @@ pub(crate) fn repeat_bytes(bytes: &[u8], count: &Int) -> Result<Option<Bytes>> {
     Ok(Some(result))
 }
 
-pub(crate) fn rstrip_bytes(data: &[u8], chars: &[u8]) -> Result<Option<Bytes>> {
+/// Trim a set of byte values, preserving unchanged exact bytes but copying other receivers.
+pub(crate) fn strip_bytes(
+    data: &[u8],
+    chars: &[u8],
+    left: bool,
+    right: bool,
+    reuse: bool,
+) -> Result<Option<Bytes>> {
     let mut remove = [false; 256];
     for &byte in chars {
         remove[usize::from(byte)] = true;
     }
-    let end = data
-        .iter()
-        .rposition(|&byte| !remove[usize::from(byte)])
-        .map_or(0, |last| last + 1);
-    if end == data.len() {
+    let mut start = 0;
+    let mut end = data.len();
+    if left {
+        while start < end && remove[usize::from(data[start])] {
+            start += 1;
+        }
+    }
+    if right {
+        while end > start && remove[usize::from(data[end - 1])] {
+            end -= 1;
+        }
+    }
+    if reuse && start == 0 && end == data.len() {
         return Ok(None);
     }
-    let mut result = allocate(end)?;
-    result.extend_from_slice(&data[..end]);
+    let mut result = allocate(end - start)?;
+    result.extend_from_slice(&data[start..end]);
     Ok(Some(result))
 }
 
@@ -648,18 +695,19 @@ pub(super) fn ascii_decode_error(bytes: crate::BytesOwner, index: usize) -> Erro
 
 /// Most decoders already own the immutable input. Retain it only on the failing path.
 pub(super) fn decode_owned_error(value: crate::BytesOwner, error: std::str::Utf8Error) -> Error {
-    Utf8Issue::new(&value, 0, error).owned_error(value)
+    DecodeIssue::utf8(&value, 0, error).owned_error(value)
 }
 
-/// A failing UTF-8 sequence uses offsets in the whole input, including after resuming.
-pub(crate) struct Utf8Issue {
+/// A failing decode sequence uses offsets in the whole input, including after resuming.
+pub(crate) struct DecodeIssue {
+    pub(crate) encoding: &'static str,
     pub(crate) start: usize,
     pub(crate) end: usize,
     pub(crate) reason: &'static str,
 }
 
-impl Utf8Issue {
-    pub(super) fn new(data: &[u8], offset: usize, error: std::str::Utf8Error) -> Self {
+impl DecodeIssue {
+    pub(super) fn utf8(data: &[u8], offset: usize, error: std::str::Utf8Error) -> Self {
         let start = offset + error.valid_up_to();
         let end = error
             .error_len()
@@ -669,22 +717,38 @@ impl Utf8Issue {
             Some(_) if !(0xc2..=0xf4).contains(&data[start]) => "invalid start byte",
             _ => "invalid continuation byte",
         };
-        Self { start, end, reason }
+        Self {
+            encoding: "utf-8",
+            start,
+            end,
+            reason,
+        }
     }
 
     fn message(&self, data: &[u8]) -> String {
-        let Self { start, end, reason } = *self;
+        let Self {
+            encoding,
+            start,
+            end,
+            reason,
+        } = *self;
         let location = if end == start + 1 {
             format!("byte 0x{:02x} in position {start}", data[start])
         } else {
             format!("bytes in position {start}-{}", end - 1)
         };
-        format!("'utf-8' codec can't decode {location}: {reason}")
+        format!("'{encoding}' codec can't decode {location}: {reason}")
     }
 
     fn owned_error(&self, value: crate::BytesOwner) -> Error {
         let message = self.message(&value);
-        Error::unicode_decode("utf-8", value, self.start..self.end, self.reason, message)
+        Error::unicode_decode(
+            self.encoding,
+            value,
+            self.start..self.end,
+            self.reason,
+            message,
+        )
     }
 
     pub(crate) fn error(&self, data: &[u8]) -> Error {
@@ -700,7 +764,7 @@ pub(super) fn utf8_error_details(
     value: &[u8],
     error: std::str::Utf8Error,
 ) -> (std::ops::Range<usize>, &'static str, String) {
-    let issue = Utf8Issue::new(value, 0, error);
+    let issue = DecodeIssue::utf8(value, 0, error);
     (issue.start..issue.end, issue.reason, issue.message(value))
 }
 

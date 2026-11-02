@@ -1,4 +1,5 @@
-from typing import NoDefault, TypeVarTuple, Unpack, get_args, get_origin
+from types import GenericAlias
+from typing import Annotated, ForwardRef, List, NoDefault, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
 
 
 def current():
@@ -25,6 +26,51 @@ def current():
     assert repr(unpacked) == "typing.Unpack[Ts]"
     assert unpacked[int, str] == (int, str)
     assert Unpack[tuple[int, str]].__typing_unpacked_tuple_args__ == (int, str)
+
+    alias = tuple[*ts]
+    it = iter(alias)
+    starred = next(it)
+    assert iter(it) is it and next(it, None) is None
+    assert type(starred) is GenericAlias and get_origin(starred) is tuple
+    assert get_args(starred) is alias.__args__ and starred.__parameters__ == (ts,)
+    assert not alias.__unpacked__ and starred.__unpacked__
+    assert alias.__typing_unpacked_tuple_args__ is None
+    assert starred.__typing_unpacked_tuple_args__ is alias.__args__
+    assert repr(starred) == "*" + repr(alias)
+    again, = starred
+    assert again is not starred and again == starred and starred != alias
+    assert hash(starred) == hash(alias) and len({starred, alias, again}) == 2
+    t = TypeVar("T")
+    spelled, = list[t]
+    assert spelled.__typing_unpacked_tuple_args__ is None
+    assert spelled[int] == next(iter(list[int]))
+    assert list[t][int] == list[int]
+    assert tuple[spelled][str].__args__ == (next(iter(list[str])),)
+    assert starred[int, str] == next(iter(tuple[int, str]))
+    assert starred["Target", None].__args__ == ("Target", None)
+
+    marker = List[Annotated[t, ts]]
+    assert marker.__parameters__ == (t,)
+    assert marker[int] == List[Annotated[int, ts]]
+    for origin in (tuple, Tuple):
+        variadic = Annotated[origin[t, Unpack[ts], t], "metadata"]
+        assert variadic[int] == Annotated[origin[int, int], "metadata"]
+        assert variadic[int, str, bool] == Annotated[origin[int, str, bool, int], "metadata"]
+        alias = variadic[t, *TypeVarTuple("Us")]
+        assert alias[bool, float] == Annotated[origin[bool, float, bool], "metadata"]
+
+    spread = Unpack[tuple["Target", None]]
+    builtin = Annotated[tuple[*ts], 1]
+    named = Annotated[Tuple[*ts], 1]
+    assert builtin["Target", None].__origin__.__args__ == (ForwardRef("Target"), type(None))
+    assert builtin[spread].__origin__.__args__ == ("Target", None)
+    assert named[spread].__origin__.__args__ == (ForwardRef("Target"), type(None))
+    try:
+        builtin[Unpack[tuple[None, ...]], Unpack[tuple[int, ...]]]
+    except TypeError as exc:
+        assert str(exc) == "More than one unpacked arbitrary-length tuple argument"
+    else:
+        raise AssertionError("accepted two arbitrary-length tuple arguments")
 
     for bad in (lambda: isinstance(0, ts), lambda: isinstance(0, NoDefault),
                 lambda: Unpack[int, str], lambda: type(NoDefault)(bad=True)):

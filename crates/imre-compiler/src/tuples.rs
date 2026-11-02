@@ -9,7 +9,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ir::{
-    Builtin, Expr, ExprKind, Function, Module, Statement, TUPLE_PROBE_ARITY, Type, children_mut,
+    Builtin, Expr, ExprKind, Function, Module, Statement, TUPLE_PROBE_ARITY, Type, children,
+    children_mut,
 };
 
 struct Producer {
@@ -572,74 +573,6 @@ fn rewrite_cleanup(clear: &mut Vec<usize>, components: &[Option<Vec<usize>>]) {
         .iter()
         .flat_map(|&slot| components[slot].clone().unwrap_or_else(|| vec![slot]))
         .collect();
-}
-
-fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
-    match &expression.kind {
-        ExprKind::Exception { message, .. } => {
-            if let Some(message) = message {
-                visit(message);
-            }
-        }
-        ExprKind::Dict { entries, .. } => {
-            for (key, value) in entries {
-                visit(key);
-                visit(value);
-            }
-        }
-        ExprKind::List(values)
-        | ExprKind::Set { values, .. }
-        | ExprKind::Tuple(values)
-        | ExprKind::Compare(values, _)
-        | ExprKind::Boolean(_, values)
-        | ExprKind::Builtin(_, values) => {
-            for value in values {
-                visit(value);
-            }
-        }
-        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-            for value in &args.values {
-                visit(value);
-            }
-        }
-        ExprKind::Callable { receiver, .. } => {
-            if let Some(receiver) = receiver {
-                visit(receiver);
-            }
-        }
-        ExprKind::Invoke { callable, args } => {
-            visit(callable);
-            for value in &args.values {
-                visit(value);
-            }
-        }
-        ExprKind::Scope { .. } => {
-            unreachable!("scoped statements require the full inspection or rewrite pass")
-        }
-        ExprKind::Bind(_, value)
-        | ExprKind::Present(value)
-        | ExprKind::Absent(value)
-        | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
-        | ExprKind::Field(value, _) => visit(value),
-        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-            visit(left);
-            visit(right);
-        }
-        ExprKind::Conditional(test, yes, no) => {
-            visit(test);
-            visit(yes);
-            visit(no);
-        }
-        ExprKind::Int(_)
-        | ExprKind::Float(_)
-        | ExprKind::Bool(_)
-        | ExprKind::Str(_)
-        | ExprKind::Bytes(_)
-        | ExprKind::None
-        | ExprKind::Local(_) => {}
-    }
 }
 
 #[cfg(test)]

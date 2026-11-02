@@ -42,6 +42,17 @@ pub(super) fn int(out: &mut Vec<u8>, protocol: u8, number: &crate::Int) -> Resul
     Ok(())
 }
 
+pub(super) fn float(out: &mut Vec<u8>, protocol: u8, value: f64) {
+    if protocol == 0 {
+        out.push(b'F'); // FLOAT
+        out.extend_from_slice(crate::floats::render(value).as_bytes());
+        out.push(b'\n');
+    } else {
+        out.push(b'G'); // BINFLOAT
+        out.extend_from_slice(&value.to_be_bytes());
+    }
+}
+
 pub(super) fn boolean(out: &mut Vec<u8>, protocol: u8, value: bool) {
     if protocol < 2 {
         out.extend_from_slice(if value { b"I01\n" } else { b"I00\n" });
@@ -83,6 +94,28 @@ pub(super) fn string(out: &mut Vec<u8>, protocol: u8, text: &str) -> Result<()> 
     Ok(())
 }
 
+pub(super) fn bytes(out: &mut Vec<u8>, protocol: u8, bytes: &[u8]) -> Result<()> {
+    let len = bytes.len();
+    if let Ok(short) = u8::try_from(len) {
+        out.extend([b'C', short]); // SHORT_BINBYTES
+    } else if let Ok(length) = u32::try_from(len) {
+        out.push(b'B'); // BINBYTES
+        out.extend(length.to_le_bytes());
+    } else if protocol >= 4 {
+        out.push(0x8e); // BINBYTES8
+        out.extend((len as u64).to_le_bytes());
+    } else {
+        return Err(Error::new(
+            "OverflowError",
+            "bytes object is too large to pickle with protocol 3",
+        ));
+    }
+    out.try_reserve(len)
+        .map_err(|_| crate::Error::allocation())?;
+    out.extend_from_slice(bytes);
+    Ok(())
+}
+
 pub(super) fn tuple_start(out: &mut Vec<u8>, protocol: u8, len: usize) {
     if protocol == 0 || (protocol == 1 && len > 0) || len > 3 {
         out.push(b'('); // MARK
@@ -95,6 +128,17 @@ pub(super) fn tuple_end(out: &mut Vec<u8>, protocol: u8, len: usize) {
         (2.., 1..=3) => 0x84 + len as u8, // TUPLE1, TUPLE2, TUPLE3
         _ => b't',                        // TUPLE
     });
+}
+
+/// Replace the in-progress elements with a tuple that a recursive child memoized.
+pub(super) fn recursive_tuple(out: &mut Vec<u8>, protocol: u8, len: usize, index: u32) {
+    if protocol == 0 || (protocol >= 2 && len <= 3) {
+        // The text protocol also needs a POP for its MARK.
+        out.extend(std::iter::repeat_n(b'0', len + usize::from(protocol == 0)));
+    } else {
+        out.push(b'1'); // POP_MARK
+    }
+    memo_get(out, protocol, index);
 }
 
 pub(super) fn memo_put(out: &mut Vec<u8>, protocol: u8, id: u32) {
@@ -133,12 +177,6 @@ pub(super) fn global(
         string(out, protocol, name)?;
         out.push(0x93); // STACK_GLOBAL
         return Ok(());
-    }
-    if name.contains('.') {
-        return Err(Error::new(
-            "NotImplementedError",
-            "nested pickle globals need protocol 4 or later",
-        ));
     }
     let (module, name) = if protocol < 3 && fix_imports {
         legacy_global(module, name)?
@@ -186,10 +224,22 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             "zip" => ("itertools", "izip"),
             "map" => ("itertools", "imap"),
             "filter" => ("itertools", "ifilter"),
-            "bool" | "bytes" | "complex" | "dict" | "float" | "frozenset" | "getattr" | "list"
-            | "object" | "set" | "slice" | "tuple" | "type" => ("__builtin__", name),
+            "bool" | "bytes" | "complex" | "dict" | "float" | "frozenset" | "getattr" | "iter"
+            | "list" | "object" | "set" | "slice" | "tuple" | "type" | "Ellipsis"
+            | "NotImplemented" => ("__builtin__", name),
             _ => return Err(unsupported()),
         });
+    }
+    if module == "collections" {
+        return Ok(match name {
+            "UserDict" => ("UserDict", "IterableUserDict"),
+            "UserList" => ("UserList", "UserList"),
+            "UserString" => ("UserString", "UserString"),
+            _ => (module, name),
+        });
+    }
+    if module == "copyreg" {
+        return Ok(("copy_reg", name));
     }
     const LEGACY_MODULES: &[&str] = &[
         "_bz2",
@@ -201,10 +251,8 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
         "_pickle",
         "_socket",
         "_thread",
-        "collections",
         "collections.abc",
         "configparser",
-        "copyreg",
         "dbm",
         "dbm.bsd",
         "dbm.dumb",

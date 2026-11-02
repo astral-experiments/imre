@@ -46,37 +46,67 @@ mod units;
 use units::Output;
 pub(crate) use units::emit_units;
 
+enum LlvmType {
+    I1,
+    I8,
+    I64,
+    Double,
+    Ptr,
+}
+
+/// Runtime descriptor tags for concrete words. Nullable is ORed with the payload tag.
+#[repr(u32)]
+enum WordKind {
+    None = 0,
+    Bool = 1,
+    Int = 2,
+    Str = 3,
+    IntList = 4,
+    Object = 5,
+    Record = 6,
+    Float = 7,
+    Bytes = 8,
+    Union = 9,
+    Enum = 10,
+    BuiltinClass = 11,
+    ForwardRef = 12,
+    AnnotationValue = 13,
+    Function = 14,
+    Nullable = 256,
+}
+
 impl Type {
-    fn llvm(self) -> &'static str {
+    /// Classifies the type once for LLVM values, retain/release calls, and field descriptors.
+    fn word_kind(self) -> WordKind {
         match self {
-            Self::Int
-            | Self::IntEnum(_)
-            | Self::StrEnum(_)
-            | Self::Enum(_)
-            | Self::Optional(_)
-            | Self::Union(_)
-            | Self::StringIterable => "i64",
-            Self::Float => "double",
-            Self::Bool => "i1",
-            Self::Str
-            | Self::ForwardRef(_)
-            | Self::AnnotationValue(_)
+            Self::None => WordKind::None,
+            Self::Bool => WordKind::Bool,
+            Self::Int => WordKind::Int,
+            Self::Float => WordKind::Float,
+            Self::Str | Self::StrLiteral(_) => WordKind::Str,
+            Self::BuiltinClass => WordKind::BuiltinClass,
+            Self::ForwardRef(_) => WordKind::ForwardRef,
+            Self::FunctionRef => WordKind::Function,
+            Self::AnnotationValue(_) => WordKind::AnnotationValue,
+            Self::IntEnum(_) | Self::StrEnum(_) | Self::Enum(_) => WordKind::Enum,
+            Self::Bytes => WordKind::Bytes,
+            Self::Union(_) | Self::StringIterable => WordKind::Union,
+            Self::ListInt => WordKind::IntList,
+            Self::Class(_)
+            | Self::VarTuple(_)
+            | Self::Tuple(_)
             | Self::CmpKey(..)
-            | Self::BuiltinClass
-            | Self::StrLiteral(_)
-            | Self::Bytes
-            | Self::ListInt
-            | Self::Class(_)
             | Self::Callable(_)
-            | Self::List(_)
+            | Self::ModuleSpec(_)
+            | Self::SysImplementation
+            | Self::CompletedProcess(..) => WordKind::Record,
+            Self::List(_)
             | Self::Dict(_)
             | Self::ChainMap(_)
             | Self::Set(_)
             | Self::Deque(_)
             | Self::FrozenStrings
             | Self::StringKeys
-            | Self::NativeModule
-            | Self::ModuleNamespace
             | Self::Iterator
             | Self::Cursor(_)
             | Self::ByteOutput
@@ -89,9 +119,9 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::PurePath(_)
-            | Self::ModuleSpec(_)
-            | Self::SysImplementation
-            | Self::CompletedProcess(..)
+            | Self::TextIO
+            | Self::StringIO
+            | Self::HandlerLock
             | Self::EventLoop
             | Self::Coroutine(_)
             | Self::Task(_)
@@ -103,9 +133,8 @@ impl Type {
             | Self::Popen(..)
             | Self::ActivePopen
             | Self::AsyncProcess(_)
-            | Self::TextIO
-            | Self::StringIO
-            | Self::HandlerLock
+            | Self::NativeModule
+            | Self::ModuleNamespace
             | Self::LogFormatter
             | Self::LogRecord
             | Self::Logger
@@ -114,12 +143,11 @@ impl Type {
             | Self::CacheState(_)
             | Self::ProcessSelectorClass
             | Self::ClockTime
-            | Self::FunctionRef
-            | Self::OverloadStub
             | Self::Calendar(_)
-            | Self::PlainObject
             | Self::StrDescriptor(_)
             | Self::Placeholder(_)
+            | Self::OverloadStub
+            | Self::PlainObject
             | Self::SimpleNamespace(_)
             | Self::PathInfo
             | Self::CodecInfo
@@ -130,6 +158,7 @@ impl Type {
             | Self::TextOutput
             | Self::Hash
             | Self::JsonDecoder
+            | Self::JsonEncoder
             | Self::ZipFile
             | Self::ZipInfo
             | Self::Context
@@ -146,116 +175,45 @@ impl Type {
             | Self::RegexMatch
             | Self::SourceModule
             | Self::BytesIO
-            | Self::BinaryIO
-            | Self::VarTuple(_)
-            | Self::Tuple(_) => "ptr",
-            Self::None => "i8",
+            | Self::BinaryIO => WordKind::Object,
+            Self::Optional(_) => WordKind::Nullable,
+        }
+    }
+
+    fn llvm_type(self) -> LlvmType {
+        match self.word_kind() {
+            WordKind::None => LlvmType::I8,
+            WordKind::Bool => LlvmType::I1,
+            WordKind::Float => LlvmType::Double,
+            WordKind::Int | WordKind::Enum | WordKind::Nullable | WordKind::Union => LlvmType::I64,
+            WordKind::Str
+            | WordKind::IntList
+            | WordKind::Object
+            | WordKind::Record
+            | WordKind::Bytes
+            | WordKind::BuiltinClass
+            | WordKind::ForwardRef
+            | WordKind::AnnotationValue
+            | WordKind::Function => LlvmType::Ptr,
+        }
+    }
+
+    fn llvm(self) -> &'static str {
+        match self.llvm_type() {
+            LlvmType::I1 => "i1",
+            LlvmType::I8 => "i8",
+            LlvmType::I64 => "i64",
+            LlvmType::Double => "double",
+            LlvmType::Ptr => "ptr",
         }
     }
 
     fn initial(self) -> &'static str {
-        match self {
-            Self::Int => "1",
-            Self::Float => "0.0",
-            Self::Str
-            | Self::ForwardRef(_)
-            | Self::AnnotationValue(_)
-            | Self::CmpKey(..)
-            | Self::BuiltinClass
-            | Self::StrLiteral(_)
-            | Self::Bytes
-            | Self::ListInt
-            | Self::Class(_)
-            | Self::Callable(_)
-            | Self::List(_)
-            | Self::Dict(_)
-            | Self::ChainMap(_)
-            | Self::Set(_)
-            | Self::Deque(_)
-            | Self::FrozenStrings
-            | Self::StringKeys
-            | Self::NativeModule
-            | Self::ModuleNamespace
-            | Self::Iterator
-            | Self::Cursor(_)
-            | Self::ByteOutput
-            | Self::TupleBuffer
-            | Self::Exception
-            | Self::NamedException(_)
-            | Self::ObjectValue
-            | Self::ReadOnlyObjectMapping
-            | Self::ImportException
-            | Self::TimeoutExpired
-            | Self::Path
-            | Self::PurePath(_)
-            | Self::ModuleSpec(_)
-            | Self::SysImplementation
-            | Self::CompletedProcess(..)
-            | Self::EventLoop
-            | Self::Coroutine(_)
-            | Self::Task(_)
-            | Self::TaskGroup
-            | Self::Document(_)
-            | Self::GeneratorContext
-            | Self::DirectoryContext(_)
-            | Self::Semaphore
-            | Self::Popen(..)
-            | Self::ActivePopen
-            | Self::AsyncProcess(_)
-            | Self::TextIO
-            | Self::StringIO
-            | Self::HandlerLock
-            | Self::LogFormatter
-            | Self::LogRecord
-            | Self::Logger
-            | Self::LogManager
-            | Self::TimedFileHandler
-            | Self::CacheState(_)
-            | Self::ProcessSelectorClass
-            | Self::ClockTime
-            | Self::FunctionRef
-            | Self::OverloadStub
-            | Self::Calendar(_)
-            | Self::PlainObject
-            | Self::StrDescriptor(_)
-            | Self::Placeholder(_)
-            | Self::SimpleNamespace(_)
-            | Self::PathInfo
-            | Self::CodecInfo
-            | Self::Poll
-            | Self::Socket
-            | Self::CodecWriterClass
-            | Self::CodecWriter
-            | Self::TextOutput
-            | Self::Hash
-            | Self::JsonDecoder
-            | Self::ZipFile
-            | Self::ZipInfo
-            | Self::Context
-            | Self::ContextMissing
-            | Self::WeakProxy(_)
-            | Self::ContextVar(_)
-            | Self::ContextToken(_)
-            | Self::CsvReader
-            | Self::Patch(_)
-            | Self::RegexPattern
-            | Self::JsonRoot
-            | Self::JsonValue
-            | Self::JsonObject
-            | Self::RegexMatch
-            | Self::SourceModule
-            | Self::BytesIO
-            | Self::BinaryIO
-            | Self::VarTuple(_)
-            | Self::Tuple(_) => "null",
-            Self::Bool
-            | Self::None
-            | Self::IntEnum(_)
-            | Self::StrEnum(_)
-            | Self::Enum(_)
-            | Self::Optional(_)
-            | Self::Union(_)
-            | Self::StringIterable => "0",
+        match self.llvm_type() {
+            LlvmType::I64 if self == Self::Int => "1",
+            LlvmType::Double => "0.0",
+            LlvmType::Ptr => "null",
+            LlvmType::I1 | LlvmType::I8 | LlvmType::I64 => "0",
         }
     }
 }
@@ -485,6 +443,20 @@ fn emit_program(
         .common()
         .push_str("; Generated by Imre. Runtime arguments borrow; results transfer ownership.\n");
     write_declarations(emitter.output);
+    if module
+        .command_flags
+        .as_ref()
+        .is_some_and(|flags| flags.faulthandler)
+    {
+        emitter.output.common().push_str(concat!(
+            "@imre_typed_fault_depth = linkonce_odr hidden thread_local global i64 0\n",
+            "declare i32 @imre_fault_enable(i32, i32, i32)\n",
+            "declare void @perror(ptr)\n",
+            "declare void @imre_fault_frame(i64, ptr, i64, ptr, i64, i32)\n",
+            "declare void @imre_fault_line(i64, i32)\n",
+            "declare void @imre_fault_truncate(i64)\n",
+        ));
+    }
     if emitter.uses_percent_tuple {
         emitter
             .output
@@ -853,111 +825,25 @@ impl Emitter<'_, '_> {
             return;
         }
         let ty = self.module.types.payload(value.ty).unwrap_or(value.ty);
-        if ty == Type::Float {
-            if value.ty != Type::Float {
-                self.void_call(&format!("imre_float_box_{operation}"), &[value]);
+        let family = match ty.word_kind() {
+            WordKind::Float => {
+                if value.ty != ty {
+                    self.void_call(&format!("imre_float_box_{operation}"), &[value]);
+                }
+                return;
             }
-            return;
-        }
-        let family = match ty {
-            Type::Int => "int",
-            Type::Union(_) | Type::StringIterable => "union",
-            Type::Str | Type::StrLiteral(_) | Type::BuiltinClass => "str",
-            Type::Bytes => "bytes",
-            Type::ListInt => "list",
-            Type::Class(_)
-            | Type::Tuple(_)
-            | Type::Callable(_)
-            | Type::ForwardRef(_)
-            | Type::FunctionRef
-            | Type::AnnotationValue(_)
-            | Type::VarTuple(_)
-            | Type::ModuleSpec(_)
-            | Type::CmpKey(..)
-            | Type::SysImplementation
-            | Type::CompletedProcess(..) => "record",
-            Type::List(_)
-            | Type::Dict(_)
-            | Type::ChainMap(_)
-            | Type::Set(_)
-            | Type::Deque(_)
-            | Type::FrozenStrings
-            | Type::StringKeys
-            | Type::Iterator
-            | Type::Cursor(_)
-            | Type::ByteOutput
-            | Type::TupleBuffer
-            | Type::Exception
-            | Type::NamedException(_)
-            | Type::ObjectValue
-            | Type::ReadOnlyObjectMapping
-            | Type::ImportException
-            | Type::TimeoutExpired
-            | Type::Path
-            | Type::PurePath(_)
-            | Type::TextIO
-            | Type::StringIO
-            | Type::HandlerLock
-            | Type::EventLoop
-            | Type::Coroutine(_)
-            | Type::Task(_)
-            | Type::TaskGroup
-            | Type::Document(_)
-            | Type::GeneratorContext
-            | Type::DirectoryContext(_)
-            | Type::Semaphore
-            | Type::Popen(..)
-            | Type::ActivePopen
-            | Type::AsyncProcess(_)
-            | Type::NativeModule
-            | Type::ModuleNamespace
-            | Type::LogFormatter
-            | Type::LogRecord
-            | Type::Logger
-            | Type::LogManager
-            | Type::TimedFileHandler
-            | Type::CacheState(_)
-            | Type::ProcessSelectorClass
-            | Type::ClockTime
-            | Type::Calendar(_)
-            | Type::StrDescriptor(_)
-            | Type::Placeholder(_)
-            | Type::OverloadStub
-            | Type::PlainObject
-            | Type::SimpleNamespace(_)
-            | Type::PathInfo
-            | Type::CodecInfo
-            | Type::Poll
-            | Type::Socket
-            | Type::CodecWriterClass
-            | Type::CodecWriter
-            | Type::TextOutput
-            | Type::Hash
-            | Type::JsonDecoder
-            | Type::ZipFile
-            | Type::ZipInfo
-            | Type::Context
-            | Type::ContextMissing
-            | Type::WeakProxy(_)
-            | Type::ContextVar(_)
-            | Type::ContextToken(_)
-            | Type::CsvReader
-            | Type::Patch(_)
-            | Type::RegexPattern
-            | Type::JsonRoot
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::RegexMatch
-            | Type::SourceModule
-            | Type::BytesIO
-            | Type::BinaryIO => "object",
-            Type::Float
-            | Type::Bool
-            | Type::IntEnum(_)
-            | Type::StrEnum(_)
-            | Type::Enum(_)
-            | Type::None => return,
-            Type::Optional(_) => unreachable!("optional types are flattened"),
+            WordKind::Int => "int",
+            WordKind::Union => "union",
+            WordKind::Str | WordKind::BuiltinClass => "str",
+            WordKind::Bytes => "bytes",
+            WordKind::IntList => "list",
+            WordKind::Record
+            | WordKind::ForwardRef
+            | WordKind::Function
+            | WordKind::AnnotationValue => "record",
+            WordKind::Object => "object",
+            WordKind::None | WordKind::Bool | WordKind::Enum => return,
+            WordKind::Nullable => unreachable!("optional types are flattened"),
         };
         let name = if value.ty == Type::Int {
             format!("{operation}_int_nonzero")
@@ -1008,6 +894,23 @@ impl Emitter<'_, '_> {
         let pending = self.instruction("call i32 @imre_error_pending()");
         let pending = self.instruction(format!("icmp ne i32 {pending}, 0"));
         self.check_failed(&pending);
+    }
+
+    /// SIGINT can arrive during optimized native loops. The ordinary path
+    /// reads one atomic byte; only the slow path enters the exception runtime.
+    fn check_interrupt(&mut self) {
+        let tripped =
+            self.instruction("load atomic i8, ptr @imre_signal_tripped monotonic, align 1");
+        let pending = self.instruction(format!("icmp ne i8 {tripped}, 0"));
+        let (slow, next) = (self.label(), self.label());
+        self.line(format!(
+            "br i1 {pending}, label %{slow}, label %{next}, !prof !0"
+        ));
+        self.start(&slow);
+        let raised = self.instruction("call i1 @imre_typed_interrupt()");
+        self.check_failed(&raised);
+        self.jump(&next);
+        self.start(&next);
     }
 
     /// Both error-detection ABIs share exactly the same ownership routing. The
@@ -1589,7 +1492,7 @@ impl Emitter<'_, '_> {
         };
         same_local
             && self.ranges.integer(left).is_some()
-            && ir::expression_preserves_local(right, slot, self.locals.len())
+            && ir::expression_preserves_local(right, slot)
     }
 
     fn cleanup(&mut self, slots: &[usize]) {
@@ -1918,6 +1821,35 @@ impl Emitter<'_, '_> {
             function.returns.llvm()
         };
         self.start("entry");
+        let fault_frame = if let Some(Statement::Expr(Expr {
+            kind: ExprKind::Builtin(Builtin::FaultFrame { file, name, line }, _),
+            ..
+        })) = function.body.first()
+        {
+            if entry {
+                let result = self.instruction("call i32 @imre_fault_enable(i32 2, i32 1, i32 1)");
+                let enabled = self.instruction(format!("icmp eq i32 {result}, 0"));
+                let (ready, failed) = (self.label(), self.label());
+                self.branch(&enabled, &ready, &failed);
+                self.start(&failed);
+                let message = self.byte_array(b"cannot enable faulthandler\0".to_vec());
+                self.line(format!("call void @perror(ptr @{message})"));
+                self.line("ret i32 1");
+                self.start(&ready);
+            }
+            let filename = self.byte_array(file.as_bytes().to_vec());
+            let function_name = self.byte_array(name.as_bytes().to_vec());
+            self.line("%fault_depth = load i64, ptr @imre_typed_fault_depth");
+            self.line(format!(
+                "call void @imre_fault_frame(i64 %fault_depth, ptr @{filename}, i64 {}, ptr @{function_name}, i64 {}, i32 {line})",
+                file.len(), name.len()
+            ));
+            let depth = self.instruction("add i64 %fault_depth, 1");
+            self.line(format!("store i64 {depth}, ptr @imre_typed_fault_depth"));
+            true
+        } else {
+            false
+        };
         let directory_slots: Vec<_> = self
             .locals
             .iter()
@@ -1963,7 +1895,7 @@ impl Emitter<'_, '_> {
             self.line(format!("%pair_view{slot} = alloca {{ ptr, i64 }}"));
         }
         let mut field_masks = vec![0_u8; self.locals.len()];
-        borrows::statements(&function.body, &mut |stmt| {
+        ir::walk_statements(&function.body, &mut |stmt| {
             if let Statement::Assign(
                 slot,
                 Expr {
@@ -2027,6 +1959,8 @@ impl Emitter<'_, '_> {
             ));
             self.prepare_directory_frame(&value);
         }
+        let command_flags = self.module.command_flags.as_ref();
+        let ignore_env = command_flags.is_some_and(|flags| flags.ignore_environment);
         if entry {
             let startup = if self.uses_orig_argv {
                 "imre_seq_layout_with_orig_argv"
@@ -2039,24 +1973,46 @@ impl Emitter<'_, '_> {
             ));
             self.line(format!(
                 "call void @imre_integer_digits_init(i32 {})",
-                u32::from(self.module.ignore_python_environment)
+                u32::from(ignore_env)
+            ));
+            self.line(format!(
+                "call void @imre_context_warnings_init(i32 {})",
+                command_flags.map_or(-1, |flags| i32::from(flags.context_aware_warnings))
             ));
             self.line("call void @imre_record_error_init()");
-            if let Some(utf8) = self.module.command_utf8_mode {
+            if command_flags.is_some_and(|flags| flags.unbuffered) {
+                self.line("call void @imre_stdio_unbuffered_init()");
+            }
+            if let Some(utf8_mode) = command_flags.and_then(|flags| flags.utf8_mode) {
                 self.line(format!(
                     "call void @imre_stdio_command_init(i32 {}, i32 {})",
-                    u32::from(self.module.ignore_python_environment),
-                    u32::from(utf8)
+                    u32::from(ignore_env),
+                    u32::from(utf8_mode)
                 ));
+            } else if ignore_env {
+                self.line("call void @imre_stdio_isolated_init()");
             } else {
                 self.line("call void @imre_stdio_init()");
             }
+            let warnoptions = command_flags.map_or(&[][..], |flags| flags.warnoptions.as_slice());
+            let options = if warnoptions.is_empty() {
+                "null".to_owned()
+            } else {
+                let mut json =
+                    serde_json::to_vec(warnoptions).expect("serializable Python -W options");
+                json.push(0);
+                format!("@{}", self.byte_array(json))
+            };
+            self.line(format!(
+                "call void @imre_warning_options_init(i32 {}, ptr {options})",
+                u32::from(ignore_env),
+            ));
             self.line("call void @imre_init_literals()");
         }
         if entry && self.uses_cache_paths {
             self.line(format!(
                 "call void @imre_cache_paths_init(i32 {})",
-                u32::from(!self.module.ignore_python_environment)
+                u32::from(!ignore_env)
             ));
         }
         if entry && self.uses_linecache {
@@ -2081,6 +2037,10 @@ impl Emitter<'_, '_> {
         self.cleanup(&cleanup_slots);
         if let Some(leave) = leave_frame {
             self.line(leave);
+        }
+        if fault_frame {
+            self.line("call void @imre_fault_truncate(i64 %fault_depth)");
+            self.line("store i64 %fault_depth, ptr @imre_typed_fault_depth");
         }
         if entry {
             if self.has_extensions {
@@ -2125,6 +2085,10 @@ impl Emitter<'_, '_> {
         self.cleanup(&cleanup_slots);
         if let Some(leave) = leave_frame {
             self.line(leave);
+        }
+        if fault_frame {
+            self.line("call void @imre_fault_truncate(i64 %fault_depth)");
+            self.line("store i64 %fault_depth, ptr @imre_typed_fault_depth");
         }
         if entry {
             if self.has_extensions {
@@ -2523,6 +2487,7 @@ impl Emitter<'_, '_> {
                     self.jump(&condition);
                 }
                 self.start(&condition);
+                self.check_interrupt();
                 let test = self.while_condition(test, raw_subtotal.is_some());
                 self.branch(&test, &body_label, &exhausted);
                 self.start(&body_label);
@@ -2590,6 +2555,7 @@ impl Emitter<'_, '_> {
                 self.checked_line("call void @imre_range_step_zero()");
                 self.line("unreachable");
                 self.start(&condition);
+                self.check_interrupt();
                 let mut current = self.borrow_slot(*cursor);
                 current.small_integer |= small_cursor;
                 let mut stop_value = self.borrow_slot(*stop);
@@ -3836,6 +3802,7 @@ impl Emitter<'_, '_> {
                 | Type::TextOutput
                 | Type::Hash
                 | Type::JsonDecoder
+                | Type::JsonEncoder
                 | Type::ZipFile
                 | Type::ZipInfo
                 | Type::Context
@@ -4502,12 +4469,8 @@ impl Emitter<'_, '_> {
                 &[&args[0].value],
             ),
             Builtin::RegexCompile { source, spelling } => {
-                // Distinct Python spellings may compile to the same engine pattern.
-                // A non-UTF-8 prefix separates this record from legacy UTF-8 literals.
-                let mut bytes = vec![0xff];
-                bytes.extend_from_slice(&(spelling.len() as u64).to_le_bytes());
-                bytes.extend_from_slice(spelling.as_bytes());
-                bytes.extend_from_slice(source.as_bytes());
+                // A non-UTF-8 byte separates the original spelling from the engine pattern.
+                let bytes = [spelling.as_bytes(), &[0xff], source.as_bytes()].concat();
                 self.pooled_literal(&bytes, returns)
             }
             Builtin::RegexSpelling => self.call("imre_regex_spelling", returns, &[&args[0].value]),
@@ -5151,6 +5114,30 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::JsonEncoderNew => {
+                let [ascii, nan, sort] = std::array::from_fn(|index| {
+                    self.instruction(format!("zext i1 {} to i32", args[index].value.operand))
+                });
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @imre_json_encoder_new(i32 {ascii}, i32 {nan}, i32 {sort})"
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::JsonEncoderEncode(schema) => {
+                let schema = self.output.global_ref(json::schema_name(*schema));
+                let word = self.word(&args[1].value);
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_json_encoder_encode(ptr {}, i64 {word}, ptr @{schema})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::JsonDecoderNew => self.call("imre_json_decoder_new", returns, &[]),
             Builtin::JsonDecoderMemo => {
                 self.call("imre_json_decoder_memo", returns, &[&args[0].value])
@@ -5356,6 +5343,15 @@ impl Emitter<'_, '_> {
                 use crate::ir::RandomOperation::*;
                 let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
                 match op {
+                    Shuffle => {
+                        let symbol = if values[0].ty == Type::ListInt {
+                            "imre_random_shuffle_int_list"
+                        } else {
+                            "imre_random_shuffle_list"
+                        };
+                        self.void_call(symbol, &values);
+                        none()
+                    }
                     Float => self.call("imre_random_float", Type::Float, &[]),
                     Bits => self.call("imre_random_bits", Type::Int, &values),
                     ChoiceIndex { secure } => {
@@ -5596,31 +5592,35 @@ impl Emitter<'_, '_> {
             }
             Builtin::SysThreadInfo => {
                 let text = self.module.types.optional(Type::Str);
-                let field = |version| Expr {
+                let field = |field| Expr {
                     ty: text,
-                    kind: ExprKind::Builtin(Builtin::SysThreadText { version }, vec![]),
+                    kind: ExprKind::Builtin(Builtin::SysThreadText { field }, vec![]),
                 };
-                // The Rust runtime does not expose either Python thread-lock implementation.
-                let lock = Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                };
+                // The runtime ABI predates the lock field: name = 0, version = 1, lock = 2.
                 self.tuple(
                     returns,
-                    &[field(false), lock, field(true)],
+                    &[field(0), field(2), field(1)],
                     Some("sys_thread_info"),
                 )
             }
-            Builtin::SysThreadText { version } => {
-                let pointer = self.instruction(format!(
-                    "call ptr @imre_sys_thread_text(i32 {})",
-                    u32::from(*version)
-                ));
+            Builtin::SysThreadText { field } => {
+                let pointer =
+                    self.instruction(format!("call ptr @imre_sys_thread_text(i32 {field})"));
                 Value {
                     ty: returns,
                     operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),
                     small_integer: false,
                 }
+            }
+            // The prologue publishes this frame before any operation that can unwind.
+            Builtin::FaultFrame { .. } => none(),
+            Builtin::FaultLine(line) => {
+                let depth = self.instruction("load i64, ptr @imre_typed_fault_depth");
+                let index = self.instruction(format!("sub i64 {depth}, 1"));
+                self.line(format!(
+                    "call void @imre_fault_line(i64 {index}, i32 {line})"
+                ));
+                none()
             }
             Builtin::GeneratorFrameEnter(name) => {
                 match self.module.source_frames.iter().flatten().next() {
@@ -5643,6 +5643,10 @@ impl Emitter<'_, '_> {
                     None => unreachable!("unused generator frames were removed"),
                 }
                 none()
+            }
+            Builtin::SysContextAwareWarnings => {
+                let raw = self.instruction("call i64 @imre_sys_context_aware_warnings()");
+                self.tag_small(&raw)
             }
             Builtin::SysGetRecursionLimit => {
                 self.call("imre_sys_getrecursionlimit", Type::Int, &[])
@@ -5688,6 +5692,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::OsName => self.call("imre_os_name", returns, &[]),
+            Builtin::OsLinesep => self.call("imre_os_linesep", returns, &[]),
             Builtin::OsPathsep => self.call("imre_os_pathsep", returns, &[]),
             Builtin::OsSeparator { alternate } => {
                 let operand = self.checked_instruction(format!(
@@ -7008,6 +7013,11 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::StructCyclePrefix => self.call(
+                "imre_struct_cycle_prefix",
+                Type::Int,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::ListReserveRange => {
                 let count = self.index_word(&args[4].value, true);
                 let name = if args[0].value.ty == Type::ByteOutput {
@@ -7648,6 +7658,18 @@ impl Emitter<'_, '_> {
                 Type::ListInt,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::DictPopItem => {
+                // Allocate the result before removing the entry. Each tuple field
+                // occupies a full word and takes the dictionary's existing owner.
+                let pair = self.record(returns);
+                let key = self.field_pointer(&pair, 0);
+                let value = self.field_pointer(&pair, 1);
+                self.checked_line(format!(
+                    "call void @imre_dict_popitem(ptr {}, ptr {key}, ptr {value})",
+                    args[0].value.operand
+                ));
+                pair
+            }
             Builtin::DictGetDefault | Builtin::DictSetDefault | Builtin::DictPop => {
                 let key = self.mapping_read_key(args[0].value.ty, &args[1].value);
                 let default = args.get(2).map(|arg| self.word(&arg.value));
@@ -8038,16 +8060,6 @@ impl Emitter<'_, '_> {
                     Type::Str | Type::StrLiteral(_) => {
                         self.void_call("imre_print_str", &[&args[0].value])
                     }
-                    Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_) => {
-                        let text = if matches!(args[0].value.ty, Type::Enum(_)) {
-                            self.call("imre_enum_string", Type::Str, &[&args[0].value])
-                        } else {
-                            self.enum_text(&args[0].value, false)
-                        };
-                        let text = self.owned(text);
-                        self.void_call("imre_print_str", &[&text]);
-                        self.release(&text);
-                    }
                     Type::Bytes => self.void_call("imre_print_bytes", &[&args[0].value]),
                     Type::Bool => {
                         let byte =
@@ -8055,99 +8067,7 @@ impl Emitter<'_, '_> {
                         self.checked_line(format!("call void @imre_print_bool(i32 {byte})"));
                     }
                     Type::None => self.void_call("imre_print_none", &[]),
-                    Type::ListInt
-                    | Type::ForwardRef(_)
-                    | Type::FunctionRef
-                    | Type::AnnotationValue(_)
-                    | Type::CmpKey(..)
-                    | Type::BuiltinClass
-                    | Type::Class(_)
-                    | Type::List(_)
-                    | Type::Dict(_)
-                    | Type::ChainMap(_)
-                    | Type::Set(_)
-                    | Type::Deque(_)
-                    | Type::FrozenStrings
-                    | Type::StringKeys
-                    | Type::Iterator
-                    | Type::Cursor(_)
-                    | Type::ByteOutput
-                    | Type::TupleBuffer
-                    | Type::Exception
-                    | Type::NamedException(_)
-                    | Type::ObjectValue
-                    | Type::ReadOnlyObjectMapping
-                    | Type::ImportException
-                    | Type::TimeoutExpired
-                    | Type::Path
-                    | Type::PurePath(_)
-                    | Type::TextIO
-                    | Type::StringIO
-                    | Type::HandlerLock
-                    | Type::EventLoop
-                    | Type::Coroutine(_)
-                    | Type::Task(_)
-                    | Type::TaskGroup
-                    | Type::Document(_)
-                    | Type::GeneratorContext
-                    | Type::DirectoryContext(_)
-                    | Type::Semaphore
-                    | Type::Popen(..)
-                    | Type::ActivePopen
-                    | Type::AsyncProcess(_)
-                    | Type::NativeModule
-                    | Type::ModuleNamespace
-                    | Type::LogFormatter
-                    | Type::LogRecord
-                    | Type::Logger
-                    | Type::LogManager
-                    | Type::TimedFileHandler
-                    | Type::CacheState(_)
-                    | Type::ProcessSelectorClass
-                    | Type::ClockTime
-                    | Type::Calendar(_)
-                    | Type::StrDescriptor(_)
-                    | Type::Placeholder(_)
-                    | Type::OverloadStub
-                    | Type::PlainObject
-                    | Type::SimpleNamespace(_)
-                    | Type::PathInfo
-                    | Type::CodecInfo
-                    | Type::Poll
-                    | Type::Socket
-                    | Type::CodecWriterClass
-                    | Type::CodecWriter
-                    | Type::TextOutput
-                    | Type::Hash
-                    | Type::JsonDecoder
-                    | Type::ZipFile
-                    | Type::ZipInfo
-                    | Type::Context
-                    | Type::ContextMissing
-                    | Type::WeakProxy(_)
-                    | Type::ContextVar(_)
-                    | Type::ContextToken(_)
-                    | Type::CsvReader
-                    | Type::Patch(_)
-                    | Type::RegexPattern
-                    | Type::JsonRoot
-                    | Type::JsonValue
-                    | Type::JsonObject
-                    | Type::RegexMatch
-                    | Type::SourceModule
-                    | Type::BytesIO
-                    | Type::BinaryIO
-                    | Type::ModuleSpec(_)
-                    | Type::SysImplementation
-                    | Type::CompletedProcess(..)
-                    | Type::Tuple(_)
-                    | Type::VarTuple(_)
-                    | Type::Optional(_)
-                    | Type::Callable(_)
-                    | Type::Union(_)
-                    | Type::StringIterable => {
-                        unreachable!("container printing is rejected")
-                    }
+                    _ => unreachable!("print expects a scalar operand"),
                 }
                 none()
             }
@@ -8360,108 +8280,14 @@ impl Emitter<'_, '_> {
     }
 
     fn word(&mut self, value: &Value) -> String {
-        match value.ty {
-            Type::Int
-            | Type::IntEnum(_)
-            | Type::StrEnum(_)
-            | Type::Enum(_)
-            | Type::Optional(_)
-            | Type::Union(_)
-            | Type::StringIterable => value.operand.clone(),
-            Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
-            Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
-            Type::None => "0".to_owned(),
-            Type::Str
-            | Type::ForwardRef(_)
-            | Type::FunctionRef
-            | Type::AnnotationValue(_)
-            | Type::CmpKey(..)
-            | Type::BuiltinClass
-            | Type::StrLiteral(_)
-            | Type::Bytes
-            | Type::ListInt
-            | Type::Class(_)
-            | Type::Callable(_)
-            | Type::List(_)
-            | Type::Dict(_)
-            | Type::ChainMap(_)
-            | Type::Set(_)
-            | Type::Deque(_)
-            | Type::FrozenStrings
-            | Type::StringKeys
-            | Type::Iterator
-            | Type::Cursor(_)
-            | Type::ByteOutput
-            | Type::TupleBuffer
-            | Type::Exception
-            | Type::NamedException(_)
-            | Type::ObjectValue
-            | Type::ReadOnlyObjectMapping
-            | Type::ImportException
-            | Type::TimeoutExpired
-            | Type::Path
-            | Type::PurePath(_)
-            | Type::TextIO
-            | Type::StringIO
-            | Type::HandlerLock
-            | Type::SourceModule
-            | Type::BytesIO
-            | Type::BinaryIO
-            | Type::EventLoop
-            | Type::Coroutine(_)
-            | Type::Task(_)
-            | Type::TaskGroup
-            | Type::Document(_)
-            | Type::GeneratorContext
-            | Type::DirectoryContext(_)
-            | Type::Semaphore
-            | Type::Popen(..)
-            | Type::ActivePopen
-            | Type::AsyncProcess(_)
-            | Type::NativeModule
-            | Type::ModuleNamespace
-            | Type::LogFormatter
-            | Type::LogRecord
-            | Type::Logger
-            | Type::LogManager
-            | Type::TimedFileHandler
-            | Type::CacheState(_)
-            | Type::ProcessSelectorClass
-            | Type::ClockTime
-            | Type::Calendar(_)
-            | Type::StrDescriptor(_)
-            | Type::Placeholder(_)
-            | Type::OverloadStub
-            | Type::PlainObject
-            | Type::SimpleNamespace(_)
-            | Type::PathInfo
-            | Type::CodecInfo
-            | Type::Poll
-            | Type::Socket
-            | Type::CodecWriterClass
-            | Type::CodecWriter
-            | Type::TextOutput
-            | Type::Hash
-            | Type::JsonDecoder
-            | Type::ZipFile
-            | Type::ZipInfo
-            | Type::Context
-            | Type::ContextMissing
-            | Type::WeakProxy(_)
-            | Type::ContextVar(_)
-            | Type::ContextToken(_)
-            | Type::CsvReader
-            | Type::Patch(_)
-            | Type::RegexPattern
-            | Type::JsonRoot
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::RegexMatch
-            | Type::ModuleSpec(_)
-            | Type::SysImplementation
-            | Type::CompletedProcess(..)
-            | Type::VarTuple(_)
-            | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
+        match value.ty.llvm_type() {
+            LlvmType::I64 => value.operand.clone(),
+            LlvmType::Double => {
+                self.instruction(format!("bitcast double {} to i64", value.operand))
+            }
+            LlvmType::I1 => self.instruction(format!("zext i1 {} to i64", value.operand)),
+            LlvmType::Ptr => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
+            LlvmType::I8 => "0".to_owned(),
         }
     }
 
@@ -8474,108 +8300,12 @@ impl Emitter<'_, '_> {
 
     /// Changes only the compiler view of a word, leaving its ownership unchanged.
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
-        let operand = match ty {
-            Type::Int
-            | Type::IntEnum(_)
-            | Type::StrEnum(_)
-            | Type::Enum(_)
-            | Type::Optional(_)
-            | Type::Union(_)
-            | Type::StringIterable => word,
-            Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
-            Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
-            Type::None => "0".to_owned(),
-            Type::Str
-            | Type::ForwardRef(_)
-            | Type::FunctionRef
-            | Type::AnnotationValue(_)
-            | Type::CmpKey(..)
-            | Type::BuiltinClass
-            | Type::StrLiteral(_)
-            | Type::Bytes
-            | Type::ListInt
-            | Type::Class(_)
-            | Type::Callable(_)
-            | Type::List(_)
-            | Type::Dict(_)
-            | Type::ChainMap(_)
-            | Type::Set(_)
-            | Type::Deque(_)
-            | Type::FrozenStrings
-            | Type::StringKeys
-            | Type::Iterator
-            | Type::Cursor(_)
-            | Type::ByteOutput
-            | Type::TupleBuffer
-            | Type::Exception
-            | Type::NamedException(_)
-            | Type::ObjectValue
-            | Type::ReadOnlyObjectMapping
-            | Type::ImportException
-            | Type::TimeoutExpired
-            | Type::Path
-            | Type::PurePath(_)
-            | Type::TextIO
-            | Type::StringIO
-            | Type::HandlerLock
-            | Type::SourceModule
-            | Type::BytesIO
-            | Type::BinaryIO
-            | Type::EventLoop
-            | Type::Coroutine(_)
-            | Type::Task(_)
-            | Type::TaskGroup
-            | Type::Document(_)
-            | Type::GeneratorContext
-            | Type::DirectoryContext(_)
-            | Type::Semaphore
-            | Type::Popen(..)
-            | Type::ActivePopen
-            | Type::AsyncProcess(_)
-            | Type::NativeModule
-            | Type::ModuleNamespace
-            | Type::LogFormatter
-            | Type::LogRecord
-            | Type::Logger
-            | Type::LogManager
-            | Type::TimedFileHandler
-            | Type::CacheState(_)
-            | Type::ProcessSelectorClass
-            | Type::ClockTime
-            | Type::Calendar(_)
-            | Type::StrDescriptor(_)
-            | Type::Placeholder(_)
-            | Type::OverloadStub
-            | Type::PlainObject
-            | Type::SimpleNamespace(_)
-            | Type::PathInfo
-            | Type::CodecInfo
-            | Type::Poll
-            | Type::Socket
-            | Type::CodecWriterClass
-            | Type::CodecWriter
-            | Type::TextOutput
-            | Type::Hash
-            | Type::JsonDecoder
-            | Type::ZipFile
-            | Type::ZipInfo
-            | Type::Context
-            | Type::ContextMissing
-            | Type::WeakProxy(_)
-            | Type::ContextVar(_)
-            | Type::ContextToken(_)
-            | Type::CsvReader
-            | Type::Patch(_)
-            | Type::RegexPattern
-            | Type::JsonRoot
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::RegexMatch
-            | Type::ModuleSpec(_)
-            | Type::SysImplementation
-            | Type::CompletedProcess(..)
-            | Type::VarTuple(_)
-            | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
+        let operand = match ty.llvm_type() {
+            LlvmType::I64 => word,
+            LlvmType::Double => self.instruction(format!("bitcast i64 {word} to double")),
+            LlvmType::I1 => self.instruction(format!("trunc i64 {word} to i1")),
+            LlvmType::Ptr => self.instruction(format!("inttoptr i64 {word} to ptr")),
+            LlvmType::I8 => "0".to_owned(),
         };
         Value {
             ty,
@@ -9076,108 +8806,14 @@ fn iterable_mode(ty: Type) -> u32 {
     }
 }
 
-/// Must match the descriptor kinds in the runtime. Nullable words preserve the
-/// payload's ownership operation, with bit 8 allowing the absent zero value.
+/// Nullable words carry their payload's kind. Bare callbacks use the function descriptor.
 fn representation_kind(ty: Type, types: &Types) -> u32 {
     match ty {
-        Type::None => 0,
-        Type::Bool => 1,
-        Type::Int => 2,
-        Type::Float => 7,
-        Type::Str | Type::StrLiteral(_) => 3,
-        Type::BuiltinClass => 11,
-        Type::ForwardRef(_) => 12,
-        Type::FunctionRef => 14,
-        Type::AnnotationValue(_) => 13,
-        Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_) => 10,
-        Type::Bytes => 8,
-        Type::Union(_) | Type::StringIterable => 9,
-        Type::ListInt => 4,
-        Type::Callable(_) if types.is_plain_callback(ty) => 14,
-        Type::Class(_)
-        | Type::VarTuple(_)
-        | Type::Tuple(_)
-        | Type::CmpKey(..)
-        | Type::Callable(_)
-        | Type::ModuleSpec(_)
-        | Type::SysImplementation
-        | Type::CompletedProcess(..) => 6,
-        Type::List(_)
-        | Type::Dict(_)
-        | Type::ChainMap(_)
-        | Type::Set(_)
-        | Type::Deque(_)
-        | Type::FrozenStrings
-        | Type::StringKeys
-        | Type::Iterator
-        | Type::Cursor(_)
-        | Type::ByteOutput
-        | Type::TupleBuffer
-        | Type::Exception
-        | Type::NamedException(_)
-        | Type::ObjectValue
-        | Type::ReadOnlyObjectMapping
-        | Type::ImportException
-        | Type::TimeoutExpired
-        | Type::Path
-        | Type::PurePath(_)
-        | Type::TextIO
-        | Type::StringIO
-        | Type::HandlerLock
-        | Type::EventLoop
-        | Type::Coroutine(_)
-        | Type::Task(_)
-        | Type::TaskGroup
-        | Type::Document(_)
-        | Type::GeneratorContext
-        | Type::DirectoryContext(_)
-        | Type::Semaphore
-        | Type::Popen(..)
-        | Type::ActivePopen
-        | Type::AsyncProcess(_)
-        | Type::NativeModule
-        | Type::ModuleNamespace
-        | Type::LogFormatter
-        | Type::LogRecord
-        | Type::Logger
-        | Type::LogManager
-        | Type::TimedFileHandler
-        | Type::CacheState(_)
-        | Type::ProcessSelectorClass
-        | Type::ClockTime
-        | Type::Calendar(_)
-        | Type::StrDescriptor(_)
-        | Type::Placeholder(_)
-        | Type::OverloadStub
-        | Type::PlainObject
-        | Type::SimpleNamespace(_)
-        | Type::PathInfo
-        | Type::CodecInfo
-        | Type::Poll
-        | Type::Socket
-        | Type::CodecWriterClass
-        | Type::CodecWriter
-        | Type::TextOutput
-        | Type::Hash
-        | Type::JsonDecoder
-        | Type::ZipFile
-        | Type::ZipInfo
-        | Type::Context
-        | Type::ContextMissing
-        | Type::WeakProxy(_)
-        | Type::ContextVar(_)
-        | Type::ContextToken(_)
-        | Type::CsvReader
-        | Type::Patch(_)
-        | Type::RegexPattern
-        | Type::JsonRoot
-        | Type::JsonValue
-        | Type::JsonObject
-        | Type::RegexMatch
-        | Type::SourceModule
-        | Type::BytesIO
-        | Type::BinaryIO => 5,
-        Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
+        Type::Optional(_) => {
+            WordKind::Nullable as u32 | representation_kind(types.payload(ty).unwrap(), types)
+        }
+        Type::Callable(_) if types.is_plain_callback(ty) => WordKind::Function as u32,
+        _ => ty.word_kind() as u32,
     }
 }
 
@@ -9208,10 +8844,10 @@ fn record_name(ty: Type) -> String {
 /// types; booleans/None use word storage so descriptor offsets stay uniform
 /// within the runtime's existing 64-bit ABI.
 fn storage_type(ty: Type) -> &'static str {
-    match ty.llvm() {
-        "ptr" => "ptr",
-        "double" => "double",
-        _ => "i64",
+    match ty.llvm_type() {
+        LlvmType::Ptr => "ptr",
+        LlvmType::Double => "double",
+        LlvmType::I1 | LlvmType::I8 | LlvmType::I64 => "i64",
     }
 }
 
@@ -9398,7 +9034,7 @@ declare i64 @imre_popen_identity(ptr)
 declare ptr @imre_popen_args(ptr)
 declare ptr @imre_popen_control(ptr)
 declare i64 @imre_child_status(ptr, i1 zeroext)
-declare i64 @imre_popen_status(ptr, i1 zeroext)
+declare i64 @imre_popen_poll(ptr)
 declare void @imre_popen_set_poll(ptr, ptr, i1 zeroext)
 declare void @imre_popen_del_poll(ptr)
 declare zeroext i1 @imre_popen_signal_override(ptr, i64)
@@ -9411,8 +9047,20 @@ declare ptr @imre_async_process_spawn(ptr, ptr, ptr, i32, i32)
 declare i64 @imre_async_process_status(ptr, i1 zeroext)
 declare ptr @imre_async_process_communicate(ptr, ptr)
 declare ptr @imre_environ_copy()
+declare ptr @imre_environb_copy()
+declare void @imre_environ_clear()
+declare void @imre_environ_update(ptr, i32)
 declare ptr @imre_environ_get(ptr, ptr)
+declare ptr @imre_environ_keys()
+declare ptr @imre_environb_index(ptr)
+declare ptr @imre_environ_index(ptr)
+declare void @imre_environ_delete(ptr, i32)
+declare void @imre_environ_set(ptr, ptr)
+declare void @imre_environ_set_bytes(ptr, ptr)
 declare ptr @imre_getcwd()
+declare i64 @imre_os_transfer_fd(i64)
+declare ptr @imre_os_read(i64, i64)
+declare i64 @imre_os_write(i64, ptr)
 declare void @imre_os_close(i64)
 declare i64 @imre_os_open(ptr, i32, i64, i64, i64)
 declare i64 @imre_os_error_field(ptr, i32)
@@ -9426,9 +9074,12 @@ declare ptr @imre_subprocess_quote_argument(i64, i32)
 @imre_os_o_excl = external constant i64
 @imre_os_o_trunc = external constant i64
 @imre_os_o_cloexec = external constant i64
+@imre_os_wnohang = external constant i64
 @imre_os_o_directory = external constant i64
 @imre_os_o_nofollow = external constant i64
 @imre_os_o_nonblock = external constant i64
+@imre_os_o_path = external constant i64
+@imre_os_o_tmpfile = external constant i64
 @imre_os_seek_set = external constant i64
 @imre_os_seek_cur = external constant i64
 @imre_os_seek_end = external constant i64
@@ -9554,7 +9205,7 @@ declare void @imre_path_link(ptr, i64, i32, i32)
 declare ptr @imre_path_replace(ptr, ptr)
 declare ptr @imre_tempdir_new(ptr, ptr, ptr)
 declare void @imre_tempdir_cleanup(ptr)
-declare ptr @imre_path_iter(ptr, ptr)
+declare ptr @imre_path_iterdir(ptr)
 declare ptr @imre_path_glob(ptr, ptr, i64, i32, i32)
 declare ptr @imre_path_walk(ptr, i32, i32, ptr)
 declare ptr @imre_path_next(ptr)
@@ -9739,6 +9390,8 @@ declare ptr @imre_binary_readline(ptr)
 declare ptr @imre_gzip_open(ptr, i32)
 declare i64 @imre_binary_write(ptr, ptr)
 
+@imre_signal_tripped = external global i8
+declare i1 @imre_typed_interrupt()
 declare i32 @imre_error_pending()
 declare ptr @imre_error_take()
 declare void @imre_error_set(ptr)
@@ -9805,8 +9458,13 @@ declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
 declare i32 @imre_finish_stdio()
 declare void @imre_integer_digits_init(i32)
+declare void @imre_context_warnings_init(i32)
+declare i64 @imre_sys_context_aware_warnings()
 declare void @imre_record_error_init()
+declare void @imre_stdio_unbuffered_init()
 declare void @imre_stdio_init()
+declare void @imre_stdio_isolated_init()
+declare void @imre_warning_options_init(i32, ptr)
 declare i64 @imre_tuple_index(i64, i64)
 declare void @imre_stdio_command_init(i32, i32)
 declare ptr @imre_sys_stream_text(i32, i32)
@@ -9823,6 +9481,8 @@ declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
 declare ptr @imre_json_decoder_new()
+declare ptr @imre_json_encoder_new(i32, i32, i32)
+declare ptr @imre_json_encoder_encode(ptr, i64, ptr)
 declare ptr @imre_json_decoder_memo(ptr)
 declare ptr @imre_json_decoder_decode(ptr, ptr)
 declare ptr @imre_json_loads_bytes(ptr)
@@ -9866,7 +9526,10 @@ declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
 declare ptr @imre_struct_list_new(ptr)
 declare i1 @imre_struct_try_fill_empty(ptr, ptr, ptr, i64)
+declare i64 @imre_struct_cycle_prefix(ptr, i64, i64)
 declare ptr @imre_struct_read_view(ptr, ptr) nounwind
+declare i64 @imre_struct_binary_prefix(ptr, ptr) nounwind
+declare double @imre_struct_binary_ordered(ptr, i64, i64, double, double, double) nounwind
 declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare ptr @imre_struct_row(ptr, i64) nounwind
 declare ptr @imre_struct_row_checked(ptr, i64)
@@ -9877,7 +9540,6 @@ declare i1 @imre_seq_mock_call_list(ptr, i1) nounwind
 declare i64 @imre_seq_get(ptr, i64)
 declare void @imre_seq_set(ptr, i64, i64, i32)
 declare i64 @imre_seq_get_index(ptr, i64)
-declare i64 @imre_seq_borrow_index_proven(ptr, i64) nounwind
 declare i64 @imre_seq_take_index_proven(ptr, i64) nounwind
 declare ptr @imre_seq_data_readonly(ptr) nounwind
 declare void @imre_seq_set_index(ptr, i64, i64, i32)
@@ -9958,16 +9620,9 @@ define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline 
   ret i64 %selected
 }
 
-; Reassociation is exact only if the integral term, count and every partial
-; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
-define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
-entry:
-  %single = icmp eq i64 %count, 1
-  br i1 %single, label %one, label %bounds
-one:
-  %single_sum = fadd double %sum, %term
-  ret double %single_sum
-bounds:
+; Bound the absolute value of every partial sum for an integral projection.
+; The strict comparison also rejects a rounded-up or rounded-down boundary.
+define internal i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count) alwaysinline nounwind {
   %n = uitofp i64 %count to double
   %ni = icmp ule i64 %count, 9007199254740992
   %t = call double @llvm.trunc.f64(double %term)
@@ -9982,8 +9637,23 @@ bounds:
   %integral = and i1 %ti, %si
   %fits = and i1 %ni, %bounded
   %exact = and i1 %integral, %fits
+  ret i1 %exact
+}
+
+; Reassociation is exact only if the integral term, count and every partial
+; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
+define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
+entry:
+  %single = icmp eq i64 %count, 1
+  br i1 %single, label %one, label %bounds
+one:
+  %single_sum = fadd double %sum, %term
+  ret double %single_sum
+bounds:
+  %exact = call i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count)
   br i1 %exact, label %bulk, label %ordered
 bulk:
+  %n = uitofp i64 %count to double
   %product = fmul double %term, %n
   %result = fadd double %sum, %product
   ret double %result
@@ -10098,6 +9768,7 @@ declare ptr @imre_dict_gather_bytes_int(ptr, ptr)
 declare i32 @imre_dict_try_get(ptr, i64, ptr)
 declare i32 @imre_dict_try_pop(ptr, i64, ptr)
 declare i64 @imre_dict_pop(ptr, i64, i64, i32)
+declare void @imre_dict_popitem(ptr, ptr, ptr)
 declare i64 @imre_dict_get_default(ptr, i64, i64)
 declare i64 @imre_dict_setdefault(ptr, i64, i64)
 declare i64 @imre_defaultdict_missing(ptr, i64)
@@ -10131,7 +9802,9 @@ declare ptr @imre_str_rsplit_last(ptr, ptr)
 declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_expandtabs(ptr, i64)
+declare ptr @imre_str_zfill(ptr, i64, i32)
 declare ptr @imre_unicode_normalize(ptr, ptr)
+declare ptr @imre_str_case_map(ptr, i32)
 declare ptr @imre_str_lower(ptr)
 declare ptr @imre_str_upper(ptr)
 declare ptr @imre_str_capitalize(ptr)
@@ -10153,6 +9826,8 @@ declare ptr @imre_str_splitlines(ptr)
 declare ptr @imre_str_splitlines_options(ptr, i32)
 declare i32 @imre_str_isspace(ptr)
 declare i32 @imre_str_isalnum(ptr)
+declare i32 @imre_str_isalpha(ptr)
+declare i32 @imre_str_isdigit(ptr)
 declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
@@ -10175,13 +9850,13 @@ declare ptr @imre_join_buffer_finish(ptr)
 declare ptr @imre_str_format(ptr, ptr, i64)
 declare ptr @imre_str_format_fields(ptr, ptr, i64)
 declare ptr @imre_str_replace(ptr, ptr, ptr)
+declare ptr @imre_str_replace_count(ptr, ptr, ptr, i64)
 declare ptr @imre_str_dedent(ptr)
 declare ptr @imre_shlex_split_options(ptr, i32, i32)
 declare ptr @imre_shlex_quote(ptr)
 declare ptr @imre_sys_executable()
 declare ptr @imre_popen_selector_class(i32)
 declare void @imre_popen_set_selector(ptr)
-declare void @imre_subprocess_to_stderr(ptr, i32)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
 declare double @llvm.fabs.f64(double)
@@ -10237,7 +9912,9 @@ declare { i64, i64 } @imre_seq_layout_with_orig_argv()
 declare ptr @imre_sys_platform()
 declare ptr @imre_frozenset_strings(ptr)
 declare ptr @imre_sys_stdlib_module_names()
+declare i32 @imre_str_is_ascii(ptr)
 declare i32 @imre_str_is_lower(ptr)
+declare i32 @imre_str_is_title(ptr)
 declare i32 @imre_str_is_upper(ptr)
 declare ptr @imre_errno_module()
 declare ptr @imre_errno_namespace(ptr)
@@ -10251,6 +9928,7 @@ declare ptr @imre_errno_lookup_default(ptr,ptr,ptr)
 declare i32 @imre_errno_member_contains(ptr,ptr)
 declare ptr @imre_sys_thread_text(i32)
 declare ptr @imre_os_name()
+declare ptr @imre_os_linesep()
 declare ptr @imre_os_pathsep()
 declare ptr @imre_os_separator(i32)
 declare void @imre_doctest_capture_start()
@@ -10280,7 +9958,7 @@ declare ptr @imre_str_static_literal(ptr, i64)
 declare ptr @imre_str_interned_literal(ptr, i64)
 declare ptr @imre_sys_intern(ptr)
 declare i32 @imre_sys_is_interned(ptr)
-declare ptr @imre_regex_compile(ptr, i64)
+declare ptr @imre_regex_literal(ptr, i64)
 declare ptr @imre_regex_spelling(ptr)
 declare ptr @imre_unittest_compile_pattern(ptr)
 declare i64 @imre_patch_len(ptr)
@@ -10307,7 +9985,7 @@ declare i1 @imre_calendar_is_datetime(ptr)
 declare ptr @imre_calendar_zone(ptr, i64)
 declare ptr @imre_calendar_utc()
 declare ptr @imre_calendar_zone_limit(i1)
-declare ptr @imre_calendar_now(ptr)
+declare ptr @imre_calendar_now(i64)
 declare ptr @imre_email_parsedate(ptr)
 declare ptr @imre_email_format_datetime(ptr, i1)
 declare ptr @imre_email_formatdate(i32, i64, i1, i1)
@@ -10474,7 +10152,6 @@ declare i32 @imre_bytes_truthy(ptr)
 declare i32 @imre_str_contains(ptr, ptr)
 declare i32 @imre_str_list_contains(ptr, ptr)
 declare i32 @imre_int_list_contains(i64, ptr)
-declare void @imre_str_enum_table(ptr, i64)
 declare void @imre_enum_display_table(ptr, i64, ptr)
 declare i64 @imre_enum_lookup(ptr, i64, i64)
 declare i64 @imre_enum_lookup_int(i64, i64, i64)
@@ -10489,6 +10166,8 @@ declare i64 @imre_int_parse(ptr)
 declare i64 @imre_int_parse_hex(ptr)
 declare ptr @imre_input()
 declare ptr @imre_chr(i64)
+declare void @imre_random_shuffle_int_list(ptr)
+declare void @imre_random_shuffle_list(ptr)
 declare void @imre_random_seed_none()
 declare void @imre_random_seed_int(i64)
 declare void @imre_random_seed_str(ptr)
@@ -10821,7 +10500,7 @@ mod tests {
             &CompileOptions::default(),
         )
         .unwrap();
-        assert_eq!(llvm.matches("call ptr @imre_regex_compile(").count(), 1);
+        assert_eq!(llvm.matches("call ptr @imre_regex_literal(").count(), 1);
         assert_eq!(llvm.matches("call ptr @imre_regex_search(").count(), 2);
         let cleanup = llvm
             .split_once("define internal void @imre_clear_literals(")

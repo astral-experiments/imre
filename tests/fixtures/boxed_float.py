@@ -1,6 +1,19 @@
 def current():
     print(f'{2.675:.2f}', f'{-0.0:+.0%}', f'{True: .1f}', f'{-3:.2%}')
     print(f'{float("inf"):+f}', f'{float("nan"):.2%}')
+    assert f"{2.5:03.0f}" == "002" and f"{3.5:03.0f}" == "004"
+    assert "{:03.0f}".format(-0.0) == "-00" and format(True, "4.0f") == "   1"
+    assert format(-1234, "03.0f") == "-1234"
+    assert format(0.125, "08.0%") == "0000012%"
+    assert format(float("inf"), "+07.0f") == "+000inf"
+    assert format(float("nan"), " 07.0f") == " 000nan"
+    for number in (1.5, 1 << 2000):
+        try:
+            format(number, "1" * 30 + "f")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("accepted an overflowing field width")
     try:
         print(f'{1 << 2000:.1f}')
     except OverflowError:
@@ -40,6 +53,26 @@ def current():
             print(str(exc))
         else:
             raise AssertionError("accepted invalid __getformat__ argument")
+
+    for value, ratio in (
+        (-0.0, (0, 1)),
+        (9.5, (19, 2)),
+        (-0.1, (-3602879701896397, 1 << 55)),
+        (5e-324, (1, 1 << 1074)),
+        (1.7976931348623157e308, (((1 << 53) - 1) << 971, 1)),
+    ):
+        assert value.as_integer_ratio() == ratio
+    assert Weight(-1.5).as_integer_ratio() == (-3, 2)
+    assert float.as_integer_ratio(Weight(0.5)) == (1, 2)
+    for args, kwargs, kind in (((), {}, TypeError), ((1,), {}, TypeError),
+                               ((0.5, 1), {}, TypeError), ((0.5,), {"x": 1}, TypeError),
+                               ((nan,), {}, ValueError), ((float("-inf"),), {}, OverflowError)):
+        try:
+            float.as_integer_ratio(*args, **kwargs)
+        except kind as exc:
+            print(str(exc))
+        else:
+            raise AssertionError("accepted invalid as_integer_ratio call")
 
     weight = Weight("1.5")
     assert type(weight) is Weight and isinstance(weight, float)

@@ -34,6 +34,37 @@ impl Context {
                 let Value::Native(kind) = self.heap.get(base) else {
                     return None;
                 };
+                if name == "__call__" {
+                    return matches!(
+                        kind.as_str(),
+                        "type"
+                            | "function"
+                            | "method"
+                            | "builtin_function_or_method"
+                            | "method_descriptor"
+                            | "classmethod_descriptor"
+                            | "wrapper_descriptor"
+                            | "method-wrapper"
+                            | "staticmethod"
+                            | "types.GenericAlias"
+                            | "typing._AnyMeta"
+                            | "typing._GenericAlias"
+                            | "typing._CallableType"
+                            | "typing._CallableGenericAlias"
+                            | "typing._LiteralGenericAlias"
+                            | "typing._UnpackGenericAlias"
+                            | "collections.abc._CallableGenericAlias"
+                            | "operator.attrgetter"
+                            | "operator.itemgetter"
+                            | "functools.partial"
+                            | "functools._lru_cache_wrapper"
+                            | "functools.KeyWrapper"
+                            | "weakref.ReferenceType"
+                            | "weakref.CallableProxyType"
+                            | "constevaluator"
+                    )
+                    .then_some(true);
+                }
                 if name == "__hash__" {
                     // Builtin classes may supply a hash slot directly or inherit it
                     // later in the MRO. Looking up the slot must never hash a value.
@@ -50,8 +81,8 @@ impl Context {
                         | "array.array"
                         | "collections.defaultdict"
                         | "collections.deque"
-                        | "contextvars.Context"
-                        | "contextvars.Token"
+                        | "_contextvars.Context"
+                        | "_contextvars.Token"
                         | "types.SimpleNamespace"
                         | "weakref.ProxyType"
                         | "weakref.CallableProxyType" => Some(false),
@@ -103,6 +134,9 @@ impl Context {
                         matches!(name, "__iter__" | "__len__" | "__reversed__")
                     }
                     "memoryview" => matches!(name, "__iter__" | "__len__"),
+                    "coroutine" | "coroutine_wrapper" => {
+                        super::generator_protocol::coroutine_method(kind, name)
+                    }
                     _ => {
                         super::builtins::is_iterator_type(kind)
                             && matches!(name, "__iter__" | "__next__")
@@ -117,10 +151,61 @@ impl Context {
         Ok(TRUE)
     }
 
-    /// Recognize the bundled ABC and its nominal subclasses, which inherit its metaclass.
+    /// Keep the standard metaclass rooted independently of the mutable module binding.
+    pub(super) fn abc_meta(&mut self) -> Id {
+        if let Some(&meta) = self.builtins.get("abc.ABCMeta") {
+            return meta;
+        }
+        let scope = self.scope("abc", None);
+        let module = self.text("abc");
+        self.bind(scope, "__module__", module);
+        let qualname = self.text("ABCMeta");
+        self.bind(scope, "__qualname__", qualname);
+        let callable = self.builtin("abc.ABCMeta.__new__");
+        let dictionary = self.dict(Vec::new());
+        let new = self.alloc(Value::StaticMethod {
+            callable,
+            dictionary,
+        });
+        self.bind(scope, "__new__", new);
+        let register = self.builtin("abc.register");
+        self.bind(scope, "register", register);
+        for name in [
+            "__instancecheck__",
+            "__subclasscheck__",
+            "_abc_registry_clear",
+            "_abc_caches_clear",
+        ] {
+            let check = self.builtin(&format!("abc.{name}"));
+            self.bind(scope, name, check);
+        }
+        let base = self.builtin("type");
+        let meta = self
+            .allocate_class("ABCMeta".into(), scope, vec![base])
+            .expect("type has a consistent MRO");
+        self.builtins.insert("abc.ABCMeta".into(), meta);
+        meta
+    }
+
+    pub(super) fn is_abc_metaclass(&self, class: Id) -> bool {
+        self.builtins
+            .get("abc.ABCMeta")
+            .is_some_and(|&abc| self.direct_subclass(class, abc))
+    }
+
     pub(super) fn is_bundled_abc(&self, class: Id) -> bool {
-        self.module_value("abc", "ABC")
-            .is_some_and(|abc| self.direct_subclass(class, abc))
+        let Value::Class {
+            metaclass,
+            ancestors,
+            ..
+        } = self.heap.get(class)
+        else {
+            return false;
+        };
+        metaclass.is_some_and(|meta| self.is_abc_metaclass(meta))
+            // Protocol's synthetic layout still inherits ABCMeta's hooks and registry.
+            || (metaclass.is_none()
+                && self.classes.get("typing.Protocol").is_some_and(|p| ancestors.contains(p)))
     }
 
     /// Only ABC classes use a Python subclass hook for public instance and subclass checks.
@@ -151,9 +236,19 @@ impl Context {
             })
     }
 
-    pub(super) fn init_abstract_class(&mut self, class: Id, name: &str, scope: Id) -> Result<()> {
+    /// Read the marker using Python lookup and truth testing, including descriptor errors.
+    pub(super) fn is_abstract_method(&mut self, value: Id) -> Result<bool> {
+        self.with_slot_depth("maximum recursion depth exceeded", |ctx| {
+            match ctx.lookup_attr(value, "__isabstractmethod__") {
+                Ok(marker) => ctx.truth(marker),
+                Err(error) if error.kind == "AttributeError" => Ok(false),
+                Err(error) => Err(error),
+            }
+        })
+    }
+
+    pub(super) fn init_abstract_class(&mut self, class: Id, scope: Id) -> Result<()> {
         if !super::mapping_abc::is_abc_class(self, class)
-            && !(name == "ABC" && self.scope_data(scope).module == "abc")
             && !self.is_bundled_abc(class)
             && !self
                 .classes
@@ -162,7 +257,10 @@ impl Context {
         {
             return Ok(());
         }
-        let mut names: BTreeSet<String> = self.scope_data(scope).names.keys().cloned().collect();
+        let mut names: BTreeSet<String> = self
+            .scope_bindings(scope)
+            .map(|(name, _)| name.to_owned())
+            .collect();
         let bases = self
             .scope_data(scope)
             .class_namespace
@@ -189,14 +287,9 @@ impl Context {
             let Some(value) = self.class_attr(class, &name) else {
                 continue;
             };
-            match self.lookup_attr(value, "__isabstractmethod__") {
-                Ok(value) if self.truth(value)? => {
-                    let key = self.text(name);
-                    super::builtins::set_add(self, methods, key)?;
-                }
-                Ok(_) => {}
-                Err(err) if err.kind == "AttributeError" => {}
-                Err(err) => return Err(err),
+            if self.is_abstract_method(value)? {
+                let key = self.text(name);
+                super::builtins::set_add(self, methods, key)?;
             }
         }
         self.set_abstract_methods(scope, methods)

@@ -1,0 +1,329 @@
+profile	ordinal	registered_id	cpython	cpython_first_exception	ordinary_O0	ordinary_O0_first_exception	boxed_O0	boxed_O0_first_exception	ordinary_O3	ordinary_O3_first_exception	boxed_O3	boxed_O3_first_exception	imre_commit
+stock-default-empty	1	test.test_hashlib.HashLibTestCase.test_algorithms_available	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	2	test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	3	test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb	"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	4	test.test_hashlib.HashLibTestCase.test_blake2b	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	5	test.test_hashlib.HashLibTestCase.test_blake2b_vectors	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	6	test.test_hashlib.HashLibTestCase.test_blake2s	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	7	test.test_hashlib.HashLibTestCase.test_blake2s_vectors	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	8	test.test_hashlib.HashLibTestCase.test_blocksize_and_name	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	9	test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	10	test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	11	test.test_hashlib.HashLibTestCase.test_case_blake2b_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	12	test.test_hashlib.HashLibTestCase.test_case_blake2b_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	13	test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	14	test.test_hashlib.HashLibTestCase.test_case_blake2s_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	15	test.test_hashlib.HashLibTestCase.test_case_blake2s_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	16	test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	17	test.test_hashlib.HashLibTestCase.test_case_md5_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	18	test.test_hashlib.HashLibTestCase.test_case_md5_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	19	test.test_hashlib.HashLibTestCase.test_case_md5_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	20	test.test_hashlib.HashLibTestCase.test_case_md5_huge	skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	21	test.test_hashlib.HashLibTestCase.test_case_md5_uintmax	skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	22	test.test_hashlib.HashLibTestCase.test_case_sha1_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	23	test.test_hashlib.HashLibTestCase.test_case_sha1_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	24	test.test_hashlib.HashLibTestCase.test_case_sha1_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	25	test.test_hashlib.HashLibTestCase.test_case_sha1_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	26	test.test_hashlib.HashLibTestCase.test_case_sha224_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	27	test.test_hashlib.HashLibTestCase.test_case_sha224_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	28	test.test_hashlib.HashLibTestCase.test_case_sha224_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	29	test.test_hashlib.HashLibTestCase.test_case_sha224_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	30	test.test_hashlib.HashLibTestCase.test_case_sha256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	31	test.test_hashlib.HashLibTestCase.test_case_sha256_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	32	test.test_hashlib.HashLibTestCase.test_case_sha256_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	33	test.test_hashlib.HashLibTestCase.test_case_sha256_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	34	test.test_hashlib.HashLibTestCase.test_case_sha384_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	35	test.test_hashlib.HashLibTestCase.test_case_sha384_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	36	test.test_hashlib.HashLibTestCase.test_case_sha384_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	37	test.test_hashlib.HashLibTestCase.test_case_sha384_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	38	test.test_hashlib.HashLibTestCase.test_case_sha3_224_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	39	test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	40	test.test_hashlib.HashLibTestCase.test_case_sha3_256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	41	test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	42	test.test_hashlib.HashLibTestCase.test_case_sha3_384_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	43	test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	44	test.test_hashlib.HashLibTestCase.test_case_sha3_512_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	45	test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	46	test.test_hashlib.HashLibTestCase.test_case_sha512_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	47	test.test_hashlib.HashLibTestCase.test_case_sha512_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	48	test.test_hashlib.HashLibTestCase.test_case_sha512_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	49	test.test_hashlib.HashLibTestCase.test_case_sha512_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	50	test.test_hashlib.HashLibTestCase.test_case_shake128_vector	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	51	test.test_hashlib.HashLibTestCase.test_case_shake256_vector	"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		"skipped ""Use of the 'urlfetch' resource not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	52	test.test_hashlib.HashLibTestCase.test_case_shake_128_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	53	test.test_hashlib.HashLibTestCase.test_case_shake_256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	54	test.test_hashlib.HashLibTestCase.test_clinic_signature	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	55	test.test_hashlib.HashLibTestCase.test_clinic_signature_errors	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	56	test.test_hashlib.HashLibTestCase.test_digest_length_overflow	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	57	test.test_hashlib.HashLibTestCase.test_disallow_instantiation	ok		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	58	test.test_hashlib.HashLibTestCase.test_extra_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	59	test.test_hashlib.HashLibTestCase.test_get_builtin_constructor	ok		skipped '_md5 module not available'		skipped '_md5 module not available'		skipped '_md5 module not available'		skipped '_md5 module not available'		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	60	test.test_hashlib.HashLibTestCase.test_get_fips_mode	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	61	test.test_hashlib.HashLibTestCase.test_gil	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	62	test.test_hashlib.HashLibTestCase.test_hash_array	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	63	test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation	ok		skipped 'need _hashlib'		skipped 'need _hashlib'		skipped 'need _hashlib'		skipped 'need _hashlib'		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	64	test.test_hashlib.HashLibTestCase.test_hexdigest	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	65	test.test_hashlib.HashLibTestCase.test_large_update	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	66	test.test_hashlib.HashLibTestCase.test_name_attribute	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	67	test.test_hashlib.HashLibTestCase.test_new_upper_to_lower	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	68	test.test_hashlib.HashLibTestCase.test_no_unicode	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	69	test.test_hashlib.HashLibTestCase.test_no_unicode_blake2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	70	test.test_hashlib.HashLibTestCase.test_no_unicode_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	71	test.test_hashlib.HashLibTestCase.test_readonly_types	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	72	test.test_hashlib.HashLibTestCase.test_sha256_gil	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	73	test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb	"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	74	test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb	"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		"skipped ""resource 'cpu' is not enabled"""		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	75	test.test_hashlib.HashLibTestCase.test_threaded_hashing	ok		ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	928de797ff631957659474defa71dd6d746590be
+stock-default-empty	76	test.test_hashlib.HashLibTestCase.test_unknown_hash	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	77	test.test_hashlib.HashLibTestCase.test_usedforsecurity_false	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	78	test.test_hashlib.HashLibTestCase.test_usedforsecurity_true	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	79	test.test_hashlib.KDFTests.test_file_digest	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	80	test.test_hashlib.KDFTests.test_normalized_name	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	81	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		928de797ff631957659474defa71dd6d746590be
+stock-default-empty	82	test.test_hashlib.KDFTests.test_scrypt	ok		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		928de797ff631957659474defa71dd6d746590be
+direct-empty	1	test.test_hashlib.HashLibTestCase.test_algorithms_available	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	2	test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	3	test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	4	test.test_hashlib.HashLibTestCase.test_blake2b	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	5	test.test_hashlib.HashLibTestCase.test_blake2b_vectors	skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'		928de797ff631957659474defa71dd6d746590be
+direct-empty	6	test.test_hashlib.HashLibTestCase.test_blake2s	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	7	test.test_hashlib.HashLibTestCase.test_blake2s_vectors	skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'		928de797ff631957659474defa71dd6d746590be
+direct-empty	8	test.test_hashlib.HashLibTestCase.test_blocksize_and_name	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	9	test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	10	test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	11	test.test_hashlib.HashLibTestCase.test_case_blake2b_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	12	test.test_hashlib.HashLibTestCase.test_case_blake2b_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	13	test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	14	test.test_hashlib.HashLibTestCase.test_case_blake2s_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	15	test.test_hashlib.HashLibTestCase.test_case_blake2s_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	16	test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	17	test.test_hashlib.HashLibTestCase.test_case_md5_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	18	test.test_hashlib.HashLibTestCase.test_case_md5_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	19	test.test_hashlib.HashLibTestCase.test_case_md5_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	20	test.test_hashlib.HashLibTestCase.test_case_md5_huge	skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		928de797ff631957659474defa71dd6d746590be
+direct-empty	21	test.test_hashlib.HashLibTestCase.test_case_md5_uintmax	skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		928de797ff631957659474defa71dd6d746590be
+direct-empty	22	test.test_hashlib.HashLibTestCase.test_case_sha1_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	23	test.test_hashlib.HashLibTestCase.test_case_sha1_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	24	test.test_hashlib.HashLibTestCase.test_case_sha1_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	25	test.test_hashlib.HashLibTestCase.test_case_sha1_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	26	test.test_hashlib.HashLibTestCase.test_case_sha224_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	27	test.test_hashlib.HashLibTestCase.test_case_sha224_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	28	test.test_hashlib.HashLibTestCase.test_case_sha224_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	29	test.test_hashlib.HashLibTestCase.test_case_sha224_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	30	test.test_hashlib.HashLibTestCase.test_case_sha256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	31	test.test_hashlib.HashLibTestCase.test_case_sha256_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	32	test.test_hashlib.HashLibTestCase.test_case_sha256_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	33	test.test_hashlib.HashLibTestCase.test_case_sha256_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	34	test.test_hashlib.HashLibTestCase.test_case_sha384_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	35	test.test_hashlib.HashLibTestCase.test_case_sha384_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	36	test.test_hashlib.HashLibTestCase.test_case_sha384_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	37	test.test_hashlib.HashLibTestCase.test_case_sha384_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	38	test.test_hashlib.HashLibTestCase.test_case_sha3_224_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	39	test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'		928de797ff631957659474defa71dd6d746590be
+direct-empty	40	test.test_hashlib.HashLibTestCase.test_case_sha3_256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	41	test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'		928de797ff631957659474defa71dd6d746590be
+direct-empty	42	test.test_hashlib.HashLibTestCase.test_case_sha3_384_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	43	test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'		928de797ff631957659474defa71dd6d746590be
+direct-empty	44	test.test_hashlib.HashLibTestCase.test_case_sha3_512_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	45	test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'		928de797ff631957659474defa71dd6d746590be
+direct-empty	46	test.test_hashlib.HashLibTestCase.test_case_sha512_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	47	test.test_hashlib.HashLibTestCase.test_case_sha512_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	48	test.test_hashlib.HashLibTestCase.test_case_sha512_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	49	test.test_hashlib.HashLibTestCase.test_case_sha512_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	50	test.test_hashlib.HashLibTestCase.test_case_shake128_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_128.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_128.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_128.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_128.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_128.txt'		928de797ff631957659474defa71dd6d746590be
+direct-empty	51	test.test_hashlib.HashLibTestCase.test_case_shake256_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/shake_256.txt'		928de797ff631957659474defa71dd6d746590be
+direct-empty	52	test.test_hashlib.HashLibTestCase.test_case_shake_128_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	53	test.test_hashlib.HashLibTestCase.test_case_shake_256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	54	test.test_hashlib.HashLibTestCase.test_clinic_signature	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	55	test.test_hashlib.HashLibTestCase.test_clinic_signature_errors	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	56	test.test_hashlib.HashLibTestCase.test_digest_length_overflow	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	57	test.test_hashlib.HashLibTestCase.test_disallow_instantiation	ok		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		928de797ff631957659474defa71dd6d746590be
+direct-empty	58	test.test_hashlib.HashLibTestCase.test_extra_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	59	test.test_hashlib.HashLibTestCase.test_get_builtin_constructor	ok		skipped '_md5 module not available'		skipped '_md5 module not available'		skipped '_md5 module not available'		skipped '_md5 module not available'		928de797ff631957659474defa71dd6d746590be
+direct-empty	60	test.test_hashlib.HashLibTestCase.test_get_fips_mode	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	61	test.test_hashlib.HashLibTestCase.test_gil	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	62	test.test_hashlib.HashLibTestCase.test_hash_array	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	63	test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation	ok		skipped 'need _hashlib'		skipped 'need _hashlib'		skipped 'need _hashlib'		skipped 'need _hashlib'		928de797ff631957659474defa71dd6d746590be
+direct-empty	64	test.test_hashlib.HashLibTestCase.test_hexdigest	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	65	test.test_hashlib.HashLibTestCase.test_large_update	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	66	test.test_hashlib.HashLibTestCase.test_name_attribute	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	67	test.test_hashlib.HashLibTestCase.test_new_upper_to_lower	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	68	test.test_hashlib.HashLibTestCase.test_no_unicode	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	69	test.test_hashlib.HashLibTestCase.test_no_unicode_blake2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	70	test.test_hashlib.HashLibTestCase.test_no_unicode_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	71	test.test_hashlib.HashLibTestCase.test_readonly_types	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	72	test.test_hashlib.HashLibTestCase.test_sha256_gil	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	73	test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	74	test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	75	test.test_hashlib.HashLibTestCase.test_threaded_hashing	ok		ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	928de797ff631957659474defa71dd6d746590be
+direct-empty	76	test.test_hashlib.HashLibTestCase.test_unknown_hash	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	77	test.test_hashlib.HashLibTestCase.test_usedforsecurity_false	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	78	test.test_hashlib.HashLibTestCase.test_usedforsecurity_true	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	79	test.test_hashlib.KDFTests.test_file_digest	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	80	test.test_hashlib.KDFTests.test_normalized_name	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-empty	81	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		928de797ff631957659474defa71dd6d746590be
+direct-empty	82	test.test_hashlib.KDFTests.test_scrypt	ok		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		928de797ff631957659474defa71dd6d746590be
+direct-shake	1	test.test_hashlib.HashLibTestCase.test_algorithms_available	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	2	test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	3	test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	4	test.test_hashlib.HashLibTestCase.test_blake2b	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	5	test.test_hashlib.HashLibTestCase.test_blake2b_vectors	skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2b.txt'		928de797ff631957659474defa71dd6d746590be
+direct-shake	6	test.test_hashlib.HashLibTestCase.test_blake2s	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	7	test.test_hashlib.HashLibTestCase.test_blake2s_vectors	skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/blake2s.txt'		928de797ff631957659474defa71dd6d746590be
+direct-shake	8	test.test_hashlib.HashLibTestCase.test_blocksize_and_name	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	9	test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	10	test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	11	test.test_hashlib.HashLibTestCase.test_case_blake2b_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	12	test.test_hashlib.HashLibTestCase.test_case_blake2b_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	13	test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	14	test.test_hashlib.HashLibTestCase.test_case_blake2s_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	15	test.test_hashlib.HashLibTestCase.test_case_blake2s_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	16	test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	17	test.test_hashlib.HashLibTestCase.test_case_md5_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	18	test.test_hashlib.HashLibTestCase.test_case_md5_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	19	test.test_hashlib.HashLibTestCase.test_case_md5_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	20	test.test_hashlib.HashLibTestCase.test_case_md5_huge	skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		928de797ff631957659474defa71dd6d746590be
+direct-shake	21	test.test_hashlib.HashLibTestCase.test_case_md5_uintmax	skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		928de797ff631957659474defa71dd6d746590be
+direct-shake	22	test.test_hashlib.HashLibTestCase.test_case_sha1_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	23	test.test_hashlib.HashLibTestCase.test_case_sha1_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	24	test.test_hashlib.HashLibTestCase.test_case_sha1_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	25	test.test_hashlib.HashLibTestCase.test_case_sha1_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	26	test.test_hashlib.HashLibTestCase.test_case_sha224_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	27	test.test_hashlib.HashLibTestCase.test_case_sha224_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	28	test.test_hashlib.HashLibTestCase.test_case_sha224_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	29	test.test_hashlib.HashLibTestCase.test_case_sha224_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	30	test.test_hashlib.HashLibTestCase.test_case_sha256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	31	test.test_hashlib.HashLibTestCase.test_case_sha256_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	32	test.test_hashlib.HashLibTestCase.test_case_sha256_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	33	test.test_hashlib.HashLibTestCase.test_case_sha256_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	34	test.test_hashlib.HashLibTestCase.test_case_sha384_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	35	test.test_hashlib.HashLibTestCase.test_case_sha384_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	36	test.test_hashlib.HashLibTestCase.test_case_sha384_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	37	test.test_hashlib.HashLibTestCase.test_case_sha384_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	38	test.test_hashlib.HashLibTestCase.test_case_sha3_224_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	39	test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_224.txt'		928de797ff631957659474defa71dd6d746590be
+direct-shake	40	test.test_hashlib.HashLibTestCase.test_case_sha3_256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	41	test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_256.txt'		928de797ff631957659474defa71dd6d746590be
+direct-shake	42	test.test_hashlib.HashLibTestCase.test_case_sha3_384_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	43	test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_384.txt'		928de797ff631957659474defa71dd6d746590be
+direct-shake	44	test.test_hashlib.HashLibTestCase.test_case_sha3_512_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	45	test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector	skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'		skipped 'Could not retrieve http://www.pythontest.net/hashlib/sha3_512.txt'		928de797ff631957659474defa71dd6d746590be
+direct-shake	46	test.test_hashlib.HashLibTestCase.test_case_sha512_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	47	test.test_hashlib.HashLibTestCase.test_case_sha512_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	48	test.test_hashlib.HashLibTestCase.test_case_sha512_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	49	test.test_hashlib.HashLibTestCase.test_case_sha512_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	50	test.test_hashlib.HashLibTestCase.test_case_shake128_vector	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	51	test.test_hashlib.HashLibTestCase.test_case_shake256_vector	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	52	test.test_hashlib.HashLibTestCase.test_case_shake_128_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	53	test.test_hashlib.HashLibTestCase.test_case_shake_256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	54	test.test_hashlib.HashLibTestCase.test_clinic_signature	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	55	test.test_hashlib.HashLibTestCase.test_clinic_signature_errors	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	56	test.test_hashlib.HashLibTestCase.test_digest_length_overflow	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	57	test.test_hashlib.HashLibTestCase.test_disallow_instantiation	ok		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		928de797ff631957659474defa71dd6d746590be
+direct-shake	58	test.test_hashlib.HashLibTestCase.test_extra_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	59	test.test_hashlib.HashLibTestCase.test_get_builtin_constructor	ok		skipped '_md5 module not available'		skipped '_md5 module not available'		skipped '_md5 module not available'		skipped '_md5 module not available'		928de797ff631957659474defa71dd6d746590be
+direct-shake	60	test.test_hashlib.HashLibTestCase.test_get_fips_mode	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	61	test.test_hashlib.HashLibTestCase.test_gil	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	62	test.test_hashlib.HashLibTestCase.test_hash_array	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	63	test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation	ok		skipped 'need _hashlib'		skipped 'need _hashlib'		skipped 'need _hashlib'		skipped 'need _hashlib'		928de797ff631957659474defa71dd6d746590be
+direct-shake	64	test.test_hashlib.HashLibTestCase.test_hexdigest	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	65	test.test_hashlib.HashLibTestCase.test_large_update	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	66	test.test_hashlib.HashLibTestCase.test_name_attribute	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	67	test.test_hashlib.HashLibTestCase.test_new_upper_to_lower	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	68	test.test_hashlib.HashLibTestCase.test_no_unicode	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	69	test.test_hashlib.HashLibTestCase.test_no_unicode_blake2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	70	test.test_hashlib.HashLibTestCase.test_no_unicode_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	71	test.test_hashlib.HashLibTestCase.test_readonly_types	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	72	test.test_hashlib.HashLibTestCase.test_sha256_gil	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	73	test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	74	test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	75	test.test_hashlib.HashLibTestCase.test_threaded_hashing	ok		ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	928de797ff631957659474defa71dd6d746590be
+direct-shake	76	test.test_hashlib.HashLibTestCase.test_unknown_hash	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	77	test.test_hashlib.HashLibTestCase.test_usedforsecurity_false	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	78	test.test_hashlib.HashLibTestCase.test_usedforsecurity_true	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	79	test.test_hashlib.KDFTests.test_file_digest	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	80	test.test_hashlib.KDFTests.test_normalized_name	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-shake	81	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		928de797ff631957659474defa71dd6d746590be
+direct-shake	82	test.test_hashlib.KDFTests.test_scrypt	ok		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		928de797ff631957659474defa71dd6d746590be
+direct-all	1	test.test_hashlib.HashLibTestCase.test_algorithms_available	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	2	test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	3	test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	4	test.test_hashlib.HashLibTestCase.test_blake2b	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	5	test.test_hashlib.HashLibTestCase.test_blake2b_vectors	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	6	test.test_hashlib.HashLibTestCase.test_blake2s	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	7	test.test_hashlib.HashLibTestCase.test_blake2s_vectors	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	8	test.test_hashlib.HashLibTestCase.test_blocksize_and_name	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	9	test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	10	test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	11	test.test_hashlib.HashLibTestCase.test_case_blake2b_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	12	test.test_hashlib.HashLibTestCase.test_case_blake2b_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	13	test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	14	test.test_hashlib.HashLibTestCase.test_case_blake2s_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	15	test.test_hashlib.HashLibTestCase.test_case_blake2s_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	16	test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	17	test.test_hashlib.HashLibTestCase.test_case_md5_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	18	test.test_hashlib.HashLibTestCase.test_case_md5_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	19	test.test_hashlib.HashLibTestCase.test_case_md5_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	20	test.test_hashlib.HashLibTestCase.test_case_md5_huge	skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		928de797ff631957659474defa71dd6d746590be
+direct-all	21	test.test_hashlib.HashLibTestCase.test_case_md5_uintmax	skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		skipped 'not enough memory: 4.0G minimum needed'		928de797ff631957659474defa71dd6d746590be
+direct-all	22	test.test_hashlib.HashLibTestCase.test_case_sha1_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	23	test.test_hashlib.HashLibTestCase.test_case_sha1_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	24	test.test_hashlib.HashLibTestCase.test_case_sha1_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	25	test.test_hashlib.HashLibTestCase.test_case_sha1_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	26	test.test_hashlib.HashLibTestCase.test_case_sha224_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	27	test.test_hashlib.HashLibTestCase.test_case_sha224_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	28	test.test_hashlib.HashLibTestCase.test_case_sha224_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	29	test.test_hashlib.HashLibTestCase.test_case_sha224_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	30	test.test_hashlib.HashLibTestCase.test_case_sha256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	31	test.test_hashlib.HashLibTestCase.test_case_sha256_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	32	test.test_hashlib.HashLibTestCase.test_case_sha256_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	33	test.test_hashlib.HashLibTestCase.test_case_sha256_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	34	test.test_hashlib.HashLibTestCase.test_case_sha384_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	35	test.test_hashlib.HashLibTestCase.test_case_sha384_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	36	test.test_hashlib.HashLibTestCase.test_case_sha384_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	37	test.test_hashlib.HashLibTestCase.test_case_sha384_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	38	test.test_hashlib.HashLibTestCase.test_case_sha3_224_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	39	test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	40	test.test_hashlib.HashLibTestCase.test_case_sha3_256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	41	test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	42	test.test_hashlib.HashLibTestCase.test_case_sha3_384_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	43	test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	44	test.test_hashlib.HashLibTestCase.test_case_sha3_512_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	45	test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	46	test.test_hashlib.HashLibTestCase.test_case_sha512_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	47	test.test_hashlib.HashLibTestCase.test_case_sha512_1	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	48	test.test_hashlib.HashLibTestCase.test_case_sha512_2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	49	test.test_hashlib.HashLibTestCase.test_case_sha512_3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	50	test.test_hashlib.HashLibTestCase.test_case_shake128_vector	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	51	test.test_hashlib.HashLibTestCase.test_case_shake256_vector	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	52	test.test_hashlib.HashLibTestCase.test_case_shake_128_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	53	test.test_hashlib.HashLibTestCase.test_case_shake_256_0	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	54	test.test_hashlib.HashLibTestCase.test_clinic_signature	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	55	test.test_hashlib.HashLibTestCase.test_clinic_signature_errors	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	56	test.test_hashlib.HashLibTestCase.test_digest_length_overflow	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	57	test.test_hashlib.HashLibTestCase.test_disallow_instantiation	ok		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		skipped 'implementation detail specific to cpython'		928de797ff631957659474defa71dd6d746590be
+direct-all	58	test.test_hashlib.HashLibTestCase.test_extra_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	59	test.test_hashlib.HashLibTestCase.test_get_builtin_constructor	ok		skipped '_md5 module not available'		skipped '_md5 module not available'		skipped '_md5 module not available'		skipped '_md5 module not available'		928de797ff631957659474defa71dd6d746590be
+direct-all	60	test.test_hashlib.HashLibTestCase.test_get_fips_mode	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	61	test.test_hashlib.HashLibTestCase.test_gil	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	62	test.test_hashlib.HashLibTestCase.test_hash_array	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	63	test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation	ok		skipped 'need _hashlib'		skipped 'need _hashlib'		skipped 'need _hashlib'		skipped 'need _hashlib'		928de797ff631957659474defa71dd6d746590be
+direct-all	64	test.test_hashlib.HashLibTestCase.test_hexdigest	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	65	test.test_hashlib.HashLibTestCase.test_large_update	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	66	test.test_hashlib.HashLibTestCase.test_name_attribute	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	67	test.test_hashlib.HashLibTestCase.test_new_upper_to_lower	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	68	test.test_hashlib.HashLibTestCase.test_no_unicode	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	69	test.test_hashlib.HashLibTestCase.test_no_unicode_blake2	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	70	test.test_hashlib.HashLibTestCase.test_no_unicode_sha3	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	71	test.test_hashlib.HashLibTestCase.test_readonly_types	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	72	test.test_hashlib.HashLibTestCase.test_sha256_gil	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	73	test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	74	test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	75	test.test_hashlib.HashLibTestCase.test_threaded_hashing	ok		ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	ERROR	NotImplementedError: this thread target cannot run independently of the boxed Python heap	928de797ff631957659474defa71dd6d746590be
+direct-all	76	test.test_hashlib.HashLibTestCase.test_unknown_hash	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	77	test.test_hashlib.HashLibTestCase.test_usedforsecurity_false	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	78	test.test_hashlib.HashLibTestCase.test_usedforsecurity_true	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	79	test.test_hashlib.KDFTests.test_file_digest	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	80	test.test_hashlib.KDFTests.test_normalized_name	ok		ok		ok		ok		ok		928de797ff631957659474defa71dd6d746590be
+direct-all	81	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		skipped 'requires OpenSSL bindings'		928de797ff631957659474defa71dd6d746590be
+direct-all	82	test.test_hashlib.KDFTests.test_scrypt	ok		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		skipped '   test requires OpenSSL > 1.1'		928de797ff631957659474defa71dd6d746590be

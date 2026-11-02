@@ -16,7 +16,13 @@ use super::{Bytes, Object, Storage, StorageCell, Str, object};
 use crate::{BytesOwner, Int, ObjectOwner};
 
 #[derive(Clone)]
-pub(crate) enum State {
+pub(crate) struct State {
+    algorithm: Algorithm,
+    class: &'static str,
+}
+
+#[derive(Clone)]
+enum Algorithm {
     Blake2b(blake2b_simd::State, usize),
     Blake2s(blake2s_simd::State, usize),
     Md5(Md5),
@@ -36,93 +42,124 @@ pub(crate) enum State {
 pub(crate) struct Provider {
     pub(crate) name: &'static str,
     aliases: &'static [&'static str],
-    pub(crate) create: fn(&[u8]) -> State,
+    initialize: fn(&[u8]) -> Algorithm,
+}
+
+impl Provider {
+    pub(crate) fn create(&self, class: Option<&'static str>, data: &[u8]) -> State {
+        State::new((self.initialize)(data), class)
+    }
 }
 
 const PROVIDERS: &[Provider] = &[
     Provider {
         name: "blake2b",
         aliases: &[],
-        create: |data| {
+        initialize: |data| {
             let mut state = blake2b_simd::State::new();
             state.update(data);
-            State::Blake2b(state, 64)
+            Algorithm::Blake2b(state, 64)
         },
     },
     Provider {
         name: "blake2s",
         aliases: &[],
-        create: |data| {
+        initialize: |data| {
             let mut state = blake2s_simd::State::new();
             state.update(data);
-            State::Blake2s(state, 32)
+            Algorithm::Blake2s(state, 32)
         },
     },
     Provider {
         name: "md5",
         aliases: &["ssl3-md5", "1.2.840.113549.2.5"],
-        create: |data| State::Md5(Md5::new_with_prefix(data)),
+        initialize: |data| Algorithm::Md5(Md5::new_with_prefix(data)),
     },
     Provider {
         name: "sha1",
         aliases: &["sha-1", "ssl3-sha1", "1.3.14.3.2.26"],
-        create: State::sha1,
+        initialize: |data| Algorithm::Sha1(Sha1::new_with_prefix(data)),
     },
     Provider {
         name: "sha224",
         aliases: &["sha-224", "sha2-224", "2.16.840.1.101.3.4.2.4"],
-        create: |data| State::Sha224(Sha224::new_with_prefix(data)),
+        initialize: |data| Algorithm::Sha224(Sha224::new_with_prefix(data)),
     },
     Provider {
         name: "sha256",
         aliases: &["sha-256", "sha2-256", "2.16.840.1.101.3.4.2.1"],
-        create: |data| State::Sha256(Sha256::new_with_prefix(data)),
+        initialize: |data| Algorithm::Sha256(Sha256::new_with_prefix(data)),
     },
     Provider {
         name: "sha384",
         aliases: &["sha-384", "sha2-384", "2.16.840.1.101.3.4.2.2"],
-        create: |data| State::Sha384(Sha384::new_with_prefix(data)),
+        initialize: |data| Algorithm::Sha384(Sha384::new_with_prefix(data)),
     },
     Provider {
         name: "sha512",
         aliases: &["sha-512", "sha2-512", "2.16.840.1.101.3.4.2.3"],
-        create: |data| State::Sha512(Sha512::new_with_prefix(data)),
+        initialize: |data| Algorithm::Sha512(Sha512::new_with_prefix(data)),
     },
     Provider {
         name: "sha3_224",
         aliases: &["sha3-224", "2.16.840.1.101.3.4.2.7"],
-        create: |data| State::Sha3_224(Sha3_224::new_with_prefix(data)),
+        initialize: |data| Algorithm::Sha3_224(Sha3_224::new_with_prefix(data)),
     },
     Provider {
         name: "sha3_256",
         aliases: &["sha3-256", "2.16.840.1.101.3.4.2.8"],
-        create: |data| State::Sha3_256(Sha3_256::new_with_prefix(data)),
+        initialize: |data| Algorithm::Sha3_256(Sha3_256::new_with_prefix(data)),
     },
     Provider {
         name: "sha3_384",
         aliases: &["sha3-384", "2.16.840.1.101.3.4.2.9"],
-        create: |data| State::Sha3_384(Sha3_384::new_with_prefix(data)),
+        initialize: |data| Algorithm::Sha3_384(Sha3_384::new_with_prefix(data)),
     },
     Provider {
         name: "sha3_512",
         aliases: &["sha3-512", "2.16.840.1.101.3.4.2.10"],
-        create: |data| State::Sha3_512(Sha3_512::new_with_prefix(data)),
+        initialize: |data| Algorithm::Sha3_512(Sha3_512::new_with_prefix(data)),
     },
     Provider {
         name: "shake_128",
         aliases: &["shake128", "shake-128", "2.16.840.1.101.3.4.2.11"],
-        create: |data| State::Shake128(sha3::digest::Update::chain(Shake128::default(), data)),
+        initialize: |data| {
+            Algorithm::Shake128(sha3::digest::Update::chain(Shake128::default(), data))
+        },
     },
     Provider {
         name: "shake_256",
         aliases: &["shake256", "shake-256", "2.16.840.1.101.3.4.2.12"],
-        create: |data| State::Shake256(sha3::digest::Update::chain(Shake256::default(), data)),
+        initialize: |data| {
+            Algorithm::Shake256(sha3::digest::Update::chain(Shake256::default(), data))
+        },
     },
 ];
 
 impl State {
+    fn new(algorithm: Algorithm, class: Option<&'static str>) -> Self {
+        // Compatibility aliases select the generic native constructor even when
+        // their canonical spelling is provided by a dedicated Python class.
+        let class = class.unwrap_or(match algorithm {
+            Algorithm::Shake128(_) | Algorithm::Shake256(_) => Self::XOF_CLASS,
+            _ => Self::CLASS,
+        });
+        Self { algorithm, class }
+    }
+
+    pub(crate) fn blake2b(state: blake2b_simd::State, size: usize) -> Self {
+        Self::new(Algorithm::Blake2b(state, size), Some("_blake2.blake2b"))
+    }
+
+    pub(crate) fn blake2s(state: blake2s_simd::State, size: usize) -> Self {
+        Self::new(Algorithm::Blake2s(state, size), Some("_blake2.blake2s"))
+    }
+
     pub(crate) fn is_xof(&self) -> bool {
-        matches!(self, Self::Shake128(_) | Self::Shake256(_))
+        matches!(
+            self.algorithm,
+            Algorithm::Shake128(_) | Algorithm::Shake256(_)
+        )
     }
 
     pub(crate) fn algorithms() -> impl Iterator<Item = &'static str> {
@@ -148,43 +185,59 @@ impl State {
     }
 
     pub(crate) const CLASS: &'static str = "hashlib._Hash";
+    pub(crate) const OPENSSL_CLASS: &'static str = "_hashlib.HASH";
     pub(crate) const XOF_CLASS: &'static str = "hashlib._HashXOF";
 
     pub(crate) fn public_constructor(algorithm: &str) -> Option<&'static str> {
         match algorithm {
-            "blake2b" => Some("hashlib.blake2b"),
-            "blake2s" => Some("hashlib.blake2s"),
+            "blake2b" => Some("_blake2.blake2b"),
+            "blake2s" => Some("_blake2.blake2s"),
+            "sha3_224" => Some("_sha3.sha3_224"),
+            "sha3_256" => Some("_sha3.sha3_256"),
+            "sha3_384" => Some("_sha3.sha3_384"),
+            "sha3_512" => Some("_sha3.sha3_512"),
+            "shake_128" => Some("_sha3.shake_128"),
+            "shake_256" => Some("_sha3.shake_256"),
             _ => None,
         }
     }
 
     pub(crate) fn provider_class(class: &str) -> Option<&'static str> {
-        Self::public_constructor(class.strip_prefix("hashlib.")?)
+        if class == Self::OPENSSL_CLASS {
+            return Some(Self::OPENSSL_CLASS);
+        }
+        let (_, name) = class.rsplit_once('.')?;
+        Self::public_constructor(name).filter(|&qualified| qualified == class)
     }
 
     pub(crate) fn is_provider_class(class: &str) -> bool {
         Self::provider_class(class).is_some()
     }
 
+    pub(crate) fn descriptor_name(class: &str, name: &str) -> Option<&'static str> {
+        match name {
+            "name" => Some("name"),
+            "block_size" => Some("block_size"),
+            "digest_size" => Some("digest_size"),
+            "_rate_bits" if class.starts_with("_sha3.") => Some("_rate_bits"),
+            "_capacity_bits" if class.starts_with("_sha3.") => Some("_capacity_bits"),
+            "_suffix" if class.starts_with("_sha3.") => Some("_suffix"),
+            _ => None,
+        }
+    }
+
     pub(crate) fn class_constant(class: &str, attr: &str) -> Option<usize> {
         match (class, attr) {
-            ("hashlib.blake2b", "SALT_SIZE" | "PERSON_SIZE") => Some(16),
-            ("hashlib.blake2s", "SALT_SIZE" | "PERSON_SIZE") => Some(8),
-            ("hashlib.blake2b", "MAX_DIGEST_SIZE" | "MAX_KEY_SIZE") => Some(64),
-            ("hashlib.blake2s", "MAX_DIGEST_SIZE" | "MAX_KEY_SIZE") => Some(32),
+            ("_blake2.blake2b", "SALT_SIZE" | "PERSON_SIZE") => Some(16),
+            ("_blake2.blake2s", "SALT_SIZE" | "PERSON_SIZE") => Some(8),
+            ("_blake2.blake2b", "MAX_DIGEST_SIZE" | "MAX_KEY_SIZE") => Some(64),
+            ("_blake2.blake2s", "MAX_DIGEST_SIZE" | "MAX_KEY_SIZE") => Some(32),
             _ => None,
         }
     }
 
     pub(crate) fn class_name(&self) -> &'static str {
-        // XOFs have no fixed digest size; their digest methods take a length.
-        if let Some(class) = Self::public_constructor(self.name()) {
-            class
-        } else if self.digest_size() == 0 {
-            Self::XOF_CLASS
-        } else {
-            Self::CLASS
-        }
+        self.class
     }
 
     pub(crate) fn repr(&self, identity: usize) -> impl std::fmt::Display {
@@ -202,84 +255,84 @@ impl State {
     }
 
     pub(crate) fn sha1(data: &[u8]) -> Self {
-        Self::Sha1(Sha1::new_with_prefix(data))
+        Self::new(Algorithm::Sha1(Sha1::new_with_prefix(data)), None)
     }
 
     pub(crate) fn name(&self) -> &'static str {
-        match self {
-            Self::Blake2b(_, _) => "blake2b",
-            Self::Blake2s(_, _) => "blake2s",
-            Self::Md5(_) => "md5",
-            Self::Sha1(_) => "sha1",
-            Self::Sha224(_) => "sha224",
-            Self::Sha256(_) => "sha256",
-            Self::Sha384(_) => "sha384",
-            Self::Sha512(_) => "sha512",
-            Self::Sha3_224(_) => "sha3_224",
-            Self::Sha3_256(_) => "sha3_256",
-            Self::Sha3_384(_) => "sha3_384",
-            Self::Sha3_512(_) => "sha3_512",
-            Self::Shake128(_) => "shake_128",
-            Self::Shake256(_) => "shake_256",
+        match &self.algorithm {
+            Algorithm::Blake2b(_, _) => "blake2b",
+            Algorithm::Blake2s(_, _) => "blake2s",
+            Algorithm::Md5(_) => "md5",
+            Algorithm::Sha1(_) => "sha1",
+            Algorithm::Sha224(_) => "sha224",
+            Algorithm::Sha256(_) => "sha256",
+            Algorithm::Sha384(_) => "sha384",
+            Algorithm::Sha512(_) => "sha512",
+            Algorithm::Sha3_224(_) => "sha3_224",
+            Algorithm::Sha3_256(_) => "sha3_256",
+            Algorithm::Sha3_384(_) => "sha3_384",
+            Algorithm::Sha3_512(_) => "sha3_512",
+            Algorithm::Shake128(_) => "shake_128",
+            Algorithm::Shake256(_) => "shake_256",
         }
     }
 
     pub(crate) fn update(&mut self, data: &[u8]) {
-        match self {
-            Self::Blake2b(h, _) => {
+        match &mut self.algorithm {
+            Algorithm::Blake2b(h, _) => {
                 h.update(data);
             }
-            Self::Blake2s(h, _) => {
+            Algorithm::Blake2s(h, _) => {
                 h.update(data);
             }
-            Self::Md5(h) => h.update(data),
-            Self::Sha1(h) => h.update(data),
-            Self::Sha224(h) => h.update(data),
-            Self::Sha256(h) => h.update(data),
-            Self::Sha384(h) => h.update(data),
-            Self::Sha512(h) => h.update(data),
-            Self::Sha3_224(h) => h.update(data),
-            Self::Sha3_256(h) => h.update(data),
-            Self::Sha3_384(h) => h.update(data),
-            Self::Sha3_512(h) => h.update(data),
-            Self::Shake128(h) => sha3::digest::Update::update(h, data),
-            Self::Shake256(h) => sha3::digest::Update::update(h, data),
+            Algorithm::Md5(h) => h.update(data),
+            Algorithm::Sha1(h) => h.update(data),
+            Algorithm::Sha224(h) => h.update(data),
+            Algorithm::Sha256(h) => h.update(data),
+            Algorithm::Sha384(h) => h.update(data),
+            Algorithm::Sha512(h) => h.update(data),
+            Algorithm::Sha3_224(h) => h.update(data),
+            Algorithm::Sha3_256(h) => h.update(data),
+            Algorithm::Sha3_384(h) => h.update(data),
+            Algorithm::Sha3_512(h) => h.update(data),
+            Algorithm::Shake128(h) => sha3::digest::Update::update(h, data),
+            Algorithm::Shake256(h) => sha3::digest::Update::update(h, data),
         }
     }
 
     pub(crate) fn block_size(&self) -> usize {
-        match self {
-            Self::Blake2b(_, _) => blake2b_simd::BLOCKBYTES,
-            Self::Blake2s(_, _) => blake2s_simd::BLOCKBYTES,
-            Self::Md5(_) => Md5::block_size(),
-            Self::Sha1(_) => Sha1::block_size(),
-            Self::Sha224(_) => Sha224::block_size(),
-            Self::Sha256(_) => Sha256::block_size(),
-            Self::Sha384(_) => Sha384::block_size(),
-            Self::Sha512(_) => Sha512::block_size(),
-            Self::Sha3_224(_) => Sha3_224::block_size(),
-            Self::Sha3_256(_) => Sha3_256::block_size(),
-            Self::Sha3_384(_) => Sha3_384::block_size(),
-            Self::Sha3_512(_) => Sha3_512::block_size(),
-            Self::Shake128(_) => Shake128::block_size(),
-            Self::Shake256(_) => Shake256::block_size(),
+        match &self.algorithm {
+            Algorithm::Blake2b(_, _) => blake2b_simd::BLOCKBYTES,
+            Algorithm::Blake2s(_, _) => blake2s_simd::BLOCKBYTES,
+            Algorithm::Md5(_) => Md5::block_size(),
+            Algorithm::Sha1(_) => Sha1::block_size(),
+            Algorithm::Sha224(_) => Sha224::block_size(),
+            Algorithm::Sha256(_) => Sha256::block_size(),
+            Algorithm::Sha384(_) => Sha384::block_size(),
+            Algorithm::Sha512(_) => Sha512::block_size(),
+            Algorithm::Sha3_224(_) => Sha3_224::block_size(),
+            Algorithm::Sha3_256(_) => Sha3_256::block_size(),
+            Algorithm::Sha3_384(_) => Sha3_384::block_size(),
+            Algorithm::Sha3_512(_) => Sha3_512::block_size(),
+            Algorithm::Shake128(_) => Shake128::block_size(),
+            Algorithm::Shake256(_) => Shake256::block_size(),
         }
     }
 
     pub(crate) fn digest_size(&self) -> usize {
-        match self {
-            Self::Blake2b(_, n) | Self::Blake2s(_, n) => *n,
-            Self::Md5(_) => Md5::output_size(),
-            Self::Sha1(_) => Sha1::output_size(),
-            Self::Sha224(_) => Sha224::output_size(),
-            Self::Sha256(_) => Sha256::output_size(),
-            Self::Sha384(_) => Sha384::output_size(),
-            Self::Sha512(_) => Sha512::output_size(),
-            Self::Sha3_224(_) => Sha3_224::output_size(),
-            Self::Sha3_256(_) => Sha3_256::output_size(),
-            Self::Sha3_384(_) => Sha3_384::output_size(),
-            Self::Sha3_512(_) => Sha3_512::output_size(),
-            Self::Shake128(_) | Self::Shake256(_) => 0,
+        match &self.algorithm {
+            Algorithm::Blake2b(_, n) | Algorithm::Blake2s(_, n) => *n,
+            Algorithm::Md5(_) => Md5::output_size(),
+            Algorithm::Sha1(_) => Sha1::output_size(),
+            Algorithm::Sha224(_) => Sha224::output_size(),
+            Algorithm::Sha256(_) => Sha256::output_size(),
+            Algorithm::Sha384(_) => Sha384::output_size(),
+            Algorithm::Sha512(_) => Sha512::output_size(),
+            Algorithm::Sha3_224(_) => Sha3_224::output_size(),
+            Algorithm::Sha3_256(_) => Sha3_256::output_size(),
+            Algorithm::Sha3_384(_) => Sha3_384::output_size(),
+            Algorithm::Sha3_512(_) => Sha3_512::output_size(),
+            Algorithm::Shake128(_) | Algorithm::Shake256(_) => 0,
         }
     }
 
@@ -288,20 +341,20 @@ impl State {
         method: &str,
         result: impl FnOnce(&[u8]) -> Result<T>,
     ) -> Result<T> {
-        match self {
-            Self::Blake2b(h, _) => result(h.finalize().as_bytes()),
-            Self::Blake2s(h, _) => result(h.finalize().as_bytes()),
-            Self::Md5(h) => result(&h.clone().finalize()),
-            Self::Sha1(h) => result(&h.clone().finalize()),
-            Self::Sha224(h) => result(&h.clone().finalize()),
-            Self::Sha256(h) => result(&h.clone().finalize()),
-            Self::Sha384(h) => result(&h.clone().finalize()),
-            Self::Sha512(h) => result(&h.clone().finalize()),
-            Self::Sha3_224(h) => result(&h.clone().finalize()),
-            Self::Sha3_256(h) => result(&h.clone().finalize()),
-            Self::Sha3_384(h) => result(&h.clone().finalize()),
-            Self::Sha3_512(h) => result(&h.clone().finalize()),
-            Self::Shake128(_) | Self::Shake256(_) => Err(Error::new(
+        match &self.algorithm {
+            Algorithm::Blake2b(h, _) => result(h.finalize().as_bytes()),
+            Algorithm::Blake2s(h, _) => result(h.finalize().as_bytes()),
+            Algorithm::Md5(h) => result(&h.clone().finalize()),
+            Algorithm::Sha1(h) => result(&h.clone().finalize()),
+            Algorithm::Sha224(h) => result(&h.clone().finalize()),
+            Algorithm::Sha256(h) => result(&h.clone().finalize()),
+            Algorithm::Sha384(h) => result(&h.clone().finalize()),
+            Algorithm::Sha512(h) => result(&h.clone().finalize()),
+            Algorithm::Sha3_224(h) => result(&h.clone().finalize()),
+            Algorithm::Sha3_256(h) => result(&h.clone().finalize()),
+            Algorithm::Sha3_384(h) => result(&h.clone().finalize()),
+            Algorithm::Sha3_512(h) => result(&h.clone().finalize()),
+            Algorithm::Shake128(_) | Algorithm::Shake256(_) => Err(Error::new(
                 Kind::TypeError,
                 format!("{method}() missing required argument 'length' (pos 1)"),
             )),
@@ -325,9 +378,9 @@ impl State {
         }
         let mut bytes = super::bytes::allocate(length as usize)?;
         bytes.resize(length as usize, 0);
-        match self {
-            Self::Shake128(h) => h.clone().finalize_xof_into(&mut bytes),
-            Self::Shake256(h) => h.clone().finalize_xof_into(&mut bytes),
+        match &self.algorithm {
+            Algorithm::Shake128(h) => h.clone().finalize_xof_into(&mut bytes),
+            Algorithm::Shake256(h) => h.clone().finalize_xof_into(&mut bytes),
             _ => unreachable!("checked XOF receiver"),
         }
         Ok(bytes)
@@ -355,7 +408,8 @@ fn handle(state: State) -> Result<*const Object> {
 pub unsafe extern "C" fn imre_hash_new(name: *const Str, data: *const Bytes) -> *const Object {
     // SAFETY: both operands remain owned for this operation.
     let (name, data) = unsafe { (&*name, &*data) };
-    let result = State::provider(name).and_then(|provider| handle((provider.create)(data)));
+    let result = State::provider(name)
+        .and_then(|provider| handle(provider.create(State::public_constructor(name), data)));
     finish(result, ptr::null())
 }
 
@@ -391,7 +445,7 @@ pub(super) fn clear_algorithms() {
     GUARANTEED.with(RefCell::take);
 }
 
-fn hex_text(digest: &[u8]) -> Result<Str> {
+pub(crate) fn hex_text(digest: &[u8]) -> Result<Str> {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut result = Str::try_with_capacity(digest.len() * 2).map_err(|_| Error::allocation())?;
     for &byte in digest {
@@ -435,7 +489,10 @@ pub unsafe extern "C" fn imre_sha1_new(value: *const Bytes) -> *const Object {
 pub unsafe extern "C" fn imre_sha256_new(value: *const Bytes) -> *const Object {
     // SAFETY: the provider consumes the borrowed bytes before returning.
     finish(
-        handle(State::Sha256(Sha256::new_with_prefix(unsafe { &*value }))),
+        handle(State::new(
+            Algorithm::Sha256(Sha256::new_with_prefix(unsafe { &*value })),
+            None,
+        )),
         ptr::null(),
     )
 }

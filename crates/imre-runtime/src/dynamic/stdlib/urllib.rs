@@ -5,15 +5,7 @@ use crate::dynamic::builtins::bind;
 use crate::objects::{UrlInput, urlquote, urlsplit};
 
 mod join;
-mod quote;
 mod urlencode;
-
-const FIELDS: [&str; 5] = ["scheme", "netloc", "path", "query", "fragment"];
-const PARSE_FIELDS: [&str; 6] = ["scheme", "netloc", "path", "params", "query", "fragment"];
-const PARSE: &str = "ParseResult";
-const PARSE_BYTES: &str = "ParseResultBytes";
-const SPLIT: &str = "SplitResult";
-const SPLIT_BYTES: &str = "SplitResultBytes";
 
 /// Bind the mutable scheme registry once, in this module's Python namespace.
 pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
@@ -32,7 +24,19 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
         let registry = ctx.alloc(Value::List(items));
         ctx.bind(scope, name, registry);
     }
-    for name in ["urljoin", "urlparse", "urlunparse", PARSE, PARSE_BYTES] {
+    for name in [
+        "urlsplit",
+        "urlparse",
+        "urljoin",
+        "urlunsplit",
+        "urlunparse",
+        "unquote",
+        "urlencode",
+    ] {
+        let operation = ctx.builtin(&format!("urllib.parse.{name}"));
+        ctx.bind(scope, &format!("_imre_{name}"), operation);
+    }
+    for name in ["_check_netloc", "_netloc_property"] {
         let operation = ctx.builtin(&format!("urllib.parse.{name}"));
         ctx.bind(scope, name, operation);
     }
@@ -65,7 +69,6 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match name {
-        "quote" | "quote_plus" | "quote_from_bytes" => quote::call(ctx, name, args, kwargs),
         "urlencode" => urlencode::call(ctx, args, kwargs),
         "urljoin" => {
             let [base, url, fragments] =
@@ -82,6 +85,11 @@ pub(super) fn call(
                 bind(name, args, kwargs, ["string", "encoding", "errors"])?;
             unquote(ctx, required(text, name, "string")?, encoding, errors)
         }
+        "_check_netloc" => {
+            let [netloc] = bind(name, args, kwargs, ["netloc"])?;
+            urlsplit::check_netloc(ctx.str_value(required(netloc, name, "netloc")?)?)?;
+            Ok(NONE)
+        }
         "urlsplit" | "urlparse" => {
             let [url, scheme, fragments] =
                 bind(name, args, kwargs, ["url", "scheme", "allow_fragments"])?;
@@ -93,18 +101,31 @@ pub(super) fn call(
                 name == "urlparse",
             )
         }
-        "urlunsplit" | "SplitResult.geturl" => {
+        "urlunsplit" => {
             let [parts] = bind(name, args, kwargs, ["components"])?;
             unsplit::<5>(ctx, required(parts, name, "components")?)
         }
-        "urlunparse" | "ParseResult.geturl" => {
+        "urlunparse" => {
             let [parts] = bind(name, args, kwargs, ["components"])?;
             unsplit::<6>(ctx, required(parts, name, "components")?)
         }
-        SPLIT => construct(ctx, SPLIT, FIELDS, args, kwargs),
-        SPLIT_BYTES => construct(ctx, SPLIT_BYTES, FIELDS, args, kwargs),
-        PARSE => construct(ctx, PARSE, PARSE_FIELDS, args, kwargs),
-        PARSE_BYTES => construct(ctx, PARSE_BYTES, PARSE_FIELDS, args, kwargs),
+        "_netloc_property" => {
+            let [netloc, field] = bind(name, args, kwargs, ["netloc", "field"])?;
+            let field = required(field, name, "field")?;
+            let index = match ctx.str_value(field)? {
+                "username" => 0,
+                "password" => 1,
+                "hostname" => 2,
+                "port" => 3,
+                other => {
+                    return Err(Error::new(
+                        "ValueError",
+                        format!("unknown authority field: {other}"),
+                    ));
+                }
+            };
+            property(ctx, required(netloc, name, "netloc")?, index)
+        }
         _ => unreachable!("registered urllib.parse operation"),
     }
 }
@@ -198,43 +219,6 @@ fn unquote(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) 
     Ok(ctx.text(text))
 }
 
-fn construct<const N: usize>(
-    ctx: &mut Context,
-    class: &'static str,
-    names: [&str; N],
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let arguments = bind(class, args, kwargs, names)?;
-    let mut fields = [NONE; N];
-    for (i, &field) in names.iter().enumerate() {
-        fields[i] = required(arguments[i], class, field)?;
-    }
-    Ok(result(ctx, class, names, fields))
-}
-
-fn result<const N: usize>(
-    ctx: &mut Context,
-    class: &'static str,
-    names: [&str; N],
-    fields: [Id; N],
-) -> Id {
-    ctx.alloc(Value::NamedTuple {
-        class: Some(class),
-        names: names.map(str::to_owned).into(),
-        values: fields.into(),
-        extras: Vec::new(),
-    })
-}
-
-fn component(text: &str, bytes: bool) -> Value {
-    if bytes {
-        Value::Bytes(text.as_bytes().to_vec())
-    } else {
-        Value::Str(text.to_owned())
-    }
-}
-
 fn split(
     ctx: &mut Context,
     url: Id,
@@ -264,59 +248,32 @@ fn split(
         ));
     }
     let fields = urlsplit::with_split_fields(url, scheme.decoded()?, fragments, |fields| {
-        Ok(fields.map(|s| component(s, bytes)))
+        Ok(fields.map(str::to_owned))
     })?;
-    let ids = fields.map(|field| ctx.alloc(field));
-    if !parse {
-        return Ok(result(
-            ctx,
-            if bytes { SPLIT_BYTES } else { SPLIT },
-            FIELDS,
-            ids,
-        ));
-    }
-    let [scheme, netloc, mut path, query, fragment] = ids;
-    let scheme_text = if bytes {
-        let text = input(ctx, scheme)?.decoded()?.to_owned();
-        ctx.text(text)
-    } else {
-        scheme
-    };
-    let module = ctx.module("urllib.parse")?;
-    let registry = ctx.lookup_attr(module, "uses_params")?;
-    let mut params = component("", bytes);
-    if ctx.contains(scheme_text, registry)? {
-        let text = input(ctx, path)?.decoded()?;
-        let last_segment = text.rfind('/').unwrap_or(0);
-        if let Some(offset) = text[last_segment..].find(';') {
-            let (prefix, suffix) = text.split_at(last_segment + offset);
-            params = component(&suffix[1..], bytes);
-            path = ctx.alloc(component(prefix, bytes));
+    let [scheme, netloc, mut path, query, fragment] = fields;
+    let fields = if parse {
+        let module = ctx.module("urllib.parse")?;
+        let registry = ctx.lookup_attr(module, "uses_params")?;
+        let scheme_id = ctx.text(scheme.clone());
+        let mut params = String::new();
+        if ctx.contains(scheme_id, registry)? {
+            let last_segment = path.rfind('/').unwrap_or(0);
+            if let Some(offset) = path[last_segment..].find(';') {
+                params = path.split_off(last_segment + offset + 1);
+                path.pop();
+            }
         }
-    }
-    let params = ctx.alloc(params);
-    Ok(result(
-        ctx,
-        if bytes { PARSE_BYTES } else { PARSE },
-        PARSE_FIELDS,
-        [scheme, netloc, path, params, query, fragment],
-    ))
+        vec![scheme, netloc, path, params, query, fragment]
+    } else {
+        vec![scheme, netloc, path, query, fragment]
+    };
+    let fields = fields.into_iter().map(|field| ctx.text(field)).collect();
+    Ok(ctx.alloc(Value::Tuple(fields)))
 }
 
-pub(in crate::dynamic) fn property(
-    ctx: &mut Context,
-    netloc: Id,
-    name: &str,
-) -> Result<Option<Id>> {
-    let index = match name {
-        "username" => 0,
-        "password" => 1,
-        "hostname" => 2,
-        "port" => 3,
-        _ => return Ok(None),
-    };
+fn property(ctx: &mut Context, netloc: Id, index: u32) -> Result<Id> {
     let netloc = input(ctx, netloc)?;
-    let value = match urlsplit::netloc_property(netloc, index)? {
+    Ok(match urlsplit::netloc_property(netloc, index)? {
         None => NONE,
         Some(urlsplit::NetlocValue::Port(n)) => ctx.int(i64::from(n)),
         Some(urlsplit::NetlocValue::Text(v)) => {
@@ -327,8 +284,7 @@ pub(in crate::dynamic) fn property(
                 ctx.text(String::from_utf8(bytes).expect("text authority is UTF-8"))
             }
         }
-    };
-    Ok(Some(value))
+    })
 }
 
 fn unsplit<const N: usize>(ctx: &mut Context, components: Id) -> Result<Id> {

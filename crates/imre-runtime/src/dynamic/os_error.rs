@@ -76,7 +76,7 @@ impl Args {
     }
 }
 
-fn subclass(code: i64) -> Option<&'static str> {
+pub(super) fn subclass(code: i64) -> Option<&'static str> {
     crate::objects::errno_entries().find_map(|(name, value)| {
         if i64::from(value) != code {
             return None;
@@ -240,6 +240,18 @@ impl Context {
         eprintln!("{error}");
     }
 
+    /// Test the stored OSError errno without invoking a Python attribute hook.
+    pub(super) fn has_errno(&self, error: &Error, errno: i32) -> bool {
+        let errno = i64::from(errno);
+        match error.os_args.as_deref() {
+            Some(Args::Native { source, .. }) => source.errno == errno,
+            Some(Args::Python(fields)) => fields.errno.is_some_and(|id| {
+                matches!(self.heap.get(id), Value::Int(value) if value.to_i64() == Some(errno))
+            }),
+            None => false,
+        }
+    }
+
     pub(super) fn is_os_error(&self, error: &Error) -> bool {
         if error.os_args.is_some() {
             return true;
@@ -272,7 +284,16 @@ impl Context {
     }
 
     /// Attach the filesystem-protocol result to a failed syscall without losing its Python identity.
-    pub(super) fn with_errno_filename(&mut self, mut error: Error, filename: Id) -> Result<Error> {
+    pub(super) fn with_errno_filename(&mut self, error: Error, filename: Id) -> Result<Error> {
+        self.with_errno_filenames(error, filename, None)
+    }
+
+    pub(super) fn with_errno_filenames(
+        &mut self,
+        mut error: Error,
+        filename: Id,
+        filename2: Option<Id>,
+    ) -> Result<Error> {
         let Some(Args::Native { source, .. }) = error.os_args.as_deref() else {
             return Ok(error);
         };
@@ -285,6 +306,7 @@ impl Context {
             errno: Some(errno),
             strerror: Some(strerror),
             filename: Some(filename),
+            filename2,
             ..Fields::default()
         }))?);
         Ok(error)

@@ -42,30 +42,18 @@ fn http_code(tag: usize) -> Option<usize> {
     (!row.description.is_null()).then_some(row.code)
 }
 
-/// Installs one module's read-only member table after its string pool is initialized.
+/// Register the canonical member strings and their Enum or StrEnum display styles.
 ///
 /// # Safety
-/// Every entry and its three pooled string owners must live and remain initialized
-/// on the calling thread until this function clears the table with null and zero.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_str_enum_table(members: *const Member, length: usize) {
-    MEMBERS.set((members, length));
-    PLAIN.set(ptr::null());
-}
-
-/// Register whether each canonical member uses Enum or StrEnum for its display.
-///
-/// # Safety
-/// The member table has the same lifetime as in `imre_str_enum_table`; `plain`
-/// names a static byte for each member in that same order.
+/// Both tables must contain `length` entries. Their entries and string roots
+/// must remain initialized on this thread until the tables are cleared.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_enum_display_table(
     members: *const Member,
     length: usize,
     plain: *const u8,
 ) {
-    // SAFETY: both tables have length entries and remain live together.
-    unsafe { imre_str_enum_table(members, length) };
+    MEMBERS.set((members, length));
     PLAIN.set(plain);
 }
 
@@ -74,7 +62,7 @@ pub(super) fn write_display(out: &mut impl std::fmt::Write, tag: usize) -> std::
     with_member(tag, |[class, name, value]| {
         let plain = PLAIN.get();
         // SAFETY: with_member checked this tag against the registered table length.
-        if !plain.is_null() && unsafe { *plain.add(tag - 1) } != 0 {
+        if unsafe { *plain.add(tag - 1) } != 0 {
             write!(out, "{class}.{name}")
         } else {
             out.write_str(value.as_str())
@@ -91,8 +79,7 @@ pub(super) fn string_value(tag: usize) -> Option<crate::StrOwner> {
     with_member(tag, |[_, _, value]| {
         let plain = PLAIN.get();
         // SAFETY: with_member proved this index and roots the registered enum value.
-        (http_code(tag).unwrap_or(0) == 0
-            && (plain.is_null() || unsafe { *plain.add(tag - 1) } == 0))
+        (http_code(tag).unwrap_or(0) == 0 && unsafe { *plain.add(tag - 1) } == 0)
             .then(|| unsafe { crate::StrOwner::acquire_word(std::ptr::from_ref(value) as usize) })
     })
 }
@@ -211,9 +198,10 @@ mod tests {
             [&roots[0], &roots[3], &roots[4]],
         ]
         .map(|fields| fields.map(std::ptr::from_ref));
-        // SAFETY: the table, its root slots and their Rc owners live until explicit teardown.
+        let styles = [0; 2];
+        // SAFETY: both tables and their string roots live until explicit teardown.
         unsafe {
-            imre_str_enum_table(members.as_ptr(), members.len());
+            imre_enum_display_table(members.as_ptr(), members.len(), styles.as_ptr());
             let kind = WordKind::new(10);
             drop(kind.acquire(1));
             assert!(texts.iter().all(|s| StrOwner::strong_count(s) == 1));
@@ -230,7 +218,7 @@ mod tests {
                 *StrOwner::from_raw(imre_value_repr(0, 10 | NULLABLE)),
                 "None"
             );
-            imre_str_enum_table(ptr::null(), 0);
+            imre_enum_display_table(ptr::null(), 0, ptr::null());
         }
     }
 }

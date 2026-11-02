@@ -52,6 +52,10 @@ def main():
                 for fixture in ("examples.py", "mismatch.py"):
                     shutil.copyfile(HERE / "controls" / fixture, work / fixture)
                 compare(tools, work, (HERE / "controls" / (control + ".py")).read_bytes())
+            work = root / "prompt_imports"
+            work.mkdir()
+            shutil.copytree(HERE / "controls/prompt_helpers", work / "prompt_helpers")
+            compare(tools, work, (HERE / "controls/prompt_imports.py").read_bytes())
             work = root / "skip"
             work.mkdir()
             sample = HERE / "upstream/Lib/test/test_doctest/sample_doctest_skip.py"

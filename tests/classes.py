@@ -61,8 +61,16 @@ INVALID_OBJECT_BASES = {
 
 
 REJECTED = {
+    "nested_class_bad_return": "class Outer:\n    class Inner:\n        def label(self) -> str:\n            return 42\n",
+    "nested_class_with_invalid_sibling": "class Outer:\n    class Inner: pass\n    x: int\n    x: str\n",
+    "nested_class_with_type_params": "class Outer[T]:\n    class Inner: pass\n",
+    "nested_class_duplicate_name": "class Outer:\n    class Inner: pass\n    class Inner: pass\n",
+    "nested_class_before_invalid_class": "class Outer:\n    class Inner: pass\nclass Bad:\n    x: int\n    x: str\n",
+    "nested_class_after_invalid_class": "class Bad:\n    x: int\n    x: str\nclass Outer:\n    class Inner: pass\n",
     **INVALID_OBJECT_BASES,
     "weak_proxy_callback": "import weakref\nclass Target:\n    pass\ndef callback(proxy: Target) -> None:\n    pass\ntarget = Target()\nweakref.proxy(target, callback)\n",
+    "constructor_uninitialized_container": "class C:\n    data: dict[int, int]\n    def __init__(self):\n        self.data[0] = 1\n        self.data = {}\n",
+    "constructor_uninitialized_index": "class C:\n    data: dict[int, int]\n    key: int\n    def __init__(self):\n        self.data = {}\n        self.data[self.key] = 1\n        self.key = 0\n",
     "inferred_field_reads_itself": FORMAT_INIT.replace("v=1", "v=self.path"),
     "inferred_field_invalid_format_arg": FORMAT_INIT.replace("v=1", "v=[1]"),
     "inferred_field_type_is_shadowed": "class str: pass\n" + FORMAT_INIT,
@@ -78,6 +86,23 @@ REJECTED = {
     "frozen_inherited_class_data": 'from dataclasses import dataclass\nclass Base:\n    items = [1]\n@dataclass(frozen=True)\nclass Child(Base):\n    n: int\nChild(1).items = [2]\n',
     "sibling_guard_field": SUBCLASS_LAYOUT + "def f(x: Base) -> str:\n    if isinstance(x, (A, B)): return x.label\n    return 'other'\n",
     "reassigned_subclass_field": SUBCLASS_LAYOUT + "def f(x: Base, replacement: Base) -> str:\n    if isinstance(x, A):\n        x = replacement\n        return x.label\n    return 'other'\n",
+    "init_popped_pair_does_not_type_unrelated_fields": """class Values:
+    def make(self): return {"key": "value"}
+    def __init__(self):
+        self.data = self.make().copy()
+        key, value = self.data.popitem()
+        self.unrelated = {"a": 1, "b": (1, 2)}
+""",
+    "init_hook_value_reads_uninitialized": """class Base:
+    value: int
+    def __init__(self) -> None:
+        self.value = self.make()
+    def make(self) -> int:
+        return 1
+class Child(Base):
+    def make(self) -> int:
+        return self.value
+""",
     "init_hook_skips_field": HOOK + "class Child(Build):\n    def prepare(self) -> None: pass\n",
     "init_hook_reads_before_write": HOOK + "class Child(Build):\n    def prepare(self) -> None: self.value = self.value + 1\n",
     "init_hook_leaks_receiver": HOOK + "def observe(value: Build) -> int: return value.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = observe(self)\n",
@@ -101,6 +126,12 @@ REJECTED = {
     "literal_mutable_alias": 'from typing import Literal\na: list[Literal["a"]] = ["a"]\nb: list[str] = a\nb.append("b")\n',
     "literal_non_string": 'from typing import Literal\nx: Literal["a", 7] = "a"\n',
     "literal_invalidated_guard": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    if s == "a":\n        s = input()\n        return s\n    return "a"\n',
+    "direct_base_misnamed_receiver": CELL + "class Child(Cell):\n    def __init__(other, self: Cell) -> None:\n        Cell.__init__(self, 1)\n",
+    "forwarded_initializer_pack_escapes": CELL + "class Child(Cell):\n    def __init__(self, *args, **kw):\n        super().__init__(*args, **kw)\n        self.value = len(args)\n",
+    "forwarded_initializer_shadows_super": CELL + "class Child(Cell):\n    def __init__(self, *super, **kw):\n        super().__init__(*super, **kw)  # ty: ignore[call-non-callable]\n",
+    "direct_base_wrong_receiver": CELL + "class Child(Cell):\n    def __init__(self, other: Cell) -> None:\n        Cell.__init__(other, 1)\n",
+    "direct_base_shadowed_parameter": CELL + "class Child(Cell):\n    def __init__(self, Cell: int) -> None:\n        Cell.__init__(self, 1)\n",
+    "direct_base_bad_argument": CELL + "class Child(Cell):\n    def __init__(self) -> None:\n        Cell.__init__(self, wrong=1)\n",
     "root_super_wrong_arity": CELL.replace("self.value = value", "super().__init__(value)\n        self.value = value"),
     "init_alias_partial_self": CELL.replace("self.value = value", "alias = self\n        self.value = value"),
     "init_rebind_self": CELL.replace("self.value = value", "self = self\n        self.value = value"),
@@ -145,6 +176,18 @@ REJECTED = {
     "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
+    "unrelated_abc_meta": "class ABCMeta: pass\nclass C(metaclass=ABCMeta): pass\n",
+    "abc_meta_with_keywords": "import abc\nclass C(metaclass=abc.ABCMeta, option=True): pass\n",
+    "abc_meta_late_import": "class C(metaclass=ABCMeta): pass\nfrom abc import ABCMeta\n",
+    "abc_meta_dataclass_generated": "import abc\nfrom dataclasses import dataclass\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def __init__(self): pass\n@dataclass\nclass B(A):\n    n: int\n",
+    "abc_meta_eager_default": "import abc\ndef init() -> int: return 42\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def f(self, *, n: int = init()): pass\n",
+    "abc_meta_registry_collision": "import abc\nclass Parent: _abc_impl = 42\nclass B(Parent, metaclass=abc.ABCMeta): pass\n",
+    "strenum_keeps_its_type_at_a_str_parameter": (
+        'from enum import StrEnum\nclass Token(StrEnum):\n    KEY = "value"\n'
+        "def is_plain(value: str) -> bool:\n    return type(value) is str\n"
+        "print(is_plain(Token.KEY))\n"
+    ),
+    "abc_meta_enum_conflict": "import abc\nfrom enum import Enum\nclass C(Enum, metaclass=abc.ABCMeta): pass\n",
     "magic_method": CELL + '    def __bytes__(self) -> bytes:\n        return b"Cell"\n',
     "str_extra_parameter": CELL + '    def __str__(self, detail: bool = False) -> str:\n        return "Cell"\n',
     "str_static_method": CELL + '    @staticmethod\n    def __str__() -> str:\n        return "Cell"\n',
@@ -283,7 +326,7 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

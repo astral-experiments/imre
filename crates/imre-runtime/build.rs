@@ -1,14 +1,14 @@
-//! Build the runtime's Unicode and platform errno tables.
+//! Build the runtime's Unicode and platform constant tables.
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use regex_syntax::hir::{Class, HirKind};
 
 /// Use the same pinned Unicode version as the runtime's regex engine.
-fn write_alnum_table(out_dir: &Path) {
+fn write_class_table(out_dir: &Path, file: &str, pattern: &str) {
     let hir = regex_syntax::Parser::new()
-        .parse(r"[\p{L}\p{N}]")
-        .expect("valid Unicode alphanumeric class");
+        .parse(pattern)
+        .expect("valid Unicode class");
     let HirKind::Class(Class::Unicode(class)) = hir.kind() else {
         panic!("expected a Unicode character class");
     };
@@ -23,12 +23,36 @@ fn write_alnum_table(out_dir: &Path) {
         .unwrap();
     }
     table.push_str("]\n");
-    std::fs::write(out_dir.join("unicode_alnum.rs"), table).unwrap();
+    std::fs::write(out_dir.join(file), table).unwrap();
+}
+
+// Keep target-specific constants in C so their names and values come from the target headers.
+fn add_sysconf_table(c: &mut String) {
+    let names = include_str!("native/sysconf-names.txt");
+    c.push_str("#include <unistd.h>\nstatic const struct entry sysconf_entries[] = {\n");
+    for name in names.lines().filter(|line| !line.starts_with('#')) {
+        writeln!(c, "#ifdef _{name}\n{{\"{name}\", _{name}}},\n#endif").unwrap();
+    }
+    c.push_str(
+        r#"};
+const struct entry *imre_platform_sysconf_entries(size_t *length) {
+    *length = sizeof(sysconf_entries) / sizeof(sysconf_entries[0]);
+    return sysconf_entries;
+}
+long imre_platform_sysconf(int name, int *error) {
+    errno = 0;
+    long value = sysconf(name);
+    *error = value == -1 ? errno : 0;
+    return value;
+}
+"#,
+    );
 }
 
 fn main() {
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    write_alnum_table(&out_dir);
+    write_class_table(&out_dir, "unicode_alnum.rs", r"[\p{L}\p{N}]");
+    write_class_table(&out_dir, "unicode_alpha.rs", r"\p{L}");
     const SYMBOLS: &str = include_str!("native/errno-symbols.txt");
     println!("cargo:rerun-if-changed=native/errno-symbols.txt");
     let mut c = String::from(
@@ -63,7 +87,24 @@ fn main() {
         c.push_str("#endif\n");
     }
     c.push_str("{NULL,0}};\nconst struct entry *imre_platform_errno_entries(size_t *len) { *len=sizeof(entries)/sizeof(entries[0])-1; return entries; }\n");
-    let path = out_dir.join("errno.c");
+    if matches!(
+        std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
+        Ok("linux" | "macos")
+    ) {
+        // h_errno may be a macro rather than an exported variable.
+        c.push_str("#include <netdb.h>\nint imre_socket_host_errno(void) { return h_errno; }\n");
+    }
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rerun-if-changed=native/sysconf-names.txt");
+        add_sysconf_table(&mut c);
+    }
+    let path = out_dir.join("platform.c");
     std::fs::write(&path, c).unwrap();
-    cc::Build::new().file(path).compile("imre_errno_headers");
+    println!("cargo:rerun-if-changed=native/locale_decode.c");
+    println!("cargo:rerun-if-changed=native/faulthandler.c");
+    cc::Build::new()
+        .file("native/faulthandler.c")
+        .file(path)
+        .file("native/locale_decode.c")
+        .compile("imre_errno_headers");
 }

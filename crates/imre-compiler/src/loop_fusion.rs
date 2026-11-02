@@ -1,11 +1,11 @@
 //! Forward values across equal counted loops when their intermediate lists are private.
 
 mod nullable;
+mod periodic;
 mod records;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::borrows::statements;
 use crate::ir::{
     self, Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type,
 };
@@ -23,6 +23,7 @@ pub(crate) fn specialize(module: &mut Module) {
             }
         }
     }
+    periodic::specialize(module);
 }
 
 /// Both loops enumerate the ordinal used to append and read each element.
@@ -208,7 +209,7 @@ fn private_lists(
         ExprKind::Scope { clear, .. } => hidden |= clear.iter().any(&protected),
         _ => {}
     });
-    statements(&function.body, &mut |s| match s {
+    ir::walk_statements(&function.body, &mut |s| match s {
         Statement::Assign(slot, _) if consumer_reads.contains_key(slot) => {
             *writes.entry(*slot).or_insert(0) += 1
         }

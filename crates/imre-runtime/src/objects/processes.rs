@@ -22,16 +22,18 @@ use super::mappings::{StringPairs, imre_dict_contains, imre_dict_new};
 use super::records::{RecordDescriptor, imre_record_new};
 use super::values::ReprWriter;
 use super::words::{OwnedWord, WordKind};
-use super::{Bytes, Int, Object, Storage, Str, fail, object};
+use super::{Bytes, Codec, Int, Object, Storage, Str, fail, object};
 
 mod argv;
 mod asynchronous;
+mod environ_item;
 mod launch_error;
 mod pass_fds;
 mod pipe_size;
 mod popen;
 mod shell_output;
 pub(super) use asynchronous::AsyncProcess;
+pub(crate) use popen::{BoxedPipe, BoxedPopen};
 pub(super) use popen::{Popen, retain_live_owner};
 
 #[cfg(target_os = "linux")]
@@ -310,6 +312,10 @@ impl CStrings {
     }
 
     fn from_environment(env: StringPairs) -> Result<Self> {
+        Self::from_pairs(env.iter().map(|(k, v)| (k.as_bytes(), v.as_bytes())))
+    }
+
+    fn from_pairs<'a>(env: impl ExactSizeIterator<Item = (&'a [u8], &'a [u8])>) -> Result<Self> {
         let mut strings = Vec::new();
         strings
             .try_reserve_exact(env.len())
@@ -324,9 +330,9 @@ impl CStrings {
             entry
                 .try_reserve_exact(size)
                 .map_err(|_| Error::allocation())?;
-            entry.extend_from_slice(key.as_bytes());
+            entry.extend_from_slice(key);
             entry.push(b'=');
-            entry.extend_from_slice(value.as_bytes());
+            entry.extend_from_slice(value);
             entry.push(0);
             strings.push(
                 CString::from_vec_with_nul(entry)
@@ -488,6 +494,12 @@ impl Default for ChildAttributes {
     }
 }
 
+const DEFAULT_SHELL: &std::ffi::CStr = if cfg!(target_os = "android") {
+    c"/system/bin/sh"
+} else {
+    c"/bin/sh"
+};
+
 struct Launch {
     argv: CStrings,
     executable: Option<CString>,
@@ -500,30 +512,37 @@ impl Launch {
     /// Prepares native launch data after validating nonempty argv and env names.
     #[cfg(test)]
     fn new(argv: Vec<CString>, env: Option<StringPairs>) -> Result<Self> {
-        Self::with_executable(argv, env, None)
+        Self::with_executable(
+            argv,
+            env.map(CStrings::from_environment).transpose()?,
+            None,
+            None,
+        )
     }
 
     fn with_executable(
         argv: Vec<CString>,
-        env: Option<StringPairs>,
+        env: Option<CStrings>,
         executable: Option<CString>,
+        search_path: Option<&[u8]>,
     ) -> Result<Self> {
         let program = executable.as_ref().unwrap_or_else(|| &argv[0]);
         let search = if program.as_bytes().contains(&b'/') {
             None
         } else {
             let inherited;
-            let path = if let Some(env) = &env {
-                env.iter()
-                    .find(|(key, _)| key.as_str() == "PATH")
-                    .map(|(_, value)| value.as_bytes())
+            let path = if search_path.is_some() {
+                search_path
+            } else if let Some(env) = &env {
+                env.strings
+                    .iter()
+                    .find_map(|entry| entry.to_bytes().strip_prefix(b"PATH="))
             } else {
                 inherited = std::env::var_os("PATH");
                 inherited.as_deref().map(OsStrExt::as_bytes)
             };
             Some(PathSearch::new(path.unwrap_or(b"/bin:/usr/bin"), program)?)
         };
-        let env = env.map(CStrings::from_environment).transpose()?;
         Ok(Self {
             argv: CStrings::new(argv)?,
             executable,
@@ -629,7 +648,7 @@ impl Launch {
         mut self,
         cwd: Option<&CString>,
         streams: u32,
-        redirects: popen::Redirects,
+        redirects: popen::Redirects<'_>,
         attributes: ChildAttributes,
     ) -> io::Result<Child> {
         let descriptors = redirects.fds;
@@ -932,6 +951,10 @@ fn capture_guard(mut child: ChildGuard) -> io::Result<(ExitStatus, Vec<u8>, Vec<
     Ok((status, stdout, stderr))
 }
 
+// POSIX may move its environ array during setenv or unsetenv. Hold this lock
+// while walking the native array or changing it in either execution mode.
+static ENVIRONMENT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Borrows the POSIX environment while no native environment change is in progress.
 fn native_environ() -> *const *const libc::c_char {
     // SAFETY: the OS stores a live null-terminated environment for this process.
@@ -949,20 +972,23 @@ fn native_environ() -> *const *const libc::c_char {
 
 /// Copy the raw entries used by the POSIX module before its first environment mutation.
 pub(crate) fn initial_environment() -> Vec<(Vec<u8>, Vec<u8>)> {
+    let _guard = ENVIRONMENT.lock().unwrap();
     let mut seen = std::collections::HashSet::new();
-    // SAFETY: the standalone runtime does not run Python threads. Nothing in this
-    // iteration calls Python or changes the native environment before it is copied.
+    // SAFETY: the lock keeps the array stable until the copy completes.
     unsafe { environment_entries(native_environ()) }
         .filter(|(name, _)| seen.insert(*name))
         .map(|(name, value)| (name.to_vec(), value.to_vec()))
         .collect()
 }
 
+/// Borrow names without examining value bytes. The value pointer is only read by a
+/// consumer that actually needs that entry's value.
+///
 /// # Safety
 /// The array (possibly null) and its C strings must be live and immutable for `'a`.
-unsafe fn environment_entries<'a>(
+unsafe fn environment_names<'a>(
     mut entries: *const *const libc::c_char,
-) -> impl Iterator<Item = (&'a [u8], &'a [u8])> {
+) -> impl Iterator<Item = (&'a [u8], *const libc::c_char)> {
     std::iter::from_fn(move || {
         loop {
             // SAFETY: each live entry has a successor; the terminating pointer is null.
@@ -970,25 +996,161 @@ unsafe fn environment_entries<'a>(
             if entry.is_null() {
                 return None;
             }
-            // SAFETY: the non-null C string and the next pointer belong to the array.
-            let bytes = unsafe {
+            // SAFETY: search the live string only up to its first '=' or NUL.
+            let split = unsafe {
                 entries = entries.add(1);
-                CStr::from_ptr(entry).to_bytes()
+                libc::strchr(entry, i32::from(b'='))
             };
-            if let Some(split) = bytes.iter().position(|&byte| byte == b'=') {
-                return Some((&bytes[..split], &bytes[split + 1..]));
+            if !split.is_null() {
+                // SAFETY: split belongs to the same C string. Its suffix is NUL-terminated.
+                return Some(unsafe {
+                    let len = split.cast_const().offset_from(entry) as usize;
+                    (
+                        std::slice::from_raw_parts(entry.cast::<u8>(), len),
+                        split.add(1).cast_const(),
+                    )
+                });
             }
         }
     })
 }
 
+/// # Safety
+/// The array (possibly null) and its C strings must be live and immutable for `'a`.
+unsafe fn environment_entries<'a>(
+    entries: *const *const libc::c_char,
+) -> impl Iterator<Item = (&'a [u8], &'a [u8])> {
+    // SAFETY: each value points to the suffix of a string rooted for `'a`.
+    unsafe {
+        environment_names(entries).map(|(name, value)| (name, CStr::from_ptr(value).to_bytes()))
+    }
+}
+
 /// Inspect one POSIX environment value without allocating a temporary string.
 pub(super) fn with_environment_value<T>(key: &[u8], inspect: impl FnOnce(&[u8]) -> T) -> Option<T> {
-    // SAFETY: the language runtime keeps the environment immutable. The value
-    // is borrowed only for the duration of the callback.
-    unsafe { environment_entries(native_environ()) }
-        .find(|(name, _)| *name == key)
-        .map(|(_, bytes)| inspect(bytes))
+    let _guard = ENVIRONMENT.lock().unwrap();
+    // SAFETY: the lock keeps the matching C string stable through the callback.
+    unsafe {
+        environment_names(native_environ())
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| inspect(CStr::from_ptr(value).to_bytes()))
+    }
+}
+
+/// Update the same process environment inherited by newly spawned children.
+pub(crate) fn change_environment(key: &CStr, value: Option<&CStr>) -> Result<()> {
+    let guard = ENVIRONMENT.lock().unwrap();
+    change_environment_locked(key, value, &guard)
+}
+
+fn change_environment_locked(
+    key: &CStr,
+    value: Option<&CStr>,
+    _guard: &std::sync::MutexGuard<'_, ()>,
+) -> Result<()> {
+    let status = if let Some(value) = value {
+        if key.to_bytes().contains(&b'=') {
+            return Err(Error::new(
+                Kind::ValueError,
+                "illegal environment variable name",
+            ));
+        }
+        // SAFETY: both inputs are live terminated strings; setenv copies them.
+        unsafe { libc::setenv(key.as_ptr(), value.as_ptr(), 1) }
+    } else {
+        // SAFETY: key stays terminated and live through the synchronous call.
+        unsafe { libc::unsetenv(key.as_ptr()) }
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(super::errno_error(io::Error::last_os_error()))
+    }
+}
+
+fn set_environment_bytes(key: &[u8], value: &[u8]) -> Result<()> {
+    change_environment(&cstring(key)?, Some(&cstring(value)?))
+}
+
+fn set_environment_text(key: &Str, value: &Str) -> Result<()> {
+    let encoding = crate::sys::filesystem_encoding()?;
+    let encode = |text: &Str| super::Codec::encode_str(text, &encoding, "surrogateescape");
+    set_environment_bytes(&encode(key)?, &encode(value)?)
+}
+
+/// Assign a typed bytes key and value to the process environment.
+///
+/// # Safety
+/// Both bytes objects are rooted until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_environ_set_bytes(key: *const Bytes, value: *const Bytes) {
+    // SAFETY: the caller supplies rooted bytes objects.
+    finish(unsafe { set_environment_bytes(&*key, &*value) }, ());
+}
+
+/// Assign a typed text key and value to the process environment.
+///
+/// # Safety
+/// Both strings are rooted by the caller until this function returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_environ_set(key: *const Str, value: *const Str) {
+    // SAFETY: the caller supplies rooted strings.
+    finish(unsafe { set_environment_text(&*key, &*value) }, ());
+}
+
+/// Remove POSIX names in mapping order. Entries remain raw bytes, including names
+/// inherited with an undecodable spelling.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_environ_clear() {
+    for (key, _) in initial_environment() {
+        if let Err(error) = cstring(&key).and_then(|key| change_environment(&key, None)) {
+            error.raise();
+            return;
+        }
+    }
+}
+
+/// # Safety
+/// The caller roots an exact dict[str, str] or dict[bytes, bytes] matching `bytes`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_environ_update(mapping: *const Object, bytes: u32) {
+    // SAFETY: the exact dictionary stays rooted. Its items iterator owns its cursor.
+    let items =
+        unsafe { crate::ObjectOwner::from_raw(super::mappings::imre_dict_iter(mapping, 1)) };
+    let update = || {
+        while let Some((key, item)) = super::mappings::pull(&items)? {
+            let value = item.expect("dictionary items have values");
+            // SAFETY: the item owns both words with the caller's exact homogeneous types.
+            unsafe {
+                if bytes != 0 {
+                    set_environment_bytes(
+                        &*(key.word as *const Bytes),
+                        &*(value.word as *const Bytes),
+                    )?;
+                } else {
+                    set_environment_text(&*(key.word as *const Str), &*(value.word as *const Str))?;
+                }
+            }
+        }
+        Ok(())
+    };
+    finish(update(), ());
+}
+
+/// Decode representable filesystem text without exposing raw entries in lookup diagnostics.
+fn decode_environment_text(codec: Codec, bytes: &[u8]) -> Result<Str> {
+    codec.decode(bytes, None).map(Str::from).map_err(|error| {
+        if error.is_kind(Kind::UnicodeDecodeError) {
+            let message = if matches!(codec, Codec::Utf8 { .. }) {
+                "environment contains non-UTF-8 text"
+            } else {
+                "environment text cannot be decoded with the filesystem encoding"
+            };
+            Error::new(Kind::UnicodeDecodeError, message)
+        } else {
+            error
+        }
+    })
 }
 
 /// Returns the first matching value, or the supplied nullable default.
@@ -999,24 +1161,20 @@ pub(super) fn with_environment_value<T>(key: &[u8], inspect: impl FnOnce(&[u8]) 
 pub unsafe extern "C" fn imre_environ_get(key: *const Str, default: *const Str) -> *const Str {
     // SAFETY: the compiler roots the key for this lookup.
     let key = unsafe { &*key };
-    let result = with_environment_value(key.as_bytes(), |bytes| {
-        std::str::from_utf8(bytes)
-            .map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text))))
-            .map_err(|_| {
-                Error::new(
-                    Kind::UnicodeDecodeError,
-                    "environment contains non-UTF-8 text",
-                )
-            })
+    let value = environ_item::encoded_key(key).and_then(|key| {
+        let codec = Codec::lookup(&crate::sys::filesystem_encoding()?)?;
+        with_environment_value(&key, |bytes| decode_environment_text(codec, bytes)).transpose()
     });
-    if let Some(result) = result {
-        finish(result, std::ptr::null())
-    } else {
-        if !default.is_null() {
-            // SAFETY: return an independent owner of the rooted default.
-            unsafe { StrOwner::increment_strong_count(default) };
+    match value {
+        Ok(Some(value)) => StrOwner::into_raw(StrOwner::new(value)),
+        Ok(None) => {
+            if !default.is_null() {
+                // SAFETY: return an independent owner of the rooted default.
+                unsafe { StrOwner::increment_strong_count(default) };
+            }
+            default
         }
-        default
+        Err(error) => error.returning(std::ptr::null()),
     }
 }
 
@@ -1026,20 +1184,15 @@ pub unsafe extern "C" fn imre_environ_get(key: *const Str, default: *const Str) 
 /// # Safety
 /// `entries` is null or a live null-terminated array of C-string pointers. The array
 /// and strings remain immutable until this function returns.
-unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<crate::ObjectOwner> {
+unsafe fn environment_snapshot(
+    entries: *const *const libc::c_char,
+    codec: Codec,
+) -> Result<crate::ObjectOwner> {
     // SAFETY: new transfers one fresh exact dict[str, str] owner.
     let result = unsafe { crate::ObjectOwner::from_raw(imre_dict_new(3, 3)) };
-    let decode = |bytes: &[u8]| {
-        std::str::from_utf8(bytes).map(Str::from).map_err(|_| {
-            Error::new(
-                Kind::UnicodeDecodeError,
-                "environment contains non-UTF-8 text",
-            )
-        })
-    };
     // SAFETY: the caller roots the terminated environment for this iteration.
     for (name, value) in unsafe { environment_entries(entries) } {
-        let key = StrOwner::new(decode(name)?);
+        let key = StrOwner::new(decode_environment_text(codec, name)?);
         // SAFETY: both the new dictionary and exact string key remain rooted.
         if unsafe {
             imre_dict_contains(
@@ -1048,7 +1201,7 @@ unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<cr
             )
         } == 0
         {
-            let value = StrOwner::new(decode(value)?);
+            let value = StrOwner::new(decode_environment_text(codec, value)?);
             // SAFETY: insertion acquires both rooted strings; no language alias
             // can observe this new acyclic dictionary before it is complete.
             unsafe {
@@ -1063,14 +1216,40 @@ unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<cr
     Ok(result)
 }
 
-/// Returns an independent UTF-8 dictionary without exposing undecodable host bytes.
-/// Diagnostics omit inherited values.
+/// Copy the process environment using the interpreter’s filesystem codec.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_environ_copy() -> *const Object {
-    // SAFETY: the single-threaded interpreter does not call Python while copying
-    // the OS's terminated environment. Raw POSIX entries preserve empty names.
-    let result = unsafe { environment_snapshot(native_environ()) };
+    let result = crate::sys::filesystem_encoding().and_then(|encoding| {
+        let codec = Codec::lookup(&encoding)?;
+        let _guard = ENVIRONMENT.lock().unwrap();
+        // SAFETY: the lock keeps the terminated environment stable during the copy.
+        unsafe { environment_snapshot(native_environ(), codec) }
+    });
     finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
+}
+
+/// Copies the POSIX byte mapping without passing keys or values through a text codec.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_environb_copy() -> *const Object {
+    // SAFETY: the dictionary owns exact bytes keys and values (word kind 8).
+    let dict = unsafe { crate::ObjectOwner::from_raw(imre_dict_new(8, 8)) };
+    for (name, value) in initial_environment() {
+        let key = crate::BytesOwner::new(name);
+        let value = crate::BytesOwner::new(value);
+        // SAFETY: the rooted bytes owners live through insertion, which retains each.
+        let result = unsafe {
+            super::mappings::dict_set(
+                crate::ObjectOwner::as_ptr(&dict),
+                crate::BytesOwner::as_ptr(&key) as usize,
+                crate::BytesOwner::as_ptr(&value) as usize,
+            )
+        };
+        if let Err(error) = result {
+            error.raise();
+            return std::ptr::null();
+        }
+    }
+    crate::ObjectOwner::into_raw(dict)
 }
 
 fn copy_argv(words: &[usize], copy: impl Fn(usize) -> Result<CString>) -> Result<Vec<CString>> {
@@ -1083,60 +1262,6 @@ fn copy_argv(words: &[usize], copy: impl Fn(usize) -> Result<CString>) -> Result
     Ok(argv)
 }
 
-/// # Safety
-/// The caller roots the legacy ABI's exact list and optional directory/environment.
-unsafe fn spawn_list(
-    args: *const Object,
-    cwd: *const Str,
-    env: *const Object,
-    streams: u32,
-) -> Result<Child> {
-    popen::cleanup();
-    // SAFETY: the compiler passes a rooted exact list, never a tuple or a scalar.
-    let cmd = unsafe { WordKind::new(5).acquire(args as usize) };
-    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, streams, 0, true);
-    // SAFETY: the original configuration remains rooted while spawn reports any error.
-    unsafe {
-        launch_error::spawn(&cmd, &config, streams, Default::default(), true, |_| {
-            Ok(ChildAttributes::default())
-        })
-    }
-}
-
-/// Runs a child with its output forwarded directly to the parent's stderr.
-///
-/// # Safety
-/// The caller roots an exact list[str] until launch and checks pending on return.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_subprocess_to_stderr(args: *const Object, check: u32) {
-    let run = || -> Result<ExitStatus> {
-        // SAFETY: all argv owners are rooted by the caller.
-        let child = unsafe { spawn_list(args, std::ptr::null(), std::ptr::null(), 4)? };
-        ChildGuard {
-            child,
-            reaped: false,
-        }
-        .wait()
-        .map_err(os_error)
-    };
-    let absent = || OwnedWord {
-        word: 0,
-        kind: WordKind::new(0),
-    };
-    match run() {
-        Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
-            positional_streams: false,
-            // SAFETY: the original list remains rooted while acquiring our owner.
-            cmd: unsafe { WordKind::new(5).acquire(args as usize) },
-            returncode: returncode(status),
-            stdout: absent(),
-            stderr: absent(),
-        }),
-        Ok(_) => {}
-        Err(error) => error.raise(),
-    }
-}
-
 /// Validate rooted language arguments and materialize an independent native launch.
 unsafe fn prepare_process(
     args: *const Object,
@@ -1145,12 +1270,12 @@ unsafe fn prepare_process(
 ) -> Result<(Launch, Option<CString>)> {
     popen::cleanup();
     // SAFETY: existing run and asynchronous ABIs accept an exact list.
-    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0, true);
+    let config = popen::LaunchConfig::basic(args.cast(), 5, cwd, env, 0, 0);
     // SAFETY: the legacy arguments have their original word representations.
     let (launch, cwd, _) = unsafe {
         let cmd = WordKind::new(5).acquire(args as usize);
         validate_command_shape(&cmd, &config)?;
-        prepare_command(&cmd, &config, || Ok(ChildAttributes::default()))?
+        prepare_command(&cmd, &config, None, None, || Ok(ChildAttributes::default()))?
     };
     Ok((launch, cwd))
 }
@@ -1188,11 +1313,15 @@ unsafe fn validate_command_shape(cmd: &OwnedWord, config: &popen::LaunchConfig) 
     }
 }
 
+type ByteEnvironment = Vec<(Vec<u8>, Vec<u8>)>;
+
 /// # Safety
 /// The exact optional directory and environment stay rooted across conversion.
 unsafe fn prepare_command(
     cmd: &OwnedWord,
     config: &popen::LaunchConfig,
+    byte_env: Option<ByteEnvironment>,
+    search_path: Option<&[u8]>,
     child_attributes: impl FnOnce() -> Result<ChildAttributes>,
 ) -> Result<(Launch, Option<CString>, ChildAttributes)> {
     // SAFETY: the caller roots the exact argv, optional directory and environment.
@@ -1224,21 +1353,22 @@ unsafe fn prepare_command(
         let executable = argv::optional_path(config.executable, config.executable_kind)?;
         let mut argv = argv::copy(cmd)?;
         if config.shell {
-            let default = if cfg!(target_os = "android") {
-                c"/system/bin/sh"
-            } else {
-                c"/bin/sh"
-            };
             let shell = executable
                 .as_deref()
                 .filter(|p| !p.to_bytes().is_empty())
-                .unwrap_or(default);
+                .unwrap_or(DEFAULT_SHELL);
             argv.try_reserve(2).map_err(|_| Error::allocation())?;
             argv.splice(..0, [shell.to_owned(), c"-c".to_owned()]);
         }
         let cwd = argv::optional_path(config.cwd, config.cwd_kind)?;
+        let env = match byte_env {
+            Some(pairs) => Some(CStrings::from_pairs(
+                pairs.iter().map(|(k, v)| (k.as_slice(), v.as_slice())),
+            )?),
+            None => env.map(CStrings::from_environment).transpose()?,
+        };
         Ok((
-            Launch::with_executable(argv, env, executable)?,
+            Launch::with_executable(argv, env, executable, search_path)?,
             cwd,
             attributes,
         ))
@@ -1561,7 +1691,6 @@ mod tests {
             env.map_or(std::ptr::null(), crate::ObjectOwner::as_ptr),
             0x11 | (1 << 16), // capture both streams as text
             Int::small(-1).unwrap().0,
-            true,
         );
         let deadline = timeout
             .as_ref()
@@ -2096,6 +2225,7 @@ mod tests {
                 b"IMRE_KEY=second",
                 b"IMRE_KEY=\xff",
                 b"IMRE_VALUE=left=right",
+                b"\xfe=\xff",
                 b"=ignored",
                 b"malformed",
                 b"\xff",
@@ -2107,7 +2237,7 @@ mod tests {
         .ok()
         .unwrap();
         // SAFETY: the immutable CStrings owner roots the terminated native array.
-        let copy = unsafe { environment_snapshot(entries.pointers.as_ptr()) }
+        let copy = unsafe { environment_snapshot(entries.pointers.as_ptr(), Codec::Latin1) }
             .unwrap_or_else(|_| panic!("controlled environment unexpectedly failed"));
         // SAFETY: the owned dictionary roots its exact strings while they are copied.
         let pairs = unsafe {
@@ -2127,31 +2257,46 @@ mod tests {
                 ("", "allowed"),
                 ("IMRE_KEY", "first"),
                 ("IMRE_VALUE", "left=right"),
+                ("þ", "ÿ"),
             ]
         );
-        let entries = CStrings::new(vec![CString::new(b"KEY=\xff".as_slice()).unwrap()])
-            .ok()
-            .unwrap();
-        // SAFETY: the immutable array is valid but contains undecodable value text.
-        match unsafe { environment_snapshot(entries.pointers.as_ptr()) } {
-            Ok(_) => panic!("non-UTF-8 environment unexpectedly succeeded"),
-            Err(error) => error.raise(),
+        for (entry, codec, expected_message) in [
+            (
+                b"KEY=\xff".as_slice(),
+                Codec::Utf8 { signature: false },
+                "environment contains non-UTF-8 text",
+            ),
+            (
+                b"KEY=\xc3\xa9".as_slice(),
+                Codec::Ascii,
+                "environment text cannot be decoded with the filesystem encoding",
+            ),
+        ] {
+            let entries = CStrings::new(vec![CString::new(entry).unwrap()])
+                .ok()
+                .unwrap();
+            // SAFETY: the array is valid, but the value is not representable in this codec.
+            match unsafe { environment_snapshot(entries.pointers.as_ptr(), codec) } {
+                Ok(_) => panic!("unrepresentable environment text unexpectedly succeeded"),
+                Err(error) => error.raise(),
+            }
+            // SAFETY: decoding published exactly one owned pending exception.
+            let error = unsafe { crate::ObjectOwner::from_raw(imre_error_take()) };
+            assert_kind(&error, Kind::UnicodeDecodeError);
+            assert_eq!(message(&error).as_str(), expected_message);
         }
-        // SAFETY: decoding published exactly one owned pending exception.
-        let error = unsafe { crate::ObjectOwner::from_raw(imre_error_take()) };
-        assert_kind(&error, Kind::UnicodeDecodeError);
-        assert_eq!(
-            message(&error).as_str(),
-            "environment contains non-UTF-8 text"
-        );
     }
 
     #[test]
     fn environment_copy_is_owned_without_logging_host_values() {
         let copy = imre_environ_copy();
-        if std::env::vars_os()
-            .any(|(key, value)| key.to_str().is_none() || value.to_str().is_none())
-        {
+        let encoding = crate::sys::filesystem_encoding().ok().unwrap();
+        let codec = Codec::lookup(&encoding).ok().unwrap();
+        if initial_environment().iter().any(|(key, value)| {
+            [key, value]
+                .into_iter()
+                .any(|bytes| codec.decode(bytes, None).is_err())
+        }) {
             assert!(copy.is_null());
             // SAFETY: failed decoding publishes one pending exception owner.
             let error = unsafe { crate::ObjectOwner::from_raw(imre_error_take()) };

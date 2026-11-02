@@ -240,11 +240,14 @@ pub extern "C" fn imre_cache_debug_validate(no_debug: u32, no_opt: u32) {
     );
 }
 
+pub(crate) const DEBUG_OVERRIDE_WARNING: &str =
+    "the debug_override parameter is deprecated; use 'optimization' instead";
+
 pub(crate) fn warn_debug_override() -> Result<(), Error> {
     super::warnings::deprecation(
         "importlib._bootstrap_external",
         "<frozen importlib._bootstrap_external>",
         258,
-        "the debug_override parameter is deprecated; use 'optimization' instead",
+        DEBUG_OVERRIDE_WARNING,
     )
 }

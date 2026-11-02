@@ -37,9 +37,7 @@ impl Checker<'_> {
         matches!(
             self.graph.modules[self.module].bindings.get(name),
             Some(Binding::Intrinsic(
-                Intrinsic::Mapping {
-                    typing_alias: false
-                } | Intrinsic::NominalClass("collections.abc.MutableMapping")
+                Intrinsic::Mapping | Intrinsic::NominalClass("collections.abc.MutableMapping")
             ))
         )
     }
@@ -72,18 +70,16 @@ impl Checker<'_> {
         let [child, parent] = call.arguments.args.as_ref() else {
             return Ok(None);
         };
-        let Some(Binding::Intrinsic(Intrinsic::Mapping { typing_alias })) =
+        let Some(Binding::Intrinsic(parent @ (Intrinsic::Mapping | Intrinsic::TYPING_MAPPING))) =
             self.collection_binding(parent)
         else {
             return Ok(None);
         };
         self.reject_builtin_keywords(call)?;
-        if !typing_alias
+        if parent == Intrinsic::Mapping
             && matches!(
                 self.collection_binding(child),
-                Some(Binding::Intrinsic(Intrinsic::Mapping {
-                    typing_alias: true
-                }))
+                Some(Binding::Intrinsic(Intrinsic::TYPING_MAPPING))
             )
         {
             // typing.Mapping is a typing alias, not a class accepted by ABCMeta.
@@ -98,7 +94,10 @@ impl Checker<'_> {
         } else if matches!(
             self.collection_binding(child),
             Some(Binding::Intrinsic(
-                Intrinsic::Mapping { .. } | Intrinsic::Counter | Intrinsic::DefaultDict
+                Intrinsic::Mapping
+                    | Intrinsic::TYPING_MAPPING
+                    | Intrinsic::Counter
+                    | Intrinsic::DefaultDict
             ))
         ) {
             true

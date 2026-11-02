@@ -1,4 +1,5 @@
 import re
+import warnings
 
 
 def current():
@@ -19,6 +20,13 @@ def current():
         print(re.compile("k.", bits).fullmatch("Ké") is not None)
     print(re.compile(b"(A)|(B)", 2).split(b"\xffab"))
     print(re.split("(a)|(b)", "xab", maxsplit=2, flags=re.I))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert re.split(":", "a:b:c", 1) == re.split(":", "a:b:c", maxsplit=1)
+    assert len(caught) == 1
+    assert caught[0].filename == __file__
+    assert caught[0].category is DeprecationWarning
+    assert str(caught[0].message) == "'maxsplit' is passed as positional argument"
     for source in ("", "x*", "|x+", "x*?", "(a*)|(b)", r"\b"):
         print(re.compile(source).split("xxaβb"), re.compile(source).split("xxaβb", -1))
     print(re.compile("$").split("a\n"), re.compile("$", re.X | re.M).split("a\nb\n"))
@@ -31,3 +39,9 @@ def current():
         pattern.split("value", 1 << 100)
     except OverflowError as error:
         print(type(error).__name__, str(error))
+
+    assert re.compile(r"((?:\n)??)$").sub("!", "a\n") == "a!!!"
+    assert re.compile("|x+").sub(repl="東", string="xxé", count=3) == "東東東é"
+    assert re.compile(b"(.)").sub(b"\xff", bytearray(b"ab"), 1) == b"\xffb"
+    assert re.compile("(?P<name>x)").sub("$1", "xx") == "$1$1"
+    assert re.compile(b"x").sub(memoryview(b"z"), b"xx") == b"zz"

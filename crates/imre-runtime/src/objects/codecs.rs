@@ -1,7 +1,7 @@
 //! Native text codecs shared by the registry and text files.
 pub(super) mod writer;
 
-use super::bytes::{Utf8Issue, ascii_decode_error, owned_input};
+use super::bytes::{DecodeIssue, ascii_decode_error, owned_input};
 use super::charmaps::Charmap;
 use super::exceptions::Result;
 use super::{Bytes, Error, Kind, Object, Storage, StorageCell, Str, finish, object};
@@ -34,14 +34,16 @@ impl CodePage {
 
 static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
 static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
+static CP437: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(6, "cp437"));
 
-const CODEC_NAMES: [&str; 6] = [
+const CODEC_NAMES: [&str; 7] = [
     "ascii",
     "iso8859-1",
     "utf-8",
     "utf-8-sig",
     "cp1251",
     "cp424",
+    "cp437",
 ];
 
 thread_local! {
@@ -57,7 +59,7 @@ thread_local! {
 }
 
 /// Collapse non-ASCII-alphanumeric separators, retaining dots in codec names.
-fn normalize(name: &str) -> Result<String> {
+pub(crate) fn normalize(name: &str) -> Result<String> {
     let mut normalized = String::new();
     normalized
         .try_reserve_exact(name.len())
@@ -180,13 +182,9 @@ pub unsafe extern "C" fn imre_str_encode_options(
 ) -> *const Bytes {
     // SAFETY: the typed compiler passes three live, immutable strings.
     let (encoding, errors) = unsafe { (&*encoding, &*errors) };
-    let result = Codec::for_encode(encoding, errors).and_then(|codec| {
+    let result = StrEncoder::lookup(encoding, errors).and_then(|encoder| {
         // SAFETY: the caller roots the original string through conversion and error construction.
-        unsafe {
-            codec.encode(&*text, Some(errors), || {
-                Ok(StrOwner::acquire_word(text as usize))
-            })
-        }
+        unsafe { encoder.encode(&*text, errors, || Ok(StrOwner::acquire_word(text as usize))) }
     });
     finish(result.and_then(encoded_bytes), std::ptr::null())
 }
@@ -209,6 +207,279 @@ pub unsafe extern "C" fn imre_codec_decode(
         }),
         std::ptr::null(),
     )
+}
+
+/// Explicit byte order never inserts a BOM. U+FEFF in the input encodes normally.
+#[derive(Clone, Copy)]
+pub(crate) enum Utf16Order {
+    Little,
+    Big,
+}
+
+impl Utf16Order {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Little => "utf-16-le",
+            Self::Big => "utf-16-be",
+        }
+    }
+
+    pub(crate) fn from_sign(order: i32) -> Self {
+        if order < 0 || order == 0 && cfg!(target_endian = "little") {
+            Self::Little
+        } else {
+            Self::Big
+        }
+    }
+
+    pub(crate) fn unit(self, bytes: [u8; 2]) -> u16 {
+        match self {
+            Self::Little => u16::from_le_bytes(bytes),
+            Self::Big => u16::from_be_bytes(bytes),
+        }
+    }
+
+    /// Decode complete units, leaving the trailing partial unit or surrogate pair to the caller.
+    pub(crate) fn decode_prefix(
+        self,
+        points: &mut Vec<u32>,
+        bytes: &[u8],
+        mut offset: usize,
+        final_chunk: bool,
+    ) -> Result<(usize, Option<DecodeIssue>)> {
+        points
+            .try_reserve((bytes.len() - offset).div_ceil(2))
+            .map_err(|_| Error::allocation())?;
+        while offset < bytes.len() {
+            let rest = &bytes[offset..];
+            let (reason, end) = if let Some((first, rest)) = rest.split_first_chunk::<2>() {
+                let first = self.unit(*first);
+                match first {
+                    0xd800..=0xdbff => {
+                        if let Some(second) = rest.first_chunk::<2>() {
+                            let second = self.unit(*second);
+                            if (0xdc00..=0xdfff).contains(&second) {
+                                let high = u32::from(first - 0xd800);
+                                let low = u32::from(second - 0xdc00);
+                                points.push(0x10000 + (high << 10) + low);
+                                offset += 4;
+                                continue;
+                            }
+                            ("illegal UTF-16 surrogate", offset + 2)
+                        } else if final_chunk {
+                            ("unexpected end of data", bytes.len())
+                        } else {
+                            break;
+                        }
+                    }
+                    0xdc00..=0xdfff => ("illegal encoding", offset + 2),
+                    _ => {
+                        points.push(u32::from(first));
+                        offset += 2;
+                        continue;
+                    }
+                }
+            } else if final_chunk {
+                ("truncated data", bytes.len())
+            } else {
+                break;
+            };
+            return Ok((
+                offset,
+                Some(DecodeIssue {
+                    encoding: self.name(),
+                    start: offset,
+                    end,
+                    reason,
+                }),
+            ));
+        }
+        Ok((offset, None))
+    }
+
+    pub(crate) fn append(
+        self,
+        bytes: &mut Vec<u8>,
+        units: impl IntoIterator<Item = u16>,
+    ) -> Result<()> {
+        for unit in units {
+            bytes.try_reserve(2).map_err(|_| Error::allocation())?;
+            bytes.extend_from_slice(&match self {
+                Self::Little => unit.to_le_bytes(),
+                Self::Big => unit.to_be_bytes(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Explicit byte order never inserts a BOM. U+FEFF in the input encodes normally.
+#[derive(Clone, Copy)]
+pub(crate) enum FixedUnicode {
+    Utf16(Utf16Order),
+    Utf32Le,
+    Utf32Be,
+}
+
+impl FixedUnicode {
+    pub(crate) fn by_key(key: &str) -> Option<Self> {
+        match key {
+            "utf_16_le" | "utf_16le" | "unicodelittleunmarked" => {
+                Some(Self::Utf16(Utf16Order::Little))
+            }
+            "utf_16_be" | "utf_16be" | "unicodebigunmarked" => Some(Self::Utf16(Utf16Order::Big)),
+            "utf_32_le" | "utf_32le" => Some(Self::Utf32Le),
+            "utf_32_be" | "utf_32be" => Some(Self::Utf32Be),
+            _ => None,
+        }
+    }
+
+    /// The unsuffixed stateless codecs use native order and prefix one BOM.
+    pub(crate) fn encoding(key: &str) -> Option<(Self, bool)> {
+        match key {
+            "utf16" | "u16" | "utf_16" => Some((Self::Utf16(Utf16Order::from_sign(0)), true)),
+            "utf32" | "u32" | "utf_32" => Some((
+                if cfg!(target_endian = "little") {
+                    Self::Utf32Le
+                } else {
+                    Self::Utf32Be
+                },
+                true,
+            )),
+            _ => Self::by_key(key).map(|format| (format, false)),
+        }
+    }
+
+    pub(crate) fn width(self) -> usize {
+        match self {
+            Self::Utf16(_) => 2,
+            Self::Utf32Le | Self::Utf32Be => 4,
+        }
+    }
+
+    pub(crate) fn byte_order(self) -> i32 {
+        match self {
+            Self::Utf16(Utf16Order::Little) | Self::Utf32Le => -1,
+            Self::Utf16(Utf16Order::Big) | Self::Utf32Be => 1,
+        }
+    }
+
+    pub(crate) fn with_order(self, order: i32) -> Self {
+        let order = Utf16Order::from_sign(order);
+        match self {
+            Self::Utf16(_) => Self::Utf16(order),
+            _ if matches!(order, Utf16Order::Little) => Self::Utf32Le,
+            _ => Self::Utf32Be,
+        }
+    }
+
+    pub(crate) fn codec_name(self, signature: bool) -> &'static str {
+        if !signature {
+            return self.name();
+        }
+        match self {
+            Self::Utf16(_) => "utf-16",
+            Self::Utf32Le | Self::Utf32Be => "utf-32",
+        }
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Utf16(order) => order.name(),
+            Self::Utf32Le => "utf-32-le",
+            Self::Utf32Be => "utf-32-be",
+        }
+    }
+
+    pub(crate) fn append(
+        self,
+        bytes: &mut Vec<u8>,
+        points: impl IntoIterator<Item = u32>,
+    ) -> Result<()> {
+        for point in points {
+            match self {
+                Self::Utf16(order) => {
+                    // A lone surrogate requested by surrogatepass is already one code unit.
+                    let mut units = [point as u16, 0];
+                    let length =
+                        char::from_u32(point).map_or(1, |ch| ch.encode_utf16(&mut units).len());
+                    order.append(bytes, units[..length].iter().copied())?;
+                }
+                Self::Utf32Le | Self::Utf32Be => {
+                    let word = if matches!(self, Self::Utf32Le) {
+                        point.to_le_bytes()
+                    } else {
+                        point.to_be_bytes()
+                    };
+                    bytes.try_reserve(4).map_err(|_| Error::allocation())?;
+                    bytes.extend_from_slice(&word);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// str.encode also supports stateless encoders without a full codec registry entry.
+#[derive(Clone, Copy)]
+pub(crate) enum StrEncoder {
+    Registered(Codec),
+    Wide {
+        format: FixedUnicode,
+        signature: bool,
+    },
+}
+
+impl StrEncoder {
+    pub(crate) fn lookup(encoding: &str, errors: &str) -> Result<Self> {
+        let key = encode_key(encoding, errors)?;
+        if let Some((format, signature)) = FixedUnicode::encoding(&key) {
+            Ok(Self::Wide { format, signature })
+        } else {
+            Ok(Self::Registered(Codec::by_key(&key, encoding)?))
+        }
+    }
+
+    fn encode<'a>(
+        self,
+        text: &'a str,
+        errors: &str,
+        original: impl FnOnce() -> Result<StrOwner>,
+    ) -> Result<Cow<'a, [u8]>> {
+        match self {
+            Self::Registered(codec) => codec.encode(text, Some(errors), original),
+            Self::Wide { format, signature } => {
+                let mut bytes = Vec::new();
+                format.append(
+                    &mut bytes,
+                    signature
+                        .then_some(0xfeff)
+                        .into_iter()
+                        .chain(text.chars().map(u32::from)),
+                )?;
+                Ok(Cow::Owned(bytes))
+            }
+        }
+    }
+
+    /// Boxed strings retain the original scalar input only when error construction needs it.
+    pub(crate) fn encode_str(self, text: &str, errors: &str) -> Result<Vec<u8>> {
+        match self.encode(text, errors, || super::text::try_owned_string(text))? {
+            Cow::Owned(bytes) => Ok(bytes),
+            Cow::Borrowed(bytes) => {
+                let mut output = super::bytes::allocate(bytes.len())?;
+                output.extend_from_slice(bytes);
+                Ok(output)
+            }
+        }
+    }
+}
+
+fn encode_key(encoding: &str, errors: &str) -> Result<String> {
+    if encoding.contains('\0') || errors.contains('\0') {
+        return Err(Error::new(Kind::ValueError, "embedded null character"));
+    }
+    normalize(encoding)
 }
 
 #[derive(Clone, Copy)]
@@ -244,26 +515,14 @@ impl Codec {
     }
 
     pub(super) fn for_encode(encoding: &str, errors: &str) -> Result<Self> {
-        if encoding.contains('\0') || errors.contains('\0') {
-            return Err(Error::new(Kind::ValueError, "embedded null character"));
-        }
-        Self::lookup(encoding)
+        Self::by_key(&encode_key(encoding, errors)?, encoding)
     }
 
-    /// Boxed strings retain a native copy of the input only when the encoder raises.
     pub(crate) fn encode_str(text: &str, encoding: &str, errors: &str) -> Result<Vec<u8>> {
-        let codec = Self::for_encode(encoding, errors)?;
-        match codec.encode(text, Some(errors), || super::text::try_owned_string(text))? {
-            Cow::Owned(bytes) => Ok(bytes),
-            Cow::Borrowed(bytes) => {
-                let mut output = super::bytes::allocate(bytes.len())?;
-                output.extend_from_slice(bytes);
-                Ok(output)
-            }
-        }
+        StrEncoder::Registered(Self::for_encode(encoding, errors)?).encode_str(text, errors)
     }
 
-    fn by_key(key: &str, value: &str) -> Result<Self> {
+    pub(crate) fn by_key(key: &str, value: &str) -> Result<Self> {
         match key {
             "utf8" | "utf_8" | "u8" | "utf" | "utf8_ucs2" | "utf8_ucs4" | "cp65001" => {
                 Ok(Self::Utf8 { signature: false })
@@ -271,6 +530,7 @@ impl Codec {
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
             "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
             "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
+            "cp437" | "437" | "cspc8codepage437" | "ibm437" => Ok(Self::CodePage(&CP437)),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
                 Ok(Self::Latin1)
@@ -288,7 +548,7 @@ impl Codec {
     }
 
     /// Text streams accept the locale sentinel in addition to registry names.
-    pub(super) fn for_stream(encoding: Option<&str>) -> Result<Self> {
+    pub(crate) fn for_stream(encoding: Option<&str>) -> Result<Self> {
         match encoding {
             None | Some("locale") => Ok(Self::Utf8 { signature: false }),
             Some(name) => Self::lookup(name),
@@ -569,11 +829,11 @@ pub(crate) fn utf8_prefix(
     text: &mut String,
     data: &[u8],
     offset: usize,
-) -> Result<Option<Utf8Issue>> {
+) -> Result<Option<DecodeIssue>> {
     let (valid, issue) = match std::str::from_utf8(&data[offset..]) {
         Ok(valid) => (valid, None),
         Err(error) => {
-            let issue = Utf8Issue::new(data, offset, error);
+            let issue = DecodeIssue::utf8(data, offset, error);
             // The validator has already checked this prefix.
             (
                 std::str::from_utf8(&data[offset..issue.start]).unwrap(),

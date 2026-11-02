@@ -120,7 +120,7 @@ fn view(kind: WordKind, word: usize) -> *const Object {
     ))))
 }
 
-/// Test identity against the None singleton, a list, or a stream with a stable native owner.
+/// Test identity against None or a string, bytes, list or stream with a stable native owner.
 ///
 /// # Safety
 /// Both the retained view and the compiler-checked comparison operand are rooted.
@@ -130,7 +130,7 @@ pub unsafe extern "C" fn imre_exception_field_identity(
     kind: u32,
     word: usize,
 ) -> u32 {
-    debug_assert!(matches!(kind, 0 | 4 | 5));
+    debug_assert!(matches!(kind, 0 | 3 | 4 | 5 | 8));
     // SAFETY: a field view owns the concrete value.
     let owner = unsafe { object(value) };
     if super::super::errno::with_nonscalar_member(owner, |_| ()).is_some() {
@@ -238,7 +238,7 @@ pub unsafe extern "C" fn imre_import_error_new(
             }),
         };
         let err = new_exception(
-            Kind::from_raw(named.map_or(kind, |d| d.base)),
+            super::kind_from_raw(named.map_or(kind, |d| d.base)),
             Payload::Import(Box::new(payload)),
         );
         if let Some(named) = named {

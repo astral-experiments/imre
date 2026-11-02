@@ -1,8 +1,19 @@
+from array import array
 import hashlib
 import hmac
 
 
 def current():
+    for code, values in (("i", [-129, 256]), ("f", [0.5]), ("d", [-1.5]), ("w", "😀")):
+        a = array(code, values)
+        raw = a.tobytes()
+        before = hashlib.sha256(a)
+        assert before.digest() == hashlib.sha256(raw).digest()
+        h = hashlib.new("sha256", a)
+        a.append(values[0])
+        h.update(a)
+        assert h.hexdigest() == hashlib.sha256(raw + a.tobytes()).hexdigest()
+        assert before.copy().digest() == hashlib.sha256(raw).digest()
     for name in ("MD5", "ssl3-md5", "SHA-1", "SHA-224", "sha2-256", "SHA-384", "2.16.840.1.101.3.4.2.3",
                  "SHA3-224", "sha3_256", "Sha3-384", "2.16.840.1.101.3.4.2.10"):
         h = hashlib.new(name=name, data=bytearray(b"abc"), usedforsecurity=False)
@@ -20,12 +31,16 @@ def current():
             raise AssertionError("hash class unexpectedly allowed mutation")
         assert h.name in repr(h) and cls.__module__ + "." + cls.__name__ in repr(h)
         assert f"0x{id(h):x}" in repr(alias) and repr(h) != repr(copied)
-        try:
-            cls()
-        except TypeError:
-            pass
+        if cls is getattr(hashlib, h.name):
+            assert cls.__module__ == "_sha3" and name == h.name
+            assert cls().name == name
         else:
-            raise AssertionError("hash class unexpectedly accepted direct construction")
+            try:
+                cls()
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("hash class unexpectedly accepted direct construction")
         print(hashlib.new(name, string=b"abc").digest() == h.digest())
         print(h.name in hashlib.algorithms_available, h.name in hashlib.algorithms_guaranteed)
     # A provider may use its own native spelling for the constructor.

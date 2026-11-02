@@ -1,32 +1,47 @@
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, RawFd};
-use std::process::{Command, Stdio};
 
-use super::{
-    Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, instance, option, os_error,
-};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, option, os_error};
 
 /// Binary handles retain their access mode after close.
 pub(in crate::dynamic) enum BinaryFile {
+    Descriptor(super::io::BufferedFd),
+    // The original sys stream owns its encoder and the shared process binary buffer.
+    Standard {
+        file: crate::objects::TextFile,
+        path: Id,
+    },
     Reader {
         slot: RefCell<Option<ReadSource>>,
-        socket: bool,
+        path: Option<Id>,
     },
-    Writer(RefCell<crate::objects::FileState>),
+    Writer {
+        file: RefCell<crate::objects::FileState>,
+        path: Id,
+        mode: &'static str,
+    },
 }
 
 impl BinaryFile {
     /// Opens the documented read, truncate, append, or exclusive-create mode.
-    pub(in crate::dynamic) fn open(path: &str, mode: &str) -> Result<Self> {
-        let mode = match mode {
+    pub(in crate::dynamic) fn open(
+        path: &str,
+        name: Id,
+        mode: &str,
+        writer_capacity: Option<usize>,
+    ) -> Result<Self> {
+        let (flags, mode) = match mode {
             "rb" => {
                 let (file, _) = crate::objects::open_file(path, 0)?;
-                return Ok(Self::reader(ReadSource::File(BufReader::new(file))));
+                return Ok(Self::reader(
+                    ReadSource::File(BufReader::new(file)),
+                    Some(name),
+                ));
             }
-            "wb" => 1,
-            "ab" => 2,
-            "xb" => 3,
+            "wb" | "bw" => (1, "wb"),
+            "ab" | "ba" => (2, "ab"),
+            "xb" | "bx" => (3, "xb"),
             _ => {
                 return Err(Error::new(
                     "ValueError",
@@ -34,16 +49,34 @@ impl BinaryFile {
                 ));
             }
         };
-        Ok(Self::Writer(RefCell::new(
-            crate::objects::FileState::binary_writer(path, mode)?,
-        )))
+        Ok(Self::Writer {
+            file: RefCell::new(crate::objects::FileState::binary_writer(
+                path,
+                flags,
+                writer_capacity,
+            )?),
+            path: name,
+            mode,
+        })
     }
 
     /// Files and sockets share the same buffered reader methods.
-    pub(in crate::dynamic) fn reader(reader: ReadSource) -> Self {
+    pub(in crate::dynamic) fn reader(reader: ReadSource, path: Option<Id>) -> Self {
         Self::Reader {
-            socket: matches!(reader, ReadSource::Socket(_)),
+            path,
             slot: RefCell::new(Some(reader)),
+        }
+    }
+
+    /// Filename objects and binary access modes remain observable after close.
+    pub(in crate::dynamic) fn path_metadata(&self) -> Option<(Id, &'static str)> {
+        match self {
+            Self::Reader {
+                path: Some(path), ..
+            } => Some((*path, "rb")),
+            Self::Writer { path, mode, .. } => Some((*path, mode)),
+            Self::Standard { path, .. } => Some((*path, "wb")),
+            _ => None,
         }
     }
 
@@ -54,11 +87,23 @@ impl BinaryFile {
             .map_err(|_| Error::new("MemoryError", ""))
     }
 
+    /// SocketIO reports its live descriptor, or -1 once this reader has closed.
+    pub(in crate::dynamic) fn socket_reader_name(&self) -> Option<RawFd> {
+        match self {
+            Self::Reader { slot, path: None } => {
+                Some(slot.borrow().as_ref().map_or(-1, AsRawFd::as_raw_fd))
+            }
+            _ => None,
+        }
+    }
+
     /// All aliases observe closure through the same buffered stream.
     pub(in crate::dynamic) fn closed(&self) -> bool {
         match self {
+            Self::Descriptor(fd) => fd.closed(),
+            Self::Standard { file, .. } => file.closed(),
             Self::Reader { slot, .. } => slot.borrow().is_none(),
-            Self::Writer(file) => file.borrow().closed(),
+            Self::Writer { file, .. } => file.borrow().closed(),
         }
     }
 }
@@ -121,17 +166,6 @@ impl AsRawFd for ReadSource {
     }
 }
 
-fn join(left: &str, right: &str) -> String {
-    if right.starts_with('/') || left.is_empty() {
-        return right.to_owned();
-    }
-    if left.ends_with('/') {
-        format!("{left}{right}")
-    } else {
-        format!("{left}/{right}")
-    }
-}
-
 fn dirname(path: &str) -> &str {
     let head = path.rfind('/').map_or("", |i| &path[..=i]);
     if head.trim_start_matches('/').is_empty() {
@@ -141,114 +175,12 @@ fn dirname(path: &str) -> &str {
     }
 }
 
-fn abspath(path: &str) -> std::io::Result<String> {
-    let path = if path.starts_with('/') {
-        path.to_owned()
-    } else {
-        let cwd = std::env::current_dir()?;
-        join(
-            cwd.to_str()
-                .ok_or_else(|| std::io::Error::other("non-UTF-8 working directory"))?,
-            path,
-        )
-    };
-    let prefix = if path.starts_with("//") && !path.starts_with("///") {
-        "//"
-    } else {
-        "/"
-    };
-    let mut parts = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(part),
-        }
+/// Borrow a binary writer's input, including the native bytes of an array.
+pub(super) fn output_bytes(ctx: &Context, value: Id) -> Result<&[u8]> {
+    match ctx.heap.get(value) {
+        Value::Array(array) => Ok(array.as_bytes()),
+        _ => ctx.bytes_like(value),
     }
-    Ok(format!("{prefix}{}", parts.join("/")))
-}
-
-fn run_process(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let command = argument(args, 0)?;
-    let items = ctx.items(command)?;
-    let argv = items
-        .iter()
-        .map(|&id| ctx.str_value(id))
-        .collect::<Result<Vec<_>>>()?;
-    let (executable, rest) = argv
-        .split_first()
-        .ok_or_else(|| Error::new("ValueError", "empty subprocess argument list"))?;
-    let named = |name| {
-        kwargs
-            .iter()
-            .find(|(key, _)| key == name)
-            .map(|&(_, id)| id)
-    };
-    let capture = named("capture_output") == Some(TRUE);
-    let piped = |name| -> Result<bool> {
-        match named(name) {
-            None | Some(NONE) => Ok(capture),
-            Some(_) if capture => Err(Error::new(
-                "ValueError",
-                "stdout and stderr arguments may not be used with capture_output",
-            )),
-            Some(id) if ctx.as_integer(id)? == -1 => Ok(true),
-            _ => Err(Error::new("ValueError", "expected subprocess.PIPE")),
-        }
-    };
-    let stdout = piped("stdout")?;
-    let stderr = piped("stderr")?;
-    let stdio = |captured| {
-        if captured {
-            Stdio::piped()
-        } else {
-            Stdio::inherit()
-        }
-    };
-    let output = Command::new(executable)
-        .args(rest)
-        .stdout(stdio(stdout))
-        .stderr(stdio(stderr))
-        .output()
-        .map_err(os_error)?;
-    let exit_code = output.status.code().unwrap_or_else(|| {
-        use std::os::unix::process::ExitStatusExt;
-        -output.status.signal().unwrap_or(1)
-    });
-    if named("check") == Some(TRUE) && exit_code != 0 {
-        return Err(Error::new(
-            "CalledProcessError",
-            format!("subprocess exited with status {exit_code}"),
-        ));
-    }
-    let text = named("text") == Some(TRUE);
-    let mut stream = |captured: bool, bytes: Vec<u8>| -> Result<Id> {
-        if !captured {
-            return Ok(NONE);
-        }
-        if text {
-            let text = String::from_utf8(bytes)
-                .map_err(|err| Error::new("UnicodeDecodeError", err.to_string()))?;
-            Ok(ctx.text(text.replace("\r\n", "\n").replace('\r', "\n")))
-        } else {
-            Ok(ctx.alloc(Value::Bytes(bytes)))
-        }
-    };
-    let stdout = stream(stdout, output.stdout)?;
-    let stderr = stream(stderr, output.stderr)?;
-    let status = ctx.int(i64::from(exit_code));
-    Ok(instance(
-        ctx,
-        "subprocess.CompletedProcess",
-        &[
-            ("args", command),
-            ("returncode", status),
-            ("stdout", stdout),
-            ("stderr", stderr),
-        ],
-    ))
 }
 
 pub(super) fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
@@ -275,6 +207,54 @@ pub(super) fn read_length(ctx: &mut Context, size: Option<Id>) -> Result<i64> {
     })
 }
 
+/// Validate a writable native destination before the file consumes any input.
+pub(super) fn readinto_target(ctx: &Context, object: Id) -> Result<Id> {
+    if let Some((storage, _)) = ctx.writable_byte_span(object)? {
+        // Some paths validate before delegating. Keep a callback's byte window intact.
+        return Ok(
+            if matches!(
+                ctx.heap.get(object),
+                Value::MemoryView { .. } | Value::BytesIoBuffer { .. }
+            ) {
+                object
+            } else {
+                storage
+            },
+        );
+    }
+    let kind = if object == NONE {
+        "None"
+    } else {
+        ctx.type_name(object)
+    };
+    Err(Error::new(
+        "TypeError",
+        format!("readinto() argument must be read-write bytes-like object, not {kind}"),
+    ))
+}
+
+pub(super) fn readinto_bytes(ctx: &mut Context, object: Id) -> Result<&mut [u8]> {
+    let object = readinto_target(ctx, object)?;
+    let (target, range) = ctx
+        .writable_byte_span(object)?
+        .expect("validated writable buffer");
+    let bytes = ctx.writable_storage_bytes(target)?;
+    Ok(&mut bytes[range])
+}
+
+/// A buffered read encountering EAGAIN returns its copied prefix count, or None if still empty.
+pub(super) fn readinto_error(ctx: &mut Context, error: std::io::Error, count: usize) -> Result<Id> {
+    if error.kind() == std::io::ErrorKind::WouldBlock {
+        Ok(if count == 0 {
+            NONE
+        } else {
+            ctx.int(count as i64)
+        })
+    } else {
+        Err(os_error(error))
+    }
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -282,28 +262,23 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let first = argument(args, 0)?;
-    match name {
-        "os.path.join" => {
-            let first = super::posixpath::fspath(ctx, first)?;
-            let mut path = ctx.str_value(first)?.to_owned();
-            for &part in &args[1..] {
-                let part = super::posixpath::fspath(ctx, part)?;
-                path = join(&path, ctx.str_value(part)?);
-            }
-            return Ok(ctx.text(path));
-        }
-        "os.path.abspath" => return Ok(ctx.text(abspath(ctx.str_value(first)?).map_err(os_error)?)),
-        "os.path.dirname" => return Ok(ctx.text(dirname(ctx.str_value(first)?).to_owned())),
-        "subprocess.run" => return run_process(ctx, args, kwargs),
-        _ => {}
+    if name == "os.path.dirname" {
+        return Ok(ctx.text(dirname(ctx.str_value(first)?).to_owned()));
     }
     let Value::File(handle) = ctx.heap.get(first) else {
         return Err(Error::new("TypeError", "expected a file"));
     };
+    if name == "file.readlines" {
+        return super::io::lines(ctx, first, "readlines", &args[1..], kwargs);
+    }
     let handle = handle.clone();
     let (slot, socket) = match handle.as_ref() {
-        BinaryFile::Reader { slot, socket } => (slot, *socket),
-        BinaryFile::Writer(file) => {
+        BinaryFile::Descriptor(file) => return file.call(ctx, first, name, &args[1..], kwargs),
+        BinaryFile::Standard { file, .. } => {
+            return standard_buffer_method(ctx, file, first, name, &args[1..], kwargs);
+        }
+        BinaryFile::Reader { slot, path } => (slot, path.is_none()),
+        BinaryFile::Writer { file, .. } => {
             if name == "file.seek" {
                 let value = option(args, 2, kwargs, "whence")?;
                 let whence = value
@@ -330,7 +305,7 @@ pub(super) fn call(
             let mut file = file.borrow_mut();
             return match (name, &args[1..]) {
                 ("file.write", [value]) => {
-                    let bytes = ctx.bytes_like(*value)?;
+                    let bytes = output_bytes(ctx, *value)?;
                     file.write_bytes(bytes)?;
                     Ok(ctx.int(bytes.len() as i64))
                 }
@@ -360,13 +335,8 @@ pub(super) fn call(
                     Ok(crate::dynamic::builtins::boolean(enabled))
                 }
                 ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
-                    if let ("file.readinto", [buffer]) = (name, &args[1..])
-                        && !matches!(ctx.heap.get(*buffer), Value::ByteArray(_))
-                    {
-                        return Err(Error::new(
-                            "TypeError",
-                            "readinto() requires a writable bytes-like object",
-                        ));
+                    if let ("file.readinto", [buffer]) = (name, &args[1..]) {
+                        readinto_target(ctx, *buffer)?;
                     }
                     Err(Error::new("UnsupportedOperation", "read"))
                 }
@@ -389,25 +359,7 @@ pub(super) fn call(
     if name == "file.seek" {
         let target = argument(args, 1)?;
         let value = option(args, 2, kwargs, "whence")?;
-        let whence = match value {
-            None => 0,
-            Some(value) => ctx
-                .index_integer(value)?
-                .to_i64()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new("OverflowError", "Python int too large to convert to C int")
-                })?,
-        };
-        if !matches!(
-            whence,
-            libc::SEEK_SET | libc::SEEK_CUR | libc::SEEK_END | libc::SEEK_DATA | libc::SEEK_HOLE
-        ) {
-            return Err(Error::new(
-                "ValueError",
-                format!("whence value {whence} unsupported"),
-            ));
-        }
+        let whence = buffered_whence(ctx, value)?;
         {
             let mut slot = slot.borrow_mut();
             let reader = slot
@@ -421,15 +373,7 @@ pub(super) fn call(
             }
         }
         // An offset conversion may advance or close this same stream.
-        let offset = ctx.index_integer(target)?.to_i64().ok_or_else(|| {
-            Error::new(
-                "ValueError",
-                format!(
-                    "cannot fit '{}' into an offset-sized integer",
-                    ctx.type_name(target)
-                ),
-            )
-        })?;
+        let offset = buffered_offset(ctx, target)?;
         let mut slot = slot.borrow_mut();
         let reader = slot
             .as_mut()
@@ -539,19 +483,14 @@ pub(super) fn call(
         "file.fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
         "file.tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
         "file.readinto" => {
-            let Value::ByteArray(buffer) = ctx.heap.get_mut(argument(args, 1)?) else {
-                return Err(Error::new(
-                    "TypeError",
-                    "readinto() requires a writable bytes-like object",
-                ));
-            };
+            let buffer = readinto_bytes(ctx, argument(args, 1)?)?;
             let mut count = 0;
             while count < buffer.len() {
                 match f.read(&mut buffer[count..]) {
                     Ok(0) => break,
                     Ok(n) => count += n,
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(os_error(e)),
+                    Err(e) => return readinto_error(ctx, e, count),
                 }
             }
             Ok(ctx.int(count as i64))
@@ -559,6 +498,136 @@ pub(super) fn call(
         _ => Err(Error::new(
             "AttributeError",
             format!("unknown native file method {name}"),
+        )),
+    }
+}
+
+pub(super) fn whence_argument(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
+    match value {
+        None => Ok(0),
+        Some(value) => ctx
+            .index_integer(value)?
+            .to_i64()
+            .and_then(|n| i32::try_from(n).ok())
+            .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int")),
+    }
+}
+
+pub(super) fn check_buffered_whence(whence: i32) -> Result<i32> {
+    if !matches!(
+        whence,
+        libc::SEEK_SET | libc::SEEK_CUR | libc::SEEK_END | libc::SEEK_DATA | libc::SEEK_HOLE
+    ) {
+        return Err(Error::new(
+            "ValueError",
+            format!("whence value {whence} unsupported"),
+        ));
+    }
+    Ok(whence)
+}
+
+pub(super) fn buffered_whence(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
+    check_buffered_whence(whence_argument(ctx, value)?)
+}
+
+pub(super) fn buffered_offset(ctx: &mut Context, target: Id) -> Result<i64> {
+    ctx.index_integer(target)?.to_i64().ok_or_else(|| {
+        Error::new(
+            "ValueError",
+            format!(
+                "cannot fit '{}' into an offset-sized integer",
+                ctx.type_name(target)
+            ),
+        )
+    })
+}
+
+fn standard_buffer_method(
+    ctx: &mut Context,
+    file: &crate::objects::TextFile,
+    receiver: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if matches!(
+        (name, args),
+        ("file.close", []) | ("file.__exit__", [_, _, _])
+    ) {
+        if !file.closed() {
+            if file.standard_writer()? {
+                ctx.check_thread_reporter_mutable()?;
+            }
+            file.close_standard_buffer()?;
+        }
+        return Ok(NONE);
+    }
+    match (name, args) {
+        ("file.write", [value]) => {
+            let data = output_bytes(ctx, *value)?;
+            if file.closed() {
+                return Err(Error::new("ValueError", "write to closed file"));
+            }
+            crate::sys::write_standard_buffer(file.standard_writer()?, data)?;
+            Ok(ctx.int(data.len() as i64))
+        }
+        ("file.flush", []) => {
+            if file.closed() {
+                return Err(Error::new("ValueError", "flush of closed file"));
+            }
+            crate::sys::flush_standard_buffer(file.standard_writer()?).map_err(os_error)?;
+            Ok(NONE)
+        }
+        ("file.tell" | "file.seekable", []) => {
+            let position = crate::sys::standard_buffer_position(file.standard_writer()?, None);
+            if name == "file.seekable" {
+                Ok(crate::dynamic::builtins::boolean(position.is_ok()))
+            } else {
+                Ok(ctx.int(position?))
+            }
+        }
+        ("file.seek", [target] | [target, _]) => {
+            if !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "BufferedWriter.seek() takes no keyword arguments",
+                ));
+            }
+            let whence = buffered_whence(ctx, args.get(1).copied())?;
+            if file.closed() {
+                return Err(Error::new("ValueError", "seek of closed file"));
+            }
+            if crate::sys::standard_buffer_position(file.standard_writer()?, None).is_err() {
+                return Err(Error::new(
+                    "UnsupportedOperation",
+                    "File or stream is not seekable.",
+                ));
+            }
+            let offset = buffered_offset(ctx, *target)?;
+            let pos = crate::sys::standard_buffer_position(
+                file.standard_writer()?,
+                Some((offset, whence)),
+            )?;
+            Ok(ctx.int(pos))
+        }
+        ("file.fileno", []) => Ok(ctx.int(if file.standard_writer()? { 2 } else { 1 })),
+        ("file.writable" | "file.readable", []) => {
+            file.standard_writer()?;
+            Ok(crate::dynamic::builtins::boolean(name == "file.writable"))
+        }
+        ("file.isatty", []) => Ok(crate::dynamic::builtins::boolean(
+            crate::objects::os::isatty(file.fileno()?),
+        )),
+        ("file.__enter__", []) => {
+            file.standard_writer()?;
+            Ok(receiver)
+        }
+        ("file.read" | "file.readline", [] | [_]) | ("file.readinto", [_]) => {
+            Err(Error::new("UnsupportedOperation", "read"))
+        }
+        _ => Err(Error::new(
+            "TypeError",
+            format!("invalid arguments to {name}"),
         )),
     }
 }
@@ -605,19 +674,37 @@ pub(super) fn text_method(
         "closed" => Ok(crate::dynamic::builtins::boolean(file.closed())),
         "read" | "readline" => Ok(ctx.text(file.read(name == "readline")?.into_string())),
         "write" => {
-            let Value::Str(value) = ctx.heap.get(args[0]) else {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "write() argument must be str, not {}",
-                        ctx.type_name(args[0])
-                    ),
-                ));
+            let input = args[0];
+            let count = match ctx.heap.get(ctx.scalar_value(input)) {
+                Value::Str(text) => {
+                    file.write(text)?;
+                    text.chars().count()
+                }
+                Value::SurrogateStr(points) => {
+                    let count = points.len();
+                    let newline = points.iter().any(|&p| matches!(p, 10 | 13));
+                    let stderr = file.standard_writer()?;
+                    let fd = if stderr { 2 } else { 1 };
+                    let encoding = ctx.text(crate::sys::standard_write_encoding(stderr));
+                    ctx.heap.keep(encoding);
+                    let errors = ctx.text(crate::sys::standard_field(fd, true).as_str());
+                    ctx.heap.keep(errors);
+                    let bytes =
+                        super::codecs::encode_text(ctx, input, Some(encoding), Some(errors))?;
+                    crate::sys::write_standard_encoded(stderr, &bytes, newline)?;
+                    count
+                }
+                _ => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("write() argument must be str, not {}", ctx.type_name(input)),
+                    ));
+                }
             };
-            file.write(value)?;
-            Ok(ctx.int(value.chars().count() as i64))
+            Ok(ctx.int(count as i64))
         }
-        "isatty" => Ok(if file.isatty()? { TRUE } else { FALSE }),
+        "fileno" => Ok(ctx.int(i64::from(file.fileno()?))),
+        "isatty" => Ok(crate::dynamic::builtins::boolean(file.isatty()?)),
         "flush" => {
             file.flush()?;
             Ok(NONE)

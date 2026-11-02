@@ -46,8 +46,9 @@ pub(super) fn allocate(ctx: &mut Context, owner: &str, args: &[Id]) -> Result<Id
     } else {
         ctx.exception(&name, args)
     };
-    // StopIteration.__new__ retains the arguments; only its initializer sets value.
+    // Allocation retains args. The initializers set StopIteration.value and SystemExit.code.
     error.set_stop_value(NONE);
+    error.exit_code = NONE;
     let import = ctx.builtin("ImportError");
     if ctx.subclass(class, import) {
         error.tracing().import_message = Some(NONE);
@@ -106,6 +107,12 @@ pub(super) fn initialize(
     error.message = initialized.message;
     if owner == "ImportError" {
         initialize_import(error, args, kwargs)?;
+    } else if owner == "SystemExit" {
+        let old = error.exit_code;
+        error.initialize_exit_code(args);
+        if old != error.exit_code {
+            ctx.heap.weak_edge_removed(old);
+        }
     }
     Ok(NONE)
 }
@@ -139,4 +146,40 @@ pub(super) fn initialize_import(
     });
     trace.import_names = (!kwargs.is_empty()).then_some(names);
     Ok(())
+}
+
+impl Context {
+    /// Append the original string to the exception's Python-visible notes list.
+    pub(in crate::dynamic) fn add_exception_note(&mut self, exception: Id, note: Id) -> Result<()> {
+        if self.string_storage(note).is_none() {
+            let kind = if note == NONE {
+                "None"
+            } else {
+                let class = self.exact_type(note)?;
+                self.class_name(class)
+            };
+            let kind = &kind[..kind.floor_char_boundary(50)];
+            return Err(type_error(format!(
+                "add_note() argument must be str, not {kind}"
+            )));
+        }
+        let key = self.heap.string_literal("__notes__")?;
+        let notes = match self.lookup_named_attr(exception, "__notes__", Some(key)) {
+            Ok(notes) => notes,
+            Err(error) if self.is_attribute_error(&error) => {
+                let notes = self.alloc(Value::List(Vec::new()));
+                let mark = self.heap.temporary_mark();
+                let result = self.set_named_attr(exception, "__notes__", Some(key), notes);
+                self.heap.release_temporaries_since(mark);
+                result?;
+                notes
+            }
+            Err(error) => return Err(error),
+        };
+        if self.list_storage(notes).is_none() {
+            return Err(type_error("Cannot add note: __notes__ is not a list"));
+        }
+        collections::method(self, "list.append", &[notes, note], &[])?;
+        Ok(())
+    }
 }

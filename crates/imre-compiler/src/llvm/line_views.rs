@@ -33,7 +33,7 @@ fn affix(op: &Builtin, args: &[Expr]) -> bool {
 
 pub(super) fn select(f: &Function) -> Vec<bool> {
     let mut slots = vec![false; f.locals.len()];
-    borrows::statements(&f.body, &mut |s| {
+    ir::walk_statements(&f.body, &mut |s| {
         if let Statement::Assign(slot, value) = s
             && reader(value)
         {
@@ -45,7 +45,7 @@ pub(super) fn select(f: &Function) -> Vec<bool> {
     }
     loop {
         let mut changed = false;
-        borrows::statements(&f.body, &mut |s| {
+        ir::walk_statements(&f.body, &mut |s| {
             if let Statement::Assign(slot, value) = s
                 && source(value).is_some_and(|s| slots[s])
                 && !slots[*slot]
@@ -61,7 +61,7 @@ pub(super) fn select(f: &Function) -> Vec<bool> {
 
     let mut safe = !f.params.iter().any(|&s| slots[s]);
     let mut uses = vec![0_isize; slots.len()];
-    borrows::statements(&f.body, &mut |s| match s {
+    ir::walk_statements(&f.body, &mut |s| match s {
         Statement::Assign(slot, value) if slots[*slot] => {
             if let Some(from) = source(value) {
                 safe &= slots[from];

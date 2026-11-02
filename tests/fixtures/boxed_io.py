@@ -1,4 +1,7 @@
+from array import array
+import gc
 import io
+import os
 import sys
 from io import RawIOBase
 
@@ -63,7 +66,91 @@ class ClosingWriterSize:
         return 0
 
 
+class BaseWriteCases:
+    class Override(io.RawIOBase):
+        def write(self, data):
+            return len(data)
+
+    class Shadow(Override):
+        write = None
+
+    class Mixed(io.BufferedIOBase, io.TextIOWrapper):
+        pass
+
+
+def check_base_writes():
+    from _collections_abc import _check_methods
+
+    print(_check_methods(io.IOBase, "write") is NotImplemented,
+          _check_methods(io.RawIOBase, "write") is True,
+          _check_methods(io.BufferedIOBase, "write") is True,
+          _check_methods(BaseWriteCases.Shadow, "write") is NotImplemented)
+    raw = BaseWriteCases.Override()
+    buffer = io.BytesIO()
+    print(raw.write(b"abcd"), buffer.write(b"abc"))
+    for method, receiver in ((io.RawIOBase.write, raw),
+                             (io.RawIOBase.readinto, raw),
+                             (io.BufferedIOBase.write, buffer)):
+        for args, kwargs in (((), {}), ((None,), {}), ((1, 2), {}),
+                             ((), {"data": 1}), ((1,), {"data": 2})):
+            try:
+                method(receiver, *args, **kwargs)
+            except (NotImplementedError, io.UnsupportedOperation, TypeError) as error:
+                print(type(error).__name__, error.args)
+            else:
+                raise AssertionError("base operation returned a value")
+        for args in ((), (1, b"data")):
+            try:
+                method(*args)
+            except TypeError as error:
+                print(error.args)
+            else:
+                raise AssertionError("base operation accepted an invalid receiver")
+    print(buffer.getvalue())
+    binary = io.BytesIO()
+    mixed = BaseWriteCases.Mixed(binary, encoding="utf-8", write_through=True)
+    try:
+        io.BufferedIOBase.write(mixed, "x")
+    except io.UnsupportedOperation as error:
+        print(error.args, binary.getvalue())
+    else:
+        raise AssertionError("base write dispatched to the text wrapper")
+    print(io.TextIOWrapper.write(mixed, "abc"), binary.getvalue())
+
+    for stream in (io.RawIOBase(), io.BufferedIOBase()):
+        stream.close()
+        try:
+            stream.write(b"x")
+        except (NotImplementedError, io.UnsupportedOperation) as error:
+            print(type(error).__name__, error.args)
+        else:
+            raise AssertionError("closed base operation returned a value")
+
+
+def check_text_base():
+    from _collections_abc import _check_methods
+
+    print(_check_methods(io.TextIOBase, "read", "write"))
+    stream = io.StringIO("untouched")
+    for transfer, values in ((io.TextIOBase.read, (0, 1 << 80, None)),
+                             (io.TextIOBase.write, (b"x", "ok", "a\0b", chr(0xd800)))):
+        for value in values:
+            try:
+                transfer(stream, value)
+            except (io.UnsupportedOperation, TypeError, ValueError, OverflowError) as error:
+                print(type(error).__name__, str(error))
+            else:
+                raise AssertionError("base operation returned a value")
+    print(stream.getvalue(), stream.tell())
+    try:
+        io.TextIOBase.readline(stream, ClosingOffset(stream))
+    except io.UnsupportedOperation as error:
+        print(error.args, stream.closed)
+
+
 def exercise(path):
+    check_base_writes()
+    check_text_base()
     events = []
 
     class Byte:
@@ -84,6 +171,19 @@ def exercise(path):
         except ValueError:
             print(events)
 
+    text_path = path + ".text-input"
+    with open(text_path, "wb") as writer:
+        writer.write(b"A\xe9\r\nZ\n")
+    encoded_path = text_path.encode()
+    with open(encoded_path, "rt", encoding="latin-1") as reader:
+        assert reader.buffer.raw.closefd and reader.name == encoded_path
+        assert reader.fileno() == reader.buffer.raw.fileno()
+        assert reader.readline() == "A\xe9\n"
+        assert reader.read() == "Z\n"
+        assert reader.seek(0) == 0
+        assert reader.read() == "A\xe9\nZ\n"
+    assert reader.closed
+
     with open(path, "rb") as reader:
         reader.read(1)
         try:
@@ -103,14 +203,28 @@ def exercise(path):
         print(stream.readline(ReadSize(stream)), stream.tell())
     from io import UnsupportedOperation
 
+    buffered_path = path + ".buffered"
+    with open(buffered_path, "wb", 4) as writer:
+        writer.write(b"a")
+        writer.write(b"bcd")
+        with open(buffered_path, "rb") as reader:
+            assert reader.read() == b""
+        writer.write(b"e")
+        with open(buffered_path, "rb") as reader:
+            assert reader.read() == b"abcd"
+    with open(buffered_path, "rb") as reader:
+        assert reader.read() == b"abcde"
+
     target_path = path + ".output"
     with open(target_path, "wb") as output:
+        assert output.name is target_path and output.mode == "wb"
         alias = output
         print(output.write(b"\x00\xff"), alias.closed)
         with open(target_path, "rb") as reader:
             print(reader.read())
         alias.flush()
         with open(target_path, "rb") as reader:
+            assert reader.name is target_path and reader.mode == "rb"
             print(reader.read())
     with open(target_path, "ab") as output:
         print(output.write(bytearray(b"x")))
@@ -124,6 +238,7 @@ def exercise(path):
                 print(error.args)
             else:
                 raise AssertionError("flush accepted extra arguments")
+    assert alias.name is target_path and alias.mode == "wb"
     try:
         open(target_path, "xb")
     except FileExistsError:
@@ -275,6 +390,58 @@ def exercise(path):
             reader.seek(ClosingOffset(reader))
         except ValueError as error:
             print(error.args, reader.closed)
+
+    def bad_lines():
+        yield b"prefix"
+        gc.collect()
+        yield None
+        raise AssertionError("read past the rejected item")
+
+    with open(path + ".writelines", "wb") as writer:
+        try:
+            writer.writelines(bad_lines())
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("writelines accepted None")
+        assert writer.writelines([b"!"]) is None
+        for call, owner in ((lambda: writer.writelines(), "_IOBase"), (writer.writelines, "BufferedWriter")):
+            try:
+                call()
+            except TypeError as error:
+                assert str(error) == f"{owner}.writelines() takes exactly one argument (0 given)"
+            else:
+                raise AssertionError("writelines accepted zero arguments")
+    with open(path + ".writelines", "rb") as reader:
+        assert reader.read() == b"prefix!"
+
+    with open(path + ".array", "wb") as writer:
+        writer.write(b"abc")
+    target = array("i", b"x" * 8)
+    independent = array("i", target)
+    view = memoryview(target)
+    with open(path + ".array", "rb") as reader:
+        assert reader.readinto(target) == 3
+        assert bytes(view) == b"abcxxxxx"
+        reader.seek(1)
+        assert reader.readinto(view) == 2
+        assert reader.readinto(view) == 0
+    assert target.tobytes() == b"bccxxxxx"
+    view.release()
+    assert independent.tobytes() == b"xxxxxxxx"
+
+    read_fd, write_fd = os.pipe()
+    try:
+        os.set_blocking(read_fd, False)
+        with open(read_fd, "rb", closefd=False) as reader:
+            dest = bytearray(b"..")
+            assert reader.readinto(dest) is None
+            os.write(write_fd, b"Q")
+            assert reader.readinto(dest) == 1
+            assert bytes(dest) == b"Q."
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
 
     lines = path + ".lines"
     with open(lines, "w") as output:

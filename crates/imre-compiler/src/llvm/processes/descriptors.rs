@@ -62,6 +62,9 @@ impl Emitter<'_, '_> {
                 }
                 return tuple;
             }
+            FdOperation::TransferFd => "transfer_fd",
+            FdOperation::Read => "read",
+            FdOperation::Write => "write",
             FdOperation::Close => "close",
             FdOperation::Seek => "lseek",
             FdOperation::Dup => "dup",
@@ -74,11 +77,19 @@ impl Emitter<'_, '_> {
         };
         let args = args
             .iter()
-            .map(|arg| format!("i64 {}", arg.value.operand))
+            .map(|arg| {
+                let repr = if arg.value.ty == Type::Bytes {
+                    "ptr"
+                } else {
+                    "i64"
+                };
+                format!("{repr} {}", arg.value.operand)
+            })
             .collect::<Vec<_>>()
             .join(", ");
         let repr = match returns {
             Type::None => "void",
+            Type::Bytes => "ptr",
             Type::Bool => "i32",
             _ => "i64",
         };

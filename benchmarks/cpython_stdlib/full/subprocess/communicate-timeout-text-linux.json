@@ -1,0 +1,127 @@
+{
+  "method": "test.test_subprocess.ProcessTestCase.test_communicate_timeout",
+  "ordinal": 130,
+  "discovered": 353,
+  "source": {
+    "cpython": "3.14.5",
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "test_subprocess_sha256": "f616fdc01e845d6a74012db6e4bb64216a850bed9d74721b4bd3a5fd2cfd66a7",
+    "method_sha256": "91da2ba038672a6cf922802fc25ae86256efe7c24823ff3e981420f1ffb7e7f6",
+    "before_measurement_commit": "922324dcc86ed7f313cc6eca7b6f4d3f2b599bca",
+    "tested_source_base": "4fe7d330497ed66c56b090061a7e224db69e2017",
+    "tested_artifacts": "Isolated candidate compiled from the tested source base and the recorded core patch.",
+    "compiler_sha256": "8b19793b0e83f8a92e67d7bd0fb99729a920f7e8152464a590b151f83a11d3b2",
+    "runtime_sha256": "002144c93a3017596d10c70fee173087c0f84437c3865a52a2143a0f11782fcd",
+    "generated_method_entry_sha256": "2aed81968e6c5397a2b7ce1c5beb5701242742ce635e4dee82f2499ee7fcbf1b",
+    "tested_core_patch_sha256": "0d1994b025e80c64a8efa8dfd8b2bd0d3b29f4bf23552e5f70b854f41459a108"
+  },
+  "base_compiler": {
+    "O0": {
+      "compile_exit": 1,
+      "diagnostic": "unexpected keyword argument \"universal_newlines\""
+    },
+    "O3": {
+      "compile_exit": 1,
+      "diagnostic": "unexpected keyword argument \"universal_newlines\""
+    }
+  },
+  "scope": "Original method body compiled with the selected TestCase fixture. CPython executed the child.",
+  "api_values_in_all_three_runs": [
+    {
+      "call": 1,
+      "timeout_seconds": 0.3,
+      "outcome": "TimeoutExpired",
+      "input": {
+        "type": "str",
+        "bytes": 6,
+        "sha256": "b493d48364afe44d11c0165cf470a4164d1e2609911ef998be868d46ade3de4e",
+        "ascii": "banana"
+      },
+      "stdout": null,
+      "stderr": {
+        "type": "bytes",
+        "bytes": 10,
+        "sha256": "3ff19a957130df290488f0bc1a5e527108a86848453f6a0b183c91651468ed97",
+        "ascii": "pineapple\n"
+      }
+    },
+    {
+      "call": 2,
+      "timeout_seconds": null,
+      "outcome": "returned",
+      "input": null,
+      "stdout": {
+        "type": "str",
+        "bytes": 6,
+        "sha256": "b493d48364afe44d11c0165cf470a4164d1e2609911ef998be868d46ade3de4e",
+        "ascii": "banana"
+      },
+      "stderr": {
+        "type": "str",
+        "bytes": 15,
+        "sha256": "a02973f0e5a7ff40d4a921e5aca0dfef594e42a0c6ce34b75429ddb0010f4625",
+        "ascii": "pineapple\npear\n"
+      }
+    }
+  ],
+  "cpython_reference": {
+    "parent_pid": 39759,
+    "parent_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "child_pid": 39779,
+    "child_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "first_call_elapsed_ms": 301.277,
+    "retry_waitpid": {
+      "pid": 39779,
+      "raw_status": 0
+    },
+    "watchdog_final": "ECHILD",
+    "stdin_writes_by_call": [
+      6,
+      0
+    ],
+    "child_stdin_bytes": 6,
+    "child_stdin_eof": true
+  },
+  "standalone_native_with_cpython_child": {
+    "O0": {
+      "parent_pid": 51076,
+      "parent_image_sha256": "389d63b6787e27fee86e95046186273fb3d0e69f569f60c0972f3a36fcf0f589",
+      "child_pid": 51077,
+      "child_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "first_call_elapsed_ms": 301.139,
+      "retry_waitpid": {
+        "pid": 51077,
+        "raw_status": 0
+      },
+      "watchdog_final": "ECHILD",
+      "stdin_writes_by_call": [
+        6,
+        0
+      ],
+      "child_stdin_bytes": 6,
+      "child_stdin_eof": true,
+      "unwrapped_parent_sha256": "0ef1076f089e0f82af4e2e77ce82526d5d08fc3f0358196ecb60cd69f87a5de1",
+      "unwrapped_root_wait_raw": 0
+    },
+    "O3": {
+      "parent_pid": 51224,
+      "parent_image_sha256": "100c6484110ecdcbd8eeaeb7fbb9a03f9dd419958015b011e445d6e56e1d1a89",
+      "child_pid": 51225,
+      "child_image_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "first_call_elapsed_ms": 301.325,
+      "retry_waitpid": {
+        "pid": 51225,
+        "raw_status": 0
+      },
+      "watchdog_final": "ECHILD",
+      "stdin_writes_by_call": [
+        6,
+        0
+      ],
+      "child_stdin_bytes": 6,
+      "child_stdin_eof": true,
+      "unwrapped_parent_sha256": "d477e0f8200e3990f5b03678c255eae778176b7f1072139215a4c5ceb68d6e1e",
+      "unwrapped_root_wait_raw": 0
+    }
+  }
+}

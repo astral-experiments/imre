@@ -126,7 +126,7 @@ impl Context {
         Ok(obj)
     }
 
-    fn class_instances_support_weakref(&self, class: Id) -> bool {
+    pub(super) fn class_instances_support_weakref(&self, class: Id) -> bool {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return false;
         };
@@ -209,13 +209,18 @@ impl Context {
             Value::Raised(error) => error
                 .class()
                 .is_some_and(|class| self.class_instances_support_weakref(class)),
-            Value::Class { .. }
+            Value::ParamSpec(_)
+            | Value::TypeVar(_)
+            | Value::Class { .. }
             | Value::Function { .. }
             | Value::Module { .. }
             | Value::Method { .. }
             | Value::Code(_)
             | Value::Set { .. }
+            | Value::MemoryView { .. }
+            | Value::File(_)
             | Value::Partial { .. }
+            | Value::HandlerLock(_)
             | Value::PrimitiveLock(_)
             | Value::Native(_) => true,
             _ => false,

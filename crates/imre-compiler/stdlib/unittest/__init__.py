@@ -155,14 +155,13 @@ class TestCase(_SuiteMember):
     _subtest_params: dict[str, object]
     failureException: typing.ClassVar[type[Exception]] = AssertionError
     _testMethodName: str
-    longMessage: bool
+    longMessage = True
     maxDiff: int | None
     _diffThreshold: int
 
     def __init__(self, methodName: str = "runTest") -> None:
         self._subtest_params = {}
         self._testMethodName = methodName
-        self.longMessage = True
         self.maxDiff = 640
         self._diffThreshold = 65536
         _validateCaseMethod(self, methodName)
@@ -177,6 +176,9 @@ class TestCase(_SuiteMember):
 
     def _declaredCaseMethods(self) -> tuple[list[str], list[str]]:
         raise RuntimeError("native unittest case requires its class metadata")
+
+    def defaultTestResult(self) -> TestResult:
+        return TestResult()
 
     def countTestCases(self) -> int:
         return 1
@@ -265,6 +267,28 @@ class TestCase(_SuiteMember):
             self.fail(self._formatMessage(msg, f"{a!r} not greater than or equal to {b!r}"))
 
     def _baseAssertEqual(self, first: bool | int, second: bool | int, msg: str | None = None) -> None:
+        if first != second:
+            standard = _inequality_message(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, standard))
+
+    def _assertClassEqual(self, first: type, second: type, msg: str | None = None) -> None:
+        if first != second:
+            standard = _inequality_message(repr(first), repr(second))
+            raise self.failureException(self._formatMessage(msg, standard))
+
+    def _assertOptionalTextEqual(self, first: str | None, second: str | None, msg: str | None = None) -> None:
+        if first is None:
+            if second is None:
+                return
+            difference = _inequality_message("None", repr(second))
+        elif second is None:
+            difference = _inequality_message(repr(first), "None")
+        else:
+            self.assertMultiLineEqual(first, second, msg)
+            return
+        raise self.failureException(self._formatMessage(msg, difference))
+
+    def _assertBytesEqual(self, first: bytes, second: bytes, msg: str | None = None) -> None:
         if first != second:
             standard = _inequality_message(repr(first), repr(second))
             raise self.failureException(self._formatMessage(msg, standard))
@@ -579,6 +603,13 @@ class _SubTestContext:
         runner = self.case._runner
         if runner is None or isinstance(exc, (_SubTestStop, KeyboardInterrupt)):
             return False
+        case = self.case
+        runner._subtest_result(case, self._description(), exc, isinstance(exc, case.failureException))
+        if runner.failfast:
+            raise _SubTestStop()
+        return True
+
+    def _description(self) -> str:
         parts: list[str] = []
         if self.has_message:
             parts.append("[" + str(self.message) + "]")
@@ -587,12 +618,7 @@ class _SubTestContext:
             for key in self.params:
                 items.append(key + "=" + repr(self.params[key]))
             parts.append("(" + ", ".join(items) + ")")
-        description = " ".join(parts) or "(<subtest>)"
-        case = self.case
-        runner._subtest_result(case, description, exc, isinstance(exc, case.failureException))
-        if runner.failfast:
-            raise _SubTestStop()
-        return True
+        return " ".join(parts) or "(<subtest>)"
 
 
 class TestResult:
@@ -632,7 +658,11 @@ class TestResult:
         self.skipped.append((test, reason))
 
     def addUnexpectedSuccess(self, test: TestCase) -> None:
-        if self.failfast:
+        try:
+            enabled = self.failfast
+        except AttributeError:
+            enabled = False
+        if enabled:
             self.stop()
         self.unexpectedSuccesses.append(test)
 
@@ -1041,17 +1071,20 @@ class _MainRunner(TextTestResult):
         finally:
             self.stopTestRun()
 
+    def _setOption(self, flag: str) -> None:
+        if flag == "-v" or flag == "--verbose":
+            self.verbose = 2
+        elif flag == "-q" or flag == "--quiet":
+            self.verbose = 0
+        elif flag == "-f" or flag == "--failfast":
+            self.failfast = True
+        else:
+            print("unsupported unittest argument: " + flag, file=sys.stderr)
+            sys.exit(2)
+
     def _start(self) -> None:
         for flag in sys.argv[1:]:
-            if flag == "-v" or flag == "--verbose":
-                self.verbose = 2
-            elif flag == "-q" or flag == "--quiet":
-                self.verbose = 0
-            elif flag == "-f" or flag == "--failfast":
-                self.failfast = True
-            else:
-                print("unsupported unittest argument: " + flag, file=sys.stderr)
-                sys.exit(2)
+            self._setOption(flag)
 
     def _finish(self) -> None:
         self._report()

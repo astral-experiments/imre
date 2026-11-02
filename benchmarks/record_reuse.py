@@ -42,7 +42,8 @@ COUNTER = r"""
 #include <stdio.h>
 
 extern void *__real_imre_record_new(const void *);
-extern void *__real_imre_record_cached_result(const void *);
+extern void *__real_imre_record_try_new(const void *);
+extern void *__real_imre_record_try_cached_result(const void *);
 static unsigned fresh, reused, in_cached_result;
 
 void *__wrap_imre_record_new(const void *descriptor) {
@@ -50,12 +51,18 @@ void *__wrap_imre_record_new(const void *descriptor) {
     return __real_imre_record_new(descriptor);
 }
 
-void *__wrap_imre_record_cached_result(const void *old) {
+void *__wrap_imre_record_try_new(const void *descriptor) {
+    void *result = __real_imre_record_try_new(descriptor);
+    if (result && !in_cached_result) fresh++;
+    return result;
+}
+
+void *__wrap_imre_record_try_cached_result(const void *old) {
     in_cached_result++;
-    void *result = __real_imre_record_cached_result(old);
+    void *result = __real_imre_record_try_cached_result(old);
     in_cached_result--;
     if (result == old) reused++;
-    else fresh++;
+    else if (result) fresh++;
     return result;
 }
 
@@ -90,7 +97,8 @@ def main() -> None:
             "--runtime", args.runtime.resolve(), "--clang", args.clang,
             "--no-cache", "--whole-program", "-q",
             "-C", f"link-arg={obj}", "-C", "link-arg=-Wl,--wrap=imre_record_new",
-            "-C", "link-arg=-Wl,--wrap=imre_record_cached_result",
+            "-C", "link-arg=-Wl,--wrap=imre_record_try_new",
+            "-C", "link-arg=-Wl,--wrap=imre_record_try_cached_result",
         ], check=True)
         for argv in ([[]] if args.source else [["unique"], ["shared"]]):
             expected = subprocess.check_output([sys.executable, args.reference or source, *argv])

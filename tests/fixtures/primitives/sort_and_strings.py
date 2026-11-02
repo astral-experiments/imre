@@ -84,6 +84,16 @@ except ValueError:
     print("join error")
 
 print("aaaa".replace("aa", "b"))
+for count in [-2, 0, 1, 2, 3]:
+    print("aaa".replace("aa", "b", count))
+    print("é🙂".replace("", "|", count=count))
+    assert "aa".replace("a", "b", count) == "aa".replace("a", "b", count=count)
+assert "aa".replace("z", "b") == "aa".replace("z", "b")
+print("abc".replace("", "-", count=True))
+try:
+    print("".replace("", "", count=2**100))
+except OverflowError as error:
+    print(str(error))
 print("é🙂".replace("", "|"))
 print("".replace("", "insert"))
 print("a\x00b\x00".replace("\x00", "λ"))

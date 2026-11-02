@@ -22,7 +22,32 @@ def clear():
     del state
 
 
+def global_definitions(value):
+    if False:
+        global Exported, exported
+
+    def exported():
+        return value
+
+    class Exported:
+        def read(self):
+            return exported()
+
+    class Local:
+        pass
+    return Local
+
+
 def current():
+    local = global_definitions(42)
+    assert local.__qualname__ == "global_definitions.<locals>.Local"
+    assert exported.__code__.co_qualname == exported.__qualname__ == "exported"
+    assert Exported.read.__code__.co_flags & 0x10
+    assert Exported.__qualname__ == "Exported"
+    assert Exported.read.__qualname__ == "Exported.read" and Exported().read() == 42
+    namespace = {"__name__": "example"}
+    exec("def make():\n    global G, f\n    class G: pass\n    def f(): pass\nmake()", namespace)
+    assert namespace["G"].__qualname__ == "G" and namespace["f"].__qualname__ == "f"
     reader, enclosing = outer()
     print(enclosing, reader() is state, state)
     clear()

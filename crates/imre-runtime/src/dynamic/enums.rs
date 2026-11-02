@@ -3,6 +3,9 @@
 use super::*;
 
 pub(super) mod auto;
+mod bases;
+mod display;
+mod float;
 
 impl Context {
     pub(super) fn scalar_value(&self, id: Id) -> Id {
@@ -22,14 +25,14 @@ impl Context {
         else {
             return None;
         };
-        let values = self.scope_data(*scope).names.get("_value2member_map_")?;
-        if !matches!(self.heap.get(*values), Value::Dict(_)) {
+        let values = self.namespace_binding(self.scope_data(*scope), "_value2member_map_")?;
+        if !matches!(self.heap.get(values), Value::Dict(_)) {
             return None;
         }
         ancestors
             .iter()
             .any(|&base| matches!(self.heap.get(base), Value::Native(name) if name == "enum.Enum"))
-            .then_some(*values)
+            .then_some(values)
     }
 
     fn scalar_enum_base(&self, base: Id) -> bool {
@@ -62,6 +65,8 @@ impl Context {
             dictionary: None,
             property: None,
             weak_reference: None,
+            cycle: None,
+            member_values: None,
             memory_stream: None,
         }))
     }
@@ -73,9 +78,7 @@ impl Context {
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
-        let Value::Class { name, .. } = self.heap.get(class) else {
-            unreachable!()
-        };
+        let name = self.class_name(class);
         let [value] = args else {
             return Err(Error::new("TypeError", format!("{name} requires a value")));
         };
@@ -89,14 +92,23 @@ impl Context {
         {
             return Ok(*value);
         }
-        if let Some(member) = self.member_for_value(values, *value) {
+        if self.float_enum_names(class).is_some() {
+            if let Some(member) = self.float_enum_lookup(class, values, *value)? {
+                return Ok(member);
+            }
+        } else if let Some(member) = self.member_for_value(values, *value) {
             return Ok(member);
         }
         if self.has_base(class, "enum.IntFlag")
             && let Ok(bits) = self.as_int(*value)
         {
-            return self.flag_combination(class, values, bits);
+            return self.flag_combination(class, bits);
         }
+        let name = if self.float_enum_names(class).is_some() {
+            self.class_qualname(class)
+        } else {
+            self.class_name(class)
+        };
         Err(Error::new(
             "ValueError",
             format!("{} is not a valid {name}", self.repr(*value)),
@@ -104,19 +116,29 @@ impl Context {
     }
 
     /// Intern a combination without adding a new declaration to __members__.
-    fn flag_combination(&mut self, class: Id, values: Id, bits: crate::Int) -> Result<Id> {
+    fn flag_combination(&mut self, class: Id, bits: crate::Int) -> Result<Id> {
         use num_bigint::BigInt;
         use num_traits::{One, Signed, Zero};
 
-        let names = self
-            .class_attr(class, "_member_map_")
-            .expect("enum name map");
-        let Value::Dict(entries) = self.heap.get(names) else {
-            unreachable!()
-        };
-        let mut declared = Vec::new();
+        let names = self.lookup_attr(class, "_member_map_")?;
+        if !self.truth(names)? {
+            let name = self.class_name(class);
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "<flag '{name}'> has no members; specify `names=()` if you meant to create a new, empty, enum"
+                ),
+            ));
+        }
+        // populate_enum retains the original declarations in __members__. The
+        // single-bit mask and order do not depend on a later name-map replacement.
+        let declared = self.lookup_attr(class, "__members__")?;
+        let declared = self
+            .dict_entries(self.mapping_proxy_target(declared))
+            .ok_or_else(|| Error::new("TypeError", "expected enum member dictionary"))?;
+        let mut singles = Vec::new();
         let mut mask = BigInt::zero();
-        for &(key, member) in entries {
+        for &(key, member) in declared {
             let Some((_, canonical, value)) = self.enum_member(member) else {
                 continue;
             };
@@ -126,41 +148,91 @@ impl Context {
             let bit = self.as_int(value)?.big().into_owned();
             mask |= &bit;
             if bit.is_positive() && (&bit & (&bit - 1u8)).is_zero() {
-                declared.push((self.str_value(key)?.to_owned(), bit));
+                singles.push((member, bit));
             }
         }
         let mut value = bits.big().into_owned();
+        let mut negative_alias = None;
         if value.is_negative() {
-            value += BigInt::one() << mask.bits().max(value.bits());
-        }
-        let key = self.alloc(Value::Int(crate::Int::new(value.clone())));
-        if let Some(member) = self.member_for_value(values, key) {
-            return Ok(member);
-        }
-        let mut names = Vec::new();
-        let mut rest = value;
-        for (name, bit) in declared {
-            if (&rest & &bit) == bit {
-                rest ^= bit;
-                names.push(name);
+            let limit = BigInt::one() << mask.bits();
+            let skipped = (&limit - 1u8) ^ &mask;
+            if value >= -&limit && (&value & skipped).is_zero() {
+                negative_alias = Some(self.alloc(Value::Int(bits)));
+                value += limit;
+            } else {
+                value += BigInt::one() << mask.bits().max(value.bits());
             }
         }
-        let name = if names.is_empty() {
+
+        let key = self.alloc(Value::Int(crate::Int::new(value.clone())));
+        let member = self.new_int(&[class, key], &[])?;
+        self.default_set_attr(member, "_value_", key)?;
+        let mut members = Vec::new();
+        let mut combined = BigInt::zero();
+        for (member, bit) in singles {
+            if (&value & &bit) == bit {
+                combined |= bit;
+                members.push(member);
+            }
+        }
+        // Flag._missing_ consults the live name map only for bits outside the
+        // single-bit members. Its items method may itself be overridden.
+        if combined != value {
+            let names = self.lookup_attr(class, "_member_map_")?;
+            let entries = match self.heap.get(names) {
+                Value::Dict(entries) => entries.iter().map(|&(_, member)| member).collect(),
+                _ => {
+                    let items = self.lookup_attr(names, "items")?;
+                    let pairs = self.call(items, Vec::new(), Vec::new())?;
+                    let mut entries = Vec::new();
+                    for pair in self.items(pairs)? {
+                        entries.push(self.unpack_items(pair, 2, None)?[1]);
+                    }
+                    entries
+                }
+            };
+            for member in entries {
+                if members.contains(&member) {
+                    continue;
+                }
+                let bits = self.lookup_attr(member, "_value_")?;
+                let bits = self.as_int(bits)?.big().into_owned();
+                if !bits.is_zero() && (&value & &bits) == bits {
+                    combined |= bits;
+                    members.push(member);
+                }
+            }
+        }
+        let name = if members.is_empty() {
             NONE
         } else {
-            if !rest.is_zero() {
-                names.push(if self.classes.get("re.RegexFlag") == Some(&class) {
-                    format!("{rest:#x}")
-                } else {
-                    rest.to_string()
-                });
+            let mut names = Vec::new();
+            for member in members {
+                let name = self.lookup_attr(member, "_name_")?;
+                names.push(self.str_value(name)?.to_owned());
             }
-            self.text(names.join("|"))
+            let prefix = self.text(names.join("|"));
+            let unknown = value ^ combined;
+            if unknown.is_zero() {
+                prefix
+            } else {
+                let formatter = self.lookup_attr(class, "_numeric_repr_")?;
+                let unknown = self.alloc(Value::Int(crate::Int::new(unknown)));
+                let formatted = self.call(formatter, vec![unknown], Vec::new())?;
+                let suffix = builtins::percent(self, "|%s", formatted)?;
+                self.binary("+", prefix, suffix)?
+            }
         };
-        let member = self.new_int(&[class, key], &[])?;
+
         self.default_set_attr(member, "_name_", name)?;
-        self.default_set_attr(member, "_value_", key)?;
-        self.put_item(values, key, member)?;
+        // A formatter can replace the map or intern this value recursively.
+        let values = self.lookup_attr(class, "_value2member_map_")?;
+        let setdefault = self.lookup_attr(values, "setdefault")?;
+        let member = self.call(setdefault, vec![key, member], Vec::new())?;
+        if let Some(original) = negative_alias {
+            let values = self.lookup_attr(class, "_value2member_map_")?;
+            self.put_item(values, original, member)?;
+        }
         Ok(member)
     }
 
@@ -221,7 +293,7 @@ impl Context {
         if !kwargs.is_empty() {
             return Err(Error::new("TypeError", "unexpected enum decorator keyword"));
         }
-        let lineage = self.linearized_bases(&[*base])?;
+        let lineage = self.linearized_bases(&[*base], false)?;
         let Value::Class { ancestors, .. } = self.heap.get_mut(*class) else {
             return Err(Error::new("TypeError", "enum decorator requires a class"));
         };
@@ -244,12 +316,15 @@ impl Context {
             Some(state) => state
                 .members
                 .into_iter()
-                .map(|name| {
-                    let raw = fields.names[&name];
-                    (name, raw)
+                .filter_map(|name| {
+                    self.namespace_binding(self.scope_data(scope), &name)
+                        .map(|value| (name, value))
                 })
                 .collect(),
-            None => fields.names.clone().into_iter().collect(),
+            None => self
+                .scope_bindings(scope)
+                .map(|(name, value)| (name.to_owned(), value))
+                .collect(),
         };
         let names = self.dict(Vec::new());
         let values = self.dict(Vec::new());
@@ -257,6 +332,9 @@ impl Context {
         self.bind(scope, "_value2member_map_", values);
         let proxy = self.alloc(Value::MappingProxy(names));
         self.bind(scope, "__members__", proxy);
+        if let Some(data_type) = base.filter(|&base| self.has_base(base, "float")) {
+            return self.populate_float_enum(class, scope, data_type, names, values, declarations);
+        }
         let new = self.class_attr(class, "__new__");
         for (name, raw) in declarations {
             if !classified && (name.starts_with('_') || self.is_enum_descriptor(raw)?) {
@@ -301,7 +379,7 @@ impl Context {
             Value::Property(_)
                 | Value::Function { .. }
                 | Value::StaticMethod { .. }
-                | Value::ClassMethod(_)
+                | Value::ClassMethod { .. }
         ) {
             return Ok(true);
         }
@@ -329,7 +407,7 @@ impl Context {
         let member = if let Some(new) = new {
             self.call(new, args, Vec::new())?
         } else if matches!(self.heap.get(base), Value::Native(name) if name == "enum.StrEnum") {
-            self.new_string("str", class, &args[1..], &[])?
+            self.new_immutable_scalar("str", class, &args[1..], &[])?
         } else {
             self.new_int(&args, &[])?
         };

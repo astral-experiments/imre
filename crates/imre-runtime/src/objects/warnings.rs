@@ -190,18 +190,96 @@ pub unsafe extern "C" fn imre_warning_filter(
                 message: Pattern::compile(message, message_re, true)?,
                 module: Pattern::compile(module, module_re, false)?,
             };
-            let mut filters = FILTERS.lock().unwrap_or_else(|poison| poison.into_inner());
-            if append == 0 {
-                filters.rules.retain(|old| !old.same(&rule));
-                filters.rules.insert(0, rule);
-            } else if !filters.rules.iter().any(|old| old.same(&rule)) {
-                filters.rules.push(rule);
-            }
-            filters.displayed.clear();
+            insert_rule(rule, append != 0);
             Ok(())
         })(),
         (),
     );
+}
+
+fn insert_rule(rule: Rule, append: bool) {
+    let mut filters = FILTERS.lock().unwrap_or_else(|poison| poison.into_inner());
+    if !append {
+        filters.rules.retain(|old| !old.same(&rule));
+        filters.rules.insert(0, rule);
+    } else if !filters.rules.iter().any(|old| old.same(&rule)) {
+        filters.rules.push(rule);
+    }
+    filters.displayed.clear();
+}
+
+pub(crate) fn category_number(name: &str) -> Option<u32> {
+    imre_ast::exceptions::WARNING_CATEGORIES
+        .iter()
+        .position(|kind| kind.name() == name)
+        .map(|n| n as u32)
+}
+
+/// Install a -W option. Messages and module names here are literal.
+pub(crate) fn startup_filter(option: &str) -> Result<(), String> {
+    let repr = |s: &str| exceptions::string_repr(s).as_str().to_owned();
+    let mut fields = option.split(':').map(str::trim);
+    let [action, message, category, module, line] =
+        std::array::from_fn(|_| fields.next().unwrap_or(""));
+    if fields.next().is_some() {
+        return Err(format!("too many fields (max 5): {}", repr(option)));
+    }
+    let action = [
+        "default", "always", "all", "ignore", "module", "once", "error",
+    ]
+    .into_iter()
+    .find(|name| name.starts_with(action))
+    .ok_or_else(|| format!("invalid action: {}", repr(action)))?;
+    let category = if category.is_empty() {
+        0
+    } else {
+        category_number(category.strip_prefix("builtins.").unwrap_or(category))
+            .ok_or_else(|| format!("unknown warning category: {}", repr(category)))?
+    };
+    let lineno = if line.is_empty() {
+        BigInt::ZERO
+    } else {
+        line.parse::<BigInt>()
+            .ok()
+            .filter(|n| !n.is_negative())
+            .ok_or_else(|| format!("invalid lineno {}", repr(line)))?
+    };
+    let message = Pattern::compile(message, &regex_syntax::escape(message), true)
+        .map_err(|_| "warning filter pattern exceeds native regex limits".to_owned())?;
+    let module = Pattern::compile(
+        module,
+        &format!(r"{}\z", regex_syntax::escape(module)),
+        false,
+    )
+    .map_err(|_| "warning filter pattern exceeds native regex limits".to_owned())?;
+    insert_rule(
+        Rule {
+            name: action.into(),
+            action: Action::parse(action).unwrap(),
+            category,
+            message,
+            module,
+            lineno,
+        },
+        false,
+    );
+    Ok(())
+}
+
+/// Decide before constructing a Python warning instance or invoking its display hook.
+pub(crate) fn should_emit(
+    category: u32,
+    kind: Kind,
+    message: &str,
+    module: &str,
+    line: isize,
+) -> crate::Result<bool> {
+    match filtered(category, module, line, || message.to_owned()) {
+        Ok(None) => Ok(false),
+        Ok(Some((Action::Error, message))) => Err(Error::new(kind, message)),
+        Ok(Some(_)) => Ok(true),
+        Err(()) => Err(Error::new(Kind::OverflowError, LINE_OVERFLOW)),
+    }
 }
 
 thread_local! {
@@ -274,23 +352,6 @@ fn filtered(
 }
 
 const LINE_OVERFLOW: &str = "Python int too large to convert to C ssize_t";
-
-/// Report an abandoned directory stream through the active ResourceWarning filters.
-pub(crate) fn unclosed_scandir(module: &str, filename: &str, line: isize, iterator: &str) {
-    let diagnostic = match filtered(1, module, line, || {
-        format!("unclosed scandir iterator {iterator}")
-    }) {
-        Ok(None) => return,
-        Ok(Some((Action::Error, message))) => format!(
-            "Exception ignored while finalizing scandir iterator {iterator}:\nResourceWarning: {message}"
-        ),
-        Ok(Some((_, message))) => format!("{filename}:{line}: ResourceWarning: {message}"),
-        Err(()) => format!(
-            "Exception ignored while finalizing scandir iterator {iterator}:\nOverflowError: {LINE_OVERFLOW}"
-        ),
-    };
-    let _ = crate::sys::write_stderr(&diagnostic, true);
-}
 
 /// Report the unreaped handle before the destructor performs its own poll.
 pub(super) fn unobserved_child(pid: libc::pid_t) {

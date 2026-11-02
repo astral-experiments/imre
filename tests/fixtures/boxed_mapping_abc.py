@@ -68,8 +68,96 @@ def hashable_classes():
         raise AssertionError("instantiated abstract Hashable")
 
 
+def dynamic_collection_classes():
+    from abc import ABCMeta
+    from collections.abc import Awaitable, Buffer, Coroutine, Sequence
+
+    for base, required in (
+        (Awaitable, "__await__"), (Buffer, "__buffer__"), (Coroutine, "throw"),
+        (Mapping, "__getitem__"), (Sequence, "__len__"), (Set, "__iter__"),
+    ):
+        assert type(base) is ABCMeta
+        methods = dict.fromkeys(base.__abstractmethods__, lambda self, *args: 0)
+        complete = type("Complete", (base,), methods)
+        assert type(complete) is ABCMeta and type(complete()) is complete
+        del methods[required]
+        incomplete = type("Incomplete", (base,), methods)
+        assert incomplete.__abstractmethods__ == frozenset({required})
+        try:
+            incomplete()
+        except TypeError as error:
+            assert required in str(error)
+        else:
+            raise AssertionError("instantiated an abstract collection")
+
+
+def callable_classes():
+    from abc import ABCMeta
+    from typing import Callable as TypingCallable, get_origin
+    from collections.abc import Callable
+
+    assert get_origin(TypingCallable) is Callable
+    assert type(Callable) is ABCMeta and Callable.__abstractmethods__ == frozenset({"__call__"})
+
+    class Incomplete(Callable):
+        pass
+
+    class Concrete(Callable):
+        def __call__(self, *args, **kwargs):
+            return super().__call__(*args, **kwargs)
+
+    class Masked(Concrete):
+        __call__ = None
+
+    class Shadowed:
+        __call__ = None
+
+    class InstanceOnly:
+        pass
+
+    value = InstanceOnly()
+    value.__call__ = lambda: True
+    for item in (value, Shadowed(), [], None):
+        assert Callable.__subclasshook__(type(item)) is NotImplemented
+        assert not isinstance(item, Callable) and not issubclass(type(item), TypingCallable)
+    assert callable(Shadowed()) and not isinstance(Shadowed(), TypingCallable)
+    from operator import attrgetter
+    from struct import Struct
+    for abc in (Callable, TypingCallable):
+        assert isinstance(attrgetter("name"), abc)
+        assert not isinstance(Struct("B"), abc)
+
+    class Reported:
+        @property
+        def __class__(self):
+            raise NotImplementedError("reported class")
+
+    try:
+        isinstance(Reported(), Callable)
+    except NotImplementedError as exc:
+        assert str(exc) == "reported class"
+    else:
+        raise AssertionError("suppressed the reported class error")
+    assert Concrete()(4, key=3) is False
+    assert get_origin(Callable[[int], bool]) is Callable
+    assert get_origin(TypingCallable[..., int]) is Callable
+    for item in (lambda: 1, len, list.append, [].append, Concrete().__call__, type, staticmethod(len)):
+        assert isinstance(item, Callable) and issubclass(type(item), Callable)
+    assert issubclass(Masked, Callable) and isinstance(Masked(), Callable)
+    assert Callable.register(InstanceOnly) is InstanceOnly
+    assert isinstance(value, TypingCallable) and issubclass(InstanceOnly, Callable)
+    try:
+        Incomplete()
+    except TypeError as exc:
+        assert "__call__" in str(exc)
+    else:
+        raise AssertionError("instantiated abstract Callable subclass")
+
+
 def current():
+    callable_classes()
     hashable_classes()
+    dynamic_collection_classes()
     from collections.abc import Collection, Container, Iterable, Sized
 
     class Protocol:
@@ -154,6 +242,35 @@ def current():
     print(bool(chain), repr(chain), len(saved))
     chain.maps.append({"owner": chain})
     print(repr(chain))
+
+    class Local(ChainMap):
+        pass
+
+    parent = {"inherited": 1}
+    first = {}
+    child = Local(parent).new_child(first, current=2)
+    assert type(child) is Local and child.maps[0] is first
+    assert child.parents.maps[0] is parent and first == {"current": 2}
+    clone = child.copy()
+    assert clone.maps[0] is not first and clone.maps[1] is parent
+    assert clone.maps == child.maps and Local.__copy__ is Local.copy
+    assert child.pop("inherited", None) is None
+    try:
+        child.pop("inherited")
+    except KeyError as exc:
+        assert exc.args == ("Key not found in the first mapping: 'inherited'",)
+    else:
+        raise AssertionError("popped a parent key")
+    assert child.popitem() == ("current", 2)
+    original = child
+    child |= [("local", 3)]
+    assert child is original and first == {"local": 3}
+    merged = child | {"local": 4}
+    assert type(merged) is Local and merged.maps == [{"local": 4}, parent]
+    assert merged.maps[1] is parent and merged.maps[0] is not first
+    assert ({"inherited": 0} | child).maps == [{"inherited": 1, "local": 3}]
+    child.clear()
+    assert first == {} and parent == {"inherited": 1}
 
     class Registered:
         pass

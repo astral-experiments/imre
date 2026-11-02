@@ -41,7 +41,7 @@ fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
             "",
         ));
     }
-    Codec::lookup(crate::sys::file_encoding(encoding))
+    Codec::lookup(&crate::sys::file_encoding(encoding))
 }
 
 // An optional native string is an owned pointer word, or zero for None.
@@ -75,8 +75,8 @@ fn open_text_output(
     let spelling = crate::sys::file_encoding(encoding);
     let policy = errors.as_deref().map_or("strict", Str::as_str);
     let mut state =
-        super::open_state_with_encoding(path, mode, false, false, Some((spelling, policy)))?;
-    let codec = options(Some(spelling), newline)?;
+        super::open_state_with_encoding(path, mode, false, false, Some((&spelling, policy)))?;
+    let codec = options(Some(&spelling), newline)?;
     let Some(super::Stream::Write(writer)) = state.stream.as_mut() else {
         unreachable!()
     };

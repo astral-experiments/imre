@@ -72,6 +72,7 @@ impl Builtin {
             Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) => {
                 Contract::new(true, PreservesLists)
             }
+            Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
             Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
             Self::ListExtendBuffer | Self::ListExtendSnapshot | Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
@@ -159,9 +160,11 @@ impl Builtin {
                 match operation {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
+                    | TextOperation::ZFill { .. }
                     | TextOperation::Normalize
                     | TextOperation::Lower
                     | TextOperation::Upper
+                    | TextOperation::CaseMap { .. }
                     | TextOperation::Capitalize
                     | TextOperation::Split(_)
                     | TextOperation::Partition
@@ -333,7 +336,6 @@ impl Builtin {
                 | ProcessOperation::PopenSignal
                 | ProcessOperation::ShellOutput { .. }
                 | ProcessOperation::CheckOutput { .. }
-                | ProcessOperation::RunToStderr
                 | ProcessOperation::Run { .. }
                 | ProcessOperation::Popen { .. }
                 | ProcessOperation::PopenCleanup
@@ -372,7 +374,13 @@ impl Builtin {
                 | ProcessOperation::TaskResult
                 | ProcessOperation::Semaphore
                 | ProcessOperation::Release
-                | ProcessOperation::EnvironCopy
+                | ProcessOperation::EnvironCopy { .. }
+                | ProcessOperation::EnvironKeys
+                | ProcessOperation::EnvironIndex { .. }
+                | ProcessOperation::EnvironDelete { .. }
+                | ProcessOperation::EnvironSet { .. }
+                | ProcessOperation::EnvironClear
+                | ProcessOperation::EnvironUpdate { .. }
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
                 | ProcessOperation::Fd(_)
@@ -476,6 +484,7 @@ impl Builtin {
             | Self::JsonLoads
             | Self::JsonEmptyObject
             | Self::JsonDecoderDecode
+            | Self::JsonEncoderEncode(_)
             | Self::JsonErrorField(_)
             | Self::HashRecord
             | Self::JsonGet { .. }
@@ -524,6 +533,7 @@ impl Builtin {
             | Self::NewPlainObject
             | Self::InspectSentinel
             | Self::JsonDecoderNew
+            | Self::JsonEncoderNew
             | Self::JsonDecoderMemo
             | Self::HashUpdate
             | Self::HashDigestSize
@@ -543,6 +553,9 @@ impl Builtin {
             | Self::IntBounded { .. }
             | Self::CanElideMapperFrames(_)
             | Self::SysGetRecursionLimit
+            | Self::SysContextAwareWarnings
+            | Self::FaultFrame { .. }
+            | Self::FaultLine(_)
             | Self::GeneratorFrameLeave
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
@@ -604,7 +617,7 @@ impl Builtin {
                 Contract::new(true, PreservesOwners)
             }
             Self::SortByComparator => Contract::new(true, Unknown),
-            Self::ListReserveRange => Contract::new(false, PreservesOwners),
+            Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)
             | Self::BinaryRead
@@ -626,6 +639,7 @@ impl Builtin {
             | Self::ChainMapSetItem
             | Self::ChainMapGet(_)
             | Self::DictPop
+            | Self::DictPopItem
             | Self::DictSetDefault
             | Self::DefaultDictMissing
             | Self::DictTryPop(_)
@@ -701,6 +715,7 @@ impl Builtin {
             | Self::SysStreamText { .. }
             | Self::SysEncoding(_)
             | Self::OsName
+            | Self::OsLinesep
             | Self::OsPathsep
             | Self::OsSeparator { .. }
             | Self::OptionalStrConcat
@@ -835,6 +850,9 @@ impl Builtin {
                 &[Type::ListInt, Type::Int, Type::Int, Type::Int],
                 Type::Bool,
             ),
+            Self::StructCyclePrefix => matches!(args, [list, period, limit]
+                if types.element(list.ty).is_some_and(|ty| types.is_value_struct(ty))
+                    && period.ty == Type::Int && limit.ty == Type::Int && result == Type::Int),
             Self::ListReserveRange => {
                 signature(
                     &[Type::ListInt, Type::Int, Type::Int, Type::Int, Type::Int],
@@ -1135,11 +1153,18 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "int_lshift"
                 | "int_rshift"
                 | "imre_flush_stdout"
+                | "imre_environ_clear"
+                | "imre_environ_update"
                 | "imre_environ_get"
+                | "imre_environ_keys"
+                | "imre_environb_index"
+                | "imre_environ_index"
                 | "imre_getcwd"
+                | "imre_os_linesep"
                 | "imre_os_pathsep"
                 | "imre_shutil_which"
                 | "imre_environ_copy"
+                | "imre_environb_copy"
                 | "imre_subprocess_check"
                 | "imre_subprocess_error_field"
                 | "imre_print_int"
@@ -1202,6 +1227,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_join_buffer_new"
                 | "imre_join_buffer_finish"
                 | "imre_str_replace"
+                | "imre_str_replace_count"
                 | "imre_print_str"
                 | "imre_print_bytes"
                 | "imre_bytes_str"
@@ -1367,6 +1393,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_slice_sum"
                 | "imre_str_get"
                 | "imre_str_expandtabs"
+                | "imre_str_zfill"
+                | "imre_str_case_map"
                 | "imre_str_lower"
                 | "imre_str_upper"
                 | "imre_str_capitalize"
@@ -1401,6 +1429,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_str_list_sorted_suffix"
                 | "imre_dict_delete"
                 | "imre_dict_pop"
+                | "imre_dict_popitem"
                 | "imre_cursor_length_hint"
                 | "imre_mapping_iter_next"
                 | "imre_exception_raise"

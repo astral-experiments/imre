@@ -2,6 +2,22 @@
 
 use super::*;
 
+/// A sealed literal must still be valid when checked in unreachable code.
+fn boxed_lookahead(spelling: &str, verbose: bool) -> bool {
+    let Ok((source, names)) =
+        imre_regex::lookahead_source(spelling, verbose, imre_regex::Alphabet::Unicode, false)
+    else {
+        return false;
+    };
+    let mut seen = HashSet::new();
+    let valid_names = names.iter().flatten().all(|name| {
+        (ruff_python_stdlib::identifiers::is_identifier(name)
+            || ruff_python_stdlib::keyword::is_keyword(name))
+            && seen.insert(name)
+    });
+    valid_names && fancy_regex::Regex::new(&source).is_ok_and(|re| re.captures_len() == names.len())
+}
+
 #[derive(Clone)]
 pub(super) struct CaptureLayout {
     groups: std::rc::Rc<[crate::fixed_regex::Capture]>,
@@ -253,8 +269,13 @@ impl Checker<'_> {
             ));
         };
         check_string(literal, self.source)?;
-        let pattern = crate::fixed_regex::translate(literal.value.to_str(), verbose)
-            .map_err(|message| error(self.source, literal, &message))?;
+        let spelling = literal.value.to_str();
+        let pattern = crate::fixed_regex::translate(spelling, verbose).map_err(|message| {
+            if boxed_lookahead(spelling, verbose) {
+                return self.object_builtin_error("regex lookahead", literal);
+            }
+            error(self.source, literal, &message)
+        })?;
         self.globals
             .regex_literals
             .borrow_mut()
@@ -276,7 +297,19 @@ impl Checker<'_> {
     }
 
     pub(super) fn compile_regex(&self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let verbose = self.regex_flags(call, 1)? & 64 != 0;
+        let flags = self.regex_flags(call, 1);
+        // A bytes or dynamic pattern can be constructed before the method using
+        // it is lowered, including in a first-party module imported by the caller.
+        if (flags.is_err()
+            || !matches!(
+                call.arguments.args.first(),
+                Some(ast::Expr::StringLiteral(_))
+            ))
+            && self.graph.uses_boxed_pattern_method()
+        {
+            return Err(self.scoped_builtin_error("re.compile", call));
+        }
+        let verbose = flags? & 64 != 0;
         self.fixed_regex(&call.arguments.args[0], verbose)
     }
 

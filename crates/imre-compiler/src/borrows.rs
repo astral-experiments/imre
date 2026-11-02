@@ -107,100 +107,15 @@ fn summaries(
     (preserves, initializes)
 }
 
-/// Visits statement nodes once, including statements nested inside expressions.
-pub(crate) fn statements(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
-    fn block(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
-        for statement in body {
-            visit(statement);
-            match statement {
-                Statement::Scope { body, .. } => block(body, visit),
-                Statement::If(_, yes, no) => {
-                    block(yes, visit);
-                    block(no, visit);
-                }
-                Statement::While(_, body, orelse) | Statement::For { body, orelse, .. } => {
-                    block(body, visit);
-                    block(orelse, visit);
-                }
-                Statement::Try {
-                    body,
-                    handlers,
-                    orelse,
-                    finalbody,
-                } => {
-                    block(body, visit);
-                    for handler in handlers {
-                        block(&handler.body, visit);
-                    }
-                    block(orelse, visit);
-                    block(finalbody, visit);
-                }
-                _ => {}
-            }
-        }
-    }
-    block(body, visit);
-    ir::walk_expressions(body, &mut |expression| {
-        if let ExprKind::Scope { body, .. } = &expression.kind {
-            block(body, visit);
-        }
-    });
-}
-
 /// Records every local writer, including cleanup and hidden iterator outputs.
 pub(crate) fn written(function: &Function) -> Vec<bool> {
     written_except(function, |_| false)
 }
 
 pub(crate) fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec<bool> {
-    let mut written = function.expression_rebound();
-    statements(&function.body, &mut |statement| match statement {
-        Statement::Assign(slot, value) => written[*slot] |= !permitted(value),
-        Statement::Clear(slot) => written[*slot] = true,
-        Statement::Move(target, source) => {
-            written[*target] = true;
-            written[*source] = true;
-        }
-        Statement::Scope { clear, .. } => {
-            for &slot in clear {
-                written[slot] = true;
-            }
-        }
-        Statement::For {
-            target,
-            cursor,
-            stop,
-            step,
-            ..
-        } => {
-            for &slot in [target, cursor, stop, step] {
-                written[slot] = true;
-            }
-        }
-        Statement::IterNext {
-            key, value, ready, ..
-        } => {
-            written[*key] = true;
-            written[*ready] = true;
-            if let Some(slot) = value {
-                written[*slot] = true;
-            }
-        }
-        Statement::Try { handlers, .. } => {
-            for handler in handlers {
-                if let Some(slot) = handler.name {
-                    written[slot] = true;
-                }
-            }
-        }
-        _ => {}
-    });
-    ir::walk_expressions(&function.body, &mut |expression| {
-        if let ExprKind::Scope { clear, .. } = &expression.kind {
-            for &slot in clear {
-                written[slot] = true;
-            }
-        }
+    let mut written = vec![false; function.locals.len()];
+    ir::walk_writes(&function.body, |slot, value| {
+        written[slot] |= !value.is_some_and(&permitted);
     });
     written
 }
@@ -223,7 +138,7 @@ fn preserves_edges(
         .copied()
         .filter(|&slot| fresh && !written[slot]);
     let mut safe = true;
-    statements(&function.body, &mut |statement| {
+    ir::walk_statements(&function.body, &mut |statement| {
         safe &= match statement {
             Statement::SetItem(..) | Statement::AugmentItem(..) => false,
             Statement::AugmentField(value, _, _, _) => {
@@ -316,7 +231,7 @@ fn local_roots(function: &Function, types: &Types, functions: &[Function]) -> Fu
                 && types.payload(ty) != Some(Type::Float)
         })
         .collect::<Vec<_>>();
-    statements(&function.body, &mut |statement| match statement {
+    ir::walk_statements(&function.body, &mut |statement| match statement {
         Statement::Assign(slot, value) => {
             if let Some(source) = projection_root(value, types, functions) {
                 dependencies[*slot].push(source);
@@ -434,7 +349,7 @@ fn length_roots(function: &Function, facts: &FunctionBorrows, types: &Types) -> 
     for (slot, eligible) in eligible.iter_mut().enumerate() {
         *eligible &= matches!(function.locals[slot], Type::ListInt | Type::List(_));
     }
-    statements(&function.body, &mut |statement| match statement {
+    ir::walk_statements(&function.body, &mut |statement| match statement {
         Statement::Assign(slot, value) => {
             if let ExprKind::Local(source) = value.kind {
                 dependencies[*slot].push(source);
@@ -489,12 +404,11 @@ mod tests {
 
     fn module(functions: Vec<Function>) -> Module {
         Module {
-            ignore_python_environment: false,
             types: Types::default(),
             class_fields: vec![vec![Type::Class(0)]],
             list_builds: Default::default(),
             class_metadata: Vec::new(),
-            command_utf8_mode: None,
+            command_flags: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
@@ -911,7 +825,7 @@ def scan(left: list[Row], right: list[Row]) -> int:
         );
         let body = emitted_body(&module, id);
         assert!(body.contains("call ptr @imre_seq_data_readonly"), "{body}");
-        assert!(body.contains("call i64 @imre_seq_borrow_index_proven"));
+        assert!(body.contains("call i64 @imre_seq_borrow_index_proven_fast("));
         assert!(!body.contains("call void @imre_record_retain"), "{body}");
         assert!(!body.contains("call void @imre_record_release"), "{body}");
     }
@@ -1102,7 +1016,7 @@ def total(rows: list[Row], fail: bool) -> int:
         );
         // The read after the branches cannot reuse either branch's SSA pointer.
         assert_eq!(
-            body.matches("call i64 @imre_seq_borrow_index_proven")
+            body.matches("call i64 @imre_seq_borrow_index_proven_fast(")
                 .count(),
             1,
             "{body}"
@@ -1182,7 +1096,7 @@ def total(rows: list[Row], fail: bool) -> int:
             let (_, read_guard) = body.rsplit_once("icmp eq ptr").unwrap();
             let cached = read_guard.find("getelementptr inbounds i64").unwrap();
             let fallback = read_guard
-                .find("call i64 @imre_seq_borrow_index_proven")
+                .find("call i64 @imre_seq_borrow_index_proven_fast(")
                 .unwrap();
             let merged = read_guard.find("phi i64").unwrap();
             assert!(cached < fallback && fallback < merged, "{body}");
@@ -1201,7 +1115,7 @@ def total(rows: list[Row], fail: bool) -> int:
         let body = emitted_body(&module, 1);
         assert!(!body.contains("call ptr @imre_seq_data_readonly"), "{body}");
         assert!(
-            body.contains("call i64 @imre_seq_borrow_index_proven"),
+            body.contains("call i64 @imre_seq_borrow_index_proven_fast("),
             "{body}"
         );
     }

@@ -316,6 +316,16 @@ pub unsafe extern "C" fn imre_posix_commonpath(list: *const super::Object, kind:
     finish(result, 0)
 }
 
+/// Exactly two leading slashes form a distinct root on POSIX.
+pub(crate) fn root_length<T: Copy + Eq + From<u8>>(path: &[T]) -> usize {
+    let slash = T::from(b'/');
+    if path.starts_with(&[slash; 2]) && !path.starts_with(&[slash; 3]) {
+        2
+    } else {
+        usize::from(path.starts_with(&[slash]))
+    }
+}
+
 /// Normalize components lexically. For relative abspath, supply the absolute cwd;
 /// for an absolute path or for normpath, pass none.
 /// The output buffer doubles as the component stack, so arbitrary bytes need no decoding.
@@ -325,12 +335,7 @@ pub(crate) fn normalize<T: Copy + Eq + From<u8>>(
 ) -> Result<Vec<T>, TryReserveError> {
     let slash = T::from(b'/');
     let dot = T::from(b'.');
-    let first = cwd.unwrap_or(path);
-    let root = if first.starts_with(&[slash; 2]) && !first.starts_with(&[slash; 3]) {
-        2
-    } else {
-        usize::from(first.starts_with(&[slash]))
-    };
+    let root = root_length(cwd.unwrap_or(path));
     let mut output = Vec::new();
     output.try_reserve(root.max(1))?;
     output.resize(root, slash);

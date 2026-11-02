@@ -136,7 +136,7 @@ fn default_directory() -> Result<Str> {
     })
 }
 
-pub(crate) fn find_default_directory() -> Result<PathBuf> {
+fn find_default_directory() -> Result<PathBuf> {
     let candidates = ["TMPDIR", "TEMP", "TMP"]
         .into_iter()
         .filter_map(std::env::var_os)
@@ -164,9 +164,20 @@ pub(crate) fn find_default_directory() -> Result<PathBuf> {
 
 /// Linux can create an unnamed inode directly. Other filesystems use exclusive
 /// creation followed by unlink, leaving the descriptor as its only owner.
-pub(super) fn anonymous_file(directory: Option<&str>) -> Result<fs::File> {
+pub(crate) fn anonymous_file(directory: Option<&str>) -> Result<fs::File> {
     let directory = directory.map_or_else(default_directory, |value| Ok(Str::from(value)))?;
-    let directory = Path::new(directory.as_str());
+    anonymous_file_in(
+        Path::new(directory.as_str()),
+        OsStr::new("tmp"),
+        OsStr::new(""),
+    )
+}
+
+pub(crate) fn anonymous_file_in(
+    directory: &Path,
+    prefix: &OsStr,
+    suffix: &OsStr,
+) -> Result<fs::File> {
     if directory.as_os_str().as_bytes().contains(&0) {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
     }
@@ -182,7 +193,10 @@ pub(super) fn anonymous_file(directory: Option<&str>) -> Result<fs::File> {
     }
     let directory = absolute(directory).map_err(os_error)?;
     for _ in 0..ATTEMPTS {
-        let path = directory.join(format!("tmp{}", random_name().map_err(os_error)?));
+        let mut name = prefix.to_owned();
+        name.push(random_name().map_err(os_error)?);
+        name.push(suffix);
+        let path = directory.join(name);
         let file = match OpenOptions::new()
             .read(true)
             .write(true)
@@ -432,7 +446,7 @@ fn cleanup(path: &str) -> Result<()> {
 
 /// Remove entries relative to held directory descriptors. On failure, `path`
 /// names the current entry even if a descendant was exchanged for a symlink.
-fn remove_tree(path: &mut PathBuf) -> io::Result<()> {
+pub(crate) fn remove_tree(path: &mut PathBuf) -> io::Result<()> {
     let parent = path.parent().unwrap_or(Path::new("."));
     let name = CString::new(path.file_name().unwrap_or(OsStr::new(".")).as_bytes())?;
     #[cfg(target_os = "linux")]

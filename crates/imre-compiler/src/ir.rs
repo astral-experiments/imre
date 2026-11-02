@@ -160,6 +160,7 @@ pub(crate) enum Type {
     Hash,
     Poll,
     JsonDecoder,
+    JsonEncoder,
     /// An open or closed ZIP archive retains its ordered central directory.
     ZipFile,
     ZipInfo,
@@ -413,6 +414,7 @@ impl std::fmt::Display for Type {
             Self::TextOutput => "writable text stream",
             Self::Hash => "hashlib hash",
             Self::JsonDecoder => "json.decoder.JSONDecoder",
+            Self::JsonEncoder => "json.encoder.JSONEncoder",
             Self::ZipFile => "zipfile.ZipFile",
             Self::ZipInfo => "zipfile.ZipInfo",
             Self::CsvReader => "CSV reader",
@@ -453,10 +455,8 @@ pub(crate) enum SourceFrame {
 }
 
 pub(crate) struct Module {
-    /// Interpreter-style -I commands ignore Python process environment variables at startup.
-    pub ignore_python_environment: bool,
-    /// Effective UTF-8 mode of an interpreter-style command.
-    pub command_utf8_mode: Option<bool>,
+    /// Interpreter settings already selected by the Python-style launcher.
+    pub command_flags: Option<crate::CommandFlags>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -925,6 +925,7 @@ pub(crate) enum LinecacheOperation {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RandomOperation {
+    Shuffle,
     Seed,
     Float,
     Bits,
@@ -1073,7 +1074,7 @@ pub(crate) enum Builtin {
     SysPlatform,
     SysThreadInfo,
     SysThreadText {
-        version: bool,
+        field: u32,
     },
     SysImplementation,
     SysStdlibModuleNames,
@@ -1088,6 +1089,7 @@ pub(crate) enum Builtin {
     SysIntern,
     SysIsInterned,
     OsName,
+    OsLinesep,
     OsPathsep,
     OsSeparator {
         alternate: bool,
@@ -1243,6 +1245,8 @@ pub(crate) enum Builtin {
     ListAllI32,
     /// Best-effort bounded capacity hint for one empty loop output list.
     ListReserveRange,
+    /// Extend a proven periodic packed prefix and return the ordinal where normal iteration resumes.
+    StructCyclePrefix,
     /// The guarded loop proves all elements fit i32 and cannot be replaced.
     ListGetI32,
     /// Every call site and intervening operation preserve these exact element
@@ -1392,6 +1396,14 @@ pub(crate) enum Builtin {
     CanElideMapperFrames([usize; 2]),
     SysGetFrameModuleName,
     SysGetRecursionLimit,
+    SysContextAwareWarnings,
+    /// Native source metadata for a Python function or module, before its first statement.
+    FaultFrame {
+        file: String,
+        name: String,
+        line: u32,
+    },
+    FaultLine(u32),
     GeneratorFrameEnter(String),
     GeneratorFrameLeave,
     SysSetRecursionLimit,
@@ -1432,6 +1444,8 @@ pub(crate) enum Builtin {
     JsonDecoderNew,
     JsonDecoderMemo,
     JsonDecoderDecode,
+    JsonEncoderNew,
+    JsonEncoderEncode(Type),
     JsonEmptyObject,
     ModuleCache(usize),
     /// Capture and access an individual wrapper's independently owned cache.
@@ -1608,6 +1622,7 @@ pub(crate) enum Builtin {
     DictTryGet(Type),
     /// Removes a key or raises KeyError; an optional third operand is an exact default.
     DictPop,
+    DictPopItem,
     /// Transfers the removed value into an optional result, or returns the supplied default.
     DictTryPop(Type),
     /// Arguments are key then dictionary, matching membership evaluation order.
@@ -1754,27 +1769,59 @@ pub(crate) enum StrDescriptor {
     RStrip,
     IsAlnum,
     IsLower,
+    IsAscii,
+    IsAlpha,
+    IsDigit,
+    ZFill,
+    IsTitle,
+    Title,
+    SwapCase,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
         Some(match name {
             "lower" => Self::Lower,
+            "title" => Self::Title,
+            "swapcase" => Self::SwapCase,
             "strip" => Self::Strip,
             "lstrip" => Self::LStrip,
             "rstrip" => Self::RStrip,
             "isalnum" => Self::IsAlnum,
+            "isascii" => Self::IsAscii,
+            "isalpha" => Self::IsAlpha,
+            "isdigit" => Self::IsDigit,
+            "istitle" => Self::IsTitle,
             "islower" => Self::IsLower,
+            "zfill" => Self::ZFill,
             _ => return None,
         })
+    }
+    pub(crate) fn is_predicate(self) -> bool {
+        matches!(
+            self,
+            Self::IsAlnum
+                | Self::IsAscii
+                | Self::IsAlpha
+                | Self::IsDigit
+                | Self::IsLower
+                | Self::IsTitle
+        )
     }
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Lower => "lower",
+            Self::Title => "title",
+            Self::SwapCase => "swapcase",
             Self::Strip => "strip",
             Self::LStrip => "lstrip",
             Self::RStrip => "rstrip",
             Self::IsAlnum => "isalnum",
+            Self::IsAscii => "isascii",
+            Self::IsAlpha => "isalpha",
+            Self::IsDigit => "isdigit",
+            Self::IsTitle => "istitle",
             Self::IsLower => "islower",
+            Self::ZFill => "zfill",
         }
     }
 }
@@ -1805,10 +1852,16 @@ pub(crate) enum TextOperation {
     Predicate(TextPredicate),
     SplitLineEnds,
     ExpandTabs,
+    ZFill {
+        copy: bool,
+    },
     Normalize,
     Lower,
     Upper,
     Capitalize,
+    CaseMap {
+        title: bool,
+    },
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
@@ -1847,8 +1900,12 @@ pub(crate) enum UrlProperty {
 #[derive(Clone, Copy)]
 pub(crate) enum TextPredicate {
     Alnum,
+    Ascii,
+    Alpha,
+    Digit,
     Space,
     Lower,
+    Title,
     Upper,
 }
 
@@ -2119,6 +2176,9 @@ pub(crate) enum Readiness {
 /// POSIX descriptor calls use the target's C int and file descriptor flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FdOperation {
+    TransferFd,
+    Read,
+    Write,
     Open,
     Unlink,
     Remove,
@@ -2168,7 +2228,6 @@ pub(crate) enum ProcessOperation {
     SelectorClass(Option<bool>),
     SetSelector,
     Executable,
-    RunToStderr,
     ShellOutput {
         status: bool,
     },
@@ -2189,7 +2248,8 @@ pub(crate) enum ProcessOperation {
     },
     Call {
         streams: u32,
-        check: bool,
+        // Discarded run calls supply check as an evaluated operand.
+        fixed_check: Option<bool>,
     },
     PopenPid,
     PopenActive,
@@ -2261,8 +2321,24 @@ pub(crate) enum ProcessOperation {
     Semaphore,
     Acquire,
     Release,
-    EnvironCopy,
+    EnvironCopy {
+        bytes: bool,
+    },
+    EnvironClear,
+    EnvironUpdate {
+        bytes: bool,
+    },
     EnvironGet,
+    EnvironKeys,
+    EnvironIndex {
+        bytes: bool,
+    },
+    EnvironDelete {
+        bytes: bool,
+    },
+    EnvironSet {
+        bytes: bool,
+    },
     GetCwd,
     Fd(FdOperation),
     Credential(&'static str),
@@ -2437,225 +2513,247 @@ pub(crate) enum Statement {
     Raise(Option<Expr>),
 }
 
-/// Rejects every local replacement hidden inside an operand. Statement regions
-/// and expression scopes are each visited once, so nested scopes do not cause
-/// repeated recursive walks of their bodies.
-pub(crate) fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> bool {
-    fn expression_writes(expression: &Expr, written: &mut [bool]) {
-        match &expression.kind {
-            ExprKind::Scope { body, value, clear } => {
-                crate::list_specialization::mark_writes(body, written);
-                for &slot in clear {
-                    written[slot] = true;
-                }
-                crate::ir::walk_expressions(body, &mut |value| match &value.kind {
-                    ExprKind::Scope { body, clear, .. } => {
-                        crate::list_specialization::mark_writes(body, written);
-                        for &slot in clear {
-                            written[slot] = true;
-                        }
-                    }
-                    ExprKind::Bind(slot, _) => written[*slot] = true,
-                    _ => {}
-                });
-                expression_writes(value, written);
+impl Statement {
+    /// Visits nested suites in source order, excluding suites owned by expressions.
+    pub(crate) fn suites<'a>(&'a self, mut visit: impl FnMut(&'a [Statement])) {
+        match self {
+            Self::Scope { body, .. } => visit(body),
+            Self::If(_, body, orelse)
+            | Self::While(_, body, orelse)
+            | Self::For { body, orelse, .. } => {
+                visit(body);
+                visit(orelse);
             }
-            ExprKind::Bind(slot, value) => {
-                written[*slot] = true;
-                expression_writes(value, written);
-            }
-            ExprKind::List(values)
-            | ExprKind::Tuple(values)
-            | ExprKind::Set { values, .. }
-            | ExprKind::Compare(values, _)
-            | ExprKind::Boolean(_, values)
-            | ExprKind::Builtin(_, values) => {
-                for value in values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-                for value in &args.values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Callable {
-                receiver: Some(receiver),
-                ..
-            } => expression_writes(receiver, written),
-            ExprKind::Invoke { callable, args } => {
-                expression_writes(callable, written);
-                for value in &args.values {
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    expression_writes(key, written);
-                    expression_writes(value, written);
-                }
-            }
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-                expression_writes(left, written);
-                expression_writes(right, written);
-            }
-            ExprKind::Conditional(test, yes, no) => {
-                expression_writes(test, written);
-                expression_writes(yes, written);
-                expression_writes(no, written);
-            }
-            ExprKind::Present(value)
-            | ExprKind::Absent(value)
-            | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
-            | ExprKind::Field(value, _) => expression_writes(value, written),
-            ExprKind::Exception {
-                message: Some(message),
-                ..
-            } => expression_writes(message, written),
-            _ => {}
-        }
-    }
-    let mut written = vec![false; locals];
-    expression_writes(expression, &mut written);
-    !written[slot]
-}
-
-/// Visits expression trees, including statements embedded in eager expressions.
-/// Analyses must include every checked branch, even when it never executes.
-pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
-    fn expression<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
-        visit(value);
-        match &value.kind {
-            ExprKind::List(values)
-            | ExprKind::Tuple(values)
-            | ExprKind::Set { values, .. }
-            | ExprKind::Compare(values, _)
-            | ExprKind::Boolean(_, values)
-            | ExprKind::Builtin(_, values) => {
-                for value in values {
-                    expression(value, visit);
-                }
-            }
-            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-                for value in &args.values {
-                    expression(value, visit);
-                }
-            }
-            ExprKind::Callable { receiver, .. } => {
-                if let Some(receiver) = receiver {
-                    expression(receiver, visit);
-                }
-            }
-            ExprKind::Invoke { callable, args } => {
-                expression(callable, visit);
-                for value in &args.values {
-                    expression(value, visit);
-                }
-            }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    expression(key, visit);
-                    expression(value, visit);
-                }
-            }
-            ExprKind::Bind(_, value)
-            | ExprKind::Present(value)
-            | ExprKind::Absent(value)
-            | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
-            | ExprKind::Field(value, _) => expression(value, visit),
-            ExprKind::Scope { body, value, .. } => {
-                walk_expressions(body, visit);
-                expression(value, visit);
-            }
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-                expression(left, visit);
-                expression(right, visit);
-            }
-            ExprKind::Conditional(test, yes, no) => {
-                expression(test, visit);
-                expression(yes, visit);
-                expression(no, visit);
-            }
-            ExprKind::Exception { message, .. } => {
-                if let Some(message) = message {
-                    expression(message, visit);
-                }
-            }
-            ExprKind::Int(_)
-            | ExprKind::Float(_)
-            | ExprKind::Bool(_)
-            | ExprKind::Str(_)
-            | ExprKind::Bytes(_)
-            | ExprKind::None
-            | ExprKind::Local(_) => {}
-        }
-    }
-    for statement in body {
-        match statement {
-            Statement::Assign(_, value)
-            | Statement::Expr(value)
-            | Statement::Return(value)
-            | Statement::Assert(value) => expression(value, visit),
-            Statement::SetItem(receiver, index, value)
-            | Statement::AugmentItem(receiver, index, _, value) => {
-                expression(receiver, visit);
-                expression(index, visit);
-                expression(value, visit);
-            }
-            Statement::SetField(receiver, _, value)
-            | Statement::AugmentField(receiver, _, _, value) => {
-                expression(receiver, visit);
-                expression(value, visit);
-            }
-            Statement::Scope { body, .. } => walk_expressions(body, visit),
-            Statement::If(test, yes, no) => {
-                expression(test, visit);
-                walk_expressions(yes, visit);
-                walk_expressions(no, visit);
-            }
-            Statement::While(test, body, orelse) => {
-                expression(test, visit);
-                walk_expressions(body, visit);
-                walk_expressions(orelse, visit);
-            }
-            Statement::For {
-                args, body, orelse, ..
-            } => {
-                for arg in args {
-                    expression(arg, visit);
-                }
-                walk_expressions(body, visit);
-                walk_expressions(orelse, visit);
-            }
-            Statement::Try {
+            Self::Try {
                 body,
                 handlers,
                 orelse,
                 finalbody,
             } => {
-                walk_expressions(body, visit);
+                visit(body);
                 for handler in handlers {
-                    walk_expressions(&handler.body, visit);
+                    visit(&handler.body);
                 }
-                walk_expressions(orelse, visit);
-                walk_expressions(finalbody, visit);
+                visit(orelse);
+                visit(finalbody);
             }
-            Statement::Raise(value) => {
-                if let Some(value) = value {
-                    expression(value, visit);
+            _ => {}
+        }
+    }
+}
+
+/// Visits each statement in ordinary suites. Expression-owned suites have separate roots.
+pub(crate) fn walk_block<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Statement)) {
+    for statement in body {
+        visit(statement);
+        statement.suites(|body| walk_block(body, visit));
+    }
+}
+
+/// Visits all statement nodes once, including those nested inside eager expressions.
+pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Statement)) {
+    walk_block(body, visit);
+    walk_expressions(body, &mut |expression| {
+        if let ExprKind::Scope { body, .. } = &expression.kind {
+            walk_block(body, visit);
+        }
+    });
+}
+
+/// Visits expression trees, including statements embedded in eager expressions.
+/// Analyses must include every checked branch, even when it never executes.
+pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
+    for statement in body {
+        match statement {
+            Statement::Assign(_, value)
+            | Statement::Expr(value)
+            | Statement::Return(value)
+            | Statement::Assert(value)
+            | Statement::If(value, _, _)
+            | Statement::While(value, _, _)
+            | Statement::Raise(Some(value)) => walk_expression(value, visit),
+            Statement::SetItem(receiver, index, value)
+            | Statement::AugmentItem(receiver, index, _, value) => {
+                for operand in [receiver, index, value] {
+                    walk_expression(operand, visit);
+                }
+            }
+            Statement::SetField(receiver, _, value)
+            | Statement::AugmentField(receiver, _, _, value) => {
+                walk_expression(receiver, visit);
+                walk_expression(value, visit);
+            }
+            Statement::For { args, .. } => {
+                for arg in args {
+                    walk_expression(arg, visit);
                 }
             }
             Statement::Move(..)
             | Statement::Clear(_)
+            | Statement::Scope { .. }
+            | Statement::Try { .. }
+            | Statement::Raise(None)
             | Statement::IterNext { .. }
             | Statement::Break
             | Statement::Continue
             | Statement::Exhaust => {}
         }
+        statement.suites(|body| walk_expressions(body, visit));
+    }
+}
+
+/// Visits a checked expression and every expression in its eager scopes.
+pub(crate) fn walk_expression<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
+    visit(value);
+    if let ExprKind::Scope { body, value, .. } = &value.kind {
+        walk_expressions(body, visit);
+        walk_expression(value, visit);
+    } else {
+        children(value, |child| walk_expression(child, visit));
+    }
+}
+
+/// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.
+pub(crate) fn walk_writes(body: &[Statement], mut visit: impl FnMut(usize, Option<&Expr>)) {
+    statement_writes(body, &mut visit);
+    walk_expressions(body, &mut |value| scoped_writes(value, &mut visit));
+}
+
+/// Visits writes during operand evaluation, including assignments in eager scopes.
+pub(crate) fn walk_expression_writes(value: &Expr, mut visit: impl FnMut(usize, Option<&Expr>)) {
+    walk_expression(value, &mut |value| scoped_writes(value, &mut visit));
+}
+
+/// Whether evaluating an operand leaves the previously loaded local in place.
+pub(crate) fn expression_preserves_local(expression: &Expr, slot: usize) -> bool {
+    let mut preserved = true;
+    walk_expression_writes(expression, |written, _| preserved &= written != slot);
+    preserved
+}
+
+/// The expression walker handles nested operands. Each scope contributes its own suite and cleanup.
+fn scoped_writes(value: &Expr, visit: &mut impl FnMut(usize, Option<&Expr>)) {
+    match &value.kind {
+        ExprKind::Scope { body, clear, .. } => {
+            statement_writes(body, visit);
+            for &slot in clear {
+                visit(slot, None);
+            }
+        }
+        ExprKind::Bind(slot, _) => visit(*slot, None),
+        _ => {}
+    }
+}
+
+/// Visits writes in statement-owned suites. Expression scopes are separate roots.
+fn statement_writes(body: &[Statement], visit: &mut impl FnMut(usize, Option<&Expr>)) {
+    walk_block(body, &mut |statement| match statement {
+        Statement::Assign(slot, value) => visit(*slot, Some(value)),
+        Statement::Clear(slot) => visit(*slot, None),
+        Statement::Move(target, source) => {
+            visit(*target, None);
+            visit(*source, None);
+        }
+        Statement::Scope { clear, .. } => {
+            for &slot in clear {
+                visit(slot, None);
+            }
+        }
+        Statement::For {
+            target,
+            cursor,
+            stop,
+            step,
+            ..
+        } => {
+            for &slot in [target, cursor, stop, step] {
+                visit(slot, None);
+            }
+        }
+        Statement::Try { handlers, .. } => {
+            for handler in handlers {
+                if let Some(slot) = handler.name {
+                    visit(slot, None);
+                }
+            }
+        }
+        Statement::IterNext {
+            key, value, ready, ..
+        } => {
+            for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
+                visit(slot, None);
+            }
+        }
+        _ => {}
+    });
+}
+
+/// Visits one expression's operands. Scoped statements are handled by the caller.
+pub(crate) fn children<'a>(expression: &'a Expr, mut visit: impl FnMut(&'a Expr)) {
+    match &expression.kind {
+        ExprKind::Exception { message, .. } => {
+            if let Some(message) = message {
+                visit(message);
+            }
+        }
+        ExprKind::Dict { entries, .. } => {
+            for (key, value) in entries {
+                visit(key);
+                visit(value);
+            }
+        }
+        ExprKind::List(values)
+        | ExprKind::Set { values, .. }
+        | ExprKind::Tuple(values)
+        | ExprKind::Compare(values, _)
+        | ExprKind::Boolean(_, values)
+        | ExprKind::Builtin(_, values) => {
+            for value in values {
+                visit(value);
+            }
+        }
+        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+            for value in &args.values {
+                visit(value);
+            }
+        }
+        ExprKind::Callable { receiver, .. } => {
+            if let Some(receiver) = receiver {
+                visit(receiver);
+            }
+        }
+        ExprKind::Invoke { callable, args } => {
+            visit(callable);
+            for value in &args.values {
+                visit(value);
+            }
+        }
+        ExprKind::Scope { .. } => {
+            unreachable!("scoped statements require the full inspection or rewrite pass")
+        }
+        ExprKind::Bind(_, value)
+        | ExprKind::Present(value)
+        | ExprKind::Absent(value)
+        | ExprKind::Unwrap(value)
+        | ExprKind::Not(value)
+        | ExprKind::Negate(value)
+        | ExprKind::Field(value, _) => visit(value),
+        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
+            visit(left);
+            visit(right);
+        }
+        ExprKind::Conditional(test, yes, no) => {
+            visit(test);
+            visit(yes);
+            visit(no);
+        }
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Str(_)
+        | ExprKind::Bytes(_)
+        | ExprKind::None
+        | ExprKind::Local(_) => {}
     }
 }
 

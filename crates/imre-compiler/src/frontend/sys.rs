@@ -91,17 +91,40 @@ impl Checker<'_> {
                 self.graph.python_optimization(),
             ))));
         }
+        if attr.attr.as_str() == "utf8_mode" {
+            let mode = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::Logging(ir::LogOperation::FileEncodingUsesUtf8),
+                    vec![],
+                ),
+            };
+            return Ok(Some(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Int, vec![mode]),
+            }));
+        }
         let Some((flags, _)) = &self.graph.command_startup else {
-            return Ok(None);
+            if attr.attr.as_str() == "warn_default_encoding" {
+                return Err(self.object_builtin_error("sys.flags.warn_default_encoding", attr));
+            }
+            return Ok(
+                (attr.attr.as_str() == "context_aware_warnings").then(|| Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::SysContextAwareWarnings, vec![]),
+                }),
+            );
         };
         if attr.attr.as_str() == "safe_path" {
             return Ok(Some(Expr::boolean(flags.safe_path)));
         }
         let setting = match attr.attr.as_str() {
-            "isolated" | "ignore_environment" => flags.isolated,
+            "isolated" => flags.isolated,
+            "ignore_environment" => flags.ignore_environment,
+            "context_aware_warnings" => flags.context_aware_warnings,
             "dont_write_bytecode" => flags.dont_write_bytecode,
             "no_user_site" => flags.no_user_site,
-            "utf8_mode" => flags.utf8_mode,
+            "warn_default_encoding" => flags.warn_default_encoding,
             _ => return Err(error(self.source, attr, "unsupported sys.flags field")),
         };
         Ok(Some(Expr::integer(i64::from(setting))))
@@ -837,7 +860,7 @@ impl Checker<'_> {
             ty: self.types.struct_sequence(
                 "sys.thread_info",
                 &["name", "lock", "version"],
-                vec![text, Type::None, text],
+                vec![text; 3],
             ),
             kind: ExprKind::Builtin(Builtin::SysThreadInfo, vec![]),
         }

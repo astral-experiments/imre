@@ -48,13 +48,13 @@ fn unpack_error(message: Expr) -> Statement {
 
 impl Checker<'_> {
     /// Finds a target's storage without executing its receiver or index.
-    fn target_context(&self, target: &ast::Expr) -> Option<Type> {
+    fn target_context(&self, target: &ast::Expr, rhs: Option<&ast::Expr>) -> Option<Type> {
         if let ast::Expr::Name(name) = target {
             self.names
                 .get(name.id.as_str())
                 .map(|&slot| self.locals[slot])
         } else {
-            self.assignment_context(target)
+            self.assignment_context(target, rhs)
         }
     }
 
@@ -154,7 +154,7 @@ impl Checker<'_> {
                     .contains(&slot)
                     .then_some((name.id.as_str(), slot))
             });
-            let context = self.target_context(target);
+            let context = self.target_context(target, Some(&assignment.value));
             let value = if let Some((_, old)) = previous {
                 // Keep the original literal context (e.g. for []) while allowing
                 // a list-producing operation to determine its own element type.
@@ -185,7 +185,7 @@ impl Checker<'_> {
         let context = assignment
             .targets
             .iter()
-            .find_map(|target| self.target_context(target));
+            .find_map(|target| self.target_context(target, Some(&assignment.value)));
         let value = if let Some(expected) = context {
             assignments::unpromoted(self.expr_expected(&assignment.value, expected)?)
         } else {
@@ -222,6 +222,16 @@ impl Checker<'_> {
         match target {
             ast::Expr::Name(_) => self.assign(target, value),
             ast::Expr::Subscript(subscript) => {
+                if let Some(ty) = self.environ_item_type(&subscript.value) {
+                    let bytes = ty == Type::Bytes;
+                    let value = self.coerce(value, ty, target)?;
+                    let key = self.expr_expected(&subscript.slice, ty)?;
+                    return Ok(Statement::Expr(builtin(
+                        Type::None,
+                        Builtin::Process(ir::ProcessOperation::EnvironSet { bytes }),
+                        vec![value, key],
+                    )));
+                }
                 let receiver = self.expr(&subscript.value)?;
                 if let Some((key, element)) = self.types.chainmap_entries(receiver.ty) {
                     let value = self.coerce(value, element, target)?;
@@ -561,8 +571,19 @@ impl Checker<'_> {
                         clear: vec![],
                     });
                 }
+                let mock_effect = self.native_mock_instance(receiver.ty)
+                    && attribute.attr.as_str() == "side_effect";
                 let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
-                let value = self.coerce(value, ty, target)?;
+                let value = self.coerce(value, ty, target).map_err(|error| {
+                    if mock_effect {
+                        self.object_runtime_export(
+                            "unittest.mock side effect assignment",
+                            attribute,
+                        )
+                    } else {
+                        error
+                    }
+                })?;
                 Ok(Statement::SetField(receiver, field, value))
             }
             _ => Err(error(self.source, target, "unsupported assignment target")),
@@ -609,7 +630,7 @@ impl Checker<'_> {
                     values.push(if let Some(index) = target_index {
                         self.unpacking_value(&targets[index], value)?
                     } else if let ast::Expr::Starred(starred) = &targets[star.unwrap()]
-                        && let Some(context) = self.target_context(&starred.value)
+                        && let Some(context) = self.target_context(&starred.value, None)
                         && let Some(element) = self
                             .types
                             .element(self.types.payload(context).unwrap_or(context))
@@ -651,11 +672,11 @@ impl Checker<'_> {
                     .iter()
                     .filter_map(|target| match target {
                         ast::Expr::Starred(starred) => {
-                            let context = self.target_context(&starred.value)?;
+                            let context = self.target_context(&starred.value, None)?;
                             self.types
                                 .element(self.types.payload(context).unwrap_or(context))
                         }
-                        _ => self.target_context(target),
+                        _ => self.target_context(target, None),
                     })
                     .reduce(|left, right| {
                         // Every destination must accept the shared element
@@ -703,7 +724,7 @@ impl Checker<'_> {
                 }
             }
         }
-        if let Some(expected) = self.target_context(target) {
+        if let Some(expected) = self.target_context(target, Some(value)) {
             return self
                 .expr_expected(value, expected)
                 .map(assignments::unpromoted);
@@ -895,7 +916,7 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let remaining = &fields[start..fields.len() - suffix];
         let context = self
-            .target_context(target)
+            .target_context(target, None)
             .and_then(|ty| self.types.element(self.types.payload(ty).unwrap_or(ty)));
         let mut element = context.or(remaining.first().copied()).unwrap_or(Type::Int);
         if context.is_none() {
@@ -957,7 +978,7 @@ impl Checker<'_> {
             ],
         );
         let expected = self
-            .target_context(target)
+            .target_context(target, None)
             .and_then(|ty| self.types.element(self.types.payload(ty).unwrap_or(ty)))
             .unwrap_or(element);
         if self.types.element(slice.ty) == Some(expected) {

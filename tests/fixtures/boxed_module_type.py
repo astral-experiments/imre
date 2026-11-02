@@ -4,6 +4,7 @@ def current():
     import _weakref
     from types import ModuleType
 
+    assert not hasattr(types, "absent_from_imported_module")
     assert type(sys) is type(types) is ModuleType
     assert (ModuleType.__name__, ModuleType.__module__) == ("module", "builtins")
 

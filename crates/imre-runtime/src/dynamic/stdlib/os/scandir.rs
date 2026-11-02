@@ -1,6 +1,10 @@
 use super::{Context, Error, Id, NONE, Result, Value, builtins, c_path, native, posixpath, stat};
 use crate::objects::os::scandir as stream;
-use std::{cell::RefCell, ffi::CString, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::CString,
+    rc::Rc,
+};
 
 pub(in crate::dynamic) const ENTRY: &str = "posix.DirEntry";
 pub(in crate::dynamic) const ITER: &str = "posix.ScandirIterator";
@@ -27,7 +31,7 @@ pub(in crate::dynamic) struct Scan {
     directory: RefCell<stream::Directory>,
     prefix: Option<CString>,
     bytes: bool,
-    pub(in crate::dynamic) source: Id,
+    pub(in crate::dynamic) source: Cell<Id>,
     dir_fd: i32,
 }
 
@@ -108,7 +112,7 @@ pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
         directory: RefCell::new(directory),
         prefix,
         bytes,
-        source,
+        source: Cell::new(source),
         dir_fd,
     })));
     ctx.heap.register_finalizer(iterator);
@@ -119,17 +123,29 @@ pub(in crate::dynamic) fn iterator_repr(scan: &Rc<Scan>) -> String {
     format!("<posix.ScandirIterator object at {:p}>", Rc::as_ptr(scan))
 }
 
-pub(in crate::dynamic) fn finalize(ctx: &Context, scan: &Rc<Scan>) {
-    if !scan.directory.borrow().is_open() {
-        return;
+pub(in crate::dynamic) fn finalize(ctx: &mut Context, owner: Id, scan: &Rc<Scan>) {
+    if scan.directory.borrow().is_open() {
+        scan.directory.borrow_mut().close();
+        let iterator = iterator_repr(scan);
+        if let Err(error) = ctx.emit_builtin_warning_with_source(
+            crate::objects::exceptions::Kind::ResourceWarning,
+            &format!("unclosed scandir iterator {iterator}"),
+            1,
+            owner,
+        ) {
+            let warning = ctx.builtin("Warning");
+            if ctx.raised_error_matches(&error, warning) {
+                super::super::super::unraisable::report(
+                    ctx,
+                    error,
+                    true,
+                    None,
+                    &format!("Exception ignored while finalizing scandir iterator {iterator}"),
+                );
+            }
+        }
     }
-    scan.directory.borrow_mut().close();
-    let location = ctx.heap.current_location();
-    let (file, line) = location.as_ref().map_or(("<string>", 1), |loc| {
-        (loc.file.as_ref(), loc.line as isize)
-    });
-    let module = &ctx.scope_data(ctx.heap.current_scope()).module;
-    crate::objects::unclosed_scandir(module, file, line, &iterator_repr(scan));
+    ctx.heap.weak_edge_removed(scan.source.replace(NONE));
 }
 
 fn spelling(ctx: &mut Context, bytes: Vec<u8>, as_bytes: bool) -> Result<Id> {
@@ -145,7 +161,7 @@ pub(in crate::dynamic) fn advance(ctx: &mut Context, scan: Rc<Scan>) -> Result<O
         .directory
         .borrow_mut()
         .next_entry()
-        .map_err(|error| path_error(ctx, error, scan.source))?;
+        .map_err(|error| path_error(ctx, error, scan.source.get()))?;
     let Some(entry) = next else {
         return Ok(None);
     };
@@ -284,7 +300,7 @@ pub(in crate::dynamic) fn method(
         return Ok(match name {
             "__iter__" | "__enter__" => id,
             "__del__" => {
-                finalize(ctx, &scan);
+                finalize(ctx, id, &scan);
                 NONE
             }
             "__next__" => advance(ctx, scan)?.ok_or_else(|| Error::new("StopIteration", ""))?,

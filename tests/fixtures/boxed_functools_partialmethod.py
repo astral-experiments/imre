@@ -1,0 +1,45 @@
+import functools
+
+
+def current():
+    placeholder = functools.Placeholder
+
+    def record(*args, **keywords):
+        return args, keywords
+
+    class Callable:
+        def __call__(self, *args, **keywords):
+            return args, keywords
+
+    class Owner:
+        basic = functools.partialmethod(record, 2, value=3)
+        combined = functools.partialmethod(basic, 4, extra=5)
+        static = functools.partialmethod(staticmethod(record), 2)
+        cls = functools.partialmethod(classmethod(record), 2)
+        over_partial = functools.partialmethod(functools.partial(record, extra=6), 3)
+        callable = functools.partialmethod(Callable(), placeholder, 4)
+        filled = functools.partialmethod(callable, 9)
+
+    obj = Owner()
+    assert obj.basic(4, value=5) == ((obj, 2, 4), {'value': 5})
+    assert Owner.basic(obj, value=6) == ((obj, 2), {'value': 6})
+    assert obj.combined(6) == ((obj, 2, 4, 6), {'value': 3, 'extra': 5})
+    assert obj.basic.__self__ is obj
+    assert Owner.cls.__self__ is Owner
+    assert obj.cls(5) == ((Owner, 2, 5), {})
+    assert obj.over_partial.__self__ is obj
+    assert obj.over_partial(5) == ((obj, 3, 5), {'extra': 6})
+    assert obj.static(5) == ((2, 5), {})
+    assert obj.callable(1, 2) == ((obj, 1, 4, 2), {})
+    assert obj.filled(7) == ((obj, 9, 4, 7), {})
+    for invalid in (lambda: obj.callable(),
+                    lambda: functools.partialmethod(None),
+                    lambda: functools.partialmethod(record, placeholder),
+                    lambda: functools.partialmethod(record, value=placeholder)):
+        try:
+            invalid()
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("expected TypeError")
+    print("partialmethod bindings passed")

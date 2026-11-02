@@ -275,6 +275,14 @@ impl Checker<'_> {
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
         use InstanceType::{Deque, Exact, List, Tuple};
+        let classinfo = expression
+            .as_subscript_expr()
+            .map_or(expression, |item| item.value.as_ref());
+        if self.collection_binding(classinfo)
+            == Some(Binding::Intrinsic(Intrinsic::TYPING_SEQUENCE))
+        {
+            return Err(self.object_runtime_export("typing.Sequence", expression));
+        }
         if self.collection_binding(expression) == Some(Binding::Intrinsic(Intrinsic::Number)) {
             // int includes bool and IntEnum. The typed value representation has no complex.
             return Ok(vec![Exact(Type::Int), Exact(Type::Float)]);
@@ -353,7 +361,9 @@ impl Checker<'_> {
         }
         if matches!(
             self.collection_binding(expression),
-            Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+            Some(Binding::Intrinsic(
+                Intrinsic::Mapping | Intrinsic::TYPING_MAPPING
+            ))
         ) {
             let mut classes = vec![InstanceType::Dict];
             classes.extend(
@@ -367,10 +377,22 @@ impl Checker<'_> {
             );
             return Ok(classes);
         }
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::CodecInfoClass)) {
+        if self.resolve(expression)
+            == Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                "codecs.CodecInfo",
+            )))
+        {
             return Ok(vec![InstanceType::Exact(Type::CodecInfo)]);
         }
-        if let Some(Binding::Intrinsic(Intrinsic::IoBase(base))) = self.resolve(expression) {
+        // Fixed I/O values can answer isinstance without materializing the public ABC.
+        let io_base = match self.resolve(expression) {
+            Some(Binding::Intrinsic(Intrinsic::IO_BASE)) => Some(ir::IoBase::Any),
+            Some(Binding::Intrinsic(Intrinsic::RAW_IO_BASE)) => Some(ir::IoBase::Raw),
+            Some(Binding::Intrinsic(Intrinsic::BUFFERED_IO_BASE)) => Some(ir::IoBase::Buffered),
+            Some(Binding::Intrinsic(Intrinsic::TEXT_IO_BASE)) => Some(ir::IoBase::Text),
+            _ => None,
+        };
+        if let Some(base) = io_base {
             return Ok(vec![InstanceType::IoBase(base)]);
         }
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::IntEnum)) {
@@ -581,6 +603,14 @@ impl Checker<'_> {
                 "issubclass requires two positional operands",
             ));
         };
+        // Either operand can require a runtime class before the other has a static value.
+        for operand in [first, second] {
+            if let Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) =
+                self.resolve(operand)
+            {
+                return Err(self.object_runtime_export(name, call));
+            }
+        }
         let mut class_operand = |operand: &ast::Expr| {
             if self.collection_binding(operand) == Some(Binding::Intrinsic(Intrinsic::Number)) {
                 Ok(annotations::class_value("numbers.Number"))

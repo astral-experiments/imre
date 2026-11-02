@@ -10,6 +10,8 @@ def current():
             events.append(("exit", kind, exc, tb))
 
     case = unittest.TestCase()
+    other = unittest.TestCase()
+    assert case._cleanups == [] and case._cleanups is not other._cleanups
     manager = Manager()
     manager.__enter__ = lambda: -1
     case.addCleanup(events.append, "oldest")
@@ -40,3 +42,13 @@ def current():
     except KeyboardInterrupt:
         print("interrupted", events[-1])
     print(case.doCleanups(), events[-1])
+
+    from unittest.case import _Outcome
+    result = unittest.TestResult()
+    case._outcome = _Outcome(result)
+    case.addCleanup(broken, message="recorded cleanup error")
+    assert not case.doCleanups()
+    assert not case._outcome.success
+    [(failed, detail)] = result.errors
+    assert failed is case
+    assert "ValueError: recorded cleanup error" in detail

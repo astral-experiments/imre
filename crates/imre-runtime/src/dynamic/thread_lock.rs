@@ -6,10 +6,11 @@ use crate::objects::locks::{timeout_float, timeout_int};
 pub(super) const CLASS: &str = "_thread.lock";
 
 pub(super) fn is_method(name: &str) -> bool {
-    matches!(
-        name,
-        "acquire" | "release" | "locked" | "__enter__" | "__exit__"
-    )
+    (cfg!(unix) && name == "_at_fork_reinit")
+        || matches!(
+            name,
+            "acquire" | "release" | "locked" | "__enter__" | "__exit__"
+        )
 }
 
 pub(super) fn construct(
@@ -38,6 +39,39 @@ pub(super) fn construct(
     Ok(ctx.alloc(Value::PrimitiveLock(Default::default())))
 }
 
+pub(super) fn acquire_args(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(bool, Option<std::time::Duration>)> {
+    let [blocking, timeout] =
+        bind_method_arguments("acquire", args, kwargs, ["blocking", "timeout"], 2)?;
+    let blocking = ctx.optional_truth(blocking, true)?;
+    let timeout = match timeout {
+        None => None,
+        Some(value) => match *ctx.heap.get(ctx.scalar_value(value)) {
+            Value::Float(seconds) => timeout_float(blocking, seconds)?,
+            _ => {
+                let seconds = ctx.index_value(value)?.ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "'{}' object cannot be interpreted as an integer or float",
+                            ctx.type_name(value)
+                        ),
+                    )
+                })?;
+                timeout_int(blocking, &seconds)?
+            }
+        },
+    };
+    if let Some(started) = ctx.threads.acquire_bound.take() {
+        // The receiver and all arguments to the terminal acquire are now bound.
+        let _ = started.send(());
+    }
+    Ok((blocking, timeout))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     name: &str,
@@ -61,27 +95,7 @@ pub(super) fn method(
     };
     let lock = lock.clone();
     if matches!(name, "acquire" | "__enter__") {
-        let [blocking, timeout] =
-            bind_method_arguments("acquire", args, kwargs, ["blocking", "timeout"], 2)?;
-        let blocking = ctx.optional_truth(blocking, true)?;
-        let timeout = match timeout {
-            None => None,
-            Some(value) => match *ctx.heap.get(value) {
-                Value::Float(seconds) => timeout_float(blocking, seconds)?,
-                _ => {
-                    let seconds = ctx.index_value(value)?.ok_or_else(|| {
-                        Error::new(
-                            "TypeError",
-                            format!(
-                                "'{}' object cannot be interpreted as an integer or float",
-                                ctx.type_name(value)
-                            ),
-                        )
-                    })?;
-                    timeout_int(blocking, &seconds)?
-                }
-            },
-        };
+        let (blocking, timeout) = acquire_args(ctx, args, kwargs)?;
         return Ok(boolean(lock.acquire(blocking, timeout)));
     }
     if !kwargs.is_empty() {
@@ -102,6 +116,14 @@ pub(super) fn method(
         ));
     }
     match name {
+        #[cfg(unix)]
+        "_at_fork_reinit" => {
+            let Value::PrimitiveLock(lock) = ctx.heap.get_mut(id) else {
+                unreachable!("lock receiver checked above");
+            };
+            crate::objects::locks::PrimitiveLock::at_fork_reinit(lock);
+            Ok(NONE)
+        }
         "locked" => Ok(boolean(lock.locked())),
         "release" | "__exit__" => {
             lock.release()?;

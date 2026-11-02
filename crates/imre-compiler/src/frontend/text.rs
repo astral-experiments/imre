@@ -228,9 +228,9 @@ impl Checker<'_> {
         })
     }
 
-    /// Bind splitlines and no-argument text predicates after evaluating the receiver; an explicit
+    /// Bind splitlines and no-argument string methods after evaluating the receiver; an explicit
     /// keepends uses Python truth, including its fallible source-class protocol.
-    pub(super) fn splitlines_or_predicate(
+    pub(super) fn splitlines_or_unary_text(
         &mut self,
         receiver: Expr,
         name: &str,
@@ -238,7 +238,10 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let split = name == "splitlines";
-        let returns = if split {
+        let mapping = matches!(name, "title" | "swapcase");
+        let returns = if mapping {
+            Type::Str
+        } else if split {
             self.types.list(Type::Str)
         } else {
             Type::Bool
@@ -246,7 +249,14 @@ impl Checker<'_> {
         let args = &call.arguments;
         let count = args.args.len() + args.keywords.len();
         if count == 0 {
-            let kind = if split {
+            let kind = if mapping {
+                ExprKind::Builtin(
+                    Builtin::Text(TextOperation::CaseMap {
+                        title: name == "title",
+                    }),
+                    vec![receiver],
+                )
+            } else if split {
                 // Preserve the existing bytes.decode().splitlines() path and
                 // direct-iteration fusion for the no-argument method.
                 match receiver.kind {
@@ -270,8 +280,12 @@ impl Checker<'_> {
             } else {
                 let predicate = match name {
                     "isalnum" => ir::TextPredicate::Alnum,
+                    "isascii" => ir::TextPredicate::Ascii,
+                    "isalpha" => ir::TextPredicate::Alpha,
+                    "isdigit" => ir::TextPredicate::Digit,
                     "isspace" => ir::TextPredicate::Space,
                     "islower" => ir::TextPredicate::Lower,
+                    "istitle" => ir::TextPredicate::Title,
                     "isupper" => ir::TextPredicate::Upper,
                     _ => unreachable!("resolved text predicate"),
                 };
@@ -282,11 +296,12 @@ impl Checker<'_> {
             };
             return Ok(Expr { ty: returns, kind });
         }
-        // Typeshed limits keepends to bool; the runtime truth-tests any
-        // represented value. Defer only this resolved method's overload.
-        if split {
+        // Typeshed overloads splitlines and the case mappings. Their runtime
+        // paths check these arguments after evaluating the operands.
+        if split || mapping {
             self.graph.checked_overload(self.module, call.range());
-        } else {
+        }
+        if !split {
             for arg in &args.args {
                 self.graph.checked_excess_argument(self.module, arg.range());
             }
@@ -389,6 +404,43 @@ impl Checker<'_> {
             }
         }
         self.expr(argument)
+    }
+
+    /// Convert the positional-only field width after evaluating the string receiver.
+    pub(super) fn zfill(
+        &mut self,
+        receiver: Expr,
+        call: &ast::ExprCall,
+        copy: bool,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let ([width], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            let error = self.one_positional_error(call, "str.zfill", "width", Type::Str)?;
+            self.graph.checked_overload(self.module, call.range());
+            return Ok(self.evaluated_receiver(Some(receiver), error));
+        };
+        let value = self.expr(width)?;
+        // An indirect descriptor call has no syntactic receiver to root a Python __index__.
+        if self.graph.reachable_only()
+            && !matches!(value.ty, Type::Int | Type::Bool | Type::IntEnum(_))
+            && !matches!(call.func.as_ref(), ast::Expr::Attribute(attr) if attr.attr.as_str() == "zfill")
+        {
+            return Err(self.object_builtin_error("indirect str.zfill width", width));
+        }
+        let size = self
+            .index_word(value, width, false)
+            .map_err(|_| self.object_builtin_error("str.zfill width", width))?;
+        self.graph.checked_argument_type(self.module, width.range());
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(
+                Builtin::Text(TextOperation::ZFill { copy }),
+                vec![receiver, size],
+            ),
+        })
     }
 
     /// Preserve ordinal lookup semantics only for plain tables without Python callbacks.

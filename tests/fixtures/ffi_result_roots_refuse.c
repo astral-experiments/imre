@@ -9,7 +9,6 @@ void *__real_malloc(size_t size);
 void *__real_calloc(size_t,size_t);
 void *__real_realloc(void *ptr, size_t size);
 uint64_t __real_imre_dyn_lit(void *, int, const unsigned char *, size_t);
-uint64_t __real_imre_dyn_op(void *, const char *, uint64_t, uint64_t, uint64_t);
 uint64_t __real_imre_dyn_op_at(void *, const char *, uint64_t, uint64_t, uint64_t, const uint32_t (*)[4]);
 
 static _Thread_local int after_put, refused;
@@ -53,10 +52,6 @@ uint64_t __wrap_imre_dyn_op_at(void *ctx, const char *op, uint64_t a, uint64_t b
     return leave(op, probe, __real_imre_dyn_op_at(ctx, op, a, b, c, span));
 }
 
-uint64_t __wrap_imre_dyn_op(void *ctx, const char *op, uint64_t a, uint64_t b, uint64_t c) {
-    int probe = enter(op);
-    return leave(op, probe, __real_imre_dyn_op(ctx, op, a, b, c));
-}
 
 uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, size_t len) {
     static const char marker[] = "start formatter allocation probe 2332";

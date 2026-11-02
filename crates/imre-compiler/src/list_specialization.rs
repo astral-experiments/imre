@@ -50,15 +50,7 @@ fn rewrite_block(body: &mut [Statement], locals: &mut Vec<Type>) {
             continue;
         }
         let mut written = vec![false; locals.len()];
-        mark_writes(body, &mut written);
-        walk_expressions(body, &mut |expression| {
-            if let ExprKind::Scope { body, clear, .. } = &expression.kind {
-                mark_writes(body, &mut written);
-                for &slot in clear {
-                    written[slot] = true;
-                }
-            }
-        });
+        crate::ir::walk_writes(body, |slot, _| written[slot] = true);
         if while_source.is_some_and(|source| written[source]) {
             continue;
         }
@@ -194,69 +186,6 @@ fn statements_contain_loop(body: &[Statement]) -> bool {
         }
         _ => false,
     })
-}
-
-/// Marks all statement-owned writes, including cleanup on abrupt scope exits.
-/// Embedded expression scopes are visited separately by the shared IR walker.
-pub(crate) fn mark_writes(body: &[Statement], written: &mut [bool]) {
-    for statement in body {
-        match statement {
-            Statement::Assign(slot, _) | Statement::Clear(slot) => written[*slot] = true,
-            Statement::Move(target, source) => {
-                written[*target] = true;
-                written[*source] = true;
-            }
-            Statement::Scope { body, clear } => {
-                mark_writes(body, written);
-                for &slot in clear {
-                    written[slot] = true;
-                }
-            }
-            Statement::If(_, yes, no) | Statement::While(_, yes, no) => {
-                mark_writes(yes, written);
-                mark_writes(no, written);
-            }
-            Statement::For {
-                target,
-                cursor,
-                stop,
-                step,
-                body,
-                orelse,
-                ..
-            } => {
-                for &slot in [target, cursor, stop, step] {
-                    written[slot] = true;
-                }
-                mark_writes(body, written);
-                mark_writes(orelse, written);
-            }
-            Statement::IterNext {
-                key, value, ready, ..
-            } => {
-                for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
-                    written[slot] = true;
-                }
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                mark_writes(body, written);
-                for handler in handlers {
-                    if let Some(slot) = handler.name {
-                        written[slot] = true;
-                    }
-                    mark_writes(&handler.body, written);
-                }
-                mark_writes(orelse, written);
-                mark_writes(finalbody, written);
-            }
-            _ => {}
-        }
-    }
 }
 
 struct Plan<'a> {

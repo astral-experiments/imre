@@ -63,6 +63,15 @@ def current():
     assert len(tracebacks) == 2 and all(tracebacks)
     assert all(item() is None for item in locals_seen)
 
+    class ShortMessage(TestCase):
+        longMessage = False
+
+    short = ShortMessage()
+    assert TestCase.longMessage is True
+    assert short.longMessage is False
+    short.longMessage = True
+    assert short.longMessage is True and ShortMessage().longMessage is False
+
     case.longMessage = False
     message = ["input"]
     try:

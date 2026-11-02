@@ -37,6 +37,7 @@ const NODES: &[Node] = &[
     node!(expr: AST, true;),
     node!(expr_context: AST, false;),
     node!(operator: AST, false;),
+    node!(cmpop: AST, false;),
     node!(unaryop: AST, false;),
     node!(Module: mod, false; body: List, type_ignores: List),
     node!(Expression: mod, false; body: Required),
@@ -61,6 +62,17 @@ const NODES: &[Node] = &[
     node!(Dict: expr, true; keys: List, values: List),
     node!(UnaryOp: expr, true; op: Required, operand: Required),
     node!(BinOp: expr, true; left: Required, op: Required, right: Required),
+    node!(Compare: expr, true; left: Required, ops: List, comparators: List),
+    node!(Eq: cmpop, false;),
+    node!(NotEq: cmpop, false;),
+    node!(Lt: cmpop, false;),
+    node!(LtE: cmpop, false;),
+    node!(Gt: cmpop, false;),
+    node!(GtE: cmpop, false;),
+    node!(Is: cmpop, false;),
+    node!(IsNot: cmpop, false;),
+    node!(In: cmpop, false;),
+    node!(NotIn: cmpop, false;),
     node!(Add: operator, false;),
     node!(Sub: operator, false;),
     node!(Mult: operator, false;),
@@ -78,6 +90,8 @@ const NODES: &[Node] = &[
     node!(USub: unaryop, false;),
     node!(Not: unaryop, false;),
     node!(Invert: unaryop, false;),
+    node!(TemplateStr: expr, true; values: List),
+    node!(Interpolation: expr, true; value: Required, str: Required, conversion: Required, format_spec: Optional),
     node!(JoinedStr: expr, true; values: List),
     node!(FormattedValue: expr, true; value: Required, conversion: Required, format_spec: Optional),
     node!(Load: expr_context, false;),
@@ -122,6 +136,9 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         let ancestors = ctx.lineage(base);
         let class = ctx.alloc(Value::Class {
             namedtuple_fields: None,
+            io_kind: None,
+            hash_type: None,
+            metaclass: None,
             name: spec.name.into(),
             scope,
             ancestors,
@@ -130,7 +147,7 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         ctx.bind(module, spec.name, class);
     }
     for spec in NODES {
-        if matches!(spec.base, "expr_context" | "operator" | "unaryop") {
+        if matches!(spec.base, "expr_context" | "operator" | "unaryop" | "cmpop") {
             let singleton = parsed_instance(ctx, spec.name, &[], None);
             ctx.builtins
                 .insert(format!("ast._{}", spec.name), singleton);
@@ -245,6 +262,8 @@ fn parsed_instance(
         scalar: None,
         property: None,
         weak_reference: None,
+        cycle: None,
+        member_values: None,
         memory_stream: None,
     })
 }

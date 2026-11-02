@@ -1,4 +1,4 @@
-from dataclasses import KW_ONLY, FrozenInstanceError, InitVar, asdict, dataclass, field, fields
+from dataclasses import KW_ONLY, FrozenInstanceError, InitVar, asdict, astuple, dataclass, field, fields
 
 
 @dataclass
@@ -69,6 +69,46 @@ def replacement():
         raise AssertionError("accepted a missing InitVar")
 
 
+def mapping_conversion():
+    from collections import defaultdict
+
+    @dataclass
+    class Row:
+        value: int
+
+    @dataclass
+    class Table:
+        groups: dict
+
+    class Mapping(dict):
+        def __deepcopy__(self, memo):
+            return "copied mapping"
+
+    groups = defaultdict(list)
+    groups['a'].append(Row(3))
+    table = Table(Mapping([('group', groups)]))
+    tuple_groups = astuple(table)[0]
+    dict_groups = asdict(table)['groups']
+    assert type(tuple_groups) is type(dict_groups) is Mapping
+    tuple_group, dict_group = tuple_groups['group'], dict_groups['group']
+    assert type(tuple_group) is type(dict_group) is defaultdict
+    assert tuple_group.default_factory is dict_group.default_factory is list
+    assert tuple_group == {'a': [(3,)]}
+    assert dict_group == {'a': [{'value': 3}]}
+    assert tuple_group['a'] is not groups['a'] and dict_group['a'] is not groups['a']
+
+    import collections
+    import weakref
+
+    mapping = Mapping()
+    assert asdict(Table(weakref.proxy(mapping))) == {"groups": "copied mapping"}
+    try:
+        collections.defaultdict = tuple
+        assert asdict(Table(groups))["groups"].default_factory is list
+    finally:
+        collections.defaultdict = defaultdict
+
+
 def current():
     @dataclass
     class Base:
@@ -103,6 +143,25 @@ def current():
                 item = [i]
             return NotImplemented
 
+    class Metadata:
+        def __init__(self):
+            self.values = {}
+
+        def __getitem__(self, key):
+            return self.values[key]
+
+        def __len__(self):
+            return len(self.values)
+
+        def __bool__(self):
+            raise AssertionError("proxy truth must use the mapping length")
+
+    metadata = Metadata()
+    view = field(metadata=metadata).metadata
+    assert not view
+    metadata.values["code"] = 7
+    assert view and len(view) == 1 and view["code"] == 7
+
     clearing = Clearing(code=7)
     clearing.left = [field(metadata=clearing).metadata]
     clearing.right = [field(metadata={"code": 7}).metadata]
@@ -110,13 +169,33 @@ def current():
 
     backing = {"code": 7}
     view = field(metadata=backing).metadata
+    from types import MappingProxyType
+    assert type(view) is MappingProxyType
+    assert MappingProxyType(mapping=backing) == view
+    import re
+    assert MappingProxyType(re.match('x', 'x'))[0] == 'x'
     assert view == {"code": 7} and {"code": 7} == view
     backing["code"] = 9
     assert view != {"code": 7} and view["code"] == 9
+    nested = field(metadata=view).metadata
+    assert list(nested) == ["code"] and list(nested.items()) == [("code", 9)]
+    assert nested["code"] == 9 and len(nested) == 1
+    assert str(nested) == "{'code': 9}"
+    assert repr(nested) == "mappingproxy(mappingproxy({'code': 9}))"
+    backing["view"] = view
+    assert repr(view) == "mappingproxy({'code': 9, 'view': mappingproxy({...})})"
     assert InitVar[int].type is int
     assert repr(InitVar[int]) == "dataclasses.InitVar[int]"
     assert repr(InitVar[list[int]]) == "dataclasses.InitVar[list[int]]"
     assert repr(InitVar[int | str]) == "dataclasses.InitVar[int | str]"
+    assert Entry.__init__.__globals__ is globals()
+    assert repr(Entry.__init__.__defaults__[0]) == "<factory>"
+    marker = Entry.__init__.__kwdefaults__["options"]
+    Entry.__init__.__kwdefaults__["options"] = "custom"
+    try:
+        assert Entry("changed").options == "custom"
+    finally:
+        Entry.__init__.__kwdefaults__["options"] = marker
     a = Entry("root")
     b = Entry(name="root")
     assert a == b and not (a != b) and a.label() == "ROOT"
@@ -183,4 +262,5 @@ def current():
         raise AssertionError("comparison swallowed the field lookup error")
 
     replacement()
+    mapping_conversion()
     print("boxed dataclasses")

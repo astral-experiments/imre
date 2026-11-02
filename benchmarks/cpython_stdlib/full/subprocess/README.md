@@ -89,20 +89,74 @@ change the results of the default reference command.
 
 ## Pipes and communication
 
-The same native-body command now executes 11 unchanged methods (the keys
-under `native_body_host_fixtures` in its result) at both levels. It covers stdin writes,
+The earlier native-body run executed 11 unchanged methods (the keys
+under `native_body_host_fixtures` in its result) at both levels. It covered stdin writes,
 stdout/stderr reads, merged output, EOF/closed state, and `communicate` with
 zero or one pipe. `ProcessTestCase.test_communicate_stdout` and
 `test_communicate_stderr` now have native-parent evidence as well as the older
-child-only observation. The native body of
-`test_post_timeout_communicate_sends_input` is attempted and reported under
-`blocked`: the compiler does not infer that its exception handler calling
-`self.fail()` cannot return. The original body is not rewritten.
+child-only observation.
+
+In `ProcessTestCase.test_post_timeout_communicate_sends_input`, the first
+`communicate()` timed out with 4,105 input bytes pending. At O0 and O3 the
+compiled original retried on the same child, sent all 4,105 bytes and closed
+stdin. The CPython child echoed the input plus a newline and exited zero.
+[Receipt](communicate-post-timeout-input-linux.json)
+
+To run the default-poll timeout original alone, add
+`--case test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output`
+to the native-body command above. The compiled `unittest.TestCase` checks that
+the first `communicate()` raises `TimeoutExpired` and that a second call on the
+same child returns all 262,144 stdout bytes. Pinned CPython supplies the
+original fixtures and runs the literal child program.
+
+`--case test.test_subprocess.ProcessTestCase.test_communicate_timeout` runs the
+text-mode retry original. The native `unittest.TestCase` checks `TimeoutExpired`
+and compares the complete stdout and stderr on the second `communicate()`
+call. Pinned CPython runs the original fixtures and child. The
+[Linux receipt](communicate-timeout-text-linux.json) records the partial stderr
+and both complete streams at O0 and O3.
+
+`--case test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input`
+runs the original with runtime-loaded modules. The compiled parent sends a byte
+memoryview to an Imre `-c` child, checks the 18 echoed bytes and that stderr is
+`None`, and runs both registered pipe cleanups. Pinned CPython supplies the
+original fixture hooks. [Linux receipt](memoryview-input-linux.json)
+
+The default-poll `test_communicate_memoryview_input_nonbyte` sends a
+memoryview of an integer array to an Imre `-c` child. The original compares
+the child's binary echo with `array.tobytes()`, checks that stderr is `None`,
+and registers two pipe cleanups. [Linux receipt](communicate-nonbyte-memoryview-linux.json)
+
+Four default-poll `ProcessTestCase` methods previously had host-driven native
+operation evidence. Their bodies now run in Imre. The two EPIPE originals check that communicating with a 1 MiB input returns without a broken-pipe exception. The pipe-buffer original checks the echo under
+backpressure, and the descriptor-leak original checks all seven nonempty pipe
+configurations. Pinned CPython supplies the original fixture hooks and their
+selected zero-exit command. The stderr-only original already had native-body
+credit. [Linux receipt](communicate-pipes-family-linux.json)
 
 The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
 a 200,000-byte exchange on all three pipes, recovery after a zero deadline,
 rejection of new input, repeated output, text newline conversion, and shared
 descriptor/close state. It is not another upstream ID.
+
+On public commit `6a399d7f`, the normal unittest lifecycle passed six
+default-poll originals at O0 and O3. These are ordinals 118, 119, 122, 123,
+124, and 126 in the 353-case stock discovery order. The receipt records the
+positive cases, fault controls, and terminal process-group checks separately.
+[Six intact communicate originals](communicate-intact-six-linux.json)
+
+The coordinator credited ordinal 122 as the one addition to 177. Ordinals 118,
+119, 123, 124, and 126 were already included. [Score update](https://github.com/astral-experiments/imre/pull/3851)
+
+POSIX ordinal 33, `test_communicate_BrokenPipeError_stdin_flush`, failed at
+O0 and O3 on `8ea92fe7` because the replacement stdin received zero flush calls.
+Public commit `934c42f0` passed the unchanged method through its fixtures at
+both levels. Both parents read 2,163 bytes from the native help child's stdout,
+observed EOF and reaped both the help child and the module fixture. Separate
+controls checked which pipe received the input and which errors propagated.
+The raw bundle `communicate-flush-receipt.tar.gz` has SHA-256
+`710b0f6b85f96bb29c9e4cc319721fe29b29103ba74b22112e44c6dff53b16d1`.
+[Original and controls](communicate-replaced-stdin-linux.json)
 
 ## Original fixtures and per-ID evidence
 

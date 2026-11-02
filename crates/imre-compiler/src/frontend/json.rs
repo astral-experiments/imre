@@ -478,6 +478,62 @@ impl Checker<'_> {
                 && !self.comprehension_targets.contains(name.id.as_str()))
     }
 
+    /// Check an encoding operand using the same schema and display rules for
+    /// module functions and encoder instances.
+    fn json_encoding_input(
+        &mut self,
+        source_node: &ast::Expr,
+        standard: bool,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let source = match source_node {
+            display if standard && documents::constant(display) && needs_document(display) => {
+                self.expr_expected(display, documents::ANY)?
+            }
+            ast::Expr::List(items) if standard && items.elts.is_empty() => {
+                self.expr_expected(source_node, Type::ListInt)?
+            }
+            ast::Expr::Dict(items) if standard && items.items.is_empty() => {
+                self.expr_expected(source_node, self.types.dict(Type::Str, Type::Int))?
+            }
+            _ => self.expr(source_node)?,
+        };
+        let schema = source.ty;
+        if standard {
+            check_standard_encoding(schema, self.types)
+        } else {
+            check_type(schema, self.types, &mut Vec::new())
+        }
+        .map_err(|message| error(self.source, call, message))?;
+        Ok(source)
+    }
+
+    pub(super) fn json_encoder_method(
+        &mut self,
+        receiver: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let source = match (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) {
+            ([value], []) => value,
+            ([], [keyword]) if keyword.arg.as_deref() == Some("o") => &keyword.value,
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "JSONEncoder.encode requires one value",
+                ));
+            }
+        };
+        let value = self.json_encoding_input(source, true, call)?;
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::JsonEncoderEncode(value.ty), vec![receiver, value]),
+        })
+    }
+
     /// Keep source keyword order while passing a fixed native encoding ABI.
     pub(super) fn json_encode(
         &mut self,
@@ -514,25 +570,8 @@ impl Checker<'_> {
                 ));
             }
         }
-        let source = match source {
-            display if standard && documents::constant(display) && needs_document(display) => {
-                self.expr_expected(display, documents::ANY)?
-            }
-            ast::Expr::List(items) if standard && items.elts.is_empty() => {
-                self.expr_expected(source, Type::ListInt)?
-            }
-            ast::Expr::Dict(items) if standard && items.items.is_empty() => {
-                self.expr_expected(source, self.types.dict(Type::Str, Type::Int))?
-            }
-            _ => self.expr(source)?,
-        };
+        let source = self.json_encoding_input(source, standard, call)?;
         let schema = source.ty;
-        if standard {
-            check_standard_encoding(schema, self.types)
-        } else {
-            check_type(schema, self.types, &mut Vec::new())
-        }
-        .map_err(|message| error(self.source, call, message))?;
         let slot = self.hidden(schema);
         let mut body = vec![Statement::Assign(slot, source)];
         let mut clear = vec![slot];

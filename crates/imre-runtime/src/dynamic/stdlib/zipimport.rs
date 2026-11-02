@@ -3,7 +3,8 @@
 use std::collections::hash_map::Entry;
 use std::path::Path;
 
-use super::{Context, Error, FALSE, Id, Result, TRUE, Value};
+use super::super::builtins::boolean;
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use crate::objects::ZipArchive;
 
 /// Use the same cached directory and member reader as the typed loader.
@@ -14,11 +15,13 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match (name, args, kwargs) {
-        ("exists", [path], []) => Ok(if Path::new(ctx.str_value(*path)?).exists() {
-            TRUE
-        } else {
-            FALSE
-        }),
+        ("exists", [path], []) => Ok(boolean(Path::new(ctx.str_value(*path)?).exists())),
+        ("isfile", [path], []) => Ok(boolean(Path::new(ctx.str_value(*path)?).is_file())),
+        ("invalidate", [path], []) => {
+            let path = ctx.str_value(*path)?.to_owned();
+            ctx.zip_directories.remove(&path);
+            Ok(NONE)
+        }
         ("index", [path], []) => {
             let path = ctx.str_value(*path)?.to_owned();
             if let Entry::Vacant(slot) = ctx.zip_directories.entry(path) {
