@@ -966,6 +966,8 @@ impl IntrinsicModule {
             (Self::Ast, "iter_fields") => Intrinsic::ObjectRuntimeExport("ast.iter_fields"),
             (Self::Ast, "NodeVisitor") => Intrinsic::ObjectRuntimeExport("ast.NodeVisitor"),
             (Self::Ast, "NodeTransformer") => Intrinsic::ObjectRuntimeExport("ast.NodeTransformer"),
+            (Self::Ast, "TemplateStr") => Intrinsic::ObjectRuntimeExport("ast.TemplateStr"),
+            (Self::Ast, "Interpolation") => Intrinsic::ObjectRuntimeExport("ast.Interpolation"),
             (Self::Ast, "literal_eval") => Intrinsic::ObjectRuntimeExport("ast.literal_eval"),
             (Self::Gc, "collect") => Intrinsic::ObjectRuntimeExport("gc.collect"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
