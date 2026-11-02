@@ -82,6 +82,8 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             &["days", "seconds", "microseconds"],
             &[
                 "__bool__",
+                "__pos__",
+                "__abs__",
                 "__neg__",
                 "__add__",
                 "__radd__",
@@ -320,7 +322,7 @@ fn nearest_quotient(ctx: &Context, numerator: Id, denominator: Id) -> Result<cra
     )))
 }
 
-fn delta_binary(
+fn delta_arithmetic(
     ctx: &mut Context,
     method: &str,
     args: &[Id],
@@ -347,6 +349,24 @@ fn delta_binary(
             "TypeError",
             format!("wrapper {name}() takes no keyword arguments"),
         ));
+    }
+    if matches!(name, "__neg__" | "__pos__" | "__abs__") {
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 0 arguments, got {}", args.len()),
+            ));
+        }
+        let micros = duration.delta_microseconds();
+        if micros == 0 {
+            return Ok(ctx.scalar_value(receiver));
+        }
+        let result = if name == "__neg__" || (name == "__abs__" && micros < 0) {
+            duration.negate_delta()?
+        } else {
+            duration
+        };
+        return Ok(store(ctx, result, NONE));
     }
     let &[other] = args else {
         return Err(Error::new(
@@ -460,7 +480,10 @@ pub(super) fn call(
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
-        "timedelta.__add__"
+        "timedelta.__neg__"
+        | "timedelta.__pos__"
+        | "timedelta.__abs__"
+        | "timedelta.__add__"
         | "timedelta.__radd__"
         | "timedelta.__sub__"
         | "timedelta.__rsub__"
@@ -469,7 +492,7 @@ pub(super) fn call(
         | "timedelta.__truediv__"
         | "timedelta.__rtruediv__"
         | "timedelta.__floordiv__"
-        | "timedelta.__rfloordiv__" => delta_binary(ctx, method, args, kwargs),
+        | "timedelta.__rfloordiv__" => delta_arithmetic(ctx, method, args, kwargs),
         "datetime.combine" => {
             let [day, clock, tz] = bind("combine", args, kwargs, ["date", "time", "tzinfo"])?;
             let day = required(day, "combine()", "date", 1)?;
@@ -693,7 +716,6 @@ pub(super) fn call(
         | "time.__str__"
         | "timedelta.__str__"
         | "timedelta.__bool__"
-        | "timedelta.__neg__"
         | "datetime.timetuple"
         | "date.timetuple"
         | "date.toordinal"
@@ -717,8 +739,6 @@ pub(super) fn call(
             let value = calendar(ctx, args[0], class)
                 .ok_or_else(|| Error::new("TypeError", format!("expected datetime.{class}")))?;
             Ok(match operation {
-                "__neg__" if value.delta_parts() == (0, 0, 0) => ctx.scalar_value(args[0]),
-                "__neg__" => store(ctx, value.negate_delta()?, NONE),
                 "__bool__" => {
                     if value.delta_parts() == (0, 0, 0) {
                         FALSE
