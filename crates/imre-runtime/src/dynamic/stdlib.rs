@@ -113,6 +113,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "builtins"
             | "errno"
             | "genericpath"
+            | "io"
             | "itertools"
     ) || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
@@ -142,7 +143,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "types"
             | "_io"
             | "_weakref"
-            | "io"
             | "locale"
             | "_locale"
             | "traceback"
@@ -433,7 +433,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
-        ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
+        ("_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan") => {
             ctx.builtin(&format!("math.{name}"))
         }
