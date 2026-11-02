@@ -354,7 +354,8 @@ impl Context {
                         | "module"
                         | super::thread_local::CLASS
                         | weakref::REFERENCE_TYPE
-                ) || stdlib::datetime::members(kind)
+                ) || (kind == super::deque::CLASS && super::deque::owns(name))
+                    || stdlib::datetime::members(kind)
                     .is_some_and(|members| members.owns(name))
                     || (kind == stdlib::fixed_structseq::SCHED_PARAM
                         && matches!(name, "__reduce__" | "__replace__"))
@@ -2815,7 +2816,7 @@ impl Context {
                 owner,
                 name: field,
                 ..
-            } if matches!(owner, "int" | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
+            } if matches!(owner, "int" | super::deque::CLASS | "typing.Union" | "typing.TypeAliasType" | stdlib::hashlib::md5::CLASS)
                 || HashState::is_provider_class(owner)
                 || owner == value::TEMPLATE_TYPE
                 || stdlib::datetime::members(owner).is_some() =>
@@ -2828,6 +2829,7 @@ impl Context {
                         return Ok(self.builtin(owner));
                     }
                     "__name__" => return Ok(self.text(field)),
+                    "__doc__" if owner == super::deque::CLASS => return Ok(self.text("maximum size of a deque or None if unbounded")),
                     "__doc__" if owner == "int" => {
                         return Ok(
                             self.text(format!("the {field} of a rational number in lowest terms"))
@@ -2956,7 +2958,7 @@ impl Context {
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
-                    _ if class == super::deque::CLASS && super::deque::member(name).is_some() => {
+                    _ if class == super::deque::CLASS && super::deque::owns(name) => {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }
                     _ => {}
