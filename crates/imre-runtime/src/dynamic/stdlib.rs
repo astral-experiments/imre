@@ -568,6 +568,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "TypeAliasType"
             | "_new_typeddict"
             | "_UnpackGenericAlias"
+            | "_ConcatenateGenericAlias"
             | "_eval_type_expression"
             | "_protocol_mro"
             | "_protocol_member"

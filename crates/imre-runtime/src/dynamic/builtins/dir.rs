@@ -40,6 +40,21 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         Value::GenericAlias(alias) if matches!(alias.kind, AliasKind::Literal(_)) => {
             return literal_names(ctx, alias.clone());
         }
+        Value::GenericAlias(alias) if alias.kind == AliasKind::Concatenate => {
+            let origin = alias.origin;
+            names.extend(alias.metadata().map(|(name, _)| name.to_owned()));
+            names.extend(["_inst", "_name", "copy_with", "__mro_entries__"].map(str::to_owned));
+            let origin_names = call(ctx, &[origin], &[])?;
+            ctx.heap.keep(origin_names);
+            let marker = ctx.text("__");
+            ctx.heap.keep(marker);
+            for name in ctx.items(origin_names)? {
+                if visible_origin_name(ctx, name, marker)? {
+                    keys.push(name);
+                }
+            }
+            ctx.builtin("object")
+        }
         Value::ParamSpec(_) => {
             names.extend(super::super::paramspec::names().map(str::to_owned));
             ctx.builtin("object")
