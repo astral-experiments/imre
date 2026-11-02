@@ -25,6 +25,31 @@ class C:
 
 
 
+class CallableInstance:
+    def __call__(self, item, /, *, count=1):
+        return item * count
+
+    def __eq__(self, other):
+        raise AssertionError("signature compared the callable")
+
+
+class StaticCall:
+    __call__ = staticmethod(lambda first, second: None)
+
+
+class ClassCall:
+    @classmethod
+    def __call__(cls, item):
+        return item
+
+
+target = CallableInstance()
+target.__call__ = lambda shadow: None
+assert str(inspect.signature(target)) == "(item, /, *, count=1)"
+assert str(inspect.signature(StaticCall())) == "(first, second)"
+assert str(inspect.signature(ClassCall())) == "(item)"
+
+
 class InheritedName(str):
     pass
 
