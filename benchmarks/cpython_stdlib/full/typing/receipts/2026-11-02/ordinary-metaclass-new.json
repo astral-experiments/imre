@@ -1,0 +1,143 @@
+{
+  "base": "fe7af98cf2bd7c9cb6d6385bf7aac07971c0d5f7",
+  "baseline_probe": {
+    "driver": "try:\n    from test.typinganndata import ann_module\nexcept BaseException as error:\n    print(\"FULL\", type(error).__name__,str(error),flush=True)\nelse:\n    print(\"FULL\",type(ann_module.S) is ann_module.Meta,ann_module.S.__annotations__,flush=True)\nfrom test.typinganndata import exact\n",
+    "narrow_and_full_stdout": "FULL NotImplementedError custom metaclass construction is unsupported\n",
+    "rc": 1,
+    "source": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nclass Meta(type):\n    def __new__(meta, name, bases, namespace):\n        return super().__new__(meta, name, bases, namespace)\n\nclass S(metaclass = Meta):\n    x: str = 'something'\n    y: str = 'something else'\n\nassert type(S) is Meta\nassert S.__annotations__ == {\"x\": str, \"y\": str}\nassert (S.x, S.y) == (\"something\", \"something else\")\nprint(\"meta namespace and class annotations\")\n",
+    "stock_stdout": "FULL True {'x': <class 'str'>, 'y': <class 'str'>}\nmeta namespace and class annotations\n",
+    "traceback": "Traceback (most recent call last):\n  File \"/workspace/scratch/meta/stage/driver.py\", line 7\n  File \"<imre stdlib>/_frozen_importlib.py\", line 591\n  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114\n  File \"/workspace/scratch/meta/stage/test/typinganndata/exact.py\", line 43\nNotImplementedError: custom metaclass construction is unsupported\n",
+    "unchanged_lines": "39\u201345, with original line numbers retained in exact.py"
+  },
+  "candidate": "79fccae070a5e30fbedf5d7d538187ae461da87f",
+  "candidate_parent": "7b5bb2c7d96a6519560ff6e5cf738e992589fafb",
+  "control": "from typing import get_type_hints\n\n\nevents = []\ntoken = object()\n\n\nclass Meta(type):\n    def __new__(meta, name, bases, namespace, *, marker):\n        events.append((meta, name, bases, namespace))\n        namespace[\"value\"] = marker\n        return super().__new__(meta, name, bases, namespace)\n\n\nclass Model(metaclass=Meta, marker=token):\n    value: object\n\n    def owner(self):\n        return __class__\n\n\nassert type(Model) is Meta and Model().owner() is Model\nassert Model.value is token and get_type_hints(Model) == {\"value\": object}\nassert len(events) == 1\nmeta, name, bases, namespace = events[0]\nassert meta is Meta and name == \"Model\" and bases == ()\nassert namespace[\"value\"] is token\nnamespace[\"value\"] = None\nassert Model.value is token\nassert not hasattr(Model, \"_abc_impl\")\n\n\nclass Derived(Model, marker=token):\n    pass\n\nassert events[-1][:3] == (Meta, \"Derived\", (Model,))\nassert type(Derived) is Meta\n\n\nclass Replacing(type):\n    def __new__(meta, name, bases, namespace):\n        return token\n\n\nclass Replaced(metaclass=Replacing):\n    pass\n\nassert Replaced is token\n\nfailure = RuntimeError(\"construction failed\")\n\n\nclass Raising(type):\n    def __new__(meta, name, bases, namespace):\n        raise failure\n\n\ntry:\n    class Failed(metaclass=Raising):\n        pass\nexcept RuntimeError as caught:\n    assert caught is failure\nelse:\n    raise AssertionError(\"ignored a metaclass exception\")\n\ntry:\n    class MissingKeyword(metaclass=Meta):\n        pass\nexcept TypeError:\n    pass\nelse:\n    raise AssertionError(\"ignored a missing constructor argument\")\n\nfor args in [(), (type,), (int, \"Bad\", (), {}), (type, \"Bad\", [], {}), (type, \"Bad\", (), [])]:\n    try:\n        type.__new__(*args)\n    except TypeError:\n        pass\n    else:\n        raise AssertionError(\"accepted an invalid type.__new__ call\")\n",
+  "cpython_pin": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "driver": "from test.typinganndata import ann_module\nfrom typing import get_type_hints\nassert type(ann_module.S) is ann_module.Meta\nassert get_type_hints(ann_module.S) == {\"x\": str, \"y\": str}\nprint(\"UNCHANGED ann_module.S\",flush=True)\nimport meta_checks\nprint(\"MUTATION IDENTITY EXCEPTIONS ANNOTATIONS PASS\",flush=True)\nimport specials\nprint(\"ABC TYPEDDICT ENUM PASS\",flush=True)\n",
+  "hostname": "a0f7c43eb913",
+  "native": [
+    {
+      "build": {
+        "stderr": " Compiling stage/qualify.py (-O0)\n  Finished /workspace/scratch/meta/qual-O0 in 49.37 s\n",
+        "stdout": ""
+      },
+      "build_argv": [
+        "/workspace/scratch/meta/bin/imre",
+        "build",
+        "stage/qualify.py",
+        "--module-root",
+        "stage",
+        "--runtime-imports",
+        "--no-cache",
+        "--clang",
+        "/workspace/scratch/intact/tools/usr/bin/clang-19",
+        "--runtime",
+        "/workspace/scratch/meta/bin/libimre_runtime.a",
+        "--opt-level",
+        "0",
+        "-o",
+        "/workspace/scratch/meta/qual-O0"
+      ],
+      "mode": "boxed",
+      "opt_level": "0",
+      "run": {
+        "rc": "0\n",
+        "stderr": "",
+        "stdout": "UNCHANGED ann_module.S\nMUTATION IDENTITY EXCEPTIONS ANNOTATIONS PASS\nABC TYPEDDICT ENUM PASS\n"
+      },
+      "run_argv": [
+        "./qual-O0"
+      ]
+    },
+    {
+      "build": {
+        "stderr": " Compiling stage/qualify.py (-O3)\n  Finished /workspace/scratch/meta/qual-O3 in 238.47 s\n",
+        "stdout": ""
+      },
+      "build_argv": [
+        "/workspace/scratch/meta/bin/imre",
+        "build",
+        "stage/qualify.py",
+        "--module-root",
+        "stage",
+        "--runtime-imports",
+        "--no-cache",
+        "--clang",
+        "/workspace/scratch/intact/tools/usr/bin/clang-19",
+        "--runtime",
+        "/workspace/scratch/meta/bin/libimre_runtime.a",
+        "--opt-level",
+        "3",
+        "-o",
+        "/workspace/scratch/meta/qual-O3"
+      ],
+      "mode": "boxed",
+      "opt_level": "3",
+      "run": {
+        "rc": "0\n",
+        "stderr": "",
+        "stdout": "UNCHANGED ann_module.S\nMUTATION IDENTITY EXCEPTIONS ANNOTATIONS PASS\nABC TYPEDDICT ENUM PASS\n"
+      },
+      "run_argv": [
+        "./qual-O3"
+      ]
+    }
+  ],
+  "scope": "whole CPython typinganndata.ann_module import and narrow metaclass controls; no unittest case credits",
+  "source_identity": {
+    "native_binary_sha256": {
+      "imre": "fbd0d5bc2d3b1dd3cc7fbbdcd4372a31584c0ee12e095d4a3e3f4f7251337b83",
+      "libimre_runtime.a": "3bace2b913099e6678027cfb84fb441d7b5f356464b7213a5ef855514f6ce03c"
+    },
+    "public_squash": {
+      "commit": "c7295770a3c2cb4dac119919bfd62896a8a55b39",
+      "parents": [
+        "c69681c01d4b3da9b4ac5fcd00f32ba26d056130"
+      ],
+      "tree": "95a5f13ffbd744375d568df204e2fd0f8b34da87"
+    },
+    "reviewed": {
+      "commit": "14cd2f98afef0f59d99cab565904644135fadce6",
+      "parents": [
+        "79fccae070a5e30fbedf5d7d538187ae461da87f"
+      ],
+      "tree": "8ccc285dbdf7783d06aca78d72c989323829eeed"
+    },
+    "scope": "typing dependency and class construction controls; zero original unittest IDs",
+    "stable_patch_id_of_reviewed_and_squashed_diffs": "2125b15494522fc8ffc79d182bc17f1e8adfd7a9",
+    "stock_binary_sha256": "9aed2e858816ce89b742a3f893c257bbb52aca73cbdb02a3d68450e827ebe03e",
+    "tested": {
+      "commit": "79fccae070a5e30fbedf5d7d538187ae461da87f",
+      "parents": [
+        "7b5bb2c7d96a6519560ff6e5cf738e992589fafb"
+      ],
+      "tree": "9688a1bab125849b78ad223a682fe451a8b1a3d2"
+    },
+    "upstream": {
+      "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "parents": [],
+      "tree": "7f48ff2aae0af2f4f4ee51a8d9dc970a0a0571f7"
+    },
+    "upstream_source_sha256": "54ac1c9629d3e0ff311ef13b019604dc8d7b17a1dafd3ff113c9dba095717ee2",
+    "whitespace_only_files_after_tested_sha": [
+      "crates/imre-runtime/src/dynamic/builtins.rs",
+      "crates/imre-runtime/src/dynamic/calls.rs"
+    ]
+  },
+  "specializations": "from abc import ABCMeta, abstractmethod\nfrom enum import Enum\nfrom typing import TypedDict\n\nclass CustomABC(ABCMeta):\n    def __new__(meta, name, bases, namespace):\n        namespace['called'] = name\n        return super().__new__(meta, name, bases, namespace)\nclass Abstract(metaclass=CustomABC):\n    @abstractmethod\n    def run(self):\n        pass\n\nassert Abstract.called == 'Abstract' and '__abstractmethods__' in Abstract.__dict__\ntry:\n    Abstract()\nexcept TypeError:\n    pass\nelse:\n    raise AssertionError(\"abstract class constructed\")\n\nclass Point(TypedDict):\n    x: int\nassert Point(x=4) == {'x': 4} and Point.__required_keys__ == frozenset({'x'})\n\nclass Color(Enum):\n    RED = 1\nassert Color(1) is Color.RED\n",
+  "stock": {
+    "argv": [
+      "/tmp/imre-stock/build/python",
+      "-B",
+      "qualify.py"
+    ],
+    "cwd": "/workspace/scratch/meta/stage",
+    "stderr": "",
+    "stdout": "UNCHANGED ann_module.S\nMUTATION IDENTITY EXCEPTIONS ANNOTATIONS PASS\nABC TYPEDDICT ENUM PASS\n"
+  },
+  "upstream_input": {
+    "path": "Lib/test/typinganndata/ann_module.py",
+    "sha256": "54ac1c9629d3e0ff311ef13b019604dc8d7b17a1dafd3ff113c9dba095717ee2"
+  },
+  "whitespace_only_followup": "14cd2f98afef0f59d99cab565904644135fadce6"
+}
