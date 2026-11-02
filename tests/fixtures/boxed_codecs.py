@@ -51,6 +51,7 @@ def check_raw_unicode_escape():
 
 
 def check_escape_decode():
+    import warnings
     from _codecs import escape_decode
 
     assert codecs.escape_decode is escape_decode
@@ -60,6 +61,14 @@ def check_escape_decode():
     assert escape_decode("é\\n", None) == (b"\xc3\xa9\n", 4)
     assert escape_decode(bytearray(br"\1\12\1234"), "unused") == (b"\x01\nS4", 10)
     assert escape_decode(b"a\\\nb") == (b"ab", 4)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        try:
+            escape_decode(br"\777\q")
+        except DeprecationWarning as error:
+            assert 'b"\\777" is an invalid octal escape sequence' in str(error)
+        else:
+            raise AssertionError("missing octal escape warning")
     for policy, expected in [("ignore", b"z"), ("replace", b"?z")]:
         assert escape_decode(br"\x4z", policy) == (expected, 4)
     for data, policy, message in [
