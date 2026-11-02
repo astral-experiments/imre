@@ -2553,6 +2553,17 @@ def __getattr__(attr):
     elif attr in {"ContextManager", "AsyncContextManager"}:
         import contextlib
         alias = _SpecialGenericAlias(getattr(contextlib, f"Abstract{attr}"), 2, name=attr, defaults=(bool | None,))
+    elif attr == "_collect_parameters":
+        import warnings
+
+        warnings.warn(
+            "The private _collect_parameters function is deprecated and will be"
+            " removed in a future version of Python. Any use of private functions"
+            " is discouraged and may break in the future.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        alias = _collect_type_parameters
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
     globals()[attr] = alias
