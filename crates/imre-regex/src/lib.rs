@@ -218,7 +218,7 @@ pub fn lookahead_source(
 }
 
 /// Translate a pattern needing native backtracking, retaining Python capture slots.
-/// Bytes patterns use this matcher for capture references and forward assertions.
+/// Bytes patterns use this matcher for references, forward assertions and atomic operations.
 pub fn backtracking_source(
     pattern: &str,
     verbose: bool,
@@ -409,6 +409,7 @@ fn tokenize(
     let mut has_lookaround = false;
     let mut has_lookbehind = false;
     let mut has_reference = false;
+    let mut has_atomic = false;
     let mut nullable_repeat = false;
     let mut width = BranchWidth::default();
     let mut group_widths = Vec::new(); // Indexed by capture number minus one.
@@ -543,12 +544,23 @@ fn tokenize(
                         };
                         output.push_str(opener);
                     } else if input.next_if_eq(&'>').is_some() {
-                        atomic_delimited(&mut input, &mut output, dotall, verbose, &mut escapes)?;
-                        may_backtrack = group.backtrack;
-                        width = group.width;
-                        width.push(Width::UNKNOWN);
-                        can_repeat = true;
-                        continue;
+                        if grammar == Grammar::Backtracking {
+                            has_atomic = true;
+                            output.push_str("?>");
+                        } else {
+                            atomic_delimited(
+                                &mut input,
+                                &mut output,
+                                dotall,
+                                verbose,
+                                &mut escapes,
+                            )?;
+                            may_backtrack = group.backtrack;
+                            width = group.width;
+                            width.push(Width::UNKNOWN);
+                            can_repeat = true;
+                            continue;
+                        }
                     } else if input.next_if_eq(&'P').is_some() && input.next_if_eq(&'<').is_some() {
                         let mut name = String::new();
                         loop {
@@ -770,12 +782,13 @@ fn tokenize(
                 nullable_repeat |= width.atom.min == 0 && hi.saturating_sub(lo) > 1;
                 width.atom.min = width.atom.min.saturating_mul(lo);
                 width.atom.max = width.atom.max.saturating_mul(hi);
+                // Modifiers must be adjacent even in verbose mode.
                 if input.next_if_eq(&'?').is_some() {
                     output.push('?');
+                } else if grammar == Grammar::Backtracking && input.next_if_eq(&'+').is_some() {
+                    has_atomic = true;
+                    output.push('+');
                 }
-                // Python requires lazy modifiers to be adjacent and rejects nested
-                // or possessive quantifiers in this subset. Verbose stripping must
-                // not accidentally turn a separated '?' into a modifier.
                 can_repeat = false;
                 continue;
             }
@@ -810,14 +823,19 @@ fn tokenize(
             return Err("expected a Python lookahead assertion".into());
         }
         Grammar::Backtracking
-            if !has_reference && !text_assertions && !byte_lookahead && !standalone_condition =>
+            if !has_reference
+                && !text_assertions
+                && !byte_lookahead
+                && !standalone_condition
+                && !(has_atomic && (alphabet != Alphabet::Bytes || !has_lookbehind)) =>
         {
             return Err("pattern does not require backtracking".into());
         }
         // Keep previously supported case-sensitive text assertions on their existing matcher.
         // For newly admitted references, a stalled repeat could leave the wrong capture.
         Grammar::Backtracking
-            if nullable_repeat && has_reference && (!text_assertions || casefold) =>
+            if nullable_repeat
+                && (has_atomic || has_reference && (!text_assertions || casefold)) =>
         {
             return Err("a repeated empty match could change the referenced capture".into());
         }
