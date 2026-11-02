@@ -4777,6 +4777,9 @@ impl<'a> Loader<'a> {
                     {
                         self.partial_value_imports.insert(def);
                     }
+                    if binding == Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS) {
+                        self.checked_builtin_imports.push((id, alias.range()));
+                    }
                     self.needs_object_imports |= binding == Binding::ConditionalValue;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
                     self.bind(id, local.as_str(), binding, alias)?;

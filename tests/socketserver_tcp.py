@@ -10,8 +10,8 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures/socketserver"
 REJECT = {
     "runtime_server_keeps_argument_checks": (
         "from socketserver import ThreadingTCPServer\n"
-        "print(ThreadingTCPServer)\n"
         "def identity(value: int) -> int: return value\n"
+        "print(ThreadingTCPServer)\n"
         "identity('wrong')\n",
         "invalid-argument-type",
     ),
