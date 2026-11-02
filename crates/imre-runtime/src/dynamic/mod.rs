@@ -10,6 +10,7 @@ mod class_annotations;
 mod complex;
 mod deque;
 mod dictionary;
+mod displayhook;
 mod enums;
 mod ffi;
 mod finalizers;
@@ -1875,6 +1876,18 @@ impl Context {
         .with_import(Some(name), None, None)
     }
 
+    /// Read the interpreter's original sys dictionary even if its import-cache entry changed.
+    fn sys_binding(&mut self, name: &str) -> Result<Option<Id>> {
+        let sys = match self.threads.system_module {
+            Some(sys) => sys,
+            None => self.module("sys")?,
+        };
+        let Value::Module { scope, .. } = *self.heap.get(sys) else {
+            unreachable!()
+        };
+        Ok(self.scope_name(scope, name))
+    }
+
     fn registered_module(&mut self, name: Id) -> Result<Option<Id>> {
         let (_, index) = self.find_dictionary_key(self.modules, name, None)?;
         Ok(index.map(|i| self.stored_entries(self.modules)[i].1))
@@ -2206,6 +2219,7 @@ impl Context {
                     "addaudithook",
                     "_getframe",
                     "_getframemodulename",
+                    "displayhook",
                     "unraisablehook",
                 ] {
                     let callable = self.builtin(&format!("sys.{name}"));
@@ -2215,7 +2229,9 @@ impl Context {
                         explicit: false,
                     });
                     self.bind(scope, name, function);
-                    if name == "unraisablehook" {
+                    if name == "displayhook" {
+                        self.bind(scope, "__displayhook__", function);
+                    } else if name == "unraisablehook" {
                         self.bind(scope, "__unraisablehook__", function);
                         if self.threads.system_module.is_none() {
                             self.threads.default_unraisable_hook = Some(function);

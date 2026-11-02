@@ -274,6 +274,20 @@ pub(in crate::dynamic) fn encode_text(
         StrEncoder::Registered(Codec::Utf8 { signature }) => {
             ctx.encode_utf8_codepoints(id, signature, &errors)
         }
+        StrEncoder::Registered(codec)
+            if matches!(errors.as_str(), "strict" | "surrogateescape")
+                && !ctx.codec_entries.handlers.contains_key(&errors) =>
+        {
+            ctx.encode_single_byte_codepoints(id, codec, errors == "surrogateescape")
+        }
+        StrEncoder::Registered(codec)
+            if matches!(errors.as_str(), "ignore" | "replace" | "backslashreplace") =>
+        {
+            // Apply the built-in handler to lone surrogates, then encode the scalar result.
+            let replaced = ctx.encode_utf8_codepoints(id, false, &errors)?;
+            let text = std::str::from_utf8(&replaced).expect("these handlers produce scalar text");
+            Ok(StrEncoder::Registered(codec).encode_str(text, &errors)?)
+        }
         _ => Err(Error::new(
             "NotImplementedError",
             "encoding non-scalar strings with this codec is unsupported",
