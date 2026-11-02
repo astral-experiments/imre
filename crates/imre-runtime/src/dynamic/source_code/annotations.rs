@@ -363,7 +363,12 @@ impl Context {
                     continue;
                 }
             }
-            let value = self.source_expr(code, environment, expr)?;
+            let value = if let ast::Expr::Starred(starred) = expr {
+                let value = self.source_expr(code, environment, &starred.value)?;
+                self.unpack_items(value, 1, None)?[0]
+            } else {
+                self.source_expr(code, environment, expr)?
+            };
             let key = self.heap.code_name(name);
             self.put_item(annotations, key, value)?;
         }

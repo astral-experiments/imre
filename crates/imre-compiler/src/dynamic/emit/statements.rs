@@ -985,6 +985,12 @@ impl Function<'_, '_> {
             let key = self.code_name(name);
             let value = if self.source.string_annotations {
                 self.text(&crate::frontend::annotation_spelling(expression))
+            } else if let ast::Expr::Starred(starred) = expression {
+                let value = self.expr(&starred.value);
+                let count = self.integer(1);
+                let items = self.op("unpack", &[&value, &count, "0"]);
+                let index = self.integer(0);
+                self.op("get", &[&items, &index])
             } else {
                 self.expr(expression)
             };
