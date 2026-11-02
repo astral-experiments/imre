@@ -1019,7 +1019,7 @@ impl Context {
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
-            Value::File(ref f) if f.is_reader() => {
+            Value::File(f) if f.is_reader() => {
                 self.module("io")?;
                 Ok(self.builtins["_io.BufferedReader"])
             }
