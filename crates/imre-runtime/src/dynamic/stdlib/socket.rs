@@ -43,6 +43,10 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
 
 const RESOLVER_NAMES: &[&str] = &[
     "gaierror",
+    "herror",
+    "gethostname",
+    "gethostbyname",
+    "gethostbyaddr",
     "getnameinfo",
     "if_nameindex",
     "if_nametoindex",
@@ -320,6 +324,76 @@ fn unsigned_mask(value: crate::Int) -> u32 {
     (value.big().as_ref() & num_bigint::BigInt::from(u32::MAX))
         .to_u32()
         .expect("masked uint32")
+}
+
+/// PyArg's "et" conversion IDNA-encodes str and treats bytes/bytearray as already encoded.
+fn host_argument(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Vec<u8>> {
+    let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+    let bytes = match ctx.heap.get(ctx.scalar_value(arg)) {
+        Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(arg)?.to_vec(),
+        Value::Str(_) | Value::SurrogateStr(_) => {
+            let host = ctx.str_value(arg)?;
+            if !host.is_ascii() {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "Unicode host names require IDNA encoding",
+                ));
+            }
+            // Match the ASCII fast path in encodings.idna; the final label may be empty.
+            let empty = if host.starts_with('.') {
+                Some(0)
+            } else {
+                host.find("..").map(|i| i + 1)
+            };
+            if let Some(i) = empty {
+                return Err(ctx.string_encoding_error(
+                    arg,
+                    "idna",
+                    "label empty",
+                    u32::from(b'.'),
+                    i..i + 1,
+                ));
+            }
+            let mut offset = 0;
+            for label in host.split('.') {
+                if label.len() >= 64 {
+                    return Err(ctx.string_encoding_error(
+                        arg,
+                        "idna",
+                        "label too long",
+                        0,
+                        offset..offset + label.len(),
+                    ));
+                }
+                offset += label.len() + 1;
+            }
+            host.as_bytes().to_vec()
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "{name}() argument 1 must be str, bytes or bytearray, not {}",
+                    ctx.type_name(arg)
+                ),
+            ));
+        }
+    };
+    if bytes.contains(&0) {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{name}() argument 1 must be encoded string without null bytes, not {}",
+                ctx.type_name(arg)
+            ),
+        ));
+    }
+    Ok(bytes)
 }
 
 fn interface_name(ctx: &mut Context, name: &std::ffi::CStr) -> Result<Id> {
@@ -625,6 +699,29 @@ pub(super) fn call(
         }
         "getaddrinfo" => return public_getaddrinfo(ctx, args, kwargs),
         "getnameinfo" => return getnameinfo(ctx, args, kwargs),
+        "gethostname" => {
+            check_args(name, args, kwargs, 0, &[])?;
+            super::audit::event(ctx, "socket.gethostname", args)?;
+            let raw = native::hostname()?;
+            let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+            return Ok(ctx.text_codepoints(codec.decode_filesystem(&raw)?));
+        }
+        "gethostbyname" => {
+            let host = host_argument(ctx, name, args, kwargs)?;
+            super::audit::event(ctx, "socket.gethostbyname", args)?;
+            return Ok(ctx.text(native::hostbyname(&host)?.to_string()));
+        }
+        "gethostbyaddr" => {
+            let host = host_argument(ctx, name, args, kwargs)?;
+            super::audit::event(ctx, "socket.gethostbyaddr", args)?;
+            let entry = native::hostbyaddr(&host)?;
+            let name = ctx.text(entry.name);
+            let aliases = entry.aliases.into_iter().map(|s| ctx.text(s)).collect();
+            let aliases = ctx.alloc(Value::List(aliases));
+            let addresses = entry.addresses.into_iter().map(|s| ctx.text(s)).collect();
+            let addresses = ctx.alloc(Value::List(addresses));
+            return Ok(ctx.alloc(Value::Tuple(vec![name, aliases, addresses])));
+        }
         "getfqdn" => {
             check_args(name, args, kwargs, 1, &["name"])?;
             let host = option(args, 0, kwargs, "name")?
