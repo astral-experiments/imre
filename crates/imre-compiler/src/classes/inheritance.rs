@@ -138,9 +138,14 @@ pub(super) fn resolve(
                         if graph
                             .session
                             .is_builtin_sequence_class(definition.module, origin)
+                            || graph.session.is_known_class(
+                                definition.module,
+                                argument,
+                                ty_python_semantic::types::KnownClass::Super,
+                            )
                         {
                             let error = module
-                                .error(argument, "sequence subclasses require object lowering");
+                                .error(argument, "native base class requires object lowering");
                             graph
                                 .object_builtin_errors
                                 .borrow_mut()

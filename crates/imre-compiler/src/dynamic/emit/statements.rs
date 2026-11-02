@@ -61,17 +61,15 @@ impl<'a> Visitor<'a> for ClosureNames {
                         !child.locals.contains(name) && !child.globals.contains(name)
                     }));
                 }
-                // Loading a name or a literal cannot introduce a binding in the
-                // defining frame. Keep the conservative fallback for other expressions.
+                // A bare decorator name cannot introduce a binding in the defining frame.
                 for decorator in &f.decorator_list {
                     self.visit_decorator(decorator);
                     self.locals_incomplete |= !decorator.expression.is_name_expr();
                 }
                 for param in f.parameters.iter_non_variadic_params() {
                     if let Some(default) = &param.default {
+                        // Defaults run here. Their expression walk records enclosing bindings.
                         self.visit_expr(default);
-                        self.locals_incomplete |=
-                            !default.is_literal_expr() && !default.is_name_expr();
                     }
                 }
             }
@@ -335,28 +333,9 @@ impl Function<'_, '_> {
                     {
                         let key = self.code_name(name.id.as_str());
                         if self.class_locals.is_some() && !self.source.string_annotations {
-                            // Class annotations may refer to a name bound after the class body.
-                            let value = self.output.code(
-                                self.source,
-                                String::new(),
-                                Body::AnnotationValue(&v.annotation),
-                                false,
-                            );
-                            let code = self.output.definition(
-                                self.source,
-                                String::new(),
-                                Body::AnnotationThunk(value.clone(), v.annotation.range()),
-                                v.annotation.start(),
-                                false,
-                                None,
-                            );
-                            self.remember_annotation(v, name.id.as_str(), &value);
-                            let name = self.text("__annotate__");
-                            let sig = self.text("{}");
-                            let defaults = self.op("dict", &[]);
-                            let thunk = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
+                            self.remember_annotation(v, name.id.as_str());
                             let offset = v.start().to_u32();
-                            self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
+                            self.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
                         } else if let Some(sites) = &mut self.module_annotation_sites {
                             let index = sites.len();
                             sites.push((name.id.to_string(), (*v.annotation).clone()));
@@ -784,6 +763,10 @@ impl Function<'_, '_> {
             json!({"posonly":[],"positional":[],"kwonly":[],"varargs":null,"kwargs":null});
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
+        }
+        if matches!(body, Body::Generator(..)) {
+            // generator() binds the implicit .0 argument without calling the step function.
+            signature["co_argcount"] = json!(1);
         }
         if let Body::Namespace(stmts) = &body {
             signature["postponed_annotations"] = json!(

@@ -2,6 +2,31 @@ import json
 from datetime import UTC, date, datetime as dt, time, timedelta, timezone, tzinfo
 
 
+def test_date_fromisoformat():
+    class Parts(date):
+        def __new__(cls, *fields):
+            return fields
+
+    class Text(str):
+        def __len__(self):
+            raise AssertionError("queried string override")
+
+        def __repr__(self):
+            return "invalid date"
+
+    bound = date(2000, 1, 1).fromisoformat
+    assert bound(Text("2025-W01")) == date(2024, 12, 30)
+    assert bound("20250102é") == date(2025, 1, 2)
+    assert Parts.fromisoformat("9999-W52-7") == (10000, 1, 2)
+    assert Parts.fromisoformat("2000-02-30") == (2000, 2, 30)
+    try:
+        bound(Text("2021-W53-1"))
+    except ValueError as exc:
+        assert str(exc) == "Invalid isoformat string: invalid date"
+    else:
+        raise AssertionError("accepted a nonexistent ISO week")
+
+
 def test_date_isoformat():
     class Zone(tzinfo):
         def utcoffset(self, value):
@@ -1043,6 +1068,7 @@ def test_calendar_strftime():
 
 
 def current():
+    test_date_fromisoformat()
     test_date_isoformat()
     test_calendar_strftime()
     test_calendar_reduction()

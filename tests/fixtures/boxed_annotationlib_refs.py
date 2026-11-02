@@ -1,14 +1,49 @@
 import annotationlib
 import typing
+from annotationlib import get_annotate_from_class_namespace as get_annotate
 from importlib import import_module
 from typing import evaluate_forward_ref
 
 
 def current():
     module = import_module("annotationlib")
+    assert get_annotate is module.get_annotate_from_class_namespace
+    assert get_annotate({}) is None
+    assert get_annotate({"__annotate_func__": current}) is current
+    assert get_annotate({"__annotate__": current}) is current
+    assert get_annotate({"__annotate__": None, "__annotate_func__": current}) is None
+
     assert module.Format is annotationlib.Format
     assert module.ForwardRef is annotationlib.ForwardRef
     print(module.Format.VALUE, module.Format.FORWARDREF.value, module.Format.STRING.value)
+
+    def field(format, exc=NotImplementedError):
+        if format > 2:
+            raise exc
+        return {"x": UnboundFieldType}
+
+    def limit(format, exc=NotImplementedError):
+        if format > 2:
+            raise exc
+        return UnboundFieldType
+
+    assert module.call_annotate_function(field, module.Format.STRING) == {"x": "UnboundFieldType"}
+    ref = module.call_evaluate_function(limit, module.Format.FORWARDREF, owner=field)
+    assert type(ref) is module.ForwardRef and ref.__owner__ is field
+    assert module.call_evaluate_function(limit, 4) == "UnboundFieldType"
+
+    class Opaque:
+        def __repr__(self):
+            raise AssertionError("rendered an opaque FORWARDREF operand")
+    token = Opaque()
+    def unknown(format, item=token, exc=NotImplementedError):
+        if format > 2:
+            raise exc
+        range[1]
+        return UnboundFieldType[item]
+    ref = module.call_evaluate_function(unknown, module.Format.FORWARDREF)
+    assert ref.__forward_arg__ == "UnboundFieldType[__annotationlib_name_1__]"
+    assert ref.__extra_names__["__annotationlib_name_1__"] is token
 
     assert typing.evaluate_forward_ref is evaluate_forward_ref
     class RawMeta(type):

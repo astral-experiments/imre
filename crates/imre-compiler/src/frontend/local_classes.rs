@@ -149,6 +149,13 @@ impl Checker<'_> {
                         self.graph.class_body_error.replace(Some(error.clone()));
                         return Err(error);
                     }
+                    if self.graph.session.is_known_class(
+                        self.module,
+                        base,
+                        ty_python_semantic::types::KnownClass::Super,
+                    ) {
+                        return Err(self.scoped_builtin_error("super subclasses", base));
+                    }
                     if self.graph.is_protocol_base(self.module, base) {
                         return Err(self.object_runtime_export("typing.Protocol", base));
                     }

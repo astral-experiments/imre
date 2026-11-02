@@ -242,6 +242,7 @@ pub(super) fn generic_attr_target(ctx: &Context, mut obj: Id, name: &str, writin
 pub(super) struct Registry {
     alias_caches: [Option<Id>; 2],
     pub(super) callable_factory: Option<Id>,
+    pub(super) abc_callable_reducer: Option<Id>,
     no_default: Option<Id>,
     overloads: HashMap<(String, String), Vec<(u32, Id)>>,
 }
@@ -252,6 +253,7 @@ impl Registry {
             .iter()
             .flatten()
             .chain(self.callable_factory.iter())
+            .chain(self.abc_callable_reducer.iter())
             .chain(self.no_default.iter())
             .chain(self.overloads.values().flatten().map(|(_, value)| value))
     }
@@ -1375,10 +1377,18 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             let module = class.rsplit_once('.').unwrap().0.to_owned();
             ctx.text(module)
         }
+        Value::Native(class)
+            if name == "__reduce__" && class == "collections.abc._CallableGenericAlias" =>
+        {
+            ctx.typing.abc_callable_reducer?
+        }
         Value::Native(class) if name == "__reduce__" && class == "typing._CallableGenericAlias" => {
             ctx.module_value("typing", "_reduce_callable_alias")?
         }
-        Value::GenericAlias(alias) if name == "__reduce__" && alias.kind.is_typing_alias() => {
+        Value::GenericAlias(alias)
+            if name == "__reduce__"
+                && (alias.kind.is_typing_alias() || alias.kind == AliasKind::AbcCallable) =>
+        {
             let class = ctx.builtin(alias.kind.class());
             return Some(
                 ctx.lookup_attr(class, name)
@@ -3021,6 +3031,7 @@ impl Context {
                             | "ellipsis"
                             | super::value::REGEX_PATTERN_TYPE
                             | super::value::REGEX_MATCH_TYPE
+                            | super::value::REGEX_SCANNER_TYPE
                             | super::value::TEMPLATE_ITER_TYPE
                             | super::value::TEMPLATE_TYPE
                             | super::value::INTERPOLATION_TYPE

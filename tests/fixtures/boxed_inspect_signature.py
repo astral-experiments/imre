@@ -1,5 +1,5 @@
 import inspect
-from functools import update_wrapper
+from functools import Placeholder, partial, update_wrapper
 from inspect import Parameter, Signature
 
 
@@ -9,6 +9,10 @@ def omitted(value=inspect._sentinel):
 
 def original(a, /, b: int = 3, *args, flag=False, **kwargs) -> str:
     return str(a)
+
+
+def with_options(a, b, *args, flag=False):
+    return a, b, args, flag
 
 
 def pair(a, b):
@@ -23,6 +27,23 @@ class C:
     def method(self, /, value: bytes = b"x"):
         pass
 
+
+class CallableInstance:
+    def __call__(self, item, /, *, count=1):
+        return item * count
+
+    def __eq__(self, other):
+        raise AssertionError("signature compared the callable")
+
+
+class StaticCall:
+    __call__ = staticmethod(lambda first, second: None)
+
+
+class ClassCall:
+    @classmethod
+    def __call__(cls, item):
+        return item
 
 
 class InheritedName(str):
@@ -46,6 +67,28 @@ class Published:
     def __call__(self):
         pass
 
+
+class ConstructorBase:
+    def __init__(self, count: int = 2, *, flag=False) -> None: pass
+
+
+class ConstructorChild(ConstructorBase):
+    pass
+
+
+class NewFirst(ConstructorBase):
+    def __new__(cls, /, name: str): pass
+
+
+class DefaultInit(ConstructorBase):
+    __init__ = object.__init__
+
+
+target = CallableInstance()
+target.__call__ = lambda shadow: None
+assert str(inspect.signature(target)) == "(item, /, *, count=1)"
+assert str(inspect.signature(StaticCall())) == "(first, second)"
+assert str(inspect.signature(ClassCall())) == "(item)"
 
 update_wrapper(wrapper, original)
 sig = Signature.from_callable(wrapper)
@@ -106,20 +149,9 @@ assert inspect.ismodule(inspect)
 assert not inspect.ismodule(inspect.Parameter)
 
 
-class ConstructorBase:
-    def __init__(self, count: int = 2, *, flag=False) -> None: pass
-
-
-class ConstructorChild(ConstructorBase):
-    pass
-
-
-class NewFirst(ConstructorBase):
-    def __new__(cls, /, name: str): pass
-
-
-class DefaultInit(ConstructorBase):
-    __init__ = object.__init__
-
-
 print(inspect.signature(ConstructorChild), inspect.signature(NewFirst), inspect.signature(DefaultInit))
+
+
+assert str(inspect.signature(partial(with_options, 1))) == "(b, *args, flag=False)"
+assert str(inspect.signature(partial(with_options, b=2))) == "(a, *, b=2, flag=False)"
+assert str(inspect.signature(partial(with_options, Placeholder, 2))) == "(a, /, *args, flag=False)"

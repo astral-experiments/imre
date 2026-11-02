@@ -1343,7 +1343,7 @@ impl Context {
             Value::Instance { class, .. } => *class,
             Value::Raised(error) => error.class()?,
             value if name == "__repr__" => match value.native_io_class_name()? {
-                class @ ("_io.BufferedReader" | "_io.BufferedWriter") => {
+                class @ ("_io.BufferedReader" | "_io.BufferedWriter" | "_io.TextIOWrapper") => {
                     *self.builtins.get(class)?
                 }
                 _ => return None,
@@ -1772,7 +1772,7 @@ impl Context {
                     append_rendered_text(&mut output, "(")?;
                     // Snapshot both operands before a Python repr hook can advance the cursor.
                     let first = match ctx.heap.get(ctx.scalar_value(id)) {
-                        Value::Count { current, step } => {
+                        Value::Count { current, step, .. } => {
                             if stdlib::itertools::machine_integer(&ctx, *step) != Some(1) {
                                 push_frame(&mut work, Part::Value(*step, true))?;
                                 push_frame(&mut work, Part::Text(", "))?;
@@ -2560,6 +2560,9 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if matches!(self.heap.get(self.scalar_value(id)), Value::Super { .. }) {
+            return self.super_repr(id);
+        }
         if matches!(
             self.heap.get(self.scalar_value(id)),
             Value::Count { .. } | Value::Repeat(_)
@@ -2916,20 +2919,6 @@ impl Context {
         }
         result
     }
-    /// Keep an upgraded proxy alive through a subscription that can call Python.
-    fn proxy_subscript<T>(
-        &mut self,
-        target: Id,
-        operation: impl FnOnce(&mut Self) -> Result<T>,
-    ) -> Result<T> {
-        self.heap.reserve_temporaries(1)?;
-        let mark = self.heap.temporary_mark();
-        self.heap.keep(target);
-        let result = operation(self);
-        self.heap.release_weak_target(mark, target);
-        result
-    }
-
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         if self.raw_read_window(obj).is_some() && !self.view_is_readonly(obj)? {
             return self.raw_view_get(obj, key);
@@ -2939,7 +2928,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.get_item(target, key));
+            return self.with_weak_target(target, |ctx| ctx.get_item(target, key));
         }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Get.apply(self, obj, key, false);
@@ -3172,7 +3161,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));
+            return self.with_weak_target(target, |ctx| ctx.put_item(target, key, val));
         }
         if matches!(self.heap.get(obj), Value::Array(_))
             && !matches!(self.heap.get(key), Value::Slice(_))
@@ -3684,7 +3673,7 @@ impl Context {
             let entries = entries.try_clone()?;
             (self.alloc(Value::Set { entries, frozen }), left)
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, true, |ctx, key, hash| {
             let roots = ctx.heap.temporary_mark();
             ctx.heap.keep(key);
             let toggle = ctx
@@ -3721,13 +3710,16 @@ impl Context {
         Ok(result)
     }
 
-    /// Visit an operand with cached hashes when its keys already belong to a set.
+    /// Visit stored set keys, and optionally exact dictionary keys, with their cached hashes.
     fn visit_set_operand(
         &mut self,
         source: Id,
+        use_dict_hashes: bool,
         mut visit: impl FnMut(&mut Self, Id, Option<i64>) -> Result<()>,
     ) -> Result<()> {
-        let iterator = if matches!(self.heap.get(source), Value::Set { .. }) {
+        let iterator = if matches!(self.heap.get(source), Value::Set { .. })
+            || (use_dict_hashes && matches!(self.heap.get(source), Value::Dict(_)))
+        {
             None
         } else {
             let iterator = self.iterator(source)?;
@@ -3777,7 +3769,7 @@ impl Context {
         } else {
             source
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, false, |ctx, key, hash| {
             ctx.discard_difference_key(target, key, hash)
         })
     }
@@ -3794,7 +3786,7 @@ impl Context {
     }
 
     fn filter_difference(&mut self, result: Id, left: Id, right: Id) -> Result<()> {
-        self.visit_set_operand(left, |ctx, key, hash| {
+        self.visit_set_operand(left, false, |ctx, key, hash| {
             ctx.heap.keep(key);
             if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
                 ctx.set_dictionary_key(result, key, NONE, hash, false)?;
@@ -3956,7 +3948,7 @@ impl Context {
                 (view, other)
             }
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, false, |ctx, key, hash| {
             let present = if let Some(view) = ctx.set_view(container) {
                 ctx.view_member(view, key, hash)?
             } else {
@@ -5337,7 +5329,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.delete_item(target, key));
+            return self.with_weak_target(target, |ctx| ctx.delete_item(target, key));
         }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Delete

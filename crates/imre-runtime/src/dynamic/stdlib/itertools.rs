@@ -271,6 +271,48 @@ impl Context {
     }
 }
 
+pub(super) fn accumulate_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if let [base, class, state] = args
+        && kwargs.is_empty()
+        && ctx.itertools_layout(*base) == Some("itertools.accumulate")
+        && matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
+            if ancestors.iter().all(|&a| !matches!(ctx.heap.get(a), Value::Native(name) if name != "object")))
+        && ctx.allocation_base(*class) == Some(*base)
+    {
+        return Ok(instance_with_state(ctx, *base, *class, *state));
+    }
+    Err(Error::new(
+        "TypeError",
+        "expected an accumulate subclass with compatible layout",
+    ))
+}
+
+pub(super) fn accumulate_state(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if let [base, receiver] = args
+        && kwargs.is_empty()
+        && ctx.itertools_layout(*base) == Some("itertools.accumulate")
+        && let Value::Instance {
+            member_values: Some(values),
+            ..
+        } = ctx.heap.get(*receiver)
+        && let Some(&state) = values.get(base)
+    {
+        return Ok(state);
+    }
+    Err(Error::new(
+        "TypeError",
+        "expected an initialized accumulate",
+    ))
+}
+
 fn compatible_cursor_class(ctx: &Context, base: Id, class: Id, layout: &str) -> bool {
     ctx.itertools_layout(base) == Some(layout)
         && matches!(ctx.heap.get(class), Value::Class { ancestors, .. }
@@ -411,6 +453,101 @@ pub(super) fn iterator_state(
     ))
 }
 
+/// Store the acquired iterator before pulling either member of the first pair.
+pub(super) fn pairwise_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if let [base, class, source] = args
+        && kwargs.is_empty()
+        && compatible_cursor_class(ctx, *base, *class, "itertools.pairwise")
+    {
+        let state = ctx.alloc(Value::Tuple(vec![*source]));
+        return Ok(instance_with_state(ctx, *base, *class, state));
+    }
+    Err(Error::new("TypeError", "expected a pairwise subclass"))
+}
+
+/// The absence of a second tuple item distinguishes an unstarted cursor from a previous None.
+fn pairwise_state(ctx: &Context, base: Id, receiver: Id) -> Result<(Id, Option<Id>)> {
+    if let Value::Instance {
+        member_values: Some(values),
+        ..
+    } = ctx.heap.get(receiver)
+        && let Some(&state) = values.get(&base)
+        && let Value::Tuple(items) = ctx.heap.get(state)
+    {
+        match items.as_slice() {
+            &[source] => return Ok((source, None)),
+            &[source, previous] => return Ok((source, Some(previous))),
+            _ => {}
+        }
+    }
+    Err(Error::new("TypeError", "expected an initialized pairwise"))
+}
+
+fn set_pairwise_state(ctx: &mut Context, base: Id, receiver: Id, source: Id, previous: Option<Id>) {
+    let mut items = vec![source];
+    items.extend(previous);
+    let state = ctx.alloc(Value::Tuple(items));
+    let Value::Instance {
+        member_values: Some(values),
+        ..
+    } = ctx.heap.get_mut(receiver)
+    else {
+        unreachable!("validated pairwise receiver")
+    };
+    let old = values
+        .insert(base, state)
+        .expect("validated pairwise state");
+    ctx.heap.weak_edge_removed(old);
+}
+
+/// Keep the previous item across a reentrant pull, preserving the source's actual exception.
+pub(super) fn pairwise_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [base, receiver] = *args else {
+        return Err(Error::new("TypeError", "expected a pairwise instance"));
+    };
+    if !kwargs.is_empty() || ctx.itertools_layout(base) != Some("itertools.pairwise") {
+        return Err(Error::new("TypeError", "expected a pairwise instance"));
+    }
+    let (source, previous) = pairwise_state(ctx, base, receiver)?;
+    if source == NONE {
+        return Err(Error::new("StopIteration", ""));
+    }
+    ctx.heap.keep(source);
+    let pull = |ctx: &mut Context| {
+        let result = ctx
+            .next_result(source)
+            .and_then(|item| item.ok_or_else(|| Error::new("StopIteration", "")));
+        if result.is_err() {
+            set_pairwise_state(ctx, base, receiver, NONE, None);
+        }
+        result
+    };
+    let previous = match previous {
+        Some(item) => item,
+        None => {
+            let item = pull(ctx)?;
+            // A reentrant first pull can exhaust the same cursor before returning an item.
+            if pairwise_state(ctx, base, receiver)?.0 == NONE {
+                set_pairwise_state(ctx, base, receiver, NONE, None);
+                return Err(Error::new("StopIteration", ""));
+            }
+            ctx.heap.keep(item);
+            set_pairwise_state(ctx, base, receiver, source, Some(item));
+            item
+        }
+    };
+    ctx.heap.keep(previous);
+    let following = pull(ctx)?;
+    ctx.heap.keep(following);
+    let (live_source, _) = pairwise_state(ctx, base, receiver)?;
+    set_pairwise_state(ctx, base, receiver, live_source, Some(following));
+    Ok(ctx.alloc(Value::Tuple(vec![previous, following])))
+}
+
 /// Build the shared repeat cursor, converting a supplied count exactly once.
 pub(super) fn repeat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let missing = || {
@@ -465,25 +602,64 @@ pub(super) fn count(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let step = step.unwrap_or_else(|| ctx.int(1));
     number(ctx, current)?;
     number(ctx, step)?;
-    if !matches!(ctx.heap.get(current), Value::Int(_))
-        && machine_integer(ctx, step) == Some(1)
-        && let Some(start) = machine_integer(ctx, current)
+    let fast = if machine_integer(ctx, step) == Some(1)
+        && let Some(n) = machine_integer(ctx, current).and_then(|n| isize::try_from(n).ok())
     {
-        current = ctx.int(start);
-    }
-    Ok(ctx.alloc(Value::Count { current, step }))
+        // CPython produces an exact int from its machine counter. A cached
+        // small int has the same identity as the original exact argument.
+        if !matches!(ctx.heap.get(current), Value::Int(_)) || !(-5..=256).contains(&n) {
+            current = ctx.int(n as i64);
+        }
+        true
+    } else {
+        false
+    };
+    Ok(ctx.alloc(Value::Count {
+        current,
+        step,
+        fast,
+    }))
 }
 
-/// Commit the next value only after the shared numeric progression succeeds.
+/// Advance unit integer strides directly. Slow Python addition may reenter this cursor.
 pub(in crate::dynamic) fn advance(ctx: &mut Context, id: Id) -> Result<Id> {
-    let Value::Count { current, step } = *ctx.heap.get(id) else {
+    let Value::Count {
+        current,
+        step,
+        fast,
+    } = *ctx.heap.get(id)
+    else {
         unreachable!("count cursor")
     };
-    let following = ctx.binary("+", current, step)?;
-    let Value::Count { current, .. } = ctx.heap.get_mut(id) else {
+    let position = fast.then(|| machine_integer(ctx, current).expect("machine position"));
+    let (item, following, fast) = if let Some(n) = position
+        && n < isize::MAX as i64
+    {
+        (current, ctx.int(n + 1), true)
+    } else {
+        // CPython materializes maxsize when it first attempts the slow addition.
+        // A failing callback may inspect that argument again on a subsequent attempt.
+        let item = if fast {
+            ctx.int(isize::MAX as i64)
+        } else {
+            current
+        };
+        // A nested next() can replace the cursor's reference to the value we owe.
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(item);
+        (item, ctx.binary("+", item, step)?, false)
+    };
+    let Value::Count {
+        current: slot,
+        fast: mode,
+        ..
+    } = ctx.heap.get_mut(id)
+    else {
         unreachable!("count cursor")
     };
-    Ok(std::mem::replace(current, following))
+    *slot = following;
+    *mode = fast;
+    Ok(item)
 }
 
 pub(super) fn method(

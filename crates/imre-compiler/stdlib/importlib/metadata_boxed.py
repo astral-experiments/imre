@@ -70,7 +70,9 @@ class Distribution(DeprecatedNonAbstract):
     def discover(cls, *, context=None, **kwargs):
         if context and kwargs:
             raise ValueError('cannot accept context and kwargs')
-        return _discover(context or DistributionFinder.Context(**kwargs))
+        context = context or DistributionFinder.Context(**kwargs)
+        resolvers = (getattr(finder, 'find_distributions', None) for finder in sys.meta_path)
+        return _discover(context, resolvers)
 
     @property
     def metadata(self):
@@ -207,9 +209,8 @@ class DistributionFinder(MetaPathFinder):
         """Return the distributions that match the search context."""
 
 
-def _discover(context):
-    for finder in sys.meta_path:
-        resolver = getattr(finder, 'find_distributions', None)
+def _discover(context, resolvers):
+    for resolver in resolvers:
         if resolver:
             yield from resolver(context)
 

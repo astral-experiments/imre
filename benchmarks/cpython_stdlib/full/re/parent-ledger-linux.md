@@ -114,6 +114,29 @@ The intact `test_search_anchor_at_beginning` assertion measured 0.51606062800419
 | `imre-re-five-explicit-f45a-release-intact.tgz` | `382c0396f2cc7056c593c504e0c883f1554a3abaeefe374086499a84fdb426ae` |
 | `imre-re-five-explicit-f45a-release-quiet.tgz` | `7e3c920cd7681c806f0ce9368d5f1bd617cc0162e7df282f5e00fb865bbfce10` |
 
+## Public replay after #4437
+
+On public `73eb1682c594d07ec47c7bf0be779d4a102f641e`, **133 of 165 parents passed on CPython and both ordinary native builds** with the same subtest IDs, results and occurrence counts. All 127 paired passes from `f45a52ca` remained. Six parents joined that intact intersection. O0 and O3 agreed on the full set of parent and subtest outcomes, including the failures. [Public revision](https://github.com/astral-experiments/imre/commit/73eb1682c594d07ec47c7bf0be779d4a102f641e) · [CPython 3.14.5 source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py)
+
+| Lane | Unittest terminal | Exit | Parents (pass / fail / error / skip) | Subtests (pass / fail / error) |
+| --- | --- | ---: | --- | --- |
+| CPython | `Ran 165 tests in 1.847s` · `OK (skipped=3)` | 0 | 162 / 0 / 0 / 3 | 2824 / 0 / 0 |
+| O0 | `Ran 165 tests in 907.746s` · `FAILED (failures=66, errors=10, skipped=14)` | 1 | 133 / 10 / 8 / 14 | 2734 / 64 / 3 |
+| O3 | `Ran 165 tests in 864.115s` · `FAILED (failures=66, errors=10, skipped=14)` | 1 | 133 / 10 / 8 / 14 | 2734 / 64 / 3 |
+
+The six gains were #25 `PatternReprTests.test_unknown_flags`, #77 `ReTests.test_copying`, #91 `test_getattr`, #107 `test_locale_flag`, #125 `test_possible_set_operations` and #134 `test_re_groupref`. Five already belonged to the accepted 145 keys. The separate public `35e6ae8a` replay established #125 as key 146 after the ambiguous-character-class warning fix. Each lane emitted `startTest`, `addSuccess` and `stopTest` for #125, with zero subtests. All 133 intact passes are in that 146-key set. [#125 raw callbacks](delta-145/125-test_possible_set_operations.txt) · [Class warnings #4373](https://github.com/astral-experiments/imre/pull/4373)
+
+The preferred-encoding implementation allowed #107 to run through its locale-dependent checks. Its separate C and C.UTF-8 runs exercised neither conditional non-ASCII case pair. The open-capture error now reports the reference position expected by #134, including its one original subtest. The numeric conditional error fix was exercised separately. In the intact run #138 `test_re_groupref_overflow` still errored at the private `re._constants` import at line 703, before its two stock subtests. [Locale encoding #4422](https://github.com/astral-experiments/imre/pull/4422) · [Open capture #4437](https://github.com/astral-experiments/imre/pull/4437) · [Numeric conditional #4418](https://github.com/astral-experiments/imre/pull/4418)
+
+Both native modes passed #6 `ExternalTests.test_re_tests` with all 2,126 stock subtest callbacks. It contributes one parent. Both also passed #66 `test_bug_gh100061`, #122 `test_pattern_compare_bytes`, #123 `test_pickling` and #158 `test_symbolic_groups`. #147 `test_search_anchor_at_beginning` failed its strict 0.1s assertion at 0.1930539380045957s on O0 and 0.19469905099686002s on O3. #108 `test_look_behind_overflow` errored while building the regex NFA, and #142 `test_regression_gh94675` skipped with `test requires multiprocessing`. Both passed on stock. The join packet lists all 19 keys outside 146, with raw callback locations, skip reasons, failures and separate pending-omission references.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Full raw · `imre-re-intact-73eb1682-linux.tgz` | `757276aeba05195d2ab36f945df151b9d23a4dd1f9e51ab30db29d0121b88ee6` |
+| Intact join · `imre-re-intact-146-join-73eb1682.tgz` | `f1407bd832aefe52024be2fdf7201e7fa078ee76b378f220dfa37307110ccd92` |
+| Selected #125 · `imre-re125-public-35e6-delta.tgz` | `879bcda5a6403f02869f2d095aa17a1a3084617ee0ace6fff0a6fc2161a38eba` |
+| Cumulative keys · `ledger-re-146-from-145-35e6.json` | `52438f634da7983c51914b5775030cc39bbd5acfad1e9f73f78cdd95e1532a64` |
+
 ## Reproduce the historical join
 
 The upstream source is CPython commit `5607950ef232dad16d75c0cf53101d9649d89115`. The SHA-256 of `Lib/test/test_re.py` is `879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2`. The following command checks the complement against loader order and reconstructs the historical key digest. Run from the Imre root with the staged CPython test tree and interpreter from the capture replay instructions. [Upstream source](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_re.py)

@@ -11,7 +11,12 @@ from _collections_abc import _check_methods
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from posix import _create_environ, abort, access, environ as _environ, fspath, getcwd, getcwdb, getpgid, getppid, kill, listdir, mkdir, putenv, read, scandir, setpgid, terminal_size, unsetenv, waitpid, write, WNOHANG
 from types import GenericAlias
-from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, open, rmdir, stat, truncate
+from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, fchdir, open, rmdir, stat, truncate
+
+try:
+    from posix import getpgrp
+except ImportError:
+    pass
 
 try:
     from posix import waitstatus_to_exitcode
@@ -21,14 +26,17 @@ except ImportError:
 if sys.platform == "linux":
     from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
+    from posix import RWF_APPEND, RWF_DSYNC, RWF_HIPRI, RWF_NOWAIT, RWF_SYNC, preadv, pwritev
     from posix import SPLICE_F_MORE, SPLICE_F_MOVE, SPLICE_F_NONBLOCK, splice
     import posix as _posix
-    from posix import O_NOCTTY, pipe2, ptsname
+    from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv, writev
     for _name in vars(_posix):
-        if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in ("posix_spawn", "posix_spawnp"):
+        if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in (
+            "posix_spawn", "posix_spawnp", "sched_get_priority_min", "sched_get_priority_max", "sched_yield",
+        ):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
-    from posix import O_PATH, O_TMPFILE, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
+    from posix import O_PATH, O_TMPFILE, cpu_count, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names
     from posix import (
         POSIX_FADV_DONTNEED, POSIX_FADV_NOREUSE, POSIX_FADV_NORMAL, POSIX_FADV_RANDOM,
         POSIX_FADV_SEQUENTIAL, POSIX_FADV_WILLNEED, posix_fadvise, posix_fallocate,
@@ -45,6 +53,12 @@ if sys.platform == "linux":
         XATTR_CREATE, XATTR_REPLACE, XATTR_SIZE_MAX, getxattr, listxattr, removexattr, setxattr,
     )
 
+
+import posix as _posix
+for _name in ("getegid", "getresgid", "getresuid"):
+    if _name in vars(_posix):
+        globals()[_name] = getattr(_posix, _name)
+del _name, _posix
 
 curdir = path.curdir
 defpath = path.defpath

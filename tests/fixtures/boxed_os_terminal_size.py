@@ -1,4 +1,6 @@
+import errno
 import os
+import sys
 from os import terminal_size
 from posix import terminal_size as posix_size
 
@@ -70,3 +72,23 @@ def current():
             assert str(error) == message
         else:
             raise AssertionError(args)
+
+
+if sys.platform == "linux":
+    from posix import get_terminal_size
+
+    assert get_terminal_size is os.get_terminal_size
+    master, slave = os.openpty()
+    try:
+        size = get_terminal_size(slave)
+        assert type(size) is terminal_size
+        assert size == (size.columns, size.lines) == get_terminal_size(master)
+    finally:
+        os.close(slave)
+        os.close(master)
+    try:
+        get_terminal_size(slave)
+    except OSError as error:
+        assert error.errno == errno.EBADF
+    else:
+        raise AssertionError("queried a closed terminal")

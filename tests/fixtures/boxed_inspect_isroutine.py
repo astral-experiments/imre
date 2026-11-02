@@ -48,10 +48,10 @@ def current():
     for value in (inspect, Callable, obj, DataDescriptor(), None):
         assert not inspect.isroutine(value)
     assert isdatadescriptor is inspect.isdatadescriptor
-    assert all(isdatadescriptor(value) for value in (DataDescriptor(), SetOnly(), property()))
+    assert all(isdatadescriptor(value) for value in (DataDescriptor(), SetOnly(), property(), int.numerator))
     instance_only = Descriptor()
     instance_only.__set__ = True
-    assert not any(isdatadescriptor(value) for value in (instance_only, DataDescriptor,
+    assert not any(isdatadescriptor(value) for value in (instance_only, Descriptor(), DataDescriptor,
                                                          function, obj.__call__))
     assert obj.render("text") == ("default", obj)
     assert obj.render(6) == 7

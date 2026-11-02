@@ -19,7 +19,7 @@ declare ptr @imre_dyn_new(i32, ptr, ptr)
 declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
-declare i64 @imre_dyn_class_annotation(ptr, i64, i64, i64, i32)
+declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
 declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
 declare i64 @imre_dyn_truth_mark(ptr)
@@ -29,6 +29,7 @@ declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
+declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
 
@@ -123,7 +124,7 @@ impl Output {
     ) -> Result<String, String> {
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| format!("{}: {err}", path.display()))?;
-        crate::analysis::check_star_import_scopes(source, &parsed.syntax().body)
+        crate::analysis::check_scope_syntax(source, parsed.syntax())
             .map_err(|error| format!("{}:{error}", path.display()))?;
         if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
             let name = keyword.arg.as_ref().expect("repeated named argument");
@@ -236,8 +237,6 @@ enum Body<'a> {
         Vec<(&'a str, &'a ast::Expr)>,
         Option<statements::ClassBindings>,
     ),
-    AnnotationValue(&'a ast::Expr),
-    AnnotationThunk(String, ruff_text_size::TextRange),
     Expression(&'a ast::Expr),
     YieldingLambda(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
@@ -394,6 +393,7 @@ impl Output {
             exits: Vec::new(),
             caught: Vec::new(),
             simple_call: None,
+            expression_line: 0,
         };
         match body {
             Body::Namespace(stmts) => {
@@ -441,15 +441,6 @@ impl Output {
                 f.unsupported("async function");
             }
             Body::Generator(generators, element) => f.generator_step(generators, element),
-            Body::AnnotationThunk(entry, range) => {
-                f.checkpoint(&range);
-                let value = f.checked(&format!("call i64 {entry}(ptr %ctx, i64 {})", f.scope));
-                f.end(&format!("ret i64 {value}"));
-            }
-            Body::AnnotationValue(expr) => {
-                let value = f.expr(expr);
-                f.end(&format!("ret i64 {value}"));
-            }
             Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
                 if matches!(body, Body::TypeAlias(_)) {
@@ -512,6 +503,7 @@ struct Function<'a, 'p> {
     exits: Vec<(Cleanup, String)>,
     caught: Vec<String>,
     simple_call: Option<ruff_text_size::TextRange>,
+    expression_line: usize,
 }
 
 #[derive(Clone)]
@@ -751,6 +743,7 @@ impl Function<'_, '_> {
     fn checkpoint(&mut self, node: &impl Ranged) {
         let (ptr, count) = self.live_handles();
         let line = self.source.line(node.start());
+        self.expression_line = line;
         self.line(&format!(
             "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
             self.source.file, self.caught.last().map_or("0", String::as_str)

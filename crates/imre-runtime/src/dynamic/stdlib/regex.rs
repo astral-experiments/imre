@@ -11,7 +11,10 @@ use crate::dynamic::builtins::bind;
 mod assertions;
 mod flags;
 mod group_names;
+#[cfg(target_os = "linux")]
+mod locale;
 mod lookahead;
+mod named_escapes;
 mod progress;
 mod scanner;
 mod split;
@@ -130,6 +133,10 @@ impl Pattern {
             (Some(a), Some(b)) if a.same_program(b) => {}
             _ => return false,
         }
+        #[cfg(target_os = "linux")]
+        if let (Matcher::Locale(a), Matcher::Locale(b)) = (&self.regex, &other.regex) {
+            return a.same_program(b);
+        }
         if self.engine_source == other.engine_source {
             return true;
         }
@@ -189,6 +196,43 @@ impl Pattern {
                 labels.push(format!("0x{remaining:x}"));
             }
             format!("re.compile({source}, {})", labels.join("|"))
+        }
+    }
+
+    /// Describe the matcher and translated program that this Pattern will execute.
+    fn debug_program(&self, output: &mut String) {
+        let source: &dyn std::fmt::Debug = &self.engine_source;
+        let (backend, program) = match &self.regex {
+            Matcher::Standard(_) => ("regex-automata meta", source),
+            #[cfg(target_os = "linux")]
+            Matcher::Locale(locale) => (
+                "regex-automata meta, LC_CTYPE at search time",
+                locale.program(),
+            ),
+            Matcher::Lookahead(_) => ("fancy-regex", source),
+            Matcher::Guarded(_) => ("progress-aware PikeVM", source),
+            Matcher::Asserted(_) => ("assertion-aware Thompson NFA", source),
+        };
+        let kind = if self.bytes { "bytes" } else { "str" };
+        write!(
+            output,
+            "Imre regex ({backend}, {kind}, flags={:#x}, groups={})\n  program {:?}",
+            self.flags,
+            self.group_count(),
+            program,
+        )
+        .unwrap();
+        for (slot, guard) in &self.assertions {
+            write!(
+                output,
+                "\n  assertion {slot} {:?} width={} {:?}",
+                guard.kind, guard.width, guard.program,
+            )
+            .unwrap();
+        }
+        if let Some(surrogates) = &self.surrogate_literals {
+            output.push_str("\n  surrogate matcher\n");
+            surrogates.debug_program(output);
         }
     }
 
@@ -289,6 +333,10 @@ impl Pattern {
                     .strip_suffix(imre_regex::FINAL_NEWLINE_ANCHOR)
                     .unwrap_or(&self.engine_source);
                 let full = format!(r"(?:{source})\z");
+                #[cfg(target_os = "linux")]
+                if let Matcher::Locale(matcher) = &self.regex {
+                    return Ok(Matcher::Locale(Box::new(matcher.full())));
+                }
                 if let Matcher::Lookahead(matcher) = &self.regex {
                     return matcher
                         .with_source(&full)
@@ -552,23 +600,32 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
         Value::Bytes(bytes) => Cow::Owned(bytes.iter().copied().map(char::from).collect()),
         _ => Cow::Borrowed(ctx.str_value(source).ok()?),
     };
+    let bytes = matches!(ctx.heap.get(ctx.scalar_value(source)), Value::Bytes(_));
+    let normalized = match named_escapes::normalize(&text, bytes, flags) {
+        Ok(normalized) => normalized,
+        Err(error) => return Some(error),
+    };
+    let text = normalized
+        .as_ref()
+        .map_or(text.as_ref(), |names| names.text.as_str());
+    let position = |at| normalized.as_ref().map_or(at, |names| names.position(at));
     let parsed = ParserBuilder::new()
         .ignore_whitespace(flags & VERBOSE != 0)
         .build()
-        .parse(&text);
-    if let Some(error) = group_names::diagnostic(
-        &text,
-        matches!(ctx.heap.get(source), Value::Bytes(_)),
+        .parse(text);
+    if let Some((message, at)) = group_names::diagnostic(
+        text,
+        bytes,
         match ctx.heap.get(ctx.scalar_value(source)) {
             Value::SurrogateStr(points) => Some(points),
             _ => None,
         },
         &parsed,
     ) {
-        return Some(error);
+        return Some((message, position(at)));
     }
-    if let Some((msg, at)) = imre_regex::repeat_diagnostic(&text, flags & VERBOSE != 0) {
-        return Some((msg.to_owned(), text[..at].chars().count()));
+    if let Some((msg, at)) = imre_regex::repeat_diagnostic(text, flags & VERBOSE != 0) {
+        return Some((msg.to_owned(), position(text[..at].chars().count())));
     }
     let error = parsed.err()?;
     let message = match error.kind() {
@@ -581,7 +638,7 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
     };
     Some((
         message.into(),
-        text[..error.span().start.offset].chars().count(),
+        position(text[..error.span().start.offset].chars().count()),
     ))
 }
 
@@ -823,8 +880,9 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
             .to_i64()
             .unwrap()
     });
+    let debug = flags & DEBUG;
     let unknown = flags & !KNOWN_FLAGS;
-    let flags = flags & KNOWN_FLAGS;
+    let flags = flags & KNOWN_FLAGS & !DEBUG;
     let scalar = ctx.heap.get(ctx.scalar_value(id));
     let bytes = matches!(scalar, Value::Bytes(_));
     let projections = if let Value::SurrogateStr(points) = scalar {
@@ -966,7 +1024,14 @@ fn compile_uncached(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> 
             "Python int too large to convert to C int",
         ));
     }
-    pattern.flags |= unknown;
+    pattern.flags |= unknown | debug;
+    if debug != 0 {
+        let mut output = String::new();
+        pattern.debug_program(&mut output);
+        let print = ctx.builtin("print");
+        let text = ctx.text(output);
+        ctx.call(print, vec![text], Vec::new())?;
+    }
     Ok(ctx.alloc(Value::RegexPattern(Rc::new(pattern))))
 }
 
@@ -993,12 +1058,6 @@ fn check_flags(flags: i64, bytes: bool) -> Result<()> {
         return Err(Error::new(
             "ValueError",
             "ASCII and UNICODE flags are incompatible",
-        ));
-    }
-    if flags & DEBUG != 0 {
-        return Err(Error::new(
-            "NotImplementedError",
-            "unsupported native regular expression flags",
         ));
     }
     Ok(())
@@ -1051,6 +1110,11 @@ fn prepare(
         std::str::from_utf8(spelling)
             .expect("text pattern")
             .to_owned()
+    };
+    let source = match named_escapes::normalize(&source, bytes, flags) {
+        Ok(Some(names)) => names.text,
+        Ok(None) => source,
+        Err((message, _)) => return Err(message),
     };
     let ascii = bytes || flags & ASCII != 0;
     // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
@@ -1224,6 +1288,15 @@ fn prepare(
             Ok((source, matcher))
         })
         .or_else(backtrack)?;
+    #[cfg(target_os = "linux")]
+    let regex = if bytes
+        && flags & (LOCALE | IGNORECASE) == LOCALE | IGNORECASE
+        && let Some(locale) = locale::LocaleMatcher::parse(&source, flags, regex.group_info())
+    {
+        Matcher::Locale(Box::new(locale))
+    } else {
+        regex
+    };
     Ok(Pattern {
         source: id,
         flags: if ascii { flags } else { flags | UNICODE },

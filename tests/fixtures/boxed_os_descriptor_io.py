@@ -27,6 +27,32 @@ def expect_errno(operation, args, number):
         raise AssertionError("descriptor operation unexpectedly succeeded")
 
 
+def check_fchdir():
+    from os import fchdir
+
+    assert fchdir is posix.fchdir and fchdir is os.fchdir
+    previous = os.getcwd()
+    with tempfile.TemporaryDirectory() as directory:
+        parent = os.open(".", os.O_RDONLY)
+        try:
+            child = os.open(directory, os.O_RDONLY)
+            try:
+                assert fchdir(fd=child) is None
+                assert os.path.samestat(os.stat("."), os.fstat(child))
+                with tempfile.TemporaryFile() as file:
+                    expect_errno(fchdir, (file,), errno.ENOTDIR)
+                assert os.path.samestat(os.stat("."), os.fstat(child))
+            finally:
+                try:
+                    fchdir(parent)
+                finally:
+                    os.close(child)
+            expect_errno(fchdir, (child,), errno.EBADF)
+        finally:
+            os.close(parent)
+    assert os.getcwd() == previous
+
+
 def check_sendfile():
     from os import sendfile
 
@@ -79,6 +105,123 @@ def check_copy_file_range():
             raise AssertionError("negative count was accepted")
 
 
+def check_readv():
+    from os import readv
+
+    assert readv is os.readv is posix.readv
+    with tempfile.TemporaryFile() as source:
+        fd = source.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        first, last = bytearray(b".."), bytearray(b"....")
+        assert readv(fd, [first, last]) == 5
+        assert (first, last) == (b"bc", b"def.")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 6
+        assert readv(fd, [last]) == 0
+        assert readv(fd, []) == 0
+        os.lseek(fd, 0, os.SEEK_SET)
+        storage = bytearray(b"......")
+        view = memoryview(storage)
+        assert readv(fd, (view[:3], view[1:4])) == 6
+        assert storage == b"adef.."
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            readv(fd, [first, b"readonly"])
+        except BufferError:
+            pass
+        else:
+            raise AssertionError("readv accepted a read-only buffer")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 0
+        first.append(0)
+    expect_errno(readv, (fd, [first]), errno.EBADF)
+
+
+def check_preadv():
+    from os import preadv
+
+    assert preadv is os.preadv is posix.preadv
+    assert os.RWF_HIPRI == posix.RWF_HIPRI
+    assert os.RWF_NOWAIT == posix.RWF_NOWAIT
+    with tempfile.TemporaryFile() as source:
+        fd = source.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        head, tail = bytearray(b".."), bytearray(b"...")
+        assert preadv(fd, [head, tail], 2) == 4
+        assert (head, tail) == (b"cd", b"ef.")
+        assert preadv(fd, [head], 6, 0) == 0
+        expect_errno(preadv, (fd, [head], -2), errno.EINVAL)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+        try:
+            preadv(fd, [head], 0, 1 << 30)
+        except NotImplementedError:
+            pass  # libc supplies only the flags-free preadv.
+        except OSError as error:
+            assert error.errno in (errno.EINVAL, errno.EOPNOTSUPP)
+        else:
+            raise AssertionError("unsupported preadv flag succeeded")
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+    expect_errno(preadv, (fd, [head], 0), errno.EBADF)
+
+
+def check_writev():
+    from os import writev
+
+    assert writev is os.writev is posix.writev
+    data = bytearray(b"abc")
+    with tempfile.TemporaryFile() as target:
+        fd = target.fileno()
+        parts = (b"<", data, memoryview(data)[1:], memoryview(b"|>"))
+        assert writev(fd, parts) == 8
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 8
+        assert os.pread(fd, 8, 0) == b"<abcbc|>"
+        assert writev(fd, []) == 0
+        probe = bytearray(b"unchanged")
+        try:
+            writev(fd, [probe, object()])
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("writev accepted a non-buffer")
+        probe.append(0)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 8
+    expect_errno(writev, (fd, [b"x"]), errno.EBADF)
+
+    reader, writer = os.pipe()
+    os.close(reader)
+    try:
+        expect_errno(writev, (writer, [b"x", b"y"]), errno.EPIPE)
+    finally:
+        os.close(writer)
+
+
+def check_pwritev():
+    from os import pwritev
+
+    assert pwritev is os.pwritev is posix.pwritev
+    with tempfile.TemporaryFile() as target:
+        fd = target.fileno()
+        os.write(fd, b"abcdef")
+        os.lseek(fd, 1, os.SEEK_SET)
+        assert pwritev(fd, [b"X", bytearray(b"Y"), memoryview(b"Z")], 2) == 3
+        assert os.pread(fd, 6, 0) == b"abXYZf"
+        expect_errno(pwritev, (fd, [b"!"], -2), errno.EINVAL)
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+        if hasattr(os, "RWF_APPEND"):
+            try:
+                n = pwritev(fd, [b"!", b"?"], 0, os.RWF_APPEND)
+            except NotImplementedError:
+                pass  # The linked libc implements only pwritev.
+            except OSError as error:
+                assert error.errno in (errno.EINVAL, errno.EOPNOTSUPP)
+            else:
+                assert n == 2 and os.pread(fd, 8, 0) == b"abXYZf!?"
+                assert os.lseek(fd, 0, os.SEEK_CUR) == 1
+                assert pwritev(fd, [b"+"], -1, os.RWF_APPEND) == 1
+                assert os.lseek(fd, 0, os.SEEK_CUR) == 9
+                assert os.pread(fd, 9, 0) == b"abXYZf!?+"
+
+
 def check_splice():
     from os import splice
 
@@ -107,11 +250,16 @@ def check_splice():
 
 
 def current():
+    check_fchdir()
     if sys.platform == "linux":
         check_tmpfile()
         check_copy_file_range()
         check_sendfile()
         check_splice()
+        check_readv()
+        check_preadv()
+        check_writev()
+        check_pwritev()
     assert os.strerror is posix.strerror
     try:
         os.fstat(-1)

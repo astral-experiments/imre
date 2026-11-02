@@ -1,8 +1,6 @@
 //! Process-wide Python hashing for bytes and the native-width storage of Unicode strings.
 
-use std::ffi::CString;
 use std::hash::Hasher;
-use std::os::unix::ffi::OsStrExt;
 use std::sync::OnceLock;
 
 use siphasher::sip::SipHasher13;
@@ -22,29 +20,25 @@ pub(crate) fn initialize(isolated: bool) -> &'static SipHasher13 {
     &HASHER.get_or_init(|| {
         let mut randomized = true;
         let mut key = [0; 16];
-        let seed = (!isolated).then(|| std::env::var_os("PYTHONHASHSEED")).flatten();
-        match seed.as_deref().map(OsStrExt::as_bytes) {
-            None | Some(b"" | b"random") => {
+        let seed = if isolated {
+            None
+        } else {
+            imre_ast::startup::environment_hash_seed().unwrap_or_else(|message| {
+                eprintln!("{message}");
+                std::process::exit(1)
+            })
+        };
+        match seed {
+            None => {
                 if getrandom::fill(&mut key).is_err() {
                     eprintln!("Fatal Python error: failed to get random numbers to initialize Python\nPython runtime state: preinitialized\n");
                     std::process::exit(1);
                 }
             }
-            Some(bytes) => {
-                let text = CString::new(bytes).expect("environment values contain no NUL");
-                let mut end = std::ptr::null_mut();
-                // SAFETY: text is NUL-terminated. strtoul sets end inside text or at its terminator.
-                let (seed, consumed) = unsafe {
-                    let seed = libc::strtoul(text.as_ptr(), &mut end, 10);
-                    (seed, *end == 0)
-                };
-                if !consumed || seed > u32::MAX.into() {
-                    eprintln!("Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\nPython runtime state: preinitialized\n");
-                    std::process::exit(1);
-                }
+            Some(seed) => {
                 randomized = seed != 0;
                 if randomized {
-                    let mut state = seed as u32;
+                    let mut state = seed;
                     // CPython expands an explicit seed with this 32-bit LCG.
                     for byte in &mut key {
                         state = state.wrapping_mul(214013).wrapping_add(2531011);

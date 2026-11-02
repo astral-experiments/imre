@@ -59,3 +59,37 @@ def current():
             count(*args, **kwargs)
         except TypeError as error:
             print(str(error))
+
+    import sys
+
+    calls = []
+
+    class Unit(int):
+        def __radd__(self, value):
+            calls.append(value)
+            return 40
+
+    small = int("42")
+    large = int("4096")
+    assert next(count(small)) is small
+    assert next(count(large)) is not large
+    unit = Unit(1)
+    cursor = count(sys.maxsize - 1, unit)
+    assert repr(cursor) == f"count({sys.maxsize - 1})"
+    assert next(cursor) == sys.maxsize - 1 and not calls
+    assert next(cursor) == sys.maxsize and calls == [sys.maxsize]
+    assert next(cursor) == 40 and calls == [sys.maxsize, 40]
+
+    class Reentrant(Number):
+        def __add__(self, other):
+            if not calls:
+                calls.append("outer")
+                assert next(cursor) is self
+                return outer_result
+            return inner_result
+
+    calls.clear()
+    initial, inner_result, outer_result = Reentrant(1), Number(2), Number(3)
+    cursor = count(initial, Number(1))
+    assert next(cursor) is initial
+    assert next(cursor) is outer_result

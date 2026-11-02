@@ -110,6 +110,7 @@ impl Imports {
                 name,
                 "_imp"
                     | "_hashlib"
+                    | "ssl"
                     | "atexit"
                     | "faulthandler"
                     | "code"
@@ -478,6 +479,7 @@ fn resolve(owner: &str, package: bool, level: u32, name: &str) -> Option<String>
 
 pub(crate) enum ObjectOperation<'a> {
     Builtin,
+    OrderedCommandImport,
     ClassBody(&'a crate::modules::SourceGraph),
 }
 
@@ -524,6 +526,7 @@ pub(crate) fn compile(
         || [
             "__future__",
             "hashlib",
+            "ssl",
             "_imp",
             "atexit",
             "faulthandler",
@@ -556,7 +559,8 @@ pub(crate) fn compile(
     let provider_hint = startup.is_some()
         && !options.runtime_imports
         && (src.contains("logging") || src.contains("tokenize") || !src.is_ascii());
-    if !object_hint && !provider_hint {
+    let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
+    if !object_hint && !provider_hint && !ordered_command {
         return Ok(None);
     }
     let Ok(mut first) = imports(
@@ -585,7 +589,7 @@ pub(crate) fn compile(
     let object_entry = object_hint
         && (module_entry.is_some()
             || first.runtime_imports
-            || operation.is_some()
+            || (operation.is_some() && !ordered_command)
             || (runtime_imports && !first.names.is_empty())
             || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
             || provider_script);
@@ -593,7 +597,15 @@ pub(crate) fn compile(
     // startup fallback needs to verify that the imported provider is bundled.
     let logging_script = !object_entry && provider_hint && first.imports_logging;
     let tokenize_script = !object_entry && imports_provider("tokenize");
-    if !object_entry && !logging_script && !tokenize_script {
+    let ordered_only = !object_entry && !logging_script && !tokenize_script;
+    if ordered_only
+        && (!ordered_command
+            || first.uses_import_builtin
+            || first
+                .names
+                .iter()
+                .any(|(level, name)| *level != 0 || name == "__future__"))
+    {
         return Ok(None);
     }
     let provider_script = provider_script || logging_script || tokenize_script;
@@ -827,6 +839,9 @@ pub(crate) fn compile(
                     } else {
                         inputs.missing.extend([init, file]);
                         if stem.is_dir() {
+                            if ordered_only {
+                                return Ok(None);
+                            }
                             inputs.directories.push((
                                 stem.clone(),
                                 stem.canonicalize().map_err(|e| e.to_string())?,
@@ -837,6 +852,11 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
+                    // A late command import can use the runtime's builtins and bundled
+                    // providers. Leave project-source imports on their original route.
+                    if ordered_only {
+                        return Ok(None);
+                    }
                     // Bundled providers cannot stand in for earlier project modules.
                     if initial.contains(root)
                         && ((request_script && prefix == "urllib")
@@ -913,6 +933,7 @@ pub(crate) fn compile(
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
         "ignore_environment":startup.is_some_and(|(flags, _)| flags.ignore_environment),
         "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
+        "cpu_count":startup.map(|(flags, _)| flags.cpu_count),
         "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
         "xoptions":startup.map(|(flags, _)| &flags.xoptions),
@@ -987,7 +1008,9 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "opcode",
     "platform",
     "re",
+    "re._constants",
     "signal",
+    "ssl",
     "stat",
     "string",
     "string.templatelib",

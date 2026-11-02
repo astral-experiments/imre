@@ -202,6 +202,38 @@ pub(crate) fn fd(s: &Object) -> RawFd {
     state(s, |s| s.fd)
 }
 
+/// Transfer a connected blocking stream to its TLS owner, leaving all socket aliases closed.
+#[cfg(unix)]
+pub(crate) fn take_tls_stream(socket: &Object) -> Result<OwnedFd> {
+    if kind(socket) != libc::SOCK_STREAM {
+        return Err(Error::new(
+            Kind::NotImplementedError,
+            "only stream sockets are supported",
+        ));
+    }
+    socket_name(socket, true)?;
+    state(socket, |s| {
+        if s.close_requested || s.readers != 0 {
+            return Err(Error::new(
+                Kind::ValueError,
+                "cannot wrap a closing socket or one with active file readers",
+            ));
+        }
+        // SAFETY: this query only reads the flags of the socket-owned descriptor.
+        let flags = checked(unsafe { libc::fcntl(s.fd, libc::F_GETFL) }).map_err(errno_error)?;
+        if s.timeout_ns >= 0 || flags & libc::O_NONBLOCK != 0 {
+            return Err(Error::new(
+                Kind::NotImplementedError,
+                "TLS requires a blocking socket without a timeout",
+            ));
+        }
+        let raw = std::mem::replace(&mut s.fd, -1);
+        s.close_requested = true;
+        // SAFETY: the open fd was exclusively owned by s, which can no longer access or close it.
+        Ok(unsafe { OwnedFd::from_raw_fd(raw) })
+    })
+}
+
 fn checked(ret: i32) -> io::Result<i32> {
     if ret < 0 {
         Err(io::Error::last_os_error())
@@ -270,6 +302,12 @@ fn poll_socket(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()
             return Err(timed_out());
         }
     }
+}
+
+/// Wait for the direction requested by a blocking TLS operation, retrying interrupted polls.
+#[cfg(unix)]
+pub(crate) fn wait_blocking(fd: RawFd, events: i16) -> io::Result<()> {
+    poll_socket(fd, events, None)
 }
 
 /// Issue a nonblocking syscall and retry on readiness only when a timeout was requested.

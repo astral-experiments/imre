@@ -686,11 +686,6 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
     let ignore_environment = config["ignore_environment"].as_bool().unwrap_or(false)
         || config["isolated"].as_bool().unwrap_or(false);
-    crate::sys::context_warnings::imre_context_warnings_init(
-        config["context_aware_warnings"]
-            .as_bool()
-            .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
-    );
     if config["faulthandler"].is_null() {
         config["faulthandler"] = (!ignore_environment
             && std::env::var_os("PYTHONFAULTHANDLER").is_some_and(|value| !value.is_empty()))
@@ -718,8 +713,16 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
             .filter(|prefix| !prefix.is_empty())
             .into();
     }
-    crate::python_hash::initialize(ignore_environment);
-    crate::integer_text::imre_integer_digits_init(u32::from(ignore_environment));
+    crate::sys::imre_process_config_init(
+        u32::from(ignore_environment),
+        config["cpu_count"]
+            .as_i64()
+            .and_then(|n| i32::try_from(n).ok())
+            .unwrap_or(if ignore_environment { 0 } else { -1 }),
+        config["context_aware_warnings"]
+            .as_bool()
+            .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
+    );
     if let Some(options) = config["warnoptions"].as_array() {
         for option in options.iter().filter_map(|value| value.as_str()) {
             if let Err(reason) = crate::objects::warnings::startup_filter(option) {
@@ -1124,18 +1127,13 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     finish_at(ctx, result, unsafe { span.as_ref() })
 }
 
-/// Accept calls from native objects generated before lexical call scopes were passed.
+/// Publish a continued expression's source line without changing its statement's GC roots.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_call_at(
-    ctx: *mut Context,
-    callable: Id,
-    args: Id,
-    kwargs: Id,
-    mark: usize,
-    span: *const [u32; 4],
-) -> Id {
-    // SAFETY: both entry points accept the same context, operands, mark and optional position.
-    unsafe { imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, NONE) }
+pub(super) unsafe extern "C" fn imre_dyn_expression_line(ctx: *mut Context, line: u32) {
+    // SAFETY: generated code owns the active context for this frame.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap
+        .replace_expression(value::ExpressionPosition::Line(line));
 }
 
 /// Invoke a compiled call using the root mark taken before its operands were evaluated.
@@ -1160,16 +1158,15 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
 
 /// Record a class annotation only when its statement executes.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_class_annotation(
+pub(super) unsafe extern "C" fn imre_dyn_mark_class_annotation(
     ctx: *mut Context,
     scope: Id,
     name: Id,
-    thunk: Id,
     offset: u32,
 ) -> Id {
     // SAFETY: the compiler passes the active context and handles from the current class body.
     let ctx = unsafe { &mut *ctx };
-    let result = ctx.record_class_annotation(scope, name, thunk, offset);
+    let result = ctx.record_class_annotation(scope, name, offset);
     finish(ctx, result)
 }
 

@@ -9,6 +9,7 @@ use super::{
 use crate::objects::interpreter_stdlib as system;
 
 pub(super) mod ast;
+mod asyncgen_hooks;
 pub(super) mod audit;
 mod binascii;
 pub(super) mod codecs;
@@ -63,6 +64,8 @@ mod resource;
 mod select;
 #[cfg(unix)]
 pub(super) mod signal;
+#[cfg(unix)]
+pub(super) mod ssl;
 mod socket;
 mod structure;
 mod subprocess;
@@ -112,6 +115,10 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
+    #[cfg(unix)]
+    if name == "_imre_ssl" {
+        return ssl::provider::available();
+    }
     if name == "_hashlib" {
         return hashlib::openssl::provider().is_some();
     }
@@ -133,6 +140,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "genericpath"
             | "hmac"
             | "urllib.parse"
+            | "re._constants"
             | "io"
             | "itertools"
             | "json"
@@ -457,6 +465,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
             ctx.builtin("enum.Enum.__deepcopy__");
+            ctx.builtin("enum.Enum.__reduce_ex__");
             ctx.builtin(&format!("enum.{name}"))
         }
         (
@@ -526,7 +535,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
         (
             "traceback",
-            "clear_frames" | "format_exc" | "format_exception" | "print_exc" | "print_exception",
+            "_frame_locals" | "_tb_position" | "clear_frames" | "format_exc" | "format_exception"
+            | "print_exc" | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
         ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
         ("types", "ModuleType") => ctx.builtin("module"),
@@ -545,6 +555,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "EllipsisType") => ctx.builtin("ellipsis"),
         ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),
+        ("types", "CellType") => ctx.builtin("cell"),
         (
             "_collections",
             "_count_elements"
@@ -577,6 +588,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
         ("_collections_abc", abc) if super::mapping_abc::bootstrapped(abc) => {
             super::mapping_abc::class(ctx, abc)?
+        }
+        ("_collections_abc", "_CallableGenericAlias") => {
+            ctx.builtin("collections.abc._CallableGenericAlias")
         }
         ("_collections_abc", "_check_methods") => ctx.builtin("_collections_abc._check_methods"),
         (
@@ -825,6 +839,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "inspect",
             "iscoroutinefunction"
             | "markcoroutinefunction"
+            | "_native_data_descriptor"
             | "_static_member"
             | "_signature_identifier"
             | "_signature_mapping"
@@ -1172,6 +1187,14 @@ pub(super) fn call(
         ctx.heap.clear_frame(frame)?;
         return Ok(NONE);
     }
+    if name == "traceback._frame_locals" {
+        let frame = single_argument("_frame_locals", "frame", args, kwargs)?;
+        return traceback::frame_locals(ctx, frame);
+    }
+    if name == "traceback._tb_position" {
+        let tb = single_argument("_tb_position", "tb", args, kwargs)?;
+        return Ok(traceback::tb_position(ctx, tb));
+    }
     if name == "traceback.clear_frames" {
         let tb = single_argument("clear_frames", "tb", args, kwargs)?;
         return traceback::clear_frames(ctx, tb);
@@ -1326,7 +1349,26 @@ pub(super) fn call(
     if name == "sys.getsizeof" {
         return system_size::getsizeof(ctx, &args[1..], kwargs);
     }
-    if matches!(name, "sys.getrecursionlimit" | "sys.is_finalizing") {
+    if name == "sys.set_coroutine_origin_tracking_depth" {
+        let [depth] = builtins::bind_builtin_arguments(
+            "set_coroutine_origin_tracking_depth",
+            args,
+            kwargs,
+            ["depth"],
+            1,
+        )?;
+        let depth = index_c_int(ctx, depth.expect("required depth argument"))?;
+        ctx.threads.coroutine_origin_depth =
+            u32::try_from(depth).map_err(|_| Error::new("ValueError", "depth must be >= 0"))?;
+        return Ok(NONE);
+    }
+    if name == "sys.set_asyncgen_hooks" {
+        return asyncgen_hooks::set(ctx, &args[1..], kwargs);
+    }
+    if matches!(
+        name,
+        "sys.getrecursionlimit" | "sys.is_finalizing" | "sys.get_asyncgen_hooks"
+    ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -1337,6 +1379,13 @@ pub(super) fn call(
             return Err(Error::new(
                 "TypeError",
                 format!("{name}() takes no arguments ({} given)", args.len() - 1),
+            ));
+        }
+        if name == "sys.get_asyncgen_hooks" {
+            return Ok(fixed_structseq::record(
+                ctx,
+                fixed_structseq::ASYNCGEN_HOOKS,
+                ctx.threads.asyncgen_hooks.to_vec(),
             ));
         }
         if name == "sys.is_finalizing" {
@@ -1428,6 +1477,7 @@ pub(super) fn call(
     if matches!(
         name,
         "sys.get_int_max_str_digits"
+            | "sys.get_coroutine_origin_tracking_depth"
             | "sys.getdefaultencoding"
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
@@ -1437,7 +1487,11 @@ pub(super) fn call(
             | "posix.getuid"
             | "posix.geteuid"
             | "posix.getgid"
+            | "posix.getegid"
+            | "posix.getresgid"
+            | "posix.getresuid"
             | "posix.getgroups"
+            | "posix.cpu_count"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
             | "sys._jit.is_active"
@@ -1466,6 +1520,7 @@ pub(super) fn call(
             ));
         }
         return Ok(match name {
+            "sys.get_coroutine_origin_tracking_depth" => ctx.int(i64::from(ctx.threads.coroutine_origin_depth)),
             "posix._create_environ" => os::environment(ctx),
             "posix.getcwd" | "posix.getcwdb" => os::getcwd(ctx, name == "posix.getcwdb")?,
             "sys.getfilesystemencoding" => ctx
@@ -1482,12 +1537,27 @@ pub(super) fn call(
             "posix.geteuid" => ctx.alloc(Value::Int(crate::objects::os::geteuid())),
             "posix.getuid" => ctx.alloc(Value::Int(crate::objects::os::getuid())),
             "posix.getgid" => ctx.alloc(Value::Int(crate::objects::os::getgid())),
+            "posix.getegid" => ctx.alloc(Value::Int(crate::objects::os::getegid())),
+            #[cfg(target_os = "linux")]
+            "posix.getresgid" | "posix.getresuid" => {
+                let ids = if name == "posix.getresgid" {
+                    crate::objects::os::getresgid()?
+                } else {
+                    crate::objects::os::getresuid()?
+                };
+                let values = ids.into_iter().map(|id| ctx.alloc(Value::Int(id))).collect();
+                ctx.alloc(Value::Tuple(values))
+            }
             "posix.getgroups" => {
                 let groups = crate::objects::os::getgroups()?
                     .into_iter()
                     .map(|group| ctx.alloc(Value::Int(group)))
                     .collect();
                 ctx.alloc(Value::List(groups))
+            }
+            #[cfg(target_os = "linux")]
+            "posix.cpu_count" => {
+                crate::sys::cpu_count::online().map_or(NONE, |n| ctx.int(i64::from(n)))
             }
             "sys.getdefaultencoding" => ctx.default_encoding,
             "sys.get_int_max_str_digits" => {
@@ -1723,13 +1793,25 @@ pub(super) fn call(
         return os::spawn_exec(ctx, args, kwargs);
     }
     if let Some(op) = name.strip_prefix("posix.")
-        && (os::is_descriptor_function(op) || os::is_process_function(op))
+        && (os::is_descriptor_function(op)
+            || os::is_process_function(op)
+            || (cfg!(unix) && op == "getpgrp"))
     {
         return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix.sysconf" {
         return os::sysconf::call(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("sched_get_priority_min" | "sched_get_priority_max")) =
+        name.strip_prefix("posix.")
+    {
+        return os::scheduler::priority_bound(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.sched_yield" {
+        return os::scheduler::yield_cpu(args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
@@ -1818,11 +1900,23 @@ pub(super) fn call(
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
+    if name == "_imre_itertools._accumulate_allocate" {
+        return itertools::accumulate_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._accumulate_state" {
+        return itertools::accumulate_state(ctx, args, kwargs);
+    }
     if name == "_imre_itertools._cycle_allocate" {
         return itertools::cycle_allocate(ctx, args, kwargs);
     }
     if name == "_imre_itertools._cycle_next" {
         return itertools::cycle_next(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._pairwise_allocate" {
+        return itertools::pairwise_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._pairwise_next" {
+        return itertools::pairwise_next(ctx, args, kwargs);
     }
     if name == "_imre_itertools._starmap_allocate" {
         return itertools::starmap_allocate(ctx, args, kwargs);
@@ -2203,6 +2297,19 @@ pub(super) fn call(
             builtins::bind_builtin_arguments("__deepcopy__", args, kwargs, ["self", "memo"], 2)?;
         return Ok(member.unwrap());
     }
+    if name == "enum.Enum.__reduce_ex__" {
+        let [member, _] =
+            builtins::bind_builtin_arguments("__reduce_ex__", args, kwargs, ["self", "proto"], 2)?;
+        let member = member.unwrap();
+        let class = ctx.lookup_attr(member, "__class__")?;
+        // Both lookups may run Python; keep the first result live through the second.
+        let mark = ctx.heap.temporary_mark();
+        ctx.heap.keep(class);
+        let value = ctx.lookup_attr(member, "_value_");
+        ctx.heap.release_temporaries_since(mark);
+        let arguments = ctx.alloc(Value::Tuple(vec![value?]));
+        return Ok(ctx.alloc(Value::Tuple(vec![class, arguments])));
+    }
     if name == "enum._simple_enum" {
         return ctx.enum_decorator(args, kwargs);
     }
@@ -2270,6 +2377,10 @@ pub(super) fn call(
         "_operator._compare_digest" | "_hashlib.compare_digest"
     ) {
         return hmac::compare(ctx, name, args, kwargs);
+    }
+    #[cfg(unix)]
+    if let Some(function) = name.strip_prefix("_imre_ssl.") {
+        return ssl::call(ctx, function, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("_hashlib.") {
         return hashlib::call_openssl(ctx, function, args, kwargs);

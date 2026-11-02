@@ -15,6 +15,35 @@ def current():
             pass
         else:
             raise AssertionError("accepted the backing dict as a proxy receiver")
+    try:
+        hash(view)
+    except TypeError as exc:
+        assert str(exc) == "unhashable type: 'dict'"
+    else:
+        raise AssertionError("hashed a proxy to an unhashable dictionary")
+
+    class HashableDict(dict):
+        def __hash__(self):
+            return self["value"]
+
+    backing = HashableDict(value=37)
+    nested = MappingProxyType(MappingProxyType(backing))
+    assert hash(nested) == 37
+    backing["value"] = 42
+    assert nested.__hash__() == MappingProxyType.__hash__(nested) == 42
+    assert {nested: "proxied"}[backing] == "proxied"
+
+    getter = MappingProxyType.__getitem__
+    assert getter.__objclass__ is MappingProxyType and type(getter).__name__ == "wrapper_descriptor"
+    assert getter.__doc__ == "Return self[key]." and getter.__text_signature__ == "($self, key, /)"
+    assert type(view.__getitem__).__name__ == "method-wrapper" and view.__getitem__.__self__ is view
+    assert getter(view, "a") == view.__getitem__("a") == 1
+    try:
+        getter(values, "a")
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted a dict as a proxy descriptor receiver")
     assert view.get("a") == 1
     copied = view.copy()
     copied.clear()

@@ -12,6 +12,8 @@ use regex_syntax::hir::{Capture, Hir, HirKind, Repetition};
 
 pub(super) enum Matcher {
     Standard(Regex),
+    #[cfg(target_os = "linux")]
+    Locale(Box<super::locale::LocaleMatcher>),
     Lookahead(Box<super::lookahead::Lookahead>),
     Guarded(Box<GuardedMatcher>),
     Asserted(Box<AssertedMatcher>),
@@ -114,8 +116,8 @@ impl Matcher {
     /// Share the progress-aware automaton with the nonempty retry used by split and findall.
     pub(super) fn guarded_nfa(&self) -> Option<&NFA> {
         match self {
-            Self::Standard(_) | Self::Asserted(_) | Self::Lookahead(_) => None,
             Self::Guarded(matcher) => Some(matcher.vm.get_nfa()),
+            _ => None,
         }
     }
 
@@ -129,6 +131,8 @@ impl Matcher {
 
     pub(super) fn group_info(&self) -> &GroupInfo {
         match self {
+            #[cfg(target_os = "linux")]
+            Self::Locale(matcher) => &matcher.groups,
             Self::Standard(regex) => regex.group_info(),
             Self::Asserted(matcher) => &matcher.groups,
             Self::Lookahead(matcher) => &matcher.groups,
@@ -164,6 +168,8 @@ impl Matcher {
     /// Store the preferred match and its capture spans for this search range.
     pub(super) fn captures(&self, input: Input<'_>, captures: &mut Captures) -> Result<(), String> {
         match self {
+            #[cfg(target_os = "linux")]
+            Self::Locale(matcher) => return matcher.captures(input, captures),
             Self::Standard(regex) => regex.captures(input, captures),
             Self::Asserted(_) | Self::Lookahead(_) => {
                 return self.asserted_search(input, captures, false).map(|_| ());

@@ -67,4 +67,24 @@ def current():
                 assert isinstance(exc, ProcessLookupError)
         else:
             raise AssertionError("kernel accepted invalid PID")
+    class Policy:
+        def __index__(self):
+            return os.SCHED_RR
+
+    for name in ("sched_get_priority_min", "sched_get_priority_max"):
+        bound = getattr(os, name)
+        assert bound is vars(posix)[name]
+        assert bound.__text_signature__ == "($module, /, policy)"
+        assert bound(policy=Policy()) == bound(os.SCHED_RR)
+        assert bound(os.SCHED_OTHER) == 0
+        for invalid, error in ((-23, OSError), (1 << 32, OverflowError), (None, TypeError)):
+            try:
+                bound(invalid)
+            except error as exc:
+                if isinstance(exc, OSError):
+                    assert exc.errno == errno.EINVAL
+            else:
+                raise AssertionError("invalid scheduling policy accepted")
+    assert os.sched_get_priority_min(os.SCHED_RR) <= os.sched_get_priority_max(os.SCHED_RR)
+    assert os.sched_yield is posix.sched_yield and os.sched_yield() is None
     print("Linux scheduler policy query passed")

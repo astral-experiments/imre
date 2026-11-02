@@ -274,9 +274,14 @@ impl Context {
                 true
             }
             ("tuple", Value::Instance { class, .. }) => self.namedtuple_fields(*class).is_some(),
+            (_, Value::DictView { .. }) => {
+                Self::dict_view_owner(self.type_name(object)) == Some(owner)
+            }
             ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
+            | ("mappingproxy", Value::MappingProxy(_))
+            | ("super", Value::Super { .. })
             | ("complex", Value::Complex(_))
             | ("str", Value::Str(_) | Value::SurrogateStr(_))
             | ("bytes", Value::Bytes(_))
@@ -645,8 +650,9 @@ impl Context {
         })
     }
     fn is_native_iterator(&self, id: Id) -> bool {
+        let value = self.heap.get(id);
         matches!(
-            self.heap.get(id),
+            value,
             Value::Iterator { .. }
                 | Value::TemplateIter { .. }
                 | Value::RangeIterator(_)
@@ -670,7 +676,7 @@ impl Context {
                 | Value::Enumerate { .. }
                 | Value::Count { .. }
                 | Value::Repeat(_)
-        )
+        ) || value.is_weak_proxy()
     }
 
     /// Select the inherited binary iterator for an exact value or a subclass with native storage.
@@ -684,6 +690,10 @@ impl Context {
 
     /// Keeps sequence iterators on their source and respects an existing iterator's cursor.
     fn iterator(&mut self, id: Id) -> Result<Id> {
+        let target = self.weak_proxy_target(id)?;
+        if target != id {
+            return self.with_weak_target(target, |ctx| ctx.iterator(target));
+        }
         if self.is_native_iterator(id) {
             let closed = match self.heap.get(id) {
                 Value::BufferedRandom(file, _) => file.borrow().closed(),
@@ -827,6 +837,7 @@ impl Context {
                 | Value::TextFile(_)
                 | Value::Enumerate { .. }
         ) || value.instance_class().is_some()
+            || value.is_weak_proxy()
         {
             return Ok(self.alloc(Value::LoopIterator {
                 source,
@@ -919,7 +930,7 @@ impl Context {
         self.raised_error_matches(error, stop)
     }
 
-    fn reverse_sequence_len(&mut self, source: Id) -> Result<usize> {
+    fn sequence_len(&mut self, source: Id) -> Result<usize> {
         let size = builtins::call(self, "len", &[source], &[])?;
         self.as_int(size)?
             .to_i64()
@@ -1111,6 +1122,19 @@ impl Context {
 
     /// Advances a boxed iterator once, leaving its remaining values available to other callers.
     fn next_result(&mut self, id: Id) -> Result<Option<Id>> {
+        let target = self.weak_proxy_target(id)?;
+        if target != id {
+            if !self.is_native_iterator(target) && self.slot(target, "__next__").is_none() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "Weakref proxy referenced a non-iterator '{:.200}' object",
+                        self.type_name(target)
+                    ),
+                ));
+            }
+            return self.with_weak_target(target, |ctx| ctx.next_item(target));
+        }
         if matches!(self.heap.get(id), Value::CoroutineWrapper(_)) {
             return self
                 .call_coroutine_method("coroutine_wrapper", "__next__", &[id])
@@ -1416,6 +1440,7 @@ impl Context {
                 | Value::Repeat(_)
                 | Value::Enumerate { .. }
         ) || matches!(self.heap.get(id), Value::GenericAlias(alias) if alias.is_builtin_alias() || alias.kind.iterates_unpack())
+            || self.heap.get(id).is_weak_proxy()
             || self.slot(id, "__iter__").is_some()
             || self.slot(id, "__getitem__").is_some()
         {
@@ -2092,8 +2117,41 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if name == "super" {
+            let mut entries = Vec::new();
+            for name in ["__new__", "__repr__", "__getattribute__", "__init__", "__get__"] {
+                let method = self.builtin(&format!("super.{name}"));
+                entries.push((self.heap.code_name(name), method));
+            }
+            for name in ["__thisclass__", "__self__", "__self_class__"] {
+                let field = self.readonly_member("super", name);
+                entries.push((self.heap.code_name(name), field));
+            }
+            let dictionary = self.dict(entries);
+            self.native_type_dicts.insert(value, dictionary);
+        }
+        if name == "coroutine" {
+            let origin = self.readonly_member("coroutine", "cr_origin");
+            let key = self.heap.code_name("cr_origin");
+            let dictionary = self.dict(vec![(key, origin)]);
+            self.native_type_dicts.insert(value, dictionary);
+        }
         if name == deque::CLASS {
             deque::install(self);
+        }
+        if let Some(owner) = Self::dict_view_owner(name)
+            && owner == name
+        {
+            let get = self.builtin(&format!("_dictview_mapping.{owner}"));
+            let mapping = self.alloc(Value::GetSetDescriptor {
+                owner,
+                name: "mapping",
+                get,
+                set: None,
+            });
+            let key = self.heap.code_name("mapping");
+            let namespace = self.dict(vec![(key, mapping)]);
+            self.native_type_dicts.insert(value, namespace);
         }
         if let Some(owner) = stdlib::itertools::cursor_type(name) {
             stdlib::itertools::install_namespace(self, value, owner);
@@ -2205,7 +2263,10 @@ impl Context {
                 self.builtin("str.maketrans");
                 builtins::STR_METHODS
             }
-            deque::ITERATOR | deque::REVERSE_ITERATOR => deque::ITERATOR_METHODS,
+            deque::ITERATOR | deque::REVERSE_ITERATOR => {
+                deque::install_iterator_namespace(self, value, name);
+                &[]
+            }
             thread_local::CLASS => &["__new__", "__getattribute__", "__setattr__", "__delattr__"],
             stdlib::fixed_structseq::SCHED_PARAM => &["__new__", "__reduce__", "__replace__"],
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
@@ -2523,7 +2584,7 @@ impl Context {
                 .and_then(|sources| sources.first())
                 .map(|m| (m.path.clone(), importlib::SourceBody::Compiled(m.code)))
         } else if stdlib::is_module(name) || self.is_frozen(name) {
-            if matches!(name, "email" | "importlib" | "json" | "urllib") {
+            if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {
                 locations.push(stdlib::package_path(self, name)?);
@@ -2749,9 +2810,33 @@ impl Context {
             let posix = if name == "os" { Some(self.module("posix")?) } else { None };
             #[cfg(target_os = "linux")]
             stdlib::posix_spawn::initialize(self, scope, posix)?;
-            for attr in ["chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups"] {
+            for attr in [
+                "fchdir", "chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups",
+                "getpgrp",
+            ] {
                 let value = match posix {
-                    Some(posix) => self.lookup_attr(posix, attr)?,
+                    Some(posix) => match self.lookup_attr(posix, attr) {
+                        Ok(value) => value,
+                        Err(error) if self.is_attribute_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    },
+                    None => self.builtin(&format!("posix.{attr}")),
+                };
+                self.bind(scope, attr, value);
+            }
+            for attr in [
+                "getegid",
+                #[cfg(target_os = "linux")]
+                "getresgid",
+                #[cfg(target_os = "linux")]
+                "getresuid",
+            ] {
+                let value = match posix {
+                    Some(module) => match self.lookup_attr(module, attr) {
+                        Ok(value) => value,
+                        Err(error) if self.is_attribute_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    },
                     None => self.builtin(&format!("posix.{attr}")),
                 };
                 self.bind(scope, attr, value);
@@ -2787,8 +2872,12 @@ impl Context {
             }
             "_imre_itertools" => {
                 for attr in [
+                    "_accumulate_allocate",
+                    "_accumulate_state",
                     "_cycle_allocate",
                     "_cycle_next",
+                    "_pairwise_allocate",
+                    "_pairwise_next",
                     "_starmap_allocate",
                     "_starmap_next",
                     "_zip_longest_allocate",
@@ -2834,9 +2923,21 @@ impl Context {
             }
             #[cfg(target_os = "linux")]
             "posix" if source.is_none() => {
+                let cpu_count = self.builtin("posix.cpu_count");
+                self.bind(scope, "cpu_count", cpu_count);
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
-                for name in ["lockf", "posix_fadvise", "ptsname", "splice"] {
+                for name in [
+                    "get_terminal_size",
+                    "lockf",
+                    "posix_fadvise",
+                    "ptsname",
+                    "preadv",
+                    "pwritev",
+                    "readv",
+                    "writev",
+                    "splice",
+                ] {
                     let function = self.builtin(&format!("posix.{name}"));
                     self.bind(scope, name, function);
                 }
@@ -2849,6 +2950,11 @@ impl Context {
                     self.bind(scope, attr, value);
                 }
                 for (attr, flag) in [
+                    ("RWF_APPEND", libc::RWF_APPEND),
+                    ("RWF_DSYNC", libc::RWF_DSYNC),
+                    ("RWF_SYNC", libc::RWF_SYNC),
+                    ("RWF_HIPRI", libc::RWF_HIPRI),
+                    ("RWF_NOWAIT", libc::RWF_NOWAIT),
                     ("O_PATH", libc::O_PATH),
                     ("O_NOCTTY", libc::O_NOCTTY),
                     ("O_TMPFILE", libc::O_TMPFILE),
@@ -2914,6 +3020,8 @@ impl Context {
             }
             "threading" if source.is_none() => {
                 let thread = self.module("_thread")?;
+                let error = self.lookup_attr(thread, "error")?;
+                self.bind(scope, "ThreadError", error);
                 let limit = self.lookup_attr(thread, "TIMEOUT_MAX")?;
                 self.bind(scope, "TIMEOUT_MAX", limit);
             }
@@ -2921,8 +3029,25 @@ impl Context {
                 #[cfg(target_os = "linux")]
                 if source.is_none() {
                     let posix = self.module("posix")?;
+                    for attr in stdlib::os::scheduler::PRIORITY_AND_YIELD {
+                        match self.lookup_attr(posix, attr) {
+                            Ok(value) => self.bind(scope, attr, value),
+                            Err(error) if self.is_attribute_error(&error) => continue,
+                            Err(error) => return Err(error),
+                        }
+                    }
                     for attr in [
+                        "get_terminal_size",
                         "ptsname",
+                        "preadv",
+                        "pwritev",
+                        "readv",
+                        "writev",
+                        "RWF_APPEND",
+                        "RWF_DSYNC",
+                        "RWF_SYNC",
+                        "RWF_HIPRI",
+                        "RWF_NOWAIT",
                         "O_NOCTTY",
                         "splice",
                         "SPLICE_F_MOVE",
@@ -2971,6 +3096,8 @@ impl Context {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
             }
+            #[cfg(unix)]
+            "_imre_ssl" if source.is_none() => stdlib::ssl::install(self, scope)?,
             "_hashlib" if source.is_none() => {
                 stdlib::hashlib::install_openssl(self, module, scope)?
             }
@@ -3152,11 +3279,17 @@ impl Context {
                 self.bind(scope, "byteorder", byteorder);
                 let thread_info = stdlib::fixed_structseq::thread_info(self);
                 self.bind(scope, "thread_info", thread_info);
+                for name in ["get_coroutine_origin_tracking_depth", "set_coroutine_origin_tracking_depth"] {
+                    let callable = self.builtin(&format!("sys.{name}"));
+                    self.bind(scope, name, callable);
+                }
                 for name in [
                     "audit",
                     "addaudithook",
                     "getsizeof",
                     "getrecursionlimit",
+                    "get_asyncgen_hooks",
+                    "set_asyncgen_hooks",
                     "is_finalizing",
                     "setrecursionlimit",
                     "_getframe",
@@ -3204,6 +3337,10 @@ impl Context {
                     self.bind(scope, "monitoring", monitoring);
                 }
             }
+            "re._constants" => {
+                let limit = self.int(i64::from(imre_regex::MAX_GROUPS));
+                self.bind(scope, "MAXGROUPS", limit);
+            }
             "re" => {
                 let pattern = self.builtin(value::REGEX_PATTERN_TYPE);
                 self.bind(scope, "Pattern", pattern);
@@ -3241,6 +3378,8 @@ impl Context {
             _ => {}
         }
         if name == "_thread" && source.is_none() {
+            let error = self.builtin("RuntimeError");
+            self.bind(scope, "error", error);
             #[cfg(unix)]
             {
                 let interrupt = self.builtin("_thread.interrupt_main");
@@ -3321,6 +3460,8 @@ impl Context {
             {
                 self.freeze_itertools_types(scope);
                 for (name, owner) in [
+                    ("accumulate", "itertools.accumulate"),
+                    ("pairwise", "itertools.pairwise"),
                     ("starmap", "itertools.starmap"),
                     ("takewhile", "itertools.takewhile"),
                     ("dropwhile", "itertools.dropwhile"),
@@ -3348,6 +3489,14 @@ impl Context {
                 && let Some(class) = self.scope_name(scope, "PatternError")
             {
                 self.classes.insert("re.PatternError".into(), class);
+            }
+            if name == "_collections_abc"
+                && self.typing.abc_callable_reducer.is_none()
+                && self.config["bundled_root"].as_str().is_some_and(|root| {
+                    path == std::path::Path::new(root).join("_collections_abc.py")
+                })
+            {
+                self.typing.abc_callable_reducer = self.scope_name(scope, "_reduce_callable_alias");
             }
             if name == "typing"
                 && self.typing.callable_factory.is_none()

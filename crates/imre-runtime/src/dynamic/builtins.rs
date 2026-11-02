@@ -17,7 +17,7 @@ mod text;
 mod translation;
 pub(super) use collections::{
     clear_container, copy_dict, hashable, list_extend, remove_dict_item, remove_dict_item_hashed,
-    set_add, set_member, sort_values, update as update_dict, update_set,
+    remove_table_entry, set_add, set_member, sort_values, update as update_dict, update_set,
 };
 pub(super) use text::{
     bytes_from_iterable, bytes_percent, format_conversion, format_value, percent, zeroed_bytes,
@@ -198,7 +198,11 @@ pub(super) fn exception_subclass(child: &str, parent: &str) -> Option<bool> {
 }
 
 pub(super) fn is_builtin(name: &str) -> bool {
-    (name != "UnsupportedOperation" && is_builtin_type(name)) || FUNCTIONS.contains(&name)
+    (name != "UnsupportedOperation" && is_builtin_type(name)) || is_builtin_function(name)
+}
+
+pub(super) fn is_builtin_function(name: &str) -> bool {
+    FUNCTIONS.contains(&name)
 }
 
 /// CPython compares built-in functions by their implementation and bound module.
@@ -216,8 +220,19 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
     (matches!(
         owner,
-        "object" | "dict" | "float" | "function" | "int" | "str" | "type" | super::thread_local::CLASS
+        "object"
+            | "dict"
+            | "float"
+            | "function"
+            | "cell"
+            | "int"
+            | "str"
+            | "super"
+            | "type"
+            | super::thread_local::CLASS
+            | super::namespace::CLASS
     ) || super::stdlib::itertools::cursor_type(owner).is_some()
+        || super::deque::iterator_class(owner).is_some()
         || is_exception(owner)
         || owner == super::stdlib::fixed_structseq::SCHED_PARAM
         || crate::objects::HashState::is_provider_class(owner))
@@ -568,7 +583,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::ClassMethod { .. } if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
-        Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
+        Value::Coroutine { .. }
+            if super::generator_protocol::coroutine_method("coroutine", attr) =>
+        {
             "coroutine"
         }
         Value::CoroutineWrapper(_)
@@ -657,6 +674,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             if matches!(
                 attr,
                 "add"
+                    | "clear"
                     | "copy"
                     | "discard"
                     | "difference"
@@ -665,6 +683,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "remove"
                     | "union"
                     | "difference_update"
+                    | "symmetric_difference_update"
                     | "update"
                     | "issuperset"
                     | "issubset"
@@ -1050,26 +1069,23 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        if scope != NONE
-            && let Value::Native(name) = self.heap.get(callable)
-        {
+        if let Value::Native(name) = self.heap.get(callable) {
             match name.as_str() {
                 "eval" => return self.call_eval_exec(scope, "eval", &args, &kwargs),
                 "exec" => return self.call_eval_exec(scope, "exec", &args, &kwargs),
                 "locals" | "vars" if args.is_empty() && kwargs.is_empty() => {
                     return self.frame_locals(scope);
                 }
+                "dir"
+                    if args.is_empty()
+                        && kwargs.is_empty()
+                        && self.scope_data(scope).parent.is_none() =>
+                {
+                    let namespace = self.module_globals(scope)?;
+                    return collections::sorted(self, &[namespace], &[]);
+                }
                 _ => {}
             }
-        }
-        if scope != NONE
-            && args.is_empty()
-            && kwargs.is_empty()
-            && matches!(self.heap.get(callable), Value::Native(name) if name == "dir")
-            && self.scope_data(scope).parent.is_none()
-        {
-            let namespace = self.module_globals(scope)?;
-            return collections::sorted(self, &[namespace], &[]);
         }
         self.call(callable, args, kwargs)
     }
@@ -1268,12 +1284,18 @@ pub(super) fn call(
         let bound = ctx.lookup_attr(mapping, method)?;
         return ctx.call(bound, forwarded, Vec::new());
     }
-    if name == "object.__getattribute__" {
+    if let Some(owner @ ("object" | "super")) = name.strip_suffix(".__getattribute__") {
         let Some((&object, values)) = args.split_first() else {
-            return Err(type_error(
-                "descriptor '__getattribute__' of 'object' object needs an argument",
-            ));
+            return Err(type_error(format!(
+                "descriptor '__getattribute__' of '{owner}' object needs an argument"
+            )));
         };
+        if owner == "super" && !ctx.builtin_slot_accepts(object, owner) {
+            return Err(type_error(format!(
+                "descriptor '__getattribute__' requires a 'super' object but received a '{}'",
+                ctx.type_name(object)
+            )));
+        }
         if !kwargs.is_empty() {
             return Err(type_error(
                 "wrapper __getattribute__() takes no keyword arguments",
@@ -1286,13 +1308,20 @@ pub(super) fn call(
             )));
         };
         let attr = attribute_name(ctx, *key)?;
-        return ctx.default_get_attr(object, &attr);
+        return if owner == "super" {
+            ctx.super_getattribute(object, &attr)
+        } else {
+            ctx.default_get_attr(object, &attr)
+        };
     }
     if matches!(name, "setattr" | "object.__setattr__") {
         return set_attribute(ctx, name, args, kwargs);
     }
     if matches!(name, "delattr" | "object.__delattr__") {
         return delete_attribute(ctx, name, args, kwargs);
+    }
+    if name == "types.SimpleNamespace.__new__" {
+        return super::namespace_init::allocate(ctx, args);
     }
     if let Some(owner) = name.strip_suffix(".__new__")
         && is_exception(owner)
@@ -1311,8 +1340,10 @@ pub(super) fn call(
             | "object.__repr__"
             | "object.__str__"
             | "object.__ne__"
+            | "mappingproxy.__hash__"
             | "mappingproxy.__repr__"
             | "mappingproxy.__str__"
+            | "super.__repr__"
     ) {
         let (owner, method) = name.split_once('.').unwrap();
         let Some((&receiver, rest)) = args.split_first() else {
@@ -1320,9 +1351,11 @@ pub(super) fn call(
                 "descriptor '{method}' of '{owner}' object needs an argument"
             )));
         };
-        if owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)) {
+        if (owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)))
+            || (owner == "super" && !ctx.builtin_slot_accepts(receiver, owner))
+        {
             return Err(type_error(format!(
-                "descriptor '{method}' requires a 'mappingproxy' object but received a '{}'",
+                "descriptor '{method}' requires a '{owner}' object but received a '{}'",
                 ctx.type_name(receiver)
             )));
         }
@@ -1350,11 +1383,18 @@ pub(super) fn call(
             )));
         }
         if owner == "mappingproxy" {
+            if method == "__hash__" {
+                let hash = ctx.dictionary_hash(receiver)?;
+                return Ok(ctx.int(hash));
+            }
             if method == "__str__" {
                 return call(ctx, "str", &[receiver], &[]);
             }
             let repr = ctx.checked_format(receiver, true)?;
             return Ok(ctx.text(repr));
+        }
+        if owner == "super" {
+            return Ok(ctx.text(ctx.super_repr(receiver)));
         }
         if method == "__repr__" {
             return ctx.object_repr(receiver);
@@ -1420,6 +1460,8 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "super" if method == "__new__" => ctx.super_new(args, kwargs),
+            "super" if method == "__init__" => ctx.super_init(args, kwargs),
             "int" | "float" | "str" | "bytes" if method == "__new__" => {
                 let Some((&class, values)) = args.split_first() else {
                     return Err(type_error(format!("{name}(): not enough arguments")));
@@ -1542,7 +1584,7 @@ pub(super) fn call(
                 {
                     ctx.check_heap_method_receiver(class, field, values[0])?;
                     true
-                } else if owner == "int" {
+                } else if owner == "int" || Context::dict_view_owner(owner).is_some() {
                     ctx.builtin_slot_accepts(values[0], owner)
                 } else if owner == "typing.Union" {
                     matches!(ctx.heap.get(values[0]), Value::Union(_))
@@ -1563,6 +1605,13 @@ pub(super) fn call(
                     "AttributeError",
                     format!("attribute '{field}' of '{owner}' objects is not writable"),
                 ))
+            }
+            "_dictview_mapping" => {
+                let receiver = noargs_method_receiver(ctx, method, "mapping", args, kwargs)?;
+                let Value::DictView { dict, .. } = *ctx.heap.get(receiver) else {
+                    unreachable!("dictionary view receiver checked");
+                };
+                Ok(ctx.alloc(Value::MappingProxy(dict)))
             }
             "_int_getset" => integer::rational_field(ctx, method, args),
             "int" if method == "bit_length" => integer::bit_length(ctx, args, kwargs),
@@ -1621,13 +1670,15 @@ pub(super) fn call(
             "bytearray" if BYTEARRAY_METHODS.contains(&method) => {
                 text::bytearray_method(ctx, name, method, args, kwargs)
             }
-            "tuple" if method == "__getitem__" => {
+            "tuple" | "mappingproxy" if method == "__getitem__" => {
                 let (&receiver, args) = args.split_first().ok_or_else(|| {
-                    type_error("descriptor '__getitem__' of 'tuple' object needs an argument")
+                    type_error(format!(
+                        "descriptor '__getitem__' of '{owner}' object needs an argument"
+                    ))
                 })?;
-                if !ctx.builtin_slot_accepts(receiver, "tuple") {
+                if !ctx.builtin_slot_accepts(receiver, owner) {
                     return Err(type_error(format!(
-                        "descriptor '__getitem__' requires a 'tuple' object but received a '{}'",
+                        "descriptor '__getitem__' requires a '{owner}' object but received a '{}'",
                         ctx.type_name(receiver)
                     )));
                 }
@@ -1642,6 +1693,9 @@ pub(super) fn call(
                         args.len()
                     )));
                 };
+                if owner == "mappingproxy" {
+                    return ctx.get_item(receiver, *key);
+                }
                 ctx.sequence_subscript(receiver, *key)
             }
             "set" | "frozenset" if set_operator(method).is_some() => {
@@ -1722,14 +1776,16 @@ pub(super) fn call(
             }
             "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
-            "function" if method == "__new__" => {
+            "function" | "cell" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {
-                    return Err(type_error("function.__new__(): not enough arguments"));
+                    return Err(type_error(format!(
+                        "{owner}.__new__(): not enough arguments"
+                    )));
                 };
-                if class != ctx.builtin("function") {
-                    return Err(ctx.invalid_new_subtype("function", class));
+                if class != ctx.builtin(owner) {
+                    return Err(ctx.invalid_new_subtype(owner, class));
                 }
-                ctx.construct_function(args, kwargs)
+                call(ctx, owner, args, kwargs)
             }
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
@@ -2060,7 +2116,7 @@ pub(super) fn call(
                             | Value::Tuple(_)
                     ))
             {
-                let remaining = ctx.reverse_sequence_len(object)?;
+                let remaining = ctx.sequence_len(object)?;
                 return Ok(ctx.alloc(Value::ReverseSequence {
                     source: Some(object),
                     remaining,
@@ -2098,9 +2154,16 @@ pub(super) fn call(
                 } => bindings.len(),
                 Value::Dict(v) | Value::DefaultDict { entries: v, .. } => v.len(),
                 Value::DictView { dict, .. } => collections::entries(ctx, *dict)?.len(),
+                value if value.is_weak_proxy() => {
+                    let target = ctx.weak_proxy_target(args[0])?;
+                    return ctx.with_weak_target(target, |ctx| call(ctx, "len", &[target], &[]));
+                }
                 Value::MappingProxy(_) => {
                     let mapping = ctx.mapping_proxy_target(args[0]);
                     return call(ctx, "len", &[mapping], &[]);
+                }
+                Value::Class { .. } if ctx.enum_values(args[0]).is_none() => {
+                    ctx.instance_len(args[0])?.ok_or_else(|| no_length(ctx))?
                 }
                 Value::Class { .. } => {
                     let values = ctx.enum_values(args[0]).ok_or_else(|| no_length(ctx))?;
@@ -2311,6 +2374,18 @@ pub(super) fn call(
                 "NotImplementedType" => NOT_IMPLEMENTED,
                 _ => ELLIPSIS,
             })
+        }
+        "cell" => {
+            if !kwargs.is_empty() {
+                return Err(type_error("cell() takes no keyword arguments"));
+            }
+            if args.len() > 1 {
+                return Err(type_error(format!(
+                    "cell expected at most 1 argument, got {}",
+                    args.len()
+                )));
+            }
+            Ok(ctx.alloc(Value::Cell(args.first().copied())))
         }
         "function" => ctx.construct_function(args, kwargs),
         "ImportError" | "ModuleNotFoundError" => {

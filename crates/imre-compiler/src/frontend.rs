@@ -2629,6 +2629,8 @@ impl<'a> Checker<'a> {
             "__iand__" | "__ior__" | "__isub__" | "__ixor__" => "set in-place operator",
             "union" => "set.union",
             "difference_update" => "set.difference_update",
+            "symmetric_difference_update" => "set.symmetric_difference_update",
+            "clear" => "set.clear",
             "pop" => "set.pop",
             "remove" => "set.remove",
             "update" => "set.update",
@@ -2668,6 +2670,9 @@ impl<'a> Checker<'a> {
             )
         {
             return Err(self.object_builtin_error(attribute.attr.as_str(), attribute));
+        }
+        if matches!(receiver.ty, Type::Coroutine(_)) && attribute.attr.as_str() == "cr_origin" {
+            return Err(self.object_builtin_error("coroutine.cr_origin", attribute));
         }
         if receiver.ty == Type::BinaryIO && matches!(attribute.attr.as_str(), "name" | "mode") {
             return Err(self.object_builtin_error("binary file metadata", attribute));
@@ -4846,6 +4851,7 @@ impl<'a> Checker<'a> {
                     && self.resolve(&call.func)
                         == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
                     && call.arguments.find_keyword("stdout").is_some()
+                    && !processes::boxed_launch_keywords(call)
                 {
                     Some(Statement::Expr(self.process_run(call, true)?))
                 } else if let ast::Expr::Call(call) = &*expression.value
@@ -4905,6 +4911,11 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if matches!(receiver.ty, Type::Coroutine(_))
+                            && attr.attr.as_str() == "cr_origin"
+                        {
+                            return Err(self.object_builtin_error("coroutine.cr_origin", attr));
+                        }
                         if receiver.ty == Type::CodecInfo
                             && matches!(
                                 attr.attr.as_str(),
@@ -6498,6 +6509,9 @@ impl<'a> Checker<'a> {
                 }
             }
             match symbol {
+                Intrinsic::GetEnv if cfg!(unix) && self.graph.command_startup.is_some() => {
+                    return Err(self.scoped_builtin_error("os.getenv", expression));
+                }
                 Intrinsic::UrlSplit => {
                     return Err(self.scoped_builtin_error("urllib.parse.urlsplit", expression));
                 }
@@ -6537,6 +6551,11 @@ impl<'a> Checker<'a> {
                         ty: Type::Bytes,
                         kind: ExprKind::Bytes(bytes.to_vec()),
                     });
+                }
+                // Specialized lookups and mutations are handled at their call sites.
+                // When the mapping itself escapes, preserve its identity and live views.
+                Intrinsic::Environ | Intrinsic::EnvironBytes => {
+                    return Err(self.scoped_builtin_error("environment mapping", expression));
                 }
                 Intrinsic::Stdin => return Err(self.object_runtime_export("sys.stdin", expression)),
                 Intrinsic::Stdout => return Ok(self.stdout_value()),
@@ -8052,6 +8071,11 @@ impl<'a> Checker<'a> {
                         Type::None,
                     ));
                 }
+                if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
+                    && self.types.mapping(receiver.ty).is_some()
+                {
+                    return Err(self.scoped_builtin_error("bound dictionary view method", attribute));
+                }
                 if let Some(element) = self.types.deque_element(receiver.ty) {
                     return self.deque_attribute(attribute, receiver, element);
                 }
@@ -8716,6 +8740,20 @@ impl<'a> Checker<'a> {
         }
         if let Some(expanded) = self.expand_closed_call(call) {
             return self.call_on(&expanded, receiver);
+        }
+        if processes::boxed_launch_keywords(call)
+            && matches!(
+                self.resolve(&call.func),
+                Some(Binding::Intrinsic(
+                    Intrinsic::Popen
+                        | Intrinsic::SubprocessCall
+                        | Intrinsic::SubprocessCheckCall
+                        | Intrinsic::SubprocessRun
+                        | Intrinsic::CheckOutput
+                ))
+            )
+        {
+            return Err(self.scoped_builtin_error("subprocess launch keywords", call));
         }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::OrderedDict)) {
             return self.ordered_dict_constructor(call, None);
@@ -9401,7 +9439,14 @@ impl<'a> Checker<'a> {
                     "groupby requires direct for iteration with an immediate list(group)",
                 ));
             }
-            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => return self.environ_get(call),
+            Some(Binding::Intrinsic(Intrinsic::GetEnv)) => {
+                // An ordinary POSIX environment can contain surrogate-escaped text
+                // and getenv returns its default by identity, regardless of its type.
+                if cfg!(unix) && self.graph.command_startup.is_some() {
+                    return Err(self.scoped_builtin_error("os.getenv", call));
+                }
+                return self.environ_get(call);
+            }
             Some(Binding::Intrinsic(Intrinsic::Strerror)) => {
                 self.reject_builtin_keywords(call)?;
                 let [code] = call.arguments.args.as_ref() else {
@@ -10445,6 +10490,11 @@ impl<'a> Checker<'a> {
                     *view = true;
                     return Ok(receiver);
                 }
+                if matches!(attribute.attr.as_str(), "keys" | "values" | "items")
+                    && call.arguments.is_empty()
+                {
+                    return Err(self.scoped_builtin_error("dictionary view", call));
+                }
                 let pop = attribute.attr.as_str() == "pop";
                 if (!pop && attribute.attr.as_str() != "get")
                     || !(1..=2).contains(&call.arguments.args.len())
@@ -11119,6 +11169,16 @@ impl<'a> Checker<'a> {
             self.reject_builtin_keywords(call)?;
             let key = self.coerce(key.clone(), Type::Str, &call.arguments.args[1])?;
             return Ok(self.implementation_hasattr(receiver.clone(), key));
+        }
+        if matches!(
+            (name.id.as_str(), args.len()),
+            ("getattr", 2 | 3) | ("hasattr" | "delattr", 2) | ("setattr", 3)
+        ) && self.unshadowed_builtin(&call.func, name.id.as_str())
+            && matches!(args[0].ty, Type::Coroutine(_))
+            && matches!(&args[1].kind, ExprKind::Str(member) if member == "cr_origin")
+        {
+            self.reject_builtin_keywords(call)?;
+            return Err(self.object_builtin_error("coroutine.cr_origin", call));
         }
         if self.unshadowed_builtin(&call.func, "getattr")
             && let [receiver, attribute] | [receiver, attribute, _] = args.as_slice()
