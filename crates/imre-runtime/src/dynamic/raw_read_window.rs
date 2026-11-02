@@ -144,7 +144,12 @@ impl Context {
         if let Value::Slice(parts) = *self.heap.get(key) {
             let range = self.raw_view_slice(id, parts)?;
             let w = self.checked_window(id)?;
-            return self.ownerless_byte_view(w.backing, w.start + range.start, range.len());
+            let readonly = self.view_is_readonly(id)?;
+            let child = self.ownerless_byte_view(w.backing, w.start + range.start, range.len())?;
+            if let Value::MemoryView { readonly: flag, .. } = self.heap.get_mut(child) {
+                *flag = readonly;
+            }
+            return Ok(child);
         }
         let pos = self.raw_view_index(id, key)?;
         let byte = self.window_bytes(self.checked_window(id)?)?[pos];

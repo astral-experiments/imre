@@ -375,7 +375,10 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
     })
 }
 
-pub(super) const MEMORYVIEW_METHODS: &[&str] = &["__enter__", "__exit__", "release", "tobytes", "toreadonly"];
+pub(super) const MEMORYVIEW_METHODS: &[&str] = &[
+    "__enter__", "__exit__", "release", "tobytes", "toreadonly",
+    "__getitem__", "__setitem__", "__delitem__",
+];
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "__repr__",
@@ -1368,6 +1371,9 @@ pub(super) fn call(
             }
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)
+            }
+            "memoryview" if matches!(method, "__getitem__" | "__setitem__" | "__delitem__") => {
+                ctx.memoryview_item_method(method, args, kwargs)
             }
             "memoryview" if MEMORYVIEW_METHODS.contains(&method) => {
                 if method == "tobytes" {

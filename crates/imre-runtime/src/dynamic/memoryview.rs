@@ -278,6 +278,50 @@ impl Context {
         }
     }
 
+    pub(super) fn memoryview_item_method(
+        &mut self,
+        method: &str,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        let Some((&view, rest)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                format!("descriptor '{method}' of 'memoryview' object needs an argument"),
+            ));
+        };
+        if !matches!(self.heap.get(view), Value::MemoryView { .. }) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{method}' requires a 'memoryview' object but received a '{}'",
+                    self.type_name(view)
+                ),
+            ));
+        }
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("wrapper {method}() takes no keyword arguments"),
+            ));
+        }
+        match (method, rest) {
+            ("__getitem__", [key]) => self.get_item(view, *key),
+            ("__delitem__", [key]) => self.delete_item(view, *key).map(|()| super::value::NONE),
+            ("__setitem__", [key, value]) => self
+                .put_item(view, *key, *value)
+                .map(|()| super::value::NONE),
+            ("__setitem__", _) => Err(Error::new(
+                "TypeError",
+                format!("__setitem__ expected 2 arguments, got {}", rest.len()),
+            )),
+            _ => Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            )),
+        }
+    }
+
     pub(super) fn memoryview_delete(&self, view: Id) -> Result<()> {
         let msg = if self.view_is_readonly(view)? {
             "cannot modify read-only memory"

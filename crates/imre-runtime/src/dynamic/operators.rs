@@ -810,7 +810,9 @@ impl Context {
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
             }
-            (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => self.memoryview_equal(a, b),
+            (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
+                self.memoryview_equal(a, b)
+            }
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::SurrogateStr(a), Value::SurrogateStr(b)) => a == b,
             (Value::Bytes(a) | Value::ByteArray(a), Value::Bytes(b) | Value::ByteArray(b)) => {
@@ -3039,7 +3041,6 @@ impl Context {
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
         if self.raw_read_window(obj).is_some() {
-            if self.view_is_readonly(obj)? { return Err(Error::new("TypeError", "cannot modify read-only memory")); }
             return self.raw_view_set(obj, key, val);
         }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
