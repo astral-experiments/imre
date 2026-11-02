@@ -2559,6 +2559,9 @@ impl Context {
                     "__doc__" if symbol == "posix.getppid" => {
                         return Ok(self.text("Return the parent's process id.\n\nIf the parent process has already exited, Windows machines will still\nreturn its id; others systems will return the id of the 'init' process (1)."));
                     }
+                    "__doc__" if symbol == "posix.cpu_count" => {
+                        return Ok(self.text("Return the number of logical CPUs in the system.\n\nReturn None if indeterminable."));
+                    }
                     "__doc__" if symbol == "posix.getpid" => {
                         return Ok(self.text("Return the current process id."));
                     }
@@ -2567,6 +2570,7 @@ impl Context {
                             symbol.as_str(),
                             "posix.abort"
                                 | "posix.getpid"
+                                | "posix.cpu_count"
                                 | "posix.getppid"
                                 | "gc.enable"
                                 | "gc.disable"

@@ -913,6 +913,7 @@ pub(crate) fn compile(
         "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
         "ignore_environment":startup.is_some_and(|(flags, _)| flags.ignore_environment),
         "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
+        "cpu_count":startup.map(|(flags, _)| flags.cpu_count),
         "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
         "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
         "xoptions":startup.map(|(flags, _)| &flags.xoptions),
