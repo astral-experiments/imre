@@ -502,7 +502,8 @@ pub(crate) fn compile(
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
     if !runtime_imports
-        && !(startup.is_some() && (src.contains("urllib") || src.contains("ftplib")))
+        && !(startup.is_some()
+            && (src.contains("urllib") || src.contains("ftplib") || src.contains("argparse")))
         && !(src.contains("class") && src.contains('='))
         && !(cfg!(unix) && src.contains("signal"))
         && ![
@@ -548,24 +549,25 @@ pub(crate) fn compile(
     ) else {
         return Ok(None);
     };
-    // Python scripts load the URL opener and FTP client as boxed modules.
-    let imports_transport = |transport: &str| {
+    // Python entries can import these bundled sources when static lowering cannot handle the entry.
+    let imports_provider = |provider: &str| {
         startup.is_some()
             && !options.runtime_imports
             && first
                 .names
                 .iter()
-                .any(|(level, name)| *level == 0 && name == transport)
+                .any(|(level, name)| *level == 0 && name == provider)
     };
-    let request_script = imports_transport("urllib.request");
-    let ftp_script = imports_transport("ftplib");
-    let transport_script = request_script || ftp_script;
+    let request_script = imports_provider("urllib.request");
+    let ftp_script = imports_provider("ftplib");
+    let argparse_script = imports_provider("argparse");
+    let provider_script = request_script || ftp_script || argparse_script;
     if !(module_entry.is_some()
         || first.runtime_imports
         || operation.is_some()
         || (runtime_imports && !first.names.is_empty())
         || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
-        || transport_script)
+        || provider_script)
     {
         return Ok(None);
     }
@@ -676,7 +678,7 @@ pub(crate) fn compile(
         if module_entry.is_none()
             && !options.runtime_imports
             && !registered_imports.called
-            && (!transport_script || owner == "__main__")
+            && (!provider_script || owner == "__main__")
             && imports.needs_typed_machinery()
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
@@ -804,10 +806,11 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
-                    // Bundled transports cannot stand in for earlier project modules.
+                    // Bundled providers cannot stand in for earlier project modules.
                     if initial.contains(root)
                         && ((request_script && prefix == "urllib")
-                            || (ftp_script && prefix == "ftplib"))
+                            || (ftp_script && prefix == "ftplib")
+                            || (argparse_script && prefix == "argparse"))
                     {
                         return Ok(None);
                     }
