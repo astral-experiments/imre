@@ -24,8 +24,23 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "access", "chmod", "chown", "link", "lstat", "mkdir", "mkfifo", "open", "readlink",
-                "rename", "rmdir", "stat", "symlink", "unlink", "utime",
+                "access",
+                "chmod",
+                "chown",
+                "link",
+                "lstat",
+                "mkdir",
+                "mkfifo",
+                #[cfg(target_os = "linux")]
+                "mknod",
+                "open",
+                "readlink",
+                "rename",
+                "rmdir",
+                "stat",
+                "symlink",
+                "unlink",
+                "utime",
             ][..],
         ),
         (
@@ -502,7 +517,10 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
         || (cfg!(target_os = "linux")
-            && matches!(name, "lockf" | "mknod" | "posix_fadvise" | "posix_fallocate" | "sendfile"))
+            && matches!(
+                name,
+                "lockf" | "mknod" | "posix_fadvise" | "posix_fallocate" | "sendfile"
+            ))
 }
 
 /// Retry a POSIX call that returns its error number directly instead of setting errno.
