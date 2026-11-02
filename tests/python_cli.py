@@ -1977,6 +1977,7 @@ def report(text):
             "boxed_locale_error.py",
             "boxed_io_protocols.py",
             "boxed_io_abc_registration.py",
+            "boxed_logging_handlers.py",
             "boxed_logging_handler_list.py",
             "boxed_logging_rlock.py",
             "boxed_selector_wide_fds.py",
