@@ -103,11 +103,11 @@ impl<'a> Span<'a> {
         Ok(bytes)
     }
 
-    fn number(&self, index: usize) -> Option<f64> {
+    fn item(&self, index: usize) -> Option<Value> {
         if let Some(array) = self.array {
-            array.numeric_item(self.layout.element(index))
+            array.at(self.layout.element(index)).ok()
         } else {
-            Some(f64::from(self.element(index)[0]))
+            Some(Value::Int(i64::from(self.element(index)[0]).into()))
         }
     }
 }
@@ -189,8 +189,13 @@ impl Context {
         {
             return x == y;
         }
-        (0..left.layout.len)
-            .all(|i| matches!((left.number(i), right.number(i)), (Some(x), Some(y)) if x == y))
+        (0..left.layout.len).all(|i| match (left.item(i), right.item(i)) {
+            (Some(Value::Int(x)), Some(Value::Int(y))) => x.cmp(&y).is_eq(),
+            (Some(Value::Float(x)), Some(Value::Float(y))) => x == y,
+            (Some(Value::Int(n)), Some(Value::Float(f)))
+            | (Some(Value::Float(f)), Some(Value::Int(n))) => crate::floats::compare(&n, f) == 0,
+            _ => false,
+        })
     }
 
     fn view_index(&mut self, id: Id, key: Id, assign: bool) -> Result<usize> {
