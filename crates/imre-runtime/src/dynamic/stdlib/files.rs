@@ -261,8 +261,11 @@ fn run_process(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
 
 /// Borrow a binary writer's input, including the native bytes of an array.
 pub(super) fn output_bytes(ctx: &Context, value: Id) -> Result<&[u8]> {
-    match ctx.heap.get(value) {
-        Value::Array(array) => Ok(array.as_bytes()),
+    match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Array(array) => {
+            ctx.check_buffer_exporter(value)?;
+            Ok(array.as_bytes())
+        }
         _ => ctx.bytes_like(value),
     }
 }
