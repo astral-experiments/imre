@@ -1652,6 +1652,10 @@ pub(super) fn call(
             };
             Ok(ctx.alloc(Value::Raised(error)))
         }
+        "NoDefaultType" if args.is_empty() && kwargs.is_empty() => {
+            Ok(super::typing::no_default(ctx))
+        }
+        "NoDefaultType" => Err(type_error("NoDefaultType takes no arguments")),
         name => Err(type_error(format!("unsupported builtin {name}"))),
     }
 }

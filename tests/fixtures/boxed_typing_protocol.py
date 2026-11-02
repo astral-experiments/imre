@@ -1,5 +1,6 @@
 import typing
 from abc import abstractmethod
+from collections.abc import Mapping, Sized
 from typing import Protocol
 
 
@@ -44,3 +45,22 @@ def current():
         except TypeError as error:
             print(str(error))
     print(isinstance("text", (str, HasHTML)), isinstance(Concrete(), Concrete))
+
+    class Explicit(HasHTML, Sized, Protocol, object):
+        pass
+
+    class GenericProtocol(Protocol, typing.Generic[parameter], object):
+        pass
+
+    class Ordinary(Explicit, Concrete):
+        pass
+
+    print(Explicit._is_protocol, GenericProtocol._is_protocol, Ordinary._is_protocol)
+    for base in (Concrete, Mapping, int):
+        try:
+            class Invalid(base, Protocol):
+                pass
+        except TypeError as error:
+            assert str(error) == f"Protocols can only inherit from other protocols, got {base!r}"
+        else:
+            raise AssertionError(f"unexpected protocol base: {base!r}")

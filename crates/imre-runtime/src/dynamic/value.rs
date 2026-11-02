@@ -417,6 +417,8 @@ impl Context {
             Value::Cell(_) => "cell",
             Value::Generator { .. } => "generator",
             Value::TypeVar(_) => "TypeVar",
+            Value::TypeVarTuple { .. } => "TypeVarTuple",
+            Value::NoDefault => "NoDefaultType",
             Value::GenericAlias(alias) => alias.kind.type_name(),
             Value::Union(_) => "Union",
             Value::Class { .. } => "type",
@@ -776,6 +778,12 @@ pub(super) enum Value {
         namedtuple_fields: Option<std::rc::Rc<[String]>>,
     },
     TypeVar(super::typing::TypeVariable),
+    TypeVarTuple {
+        name: Id,
+        module: Id,
+        default: Id,
+    },
+    NoDefault,
     GenericAlias(super::typing::Alias),
     Union(super::union::Union),
     Instance {
@@ -1170,6 +1178,11 @@ impl Value {
                 visit.push(*scope);
                 visit.extend(ancestors);
             }
+            Self::TypeVarTuple {
+                name,
+                module,
+                default,
+            } => visit.extend([*name, *module, *default]),
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);
@@ -1281,6 +1294,7 @@ impl Value {
             | Self::AttrGetter(_)
             | Self::TupleGetterDoc
             | Self::ReadOnlyMember(_, _)
+            | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::File(_)

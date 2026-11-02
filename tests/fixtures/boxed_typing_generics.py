@@ -1,8 +1,12 @@
 from sys import path
 from types import GenericAlias
 import typing as t
-from typing import BinaryIO, TextIO
+from typing import BinaryIO, KT, TextIO, VT
+from typing import T as typing_T
 
+
+assert typing_T is t.T and KT is t.KT and VT is t.VT
+assert (repr(typing_T), repr(KT), repr(VT)) == ("~T", "~KT", "~VT")
 
 K = t.TypeVar("K")
 print(TextIO is t.TextIO, BinaryIO is t.BinaryIO)
