@@ -2128,6 +2128,11 @@ impl Heap {
         previous
     }
 
+    /// An interpreter root (such as packed callback operands) can own weak targets indirectly.
+    pub(super) fn observes_released_roots(&self) -> bool {
+        self.has_weak_values || self.tracks_finalizers()
+    }
+
     pub fn weak_edge_removed(&mut self, value: Id) {
         if self.has_weak_values
             && (self.weak_edge(value)
