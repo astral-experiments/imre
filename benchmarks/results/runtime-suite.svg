@@ -378,7 +378,7 @@ z
     <text style="font-size: 14.25px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="36" y="122.432109" transform="rotate(-0 36 122.432109)">Median runtime. Scales vary by workload. Speedups compare Imre with CPython.</text>
    </g>
    <g id="text_5">
-    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="165.330469" transform="rotate(-0 39 165.330469)">Inventory · repeated</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="165.389063" transform="rotate(-0 39 165.389063)">Inventory · repeated</text>
    </g>
    <g id="text_6">
     <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="333.75" y="164.147344" transform="rotate(-0 333.75 164.147344)">2.2× speedup</text>
@@ -414,7 +414,7 @@ z
     <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="333.75" y="246.55207" transform="rotate(-0 333.75 246.55207)">90.37 ms</text>
    </g>
    <g id="text_17">
-    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="356.25" y="165.330469" transform="rotate(-0 356.25 165.330469)">Inventory · distinct</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="356.25" y="165.389063" transform="rotate(-0 356.25 165.389063)">Inventory · distinct</text>
    </g>
    <g id="text_18">
     <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="651" y="164.147344" transform="rotate(-0 651 164.147344)">1.7× speedup</text>
@@ -453,7 +453,7 @@ z
     <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="651" y="246.55207" transform="rotate(-0 651 246.55207)">121.16 ms</text>
    </g>
    <g id="text_30">
-    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="300.389063" transform="rotate(-0 39 300.389063)">Base45 decode</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="300.389063" transform="rotate(-0 39 300.389063)">Base45 decode</text>
    </g>
    <g id="text_31">
     <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="333.75" y="299.147344" transform="rotate(-0 333.75 299.147344)">12.2× speedup</text>
@@ -492,7 +492,7 @@ z
     <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="333.75" y="381.55207" transform="rotate(-0 333.75 381.55207)">206.27 ms</text>
    </g>
    <g id="text_43">
-    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="356.25" y="300.389063" transform="rotate(-0 356.25 300.389063)">Luhn checksum</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="356.25" y="300.389063" transform="rotate(-0 356.25 300.389063)">Luhn checksum</text>
    </g>
    <g id="text_44">
     <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="651" y="299.147344" transform="rotate(-0 651 299.147344)">11.5× speedup</text>
@@ -528,7 +528,7 @@ z
     <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="651" y="381.55207" transform="rotate(-0 651 381.55207)">157.62 ms</text>
    </g>
    <g id="text_55">
-    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="435.330469" transform="rotate(-0 39 435.330469)">Telemetry report</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="435.389063" transform="rotate(-0 39 435.389063)">Telemetry report</text>
    </g>
    <g id="text_56">
     <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="333.75" y="434.147344" transform="rotate(-0 333.75 434.147344)">7.8× speedup</text>
@@ -567,7 +567,7 @@ z
     <text style="font-size: 12.75px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; text-anchor: end; fill: #cdcbfb" x="333.75" y="516.55207" transform="rotate(-0 333.75 516.55207)">128.03 ms</text>
    </g>
    <g id="text_68">
-    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="356.25" y="435.389063" transform="rotate(-0 356.25 435.389063)">Offline conformance report</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="356.25" y="435.389063" transform="rotate(-0 356.25 435.389063)">Offline conformance report</text>
    </g>
    <g id="text_69">
     <text style="font-size: 10.5px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #de5fe9" x="651" y="434.147344" transform="rotate(-0 651 434.147344)">6.0× speedup</text>

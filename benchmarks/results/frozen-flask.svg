@@ -146,7 +146,7 @@ z
     <text style="font-size: 14.25px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #c4b6d3" x="36" y="122.432109" transform="rotate(-0 36 122.432109)">1,800 requests per round, split across health checks, HTML greetings and JSON sums.</text>
    </g>
    <g id="text_5">
-    <text style="font-weight: 600; font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="166.889062" transform="rotate(-0 39 166.889062)">Median requests per second</text>
+    <text style="font-size: 15px; font-family: Arial, Helvetica, sans-serif; text-anchor: start; fill: #fbf2fc" x="39" y="166.889062" transform="rotate(-0 39 166.889062)">Median requests per second</text>
    </g>
    <g id="text_6">
     <text style="font-size: 11.25px; font-family: Arial, Helvetica, sans-serif; text-anchor: end; fill: #c4b6d3" x="651" y="165.854297" transform="rotate(-0 651 165.854297)">Higher is faster</text>

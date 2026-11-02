@@ -178,7 +178,6 @@ def workload_panels(rows, path):
             y + 23,
             PANEL_TITLES.get(case["name"], case["name"]),
             20,
-            weight="semibold",
         )
         speedup = medians["cpython"] / medians["imre"]
         label(
@@ -226,7 +225,7 @@ def frozen_flask_panel(report, path):
         f"{rounds} rounds · {concurrency} clients",
     )
     rule(ax, 48, 192, 872, 192)
-    label(ax, 52, 217, "Median requests per second", 20, weight="semibold")
+    label(ax, 52, 217, "Median requests per second", 20)
     label(ax, 868, 217, "Higher is faster", 15, color=MUTED, align="right")
     bars(
         ax,
