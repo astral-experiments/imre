@@ -74,6 +74,7 @@ def current():
     path = "imre-boxed-unlink"
     try:
         check_open_audit(directory)
+        check_remove_audit(directory)
         for remove, data in ((os.remove, b"hello"), (posix.unlink, b"Hello World!")):
             with open(path, "xb") as file:
                 assert file.write(data) == len(data)
@@ -124,3 +125,33 @@ def check_open_audit(directory):
         armed = False
     assert events == [(spelling, None, flags | os.O_CLOEXEC)]
     assert not os.path.lexists(spelling)
+
+
+def check_remove_audit(directory):
+    path = b"imre-boxed-remove-audit"
+    with open(path, "xb") as file:
+        file.write(b"keep")
+    events = []
+
+    def audit(event, args):
+        if armed and event == "os.remove" and args[0] is path:
+            events.append(args)
+            raise PermissionError("veto remove")
+
+    armed = True
+    try:
+        sys.addaudithook(audit)
+        for remove in (os.unlink, posix.remove):
+            try:
+                remove(path, dir_fd=directory)
+            except PermissionError as error:
+                assert str(error) == "veto remove"
+            else:
+                raise AssertionError("audit hook did not prevent removal")
+        assert events == [(path, directory), (path, directory)]
+        with open(path, "rb") as file:
+            assert file.read() == b"keep"
+    finally:
+        armed = False
+        if os.path.lexists(path):
+            os.unlink(path)
