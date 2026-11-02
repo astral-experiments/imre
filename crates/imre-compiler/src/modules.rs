@@ -187,7 +187,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "_weakrefset" => Some(("_weakrefset.py", include_str!("../stdlib/_weakrefset.py"))),
         "abc" => Some(("abc.py", include_str!("../stdlib/abc.py"))),
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
+        // CPython 3.14.5 Lib/code.py and Lib/codeop.py. See stdlib/docstrings/LICENSE.
+        "code" => Some(("code.py", include_str!("../stdlib/code.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
+        "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
         "collections" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
