@@ -1,5 +1,7 @@
+import gc
 import os
 import posix
+import weakref
 from os import readlink
 from posix import readlink as posix_readlink
 
@@ -28,3 +30,24 @@ def current():
         assert error.filename is missing and error.filename2 is None
     else:
         raise AssertionError("readlink accepted missing path")
+
+    class Spelling(str):
+        pass
+
+    spellings = [Spelling("missing-before-collect")]
+    ref = weakref.ref(spellings[0])
+
+    class PoppedPath:
+        __fspath__ = staticmethod(spellings.pop)
+
+    class ClosedFd:
+        def __index__(self):
+            gc.collect()
+            return -2
+
+    try:
+        readlink(PoppedPath(), dir_fd=ClosedFd())
+    except OSError as error:
+        assert type(error.filename) is Spelling and error.filename is ref()
+    else:
+        raise AssertionError("readlink accepted closed directory descriptor")

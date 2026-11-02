@@ -18,11 +18,18 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "unlink",
+                "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "unlink",
             ][..],
         ),
-        ("supports_fd", &["listdir", "scandir", "stat"][..]),
-        ("supports_follow_symlinks", &["stat"][..]),
+        ("supports_fd", &["chmod", "listdir", "scandir", "stat"][..]),
+        (
+            "supports_follow_symlinks",
+            &[
+                #[cfg(target_os = "macos")]
+                "chmod",
+                "stat",
+            ][..],
+        ),
         ("supports_effective_ids", &[][..]),
     ] {
         let set = ctx.alloc(Value::Set {
@@ -308,6 +315,7 @@ pub(super) fn change_environment(
     Ok(NONE)
 }
 
+mod chmod;
 mod unlink;
 
 /// POSIX functions exported as the same builtins by both os and posix.
@@ -321,6 +329,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "unlink"
             | "rmdir"
             | "mkdir"
+            | "chmod"
             | "dup"
             | "dup2"
             | "isatty"
@@ -335,11 +344,49 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
-fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
+pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+enum PathArg {
+    Fd(i32),
+    Name(CString),
+}
+
+/// Convert a POSIX path and retain the Python spelling for audits and OSError.filename.
+fn path_or_fd(
+    ctx: &mut Context,
+    name: &str,
+    path: Id,
+    allow_fd: bool,
+    warn_bool_fd: fn(&Context, Id) -> Result<()>,
+) -> Result<(PathArg, Id)> {
+    let spelling = matches!(
+        ctx.heap.get(ctx.scalar_value(path)),
+        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+    );
+    if allow_fd
+        && !spelling
+        && let Some(index) = ctx.index_value(path)?
+    {
+        warn_bool_fd(ctx, path)?;
+        return Ok((PathArg::Fd(native::directory_fd_number(&index)?), path));
+    }
+    let kinds = if allow_fd {
+        "string, bytes, os.PathLike or integer"
+    } else {
+        "string, bytes or os.PathLike"
+    };
+    let filename = posixpath::path_arg(ctx, path, &format!("{name}: path should be {kinds}"))?;
+    let pathname = c_path(
+        ctx,
+        filename,
+        &format!("{name}: embedded null character in path"),
+    )?;
+    Ok((PathArg::Name(pathname), filename))
 }
 
 /// Convert an optional dir_fd after the path and preceding arguments.
@@ -398,10 +445,12 @@ fn path_and_dir_fd(
 /// Return the link contents with the string type of its converted path.
 fn readlink(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let (path, pathname, dir_fd) = path_and_dir_fd(ctx, "readlink", args, kwargs)?;
-    let target = native::readlink_at(&pathname, dir_fd).map_err(|error| {
-        ctx.with_errno_filename(crate::objects::errno_error(error).into(), path)
-            .unwrap_or_else(|error| error)
-    })?;
+    let target = match native::readlink_at(&pathname, dir_fd) {
+        Ok(target) => target,
+        Err(error) => {
+            return Err(ctx.with_errno_filename(crate::objects::errno_error(error).into(), path)?);
+        }
+    };
     if matches!(ctx.heap.get(ctx.scalar_value(path)), Value::Bytes(_)) {
         return Ok(ctx.alloc(Value::Bytes(target)));
     }
@@ -493,6 +542,9 @@ pub(super) fn descriptor(
     }
     if matches!(name, "remove" | "unlink" | "rmdir") {
         return unlink::call(ctx, name, args, kwargs);
+    }
+    if name == "chmod" {
+        return chmod::call(ctx, args, kwargs);
     }
     if name == "mkdir" {
         return mkdir(ctx, args, kwargs);

@@ -323,7 +323,10 @@ impl Context {
                 Ok(std::mem::replace(&mut items[index], NONE))
             }
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
-            "class" => self.class(a, b, c),
+            "class" | "parameterized_class" => {
+                let total = self.dict_named_item(a, "total");
+                self.class(b, c, total, op == "parameterized_class")
+            }
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
                     return Err(Error::new("SystemError", "invalid coroutine definition"));
@@ -562,6 +565,19 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
             .as_bool()
             .map_or(if ignore_environment { 0 } else { -1 }, i32::from),
     );
+    let options: Vec<String> =
+        serde_json::from_value(config["warnoptions"].take()).unwrap_or_default();
+    config["warnoptions"] = crate::sys::startup_warning_options(ignore_environment, options).into();
+    crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
+    config["utf8_mode"] = crate::sys::imre_sys_utf8_mode().into();
+    config["warn_default_encoding"] = config["warn_default_encoding"]
+        .as_bool()
+        .unwrap_or_else(|| {
+            !ignore_environment
+                && std::env::var_os("PYTHONWARNDEFAULTENCODING")
+                    .is_some_and(|value| !value.is_empty())
+        })
+        .into();
     if !ignore_environment {
         config["pycache_prefix"] = std::env::var("PYTHONPYCACHEPREFIX")
             .ok()
@@ -570,7 +586,13 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     }
     crate::python_hash::initialize(ignore_environment);
     crate::integer_text::imre_integer_digits_init(u32::from(ignore_environment));
-    crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
+    if let Some(options) = config["warnoptions"].as_array() {
+        for option in options.iter().filter_map(|value| value.as_str()) {
+            if let Err(reason) = crate::objects::warnings::startup_filter(option) {
+                eprintln!("Invalid -W option ignored: {reason}");
+            }
+        }
+    }
     // SAFETY: main supplies argc pointers to NUL-terminated strings that remain
     // valid while the constructor consumes this iterator.
     let args = unsafe { slice::from_raw_parts(argv, argc as usize) }
@@ -955,6 +977,38 @@ pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
 }
 
 impl Context {
+    /// Resolve a code object's lexical reads against its enclosing function scopes.
+    pub(super) fn enclosing_freevars<'a>(
+        &self,
+        scope: Id,
+        reads: impl Iterator<Item = &'a str>,
+    ) -> Option<Vec<String>> {
+        let mut freevars = Vec::new();
+        for name in reads {
+            let mut cursor = Some(scope);
+            while let Some(frame_id) = cursor {
+                let frame = self.scope_data(frame_id);
+                if frame.parent.is_none()
+                    || (frame.class_body.is_none() && frame.globals.contains(name))
+                {
+                    break;
+                }
+                if frame.class_body.is_none()
+                    && (frame.closure.declared.contains(name)
+                        || frame.closure.cells.contains_key(name))
+                {
+                    freevars.push(name.to_owned());
+                    break;
+                }
+                if !frame.closure.declared_complete {
+                    return None;
+                }
+                cursor = frame.parent;
+            }
+        }
+        Some(freevars)
+    }
+
     pub(super) fn prelinked_code(
         &mut self,
         entry: Code,
@@ -972,43 +1026,17 @@ impl Context {
             .ok()
             .and_then(|v| serde_json::from_str(v).ok())
             .unwrap_or_default();
-        let mut closure_supported = metadata["scope_complete"].as_bool().unwrap_or(false)
-            && !metadata["class_cell"].as_bool().unwrap_or(false);
-        let mut freevars = Vec::new();
-        if closure_supported {
-            for name in metadata["scope_reads"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|v| v.as_str())
-            {
-                let mut cursor = Some(scope);
-                while let Some(frame_id) = cursor {
-                    let frame = self.scope_data(frame_id);
-                    if frame.parent.is_none()
-                        || (frame.class_body.is_none() && frame.globals.contains(name))
-                    {
-                        break;
-                    }
-                    if frame.class_body.is_none()
-                        && (frame.closure.declared.contains(name)
-                            || frame.closure.cells.contains_key(name))
-                    {
-                        freevars.push(name.to_owned());
-                        break;
-                    }
-                    if !frame.closure.declared_complete {
-                        closure_supported = false;
-                        freevars.clear();
-                        break;
-                    }
-                    cursor = frame.parent;
-                }
-                if !closure_supported {
-                    break;
-                }
-            }
-        }
+        let reads = metadata["scope_reads"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str());
+        let freevars = (metadata["scope_complete"].as_bool() == Some(true)
+            && metadata["class_cell"].as_bool() != Some(true))
+        .then(|| self.enclosing_freevars(scope, reads))
+        .flatten();
+        let closure_supported = freevars.is_some();
+        let freevars = freevars.unwrap_or_default();
         self.alloc(Value::Code(value::CodeObject {
             body: value::Body::Native(entry),
             name,
@@ -1321,7 +1349,7 @@ impl Context {
                 let _ = self.collect_full();
                 return;
             }
-            if self.heap.has_unbound_finalizer(NONE) {
+            if !self.heap.caller_keeps_only_finalizer() && self.heap.has_unbound_finalizer(NONE) {
                 match self.drain_acyclic_finalizers() {
                     Ok(true) => {
                         // Dropping a finalized instance releases its remaining strong edges,

@@ -1,5 +1,6 @@
 //! Apply Python's lexical class-name mangling before lowering boxed modules.
 
+pub mod exceptions;
 pub mod startup;
 pub mod strings;
 

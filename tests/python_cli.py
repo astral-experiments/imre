@@ -1032,6 +1032,42 @@ def main():
                 "os", "posix",
             )
 
+        for mode in ("0", "1"):
+            compare(
+                "-I", "-X", f"utf8={mode}", "-c",
+                "import io; print(io.text_encoding(None))",
+            )
+        compare(
+            "-I", "-X", "warn_default_encoding", "-W", "error::EncodingWarning", "-c",
+            "from _io import text_encoding\n"
+            "try: text_encoding(None)\n"
+            "except EncodingWarning as exc: print(str(exc))",
+        )
+
+        compare(
+            "-X", "warn_default_encoding", "-Walways", "-c",
+            "from io import text_encoding\n"
+            "import io, sys, warnings\n"
+            "def hook(message, category, filename, lineno, file, line):\n"
+            "    print(type(message) is category is EncodingWarning, str(message), filename, lineno, file, line)\n"
+            "    raise OSError('from hook')\n"
+            "original = sys.stderr\n"
+            "sys.stderr = io.StringIO()\n"
+            "text_encoding(None, 1)\n"
+            "print(sys.stderr.getvalue().strip())\n"
+            "sys.stderr = original\n"
+            "warnings.showwarning = hook\n"
+            "try: text_encoding(None, 1)\n"
+            "except OSError as exc: print(exc)\n"
+            "warnings.showwarning = 42\n"
+            "try: text_encoding(None, 1)\n"
+            "except TypeError as exc: print(exc)",
+        )
+        compare(
+            "-X", "warn_default_encoding", "-Werror::EncodingWarning", "-c",
+            "from io import text_encoding\n__name__ = None\nprint(text_encoding(None, 1))",
+        )
+
         subset_method = root / "set_issubset.py"
         for statement in (
             "print({1, 2}.issubset([2, 1]))",
@@ -1064,6 +1100,7 @@ def main():
             "case.assertIsSubclass(bool, int)",
             "check = Case.assertNotIsSubclass\ncheck(case, int, str)",
             "case.assertIsInstance(1, int)",
+            "case.assertNotHasAttr(Case, 'absent')",
             "Case.assertNotIsInstance(case, 1, str)",
             "check = case.assertIsInstance\ncheck(1, int)",
             "check = Case.assertNotIsInstance\ncheck(case, 1, str)",
@@ -1073,6 +1110,14 @@ def main():
                 + statement + "\nprint('checked')\n"
             )
             compare("-B", instance_check, native_args=("run", instance_check, "--quiet"))
+
+        registration = root / "unittest_registration.py"
+        registration.write_text(
+            "from unittest import TestResult, registerResult, removeResult\n"
+            "result = TestResult()\nregisterResult(result)\n"
+            "print(removeResult(result), removeResult(result))\n"
+        )
+        compare("-B", registration, native_args=("run", registration, "--quiet"))
 
         temporary_read = root / "temporary_readinto.py"
         temporary_read.write_text(
@@ -1282,6 +1327,16 @@ print(found.value)
             (root / "linked-script.py").symlink_to("pkg/path0.py")
             compare("-B", "linked-script.py")
 
+            (root / "dangling-link").symlink_to("missing-target")
+            compare(
+                "-B", "-c",
+                "import os\n"
+                "from os.path import exists, getatime, getctime, getmtime, lexists\n"
+                "assert lexists(path=b'dangling-link') and not exists('dangling-link')\n"
+                "s = os.stat('.')\n"
+                "assert (getatime('.'), getctime('.'), getmtime('.')) == (s.st_atime, s.st_ctime, s.st_mtime)",
+            )
+
             byte_dir = root / os.fsdecode(b"dir-\xff")
             byte_dir.mkdir()
             (byte_dir / "main.py").write_text("import sys\nprint(sys.path[0])\n")
@@ -1461,7 +1516,10 @@ def report(text):
         compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
         builtins_fixture = fixtures / "boxed_builtins_module.py"
         compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
-        for name in ("boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py", "boxed_thread_dangling.py"):
+        for name in (
+            "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
+            "boxed_thread_dangling.py", "boxed_threading_rlock.py",
+        ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
@@ -1486,8 +1544,14 @@ def report(text):
 
             result = subprocess.run([executable, source], capture_output=True, preexec_fn=small_stack)
             assert (result.returncode, result.stdout) == (0, b"7\n"), result.stderr
+        compare(
+            "-IB", "-c",
+            "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
+            "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
+        )
         for fixture in (
             "boxed_ast.py",
+            "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_recursive_repr.py",
@@ -1497,6 +1561,7 @@ def report(text):
             "boxed_slice_deep_repr.py",
             "boxed_slice_repr_cycles.py",
             "boxed_source_exec.py",
+            "boxed_sys_getframe.py",
             "boxed_sys_audit.py",
             "boxed_sys_audit_recursion.py",
             "boxed_sys_intern.py",
@@ -1510,6 +1575,7 @@ def report(text):
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
+            "boxed_divmod_slots.py",
             "boxed_complex.py",
             "boxed_float.py",
             "boxed_round.py",
@@ -1537,6 +1603,8 @@ def report(text):
             "boxed_lru_insert_same.py",
             "boxed_annotationlib_refs.py",
             "boxed_typing_assert_type.py",
+            "boxed_typing_typeddict.py",
+            "boxed_typing_dataclass_transform.py",
             "boxed_typing_optional.py",
             "boxed_typing_literal.py",
             "boxed_typing_protocol.py",
@@ -1556,6 +1624,7 @@ def report(text):
             "boxed_time.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
+            "boxed_io_text_encoding.py",
             "boxed_selector_wide_fds.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
@@ -1584,12 +1653,15 @@ def report(text):
             "boxed_map_capwords.py",
             "boxed_module_globals.py",
             "boxed_dir.py",
+            "boxed_unittest_assert_almost_equal.py",
             "boxed_unittest_assert_count_equal.py",
             "boxed_unittest_membership.py",
             "boxed_unittest_instance.py",
             "boxed_unittest_subclass.py",
+            "boxed_unittest_not_has_attr.py",
             "boxed_unittest_not_equal.py",
             "boxed_unittest_assert_raises.py",
+            "boxed_unittest_patch.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
             "boxed_frozenset.py",
@@ -1615,9 +1687,11 @@ def report(text):
             "boxed_bytecache.py",
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
+            "boxed_unittest_result_registry.py",
             "boxed_unittest_class_cleanup.py",
             "boxed_posixpath.py",
             "boxed_stat.py",
+            "boxed_signal.py",
             "boxed_itertools_count.py",
             "boxed_enum_descriptors.py",
             "boxed_enum_auto.py",
@@ -1640,6 +1714,7 @@ def report(text):
             "boxed_user_containers.py",
             "boxed_dict_pop.py",
             "boxed_recursive_equality.py",
+            "boxed_thread_rlock.py",
             "boxed_selector_modify_data.py",
             "boxed_structural_hooks.py",
             "boxed_list_pop.py",
@@ -1662,6 +1737,7 @@ def report(text):
             "boxed_max.py",
             "boxed_min.py",
             "boxed_generator_delegation.py",
+            "boxed_source_coroutine.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",
             "boxed_slice.py",
@@ -1677,6 +1753,7 @@ def report(text):
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
             "boxed_heapq.py",
+            "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
             "boxed_string_new.py",
@@ -1684,7 +1761,7 @@ def report(text):
             "boxed_string_surrogates.py",
             "boxed_string_expandtabs.py",
         ):
-            if fixture == "boxed_stat.py" and sys.platform not in ("linux", "darwin"):
+            if fixture in ("boxed_stat.py", "boxed_signal.py") and sys.platform not in ("linux", "darwin"):
                 continue
             plugin.write_bytes((fixtures / fixture).read_bytes())
             if fixture == "boxed_slice_deep_repr.py":

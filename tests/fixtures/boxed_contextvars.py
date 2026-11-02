@@ -1,5 +1,7 @@
 """Exercise context-local bindings with wheel-defined objects in the native object runtime."""
 
+import _contextvars
+import contextvars
 from contextvars import Context, ContextVar, Token, copy_context
 from operator import length_hint
 
@@ -9,9 +11,22 @@ class Request:
 
 
 def current():
-    var = ContextVar("request", default=None)
+    assert _contextvars.__name__ == "_contextvars"
+    assert contextvars.__name__ == "contextvars"
+    assert _contextvars is not contextvars
+    assert _contextvars.Context is Context
+    assert _contextvars.ContextVar is ContextVar
+    assert _contextvars.Token is Token
+    assert _contextvars.copy_context is copy_context
+
+    var = _contextvars.ContextVar("request", default=None)
+    assert type(var) is ContextVar and type(Context()) is Context
+    assert type(ContextVar) is type and ContextVar.__module__ == "_contextvars"
+    assert ContextVar.__qualname__ == "ContextVar"
+    assert copy_context.__self__ is _contextvars and copy_context.__module__ == "_contextvars"
     req = Request()
     outer = var.set(req)
+    assert type(outer) is Token
     saved = copy_context()
     inner = var.set(None)
     print(var.name, isinstance(var, ContextVar), isinstance(inner, Token))

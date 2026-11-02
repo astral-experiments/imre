@@ -120,8 +120,12 @@ def _boxedTextResultInit(self, stream=None, descriptions=True, verbosity=1, *, d
     self.durations = durations
 
 
+from unittest.signals import registerResult as _registerRunnerResult
+
+
 def _runWithResult(self, test):
     result = self._makeResult()
+    _registerRunnerResult(result)
     result.failfast = self.failfast
     result.buffer = self.buffer
     result.tb_locals = self.tb_locals
