@@ -2168,12 +2168,6 @@ def report(text):
             "    print(type(result).__name__, result, result is x)\n"
         )
         compare("-IB", "-c", decimal_import + "import decimal_subclass")
-        (helpers / "decimal_comparison.py").write_text(
-            "from decimal import Decimal\nprint(Decimal('1.00') == Decimal(1))\n"
-        )
-        unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_comparison")
-        assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
-
         (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
         compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
 
@@ -2452,6 +2446,7 @@ def report(text):
             "boxed_inspect_unwrap.py",
             "boxed_inspect_isroutine.py",
             "boxed_numeric_repr.py",
+            "boxed_decimal_arithmetic.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
             "boxed_simple_namespace.py",
