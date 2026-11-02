@@ -64,6 +64,8 @@ enum Instruction {
         end: usize,
     },
     ExceptMatch(ast::Expr, usize),
+    BindException(String),
+    ClearException(String),
     StartFinally,
     EndFinally,
     Delegate,
@@ -464,6 +466,9 @@ impl Program {
                         }
                     }
                 }
+                Instruction::BindException(name) | Instruction::ClearException(name) => {
+                    strings.heap.code_name(name);
+                }
                 Instruction::ClassStart | Instruction::ClassEnd => {}
                 Instruction::Yield(e) | Instruction::Return(e) | Instruction::Next(e, _) => {
                     if let Some(e) = e {
@@ -806,14 +811,7 @@ impl Program {
                     }
                     continue;
                 }
-                Stmt::Try(s)
-                    if !s.is_star
-                        && !s.handlers.is_empty()
-                        && s.finalbody.is_empty()
-                        && s.handlers
-                            .iter()
-                            .all(|ast::ExceptHandler::ExceptHandler(h)| h.name.is_none()) =>
-                {
+                Stmt::Try(s) if !s.is_star && !s.handlers.is_empty() && s.finalbody.is_empty() => {
                     let entry = self.instructions.len();
                     self.instructions
                         .push((line, Instruction::EnterExcept { handler: 0, end: 0 }));
@@ -831,7 +829,31 @@ impl Program {
                                 .push((handler_line, Instruction::ExceptMatch(*class, 0)));
                             i
                         });
+                        let cleanup = h.name.map(|name| {
+                            let name = name.to_string();
+                            self.locals.insert(name.clone());
+                            self.instructions
+                                .push((handler_line, Instruction::BindException(name.clone())));
+                            let entry = self.instructions.len();
+                            self.instructions.push((
+                                handler_line,
+                                Instruction::EnterFinally { handler: 0, end: 0 },
+                            ));
+                            (entry, name)
+                        });
                         self.lower(h.body, lines, function, active.as_deref_mut())?;
+                        if let Some((entry, name)) = cleanup {
+                            // The implicit finally clears the target on fallthrough, unwind and generator close.
+                            self.instructions
+                                .push((handler_line, Instruction::StartFinally));
+                            let handler = self.instructions.len();
+                            self.instructions
+                                .push((handler_line, Instruction::ClearException(name)));
+                            self.instructions
+                                .push((handler_line, Instruction::EndFinally));
+                            let end = self.instructions.len();
+                            self.instructions[entry].1 = Instruction::EnterFinally { handler, end };
+                        }
                         handled.push(self.instructions.len());
                         self.instructions.push((handler_line, Instruction::Jump(0)));
                         if let Some(i) = check {
@@ -2296,6 +2318,14 @@ impl Context {
                         pop_iter: false,
                     });
                 }
+            }
+            Instruction::BindException(name) => {
+                self.bind_source_name(scope, name, self.heap.active_exception())?;
+            }
+            Instruction::ClearException(name) => {
+                self.bind_source_name(scope, name, NONE)?;
+                let key = self.heap.code_name(name);
+                self.op("delname", scope, key, NONE)?;
             }
             Instruction::ExceptMatch(class, next_handler) => {
                 let class = eval(self, class)?;
