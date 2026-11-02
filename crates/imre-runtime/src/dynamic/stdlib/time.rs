@@ -186,8 +186,8 @@ pub(super) fn call(
                 ));
             };
             audit::event(ctx, "time.sleep", args)?;
-            if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(*seconds)) {
-                crate::objects::time::sleep_float(*value)?;
+            let nanos = if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(*seconds)) {
+                crate::objects::time::sleep_float_ns(*value)?
             } else {
                 let overflow = || {
                     Error::new(
@@ -213,12 +213,12 @@ pub(super) fn call(
                     }
                     Err(error) => return Err(error),
                 };
-                let nanos = seconds
+                seconds
                     .to_i64()
                     .and_then(|n| n.checked_mul(1_000_000_000))
-                    .ok_or_else(overflow)?;
-                crate::objects::time::sleep_ns(nanos)?;
-            }
+                    .ok_or_else(overflow)?
+            };
+            crate::objects::time::sleep_ns(nanos, || ctx.dispatch_signals())?;
             Ok(NONE)
         }
         "time" if args.is_empty() => Ok(ctx.alloc(Value::Float(wall_time()))),

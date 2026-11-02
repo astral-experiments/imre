@@ -136,7 +136,12 @@ impl Context {
         self.bind(scope, "__new__", new);
         let register = self.builtin("abc.register");
         self.bind(scope, "register", register);
-        for name in ["__instancecheck__", "__subclasscheck__"] {
+        for name in [
+            "__instancecheck__",
+            "__subclasscheck__",
+            "_abc_registry_clear",
+            "_abc_caches_clear",
+        ] {
             let check = self.builtin(&format!("abc.{name}"));
             self.bind(scope, name, check);
         }

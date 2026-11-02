@@ -6,7 +6,11 @@ use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 
 const RUN_PREFIX: &[u8] = b".imre-run-fd-";
-const EXEC_PREFIX: &[u8] = b".imre-exec-fd-";
+// The launcher reads the protocol version from the linked image, including cache hits.
+// SAFETY: these dedicated sections contain read-only data for their respective platforms.
+#[cfg_attr(target_os = "linux", unsafe(link_section = ".imre.exec.v1"))]
+#[cfg_attr(target_os = "macos", unsafe(link_section = "__TEXT,__imre_exec_v1"))]
+static EXEC_PREFIX: [u8; 14] = *b".imre-exec-fd-";
 
 pub(crate) fn wait_for_cleanup(want_original: bool) -> io::Result<Option<Vec<u8>>> {
     #[cfg(target_os = "linux")]
@@ -23,7 +27,7 @@ pub(crate) fn wait_for_cleanup(want_original: bool) -> io::Result<Option<Vec<u8>
     let name = path.rsplit(|&byte| byte == b'/').next().unwrap_or_default();
     let (digits, exec) = if let Some(digits) = name.strip_prefix(RUN_PREFIX) {
         (digits, false)
-    } else if let Some(digits) = name.strip_prefix(EXEC_PREFIX) {
+    } else if let Some(digits) = name.strip_prefix(std::hint::black_box(EXEC_PREFIX.as_slice())) {
         (digits, true)
     } else {
         return Ok(None);

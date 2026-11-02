@@ -33,3 +33,10 @@ def current():
         assert str(exc) == "path-like args is not allowed when shell is true"
     else:
         raise AssertionError("accepted scalar path-like shell command")
+
+    for name in ("run", "PIPE", "STDOUT", "DEVNULL"):
+        delattr(_subprocess, name)
+        try:
+            assert not hasattr(_subprocess, name)
+        finally:
+            setattr(_subprocess, name, globals()[name])

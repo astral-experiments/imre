@@ -1,0 +1,364 @@
+{
+  "platform": "linux-x86_64",
+  "executor_hostname": "a0f7c43eb913",
+  "imre": "06c9fd7d70a1153ee20581f44a2d628231188ca4",
+  "imre_binary_sha256": "24e92b23a992e821582f31c7df9435b26f8396168faf36c113692152d5839b61",
+  "runtime_archive_sha256": "70d88b5e9d4d17dd2d9c67198b7301e0a15ddf82919d55b119f4f3725797bf7b",
+  "clang": "Debian clang version 19.1.7 (3+b1)",
+  "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_typing_sha256": "28d17772f523800f02a5bf1e0cc012779d7df1f616fec7cc34d922dcba7ee1cc",
+  "denominator": 712,
+  "working_directory": "/workspace/scratch/intact/baseline-stage",
+  "processes": [
+    {
+      "mode": "ordinary module invocation",
+      "opt_level": 0,
+      "command": "IMREFLAGS=--no-cache\\ --clang\\ /workspace/scratch/intact/tools/usr/bin/clang-19\\ --runtime\\ /workspace/scratch/baseline-bin/libimre_runtime.a\\ --opt-level\\ 0 /workspace/scratch/baseline-bin/imre -B -m discover",
+      "run": {
+        "exit": 1,
+        "stdout": [],
+        "stderr": [
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/runpy.py\", line 203\n",
+          "  File \"<imre stdlib>/runpy.py\", line 88\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/discover.py\", line 3\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/test_typing.py\", line 33\n",
+          "ImportError: cannot import name 'reveal_type' from 'typing' (<imre stdlib>/typing.py)\n"
+        ]
+      }
+    },
+    {
+      "mode": "ordinary module invocation",
+      "opt_level": 3,
+      "command": "IMREFLAGS=--no-cache\\ --clang\\ /workspace/scratch/intact/tools/usr/bin/clang-19\\ --runtime\\ /workspace/scratch/baseline-bin/libimre_runtime.a\\ --opt-level\\ 3 /workspace/scratch/baseline-bin/imre -B -m discover",
+      "run": {
+        "exit": 1,
+        "stdout": [],
+        "stderr": [
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/runpy.py\", line 203\n",
+          "  File \"<imre stdlib>/runpy.py\", line 88\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/discover.py\", line 3\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/test_typing.py\", line 33\n",
+          "ImportError: cannot import name 'reveal_type' from 'typing' (<imre stdlib>/typing.py)\n"
+        ]
+      }
+    },
+    {
+      "mode": "filesystem discovery",
+      "opt_level": 0,
+      "build_command": "/workspace/scratch/baseline-bin/imre build unittest_discover.py --module-root /workspace/scratch/intact/baseline-stage --no-cache --clang /workspace/scratch/intact/tools/usr/bin/clang-19 --runtime /workspace/scratch/baseline-bin/libimre_runtime.a --opt-level 0 -o /workspace/scratch/intact/logs/public-06c9fd7d-discovery/O0.exe",
+      "build": {
+        "exit": 0,
+        "stdout": [],
+        "stderr": [
+          " Compiling unittest_discover.py (-O0)\n",
+          "  Finished /workspace/scratch/intact/logs/public-06c9fd7d-discovery/O0.exe in 53.11 s\n"
+        ]
+      },
+      "run": {
+        "exit": 1,
+        "stdout": [
+          "DISCOVERED 3\n",
+          "LOAD_ERROR Failed to import test module: test.support\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 369, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114, in exec_module\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/support/__init__.py\", line 3104, in <module>\n",
+          "    @types.coroutine\n",
+          "NotImplementedError: native types.coroutine supports compiled generator and coroutine functions\n",
+          "\n",
+          "LOAD_ERROR Failed to import test module: test.test_typing\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 335, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 111, in exec_module\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 192, in get_code\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 184, in source_to_code\n",
+          "NotImplementedError: runtime source: StmtClassDef\n",
+          "\n",
+          "LOAD_ERROR Failed to import test module: test.typinganndata.partialexecution\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 369, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114, in exec_module\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/typinganndata/partialexecution/__init__.py\", line 1, in <module>\n",
+          "    from . import a\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 111, in exec_module\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 192, in get_code\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 184, in source_to_code\n",
+          "NotImplementedError: runtime source: StmtAnnAssign\n",
+          "\n",
+          "RUNNER_COUNT 3\n"
+        ],
+        "stderr": [
+          "test.support (unittest.loader._FailedTest.test.support) ... ERROR\n",
+          "test.test_typing (unittest.loader._FailedTest.test.test_typing) ... ERROR\n",
+          "test.typinganndata.partialexecution (unittest.loader._FailedTest.test.typinganndata.partialexecution) ... ERROR\n",
+          "\n",
+          "======================================================================\n",
+          "ERROR: test.support (unittest.loader._FailedTest.test.support)\n",
+          "----------------------------------------------------------------------\n",
+          "ImportError: Failed to import test module: test.support\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 369, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114, in exec_module\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/support/__init__.py\", line 3104, in <module>\n",
+          "    @types.coroutine\n",
+          "NotImplementedError: native types.coroutine supports compiled generator and coroutine functions\n",
+          "\n",
+          "\n",
+          "======================================================================\n",
+          "ERROR: test.test_typing (unittest.loader._FailedTest.test.test_typing)\n",
+          "----------------------------------------------------------------------\n",
+          "ImportError: Failed to import test module: test.test_typing\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 335, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 111, in exec_module\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 192, in get_code\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 184, in source_to_code\n",
+          "NotImplementedError: runtime source: StmtClassDef\n",
+          "\n",
+          "\n",
+          "======================================================================\n",
+          "ERROR: test.typinganndata.partialexecution (unittest.loader._FailedTest.test.typinganndata.partialexecution)\n",
+          "----------------------------------------------------------------------\n",
+          "ImportError: Failed to import test module: test.typinganndata.partialexecution\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 369, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114, in exec_module\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/typinganndata/partialexecution/__init__.py\", line 1, in <module>\n",
+          "    from . import a\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 111, in exec_module\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 192, in get_code\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 184, in source_to_code\n",
+          "NotImplementedError: runtime source: StmtAnnAssign\n",
+          "\n",
+          "\n",
+          "----------------------------------------------------------------------\n",
+          "Ran 3 tests in 5.614s\n",
+          "\n",
+          "FAILED (errors=3)\n"
+        ]
+      }
+    },
+    {
+      "mode": "filesystem discovery",
+      "opt_level": 3,
+      "build_command": "/workspace/scratch/baseline-bin/imre build unittest_discover.py --module-root /workspace/scratch/intact/baseline-stage --no-cache --clang /workspace/scratch/intact/tools/usr/bin/clang-19 --runtime /workspace/scratch/baseline-bin/libimre_runtime.a --opt-level 3 -o /workspace/scratch/intact/logs/public-06c9fd7d-discovery/O3.exe",
+      "build": {
+        "exit": 0,
+        "stdout": [],
+        "stderr": [
+          " Compiling unittest_discover.py (-O3)\n",
+          "  Finished /workspace/scratch/intact/logs/public-06c9fd7d-discovery/O3.exe in 196.01 s\n"
+        ]
+      },
+      "run": {
+        "exit": 1,
+        "stdout": [
+          "DISCOVERED 3\n",
+          "LOAD_ERROR Failed to import test module: test.support\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 369, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114, in exec_module\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/support/__init__.py\", line 3104, in <module>\n",
+          "    @types.coroutine\n",
+          "NotImplementedError: native types.coroutine supports compiled generator and coroutine functions\n",
+          "\n",
+          "LOAD_ERROR Failed to import test module: test.test_typing\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 335, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 111, in exec_module\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 192, in get_code\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 184, in source_to_code\n",
+          "NotImplementedError: runtime source: StmtClassDef\n",
+          "\n",
+          "LOAD_ERROR Failed to import test module: test.typinganndata.partialexecution\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 369, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114, in exec_module\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/typinganndata/partialexecution/__init__.py\", line 1, in <module>\n",
+          "    from . import a\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 111, in exec_module\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 192, in get_code\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 184, in source_to_code\n",
+          "NotImplementedError: runtime source: StmtAnnAssign\n",
+          "\n",
+          "RUNNER_COUNT 3\n"
+        ],
+        "stderr": [
+          "test.support (unittest.loader._FailedTest.test.support) ... ERROR\n",
+          "test.test_typing (unittest.loader._FailedTest.test.test_typing) ... ERROR\n",
+          "test.typinganndata.partialexecution (unittest.loader._FailedTest.test.typinganndata.partialexecution) ... ERROR\n",
+          "\n",
+          "======================================================================\n",
+          "ERROR: test.support (unittest.loader._FailedTest.test.support)\n",
+          "----------------------------------------------------------------------\n",
+          "ImportError: Failed to import test module: test.support\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 369, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114, in exec_module\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/support/__init__.py\", line 3104, in <module>\n",
+          "    @types.coroutine\n",
+          "NotImplementedError: native types.coroutine supports compiled generator and coroutine functions\n",
+          "\n",
+          "\n",
+          "======================================================================\n",
+          "ERROR: test.test_typing (unittest.loader._FailedTest.test.test_typing)\n",
+          "----------------------------------------------------------------------\n",
+          "ImportError: Failed to import test module: test.test_typing\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 335, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 111, in exec_module\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 192, in get_code\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 184, in source_to_code\n",
+          "NotImplementedError: runtime source: StmtClassDef\n",
+          "\n",
+          "\n",
+          "======================================================================\n",
+          "ERROR: test.typinganndata.partialexecution (unittest.loader._FailedTest.test.typinganndata.partialexecution)\n",
+          "----------------------------------------------------------------------\n",
+          "ImportError: Failed to import test module: test.typinganndata.partialexecution\n",
+          "Traceback (most recent call last):\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 369, in _find_test_path\n",
+          "  File \"<imre stdlib>/unittest/loader.py\", line 273, in _get_module_from_name\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114, in exec_module\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/typinganndata/partialexecution/__init__.py\", line 1, in <module>\n",
+          "    from . import a\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591, in _load_unlocked\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 111, in exec_module\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 192, in get_code\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 184, in source_to_code\n",
+          "NotImplementedError: runtime source: StmtAnnAssign\n",
+          "\n",
+          "\n",
+          "----------------------------------------------------------------------\n",
+          "Ran 3 tests in 11.647s\n",
+          "\n",
+          "FAILED (errors=3)\n"
+        ]
+      }
+    },
+    {
+      "mode": "boxed direct import",
+      "opt_level": 0,
+      "build_command": "/workspace/scratch/imre/target/debug/imre build /workspace/scratch/intact/baseline-stage/discover.py --module-root /workspace/scratch/intact/baseline-stage --no-cache --opt-level 0 --runtime /workspace/scratch/imre/target/debug/libimre_runtime.a --clang /workspace/scratch/intact/tools/usr/bin/clang-19 -o /workspace/scratch/intact/logs/public-06c9fd7d-ordered/boxed-O0.exe --runtime-imports",
+      "build": {
+        "exit": 0,
+        "stdout": [],
+        "stderr": [
+          " Compiling /workspace/scratch/intact/baseline-stage/discover.py (-O0)\n",
+          "  Finished /workspace/scratch/intact/logs/public-06c9fd7d-ordered/boxed-O0.exe in 32.54 s\n"
+        ]
+      },
+      "run": {
+        "exit": 1,
+        "stdout": [],
+        "stderr": [
+          "Traceback (most recent call last):\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/discover.py\", line 3\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/test_typing.py\", line 33\n",
+          "ImportError: cannot import name 'reveal_type' from 'typing' (<imre stdlib>/typing.py)\n"
+        ]
+      }
+    },
+    {
+      "mode": "boxed direct import",
+      "opt_level": 3,
+      "timeout_seconds": 240,
+      "build_command": "/workspace/scratch/imre/target/debug/imre build /workspace/scratch/intact/baseline-stage/discover.py --module-root /workspace/scratch/intact/baseline-stage --no-cache --opt-level 3 --runtime /workspace/scratch/imre/target/debug/libimre_runtime.a --clang /workspace/scratch/intact/tools/usr/bin/clang-19 -o /workspace/scratch/intact/logs/public-06c9fd7d-ordered/boxed-O3.exe --runtime-imports",
+      "build": {
+        "exit": 124,
+        "stdout": [],
+        "stderr": [
+          " Compiling /workspace/scratch/intact/baseline-stage/discover.py (-O3)\n"
+        ]
+      },
+      "run": null
+    },
+    {
+      "mode": "boxed direct import",
+      "opt_level": 3,
+      "build_command": "/workspace/scratch/baseline-bin/imre build /workspace/scratch/intact/baseline-stage/discover.py --module-root /workspace/scratch/intact/baseline-stage --no-cache --opt-level 3 --runtime /workspace/scratch/baseline-bin/libimre_runtime.a --clang /workspace/scratch/intact/tools/usr/bin/clang-19 --runtime-imports -o ../logs/public-06c9fd7d-ordered-retry/boxed-O3.exe",
+      "build": {
+        "exit": 0,
+        "stdout": [],
+        "stderr": [
+          " Compiling /workspace/scratch/intact/baseline-stage/discover.py (-O3)\n",
+          "  Finished ../logs/public-06c9fd7d-ordered-retry/boxed-O3.exe in 695.97 s\n"
+        ]
+      },
+      "run": {
+        "exit": 1,
+        "stdout": [],
+        "stderr": [
+          "Traceback (most recent call last):\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/discover.py\", line 3\n",
+          "  File \"<imre stdlib>/_frozen_importlib.py\", line 591\n",
+          "  File \"<imre stdlib>/importlib/_bootstrap_external.py\", line 114\n",
+          "  File \"/workspace/scratch/intact/baseline-stage/test/test_typing.py\", line 33\n",
+          "ImportError: cannot import name 'reveal_type' from 'typing' (<imre stdlib>/typing.py)\n"
+        ]
+      }
+    },
+    {
+      "mode": "static direct import",
+      "opt_level": 0,
+      "build_command": "/workspace/scratch/imre/target/debug/imre build /workspace/scratch/intact/baseline-stage/discover.py --module-root /workspace/scratch/intact/baseline-stage --no-cache --opt-level 0 --runtime /workspace/scratch/imre/target/debug/libimre_runtime.a --clang /workspace/scratch/intact/tools/usr/bin/clang-19 -o /workspace/scratch/intact/logs/public-06c9fd7d-ordered/ordinary-O0.exe",
+      "build": {
+        "exit": 1,
+        "stdout": [],
+        "stderr": [
+          " Compiling /workspace/scratch/intact/baseline-stage/discover.py (-O0)\n",
+          "/workspace/scratch/intact/baseline-stage/discover.py:3:1: Imre: /workspace/scratch/intact/baseline-stage/test/test_typing.py:715:29: Imre: starred elements in tuple displays require a module or function body\n"
+        ]
+      },
+      "run": null
+    },
+    {
+      "mode": "static direct import",
+      "opt_level": 3,
+      "build_command": "/workspace/scratch/imre/target/debug/imre build /workspace/scratch/intact/baseline-stage/discover.py --module-root /workspace/scratch/intact/baseline-stage --no-cache --opt-level 3 --runtime /workspace/scratch/imre/target/debug/libimre_runtime.a --clang /workspace/scratch/intact/tools/usr/bin/clang-19 -o /workspace/scratch/intact/logs/public-06c9fd7d-ordered/ordinary-O3.exe",
+      "build": {
+        "exit": 1,
+        "stdout": [],
+        "stderr": [
+          " Compiling /workspace/scratch/intact/baseline-stage/discover.py (-O3)\n",
+          "/workspace/scratch/intact/baseline-stage/discover.py:3:1: Imre: /workspace/scratch/intact/baseline-stage/test/test_typing.py:715:29: Imre: starred elements in tuple displays require a module or function body\n"
+        ]
+      },
+      "run": null
+    }
+  ]
+}

@@ -64,6 +64,7 @@ pub(super) fn property(name: &str) -> bool {
 pub(in crate::dynamic::stdlib) enum StreamCodec {
     Registered(Codec),
     Utf16(i32),
+    Utf32 { little: bool },
 }
 
 impl StreamCodec {
@@ -75,7 +76,9 @@ impl StreamCodec {
         Ok(match FixedUnicode::by_key(&key) {
             Some(FixedUnicode::Utf16(Utf16Order::Little)) => Self::Utf16(-1),
             Some(FixedUnicode::Utf16(Utf16Order::Big)) => Self::Utf16(1),
-            _ => Self::Registered(Codec::by_key(&key, encoding)?),
+            Some(FixedUnicode::Utf32Le) => Self::Utf32 { little: true },
+            Some(FixedUnicode::Utf32Be) => Self::Utf32 { little: false },
+            None => Self::Registered(Codec::by_key(&key, encoding)?),
         })
     }
 }
@@ -320,10 +323,10 @@ impl Wrapper {
 
     fn position(&self, ctx: &mut Context, end: Id) -> Result<Id> {
         let input = self.input.borrow();
-        let width = if matches!(self.codec, StreamCodec::Utf16(_)) {
-            2
-        } else {
-            1
+        let width = match self.codec {
+            StreamCodec::Utf16(_) => 2,
+            StreamCodec::Utf32 { .. } => 4,
+            StreamCodec::Registered(_) => 1,
         };
         let offset = input.position(ctx, end, width)?;
         if !matches!(self.codec, StreamCodec::Utf16(0)) || !input.wide_snapshot {
@@ -399,12 +402,25 @@ impl Wrapper {
         let signature = matches!(self.codec, StreamCodec::Utf16(0))
             && self.seekable
             && self.write_start.replace(false);
-        let mut encoded = match self.codec {
+        let encoded = match self.codec {
             StreamCodec::Utf16(order) => {
-                let order = Utf16Order::from_sign(order);
-                let name = if signature { "utf-16" } else { order.name() };
                 let errors = ctx.str_value(self.errors)?.to_owned();
-                codecs::encode_fixed(ctx, translated, FixedUnicode::Utf16(order), &errors, name)?
+                codecs::encode_fixed(
+                    ctx,
+                    translated,
+                    FixedUnicode::Utf16(Utf16Order::from_sign(order)),
+                    &errors,
+                    signature,
+                )?
+            }
+            StreamCodec::Utf32 { little } => {
+                let errors = ctx.str_value(self.errors)?.to_owned();
+                let format = if little {
+                    FixedUnicode::Utf32Le
+                } else {
+                    FixedUnicode::Utf32Be
+                };
+                codecs::encode_fixed(ctx, translated, format, &errors, false)?
             }
             StreamCodec::Registered(codec) => {
                 let encoding = if matches!(codec, Codec::Utf8 { signature: true })
@@ -417,12 +433,7 @@ impl Wrapper {
                 codecs::encode_text(ctx, translated, Some(encoding), Some(self.errors))?
             }
         };
-        if signature {
-            encoded
-                .try_reserve(2)
-                .map_err(|_| crate::Error::allocation())?;
-            encoded.splice(..0, u16::to_ne_bytes(0xfeff));
-        }
+
         self.write_start.set(false);
         if encoded.len() >= self.chunk_size.get() {
             while !self.output.borrow().is_empty() {
@@ -499,6 +510,16 @@ impl Wrapper {
                     0,
                     codec,
                 ),
+                StreamCodec::Utf32 { little } => {
+                    let errors = ctx.str_value(errors)?.to_owned();
+                    let (decoded, consumed) =
+                        codecs::utf32_chunk(ctx, raw, &errors, little, 0, end)?;
+                    let data = ctx.bytes_like(raw)?;
+                    let consumed = consumed.min(data.len());
+                    let mut input = w.input.borrow_mut();
+                    input.save_tail(&data[consumed..])?;
+                    (decoded, consumed, 0, codec)
+                }
                 StreamCodec::Utf16(requested) => {
                     let order = ctx.int(i64::from(requested));
                     let result =
@@ -522,12 +543,7 @@ impl Wrapper {
                     }
                     let consumed = consumed.min(data.len());
                     let mut reader = w.input.borrow_mut();
-                    reader.tail.clear();
-                    reader
-                        .tail
-                        .try_reserve(data.len() - consumed)
-                        .map_err(|_| crate::Error::allocation())?;
-                    reader.tail.extend_from_slice(&data[consumed..]);
+                    reader.save_tail(&data[consumed..])?;
                     let signature = if requested == 0 && order != 0 { 2 } else { 0 };
                     reader.order = order;
                     if order != 0 {

@@ -79,6 +79,10 @@ impl Calendar {
         Some([min, max, Value::Delta(resolution)].map(|value| Self(owner(value))))
     }
 
+    pub(crate) fn zone_limit(max: bool) -> Self {
+        Self(zone_limit(max))
+    }
+
     pub(crate) fn utc() -> Self {
         Self(utc())
     }

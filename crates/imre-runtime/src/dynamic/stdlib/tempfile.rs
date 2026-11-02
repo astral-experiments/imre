@@ -192,7 +192,6 @@ pub(super) fn path_operation(
             Ok(NONE)
         }
         ("random_name", []) => Ok(ctx.text(tempdirs::random_name().map_err(errno_error)?)),
-        ("default_directory", []) => Ok(filesystem_text(ctx, tempdirs::find_default_directory()?)),
         ("abspath" | "mkdir" | "cleanup_directory", &[arg]) => {
             let arg = super::posixpath::fspath(ctx, arg)?;
             let value = ctx.heap.get(ctx.scalar_value(arg));

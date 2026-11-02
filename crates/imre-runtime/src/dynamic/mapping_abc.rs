@@ -55,6 +55,11 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     if name == "Mapping" {
         ctx.bind(scope, "__reversed__", NONE);
     }
+    if matches!(name, "Iterable" | "Container") {
+        let alias = ctx.builtin("types.GenericAlias");
+        let method = super::method_decorator::class_method(ctx, alias)?;
+        ctx.bind(scope, "__class_getitem__", method);
+    }
     if structural_methods(name).is_some() {
         let function = ctx.builtin(&format!("abc.hook.{name}.__subclasshook__"));
         let hook = super::method_decorator::class_method(ctx, function)?;
@@ -77,14 +82,6 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     ctx.classes.insert(key, result);
     ctx.init_abstract_class(result, scope)?;
     Ok(result)
-}
-
-/// Iterable and Container supply the generic alias inherited by the collection ABCs.
-pub(super) fn is_generic_abc(ctx: &Context, class: Id) -> bool {
-    ["collections.abc.Iterable", "collections.abc.Container"]
-        .iter()
-        .filter_map(|&name| ctx.classes.get(name))
-        .any(|&base| ctx.direct_subclass(class, base))
 }
 
 /// A subclass of a collections ABC inherits its metaclass's registration method.
@@ -203,9 +200,7 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
         ));
     }
     ctx.heap.abc_registrations.push([owner, cls]);
-    ctx.heap
-        .protocol_subclass_cache
-        .retain(|_, matched| *matched);
+    ctx.heap.abc_subclass_cache.retain(|_, matched| *matched);
     ctx.heap.abc_cache_token = ctx.heap.abc_cache_token.wrapping_add(1);
     Ok(cls)
 }
@@ -246,13 +241,25 @@ pub(super) fn call(
         }
         return ctx.abc_check_methods(candidate, &names[..methods.len()]);
     }
-    if name == "_abc_caches_clear"
-        && let [owner] = args
-        && kwargs.is_empty()
-    {
-        ctx.heap
-            .protocol_subclass_cache
-            .retain(|pair, _| pair[0] != *owner);
+    if matches!(name, "_abc_registry_clear" | "_abc_caches_clear") {
+        let [Some(owner)] = super::builtins::bind_builtin_arguments(
+            &format!("ABCMeta.{name}"),
+            args,
+            kwargs,
+            ["cls"],
+            1,
+        )?
+        else {
+            unreachable!("ABCMeta clearing methods require a class")
+        };
+        check_impl(ctx, owner)?;
+        if name == "_abc_registry_clear" {
+            ctx.heap.abc_registrations.retain(|pair| pair[0] != owner);
+        } else {
+            ctx.heap
+                .abc_subclass_cache
+                .retain(|pair, _| pair[0] != owner);
+        }
         return Ok(NONE);
     }
     if name == "get_cache_token" {

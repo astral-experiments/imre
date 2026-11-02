@@ -140,7 +140,7 @@ pub(in crate::dynamic::stdlib) fn transform(
     let encoding = spelling(ctx, encoding, "utf-8")?;
     error_name(ctx, errors)?;
     let key = crate::objects::normalize_codec(&encoding)?;
-    let wide = wide_unicode::encoding(&key);
+    let wide = FixedUnicode::encoding(&key);
     let native = name == "decode" && (wide.is_some() || key == "raw_unicode_escape");
     match lookup_transform(ctx, &encoding, native)? {
         Some(entry) => apply(ctx, entry, name, input, &encoding, errors, false),
@@ -161,7 +161,7 @@ pub(in crate::dynamic) fn encode_text_object(
     let entry = if shortcut(&key) {
         None
     } else {
-        lookup_transform(ctx, &name, FixedUnicode::by_key(&key).is_some())?
+        lookup_transform(ctx, &name, FixedUnicode::encoding(&key).is_some())?
     };
     let Some(entry) = entry else {
         let data = encode_text(ctx, input, encoding, errors)?;
@@ -211,7 +211,7 @@ pub(in crate::dynamic) fn decode_named(
     if ctx.bytes_like(input)?.is_empty() {
         return Ok(ctx.text(""));
     }
-    let wide = wide_unicode::encoding(&key);
+    let wide = FixedUnicode::encoding(&key);
     if shortcut(&key) {
         return if wide.is_some() {
             native_decode(ctx, wide, input, errors)
@@ -224,19 +224,24 @@ pub(in crate::dynamic) fn decode_named(
         let Some(entry) = lookup_transform(ctx, &name, native)? else {
             return native_decode(ctx, wide, input, errors);
         };
-        let owner = if matches!(ctx.heap.get(input), Value::Bytes(_)) {
-            input
+        let storage = ctx.scalar_value(input);
+        let view = if let Value::ByteArray(bytes) = ctx.heap.get(storage) {
+            ctx.ownerless_byte_view(storage, 0, bytes.len(), true)?
         } else {
-            let bytes = ctx.bytes_like(input)?.to_vec();
-            ctx.alloc(Value::Bytes(bytes))
+            let owner = if matches!(ctx.heap.get(storage), Value::Bytes(_)) {
+                storage
+            } else {
+                let bytes = ctx.bytes_like(input)?.to_vec();
+                ctx.alloc(Value::Bytes(bytes))
+            };
+            ctx.alloc(Value::MemoryView {
+                owner: Some(owner),
+                anonymous: true,
+                layout: None,
+                readonly: true,
+                hash: None,
+            })
         };
-        let view = ctx.alloc(Value::MemoryView {
-            owner: Some(owner),
-            anonymous: true,
-            layout: None,
-            readonly: false,
-            hash: None,
-        });
         let result = apply(ctx, entry, "decode", view, &name, errors, true)?;
         if ctx.string_storage(result).is_none() {
             return Err(type_error(format!("'{name}' decoder returned '{}' instead of 'str'; use codecs.decode() to decode to arbitrary types", ctx.type_name(result))));

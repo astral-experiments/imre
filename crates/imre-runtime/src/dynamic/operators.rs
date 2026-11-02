@@ -1299,6 +1299,12 @@ impl Context {
         let class = match self.heap.get(id) {
             Value::Instance { class, .. } => *class,
             Value::Raised(error) => error.class()?,
+            value
+                if name == "__repr__"
+                    && value.native_io_class_name() == Some("_io.BufferedReader") =>
+            {
+                *self.builtins.get("_io.BufferedReader")?
+            }
             _ => return None,
         };
         self.class_attr(class, name).map(|slot| (class, slot))
@@ -2627,6 +2633,9 @@ impl Context {
             Value::SurrogateStr(points) => surrogate_repr(points),
             Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
             Value::Str(s) => s.clone(),
+            Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).hash_type() => {
+                format!("<{name} object at {id:#x}>")
+            }
             Value::Instance {
                 scalar: Some(payload),
                 ..
@@ -2761,6 +2770,16 @@ impl Context {
             {
                 format!("<built-in function {leaf}>")
             }
+            Value::HashMethod { name, .. } => format!("<method '{name}' of '_md5.md5' objects>"),
+            Value::Method {
+                callable, receiver, ..
+            } if let Value::HashMethod { name, .. } = self.heap.get(*callable) => {
+                if matches!(self.heap.get(*receiver), Value::Module { .. }) {
+                    format!("<built-in function {name}>")
+                } else {
+                    format!("<built-in method {name} of _md5.md5 object at {receiver:#x}>")
+                }
+            }
             Value::Native(name)
                 if matches!(name.as_str(), "binascii.a2b_hex" | "binascii.unhexlify") =>
             {
@@ -2841,7 +2860,7 @@ impl Context {
     }
 
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
-        if self.raw_read_window(obj).is_some() {
+        if self.raw_read_window(obj).is_some() && !self.view_is_readonly(obj)? {
             return self.raw_view_get(obj, key);
         }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
@@ -4475,6 +4494,21 @@ impl Context {
                 }
             }
         }
+        if op == "%"
+            && [left, right]
+                .into_iter()
+                .any(|id| self.calendar_slot_class(id, false).is_some())
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "unsupported operand type(s) for %{}: '{}' and '{}'",
+                    if inplace { "=" } else { "" },
+                    stdlib::datetime::type_name(self, a),
+                    stdlib::datetime::type_name(self, b)
+                ),
+            ));
+        }
         if op == "**"
             && [left, right]
                 .into_iter()
@@ -4605,6 +4639,10 @@ impl Context {
                 | "__rtruediv__"
                 | "__floordiv__"
                 | "__rfloordiv__"
+                | "__mod__"
+                | "__rmod__"
+                | "__divmod__"
+                | "__rdivmod__"
         ) && self
             .calendar_slot_class(
                 obj,
@@ -4664,14 +4702,20 @@ impl Context {
     /// Try divmod's numeric slots in order, including the inherited slot of integer subclasses.
     pub(super) fn divmod(&mut self, a: Id, b: Id) -> Result<Id> {
         let class = |value| {
-            self.heap.get(value).instance_class().or_else(|| {
-                self.builtin_type_name(value)
-                    .and_then(|name| self.builtins.get(name).copied())
-            })
+            self.heap
+                .get(value)
+                .instance_class()
+                .or_else(|| self.calendar_slot_class(value, false))
+                .or_else(|| {
+                    self.builtin_type_name(value)
+                        .and_then(|name| self.builtins.get(name).copied())
+                })
         };
         let (left, right) = (class(a), class(b));
         let python_slot = |value| {
-            self.slot(value, "__divmod__").is_some() || self.slot(value, "__rdivmod__").is_some()
+            self.calendar_slot_class(value, false).is_some()
+                || self.slot(value, "__divmod__").is_some()
+                || self.slot(value, "__rdivmod__").is_some()
         };
         let reflected_first = match (left, right) {
             (Some(left), Some(right))
@@ -4690,7 +4734,9 @@ impl Context {
             } else {
                 (a, "__divmod__", b)
             };
-            if self.slot(receiver, hook).is_some() {
+            if self.calendar_slot_class(receiver, false).is_some()
+                || self.slot(receiver, hook).is_some()
+            {
                 if let Some(result) = self.operator_slot(receiver, hook, other)? {
                     return Ok(result);
                 }
@@ -4700,12 +4746,16 @@ impl Context {
                 return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
             }
         }
+        let type_name = |id| match self.heap.get(id) {
+            Value::Calendar { .. } => stdlib::datetime::type_name(self, id),
+            _ => self.type_name(id).into(),
+        };
         Err(Error::new(
             "TypeError",
             format!(
                 "unsupported operand type(s) for divmod(): '{}' and '{}'",
-                self.type_name(a),
-                self.type_name(b)
+                type_name(a),
+                type_name(b)
             ),
         ))
     }
@@ -4900,7 +4950,7 @@ impl Context {
         }
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "+" | "-" | "*" | "/" | "//") {
+                if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
                     self.calendar_slot_class(id, matches!(op, "+" | "-"))
                 } else {
                     None

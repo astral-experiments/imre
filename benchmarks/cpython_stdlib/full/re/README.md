@@ -46,3 +46,5 @@ done
 ```
 
 The original runs end in `Ran 3 tests` and `OK`. The inverse runs end in `FAILED (failures=3)` with assertion call sites at upstream lines 463, 429 and 383 respectively. The original source SHA-256 is `879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2`.
+
+A separate four-case replay covers match expansion, bytearray buffer lifetime, and named-field lookup through a match. [Capture replay](capture-replay.md)

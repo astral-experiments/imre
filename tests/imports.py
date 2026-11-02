@@ -183,6 +183,10 @@ REJECTED = {
         "main.py": "from helper import chosen\n",
         "helper.py": "if False:\n    def chosen():\n        return 1\n",
     }, "no static binding"),
+    "conditional_uninitialized_export": ({
+        "main.py": "from helper import selected\n",
+        "helper.py": "if True:\n    selected: int\nelse:\n    selected = 1\n",
+    }, 'no static binding "selected"'),
     "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
     "unused_resource_function": ({
@@ -875,6 +879,15 @@ ACCEPTED = {
             "else:\n    def selected():\n        return 'other'\n"
             "if guard(''):\n    def other():\n        return 'always'\n"
             "else:\n    def other():\n        return 'unreachable'\n"
+        ),
+    },
+    "conditional_package_value": {
+        "main.py": "from helper import selected as chosen\nimport helper\nprint(chosen, helper.selected)\n",
+        "helper/__init__.py": (
+            "import sys\n"
+            "if sys.platform == 'win32':\n    selected = 'windows'\n"
+            "elif sys.platform == 'linux':\n    selected = 'linux'\n"
+            "else:\n    selected = None\n"
         ),
     },
     "conditional_function_then_definition": {

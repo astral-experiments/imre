@@ -371,6 +371,15 @@ impl Input {
         Ok(pos)
     }
 
+    /// Detach bytes already prefetched by the public buffered pipe before reading its raw fd.
+    pub(super) fn take_read_ahead(&mut self) -> Result<Bytes> {
+        let buffered = self.raw.buffer();
+        let mut bytes = reserve(buffered.len())?;
+        bytes.extend_from_slice(buffered);
+        self.raw.consume(bytes.len());
+        Ok(bytes)
+    }
+
     /// read1 consumes available read-ahead or makes a single raw request without prefetching.
     pub(super) fn read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
         let size = size.unwrap_or(self.raw.capacity());

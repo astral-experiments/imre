@@ -1332,6 +1332,9 @@ fn signature(
             )
         })
         .map(|context| classes.instance(context.class));
+    if method.is_none() && crate::dynamic::function_type_params(function).is_some() {
+        graph.needs_object_runtime.set(true);
+    }
     if !function.decorator_list.is_empty() || function.type_params.is_some() {
         if function.decorator_list.iter().any(|decorator| {
             decorator.expression.as_call_expr().is_some_and(|call| {
@@ -4898,6 +4901,19 @@ impl<'a> Checker<'a> {
                             "deletion requires a dictionary subscript",
                         ));
                     };
+                    if let Some(ty) = self.environ_item_type(&target.value) {
+                        let key = self.expr_expected(&target.slice, ty)?;
+                        statements.push(Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(
+                                Builtin::Process(ir::ProcessOperation::EnvironDelete {
+                                    bytes: ty == Type::Bytes,
+                                }),
+                                vec![key],
+                            ),
+                        }));
+                        continue;
+                    }
                     let receiver = self.expr(&target.value)?;
                     if matches!(receiver.ty, Type::Deque(_)) {
                         let index = self.integer_index(&target.slice)?;
@@ -5937,6 +5953,12 @@ impl<'a> Checker<'a> {
         {
             return Ok(self.nullable_int_sum(left, right));
         }
+        if binary.op == ast::Operator::Mod
+            && left.ty == Type::Calendar(ir::CalendarType::Delta)
+            && right.ty == left.ty
+        {
+            return Err(self.object_runtime_export("timedelta remainder", binary));
+        }
         if let (Type::Calendar(first), Type::Calendar(second)) = (left.ty, right.ty) {
             return calendar::binary(first, second, left, right, binary, self.source);
         }
@@ -6500,6 +6522,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 Intrinsic::StringConstant(value) => return Ok(unpacking::string(value)),
+                Intrinsic::BoolConstant(value) => return Ok(Expr::boolean(value)),
                 Intrinsic::LogRecordFlag(mask) => {
                     return Ok(logging_records::op(
                         ir::LogRecordOperation::Flag,
@@ -7403,6 +7426,16 @@ impl<'a> Checker<'a> {
                 (Type::Bool, ExprKind::Compare(values, ops))
             }
             ast::Expr::Subscript(subscript) => {
+                if self.environ_item_type(&subscript.value) == Some(Type::Str) {
+                    let key = self.expr_expected(&subscript.slice, Type::Str)?;
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(
+                            Builtin::Process(ir::ProcessOperation::EnvironIndex),
+                            vec![key],
+                        ),
+                    });
+                }
                 if let Some(member) = self.enum_name_lookup(subscript)? {
                     return Ok(member);
                 }
@@ -9473,12 +9506,11 @@ impl<'a> Checker<'a> {
             return self.process_check_output(call);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && matches!(
-                self.resolve(&attribute.value),
-                Some(Binding::Intrinsic(Intrinsic::Environ))
-            )
+            && let Some(Binding::Intrinsic(
+                mapping @ (Intrinsic::Environ | Intrinsic::EnvironBytes),
+            )) = self.resolve(&attribute.value)
         {
-            return self.environ_method(attribute, call);
+            return self.environ_method(attribute, call, mapping == Intrinsic::EnvironBytes);
         }
         if let ast::Expr::Attribute(attr) = call.func.as_ref() {
             self.calendar_class_attribute(attr)?;
@@ -10684,6 +10716,12 @@ impl<'a> Checker<'a> {
             });
         }
         if name.id == "divmod" && args.len() == 2 {
+            if args
+                .iter()
+                .all(|arg| arg.ty == Type::Calendar(ir::CalendarType::Delta))
+            {
+                return Err(self.object_runtime_export("timedelta divmod", call));
+            }
             let mut body = Vec::with_capacity(2);
             let mut slots = Vec::with_capacity(2);
             for arg in args {

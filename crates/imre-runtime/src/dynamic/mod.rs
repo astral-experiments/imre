@@ -37,6 +37,8 @@ mod paramspec;
 mod property;
 mod range;
 mod raw_read_window;
+#[cfg(unix)]
+mod signal_handlers;
 mod slice;
 mod slot_member;
 mod source_code;
@@ -150,6 +152,7 @@ pub(crate) struct Context {
     classes: HashMap<String, Id>,
     // The Python enum bases use native layouts but have writable class dictionaries.
     enum_scopes: HashMap<Id, Id>,
+    signal_handlers: Vec<Id>,
     typing: typing::Registry,
     // Python wrappers retain their registered logger for the lifetime of this heap.
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
@@ -2113,7 +2116,7 @@ impl Context {
                 defaultdict::METHODS
             }
             "list" => builtins::LIST_METHODS,
-            "method_descriptor" => &["__get__"],
+            "method_descriptor" | "wrapper_descriptor" => &["__get__"],
             "tuple" => &["__repr__", "__getitem__", "index"],
             "set" => &[
                 "__repr__",
@@ -2153,6 +2156,7 @@ impl Context {
                 &[
                     "__add__",
                     "__index__",
+                    "__trunc__",
                     "bit_length",
                     "from_bytes",
                     "to_bytes",
@@ -2163,6 +2167,7 @@ impl Context {
             "float" => &[
                 "__format__",
                 "__getformat__",
+                "__trunc__",
                 "as_integer_ratio",
                 "__repr__",
             ],
@@ -2461,7 +2466,10 @@ impl Context {
             self.bind_import_child(name, source_globals, module)?;
             return Ok(Some(module));
         }
-        self.load_bootstrap_module(name, parent, source_globals)
+        // Bootstrap initializers and live sys.modules hooks can reenter Python.
+        stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+            self.load_bootstrap_module(name, parent, source_globals)
+        })
     }
 
     /// Before installing the registry, execute its dependencies and the script's explicit entry.
@@ -2707,9 +2715,13 @@ impl Context {
                 self.bind(scope, "_import_lock", lock);
             }
             "itertools" => {
+                for attr in ["count", "repeat"] {
+                    let value = self.builtin(&format!("{name}.{attr}"));
+                    self.bind(scope, attr, value);
+                }
+            }
+            "_imre_itertools" => {
                 for attr in [
-                    "count",
-                    "repeat",
                     "_cycle_allocate",
                     "_cycle_next",
                     "_filterfalse_allocate",
@@ -2718,7 +2730,7 @@ impl Context {
                     "_chain_get",
                     "_chain_set",
                 ] {
-                    let value = self.builtin(&format!("itertools.{attr}"));
+                    let value = self.builtin(&format!("{name}.{attr}"));
                     self.bind(scope, attr, value);
                 }
             }
@@ -2768,17 +2780,22 @@ impl Context {
             }
             #[cfg(unix)]
             "_signal" if source.is_none() => {
-                #[cfg(target_os = "linux")]
                 stdlib::signal::initialize(self, scope);
-                for (name, disposition) in [("SIG_DFL", libc::SIG_DFL), ("SIG_IGN", libc::SIG_IGN)]
-                {
-                    let value = self.int(disposition as i64);
+                for (name, key, value) in [
+                    ("SIG_DFL", "_signal.SIG_DFL", libc::SIG_DFL),
+                    ("SIG_IGN", "_signal.SIG_IGN", libc::SIG_IGN),
+                ] {
+                    let value = self.signal_sentinel(key, value);
                     self.bind(scope, name, value);
+                }
+                for name in ["signal", "getsignal"] {
+                    let function = self.builtin(&format!("_signal.{name}"));
+                    self.bind(scope, name, function);
                 }
                 let handler = self.builtin("_signal.default_int_handler");
                 self.bind(scope, "default_int_handler", handler);
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(unix)]
             "_imre_signal" if source.is_none() => {
                 let factory = self.builtin("_imre_signal.make_signals");
                 self.bind(scope, "make_signals", factory);
@@ -2833,6 +2850,7 @@ impl Context {
                 let native_new = self.builtin("hashlib.new");
                 self.bind(scope, "_native_new", native_new);
             }
+            "_md5" => stdlib::hashlib::md5::install(self, module, scope)?,
             "_sha3" => {
                 for name in [
                     "sha3_224",

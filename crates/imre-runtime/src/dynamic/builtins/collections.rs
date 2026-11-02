@@ -299,7 +299,7 @@ pub(in super::super) fn update(
                 // PySequence_Fast replaces TypeError only while obtaining the iterator.
                 let iterator = ctx.iterator(pair).map_err(|error| {
                     let class = ctx.builtin("TypeError");
-                    if ctx.error_matches(&error.kind, class) {
+                    if ctx.raised_error_matches(&error, class) {
                         type_error("object is not iterable")
                     } else {
                         error

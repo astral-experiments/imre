@@ -1,6 +1,6 @@
-from collections import defaultdict
+from collections import Counter as CounterCollection, defaultdict
 from collections.abc import Mapping as MappingABC, MutableMapping as MutableMappingABC, Sequence as SequenceABC
-from typing import DefaultDict, Dict, Generic, Mapping, MutableMapping, Sequence, TypeVar, get_args, get_origin
+from typing import Counter, DefaultDict, Dict, Generic, Mapping, MutableMapping, Sequence, TypeVar, get_args, get_origin
 
 
 def current():
@@ -41,6 +41,10 @@ def current():
     class Entries(Dict[str, int]):
         pass
     assert Entries.__bases__ == (dict, Generic)
+    assert get_origin(Counter) is CounterCollection
+    for constructor in (Counter, Counter[int]):
+        counts = constructor([4, 4, 5])
+        assert type(counts) is CounterCollection and counts == {4: 2, 5: 1}
     for constructor in (DefaultDict, DefaultDict[str, int]):
         instance = constructor(int, present=3)
         assert type(instance) is defaultdict and instance.default_factory is int
