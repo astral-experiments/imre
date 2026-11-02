@@ -1,9 +1,9 @@
-//! A static method unwraps to the same callable for class and instance access.
+//! Metadata shared by classmethod and staticmethod descriptors.
 use super::Context;
 use super::value::{Error, FALSE, Id, Result, TRUE, Value};
 
 /// Copy the eagerly assigned function metadata without evaluating its annotations.
-pub(super) fn construct(ctx: &mut Context, callable: Id) -> Result<Id> {
+fn copy_metadata(ctx: &mut Context, callable: Id) -> Result<Id> {
     let dictionary = ctx.dict(Vec::new());
     for name in ["__module__", "__name__", "__qualname__", "__doc__"] {
         match ctx.lookup_attr(callable, name) {
@@ -11,10 +11,23 @@ pub(super) fn construct(ctx: &mut Context, callable: Id) -> Result<Id> {
                 let key = ctx.text(name);
                 ctx.put_item(dictionary, key, value)?;
             }
-            Err(error) if error.kind == "AttributeError" => {}
+            Err(error) if ctx.is_attribute_error(&error) => {}
             Err(error) => return Err(error),
         }
     }
+    Ok(dictionary)
+}
+
+pub(super) fn class_method(ctx: &mut Context, callable: Id) -> Result<Id> {
+    let dictionary = copy_metadata(ctx, callable)?;
+    Ok(ctx.alloc(Value::ClassMethod {
+        callable,
+        dictionary,
+    }))
+}
+
+pub(super) fn static_method(ctx: &mut Context, callable: Id) -> Result<Id> {
+    let dictionary = copy_metadata(ctx, callable)?;
     Ok(ctx.alloc(Value::StaticMethod {
         callable,
         dictionary,
@@ -40,24 +53,17 @@ pub(super) fn attribute(
     let key = ctx.text(name);
     let storage = ctx
         .dict_storage(dictionary)
-        .expect("staticmethod dictionary");
-    if let Some((_, value)) = ctx
-        .dict_entries(storage)
-        .unwrap()
-        .iter()
-        .find(|(stored, _)| ctx.equal(*stored, key))
-    {
-        return Ok(Some(*value));
+        .expect("method wrapper dictionary");
+    // A callback may replace the wrapper dictionary while this lookup is in progress.
+    ctx.heap.keep(dictionary);
+    let (_, index) = ctx.find_dictionary_key(storage, key, None)?;
+    if let Some(index) = index {
+        return Ok(Some(ctx.dict_entries(storage).unwrap()[index].1));
     }
     if matches!(name, "__annotations__" | "__annotate__") {
-        match ctx.lookup_attr(callable, name) {
-            Ok(value) => {
-                ctx.put_item(storage, key, value)?;
-                return Ok(Some(value));
-            }
-            Err(error) if error.kind == "AttributeError" => {}
-            Err(error) => return Err(error),
-        }
+        let value = ctx.lookup_attr(callable, name)?;
+        ctx.put_item(storage, key, value)?;
+        return Ok(Some(value));
     }
     Ok(None)
 }
@@ -74,7 +80,10 @@ pub(super) fn update_attribute(
         "__func__" | "__wrapped__" => Err(Error::new("AttributeError", "readonly attribute")),
         "__isabstractmethod__" => Err(Error::new(
             "AttributeError",
-            "attribute '__isabstractmethod__' of 'staticmethod' objects is not writable",
+            format!(
+                "attribute '__isabstractmethod__' of '{}' objects is not writable",
+                ctx.type_name(wrapper)
+            ),
         )),
         "__dict__" => {
             let Some(value) = value else {
@@ -89,16 +98,21 @@ pub(super) fn update_attribute(
                     ),
                 ));
             }
-            let Value::StaticMethod { dictionary, .. } = ctx.heap.get_mut(wrapper) else {
+            let (Value::StaticMethod { dictionary, .. } | Value::ClassMethod { dictionary, .. }) =
+                ctx.heap.get_mut(wrapper)
+            else {
                 unreachable!()
             };
-            *dictionary = value;
+            let previous = std::mem::replace(dictionary, value);
+            if previous != value {
+                ctx.heap.weak_edge_removed(previous);
+            }
             Ok(())
         }
         _ => {
             let storage = ctx
                 .dict_storage(dictionary)
-                .expect("staticmethod dictionary");
+                .expect("method wrapper dictionary");
             if let Some(value) = value {
                 let key = ctx.text(name);
                 ctx.put_item(storage, key, value)
