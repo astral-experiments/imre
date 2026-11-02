@@ -2550,6 +2550,7 @@ impl<'a> Checker<'a> {
     ) -> Option<&'static str> {
         let name = match attribute.attr.as_str() {
             "difference_update" => "set.difference_update",
+            "update" => "set.update",
             "issubset" => "set.issubset",
             _ => return None,
         };

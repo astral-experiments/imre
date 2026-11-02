@@ -51,7 +51,7 @@ impl BuiltinDescriptor {
                 Some(("BaseException", attr, &["add_note", "with_traceback"][..]))
             }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
-            Some(("set", attr)) => Some(("set", attr, &["issubset"][..])),
+            Some(("set", attr)) => Some(("set", attr, &["issubset", "update"][..])),
             Some(("frozenset", attr)) => Some(("frozenset", attr, &["issubset"][..])),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
