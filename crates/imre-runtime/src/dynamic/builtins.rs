@@ -406,6 +406,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "copy",
     "endswith",
     "extend",
+    "hex",
     "lstrip",
     "reverse",
     "rstrip",
@@ -423,6 +424,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "decode",
     "endswith",
     "find",
+    "hex",
     "index",
     "join",
     "lstrip",
@@ -1548,6 +1550,7 @@ pub(super) fn call(
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" if method == "__repr__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
+            "bytes" | "bytearray" if method == "hex" => text::bytes_hex(ctx, owner, args, kwargs),
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
             "bytearray"
                 if matches!(

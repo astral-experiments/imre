@@ -53,7 +53,7 @@ pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::{State as HashState, hex_text as hash_hex};
+pub(crate) use hashlib::{State as HashState, hex_text as hash_hex, hex_with_separator};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
