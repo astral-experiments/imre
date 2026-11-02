@@ -165,6 +165,7 @@ pub(super) fn call(
         "time_ns" => "time.time_ns",
         "sleep" => "time.sleep",
         "monotonic" => "time.monotonic",
+        "monotonic_ns" => "time.monotonic_ns",
         "perf_counter" => "time.perf_counter",
         "mktime" => "time.mktime",
         "tzset" => "time.tzset",
@@ -273,6 +274,9 @@ pub(super) fn call(
             })?;
             Ok(ctx.int(nanos))
         }
+        "monotonic_ns" if args.is_empty() => {
+            Ok(ctx.int(crate::objects::time::monotonic_time_ns()?))
+        }
         "monotonic" | "perf_counter" if args.is_empty() => {
             let stamp =
                 crate::objects::time::monotonic_time().map_err(crate::objects::errno_error)?;
@@ -291,10 +295,12 @@ pub(super) fn call(
             install_timezone(ctx, scope)?;
             Ok(NONE)
         }
-        "time" | "time_ns" | "monotonic" | "perf_counter" | "tzset" => Err(Error::new(
-            "TypeError",
-            format!("{function}() takes no arguments ({} given)", args.len()),
-        )),
+        "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter" | "tzset" => {
+            Err(Error::new(
+                "TypeError",
+                format!("{function}() takes no arguments ({} given)", args.len()),
+            ))
+        }
         "mktime" => match args {
             [value] => {
                 let stamp = tuple_time(ctx, *value, name)?.timestamp()?;

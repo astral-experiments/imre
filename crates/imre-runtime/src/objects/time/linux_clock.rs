@@ -1,24 +1,8 @@
 //! Linux availability checks and fallback providers for time.get_clock_info.
 
-use super::{Error, Kind, clock_resolution};
+use super::{Error, Kind, clock_resolution, timestamp_ns};
 use crate::objects::errno_error;
 use std::{io, mem::MaybeUninit};
-
-// CPython samples the clock even for an information request, including its
-// conversion to a signed 64-bit nanosecond count.
-fn check_timestamp(seconds: impl Into<i64>, nanos: impl Into<i64>) -> Result<(), Error> {
-    seconds
-        .into()
-        .checked_mul(1_000_000_000)
-        .and_then(|whole| whole.checked_add(nanos.into()))
-        .map(|_| ())
-        .ok_or_else(|| {
-            Error::new(
-                Kind::OverflowError,
-                "timestamp too large to convert to C PyTime_t",
-            )
-        })
-}
 
 /// CPython obtains a clock reading even for a metadata-only query.
 pub(super) fn probe(
@@ -35,7 +19,7 @@ pub(super) fn probe(
     }
     // SAFETY: the successful clock_gettime call initialized sample.
     let sample = unsafe { sample.assume_init() };
-    let check = || check_timestamp(sample.tv_sec, sample.tv_nsec);
+    let check = || timestamp_ns(sample.tv_sec, sample.tv_nsec);
     // The wall and monotonic providers convert their sample before querying
     // resolution. The CPU providers query resolution first.
     let cpu = matches!(
@@ -67,7 +51,7 @@ fn process_fallback() -> Result<(&'static str, f64), Error> {
         // SAFETY: getrusage returned success.
         let usage = unsafe { usage.assume_init() };
         for tv in [usage.ru_utime, usage.ru_stime] {
-            check_timestamp(tv.tv_sec, tv.tv_usec * 1000)?;
+            timestamp_ns(tv.tv_sec, tv.tv_usec * 1000)?;
         }
         ("getrusage(RUSAGE_SELF)", 1e-6)
     } else {
