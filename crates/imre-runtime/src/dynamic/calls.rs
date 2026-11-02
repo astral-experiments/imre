@@ -769,7 +769,7 @@ impl Context {
                         })
                         || name.starts_with("collections.defaultdict.")
                         || name.starts_with("property.")
-                        || name.starts_with("dict.")
+                        || (name.starts_with("dict.") && name != "dict.__new__")
                         || name.starts_with("abc.")
                         || name
                             .strip_prefix("str.")
@@ -3242,6 +3242,9 @@ impl Context {
         }
         if name == "__new__" {
             match self.heap.get(base) {
+                Value::Dict(_) | Value::DefaultDict { .. } => {
+                    return Ok(self.builtin("dict.__new__"));
+                }
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 Value::Class { .. } | Value::Instance { .. } => {
@@ -4418,6 +4421,33 @@ impl Context {
         }))
     }
 
+    /// Create empty mapping storage for the requested type without running its initializer.
+    fn new_dict(&mut self, args: &[Id]) -> Result<Id> {
+        let Some(&class) = args.first() else {
+            return Err(Error::new(
+                "TypeError",
+                "dict.__new__(): not enough arguments",
+            ));
+        };
+        let dict = self.builtin("dict");
+        if !self.direct_subclass(class, dict) {
+            return Err(self.invalid_new_subtype("dict", class));
+        }
+        let storage = if self.has_base(class, "collections.defaultdict") {
+            self.alloc(Value::DefaultDict {
+                factory: NONE,
+                entries: Default::default(),
+            })
+        } else {
+            self.dict(Vec::new())
+        };
+        if matches!(self.heap.get(class), Value::Class { .. }) {
+            Ok(self.instance(class, Some(storage)))
+        } else {
+            Ok(storage)
+        }
+    }
+
     /// Describe a receiver rejected by a builtin allocator.
     pub(super) fn invalid_new_subtype(&self, kind: &str, class: Id) -> Error {
         let message = match self.heap.get(class) {
@@ -4605,6 +4635,7 @@ impl Context {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
+            Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "tuple.__new__" => {
                 if args.first().is_some_and(|&class| matches!(self.heap.get(class), Value::Native(name) if name == stdlib::flags::TYPE)) {
@@ -5054,15 +5085,6 @@ impl Context {
                         .collect::<Vec<_>>();
                     self.new_float(&positional, &kwargs)?
                 } else {
-                    let dictionary = if self.has_base(callable, "collections.defaultdict") {
-                        Some(self.alloc(Value::DefaultDict {
-                            factory: NONE,
-                            entries: Default::default(),
-                        }))
-                    } else {
-                        self.has_base(callable, "dict")
-                            .then(|| self.dict(Vec::new()))
-                    };
                     let storage = if rlock_subclass {
                         Some(self.alloc(Value::HandlerLock(Default::default())))
                     } else if self.has_base(callable, "list") {
@@ -5079,7 +5101,7 @@ impl Context {
                     } else {
                         None
                     };
-                    let object = self.instance(callable, dictionary);
+                    let object = self.instance(callable, None);
                     if let Value::Instance { scalar, .. } = self.heap.get_mut(object) {
                         *scalar = storage;
                     }

@@ -222,6 +222,7 @@ def current():
 
     fromkeys_construction()
     ordered_dictionary()
+    allocate_without_init()
     mapping_patterns()
     counts = Counter(a=3)
     clone = copy(counts)
@@ -758,3 +759,32 @@ def missing_key_errors():
         raise AssertionError("lookup suppressed a hashing exception")
     assert table["absent"] == 12
     assert calls == ["absent"]
+
+
+def allocate_without_init():
+    from collections import defaultdict
+
+    class Derived(dict):
+        def __init__(self):
+            raise AssertionError("allocator called subclass initializer")
+
+    class Defaults(defaultdict):
+        pass
+
+    for cls in (dict, Derived, defaultdict, Defaults):
+        value = dict.__new__(cls, [("ignored", 1)], extra=2)
+        assert type(value) is cls and not value
+        assert cls.__new__ is value.__new__ is dict.__new__
+        assert value.__new__.__self__ is dict
+        value["entry"] = 3
+        assert value["entry"] == 3
+        if isinstance(value, defaultdict):
+            assert value.default_factory is None
+
+    for args in ((), (object,), (17,)):
+        try:
+            dict.__new__(*args)
+        except TypeError as exc:
+            print(exc)
+        else:
+            raise AssertionError("dict allocator accepted an invalid subtype")
