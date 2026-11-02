@@ -4,7 +4,16 @@ import enum
 import sys
 import types
 
-__all__ = ["Format", "ForwardRef", "get_annotations", "annotations_to_string", "type_repr"]
+__all__ = [
+    "Format",
+    "ForwardRef",
+    "call_annotate_function",
+    "call_evaluate_function",
+    "get_annotate_from_class_namespace",
+    "get_annotations",
+    "annotations_to_string",
+    "type_repr",
+]
 
 
 class Format(enum.IntEnum):
@@ -33,8 +42,117 @@ def type_repr(value):
         return "..."
     from string.templatelib import Template
     if isinstance(value, Template):
-        raise NotImplementedError("template annotation strings require AST unparsing")
+        return _template_repr(value)
     return repr(value)
+
+
+_TEMPLATE_QUOTES = ("'", '"', '"""', "'''")
+
+
+def _template_constant(value):
+    def simple(item):
+        if isinstance(item, (float, complex)):
+            return repr(item).replace("inf", "1e309").replace("nan", "(1e309-1e309)")
+        return repr(item)
+
+    if isinstance(value, tuple):
+        if len(value) == 1:
+            return "".join(("(", simple(value[0]), ",)"))
+        return "(" + ", ".join(simple(item) for item in value) + ")"
+    return "..." if value is ... else simple(value)
+
+
+def _template_constructor(template):
+    parts = []
+    for part in template:
+        if isinstance(part, str):
+            parts.append(_template_constant(part))
+        else:
+            arguments = (part.value, part.expression, part.conversion, part.format_spec)
+            arguments = ", ".join(_template_constant(arg) for arg in arguments)
+            parts.append("Interpolation(" + arguments + ")")
+    return "Template(" + ", ".join(parts) + ")"
+
+
+def _template_interpolation(expression, conversion, format_spec):
+    parts = ["{ " if expression.startswith("{") else "{", expression]
+    if conversion != -1:
+        parts.extend(("!", chr(conversion)))
+    if format_spec is not None:
+        spec = format_spec.replace("{", "{{").replace("}", "}}")
+        spec = spec.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
+        parts.extend((":", spec.replace("\n", "\\n")))
+    parts.append("}")
+    return "".join(parts)
+
+
+def _quoted_template(parts):
+    # Match _ast_unparse.Unparser._ftstring_helper: earlier parts restrict the
+    # delimiters available to the rest of this literal.
+    quotes = list(_TEMPLATE_QUOTES)
+    rendered = []
+    for part, literal in parts:
+        if literal:
+            # Single-character repr preserves printable characters and escapes
+            # backslashes and nonprintable code points, including surrogates.
+            escaped = "".join(repr(char)[1:-1] for char in part)
+            choices = [q for q in quotes if q not in escaped]
+            if not choices:
+                text = repr(part)
+                choices = [next((q for q in quotes if text[0] in q), text[0])]
+                if choices[0] not in quotes:
+                    # No common delimiter works for all parts. Match CPython's
+                    # triple-single-quoted fallback and force repr's single quotes.
+                    return "t'''" + "".join(
+                        repr('"' + s)[2:-1] if is_literal else s for s, is_literal in parts
+                    ) + "'''"
+                escaped = text[1:-1]
+            elif escaped:
+                choices.sort(key=lambda q: q[0] == escaped[-1])
+                if choices[0][0] == escaped[-1]:
+                    escaped = escaped[:-1] + "\\" + escaped[-1]
+            part, quotes = escaped, choices
+        else:
+            if "\n" in part:
+                quotes = [q for q in quotes if len(q) == 3]
+                assert quotes
+            quotes = [q for q in quotes if q not in part] or quotes
+        rendered.append(part)
+    quote = quotes[0]
+    return "t" + quote + "".join(rendered) + quote
+
+
+def _template_repr(template):
+    from typing import _check_annotation_syntax
+
+    if any(part.expression.strip() == "" for part in template.interpolations):
+        return _template_constructor(template)
+    try:
+        for part in template.interpolations:
+            _check_annotation_syntax(f"({part.expression})")
+    except SyntaxError:
+        return _template_constructor(template)
+    # Construct all fields before writing any text. Conversion, format specs and
+    # subclasses of str can run Python code in both phases.
+    fields = []
+    for part in template:
+        if isinstance(part, str):
+            fields.append(part)
+        else:
+            fields.append((
+                part.expression,
+                ord(part.conversion) if part.conversion else -1,
+                part.format_spec if part.format_spec else None,
+            ))
+
+    parts = []
+    for field in fields:
+        if type(field) is tuple:
+            parts.append((_template_interpolation(*field), False))
+        else:
+            text = field.replace("{", "{{").replace("}", "}}")
+            parts.append(("".join((text,)), True))
+    return _quoted_template(parts)
 
 
 def annotations_to_string(annotations):
@@ -46,15 +164,30 @@ def annotations_to_string(annotations):
             for name, value in annotations.items()}
 
 
-def _make_forward_ref(arg, module=None, owner=None, *, is_class=False):
-    from typing import _validate_forward_ref
+def _make_forward_ref(arg, module=None, owner=None, *, is_argument=True, is_class=False):
+    from _typing import _validate_forward_ref
     # typing._make_forward_ref eagerly checks the syntax, without resolving names.
     source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
     try:
         _validate_forward_ref(source)
     except SyntaxError:
         raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
-    return ForwardRef(arg, module=module, owner=owner, is_class=is_class)
+    return ForwardRef(arg, module=module, owner=owner, is_argument=is_argument, is_class=is_class)
+
+
+def _render_tokens(tokens, extra_names=None):
+    """Render spelling, captured-name, and deferred constant tokens for an annotation."""
+    parts = []
+    for token in tokens:
+        if type(token) is str:
+            parts.append(token)
+        else:
+            key, value = token
+            if type(key) is str:
+                parts.append(type_repr(extra_names[key]) if extra_names and key in extra_names else key)
+            else:
+                parts.append(key(value))
+    return "".join(parts)
 
 
 class ForwardRef:
@@ -96,21 +229,15 @@ class ForwardRef:
 
     @property
     def __forward_arg__(self):
+        if self.__arg__ is None:
+            self.__arg__ = _render_tokens(self.__ast_node__)
         return self.__arg__
 
     @property
     def __resolved_str__(self):
         if self.__resolved_str_cache__ is None:
-            if self.__ast_node__ is None:
-                rendered = self.__forward_arg__
-            else:
-                # Preserve literal tokens and render captured values only when
-                # the caller asks to see them. Their repr can execute user code.
-                rendered = "".join(
-                    part if type(part) is str else type_repr(part[1])
-                    for part in self.__ast_node__
-                )
-            self.__resolved_str_cache__ = rendered
+            self.__resolved_str_cache__ = (_render_tokens(self.__ast_node__, self.__extra_names__)
+                                           if self.__extra_names__ else self.__forward_arg__)
         return self.__resolved_str_cache__
 
     def evaluate(self, *, globals=None, locals=None, type_params=None, owner=None,
@@ -166,16 +293,16 @@ class ForwardRef:
         if self.__extra_names__:
             locals.update(self.__extra_names__)
 
-        import typing
+        from _typing import _eval_type_expression, _validate_forward_ref
         arg = self.__forward_arg__
         source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
         try:
-            return typing._eval_type_expression(source, globals, locals)
+            return _eval_type_expression(source, globals, locals)
         except SyntaxError:
             # Parsing fails before CPython enters its symbolic fallback. An
             # exception from the expression itself, however, still permits it.
             try:
-                typing._validate_forward_ref(source)
+                _validate_forward_ref(source)
             except SyntaxError:
                 raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
             if format == Format.VALUE:
@@ -192,12 +319,13 @@ class ForwardRef:
         # scoped forward references, preserving already-known parts of the result.
         import builtins
         names = {**vars(builtins), **globals, **locals}
-        symbolic = typing._typeddict_names(
+        from typing import _typeddict_names
+        symbolic = _typeddict_names(
             globals, cells if isinstance(cells, dict) else None,
             owner, names, self.__forward_is_class__,
         )
         try:
-            result = typing._eval_type_expression(source, globals, symbolic)
+            result = _eval_type_expression(source, globals, symbolic)
         except Exception:
             return self
         symbolic.finish()
@@ -275,6 +403,73 @@ def _rewrite_star_unpack(arg):
         return arg
 
 
+def _stringify_single(value):
+    if value is ...:
+        return "..."
+    if isinstance(value, str):
+        return value
+    from string.templatelib import Template
+    if isinstance(value, Template):
+        return _template_repr(value)
+    return repr(value)
+
+
+def call_evaluate_function(evaluate, format, *, owner=None):
+    """Call the evaluator for a type alias or type parameter in the requested format."""
+    return call_annotate_function(evaluate, format, owner=owner, _is_evaluate=True)
+
+
+def call_annotate_function(annotate, format, *, owner=None, _is_evaluate=False):
+    """Call an annotation provider, replaying it in the requested format if needed."""
+    if format == Format.VALUE_WITH_FAKE_GLOBALS:
+        raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
+    try:
+        return annotate(format)
+    except NotImplementedError:
+        pass
+
+    if format == Format.STRING:
+        try:
+            annotate(Format.VALUE_WITH_FAKE_GLOBALS)
+        except NotImplementedError:
+            return annotations_to_string(annotate(Format.VALUE))
+        except Exception:
+            pass
+        from typing import _typeddict_replay
+        func, _ = _typeddict_replay(annotate, owner, format, False)
+        result = func(Format.VALUE_WITH_FAKE_GLOBALS)
+        if _is_evaluate:
+            return _stringify_single(result)
+        return {key: _stringify_single(value) for key, value in result.items()}
+
+    if format == Format.FORWARDREF:
+        from typing import _typeddict_replay
+        func, names = _typeddict_replay(annotate, owner, format, True)
+        try:
+            result = func(Format.VALUE_WITH_FAKE_GLOBALS)
+        except NotImplementedError:
+            return annotate(Format.VALUE)
+        except Exception:
+            pass
+        else:
+            names.finish()
+            return result
+
+        # An operation on a known value can fail. Replay with symbolic globals,
+        # then evaluate the ForwardRefs for which the available names suffice.
+        func, names = _typeddict_replay(annotate, owner, format, False)
+        result = func(Format.VALUE_WITH_FAKE_GLOBALS)
+        names.finish()
+        if _is_evaluate:
+            return result.evaluate(format=Format.FORWARDREF) if isinstance(result, ForwardRef) else result
+        return {key: value.evaluate(format=Format.FORWARDREF)
+                if isinstance(value, ForwardRef) else value for key, value in result.items()}
+
+    if format == Format.VALUE:
+        raise RuntimeError("annotate function does not support VALUE format")
+    raise ValueError(f"Invalid format: {format!r}")
+
+
 def _get_and_call_annotate(obj, format):
     """Get the __annotate__ function and call it.
 
@@ -282,12 +477,23 @@ def _get_and_call_annotate(obj, format):
     """
     annotate = getattr(obj, "__annotate__", None)
     if annotate is not None:
-        from typing import _call_annotate
-        ann = _call_annotate(annotate, format, owner=obj)
+        ann = call_annotate_function(annotate, format, owner=obj)
         if not isinstance(ann, dict):
             raise ValueError(f"{obj!r}.__annotate__ returned a non-dict")
         return ann
     return None
+
+
+def get_annotate_from_class_namespace(obj):
+    """Retrieve the annotate function from a class namespace dictionary.
+
+    Return None if the namespace does not contain an annotate function.
+    This is useful in metaclass ``__new__`` methods to retrieve the annotate function.
+    """
+    try:
+        return obj["__annotate__"]
+    except KeyError:
+        return obj.get("__annotate_func__", None)
 
 
 def get_annotations(

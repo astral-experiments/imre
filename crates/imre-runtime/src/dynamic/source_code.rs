@@ -14,6 +14,9 @@ use super::*;
 
 pub(super) struct Program {
     pub filename: Rc<str>,
+    // All nested code shares a source map. Prelinked suspended suites start in a synthetic header.
+    source_lines: Rc<[usize]>,
+    linked_body_line: Option<u32>,
     pub name: String,
     qualname: String,
     nested_global: bool,
@@ -106,6 +109,7 @@ impl ScopeDirective {
 
 #[derive(Clone, Copy)]
 enum EnclosingBinding {
+    TypeParameter,
     Local,
     ClassCell,
 }
@@ -123,6 +127,7 @@ enum Instruction {
     },
     From(String, u32, Vec<(String, String)>),
     Define(Definition),
+    ReturnClass(Definition),
     CheckAnnotationFormat,
     Annotations {
         entries: Vec<(String, ast::Expr)>,
@@ -207,7 +212,11 @@ struct Definition {
 enum DefinitionKind {
     TypeAlias(Vec<String>),
     Function(Box<ast::Parameters>),
-    Class(Option<Box<ast::Arguments>>),
+    Class {
+        arguments: Option<Box<ast::Arguments>>,
+        parameterized: bool,
+    },
+    ClassParameters(Vec<ast::Identifier>),
 }
 
 /// Check the expressions executed inline or in a synchronous generator's deferred frame.
@@ -1075,6 +1084,7 @@ impl Program {
         annotation_class: Option<&HashSet<String>>,
     ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
+        let class_parameters = self.class_parameter_header();
         let mut nested_reads = BTreeSet::new();
         let stringized = self.string_annotations();
         let class_locals = self.class_attributes.as_ref().map(|_| &self.locals);
@@ -1185,7 +1195,7 @@ impl Program {
                             .cloned(),
                     );
                 }
-                Instruction::Define(definition) => {
+                Instruction::Define(definition) | Instruction::ReturnClass(definition) => {
                     if let Some(provider) = &mut definition.annotate {
                         nested_reads.extend(
                             strings
@@ -1197,9 +1207,23 @@ impl Program {
                     let child =
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
+                    if let DefinitionKind::ClassParameters(params) = &definition.kind {
+                        child.locals.extend(params.iter().map(ToString::to_string));
+                    }
                     let (roots, reads) =
                         child.prepare_strings(strings.heap, strings.shared, spellings, line_at)?;
-                    nested_reads.extend(reads.iter().cloned());
+                    if let DefinitionKind::ClassParameters(params) = &definition.kind {
+                        nested_reads.extend(
+                            reads
+                                .iter()
+                                .filter(|name| {
+                                    !params.iter().any(|param| param.as_str() == name.as_str())
+                                })
+                                .cloned(),
+                        );
+                    } else {
+                        nested_reads.extend(reads.iter().cloned());
+                    }
                     if roots != NONE {
                         strings.keep(roots)?;
                     }
@@ -1210,8 +1234,11 @@ impl Program {
                         DefinitionKind::Function(parameters) => {
                             strings.visit_parameters(parameters)
                         }
-                        DefinitionKind::Class(Some(args)) => strings.visit_arguments(args),
-                        DefinitionKind::Class(None) | DefinitionKind::TypeAlias(_) => {}
+                        DefinitionKind::Class {
+                            arguments: Some(args),
+                            ..
+                        } => strings.visit_arguments(args),
+                        _ => {}
                     }
                 }
                 Instruction::ModuleAnnotations(None)
@@ -1272,6 +1299,8 @@ impl Program {
             };
             let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
             child.strip_docstrings = self.strip_docstrings;
+            child.source_lines = self.source_lines.clone();
+            child.linked_body_line = self.linked_body_line;
             child.qualname =
                 Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
             child.method_imports = self.method_imports.clone();
@@ -1336,6 +1365,11 @@ impl Program {
         }
         nested_reads.append(&mut strings.comprehension_reads);
         self.string_roots = strings.finish();
+        if class_parameters {
+            // Captured parameters are cells. Only uncaptured (fast) parameters
+            // bypass the enclosing class namespace when evaluating explicit bases.
+            self.locals.retain(|name| !nested_reads.contains(name));
+        }
         // An annotation's class-local name falls back to globals when the class
         // dictionary lacks it. Functions nested inside the annotation skip the class.
         if let Some(class) = annotation_class {
@@ -1460,6 +1494,12 @@ impl Program {
             if *kind == ScopeDirective::Global {
                 module_globals.insert(name.clone());
             } else if let Some(binding) = enclosing(name) {
+                if matches!(binding, EnclosingBinding::TypeParameter) {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        format!("nonlocal binding not allowed for type parameter '{name}'"),
+                    ));
+                }
                 if matches!(binding, EnclosingBinding::ClassCell) {
                     self.class_nonlocal = true;
                     self.class_cell = true;
@@ -1476,8 +1516,15 @@ impl Program {
         let function = self.name != "<module>" && self.class_attributes.is_none();
         let bound = |name: &str| {
             if self.class_attributes.is_some() && name == "__class__" {
+                if !self.locals.contains(name)
+                    && matches!(enclosing(name), Some(EnclosingBinding::TypeParameter))
+                {
+                    return Some(EnclosingBinding::TypeParameter);
+                }
                 Some(EnclosingBinding::ClassCell)
-            } else if function && self.locals.contains(name) {
+            } else if self.locals.contains(name)
+                && (function || matches!(enclosing(name), Some(EnclosingBinding::TypeParameter)))
+            {
                 Some(EnclosingBinding::Local)
             } else if function
                 && matches!(self.directives.get(name), Some((ScopeDirective::Global, _)))
@@ -1488,9 +1535,22 @@ impl Program {
             }
         };
         for (_, op) in &mut self.instructions {
-            if let Instruction::Define(definition) = op {
+            if let Instruction::Define(definition) | Instruction::ReturnClass(definition) = op {
                 let child = Rc::get_mut(&mut definition.body).expect("newly lowered child code");
-                child.resolve_directives(&bound, module_globals)?;
+                if let DefinitionKind::ClassParameters(params) = &definition.kind {
+                    child.resolve_directives(
+                        &|name| {
+                            if params.iter().any(|p| p.as_str() == name) {
+                                Some(EnclosingBinding::TypeParameter)
+                            } else {
+                                bound(name)
+                            }
+                        },
+                        module_globals,
+                    )?;
+                } else {
+                    child.resolve_directives(&bound, module_globals)?;
+                }
                 if child.class_cell
                     && function
                     && matches!(enclosing("__class__"), Some(EnclosingBinding::ClassCell))
@@ -1502,8 +1562,30 @@ impl Program {
         Ok(())
     }
 
+    fn class_parameter_header(&self) -> bool {
+        matches!(
+            self.instructions.first(),
+            Some((_, Instruction::ReturnClass(_)))
+        )
+    }
+
+    pub(super) fn expression_line(&self, offset: ruff_text_size::TextSize) -> Option<u32> {
+        if self.source_lines.is_empty() {
+            return None;
+        }
+        let line = self
+            .source_lines
+            .partition_point(|&start| start <= offset.to_usize()) as u32;
+        Some(
+            self.linked_body_line
+                .map_or(line, |base| base + line.saturating_sub(2)),
+        )
+    }
+
     fn nested_program(&self, name: &str) -> Self {
         let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
+        child.source_lines = self.source_lines.clone();
+        child.linked_body_line = self.linked_body_line;
         child.strip_docstrings = self.strip_docstrings;
         child
     }
@@ -1511,6 +1593,8 @@ impl Program {
     fn new(filename: Rc<str>, name: &str, has_named_bindings: bool) -> Self {
         Self {
             filename,
+            source_lines: Rc::default(),
+            linked_body_line: None,
             name: name.to_owned(),
             qualname: name.to_owned(),
             nested_global: false,
@@ -1579,6 +1663,12 @@ impl Program {
         }
     }
 
+    fn definition_spelling<'a>(&'a self, name: &'a ast::Identifier) -> &'a str {
+        self.private_names
+            .as_ref()
+            .map_or(name.as_str(), |names| names.definition(name))
+    }
+
     fn definition_body(
         &self,
         name: &ast::Identifier,
@@ -1586,10 +1676,7 @@ impl Program {
         line: u32,
         lines: &[usize],
     ) -> Self {
-        let original = self
-            .private_names
-            .as_ref()
-            .map_or(name.as_str(), |p| p.definition(name));
+        let original = self.definition_spelling(name);
         let mut child = self.nested_program(original);
         child.nested_global = self.name != "<module>"
             && matches!(
@@ -1700,8 +1787,21 @@ impl Program {
         mut fields: Option<&mut Vec<(String, ast::Expr)>>,
     ) -> Result<()> {
         use ast::Stmt;
-        for stmt in body {
+        for mut stmt in body {
             let line = lines.partition_point(|n| *n <= stmt.start().to_usize()) as u32;
+            // A generic class's header selectively mangles its private type parameters.
+            // Keep the shared spelling map for both the parameter frame and its body.
+            let class_names = if self.private_names.is_none()
+                && matches!(&stmt, Stmt::ClassDef(class) if class.type_params.is_some())
+            {
+                Some(Rc::new(imre_ast::lower_in(
+                    std::slice::from_mut(&mut stmt),
+                    "",
+                    false,
+                )))
+            } else {
+                None
+            };
             let op = match stmt {
                 Stmt::Pass(_) => continue,
                 Stmt::Global(s) => {
@@ -1920,7 +2020,7 @@ impl Program {
                         annotate,
                     })
                 }
-                Stmt::ClassDef(mut s) if s.type_params.is_none() => {
+                Stmt::ClassDef(mut s) => {
                     if let Some(args) = &s.arguments
                         && (args.keywords.iter().any(|kw| kw.arg.is_none())
                             || args.args.iter().any(|a| matches!(a, ast::Expr::Starred(_))))
@@ -1928,6 +2028,17 @@ impl Program {
                         return Err(unsupported("expanded class arguments"));
                     }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    if let Some(names) = &class_names {
+                        child.private_names = Some(Rc::clone(names));
+                    }
+                    if s.type_params.is_some()
+                        && let Some((_, reason)) = s
+                            .arguments
+                            .as_deref()
+                            .and_then(imre_ast::generic_class_arguments_error)
+                    {
+                        return Err(Error::new("SyntaxError", reason));
+                    }
                     let spellings = child.private_names.get_or_insert_with(|| {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
                     });
@@ -1938,13 +2049,81 @@ impl Program {
                     child.lower_namespace(s.body, lines, false)?;
                     child.instructions.push((line, Instruction::ClassEnd));
                     self.locals.insert(s.name.to_string());
-                    Instruction::Define(Definition {
+                    let mut definition = Definition {
                         binding: s.name.to_string(),
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
-                        kind: DefinitionKind::Class(s.arguments),
+                        kind: DefinitionKind::Class {
+                            arguments: s.arguments,
+                            parameterized: s.type_params.is_some(),
+                        },
                         annotate: None,
-                    })
+                    };
+                    if let Some(params) = s.type_params {
+                        let mut parameters = Vec::new();
+                        for param in &*params {
+                            let ast::TypeParam::TypeVar(var) = param else {
+                                return Err(unsupported("variadic class type parameters"));
+                            };
+                            match var.name.as_str() {
+                                "__classdict__" => {
+                                    return Err(Error::new(
+                                        "SyntaxError",
+                                        "reserved name '__classdict__' cannot be used for type parameter",
+                                    ));
+                                }
+                                "__debug__" => {
+                                    return Err(Error::new(
+                                        "SyntaxError",
+                                        "cannot assign to __debug__",
+                                    ));
+                                }
+                                _ => {}
+                            }
+                            if var.bound.is_some() || var.default.is_some() {
+                                return Err(unsupported(
+                                    "class type parameter bounds and defaults",
+                                ));
+                            }
+                            if parameters
+                                .iter()
+                                .any(|p: &ast::Identifier| p.id == var.name.id)
+                            {
+                                return Err(Error::new(
+                                    "SyntaxError",
+                                    format!(
+                                        "duplicate type parameter '{}'",
+                                        definition.body.definition_spelling(&var.name)
+                                    ),
+                                ));
+                            }
+                            parameters.push(var.name.clone());
+                        }
+                        // Bases and keywords run in the implicit type-parameter function.
+                        // Decorators are evaluated and applied in the enclosing scope.
+                        let mut header = self.definition_body(&s.name, &[], line, lines);
+                        header.name = format!("<generic parameters of {}>", definition.body.name);
+                        header.qualname = Self::qualified_name(
+                            &self.qualname,
+                            self.class_attributes.is_some(),
+                            &header.name,
+                        );
+                        header.nested_global = false;
+                        header.first_line = definition.body.first_line;
+                        header.private_names = definition.body.private_names.clone();
+                        let decorators = std::mem::take(&mut definition.decorators);
+                        header
+                            .instructions
+                            .push((line, Instruction::ReturnClass(definition)));
+                        definition = Definition {
+                            binding: s.name.to_string(),
+                            decorators,
+                            body: Rc::new(header),
+                            kind: DefinitionKind::ClassParameters(parameters),
+                            annotate: None,
+                        };
+                    }
+                    Instruction::Define(definition)
                 }
                 Stmt::Break(_) => {
                     let current = active
@@ -2488,18 +2667,45 @@ impl Context {
         } else {
             &source
         };
+        let normalized;
+        let source = if source.contains('\r') {
+            normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+            normalized.as_str()
+        } else {
+            source
+        };
         let parsed = ruff_python_parser::parse(source, parser_mode.into())
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
         if interactive && let ast::Mod::Module(module) = parsed.syntax() {
             check_single_input(&module.body, parsed.tokens())?;
         }
         let spellings = string_replacements(source, parsed.tokens());
-        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
-            let message = format!(
-                "keyword argument repeated: {}",
-                keyword.arg.as_ref().unwrap()
-            );
+        let lines: Rc<[usize]> =
+            line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
+        let async_error = match parsed.syntax() {
+            ast::Mod::Module(module) => {
+                let error = imre_ast::async_generators::syntax_error(module);
+                if error.is_some() && imre_ast::misplaced_star_import(&module.body).is_some() {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        "import * only allowed at module level",
+                    ));
+                }
+                error
+            }
+            _ => None,
+        };
+        let invalid = async_error
+            .map(|(range, msg)| (range, msg.to_owned()))
+            .or_else(|| {
+                let keyword = imre_ast::repeated_keyword(parsed.syntax().into())?;
+                let name = keyword.arg.as_ref().unwrap();
+                Some((
+                    keyword.range(),
+                    format!("keyword argument repeated: {name}"),
+                ))
+            });
+        if let Some((range, message)) = invalid {
             let position = |offset: usize| {
                 let mut line = 1;
                 let mut line_start = 0;
@@ -2511,8 +2717,8 @@ impl Context {
                 }
                 (line, offset - line_start + 1)
             };
-            let (line, column) = position(keyword.start().to_usize());
-            let (end_line, end_column) = position(keyword.end().to_usize());
+            let (line, column) = position(range.start().to_usize());
+            let (end_line, end_column) = position(range.end().to_usize());
             let msg = self.text(&message);
             let details = vec![
                 filename_id,
@@ -2554,6 +2760,7 @@ impl Context {
             return Err(error);
         }
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
+        code.source_lines = lines.clone();
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
         code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
@@ -2580,7 +2787,7 @@ impl Context {
                 code.method_imports = Rc::new(imre_ast::module_imports(&body));
                 let caller = self.heap.current_code();
                 let inherited = matches!(self.heap.get(caller), Value::Code(code) if
-            code.flags.unwrap_or(0) & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0
+            code.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0
             || matches!(&code.body, Body::Source(p) if p.private_names.as_ref().is_some_and(|n| n.string_annotations)));
                 if inherited || imre_ast::future_annotations(&body) {
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
@@ -2606,7 +2813,7 @@ impl Context {
     }
 
     /// Attach the filename after tokenization, just as compile does for string input.
-    fn source_decode_error(
+    pub(super) fn source_decode_error(
         &mut self,
         error: crate::objects::SourceDecodeError,
         filename: Id,
@@ -2635,7 +2842,7 @@ impl Context {
             let lineno = range.as_ref().map_or(0, |r| r.line);
             let name = self
                 .str_value(filename)
-                .expect("compile validated its filename");
+                .expect("source filename was validated");
             let basename = name
                 .rsplit(std::path::MAIN_SEPARATOR)
                 .next()
@@ -2692,8 +2899,15 @@ impl Context {
             first_line: program.first_line,
             module_definition: !program.nested_global && program.name == program.qualname,
             coroutine: program.kind == FunctionKind::Coroutine,
+            flags: match program.kind {
+                FunctionKind::Generator | FunctionKind::GeneratorLambda => {
+                    imre_ast::code_flags::GENERATOR
+                }
+                FunctionKind::Coroutine => imre_ast::code_flags::COROUTINE,
+                FunctionKind::Plain => 0,
+            },
+            flags_complete: false,
             body: Body::Source(program),
-            flags: None,
             parameters: parameters.unwrap_or(NONE),
             nested: Vec::new(),
             closure_supported: freevars.is_some(),
@@ -2996,6 +3210,11 @@ impl Context {
 
     /// Resolve the caller's namespace, copying bindings only for optimized frames.
     pub(super) fn frame_locals(&mut self, scope: Id) -> Result<Id> {
+        self.locals_for_code(scope, self.heap.current_code())
+    }
+
+    /// Read bindings using the code that owns the scope, including its free variables.
+    pub(super) fn locals_for_code(&mut self, scope: Id, code: Id) -> Result<Id> {
         let frame = self.scope_data(scope);
         if let Some(locals) = frame.exec_locals {
             return Ok(locals);
@@ -3025,7 +3244,7 @@ impl Context {
             }
             local = parent;
         }
-        if let Value::Code(code) = self.heap.get(self.heap.current_code()) {
+        if let Value::Code(code) = self.heap.get(code) {
             names.extend(code.freevars.iter().cloned());
             // Some compiled functions retain their lexical environment because their entire
             // closure cannot yet be cloned. Their statically resolved reads are still locals.
@@ -3240,7 +3459,8 @@ impl Context {
                 running: false,
             });
             Ok(if kind == FunctionKind::Coroutine {
-                self.alloc(Value::Coroutine(frame))
+                let origin = self.coroutine_origin();
+                self.alloc(Value::Coroutine { frame, origin })
             } else {
                 frame
             })
@@ -3291,18 +3511,21 @@ impl Context {
         }
         let signature: Signature<'_> = serde_json::from_str(self.str_value(code.parameters)?)
             .map_err(|_| Error::new("SystemError", "invalid generator signature"))?;
-        let postponed = code.flags.unwrap_or(0) & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
+        let postponed = code.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
         let private_names = signature
             .private_scope
             .or(postponed.then_some(("", true)))
             .map(|(owner, postponed)| Rc::new(imre_ast::lower_in(&mut def.body, owner, postponed)));
-        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
+        let lines: Rc<[usize]> =
+            line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
         let mut program = Program::new(
             self.str_value(code.filename)?.into(),
             self.str_value(code.name)?,
             source.contains(":="),
         );
         program.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
+        program.source_lines = lines.clone();
+        program.linked_body_line = Some(body_line);
         program.method_imports = Rc::new(signature.method_imports);
         program.template_expressions = Rc::new(template_expressions);
         program.private_names = private_names;
@@ -4459,8 +4682,11 @@ impl Context {
                 let attrs = self.alloc(Value::Tuple(names));
                 self.bind_source_name(scope, "__static_attributes__", attrs)?;
             }
-            Instruction::Define(definition) => {
+            Instruction::Define(definition) | Instruction::ReturnClass(definition) => {
                 let value = self.source_definition(code, owner, scope, *ip - 1, definition)?;
+                if matches!(op, Instruction::ReturnClass(_)) {
+                    return Ok(Some(Step::Return(value)));
+                }
                 self.bind_source_name(scope, &definition.binding, value)?;
             }
         }
@@ -4517,7 +4743,11 @@ impl Context {
                     "scope_locals_complete": true,
                 })
             }
-            DefinitionKind::Class(args) => {
+            DefinitionKind::ClassParameters(_) => serde_json::json!({}),
+            DefinitionKind::Class {
+                arguments: args,
+                parameterized,
+            } => {
                 let mut values = Vec::new();
                 let mut keywords = Vec::new();
                 if let Some(args) = args {
@@ -4533,7 +4763,10 @@ impl Context {
                         keywords.push((name.to_string(), value));
                     }
                 }
-                bases = Some((self.alloc(Value::List(values)), keywords));
+                if *parameterized {
+                    values.push(self.lookup(defining_scope, ".generic_base")?);
+                }
+                bases = Some((self.alloc(Value::List(values)), keywords, *parameterized));
                 serde_json::json!({
                     "needs_class_cell": child.needs_class_cell,
                     "needs_dict_cell": child.needs_dict_cell,
@@ -4607,8 +4840,27 @@ impl Context {
             let annotate = self.source_annotator(provider, code, defining_scope)?;
             self.set_function_attr(value, "__annotate__", annotate)?;
         }
-        if let Some((bases, keywords)) = bases {
-            value = self.class(bases, value, keywords, false)?;
+        if let DefinitionKind::ClassParameters(params) = &definition.kind {
+            let entries = params
+                .iter()
+                .map(|param| {
+                    let name = child.definition_spelling(param);
+                    (
+                        self.heap.code_name(param.as_str()),
+                        self.heap.code_name(name),
+                    )
+                })
+                .collect();
+            let names = self.dict(entries);
+            let parameters = super::typing::parameter_scope(self, defining_scope, names, true)?;
+            if self.scope_data(scope).class_body.is_some() {
+                let namespace = self.active_class_namespace(scope);
+                self.bind(parameters, "__classdict__", namespace);
+            }
+            value = self.execute(code, parameters, FrameOwner::Function(value))?;
+        }
+        if let Some((bases, keywords, parameterized)) = bases {
+            value = self.class(bases, value, keywords, parameterized)?;
         }
         for decorator in decorators.into_iter().rev() {
             value = self.call(decorator, vec![value], Vec::new())?;
@@ -4653,9 +4905,19 @@ impl Context {
     }
 
     fn source_expr(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
-        let value = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+        let position = imre_ast::expression_position(
+            expr,
+            &code.method_imports,
+            code.private_names.as_deref(),
+        );
+        let previous = self
+            .heap
+            .replace_expression(value::ExpressionPosition::Offset(position));
+        let result = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
             self.source_expr_inner(code, scope, expr)
-        })?;
+        });
+        self.heap.replace_expression(previous);
+        let value = result?;
         self.heap.keep(value);
         Ok(value)
     }
@@ -4873,6 +5135,46 @@ impl Context {
         Ok(merged)
     }
 
+    fn source_sequence_items(
+        &mut self,
+        code: &Program,
+        scope: Id,
+        elements: &[ast::Expr],
+    ) -> Result<Vec<Id>> {
+        let mut items = Vec::with_capacity(elements.len());
+        for item in elements {
+            if let ast::Expr::Starred(star) = item {
+                let mark = self.heap.temporary_mark();
+                let first = items.len();
+                let expanded = self
+                    .source_expr(code, scope, &star.value)
+                    .and_then(|iterable| self.extend_source_items(&mut items, iterable, None));
+                // Only yielded values outlive this operand. Release the iterator before
+                // evaluating the next element or dispatching a weakref callback.
+                let collect = self.heap.discard_truth_operands(mark, self.modules);
+                match &expanded {
+                    Ok(()) => {
+                        for &value in &items[first..] {
+                            self.heap.keep(value);
+                        }
+                    }
+                    Err(error) => {
+                        for root in error.roots() {
+                            self.heap.keep(root);
+                        }
+                    }
+                }
+                if collect {
+                    self.collect_unreachable();
+                }
+                expanded?;
+            } else {
+                items.push(self.source_expr(code, scope, item)?);
+            }
+        }
+        Ok(items)
+    }
+
     fn extend_source_items(
         &mut self,
         args: &mut Vec<Id>,
@@ -5034,6 +5336,16 @@ impl Context {
                     enclosing = frame.parent.expect("enclosing comprehension scope");
                 }
                 if scope == enclosing
+                    && code.class_parameter_header()
+                    && !code.locals.contains(name)
+                    && let Some(namespace) = self.scope_name(scope, "__classdict__")
+                {
+                    match self.load_exec_name(namespace, name) {
+                        Err(error) if self.is_builtin_error(&error, "KeyError") => {}
+                        value => return value,
+                    }
+                }
+                if scope == enclosing
                     && code.class_attributes.is_some()
                     && code.locals.contains(name)
                 {
@@ -5127,48 +5439,14 @@ impl Context {
                 Ok(self.alloc(value))
             }
             Expr::List(v) => {
-                let items = v
-                    .elts
-                    .iter()
-                    .map(|x| eval(self, x))
-                    .collect::<Result<_>>()?;
+                let items = self.source_sequence_items(code, scope, &v.elts)?;
                 Ok(self.alloc(Value::List(items)))
             }
             Expr::Tuple(v) => {
                 if let Some(&id) = code.literals.get(&v.range()) {
                     return Ok(id);
                 }
-                let mut items = Vec::with_capacity(v.elts.len());
-                for item in &v.elts {
-                    if let Expr::Starred(star) = item {
-                        let mark = self.heap.temporary_mark();
-                        let first = items.len();
-                        let expanded = eval(self, &star.value).and_then(|iterable| {
-                            self.extend_source_items(&mut items, iterable, None)
-                        });
-                        // Only yielded values outlive this operand. Release the iterator before
-                        // evaluating the next tuple element or dispatching a weakref callback.
-                        let collect = self.heap.discard_truth_operands(mark, self.modules);
-                        match &expanded {
-                            Ok(()) => {
-                                for &value in &items[first..] {
-                                    self.heap.keep(value);
-                                }
-                            }
-                            Err(error) => {
-                                for root in error.roots() {
-                                    self.heap.keep(root);
-                                }
-                            }
-                        }
-                        if collect {
-                            self.collect_unreachable();
-                        }
-                        expanded?;
-                    } else {
-                        items.push(eval(self, item)?);
-                    }
-                }
+                let items = self.source_sequence_items(code, scope, &v.elts)?;
                 Ok(self
                     .heap
                     .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))

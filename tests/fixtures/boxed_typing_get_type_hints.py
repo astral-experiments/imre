@@ -38,6 +38,15 @@ def error_for(expression):
 
 
 def current():
+    class Owner[Param]:
+        item: ForwardRef("Param", module="builtins")
+        items: list[ForwardRef("Param", module="builtins")]
+
+    param, = Owner.__type_params__
+    assert get_type_hints(Owner) == {"item": param, "items": list[param]}
+    # The explicit local binding wins when _hint_scope retains it.
+    assert get_type_hints(Owner, {"Param": str}, {"Param": bytes})["item"] is bytes
+
     assert get_type_hints(Parent) == {"item": Target, "values": list[Target]}
     assert get_type_hints(Child) == {"item": bytes, "values": list[Target]}
     assert get_type_hints(fn) == {"a": Target, "return": type(None)}

@@ -28,6 +28,7 @@ pub(super) fn resolve(
         }
         path.push(id);
         let mut base: Option<usize> = None;
+        let mut mixin = None;
         if let Some(args) = &node.arguments {
             for argument in &args.args {
                 if graph.is_protocol_base(definition.module, argument) {
@@ -113,16 +114,44 @@ pub(super) fn resolve(
                         if let Some(first) = base {
                             let parent: &Class = classes[first].as_ref().unwrap();
                             if !parent.bases.contains(&next) {
-                                return Err(module.error(
-                                    argument,
-                                    "multiple independent base classes are unsupported",
-                                ));
+                                let donor = classes[next].as_ref().unwrap();
+                                if args.args.len() != 2
+                                    || first == next
+                                    || !method_only_mixin(graph, donor)
+                                {
+                                    return Err(module.error(
+                                        argument,
+                                        "multiple independent base classes are unsupported",
+                                    ));
+                                }
+                                mixin = Some(next);
                             }
                         } else {
                             base = Some(next);
                         }
                     }
                     _ => {
+                        let origin = match argument {
+                            ast::Expr::Subscript(subscript) => &*subscript.value,
+                            other => other,
+                        };
+                        if graph
+                            .session
+                            .is_builtin_sequence_class(definition.module, origin)
+                            || graph.session.is_known_class(
+                                definition.module,
+                                argument,
+                                ty_python_semantic::types::KnownClass::Super,
+                            )
+                        {
+                            let error = module
+                                .error(argument, "native base class requires object lowering");
+                            graph
+                                .object_builtin_errors
+                                .borrow_mut()
+                                .insert(error.clone());
+                            return Err(error);
+                        }
                         return Err(
                             module.error(argument, "the base must be a known fixed-layout class")
                         );
@@ -130,15 +159,23 @@ pub(super) fn resolve(
                 }
             }
         }
-        let mut class = collect_class(
+        let mut decorators = DeferredMethodDecorators::default();
+        let class = collect_class(
             graph,
             module,
             definition,
             node,
-            base.map(|i| (i, classes[i].as_ref().unwrap())),
+            [base, mixin].map(|parent| parent.map(|id| (id, classes[id].as_ref().unwrap()))),
             exceptions.layouts.contains(&definition),
             &exceptions.ids,
-        )?;
+            &mut decorators,
+        );
+        if !decorators.has_runtime_method
+            && let Some(error) = decorators.unsupported
+        {
+            return Err(error);
+        }
+        let mut class = class?;
         if exceptions.layouts.contains(&definition) {
             let index = (exceptions.ids[&definition] - exceptions::FIRST_USER_EXCEPTION) as usize;
             let mro = &exceptions.named[index].ancestors;
@@ -169,6 +206,25 @@ pub(super) fn resolve(
         build(id, graph, nodes, ids, exceptions, &mut classes, &mut path)?;
     }
     Ok(classes.into_iter().map(Option::unwrap).collect())
+}
+
+/// A trailing root mixin supplies ordinary methods without changing the receiver layout.
+fn method_only_mixin(graph: &SourceGraph, class: &Class) -> bool {
+    let node = &class.node;
+    node.decorator_list.is_empty()
+        && node.type_params.is_none()
+        && node.arguments.as_ref().is_none_or(|args| {
+            args.keywords.is_empty()
+                && (args.args.is_empty()
+                    || matches!(&*args.args, [base]
+                if graph.session.builtin_object_base(class.definition.module, base)))
+        })
+        && node.body.iter().all(|stmt| match stmt {
+            ast::Stmt::FunctionDef(f) => !f.name.starts_with("__") && f.decorator_list.is_empty(),
+            ast::Stmt::Expr(expr) => matches!(&*expr.value, ast::Expr::StringLiteral(_)),
+            ast::Stmt::Pass(_) => true,
+            _ => false,
+        })
 }
 
 /// Return the member and the name whose binding must be the builtin `super`.

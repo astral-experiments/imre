@@ -305,26 +305,56 @@ impl Context {
             return Ok(None);
         };
         let result = self.call(index, Vec::new(), Vec::new())?;
+        let number = self.integer_slot_result(result, "__index__")?;
+        Ok(Some((result, number)))
+    }
+
+    fn integer_slot_result(&mut self, result: Id, slot: &str) -> Result<crate::Int> {
         let number = self.as_int(result).map_err(|_| {
             Error::new(
                 "TypeError",
                 format!(
-                    "__index__ returned non-int (type {})",
+                    "{slot} returned non-int (type {})",
                     self.type_name(result)
                 ),
             )
         })?;
         if !matches!(self.heap.get(result), Value::Int(_)) {
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(result);
             self.emit_builtin_warning(
                 crate::objects::exceptions::Kind::DeprecationWarning,
                 &format!(
-                    "__index__ returned non-int (type {}).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.",
+                    "{slot} returned non-int (type {}).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.",
                     self.type_name(result)
                 ),
                 1,
             )?;
         }
-        Ok(Some((result, number)))
+        Ok(number)
+    }
+
+    /// Apply the numeric conversion used by int(x) before attempting to parse text.
+    pub(super) fn numeric_int(&mut self, value: Id) -> Result<Option<Id>> {
+        if matches!(self.heap.get(value), Value::Int(_)) {
+            return Ok(Some(value));
+        }
+        let (result, number) = if let Some(method) = self.bound_slot(value, "__int__")? {
+            let result = self.call(method, Vec::new(), Vec::new())?;
+            (result, self.integer_slot_result(result, "__int__")?)
+        } else if let Value::Float(number) = *self.heap.get(self.scalar_value(value)) {
+            let integer = crate::floats::float_to_integer(number)?;
+            return Ok(Some(self.alloc(Value::Int(crate::Int::new(integer)))));
+        } else if let Some(index) = self.index_result(value)? {
+            index
+        } else {
+            return Ok(None);
+        };
+        Ok(Some(if matches!(self.heap.get(result), Value::Int(_)) {
+            result
+        } else {
+            self.alloc(Value::Int(number))
+        }))
     }
 
     /// Convert a bytearray element using the index protocol and the inclusive byte bounds.
@@ -1313,7 +1343,7 @@ impl Context {
             Value::Instance { class, .. } => *class,
             Value::Raised(error) => error.class()?,
             value if name == "__repr__" => match value.native_io_class_name()? {
-                class @ ("_io.BufferedReader" | "_io.BufferedWriter") => {
+                class @ ("_io.BufferedReader" | "_io.BufferedWriter" | "_io.TextIOWrapper") => {
                     *self.builtins.get(class)?
                 }
                 _ => return None,
@@ -1742,7 +1772,7 @@ impl Context {
                     append_rendered_text(&mut output, "(")?;
                     // Snapshot both operands before a Python repr hook can advance the cursor.
                     let first = match ctx.heap.get(ctx.scalar_value(id)) {
-                        Value::Count { current, step } => {
+                        Value::Count { current, step, .. } => {
                             if stdlib::itertools::machine_integer(&ctx, *step) != Some(1) {
                                 push_frame(&mut work, Part::Value(*step, true))?;
                                 push_frame(&mut work, Part::Text(", "))?;
@@ -2530,6 +2560,9 @@ impl Context {
     /// Keeps recursive container arguments on the same formatting stack.
     fn format_value(&self, id: Id, repr: bool, active: &mut Vec<Id>) -> String {
         let value = self.heap.get(id);
+        if matches!(self.heap.get(self.scalar_value(id)), Value::Super { .. }) {
+            return self.super_repr(id);
+        }
         if matches!(
             self.heap.get(self.scalar_value(id)),
             Value::Count { .. } | Value::Repeat(_)
@@ -2798,14 +2831,27 @@ impl Context {
             {
                 format!("<built-in function {leaf}>")
             }
-            Value::HashMethod { name, .. } => format!("<method '{name}' of '_md5.md5' objects>"),
+            Value::HeapTypeMethod { name, owner } => {
+                let class = self.heap.get(*owner).heap_type().unwrap();
+                let kind = if *name == "__repr__" {
+                    "slot wrapper"
+                } else {
+                    "method"
+                };
+                format!("<{kind} '{name}' of '{class}' objects>")
+            }
             Value::Method {
                 callable, receiver, ..
-            } if let Value::HashMethod { name, .. } = self.heap.get(*callable) => {
+            } if let Value::HeapTypeMethod { name, owner } = self.heap.get(*callable) => {
+                let class = self.heap.get(*owner).heap_type().unwrap();
                 if matches!(self.heap.get(*receiver), Value::Module { .. }) {
                     format!("<built-in function {name}>")
+                } else if *name == "__new__" {
+                    format!("<built-in method __new__ of type object at {receiver:#x}>")
+                } else if *name == "__repr__" {
+                    format!("<method-wrapper '__repr__' of {class} object at {receiver:#x}>")
                 } else {
-                    format!("<built-in method {name} of _md5.md5 object at {receiver:#x}>")
+                    format!("<built-in method {name} of {class} object at {receiver:#x}>")
                 }
             }
             Value::Native(name)
@@ -2873,20 +2919,6 @@ impl Context {
         }
         result
     }
-    /// Keep an upgraded proxy alive through a subscription that can call Python.
-    fn proxy_subscript<T>(
-        &mut self,
-        target: Id,
-        operation: impl FnOnce(&mut Self) -> Result<T>,
-    ) -> Result<T> {
-        self.heap.reserve_temporaries(1)?;
-        let mark = self.heap.temporary_mark();
-        self.heap.keep(target);
-        let result = operation(self);
-        self.heap.release_weak_target(mark, target);
-        result
-    }
-
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
         if self.raw_read_window(obj).is_some() && !self.view_is_readonly(obj)? {
             return self.raw_view_get(obj, key);
@@ -2896,7 +2928,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.get_item(target, key));
+            return self.with_weak_target(target, |ctx| ctx.get_item(target, key));
         }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Get.apply(self, obj, key, false);
@@ -3129,7 +3161,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.put_item(target, key, val));
+            return self.with_weak_target(target, |ctx| ctx.put_item(target, key, val));
         }
         if matches!(self.heap.get(obj), Value::Array(_))
             && !matches!(self.heap.get(key), Value::Slice(_))
@@ -3476,6 +3508,7 @@ impl Context {
         matches!(
             self.heap.get(storage),
             Value::List(_)
+                | Value::Deque(_)
                 | Value::Tuple(_)
                 | Value::Str(_)
                 | Value::SurrogateStr(_)
@@ -3485,15 +3518,12 @@ impl Context {
         .then_some(storage)
     }
 
-    /// Repeat the current contents after converting the multiplier through its index slot.
-    fn repeat_sequence(
+    pub(super) fn sequence_multiplier(
         &mut self,
-        owner: Id,
-        storage: Id,
         multiplier: Id,
-        mode: RepeatMode,
-    ) -> Result<Id> {
-        let count = if mode == RepeatMode::Wrapper {
+        wrapper: bool,
+    ) -> Result<(crate::Int, isize)> {
+        let count = if wrapper {
             self.index_integer(multiplier)?
         } else {
             self.index_value(multiplier)?.ok_or_else(|| {
@@ -3518,7 +3548,27 @@ impl Context {
                     ),
                 )
             })?;
+        Ok((count, n))
+    }
+
+    fn overrides_repeat(&self, owner: Id, name: &str) -> bool {
+        self.slot(owner, name).is_some_and(|slot| {
+            !matches!(self.heap.get(slot), Value::Native(symbol)
+                if symbol.strip_prefix("collections.deque.") == Some(name))
+        })
+    }
+
+    /// Repeat the current contents after converting the multiplier through its index slot.
+    fn repeat_sequence(
+        &mut self,
+        owner: Id,
+        storage: Id,
+        multiplier: Id,
+        mode: RepeatMode,
+    ) -> Result<Id> {
+        let (count, n) = self.sequence_multiplier(multiplier, mode == RepeatMode::Wrapper)?;
         Ok(match self.heap.get(storage) {
+            Value::Deque(_) => return deque::repeat(self, owner, n, mode == RepeatMode::InPlace),
             Value::List(items) if mode == RepeatMode::InPlace => {
                 if n <= 0 {
                     builtins::clear_container(self, storage);
@@ -3535,7 +3585,7 @@ impl Context {
                 let repeated = repeat_values(items, n)?;
                 self.alloc(Value::List(repeated))
             }
-            Value::Tuple(items) if items.is_empty() || n == 1 => storage,
+            Value::Tuple(items) if items.is_empty() || (n == 1 && owner == storage) => storage,
             Value::Tuple(items) => {
                 let repeated = repeat_values(items, n)?;
                 self.alloc(Value::Tuple(repeated))
@@ -3623,7 +3673,7 @@ impl Context {
             let entries = entries.try_clone()?;
             (self.alloc(Value::Set { entries, frozen }), left)
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, true, |ctx, key, hash| {
             let roots = ctx.heap.temporary_mark();
             ctx.heap.keep(key);
             let toggle = ctx
@@ -3660,13 +3710,16 @@ impl Context {
         Ok(result)
     }
 
-    /// Visit an operand with cached hashes when its keys already belong to a set.
+    /// Visit stored set keys, and optionally exact dictionary keys, with their cached hashes.
     fn visit_set_operand(
         &mut self,
         source: Id,
+        use_dict_hashes: bool,
         mut visit: impl FnMut(&mut Self, Id, Option<i64>) -> Result<()>,
     ) -> Result<()> {
-        let iterator = if matches!(self.heap.get(source), Value::Set { .. }) {
+        let iterator = if matches!(self.heap.get(source), Value::Set { .. })
+            || (use_dict_hashes && matches!(self.heap.get(source), Value::Dict(_)))
+        {
             None
         } else {
             let iterator = self.iterator(source)?;
@@ -3716,7 +3769,7 @@ impl Context {
         } else {
             source
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, false, |ctx, key, hash| {
             ctx.discard_difference_key(target, key, hash)
         })
     }
@@ -3733,7 +3786,7 @@ impl Context {
     }
 
     fn filter_difference(&mut self, result: Id, left: Id, right: Id) -> Result<()> {
-        self.visit_set_operand(left, |ctx, key, hash| {
+        self.visit_set_operand(left, false, |ctx, key, hash| {
             ctx.heap.keep(key);
             if ctx.find_dictionary_key(right, key, hash)?.1.is_none() {
                 ctx.set_dictionary_key(result, key, NONE, hash, false)?;
@@ -3895,7 +3948,7 @@ impl Context {
                 (view, other)
             }
         };
-        self.visit_set_operand(source, |ctx, key, hash| {
+        self.visit_set_operand(source, false, |ctx, key, hash| {
             let present = if let Some(view) = ctx.set_view(container) {
                 ctx.view_member(view, key, hash)?
             } else {
@@ -4088,6 +4141,33 @@ impl Context {
         };
         let items = concat_ids(left, right)?;
         Ok(self.alloc(Value::List(items)))
+    }
+
+    /// Concatenate tuple storage without consulting a subclass's iterator or item hooks.
+    fn concat_tuple(&mut self, a: Id, b: Id) -> Result<Id> {
+        let items = |value| match self.tuple_backing(value) {
+            Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                Ok(Some(Cow::Borrowed(items.as_slice())))
+            }
+            _ => self.tuple_items(value).map(|items| items.map(Cow::Owned)),
+        };
+        let Some(right) = items(b)? else {
+            let name = self.type_name(b);
+            let name = &name[..name.floor_char_boundary(200)];
+            return Err(Error::new(
+                "TypeError",
+                format!("can only concatenate tuple (not \"{name}\") to tuple"),
+            ));
+        };
+        let left = items(a)?.expect("tuple receiver");
+        if left.is_empty() && matches!(self.heap.get(b), Value::Tuple(_)) {
+            return Ok(b);
+        }
+        if right.is_empty() && matches!(self.heap.get(a), Value::Tuple(_)) {
+            return Ok(a);
+        }
+        let values = concat_ids(&left, &right)?;
+        Ok(self.alloc(Value::Tuple(values)))
     }
 
     /// Join the boundary strings and preserve the existing interpolation objects.
@@ -4353,11 +4433,39 @@ impl Context {
                 };
                 return Err(Error::new("TypeError", message));
             }
+            "+" if self.builtin_slot_accepts(a, "tuple") => {
+                if self.overrides_add(a, "tuple.__add__") {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for +{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
+                return self.concat_tuple(a, b);
+            }
             "+" | "-"
                 if matches!(self.heap.get(a), Value::Complex(_))
                     || matches!(self.heap.get(b), Value::Complex(_)) =>
             {
                 return self.complex_sum(op == "+", a, b);
+            }
+            "+" if matches!(self.heap.get(self.scalar_value(a)), Value::Deque(_)) => {
+                if self.overrides_add(a, "collections.deque.__add__") {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for +{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
+                return deque::concat(self, a, b);
             }
             "+" if let Some(storage) = self.list_storage(a) => {
                 if inplace && storage == a {
@@ -4405,16 +4513,6 @@ impl Context {
                         format!("can't concat {} to bytearray", self.type_name(b)),
                     ));
                 }
-                (Value::Tuple(x), Value::Tuple(y)) => {
-                    if x.is_empty() {
-                        return Ok(b);
-                    }
-                    if y.is_empty() {
-                        return Ok(a);
-                    }
-                    let items = concat_ids(x, y)?;
-                    return Ok(self.alloc(Value::Tuple(items)));
-                }
                 _ => {}
             },
             "*" => {
@@ -4425,12 +4523,15 @@ impl Context {
                     };
                     let mode = if left
                         && inplace
-                        && matches!(self.heap.get(storage), Value::List(_) | Value::ByteArray(_))
-                        && self.slot(owner, "__imul__").is_none()
+                        && matches!(
+                            self.heap.get(storage),
+                            Value::List(_) | Value::ByteArray(_) | Value::Deque(_)
+                        )
+                        && !self.overrides_repeat(owner, "__imul__")
                     {
                         RepeatMode::InPlace
-                    } else if self.slot(owner, "__mul__").is_none()
-                        && self.slot(owner, "__rmul__").is_none()
+                    } else if !self.overrides_repeat(owner, "__mul__")
+                        && !self.overrides_repeat(owner, "__rmul__")
                     {
                         RepeatMode::Sequence
                     } else {
@@ -4683,17 +4784,46 @@ impl Context {
         if let Value::KeyWrapper { comparator, object } = *self.heap.get(obj) {
             return stdlib::functools::key_comparison(self, name, comparator, object, other);
         }
-        // Without a Python addition hook, list concatenation waits for the reflected operand.
+        // Defining only __radd__ also installs a forward numeric slot. In that case
+        // the inherited tuple concatenation runs before an unrelated reflected slot.
         if name == "__add__"
-            && self.list_storage(obj).is_some()
-            && !self.overrides_add(obj, "list.__add__")
-            && self.slot(obj, "__radd__").is_none()
+            && self.builtin_slot_accepts(obj, "tuple")
+            && !self.overrides_add(obj, "tuple.__add__")
+        {
+            return if self.slot(obj, "__radd__").is_some() {
+                self.concat_tuple(obj, other).map(Some)
+            } else {
+                Ok(None)
+            };
+        }
+        // Native deque repetition is a sequence fallback, after numeric hooks. A subtype
+        // defining either multiply hook installs a numeric slot for both directions.
+        if matches!(name, "__mul__" | "__rmul__" | "__imul__")
+            && matches!(self.heap.get(self.scalar_value(obj)), Value::Deque(_))
+            && !self.overrides_repeat(obj, name)
+            && (name == "__imul__"
+                || (!self.overrides_repeat(obj, "__mul__")
+                    && !self.overrides_repeat(obj, "__rmul__")))
         {
             return Ok(None);
         }
+        // Sequence concatenation runs after the right operand's reflected numeric slot.
+        if name == "__add__" {
+            let native = match self.heap.get(self.scalar_value(obj)) {
+                Value::List(_) => Some("list.__add__"),
+                Value::Deque(_) => Some("collections.deque.__add__"),
+                _ => None,
+            };
+            if native.is_some_and(|slot| !self.overrides_add(obj, slot))
+                && self.slot(obj, "__radd__").is_none()
+            {
+                return Ok(None);
+            }
+        }
         let method = if matches!(
             (name, self.heap.get(obj)),
-            ("__xor__" | "__rxor__", Value::Set { .. })
+            ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
+                | ("__xor__" | "__rxor__", Value::Set { .. })
                 | (
                     "__or__" | "__ror__",
                     Value::Dict(_) | Value::DefaultDict { .. }
@@ -5033,7 +5163,11 @@ impl Context {
         }
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
+                if matches!(op, "<" | "<=" | ">" | ">=")
+                    && matches!(self.heap.get(id), Value::Deque(_))
+                {
+                    self.builtins.get(deque::CLASS).copied()
+                } else if matches!(op, "+" | "-" | "*" | "/" | "//" | "%") {
                     self.calendar_slot_class(id, matches!(op, "+" | "-"))
                 } else {
                     None
@@ -5069,7 +5203,7 @@ impl Context {
             && [a, b]
                 .into_iter()
                 .any(|id| match self.heap.get(self.scalar_value(id)) {
-                    Value::Set { .. } => true,
+                    Value::Set { .. } | Value::Deque(_) => true,
                     Value::Calendar { value, .. } => value.class() != "timezone",
                     _ => false,
                 });
@@ -5195,7 +5329,7 @@ impl Context {
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
-            return self.proxy_subscript(target, |ctx| ctx.delete_item(target, key));
+            return self.with_weak_target(target, |ctx| ctx.delete_item(target, key));
         }
         if matches!(self.heap.get(obj), Value::Deque(_)) {
             return deque::IndexOp::Delete

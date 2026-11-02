@@ -1,6 +1,9 @@
 //! Process text streams and their native encoding and buffering.
 pub(crate) mod context_warnings;
+#[cfg(target_os = "linux")]
+pub(crate) mod cpu_count;
 mod recursion;
+
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
 pub(crate) use recursion::{recursion_limit, set_recursion_limit};
 mod intern;
@@ -9,6 +12,8 @@ use crate::objects::{Codec, errno_error};
 pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
 mod encoding;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub(crate) use encoding::langinfo;
 mod warnoptions;
 pub(crate) use encoding::{
     file_encoding, imre_sys_utf8_mode, set_locale, strerror, with_errno_message,
@@ -19,6 +24,22 @@ mod input;
 pub(super) use input::read_input_line;
 mod encoding_names;
 pub(crate) use encoding_names::{default_encoding, filesystem_encoding, filesystem_errors};
+
+/// Apply startup settings in CPython's validation order before any user code can run.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_process_config_init(
+    ignore_environment: u32,
+    cpus: i32,
+    context_warnings: i32,
+) {
+    crate::python_hash::initialize(ignore_environment != 0);
+    crate::integer_text::imre_integer_digits_init(ignore_environment);
+    #[cfg(target_os = "linux")]
+    cpu_count::initialize(cpus);
+    #[cfg(not(target_os = "linux"))]
+    let _ = cpus;
+    self::context_warnings::imre_context_warnings_init(context_warnings);
+}
 
 pub(super) fn initialize_encoding(isolated: bool, utf8: Option<bool>) {
     encoding::initialize(isolated, utf8);

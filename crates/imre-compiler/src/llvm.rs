@@ -17,6 +17,7 @@ use crate::ir::{
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
+mod affine;
 mod asyncio;
 mod byte_outputs;
 mod calendar;
@@ -365,6 +366,7 @@ fn emit_program(
         output,
         code: String::new(),
         entry_allocas: String::new(),
+        mapping_words: 0,
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         uses_string_interning: false,
@@ -587,6 +589,7 @@ struct Emitter<'a, 'module> {
     output: &'a mut Output,
     code: String,
     entry_allocas: String,
+    mapping_words: usize,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     uses_string_interning: bool,
@@ -856,15 +859,19 @@ impl Emitter<'_, '_> {
         self.void_call(&name, &[&payload]);
     }
 
+    fn may_own_reference(&self, ty: Type, small_integer: bool) -> bool {
+        !small_integer
+            && ty != Type::Float
+            && !matches!(
+                self.module.types.payload(ty).unwrap_or(ty),
+                Type::Bool | Type::None | Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_)
+            )
+    }
+
     /// Registers one owner only after a call's error check. Fallible universal
     /// word getters may return zero on failure, which is not a valid owned Int.
     fn owned(&mut self, value: Value) -> Value {
-        if value.ty != Type::Float
-            && !matches!(
-                self.module.types.payload(value.ty).unwrap_or(value.ty),
-                Type::Bool | Type::None | Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_)
-            )
-            && !value.small_integer
+        if self.may_own_reference(value.ty, value.small_integer)
             && !self
                 .temporaries
                 .iter()
@@ -1485,13 +1492,6 @@ impl Emitter<'_, '_> {
         same_local && self.ranges.integer(left).is_some() && expression_preserves_local(right, slot)
     }
 
-    fn cleanup(&mut self, slots: &[usize]) {
-        for &slot in slots {
-            let value = self.take_slot(slot);
-            self.release(&value);
-        }
-    }
-
     /// Releases initialized module owners and harmless defaults on either exit.
     fn cleanup_globals(&mut self) {
         for slot in (0..self.module.globals.len()).rev() {
@@ -1607,11 +1607,13 @@ impl Emitter<'_, '_> {
         }
         match completion {
             Completion::Return(value) => {
-                self.line(format!(
-                    "store {} {}, ptr %function_return",
-                    value.ty.llvm(),
-                    value.operand
-                ));
+                if value.ty != Type::None {
+                    self.line(format!(
+                        "store {} {}, ptr %function_return",
+                        value.ty.llvm(),
+                        value.operand
+                    ));
+                }
                 self.jump(&self.return_exit.clone());
             }
             Completion::Jump { label, .. } => self.jump(&label),
@@ -1757,6 +1759,7 @@ impl Emitter<'_, '_> {
         borrows: &FunctionBorrows,
     ) -> Result<String, String> {
         self.entry_allocas.clear();
+        self.mapping_words = 0;
         self.locals = function.locals.clone();
         byte_outputs::select(function, &mut self.locals);
         self.borrowed_locals = borrows.locals.clone();
@@ -1776,7 +1779,10 @@ impl Emitter<'_, '_> {
                 !rebound[slot] && !self.resource_types.contains(&function.locals[slot]);
         }
         let mut cleanup_slots: Vec<_> = (0..self.locals.len())
-            .filter(|&slot| self.owns_slot(slot))
+            .filter(|&slot| {
+                self.owns_slot(slot)
+                    && self.may_own_reference(self.locals[slot], self.small_locals[slot])
+            })
             .collect();
         if !entry
             && cleanup_slots
@@ -1789,8 +1795,6 @@ impl Emitter<'_, '_> {
         self.loops.clear();
         self.temporaries.clear();
         self.cleanups.clear();
-        self.return_exit = self.label();
-        self.error_exit = self.label();
         let params = function
             .params
             .iter()
@@ -1851,25 +1855,26 @@ impl Emitter<'_, '_> {
             })
             .collect();
         self.directory_slot_count = directory_slots.len();
+        let separate_exits = entry || !directory_slots.is_empty();
+        self.return_exit = self.label();
+        self.error_exit = if separate_exits {
+            self.label()
+        } else {
+            self.return_exit.clone()
+        };
         if !directory_slots.is_empty() {
             self.line("%directory_frame = alloca ptr");
             self.line("store ptr null, ptr %directory_frame");
         }
         let allocas_at = self.code.len();
-        self.line(format!(
-            "%function_return = alloca {}",
-            function.returns.llvm()
-        ));
-        self.line(format!(
-            "store {} {}, ptr %function_return",
-            function.returns.llvm(),
-            function.returns.initial()
-        ));
-        // Runtime out-parameters always write full words, including for bool
-        // and None payloads. Results are loaded only after a successful call;
-        // each call transfers them before another call can reuse this storage.
-        self.line("%mapping_key_word = alloca i64");
-        self.line("%mapping_value_word = alloca i64");
+        if function.returns != Type::None {
+            let ty = function.returns.llvm();
+            self.line(format!("%function_return = alloca {ty}"));
+            self.line(format!(
+                "store {ty} {}, ptr %function_return",
+                function.returns.initial()
+            ));
+        }
         for (slot, &ty) in function.locals.iter().enumerate() {
             self.line(format!("%local{slot} = alloca {}", ty.llvm()));
             // Parameters initialize exactly once below. ASan can relocate their
@@ -1913,11 +1918,9 @@ impl Emitter<'_, '_> {
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
             ));
             self.line(format!(
-                "call void @imre_integer_digits_init(i32 {})",
-                u32::from(ignore_env)
-            ));
-            self.line(format!(
-                "call void @imre_context_warnings_init(i32 {})",
+                "call void @imre_process_config_init(i32 {}, i32 {}, i32 {})",
+                u32::from(ignore_env),
+                command_flags.map_or(-1, |flags| flags.cpu_count),
                 command_flags.map_or(-1, |flags| i32::from(flags.context_aware_warnings))
             ));
             self.line("call void @imre_record_error_init()");
@@ -1972,10 +1975,39 @@ impl Emitter<'_, '_> {
             self.jump(&self.return_exit.clone());
         }
         self.start(&self.return_exit.clone());
-        self.with_directory_frame(|out, frame| {
-            out.line(format!("call void @imre_object_release(ptr {frame})"));
-        });
-        self.cleanup(&cleanup_slots);
+        let failed = if separate_exits {
+            self.with_directory_frame(|out, frame| {
+                out.line(format!("call void @imre_object_release(ptr {frame})"));
+            });
+            let returned = self.current.clone();
+            let cleanup = self.label();
+            self.jump(&cleanup);
+            self.start(&self.error_exit.clone());
+            self.with_directory_frame(|out, frame| {
+                for &slot in &directory_slots {
+                    let value = out.borrow_slot(slot);
+                    let pointer = out.optional_object_pointer(&value);
+                    out.line(format!(
+                        "call void @imre_error_frame_keep_directory(ptr {frame}, ptr {pointer})"
+                    ));
+                }
+                out.line(format!(
+                    "call void @imre_error_attach_directory_frame(ptr {frame})"
+                ));
+            });
+            let raised = self.current.clone();
+            self.jump(&cleanup);
+            self.start(&cleanup);
+            entry.then(|| {
+                self.instruction(format!("phi i1 [false, %{returned}], [true, %{raised}]"))
+            })
+        } else {
+            None
+        };
+        for slot in cleanup_slots {
+            let value = self.borrow_slot(slot);
+            self.reference(&value, "release");
+        }
         if let Some(leave) = leave_frame {
             self.line(leave);
         }
@@ -1983,7 +2015,7 @@ impl Emitter<'_, '_> {
             self.line("call void @imre_fault_truncate(i64 %fault_depth)");
             self.line("store i64 %fault_depth, ptr @imre_typed_fault_depth");
         }
-        if entry {
+        if let Some(failed) = failed {
             if self.has_extensions {
                 self.line("call void @imre_extension_clear()");
             }
@@ -2001,8 +2033,17 @@ impl Emitter<'_, '_> {
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
             }
+            let report = self.label();
+            let flush = self.label();
+            self.branch(&failed, &report, &flush);
+            self.start(&flush);
             let status = self.instruction("call i32 @imre_finish_stdio()");
             self.line(format!("ret i32 {status}"));
+            self.start(&report);
+            let status = self.instruction("call i32 @imre_error_unhandled()");
+            self.line(format!("ret i32 {status}"));
+        } else if function.returns == Type::None {
+            self.line("ret i8 0");
         } else {
             let value = self.instruction(format!(
                 "load {}, ptr %function_return",
@@ -2010,51 +2051,14 @@ impl Emitter<'_, '_> {
             ));
             self.line(format!("ret {returns} {value}"));
         }
-        self.start(&self.error_exit.clone());
-        self.with_directory_frame(|out, frame| {
-            for &slot in &directory_slots {
-                let value = out.borrow_slot(slot);
-                let pointer = out.optional_object_pointer(&value);
-                out.line(format!(
-                    "call void @imre_error_frame_keep_directory(ptr {frame}, ptr {pointer})"
-                ));
-            }
-            out.line(format!(
-                "call void @imre_error_attach_directory_frame(ptr {frame})"
-            ));
-        });
-        self.cleanup(&cleanup_slots);
-        if let Some(leave) = leave_frame {
-            self.line(leave);
-        }
-        if fault_frame {
-            self.line("call void @imre_fault_truncate(i64 %fault_depth)");
-            self.line("store i64 %fault_depth, ptr @imre_typed_fault_depth");
-        }
-        if entry {
-            if self.has_extensions {
-                self.line("call void @imre_extension_clear()");
-            }
-            self.cleanup_globals();
-            if self.uses_linecache {
-                self.line("call void @imre_linecache_clear()");
-            }
-            if self.changes_stdout {
-                self.line("call void @imre_sys_stdout_clear()");
-            }
-            if self.uses_builtins_last {
-                self.line("call void @imre_builtins_clear()");
-            }
-            self.line("call void @imre_clear_literals()");
-            if self.uses_sys_argv {
-                self.line("call void @imre_args_clear()");
-            }
-            let status = self.instruction("call i32 @imre_error_unhandled()");
-            self.line(format!("ret i32 {status}"));
-        } else {
-            self.line(format!("ret {returns} {}", function.returns.initial()));
-        }
         self.code.push_str("}\n");
+        // Mapping calls transfer their output words before another call can reuse them.
+        for name in ["%mapping_key_word", "%mapping_value_word"]
+            .into_iter()
+            .take(self.mapping_words)
+        {
+            writeln!(self.entry_allocas, "  {name} = alloca i64").unwrap();
+        }
         self.code.insert_str(allocas_at, &self.entry_allocas);
         if self.cleanup_limit_hit {
             return Err("Imre: finally cleanup expansion exceeds the compiler limit".to_owned());
@@ -2436,6 +2440,11 @@ impl Emitter<'_, '_> {
                 // This proof includes the final increment and the hidden cursor,
                 // independently of reassignment of the visible loop target.
                 let small_cursor = self.ranges.range_cursor(statement).is_some();
+                let unit_step = match args.as_slice() {
+                    [_] | [_, _] => true,
+                    [_, _, step] => matches!(&step.kind, ExprKind::Int(n) if n == "1"),
+                    _ => false,
+                };
                 let mut args = args.iter().map(|arg| self.expr(arg)).collect::<Vec<_>>();
                 if args.len() == 1 {
                     args.insert(0, small(0));
@@ -2481,6 +2490,9 @@ impl Emitter<'_, '_> {
                 ));
                 self.branch(&test, &body_label, &exhausted);
                 self.start(&body_label);
+                if unit_step {
+                    self.advance_affine(body, *target, *cursor, *stop);
+                }
                 let current = self.load(*cursor, small_cursor);
                 self.store(*target, &current);
                 self.loops.push(LoopTarget {
@@ -6323,6 +6335,9 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::ObjectIsExactTuple => {
+                self.call("imre_object_is_exact_tuple", returns, &[&args[0].value])
+            }
             Builtin::ObjectTextProject => {
                 self.call("imre_object_exact_text", returns, &[&args[0].value])
             }
@@ -7255,6 +7270,13 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_deque_clear", &[&args[0].value]);
                 none()
             }
+            Builtin::DequeRotate => {
+                self.checked_line(format!(
+                    "call void @imre_deque_rotate(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             Builtin::DequeReverse => {
                 self.void_call("imre_deque_reverse", &[&args[0].value]);
                 none()
@@ -7876,6 +7898,7 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         let key = self.mapping_read_key(args[0].value.ty, &args[1].value);
+        self.mapping_words = self.mapping_words.max(1);
         let call = format!(
             "call i32 @{function}(ptr {}, i64 {key}, ptr %mapping_key_word)",
             args[0].value.operand
@@ -7943,6 +7966,7 @@ impl Emitter<'_, '_> {
             debug_assert_ne!(ready, value);
         }
         let iterator = self.borrow_slot(iterator);
+        self.mapping_words = self.mapping_words.max(1 + usize::from(value.is_some()));
         let value_output = if value.is_some() {
             "%mapping_value_word"
         } else {
@@ -8780,9 +8804,13 @@ declare ptr @imre_environ_index(ptr)
 declare void @imre_environ_delete(ptr, i32)
 declare void @imre_environ_set(ptr, ptr)
 declare void @imre_environ_set_bytes(ptr, ptr)
+declare i64 @imre_os_getpid()
 declare ptr @imre_getcwd()
 declare ptr @imre_getcwdb()
 declare i64 @imre_os_transfer_fd(i64)
+declare i64 @imre_os_copy_file_range(i64, i64, i64, i64, i64)
+declare void @imre_os_check_copy_count(i64)
+declare void @imre_os_check_copy_offset(i64)
 declare ptr @imre_os_read(i64, i64)
 declare i64 @imre_os_write(i64, ptr)
 declare void @imre_os_close(i64)
@@ -8802,6 +8830,7 @@ declare ptr @imre_subprocess_quote_argument(i64, i32)
 @imre_os_o_directory = external constant i64
 @imre_os_o_nofollow = external constant i64
 @imre_os_o_nonblock = external constant i64
+@imre_os_o_noctty = external constant i64
 @imre_os_o_path = external constant i64
 @imre_os_o_tmpfile = external constant i64
 @imre_os_seek_set = external constant i64
@@ -8822,9 +8851,12 @@ declare ptr @imre_poll_new()
 declare void @imre_poll_update(ptr, i32, i64, i64)
 declare ptr @imre_poll_wait(ptr, i32, i64, ptr)
 declare void @imre_select_wait(ptr, ptr, ptr, i32, i64, ptr)
+declare void @imre_os_openpty(ptr)
 declare void @imre_os_pipe(ptr)
 declare void @imre_os_pipe2(ptr, i64)
 declare i32 @imre_os_isatty(i64)
+declare ptr @imre_os_ptsname(i64, ptr, ptr, i64)
+declare i64 @imre_os_device_encoding(i64)
 declare i32 @imre_os_get_blocking(i64)
 declare void @imre_os_set_blocking(i64, i64)
 declare i32 @imre_os_get_inheritable(i64)
@@ -9156,6 +9188,7 @@ declare zeroext i1 @imre_contextvars_was_missing(ptr)
 declare ptr @imre_contextvars_enter(ptr)
 declare void @imre_contextvars_leave(ptr, ptr)
 declare i64 @imre_contextvars_len(ptr)
+declare zeroext i1 @imre_object_is_exact_tuple(ptr)
 declare ptr @imre_object_exact_text(ptr)
 declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)
@@ -9182,8 +9215,7 @@ declare ptr @imre_exception_swap_active(ptr)
 declare void @imre_exception_raise(ptr)
 declare void @imre_exception_reraise()
 declare i32 @imre_finish_stdio()
-declare void @imre_integer_digits_init(i32)
-declare void @imre_context_warnings_init(i32)
+declare void @imre_process_config_init(i32, i32, i32)
 declare i64 @imre_sys_context_aware_warnings()
 declare void @imre_record_error_init()
 declare void @imre_stdio_unbuffered_init()
@@ -9334,6 +9366,47 @@ define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline 
   ret i64 %selected
 }
 
+; Skip 1,023 additions, leaving the last iteration in the ordinary loop body.
+; Nonnegative i32 ordinals and coefficients keep each scalar expression small.
+; The chunk subtotal is computed in i128 before narrowing to a tagged integer.
+define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i32 %scale, i32 %offset) noinline nounwind memory(none) {
+  %tags0 = and i64 %at, %end
+  %tags = and i64 %tags0, %total
+  %small = trunc i64 %tags to i1
+  %i = ashr i64 %at, 1
+  %stop = ashr i64 %end, 1
+  %sum = ashr i64 %total, 1
+  %bounded = icmp ule i64 %i, 2147482624
+  %last = add i64 %i, 1023
+  %within = icmp slt i64 %last, %stop
+  %valid = and i1 %small, %bounded
+  %chunk = and i1 %valid, %within
+  br i1 %chunk, label %check_sum, label %fallback
+check_sum:
+  %a = zext i32 %scale to i128
+  %b = zext i32 %offset to i128
+  %x = zext i64 %i to i128
+  %base = mul i128 %x, 1023
+  %ordinals = add i128 %base, 522753
+  %linear = mul i128 %a, %ordinals
+  %constant = mul i128 %b, 1023
+  %delta = add i128 %linear, %constant
+  %initial = sext i64 %sum to i128
+  %partial = add i128 %initial, %delta
+  %fits = icmp sle i128 %partial, 4611686018427387903
+  br i1 %fits, label %success, label %fallback
+success:
+  %new_at = add i64 %at, 2046
+  %n = trunc i128 %partial to i64
+  %shift = shl i64 %n, 1
+  %new_total = or i64 %shift, 1
+  %r0 = insertvalue {i64,i64} zeroinitializer, i64 %new_at, 0
+  %r = insertvalue {i64,i64} %r0, i64 %new_total, 1
+  ret {i64,i64} %r
+fallback:
+  ret {i64,i64} zeroinitializer
+}
+
 ; Bound the absolute value of every partial sum for an integral projection.
 ; The strict comparison also rejects a rounded-up or rounded-down boundary.
 define internal i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count) alwaysinline nounwind {
@@ -9442,6 +9515,7 @@ declare ptr @imre_deque_copy(ptr)
 declare i64 @imre_deque_pop(ptr, i32)
 declare void @imre_deque_clear(ptr)
 declare void @imre_deque_reverse(ptr)
+declare void @imre_deque_rotate(ptr, i64)
 declare void @imre_deque_check_method_index(i64)
 declare i64 @imre_deque_get(ptr, i64)
 declare void @imre_deque_set(ptr, i64, i64)
@@ -10427,7 +10501,7 @@ print(show("x"))
     }
 
     #[test]
-    fn string_constants_are_rooted_once_and_cleared_on_both_main_exits() {
+    fn string_constants_are_rooted_once_and_cleared_before_main_returns() {
         let llvm = compile(
             "def text() -> str:\n    return 'shared'\nprint('shared')\nprint(text())\n",
             &CompileOptions {
@@ -10456,7 +10530,10 @@ print(show("x"))
         assert!(body.contains("@imre_str_retain("));
         let main = llvm.split_once("define i32 @main(").unwrap().1;
         assert_eq!(main.matches("call void @imre_init_literals()").count(), 1);
-        assert_eq!(main.matches("call void @imre_clear_literals()").count(), 2);
+        assert_eq!(main.matches("call void @imre_clear_literals()").count(), 1);
+        let (_, exits) = main.split_once("call void @imre_clear_literals()").unwrap();
+        assert!(exits.contains("call i32 @imre_finish_stdio()"));
+        assert!(exits.contains("call i32 @imre_error_unhandled()"));
     }
 
     /// Classifies only assignments to a source slot, excluding its argument and

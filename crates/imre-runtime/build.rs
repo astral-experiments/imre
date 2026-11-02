@@ -53,6 +53,12 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     write_class_table(&out_dir, "unicode_alnum.rs", r"[\p{L}\p{N}]");
     write_class_table(&out_dir, "unicode_alpha.rs", r"\p{L}");
+    write_class_table(&out_dir, "unicode_identifier_start.rs", r"[_\p{XID_Start}]");
+    write_class_table(
+        &out_dir,
+        "unicode_identifier_continue.rs",
+        r"\p{XID_Continue}",
+    );
     const SYMBOLS: &str = include_str!("native/errno-symbols.txt");
     println!("cargo:rerun-if-changed=native/errno-symbols.txt");
     let mut c = String::from(

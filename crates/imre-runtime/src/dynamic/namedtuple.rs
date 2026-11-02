@@ -8,7 +8,8 @@ use ruff_python_stdlib::{identifiers::is_identifier, keyword::is_keyword};
 pub(super) const GETTER: &str = "collections._tuplegetter";
 pub(super) const DOC_REPR: &str = "<member '__doc__' of 'collections._tuplegetter' objects>";
 pub(super) const MEMBER_SLOTS: &[&str] = &["__get__", "__set__", "__delete__"];
-pub(super) const GETTER_METHODS: &[&str] = &["__get__", "__set__", "__delete__", "__reduce__"];
+pub(super) const GETTER_METHODS: &[&str] =
+    &["__get__", "__set__", "__delete__", "__reduce__", "__repr__"];
 
 /// Return the shared native type attributes that describe the tuple field descriptor.
 pub(super) fn class_attribute(ctx: &mut Context, class: Id, name: &str) -> Option<Id> {
@@ -285,6 +286,10 @@ pub(super) fn getter_method(
         }
         ("__set__", [_, _]) => Err(Error::new("AttributeError", "can't set attribute")),
         ("__delete__", [_]) => Err(Error::new("AttributeError", "can't delete attribute")),
+        ("__repr__", []) => {
+            let text = ctx.checked_format(receiver, true)?;
+            Ok(ctx.text(text))
+        }
         ("__reduce__", []) => {
             let doc = doc
                 .ok_or_else(|| Error::new("SystemError", "NULL object passed to Py_BuildValue"))?;
@@ -434,8 +439,8 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     ctx.bind(scope, "__slots__", slots);
     let doc = ctx.text(format!("{typename}({})", names.join(", ")));
     ctx.bind(scope, "__doc__", doc);
-    let make = ctx.builtin("_collections._make");
-    let make = super::method_decorator::class_method(ctx, make)?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_make")?;
+    let make = ctx.call(factory, vec![name, fields], Vec::new())?;
     ctx.bind(scope, "_make", make);
     let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
     bind_new(ctx, scope, &typename, &names, defaults)?;
@@ -590,6 +595,12 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
             "tuple.__new__(posix.sched_param) is not safe, use posix.sched_param.__new__()",
         ));
     }
+    if ctx.heap.get(class).heap_type() == Some(super::stdlib::datetime::isocalendar::CLASS) {
+        return Err(Error::new(
+            "TypeError",
+            "tuple.__new__(datetime.IsoCalendarDate) is not safe, use datetime.IsoCalendarDate.__new__()",
+        ));
+    }
     let names = ctx.namedtuple_fields(class);
     if names.is_none() && !ctx.subclass(class, tuple) {
         return Err(ctx.invalid_new_subtype("tuple", class));
@@ -621,38 +632,6 @@ pub(super) fn allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
         scalar,
         namespace: None,
         dictionary: None,
-        property: None,
-        weak_reference: None,
-        cycle: None,
-        member_values: None,
-        memory_stream: None,
-    }))
-}
-
-/// Build the descriptor's actual receiver class from the iterable's positional values.
-pub(super) fn make(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [Some(class), Some(iterable)] =
-        builtins::bind_method_arguments("_make", args, kwargs, ["cls", "iterable"], 2)?
-    else {
-        return Err(Error::new("TypeError", "_make() requires an iterable"));
-    };
-    let names = ctx
-        .namedtuple_fields(class)
-        .ok_or_else(|| Error::new("TypeError", "expected a named tuple class"))?;
-    let values = collect(ctx, iterable)?;
-    if names.len() != values.len() {
-        return Err(Error::new(
-            "TypeError",
-            format!("Expected {} arguments, got {}", names.len(), values.len()),
-        ));
-    }
-    let fields = names.iter().cloned().zip(values).collect();
-    Ok(ctx.alloc(Value::Instance {
-        class,
-        namespace: None,
-        fields,
-        dictionary: None,
-        scalar: None,
         property: None,
         weak_reference: None,
         cycle: None,

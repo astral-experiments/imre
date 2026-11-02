@@ -186,7 +186,10 @@ macro_rules! operator_functions {
 include!("../../../native/operator-functions.rs");
 
 /// Install the same callable objects in the private extension and its public wrapper.
-pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id, module: &str) {
+pub(in crate::dynamic) fn install(ctx: &mut Context, owner: Id, scope: Id, module: &str) {
+    if module == "_operator" {
+        super::hmac::bind_compare(ctx, owner, scope, "_operator._compare_digest");
+    }
     for &name in Operation::NAMES {
         let function = ctx.builtin(&format!("operator.{name}"));
         ctx.bind(scope, name, function);
@@ -300,7 +303,7 @@ impl Context {
         }
         if let Value::ReverseSequence { source, remaining } = *self.heap.get(value) {
             let hint = match source {
-                Some(seq) if remaining != 0 && remaining <= self.reverse_sequence_len(seq)? => {
+                Some(seq) if remaining != 0 && remaining <= self.sequence_len(seq)? => {
                     remaining
                 }
                 _ => 0,

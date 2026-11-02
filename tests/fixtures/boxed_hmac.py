@@ -3,6 +3,33 @@ import hmac
 
 
 def check():
+    import sys
+    from _operator import _compare_digest
+    try:
+        from _hashlib import compare_digest as backend
+    except ImportError:
+        backend = _compare_digest
+    assert hmac.compare_digest is backend
+    for compare in (_compare_digest, hmac.compare_digest):
+        owner = compare.__self__
+        sys.modules.pop(owner.__name__)
+        try:
+            fresh = __import__(owner.__name__)
+            new_compare = getattr(fresh, compare.__name__)
+            assert fresh is not owner and new_compare is not compare
+            assert new_compare.__self__ is fresh and compare.__self__ is owner
+        finally:
+            sys.modules[owner.__name__] = owner
+        view = memoryview(b"xabc")
+        assert compare(view[1:], b"abc")
+        assert not compare(view[1:], bytearray(b"xbc"))
+        try:
+            compare(view[::2], b"xb")
+        except BufferError:
+            pass
+        else:
+            raise AssertionError("noncontiguous memoryview accepted")
+
     data = bytearray(b"abc")
     digest = hashlib.sha1(data)
     digest.update(data)

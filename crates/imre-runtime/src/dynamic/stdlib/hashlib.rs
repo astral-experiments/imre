@@ -10,7 +10,7 @@ pub(crate) mod openssl;
 
 const UNSUPPORTED_DIGEST: &str = "_hashlib.UnsupportedDigestmodError";
 
-pub(in crate::dynamic) fn install_openssl(ctx: &mut Context, scope: Id) -> Result<()> {
+pub(in crate::dynamic) fn install_openssl(ctx: &mut Context, module: Id, scope: Id) -> Result<()> {
     let provider = openssl::required()?;
     let class = if let Some(&class) = ctx.builtins.get(UNSUPPORTED_DIGEST) {
         class
@@ -27,6 +27,7 @@ pub(in crate::dynamic) fn install_openssl(ctx: &mut Context, scope: Id) -> Resul
         class
     };
     ctx.bind(scope, "UnsupportedDigestmodError", class);
+    super::hmac::bind_compare(ctx, module, scope, "_hashlib.compare_digest");
     for name in ["HASH", "new", "get_fips_mode", "pbkdf2_hmac", "scrypt"] {
         if name != "scrypt" || provider.has_scrypt() {
             let function = ctx.builtin(&format!("_hashlib.{name}"));

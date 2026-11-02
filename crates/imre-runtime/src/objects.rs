@@ -53,7 +53,7 @@ pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::{State as HashState, hex_text as hash_hex};
+pub(crate) use hashlib::{State as HashState, hex_text as hash_hex, hex_with_separator};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
@@ -82,8 +82,12 @@ mod paths;
 pub(crate) use paths::{directory_entries, path_utf8};
 pub(crate) mod posixpath;
 mod processes;
-pub(crate) use processes::{BoxedPipe, BoxedPopen, change_environment, initial_environment};
+pub(crate) use processes::{
+    BoxedPipe, BoxedPopen, CStrings, change_environment, initial_environment,
+};
 mod random;
+#[cfg(target_os = "linux")]
+pub(crate) use random::reseed_after_fork;
 pub(crate) use random::{choice_index, imre_random_float, random_below, shuffle_swaps};
 pub(crate) mod readiness;
 pub(crate) mod records;
@@ -103,11 +107,12 @@ mod text;
 pub(crate) use text::{codepoint_search_window, dedent, hexadecimal, search_window};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
-pub(crate) use text::{UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
+pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
     count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
     ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
-    python_islower, python_isspace, python_istitle, python_isupper, split_parts,
+    python_isidentifier, python_islower, python_isspace, python_istitle, python_isupper,
+    split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};

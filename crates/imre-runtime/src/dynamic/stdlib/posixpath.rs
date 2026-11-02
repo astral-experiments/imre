@@ -269,3 +269,12 @@ pub(super) fn call(
     };
     Ok(ctx.int(cut as i64))
 }
+
+pub(super) fn dirname(path: &str) -> &str {
+    let head = path.rfind('/').map_or("", |i| &path[..=i]);
+    if head.trim_start_matches('/').is_empty() {
+        head
+    } else {
+        head.trim_end_matches('/')
+    }
+}

@@ -107,8 +107,38 @@ fn parse_surrogates(points: &[u32]) -> Result<Option<Parsed>> {
     Ok(parse(&text))
 }
 
-pub(super) fn fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (class, args) = calendar_class_args(ctx, "datetime.datetime", "fromisoformat", args)?;
+fn invalid_input(ctx: &mut Context, input: Id) -> Result<Id> {
+    let repr = builtins::call(ctx, "repr", &[input], &[])?;
+    if let Ok(text) = ctx.str_value(repr) {
+        return Err(Error::new(
+            "ValueError",
+            format!("Invalid isoformat string: {text}"),
+        ));
+    }
+    let prefix = ctx.text("Invalid isoformat string: ");
+    let message = ctx.concat_strings(prefix, repr)?;
+    Err(ctx.lookup_error("ValueError", message))
+}
+
+/// CPython gates exact UTF-8 byte lengths, then consumes the fixed-size fields.
+/// In a ten-byte input a compact date therefore leaves two trailing bytes unread.
+fn parse_date_only(text: &str) -> Option<[i32; 3]> {
+    let bytes = text.as_bytes();
+    match bytes.len() {
+        7 | 8 => parse_date(bytes),
+        10 if bytes[4] == b'-' => parse_date(bytes),
+        10 => parse_date(&bytes[..8]),
+        _ => None,
+    }
+}
+
+pub(super) fn fromisoformat(
+    ctx: &mut Context,
+    owner: &'static str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (class, args) = calendar_class_args(ctx, owner, "fromisoformat", args)?;
     let name = ctx.class_qualname(class);
     let input = builtins::one_positional_arg(&format!("{name}.fromisoformat"), args, kwargs)?;
     let Some(storage) = ctx.string_storage(input) else {
@@ -117,6 +147,17 @@ pub(super) fn fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
             "fromisoformat: argument must be str",
         ));
     };
+    if owner == "datetime.date" {
+        let Some(fields) = ctx.str_value(storage).ok().and_then(parse_date_only) else {
+            return invalid_input(ctx, input);
+        };
+        // The receiving class validates these fields, including years past 9999.
+        let args = fields
+            .into_iter()
+            .map(|field| ctx.int(i64::from(field)))
+            .collect();
+        return ctx.call(class, args, vec![]);
+    }
     let parsed = match ctx.heap.get(storage) {
         Value::Str(text) => parse(text),
         Value::SurrogateStr(points) => parse_surrogates(points)?,
@@ -128,16 +169,7 @@ pub(super) fn fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
         offset,
     }) = parsed
     else {
-        let repr = builtins::call(ctx, "repr", &[input], &[])?;
-        if let Ok(text) = ctx.str_value(repr) {
-            return Err(Error::new(
-                "ValueError",
-                format!("Invalid isoformat string: {text}"),
-            ));
-        }
-        let prefix = ctx.text("Invalid isoformat string: ");
-        let message = ctx.concat_strings(prefix, repr)?;
-        return Err(ctx.lookup_error("ValueError", message));
+        return invalid_input(ctx, input);
     };
     let tz = iso_zone(ctx, offset)?;
     Calendar::iso_midnight(&mut date, &mut clock)?;

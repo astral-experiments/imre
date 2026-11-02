@@ -445,15 +445,39 @@ pub(super) fn clear_algorithms() {
     GUARANTEED.with(RefCell::take);
 }
 
-pub(crate) fn hex_text(digest: &[u8]) -> Result<Str> {
+pub(crate) fn hex_text(bytes: &[u8]) -> Result<Str> {
+    hex_with_separator(bytes, None, 0)
+}
+
+pub(crate) fn hex_with_separator(bytes: &[u8], separator: Option<u8>, group: i32) -> Result<Str> {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut result = Str::try_with_capacity(digest.len() * 2).map_err(|_| Error::allocation())?;
-    for &byte in digest {
+    let step = group.unsigned_abs() as usize;
+    let separator = separator.filter(|_| step > 0 && step < bytes.len());
+    let separators = separator.map_or(0, |_| (bytes.len() - 1) / step);
+    let capacity = bytes
+        .len()
+        .checked_mul(2)
+        .and_then(|n| n.checked_add(separators))
+        .ok_or_else(Error::allocation)?;
+    let mut result = Str::try_with_capacity(capacity).map_err(|_| Error::allocation())?;
+    let mut next = if separator.is_some() && group > 0 {
+        (bytes.len() - 1) % step + 1
+    } else {
+        step
+    };
+    for (index, &byte) in bytes.iter().enumerate() {
+        if let Some(separator) = separator
+            && index == next
+        {
+            result.push(char::from(separator));
+            next += step;
+        }
         result.push(char::from(HEX[(byte >> 4) as usize]));
         result.push(char::from(HEX[(byte & 15) as usize]));
     }
     Ok(result)
 }
+
 
 fn hex(digest: &[u8]) -> Result<*const Str> {
     crate::checked_owned_str(hex_text(digest)?)

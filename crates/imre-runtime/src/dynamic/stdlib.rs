@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 
 use super::{
     Context, builtins,
-    value::{Error, FALSE, Id, NONE, Result, TRUE, Value},
+    value::{self, Error, FALSE, Id, NONE, Result, TRUE, Value},
 };
 use crate::objects::interpreter_stdlib as system;
 
 pub(super) mod ast;
+mod asyncgen_hooks;
 pub(super) mod audit;
 mod binascii;
 pub(super) mod codecs;
@@ -25,11 +26,15 @@ pub(super) mod flags;
 mod fnmatch;
 mod formatters;
 pub(super) mod functools;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) mod grp;
 pub(super) mod hashlib;
 mod hmac;
 mod inspect;
 pub(super) mod itertools;
 pub(super) mod locale;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) mod pwd;
 pub(super) mod tempfile;
 pub(super) mod time;
 mod tokenize;
@@ -48,6 +53,8 @@ mod ordered_dict;
 pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
+#[cfg(target_os = "linux")]
+pub(super) mod posix_spawn;
 mod posixpath;
 mod random;
 pub(super) mod readiness;
@@ -57,6 +64,8 @@ mod resource;
 mod select;
 #[cfg(unix)]
 pub(super) mod signal;
+#[cfg(unix)]
+pub(super) mod ssl;
 mod socket;
 mod structure;
 mod subprocess;
@@ -68,7 +77,7 @@ mod zipimport;
 mod zlib;
 
 /// Format a type for CPython diagnostics, including a non-default module and its qualname.
-fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
+pub(super) fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
     let name = match ctx.own_class_attr(class, "__qualname__") {
         Some(name) => name,
         None => ctx.text(ctx.class_name(class).to_owned()),
@@ -106,6 +115,10 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
+    #[cfg(unix)]
+    if name == "_imre_ssl" {
+        return ssl::provider::available();
+    }
     if name == "_hashlib" {
         return hashlib::openssl::provider().is_some();
     }
@@ -125,13 +138,16 @@ pub(super) fn is_module(name: &str) -> bool {
             | "errno"
             | "faulthandler"
             | "genericpath"
+            | "hmac"
             | "urllib.parse"
+            | "re._constants"
             | "io"
             | "itertools"
             | "json"
             | "subprocess"
             | "warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
+        || (cfg!(any(target_os = "linux", target_os = "macos")) && matches!(name, "grp" | "pwd"))
         || has_lazy_attributes(name)
 }
 
@@ -200,7 +216,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "random"
             | "secrets"
             | "hashlib"
-            | "hmac"
             | "re"
             | "importlib"
             | "importlib.machinery"
@@ -248,6 +263,17 @@ fn argument(args: &[Id], index: usize) -> Result<Id> {
     args.get(index)
         .copied()
         .ok_or_else(|| Error::new("TypeError", "missing required argument"))
+}
+
+/// PyArg formats at most 50 bytes of tp_name before decoding the entire diagnostic as UTF-8.
+fn string_argument_message(
+    function: &str,
+    position: usize,
+    kind: &str,
+) -> std::result::Result<String, crate::Error> {
+    let mut message = format!("{function}() argument {position} must be str, not ").into_bytes();
+    message.extend_from_slice(&kind.as_bytes()[..kind.len().min(50)]);
+    crate::objects::Codec::Utf8 { signature: false }.decode(&message, None)
 }
 
 /// Bind the one positional-or-keyword parameter of a Python function.
@@ -398,6 +424,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
     {
         return Ok(ctx.int(i64::from(value)));
     }
+    #[cfg(target_os = "linux")]
+    if matches!(module, "os" | "posix") && os::xattr::FUNCTIONS.contains(&name) {
+        return Ok(ctx.builtin(&format!("posix.{name}")));
+    }
     if module == "_imre_subprocess" && subprocess::function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
@@ -423,7 +453,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         (
             "codecs" | "_codecs",
             "encode" | "decode" | "register" | "unregister" | "lookup" | "escape_decode"
-            | "utf_16_ex_decode",
+            | "utf_8_decode" | "utf_16_ex_decode",
         ) => ctx.builtin(&format!("codecs.{name}")),
         ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
@@ -435,6 +465,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("enum", "Enum" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
             ctx.builtin("enum.Enum.__deepcopy__");
+            ctx.builtin("enum.Enum.__reduce_ex__");
             ctx.builtin(&format!("enum.{name}"))
         }
         (
@@ -495,7 +526,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "slotted_type"
             | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
-        ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
+        ("_imre_thread", "start" | "join" | "alive" | "threads" | "current" | "shutdown") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
@@ -504,7 +535,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
         (
             "traceback",
-            "clear_frames" | "format_exc" | "format_exception" | "print_exc" | "print_exception",
+            "_frame_locals" | "_tb_position" | "clear_frames" | "format_exc" | "format_exception"
+            | "print_exc" | "print_exception",
         ) => ctx.builtin(&format!("traceback.{name}")),
         ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
         ("types", "ModuleType") => ctx.builtin("module"),
@@ -523,6 +555,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "EllipsisType") => ctx.builtin("ellipsis"),
         ("types", "NoneType" | "NotImplementedType") => ctx.builtin(name),
         ("types", "CodeType") => ctx.builtin("code"),
+        ("types", "CellType") => ctx.builtin("cell"),
         (
             "_collections",
             "_count_elements"
@@ -541,6 +574,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        (
+            "_typing",
+            "_get_alias_kind" | "_eval_type_expression" | "_validate_forward_ref" | "_install_generic_alias_iter",
+        ) => ctx.builtin(&format!("typing.{name}")),
         ("_typing", "_get_args") => ctx.builtin("typing.get_args"),
         ("_typing", "_get_origin") => ctx.builtin("typing.get_origin"),
         ("_typing", "_idfunc") => ctx.builtin("_typing._idfunc"),
@@ -551,6 +588,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
         ("_collections_abc", abc) if super::mapping_abc::bootstrapped(abc) => {
             super::mapping_abc::class(ctx, abc)?
+        }
+        ("_collections_abc", "_CallableGenericAlias") => {
+            ctx.builtin("collections.abc._CallableGenericAlias")
         }
         ("_collections_abc", "_check_methods") => ctx.builtin("_collections_abc._check_methods"),
         (
@@ -568,6 +608,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_eval_type_expression"
             | "_protocol_mro"
             | "_protocol_member"
+            | "_check_annotation_syntax"
             | "_validate_forward_ref"
             | "_finish_field_ref"
             | "Any"
@@ -684,19 +725,29 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
+        #[cfg(unix)]
+        ("os" | "posix", "getuid" | "geteuid" | "getgid" | "getgroups") => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
         ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
         #[cfg(target_os = "linux")]
         ("os" | "posix", "statvfs_result") => ctx.builtin(os::stat::VFS_CLASS),
         #[cfg(target_os = "linux")]
-        ("os" | "posix", name @ ("statvfs" | "fstatvfs")) => ctx.builtin(&format!("posix.{name}")),
+        ("os" | "posix", name @ ("statvfs" | "fstatvfs" | "pipe2")) => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
         ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "listdir") if cfg!(unix) => ctx.builtin("posix.listdir"),
         ("os" | "posix", "fspath") => ctx.builtin("posix.fspath"),
-        ("os" | "posix", name) if os::is_descriptor_function(name) => {
+        #[cfg(target_os = "linux")]
+        ("posix", "_spawn_exec") => ctx.builtin("posix._spawn_exec"),
+        ("os" | "posix", name)
+            if os::is_descriptor_function(name) || os::is_process_function(name) =>
+        {
             ctx.builtin(&format!("posix.{name}"))
         }
         ("posixpath", "normpath") | ("posix", "_path_normpath") => {
@@ -745,7 +796,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
-        | ("_imre_json", "scan_once" | "surrogate_text" | "encoder_state" | "encoder_call")
+        | (
+            "_imre_json",
+            "scan_once"
+            | "is_constants_lookup"
+            | "surrogate_text"
+            | "encoder_state"
+            | "encoder_call",
+        )
         | ("_imre_linecache", "source_lines")
         | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
         | (
@@ -763,7 +821,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("marshal", "loads")
         | ("pickle", "dumps")
         | ("hashlib", "file_digest")
-        | ("hmac", "new" | "HMAC" | "compare_digest")
+        | ("hmac", "new" | "HMAC")
         | (
             "re",
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
@@ -781,6 +839,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "inspect",
             "iscoroutinefunction"
             | "markcoroutinefunction"
+            | "_native_data_descriptor"
             | "_static_member"
             | "_signature_identifier"
             | "_signature_mapping"
@@ -969,6 +1028,10 @@ pub(super) fn call(
         return super::atexit::call(ctx, method, args, kwargs);
     }
 
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    if name == "_locale.nl_langinfo" {
+        return locale::nl_langinfo(ctx, args, kwargs);
+    }
     if name == "_locale.setlocale" {
         return locale::setlocale(ctx, args, kwargs);
     }
@@ -1124,6 +1187,14 @@ pub(super) fn call(
         ctx.heap.clear_frame(frame)?;
         return Ok(NONE);
     }
+    if name == "traceback._frame_locals" {
+        let frame = single_argument("_frame_locals", "frame", args, kwargs)?;
+        return traceback::frame_locals(ctx, frame);
+    }
+    if name == "traceback._tb_position" {
+        let tb = single_argument("_tb_position", "tb", args, kwargs)?;
+        return Ok(traceback::tb_position(ctx, tb));
+    }
     if name == "traceback.clear_frames" {
         let tb = single_argument("clear_frames", "tb", args, kwargs)?;
         return traceback::clear_frames(ctx, tb);
@@ -1278,7 +1349,26 @@ pub(super) fn call(
     if name == "sys.getsizeof" {
         return system_size::getsizeof(ctx, &args[1..], kwargs);
     }
-    if matches!(name, "sys.getrecursionlimit" | "sys.is_finalizing") {
+    if name == "sys.set_coroutine_origin_tracking_depth" {
+        let [depth] = builtins::bind_builtin_arguments(
+            "set_coroutine_origin_tracking_depth",
+            args,
+            kwargs,
+            ["depth"],
+            1,
+        )?;
+        let depth = index_c_int(ctx, depth.expect("required depth argument"))?;
+        ctx.threads.coroutine_origin_depth =
+            u32::try_from(depth).map_err(|_| Error::new("ValueError", "depth must be >= 0"))?;
+        return Ok(NONE);
+    }
+    if name == "sys.set_asyncgen_hooks" {
+        return asyncgen_hooks::set(ctx, &args[1..], kwargs);
+    }
+    if matches!(
+        name,
+        "sys.getrecursionlimit" | "sys.is_finalizing" | "sys.get_asyncgen_hooks"
+    ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -1289,6 +1379,13 @@ pub(super) fn call(
             return Err(Error::new(
                 "TypeError",
                 format!("{name}() takes no arguments ({} given)", args.len() - 1),
+            ));
+        }
+        if name == "sys.get_asyncgen_hooks" {
+            return Ok(fixed_structseq::record(
+                ctx,
+                fixed_structseq::ASYNCGEN_HOOKS,
+                ctx.threads.asyncgen_hooks.to_vec(),
             ));
         }
         if name == "sys.is_finalizing" {
@@ -1380,12 +1477,21 @@ pub(super) fn call(
     if matches!(
         name,
         "sys.get_int_max_str_digits"
+            | "sys.get_coroutine_origin_tracking_depth"
             | "sys.getdefaultencoding"
             | "_locale.getencoding"
             | "sys.getfilesystemencoding"
             | "sys.getfilesystemencodeerrors"
             | "posix.abort"
             | "posix.getpid"
+            | "posix.getuid"
+            | "posix.geteuid"
+            | "posix.getgid"
+            | "posix.getegid"
+            | "posix.getresgid"
+            | "posix.getresuid"
+            | "posix.getgroups"
+            | "posix.cpu_count"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
             | "sys._jit.is_active"
@@ -1414,6 +1520,7 @@ pub(super) fn call(
             ));
         }
         return Ok(match name {
+            "sys.get_coroutine_origin_tracking_depth" => ctx.int(i64::from(ctx.threads.coroutine_origin_depth)),
             "posix._create_environ" => os::environment(ctx),
             "posix.getcwd" | "posix.getcwdb" => os::getcwd(ctx, name == "posix.getcwdb")?,
             "sys.getfilesystemencoding" => ctx
@@ -1427,6 +1534,31 @@ pub(super) fn call(
             #[cfg(unix)]
             "posix.abort" => unsafe { libc::abort() },
             "posix.getpid" => ctx.int(i64::from(std::process::id())),
+            "posix.geteuid" => ctx.alloc(Value::Int(crate::objects::os::geteuid())),
+            "posix.getuid" => ctx.alloc(Value::Int(crate::objects::os::getuid())),
+            "posix.getgid" => ctx.alloc(Value::Int(crate::objects::os::getgid())),
+            "posix.getegid" => ctx.alloc(Value::Int(crate::objects::os::getegid())),
+            #[cfg(target_os = "linux")]
+            "posix.getresgid" | "posix.getresuid" => {
+                let ids = if name == "posix.getresgid" {
+                    crate::objects::os::getresgid()?
+                } else {
+                    crate::objects::os::getresuid()?
+                };
+                let values = ids.into_iter().map(|id| ctx.alloc(Value::Int(id))).collect();
+                ctx.alloc(Value::Tuple(values))
+            }
+            "posix.getgroups" => {
+                let groups = crate::objects::os::getgroups()?
+                    .into_iter()
+                    .map(|group| ctx.alloc(Value::Int(group)))
+                    .collect();
+                ctx.alloc(Value::List(groups))
+            }
+            #[cfg(target_os = "linux")]
+            "posix.cpu_count" => {
+                crate::sys::cpu_count::online().map_or(NONE, |n| ctx.int(i64::from(n)))
+            }
             "sys.getdefaultencoding" => ctx.default_encoding,
             "sys.get_int_max_str_digits" => {
                 ctx.int(i64::from(crate::integer_text::decimal_digit_limit()))
@@ -1434,6 +1566,14 @@ pub(super) fn call(
             // As in typed SysJitPredicate, Imre compiles before the process starts.
             _ => FALSE,
         });
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(function @ ("getgrall" | "getgrgid" | "getgrnam")) = name.strip_prefix("grp.") {
+        return grp::call(ctx, function, args, kwargs);
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(function @ ("getpwall" | "getpwnam" | "getpwuid")) = name.strip_prefix("pwd.") {
+        return pwd::call(ctx, function, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "fcntl.fcntl" {
@@ -1622,6 +1762,12 @@ pub(super) fn call(
     {
         return posixpath::call(ctx, name, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if let Some(op) = name.strip_prefix("posix.")
+        && os::xattr::FUNCTIONS.contains(&op)
+    {
+        return os::xattr::call(ctx, op, args, kwargs);
+    }
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
     }
@@ -1632,14 +1778,24 @@ pub(super) fn call(
         return os::stat::construct(ctx, layout, args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    if let Some(op @ ("pipe2" | "ptsname")) = name.strip_prefix("posix.") {
+        return os::descriptor(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if let Some(op @ ("statvfs" | "fstatvfs")) = name.strip_prefix("posix.") {
         return os::statvfs::call(ctx, op, args, kwargs);
     }
     if let Some(op @ ("stat" | "lstat" | "fstat")) = name.strip_prefix("posix.") {
         return os::stat::call(ctx, op, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if name == "posix._spawn_exec" {
+        return os::spawn_exec(ctx, args, kwargs);
+    }
     if let Some(op) = name.strip_prefix("posix.")
-        && os::is_descriptor_function(op)
+        && (os::is_descriptor_function(op)
+            || os::is_process_function(op)
+            || (cfg!(unix) && op == "getpgrp"))
     {
         return os::descriptor(ctx, op, args, kwargs);
     }
@@ -1648,12 +1804,30 @@ pub(super) fn call(
         return os::sysconf::call(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    if let Some(op @ ("sched_get_priority_min" | "sched_get_priority_max")) =
+        name.strip_prefix("posix.")
+    {
+        return os::scheduler::priority_bound(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.sched_yield" {
+        return os::scheduler::yield_cpu(args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
         return os::scheduler::get_policy(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
+    if let Some(op @ ("major" | "minor" | "makedev")) = name.strip_prefix("posix.") {
+        return os::device::call(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
     if let Some(op @ ("eventfd" | "eventfd_read" | "eventfd_write")) = name.strip_prefix("posix.") {
         return os::eventfd::call(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("posix_spawn" | "posix_spawnp")) = name.strip_prefix("posix.") {
+        return posix_spawn::call(ctx, op, args, kwargs);
     }
     if name == "posix.strerror" {
         if !kwargs.is_empty() {
@@ -1723,11 +1897,14 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("collections._tuplegetter.") {
         return super::namedtuple::getter_method(ctx, method, args, kwargs);
     }
-    if name == "_collections._make" {
-        return super::namedtuple::make(ctx, args, kwargs);
-    }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._accumulate_allocate" {
+        return itertools::accumulate_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._accumulate_state" {
+        return itertools::accumulate_state(ctx, args, kwargs);
     }
     if name == "_imre_itertools._cycle_allocate" {
         return itertools::cycle_allocate(ctx, args, kwargs);
@@ -1735,11 +1912,29 @@ pub(super) fn call(
     if name == "_imre_itertools._cycle_next" {
         return itertools::cycle_next(ctx, args, kwargs);
     }
-    if name == "_imre_itertools._filterfalse_allocate" {
-        return itertools::filterfalse_allocate(ctx, args, kwargs);
+    if name == "_imre_itertools._pairwise_allocate" {
+        return itertools::pairwise_allocate(ctx, args, kwargs);
     }
-    if name == "_imre_itertools._filterfalse_state" {
-        return itertools::filterfalse_state(ctx, args, kwargs);
+    if name == "_imre_itertools._pairwise_next" {
+        return itertools::pairwise_next(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._starmap_allocate" {
+        return itertools::starmap_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._starmap_next" {
+        return itertools::starmap_next(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._predicate_allocate" {
+        return itertools::predicate_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._predicate_state" {
+        return itertools::iterator_state(ctx, args, kwargs, "predicate iterator");
+    }
+    if name == "_imre_itertools._zip_longest_allocate" {
+        return itertools::zip_longest_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._zip_longest_state" {
+        return itertools::iterator_state(ctx, args, kwargs, "zip_longest");
     }
     if name == "_imre_itertools._chain_allocate" {
         let [base, class, source] = args else {
@@ -1817,26 +2012,21 @@ pub(super) fn call(
         }
         if let Value::Function { code, .. } = *ctx.heap.get(func) {
             let original = ctx.code_object(code);
-            if original.coroutine {
+            use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
+            if original.coroutine || original.flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {
                 return Ok(func);
             }
-            if let Some(flags) = original.flags {
-                use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
-                if flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {
-                    return Ok(func);
-                }
-                if flags & GENERATOR != 0 && !matches!(original.body, super::value::Body::Native(_))
-                {
-                    // Other functions and existing generators retain their original code.
-                    let mut marked = original.clone();
-                    marked.flags = Some(flags | ITERABLE_COROUTINE);
-                    let marked = ctx.alloc(Value::Code(marked));
-                    let Value::Function { code, .. } = ctx.heap.get_mut(func) else {
-                        unreachable!()
-                    };
-                    *code = marked;
-                    return Ok(func);
-                }
+            if original.flags & GENERATOR != 0 && !matches!(original.body, super::value::Body::Native(_))
+            {
+                // Other functions and existing generators retain their original code.
+                let mut marked = original.clone();
+                marked.flags |= ITERABLE_COROUTINE;
+                let marked = ctx.alloc(Value::Code(marked));
+                let Value::Function { code, .. } = ctx.heap.get_mut(func) else {
+                    unreachable!()
+                };
+                *code = marked;
+                return Ok(func);
             }
         }
         return Err(Error::new(
@@ -2107,6 +2297,19 @@ pub(super) fn call(
             builtins::bind_builtin_arguments("__deepcopy__", args, kwargs, ["self", "memo"], 2)?;
         return Ok(member.unwrap());
     }
+    if name == "enum.Enum.__reduce_ex__" {
+        let [member, _] =
+            builtins::bind_builtin_arguments("__reduce_ex__", args, kwargs, ["self", "proto"], 2)?;
+        let member = member.unwrap();
+        let class = ctx.lookup_attr(member, "__class__")?;
+        // Both lookups may run Python; keep the first result live through the second.
+        let mark = ctx.heap.temporary_mark();
+        ctx.heap.keep(class);
+        let value = ctx.lookup_attr(member, "_value_");
+        ctx.heap.release_temporaries_since(mark);
+        let arguments = ctx.alloc(Value::Tuple(vec![value?]));
+        return Ok(ctx.alloc(Value::Tuple(vec![class, arguments])));
+    }
     if name == "enum._simple_enum" {
         return ctx.enum_decorator(args, kwargs);
     }
@@ -2133,6 +2336,7 @@ pub(super) fn call(
         return match function {
             "encode" | "decode" => codecs::transform(ctx, function, args, kwargs),
             "escape_decode" => codecs::escape_decode(ctx, args, kwargs),
+            "utf_8_decode" => codecs::utf8_decode(ctx, args, kwargs),
             "utf_16_ex_decode" => codecs::utf16_extended(ctx, args, kwargs),
             "lookup" => codecs::lookup(ctx, args, kwargs),
             "register" | "unregister" => codecs::search_registry(ctx, function, args, kwargs),
@@ -2168,6 +2372,16 @@ pub(super) fn call(
     if let Some(class) = crate::objects::HashState::provider_class(name) {
         return hashlib::hash(ctx, class.rsplit_once('.').unwrap().1, args, kwargs);
     }
+    if matches!(
+        name,
+        "_operator._compare_digest" | "_hashlib.compare_digest"
+    ) {
+        return hmac::compare(ctx, name, args, kwargs);
+    }
+    #[cfg(unix)]
+    if let Some(function) = name.strip_prefix("_imre_ssl.") {
+        return ssl::call(ctx, function, args, kwargs);
+    }
     if let Some(function) = name.strip_prefix("_hashlib.") {
         return hashlib::call_openssl(ctx, function, args, kwargs);
     }
@@ -2183,7 +2397,8 @@ pub(super) fn call(
         return tempfile::open(ctx, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("BufferedRandom.") {
-        return tempfile::method(ctx, method, args, kwargs);
+        let receiver = argument(args, 0)?;
+        return tempfile::method(ctx, receiver, method, &args[1..], kwargs);
     }
     if let Some(method) = name.strip_prefix("TextIOWrapper.") {
         return files::text_method(ctx, method, args, kwargs);
@@ -2321,6 +2536,22 @@ pub(super) fn call(
     if let Some(method @ ("sub" | "subn")) = name.strip_prefix("pattern.") {
         return regex::pattern_sub(ctx, method, args, kwargs);
     }
+    if let Some((owner @ (value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE), method)) =
+        name.rsplit_once('.')
+        && value::REGEX_COPY_METHODS.contains(&method)
+    {
+        let (receiver, rest) = builtins::method_receiver_args(ctx, owner, method, args, kwargs)?;
+        let qualified = name.strip_prefix("re.").unwrap();
+        if method == "__deepcopy__" {
+            builtins::one_positional_arg(qualified, rest, &[])?;
+        } else if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("{qualified}() takes no arguments ({} given)", rest.len()),
+            ));
+        }
+        return Ok(receiver);
+    }
     if name == "pattern.split" {
         return regex::pattern_split(ctx, args, kwargs);
     }
@@ -2353,9 +2584,11 @@ pub(super) fn call(
         "_imre_json.encoder_state" => return json::encoder_state(ctx, args, kwargs),
         "_imre_json.encoder_call" => return json::encoder_call(ctx, args, kwargs),
         "_imre_json.surrogate_text" => (1, &[]),
+        "_imre_json.is_constants_lookup" => (2, &[]),
         "_imre_json.scan_once" => (3, &[]),
+        "hmac._digest_native" => (3, &[]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
-        "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
+        "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
         "hash.update" => (2, &[]),
         "hash.copy" => (1, &[]),
@@ -2369,11 +2602,8 @@ pub(super) fn call(
                 kwargs,
             );
         }
-        "file.seek" => (3, &["whence"]),
-        "file.truncate" => (2, &[]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "file.read" | "file.read1" | "file.readline" | "file.readlines"
-        | "file.readinto" | "file.write" => (2, &[]),
+        "struct.unpack" => (2, &[]),
         "match.expand" => return regex::match_expand(ctx, args, kwargs),
         "match.group" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
@@ -2397,14 +2627,6 @@ pub(super) fn call(
         | "collections.defaultdict.__reduce__"
         | "functools._lru_cache_wrapper.cache_clear"
         | "functools._lru_cache_wrapper.cache_info"
-        | "file.close"
-        | "file.readable"
-        | "file.writable"
-        | "file.seekable"
-        | "file.isatty"
-        | "file.flush"
-        | "file.fileno"
-        | "file.tell"
         | "file.__enter__" => (1, &[]),
         _ => (0, &[]),
     };
@@ -2414,20 +2636,6 @@ pub(super) fn call(
                 .iter()
                 .any(|(key, _)| !keywords.contains(&key.as_str())))
     {
-        if name == "file.flush"
-            && let Some((&receiver, positional)) = args.split_first()
-        {
-            let class = ctx.type_name(receiver).trim_start_matches("_io.");
-            let message = if kwargs.is_empty() {
-                format!(
-                    "{class}.flush() takes no arguments ({} given)",
-                    positional.len()
-                )
-            } else {
-                format!("{class}.flush() takes no keyword arguments")
-            };
-            return Err(Error::new("TypeError", message));
-        }
         return Err(Error::new(
             "TypeError",
             format!("unsupported arguments to {name}"),
@@ -2480,8 +2688,8 @@ pub(super) fn call(
             };
             ctx.alloc(Value::Bytes(result))
         }
+        "hmac._digest_native" => return hmac::digest_native(ctx, args),
         "hmac.new" | "hmac.HMAC" => return hmac::new(ctx, args, kwargs),
-        "hmac.compare_digest" => return hmac::compare(ctx, args),
         method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
         "hash.update" | "hash.copy" => {
             return hashlib::method(ctx, name, args);
@@ -2601,6 +2809,11 @@ pub(super) fn call(
                 NONE
             }
         }
+        "_imre_json.is_constants_lookup" => builtins::boolean(json::is_constants_lookup(
+            ctx,
+            argument(args, 0)?,
+            argument(args, 1)?,
+        )),
         "_imre_json.scan_once" => json::scan_once(
             ctx,
             argument(args, 0)?,
@@ -2683,8 +2896,18 @@ pub(super) fn call(
             }
             return Err(ctx.exception("SystemExit", args));
         }
-        name if name.starts_with("os.path.") || name.starts_with("file.") => {
-            return files::call(ctx, name, args, kwargs);
+        "os.path.dirname" => {
+            let path = ctx.str_value(argument(args, 0)?)?;
+            return Ok(ctx.text(posixpath::dirname(path).to_owned()));
+        }
+        "file.__enter__" | "file.__exit__" => {
+            let receiver = argument(args, 0)?;
+            return files::binary_method(
+                ctx,
+                receiver,
+                name.trim_start_matches("file."),
+                &args[1..],
+            );
         }
         "match.groups" | "match.groupdict" => {
             let receiver = argument(args, 0)?;

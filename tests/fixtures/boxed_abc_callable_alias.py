@@ -39,3 +39,15 @@ def current():
     child = Child[[], int]
     assert child.__origin__ is Child
     assert type(child) is cls and child().__orig_class__ == child
+
+    for original in (Callable[[int, str], bool], Callable[[], bool], Callable[..., bool]):
+        factory, arguments = original.__reduce__()
+        assert factory is cls and arguments[0] is Callable
+        restored = factory(*arguments)
+        assert type(restored) is cls and restored == original
+    from pickle import HIGHEST_PROTOCOL, dumps, loads
+    for protocol in range(HIGHEST_PROTOCOL + 1):
+        assert loads(dumps(alias, protocol)) == alias
+        if protocol < 3:
+            assert b"c_abcoll\n_CallableGenericAlias\n" in dumps(alias, protocol)
+            assert b"ccollections.abc\n_CallableGenericAlias\n" in dumps(alias, protocol, fix_imports=False)

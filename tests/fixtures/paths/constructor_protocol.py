@@ -77,6 +77,28 @@ def receiver() -> PureWindowsPath:
     return PureWindowsPath('prefix')
 
 
+class InheritedName(TextName):
+    pass
+
+
+class UpperName(TextName):
+    def __fspath__(self) -> str:
+        print(f'uppercase {self.name}')
+        return self.name.upper()
+
+
+def relative_name(name: TextName) -> None:
+    print(PurePosixPath('a/b').is_relative_to(name))
+    print(str(PureWindowsPath('a/b').relative_to(name)))
+
+
+def walk_option(fail: bool) -> bool:
+    print('evaluate walk_up')
+    if fail:
+        raise ValueError('walk_up failed')
+    return True
+
+
 print(str(Path(make('first'), make('second'))))
 print(str(receiver().joinpath(make('one'), make('two'))))
 print(str(receiver().with_segments(make('fresh'), make('part'))))
@@ -154,4 +176,29 @@ except ValueError as exc:
 try:
     PurePosixPath(bad=make('first kw'), self=make('second kw'))
 except TypeError as exc:
+    print(str(exc))
+
+
+relative_name(InheritedName('a'))
+relative_name(UpperName('a'))
+print(str(receiver().relative_to(make('base'), walk_up=walk_option(False))))
+try:
+    receiver().relative_to(TypeFailure(), walk_up=walk_option(True))
+except ValueError as exc:
+    print(str(exc))
+try:
+    PureWindowsPath('a').is_relative_to(ByteName())
+except TypeError as exc:
+    print(str(exc))
+try:
+    PurePosixPath('a').relative_to(WrongReturn())
+except TypeError as exc:
+    print(str(exc))
+try:
+    Path('a').is_relative_to(TypeFailure())
+except TypeError as exc:
+    print(str(exc))
+try:
+    PureWindowsPath('a').relative_to(ValueFailure())
+except ValueError as exc:
     print(str(exc))

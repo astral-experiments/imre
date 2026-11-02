@@ -4,6 +4,37 @@ from collections import deque
 from types import MappingProxyType
 
 
+def check_ordering():
+    events = []
+
+    class Item:
+        def __eq__(self, other):
+            events.append("eq")
+            return False
+
+        def __lt__(self, other):
+            events.append("lt")
+            return self
+
+        def __bool__(self):
+            events.append("bool")
+            return True
+
+    left, right = deque([Item()]), deque([Item()])
+    assert (left < right) is True and events == ["eq", "lt", "bool"]
+    assert left >= left and not left > left
+    assert deque([1]) <= deque([1, 0]) and deque([1, 0]) > deque([1])
+    assert deque.__lt__(left, []) is NotImplemented
+
+    marker = object()
+
+    class Reflected(deque):
+        def __gt__(self, other):
+            return marker
+
+    assert (left < Reflected()) is marker
+
+
 def check_weakrefs():
     class Slotted(deque):
         __slots__ = ()
@@ -39,6 +70,7 @@ def check_weakrefs():
 
 
 def current():
+    check_ordering()
     check_weakrefs()
     marker = []
     queue = deque((item for item in (marker, "middle", 3)))
@@ -378,4 +410,41 @@ def current():
     else:
         raise AssertionError("count ignored a mutation in its final comparison")
 
+    check_rotation()
     print("deque passed")
+
+
+def check_rotation():
+    class Marker:
+        pass
+
+    marker = Marker()
+    reference = weakref.ref(marker)
+    queue = deque([marker, 1, 2], maxlen=3)
+    del marker
+    rotate = queue.rotate
+    assert rotate() is None and queue[1] is reference()
+
+    class Index:
+        def __index__(self):
+            queue.append(3)
+            return -1
+
+    deque.rotate(queue, Index())
+    assert list(queue) == [1, 3, reference()] and queue.maxlen == 3
+    for count in (0, len(queue)):
+        cursor = iter(queue)
+        queue.rotate(count)
+        try:
+            next(cursor)
+        except RuntimeError as error:
+            assert str(error) == "deque mutated during iteration"
+        else:
+            raise AssertionError("rotation did not invalidate a live iterator")
+    single = deque([1])
+    cursor = iter(single)
+    single.rotate()
+    assert next(cursor) == 1
+    queue.clear()
+    gc.collect()
+    assert reference() is None

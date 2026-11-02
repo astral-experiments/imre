@@ -5,7 +5,7 @@ pub(super) const CLASS: &str = "collections.deque";
 pub(super) const ITERATOR: &str = "collections._deque_iterator";
 pub(super) const REVERSE_ITERATOR: &str = "collections._deque_reverse_iterator";
 pub(super) const ITERATOR_METHODS: &[&str] =
-    &["__iter__", "__next__", "__length_hint__", "__reduce__"];
+    &["__getattribute__", "__iter__", "__next__", "__length_hint__", "__reduce__"];
 
 pub(super) fn iterator_class(name: &str) -> Option<&'static str> {
     match name {
@@ -38,8 +38,12 @@ impl Member {
 // The implemented members in CPython 3.14.5 type dictionary order, with their clinic metadata.
 const MEMBERS: &[Member] = &[
     Member::new("__repr__", "Return repr(self).", "($self, /)"),
+    Member::new("__lt__", "Return self<value.", "($self, value, /)"),
+    Member::new("__le__", "Return self<=value.", "($self, value, /)"),
     Member::new("__eq__", "Return self==value.", "($self, value, /)"),
     Member::new("__ne__", "Return self!=value.", "($self, value, /)"),
+    Member::new("__gt__", "Return self>value.", "($self, value, /)"),
+    Member::new("__ge__", "Return self>=value.", "($self, value, /)"),
     Member::new("__iter__", "Implement iter(self).", "($self, /)"),
     Member::new(
         "__init__",
@@ -47,6 +51,9 @@ const MEMBERS: &[Member] = &[
         "($self, /, *args, **kwargs)",
     ),
     Member::new("__len__", "Return len(self).", "($self, /)"),
+    Member::new("__add__", "Return self+value.", "($self, value, /)"),
+    Member::new("__mul__", "Return self*value.", "($self, value, /)"),
+    Member::new("__rmul__", "Return value*self.", "($self, value, /)"),
     Member::new("__getitem__", "Return self[key].", "($self, key, /)"),
     Member::new(
         "__setitem__",
@@ -60,6 +67,7 @@ const MEMBERS: &[Member] = &[
         "($self, key, /)",
     ),
     Member::new("__iadd__", "Implement self+=value.", "($self, value, /)"),
+    Member::new("__imul__", "Implement self*=value.", "($self, value, /)"),
     Member::new(
         "append",
         "Add an element to the right side of the deque.",
@@ -123,6 +131,11 @@ const MEMBERS: &[Member] = &[
         "($self, /)",
     ),
     Member::new("reverse", "Reverse *IN PLACE*.", "($self, /)"),
+    Member::new(
+        "rotate",
+        "Rotate the deque n steps to the right.  If n is negative, rotates left.",
+        "($self, n=1, /)",
+    ),
 ];
 
 pub(super) fn member(name: &str) -> Option<&'static Member> {
@@ -143,6 +156,24 @@ pub(super) fn class_dictionary(ctx: &mut Context, class: Id) -> Result<Id> {
             .map(|entry| entry.name)
             .chain(["__new__", "__hash__", "maxlen"]),
     )
+}
+
+/// Install the iterator's own descriptors in CPython type-dictionary order.
+pub(super) fn install_iterator_namespace(ctx: &mut Context, class: Id, owner: &str) {
+    let entries = std::iter::once("__new__")
+        .chain(ITERATOR_METHODS.iter().copied())
+        .chain(["__doc__", "__module__"])
+        .map(|field| {
+            let value = match field {
+                "__doc__" => NONE,
+                "__module__" => ctx.heap.code_name("collections"),
+                _ => ctx.builtin(&format!("{owner}.{field}")),
+            };
+            (ctx.heap.code_name(field), value)
+        })
+        .collect();
+    let dictionary = ctx.dict(entries);
+    ctx.native_type_dicts.insert(class, dictionary);
 }
 
 pub(super) enum IndexOp {
@@ -252,6 +283,9 @@ pub(super) fn iterator_method(
     if ctx.heap.get(receiver).intrinsic_type_name() != Some(class) {
         return Err(Error::new("TypeError", format!("expected a {class} receiver")));
     }
+    if name == "__getattribute__" {
+        return builtins::call(ctx, "object.__getattribute__", args, kwargs);
+    }
     if !rest.is_empty() || !kwargs.is_empty() {
         return Err(Error::new("TypeError", format!("{class}.{name}() takes no arguments")));
     }
@@ -343,6 +377,115 @@ fn initialize(ctx: &mut Context, queue: Id, args: &[Id], kwargs: &[(String, Id)]
     Ok(())
 }
 
+pub(super) fn copy(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let storage = ctx.scalar_value(receiver);
+    let Value::Deque(ring) = ctx.heap.get(storage) else {
+        unreachable!()
+    };
+    if storage == receiver {
+        let copy = ring.shallow_copy()?;
+        return Ok(ctx.alloc(Value::Deque(Box::new(copy))));
+    }
+    let bound = ring.maxlen;
+    let class = ctx.exact_type(receiver)?;
+    let mut args = vec![receiver];
+    if let Some(n) = bound {
+        args.push(ctx.int(n as i64));
+    }
+    let result = ctx.call(class, args, Vec::new())?;
+    if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Deque(_)) {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{}() must return a deque, not {}",
+                ctx.type_name(receiver),
+                ctx.type_name(result)
+            ),
+        ));
+    }
+    Ok(result)
+}
+
+/// A subtype's iterator can mutate its ring while the repetition takes its snapshot.
+pub(super) fn repeat(ctx: &mut Context, receiver: Id, count: isize, inplace: bool) -> Result<Id> {
+    let owner = if inplace {
+        receiver
+    } else {
+        copy(ctx, receiver)?
+    };
+    let storage = ctx.scalar_value(owner);
+    let Value::Deque(ring) = ctx.heap.get_mut(storage) else {
+        unreachable!()
+    };
+    let size = ring.items.len();
+    if size == 0 || count == 1 {
+        return Ok(owner);
+    }
+    if count <= 0 {
+        builtins::clear_container(ctx, storage);
+        return Ok(owner);
+    }
+    let count = count as usize;
+    let memory = || Error::new("MemoryError", "");
+    if size == 1 {
+        let length = count.min(ring.maxlen.unwrap_or(count));
+        ring.items.try_reserve(length - 1).map_err(|_| memory())?;
+        ring.items.resize(length, ring.items[0]);
+        ring.state = ring.state.wrapping_add(1);
+        return Ok(owner);
+    }
+    if count > isize::MAX as usize / size {
+        return Err(memory());
+    }
+    if owner == storage {
+        // All original references survive. Rotate to the first retained element,
+        // then fill from that period without building a second repeated sequence.
+        let total = count * size;
+        let length = total.min(ring.maxlen.unwrap_or(total));
+        if length > size {
+            ring.items
+                .try_reserve(length - size)
+                .map_err(|_| memory())?;
+            ring.items.rotate_left((total - length) % size);
+            for i in size..length {
+                ring.items.push_back(ring.items[i % size]);
+            }
+            ring.state = ring.state.wrapping_add(1);
+        }
+        return Ok(owner);
+    }
+
+    // PySequence_List observes __iter__ followed by __len__, even if the bound is full.
+    let snapshot = ctx.alloc(Value::List(Vec::new()));
+    builtins::list_extend(ctx, snapshot, owner)?;
+    let Value::List(items) = ctx.heap.get(snapshot) else {
+        unreachable!()
+    };
+    let chunk = items.len();
+    let Value::Deque(ring) = ctx.heap.get_mut(storage) else {
+        unreachable!()
+    };
+    let times = ring
+        .maxlen
+        .map_or(count, |bound| count.min(bound.div_ceil(size)))
+        .saturating_sub(1);
+    if times != 0 && chunk != 0 {
+        let extra = chunk.saturating_mul(times).min(
+            ring.maxlen
+                .unwrap_or(usize::MAX)
+                .saturating_sub(ring.items.len()),
+        );
+        ring.items.try_reserve(extra).map_err(|_| memory())?;
+        let roots = ctx.heap.temporary_mark();
+        for _ in 0..times {
+            let result = extend(ctx, owner, snapshot, false);
+            ctx.heap.release_temporaries_since(roots);
+            result?;
+        }
+    }
+    Ok(owner)
+}
+
 /// Consume a live Python iterator one item at a time, retaining any successful prefix.
 pub(super) fn extend(ctx: &mut Context, queue: Id, source: Id, left: bool) -> Result<()> {
     let storage = ctx.scalar_value(queue);
@@ -376,6 +519,30 @@ pub(super) fn extend(ctx: &mut Context, queue: Id, source: Id, left: bool) -> Re
     })();
     ctx.heap.release_temporaries_since(roots);
     result
+}
+
+/// Concatenate by copying the left deque and consuming the right operand's iterator.
+pub(super) fn concat(ctx: &mut Context, left: Id, right: Id) -> Result<Id> {
+    if !matches!(ctx.heap.get(ctx.scalar_value(right)), Value::Deque(_)) {
+        // CPython uses isinstance here, which also accepts a reported __class__.
+        let deque = ctx.builtin(CLASS);
+        let reported_deque = match ctx.lookup_attr(right, "__class__") {
+            Ok(class) => ctx.direct_subclass(class, deque),
+            Err(error) if ctx.is_attribute_error(&error) => false,
+            Err(error) => return Err(error),
+        };
+        if !reported_deque {
+            let name = ctx.type_name(right);
+            let name = &name[..name.floor_char_boundary(200)];
+            return Err(Error::new(
+                "TypeError",
+                format!("can only concatenate deque (not \"{name}\") to deque"),
+            ));
+        }
+    }
+    let result = copy(ctx, left)?;
+    extend(ctx, result, right, false)?;
+    Ok(result)
 }
 
 /// Compare through live cursors so a callback can mutate either deque or raise.
@@ -609,6 +776,44 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
     result
 }
 
+/// Order the live iterators by their first unequal elements, or by which one ends first.
+fn order(ctx: &mut Context, op: &str, left: Id, right: Id) -> Result<bool> {
+    let roots = ctx.heap.temporary_mark();
+    ctx.heap.keep(left);
+    ctx.heap.keep(right);
+    let result = ctx.with_slot_depth("maximum recursion depth exceeded in comparison", |ctx| {
+        let a = ctx.iterator(left)?;
+        ctx.heap.keep(a);
+        let b = ctx.iterator(right)?;
+        ctx.heap.keep(b);
+        let step = ctx.heap.temporary_mark();
+        loop {
+            ctx.heap.release_temporaries_since(step);
+            let x = ctx.next_item(a)?;
+            if let Some(x) = x {
+                ctx.heap.keep(x);
+            }
+            let y = ctx.next_item(b)?;
+            let (Some(x), Some(y)) = (x, y) else {
+                return Ok(match op {
+                    "<" => y.is_some(),
+                    "<=" => x.is_none(),
+                    ">" => x.is_some(),
+                    ">=" => y.is_none(),
+                    _ => unreachable!(),
+                });
+            };
+            ctx.heap.keep(y);
+            if !ctx.checked_equal(x, y)? {
+                let result = ctx.binary(op, x, y)?;
+                return ctx.truth(result);
+            }
+        }
+    });
+    ctx.heap.release_temporaries_since(roots);
+    result
+}
+
 /// Keep the element alive while its equality and truth hooks run.
 fn element_matches(ctx: &mut Context, item: Id, value: Id) -> Result<bool> {
     if item == value {
@@ -786,10 +991,22 @@ pub(super) fn method(
         initialize(ctx, receiver, rest, kwargs)?;
         return Ok(NONE);
     }
+    let comparison = match name {
+        "__lt__" => Some("<"),
+        "__le__" => Some("<="),
+        "__eq__" => Some("=="),
+        "__ne__" => Some("!="),
+        "__gt__" => Some(">"),
+        "__ge__" => Some(">="),
+        _ => None,
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            if matches!(name, "__iadd__" | "__contains__" | "__repr__") {
+            if comparison.is_some() || matches!(
+                name,
+                "__add__" | "__iadd__" | "__contains__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__"
+            ) {
                 format!("wrapper {name}() takes no keyword arguments")
             } else {
                 format!("deque.{name}() takes no keyword arguments")
@@ -834,13 +1051,51 @@ pub(super) fn method(
     if name == "index" {
         return index(ctx, storage, rest);
     }
-    match (name, rest) {
-        ("__eq__" | "__ne__", [other]) => {
-            if !matches!(ctx.heap.get(ctx.scalar_value(*other)), Value::Deque(_)) {
-                return Ok(super::value::NOT_IMPLEMENTED);
+    if name == "rotate" {
+        let count = match rest {
+            [] => crate::Int::from(1),
+            [count] => ctx.index_integer(*count)?,
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("rotate expected at most 1 argument, got {}", rest.len()),
+                ));
             }
-            let op = if name == "__eq__" { "==" } else { "!=" };
-            return compare(ctx, op, receiver, *other).map(builtins::boolean);
+        };
+        // __index__ can change the deque before the rotation.
+        let Value::Deque(ring) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        ring.rotate(&count)?;
+        return Ok(NONE);
+    }
+    if let Some(op) = comparison {
+        let [other] = rest else {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            ));
+        };
+        if !matches!(ctx.heap.get(ctx.scalar_value(*other)), Value::Deque(_)) {
+            return Ok(super::value::NOT_IMPLEMENTED);
+        }
+        let result = if matches!(op, "==" | "!=") {
+            compare(ctx, op, receiver, *other)?
+        } else {
+            order(ctx, op, receiver, *other)?
+        };
+        return Ok(builtins::boolean(result));
+    }
+    match (name, rest) {
+        ("__mul__" | "__rmul__" | "__imul__", [item]) => {
+            let (_, n) = ctx.sequence_multiplier(*item, true)?;
+            return repeat(ctx, receiver, n, name == "__imul__");
+        }
+        ("__mul__" | "__rmul__" | "__imul__", _) => {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 1 argument, got {}", rest.len()),
+            ));
         }
         ("__contains__", [item]) => return ctx.contains(*item, storage).map(builtins::boolean),
         ("__getitem__", [index]) => return IndexOp::Get.apply(ctx, storage, *index, true),
@@ -848,11 +1103,12 @@ pub(super) fn method(
             return IndexOp::Set(*value).apply(ctx, storage, *index, true);
         }
         ("__delitem__", [index]) => return IndexOp::Delete.apply(ctx, storage, *index, true),
+        ("__add__", [other]) => return concat(ctx, receiver, *other),
         ("__iadd__", [item]) => {
             extend(ctx, receiver, *item, false)?;
             return Ok(receiver);
         }
-        ("__getitem__" | "__delitem__" | "__iadd__" | "__contains__" | "__eq__" | "__ne__", _) => {
+        ("__getitem__" | "__delitem__" | "__add__" | "__iadd__" | "__contains__", _) => {
             return Err(Error::new(
                 "TypeError",
                 format!("expected 1 argument, got {}", rest.len()),
@@ -907,30 +1163,7 @@ pub(super) fn method(
             let bound = ring.maxlen;
             Ok(bound.map_or(NONE, |n| ctx.int(n as i64)))
         }
-        "copy" | "__copy__" if receiver != storage => {
-            let bound = ring.maxlen;
-            let class = ctx.exact_type(receiver)?;
-            let mut args = vec![receiver];
-            if let Some(n) = bound {
-                args.push(ctx.int(n as i64));
-            }
-            let result = ctx.call(class, args, Vec::new())?;
-            if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Deque(_)) {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "{}() must return a deque, not {}",
-                        ctx.type_name(receiver),
-                        ctx.type_name(result)
-                    ),
-                ));
-            }
-            Ok(result)
-        }
-        "copy" | "__copy__" => {
-            let copy = ring.shallow_copy()?;
-            Ok(ctx.alloc(Value::Deque(Box::new(copy))))
-        }
+        "copy" | "__copy__" => copy(ctx, receiver),
         "reverse" => {
             ring.reverse();
             Ok(NONE)

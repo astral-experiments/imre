@@ -33,3 +33,26 @@ def current():
     callback = Unnamed()
     case.assertWarns(UserWarning, callback, warnings.warn, "unnamed")
     case.assertRaises(ValueError, callback, int, "invalid")
+
+    filters = warnings.filters
+    assert case._assertNotWarns(UserWarning, warnings.warn, "other", category=ResourceWarning) is None
+    with case._assertNotWarns(DeprecationWarning):
+        pass
+    assert warnings.filters is filters
+    try:
+        with case._assertNotWarns(Warning, msg="unexpected warning"):
+            warnings.warn("matched", UserWarning)
+    except case.failureException as error:
+        assert str(error) == "Warning triggered : unexpected warning"
+    else:
+        raise AssertionError("accepted a warning from the requested category")
+    sentinel = LookupError("inside the context")
+    try:
+        with case._assertNotWarns(UserWarning):
+            warnings.warn("matched before exception", UserWarning)
+            raise sentinel
+    except LookupError as error:
+        assert error is sentinel
+    else:
+        raise AssertionError("suppressed an unrelated exception")
+    assert warnings.filters is filters

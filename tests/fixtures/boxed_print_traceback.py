@@ -181,3 +181,61 @@ for index in range(5):
 stream = io.StringIO()
 print_stack(frame, file=stream)
 assert stream.getvalue().count('line None, in stack_messages\n') == 5
+
+
+# Capture the walk here even though another frame consumes it later.
+from traceback import FrameSummary, StackSummary, walk_stack
+
+
+def captured_walk(marker):
+    return walk_stack(None)
+
+
+summary = StackSummary.extract(captured_walk('live'), limit=1,
+                               capture_locals=True, lookup_lines=False)
+assert isinstance(summary, StackSummary) and len(summary) == 1
+frame = summary[0]
+assert isinstance(frame, FrameSummary) and frame.name == 'captured_walk'
+assert frame.locals['marker'] == "'live'"
+assert frame.line == 'return walk_stack(None)'
+assert 'in captured_walk' in summary.format()[0]
+
+
+def saved_closure(value):
+    def inner():
+        binding = value
+        return sys._getframe()
+    return inner()
+
+
+saved = saved_closure(17)
+summary = StackSummary.extract([(saved, saved.f_lineno)], capture_locals=True)
+assert summary[0].locals == {'binding': '17', 'value': '17'}
+saved.clear()
+assert StackSummary.extract([(saved, 1)], capture_locals=True)[0].locals is None
+
+from traceback import extract_tb
+
+
+def divide_by_zero():
+    return 1 / 0
+
+
+def extract_failure():
+    try:
+        divide_by_zero()
+    except ZeroDivisionError as exc:
+        return exc.__traceback__
+
+
+tb = extract_failure()
+summary = extract_tb(tb)
+assert isinstance(summary, StackSummary)
+assert all(isinstance(frame, FrameSummary) for frame in summary)
+assert [(frame.name, frame.line) for frame in summary] == [
+    ('extract_failure', 'divide_by_zero()'), ('divide_by_zero', 'return 1 / 0')
+]
+assert extract_tb(tb, limit=1) == summary[:1]
+assert extract_tb(tb, limit=-1) == summary[-1:]
+assert extract_tb(tb, limit=0) == extract_tb(None) == []
+assert summary[-1].lineno == tb.tb_next.tb_lineno

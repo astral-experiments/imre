@@ -104,42 +104,56 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-The table covers 25 standard library modules as of November 2, 2026 (UTC).
-A **paired pass** means the same original CPython 3.14.5 test passed at both
-`-O0` and `-O3`. Counts include selected tests and results from development
-branches. Skipped tests count toward the suite size only. The [omission decisions](docs/stdlib-omissions.md) explain each original included in the omitted column.
+As of November 2, 2026, Imre has a paired pass for **7,911 of 13,328 tests (59.4%)** in the original 25 standard library module families.
+A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
+`-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
+development branches. Each original test occurrence counts once. Skipped and omitted tests remain
+in the denominator. The [omission decisions](docs/stdlib-omissions.md) explain each original included in the omitted column.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
-| `argparse` | 1,791 | 1,893 | 0 | 1,791 of 1,893 cumulative original occurrences. The 19-key addition has matching stock, O0 and O3 parent and subtest outcomes on public revisions, with original converter metaclass, fixture, and generated base preserved. |
-| `collections` | 614 | 659 | 6 | The unchanged 295-case OrderedDict file and its 13 classes exited 0 at both levels. Stock passed 295. Imre passed 287 and skipped eight. Six skips have accepted omissions. The two weak-reference cases remain in scope. |
+| `argparse` | 1,850 | 1,893 | 0 | Selected stock and native runs added 59 originals. Twelve generated methods exercise parser setup with empty upstream failure lists. All 1,893 original occurrences are inventoried. |
+| `collections` | 628 | 659 | 8 | Three namedtuple originals, three wrapper protocols and a periodic string search passed on stock and public native O0/O3. The 659-case aggregate still stops in the large namedtuple case. |
 | `csv` | 122 | 128 | 0 | Complete suite on `main`, 122 passed and six matched upstream skips. |
 | `dataclasses` | 247 | 276 | 0 | The latest intact public run passed 206, and the retained intact run passed 207. Thirteen more TestDocString originals pass on a sealed development tree after all 276 register. Their public replay needs annotationlib.get_annotations for #3578. |
-| `datetime` | 727 | 1,098 | 0 | Both public native builds registered all 1,098 originals and emitted 847 terminal verdicts before aborting. Each passed 591. The 590 that passed both levels contribute 50 new cases to the cumulative 727. |
+| `datetime` | 815 | 1,098 | 0 | Selected replacement and subtype tests and complete class runs added 15 originals with matching stock/O0/O3 parent and subtest outcomes. Earlier intact and focused runs contribute to the total. |
 | `fnmatch` | 24 | 24 | 0 | Complete suite on `main`, all 24 passed. |
 | `functools` | 91 | 329 | 0 | The intact 325-case primary module passed 89 in all four modes. Two more original cases passed in separate runs. |
 | `hashlib` | 77 | 82 | 0 | The cumulative resource-enabled inventory includes 77 distinct pairs. Under the default stock resource policy, intact ordinary O0 and O3 each record 67 passes, one threaded-hashing error and 14 skips. The real builtin MD5 factory is verified at both native levels. |
-| `importlib` | 235 | 1,346 | 0 | With the pinned zipfile extension available, Linux native O0 and O3 passed 125 of 126 disk-resource originals, adding 12 text, bytes and encoding cases. The last requires c_resources. Default staging reached zero of these 126. The ledger also includes 86 runnable originals across three intact importlib.metadata files. |
-| `io` | 284 | 1,038 | 2 | 284 of 1,038 across runs. The latest ten cover four BufferedRWPair methods and six CMiscIO file and pipe cases. BufferedWriter has 35 of 43 ordinary paired cases, and TextIOWrapper has 60 of 82 across public builds. |
+| `importlib` | 251 | 1,346 | 0 | Sixteen more name and spec resolution originals passed on stock with its full helper and public native O0/O3 with four or seven unmodified fixture functions. The full native helper import remains open. |
+| `io` | 356 | 1,038 | 2 | Six buffered reader and six buffered random originals add 12 pairs. Ten had clean owning runs. Two parents passed in native class runs that exited 1 on other cases. Both ordinary and boxed CLI routes contribute. |
 | `itertools` | 112 | 138 | 0 | Selected runs account for 112 original passes. Public 90955053 resolved the typing.Iterable import. The unchanged 137-case primary now reaches a module-level type alias in _pyrepl/types.py and stops before discovery at both native levels. A separate GIL companion supplies the 138th registration. |
-| `json` | 172 | 216 | 0 | The intact Unicode file passed 34/34 at ordinary O0 and O3 on two public revisions. Of those, 26 used the expected provider and 17 were new. The eight-case scanstring file passed at both levels and added one original. |
-| `logging` | 169 | 272 | 0 | 169 of 272 distinct originals passed across runs. The latest 15 include formatting, log records and module-level behavior. Matching parent callbacks are recorded separately from other failures in the same group. |
-| `os` | 243 | 579 | 0 | The public POSIX file started and stopped all 179 originals at both levels. Thirteen more OS cases have matching stock and paired native callbacks. A parent that exercised 3 of 15 stock subtests and a parent with an unreachable deep-path probe remain uncredited. |
-| `pathlib` | 933 | 1,369 | 1 | 933 of 1,369 distinct originals passed across selections. At dd3180cc, fifteen new cases passed after normal discovery and seventeen by direct selection. The last intact run had 865 passes, 404 skips and 100 errors at each level. |
-| `re` | 140 | 165 | 0 | 140 of 165 distinct originals passed across public runs. Four additions cover the external-table parent, empty arrays, match representation, and inline flags. Both latest full-class failfast runs hit test_bug_40736 after 23 passes. |
-| `shutil` | 89 | 223 | 0 | The complete original TestCopyTree, TestMove and TestCopyFile classes passed all 44 Linux-runnable cases on public main, with two matching skips. Sixteen of the passes were already counted. Earlier sendfile and archive results are included. |
+| `json` | 180 | 216 | 0 | The intact 34-case Unicode file passed on stock and public ordinary O0/O3. One CUnicode original was new. The cumulative count includes earlier selected results. Two CLI broken-pipe cases await matching child executable evidence. |
+| `logging` | 224 | 272 | 0 | The queue configuration original passed for all five public queue inputs, including the Python implementation of SimpleQueue on Imre. This restores one parent in the 272-test inventory. |
+| `os` | 303 | 579 | 0 | Nineteen more filesystem and file-descriptor originals passed on stock and public O0/O3, including ownership, extended attributes and directory creation. |
+| `pathlib` | 962 | 1,369 | 1 | Four previously skipped POSIX group cases passed on stock and both native levels on the head merged in #4448. Earlier package discovery and selected runs contribute to the total. |
+| `re` | 146 | 165 | 0 | The unchanged 165-test suite finished on public O0 and O3 with 131 paired parent passes. One was new to the cumulative count. Both native processes exited with failures. |
+| `shutil` | 105 | 223 | 0 | Nineteen focused copy originals passed on stock and native O0/O3 with the Linux kernel transfer. Sixteen were new. The file-mode skip and the full 223-case run are tracked separately. |
 | `socket` | 61 | 746 | 0 | Earlier and focused cases total 61. Four native modes pass 14/19 resolver originals, including the new service database lookup. The 746-case discovery run executed no test bodies. |
-| `subprocess` | 254 | 353 | 0 | Public Linux O0 and O3 passed six additional originals for kill, send_signal, terminate, waiting with ignored SIGCHLD, and interrupted communicate with and without poll. Their raw receipts show successful parent tests and reaped children. The full 353-case suite remains open. |
-| `tempfile` | 107 | 118 | 0 | The intact 118-case file passed 100 originals in ordinary and boxed O0 and O3. Three TemporaryDirectory shutdown cases passed in later runs. All seven TestTemporaryFile cases passed with real files on stock and public ordinary and boxed O0 and O3, adding four more cases. |
+| `subprocess` | 266 | 353 | 0 | The intact POSIX class and focused runs exercise real children. Three additional selected originals verified the child umask, resulting file mode and reaping under file descriptor pressure. |
+| `tempfile` | 108 | 118 | 2 | All 118 originals finished in ordinary and boxed O0/O3. Each native run passed 108 and skipped 10. Stock passed 112 and skipped six. Two extra native skips are documented omissions. The other two require working os.fork and os.spawnl. |
 | `textwrap` | 68 | 68 | 0 | Complete suite on `main`, all 68 passed. |
-| `threading` | 83 | 228 | 0 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
-| `typing` | 245 | 712 | 0 | All 83 ProtocolTests methods and 132 subtests passed in stock and both public native runs, including deferred annotations. Nineteen other selected typing originals passed at ordinary O0/O3. The cumulative 245 of 712 includes earlier verified originals. |
+| `threading` | 83 | 228 | 1 | All 228 original registrations ran in ordinary and boxed builds at both levels. Each passed 83, skipped 32 and reported failures on 113 IDs. The bound worker callback still blocks 58 Bunch fixture cases. |
+| `typing` | 388 | 712 | 0 | Complete class replays added 109 original parents. Stock and public O0/O3 matched every child subtest, and all class processes finished. The cumulative count includes earlier selected runs. |
 | `unittest` | 275 | 1,090 | 0 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 169 | 178 | 0 | Both unchanged scripts exited 0 on public Linux in ordinary and runtime-import O0 and O3. Of 178 originals, 169 passed in the parent, including two verified address normalizations. Three matched in a child only. Two Windows cases and four cases requiring SSL skipped. Ordinary checked compilation still stopped on both files. |
-| **Total** | **7,332** | **13,328** | **9** | **3 complete suites on `main`** |
+| **Total** | **7,911** | **13,328** | **14** | **3 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
+
+### Additional module families
+
+CPython 3.14.5 discovers **1,217 test occurrences** in these six families on Linux. They use the same pairing rule and have a separate total. A dash marks a pending native baseline.
+
+| Module | Paired passes | Upstream tests | Initial coverage target |
+| --- | ---: | ---: | --- |
+| `contextlib` | — | 149 | Context managers, exception propagation, and cleanup order |
+| `inspect` | — | 362 | Callable signatures, argument binding, and decorator unwrapping |
+| `ssl` | — | 195 | SSL contexts, certificates, and loopback TLS connections |
+| `types` | — | 141 | Bound methods, module objects, namespaces, and read-only mappings |
+| `warnings` | — | 187 | Filter selection, warning capture, and caller attribution |
+| `weakref` | — | 183 | Reference callbacks, weak containers, and finalizers |
 
 ## Design
 
@@ -207,6 +221,10 @@ cd imre
 cargo build --workspace --release --locked
 ./target/release/imre --version
 ```
+
+Imre defaults to native optimization level 3. Set `IMRE_DEFAULT_NATIVE_OPT_LEVEL`
+to 0, 1, 2, or 3 when building the compiler to choose a different default.
+The compiled-in default also applies to isolated Python invocations (`-I`).
 
 ## Getting started
 

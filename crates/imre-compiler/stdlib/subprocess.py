@@ -2,8 +2,10 @@
 import _imre_subprocess as _process
 from _weakref import ref as _ref
 from time import monotonic as _time
+from warnings import warn as _warn
 import io
 import selectors
+import sys
 
 __all__ = ["Popen", "PIPE", "STDOUT", "call", "check_call", "getstatusoutput",
            "getoutput", "check_output", "run", "CalledProcessError", "DEVNULL",
@@ -23,6 +25,78 @@ def _cleanup():
         if child.poll() is not None:
             _active.remove(child)
     _process.cleanup()
+
+
+def _optim_args_from_interpreter_flags():
+    """Return a list of command-line arguments reproducing the current
+    optimization settings in sys.flags."""
+    args = []
+    value = sys.flags.optimize
+    if value > 0:
+        args.append('-' + 'O' * value)
+    return args
+
+
+def _args_from_interpreter_flags():
+    """Return a list of command-line arguments reproducing the current
+    settings in sys.flags, sys.warnoptions and sys._xoptions."""
+    flag_opt_map = {
+        'debug': 'd',
+        # 'inspect': 'i',
+        # 'interactive': 'i',
+        'dont_write_bytecode': 'B',
+        'no_site': 'S',
+        'verbose': 'v',
+        'bytes_warning': 'b',
+        'quiet': 'q',
+        # -O is handled in _optim_args_from_interpreter_flags()
+    }
+    args = _optim_args_from_interpreter_flags()
+    for flag, opt in flag_opt_map.items():
+        v = getattr(sys.flags, flag)
+        if v > 0:
+            args.append('-' + opt * v)
+
+    if sys.flags.isolated:
+        args.append('-I')
+    else:
+        if sys.flags.ignore_environment:
+            args.append('-E')
+        if sys.flags.no_user_site:
+            args.append('-s')
+        if sys.flags.safe_path:
+            args.append('-P')
+
+    # -W options
+    warnopts = sys.warnoptions[:]
+    xoptions = getattr(sys, '_xoptions', {})
+    bytes_warning = sys.flags.bytes_warning
+    dev_mode = sys.flags.dev_mode
+
+    if bytes_warning > 1:
+        warnopts.remove("error::BytesWarning")
+    elif bytes_warning:
+        warnopts.remove("default::BytesWarning")
+    if dev_mode:
+        warnopts.remove('default')
+    for opt in warnopts:
+        args.append('-W' + opt)
+
+    # -X options
+    if dev_mode:
+        args.extend(('-X', 'dev'))
+    for opt in sorted(xoptions):
+        if opt == 'dev':
+            # handled above via sys.flags.dev_mode
+            continue
+        value = xoptions[opt]
+        if value is True:
+            arg = opt
+        else:
+            arg = '%s=%s' % (opt, value)
+        args.extend(('-X', arg))
+
+    return args
 
 
 def _text_encoding():
@@ -83,7 +157,8 @@ class Popen:
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
                  stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
-                 universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False, umask=-1, pipesize=-1):
+                 universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False,
+                 umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0):
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -99,6 +174,10 @@ class Popen:
             import warnings
             warnings.warn("pass_fds overriding close_fds.", RuntimeWarning)
             close_fds = True
+        if startupinfo is not None:
+            raise ValueError("startupinfo is only supported on Windows platforms")
+        if creationflags != 0:
+            raise ValueError("creationflags is only supported on Windows platforms")
         if (text is not None and universal_newlines is not None
                 and bool(text) != bool(universal_newlines)):
             raise SubprocessError("Cannot disambiguate when both text and universal_newlines "
@@ -114,12 +193,14 @@ class Popen:
         self._communication_started = False
         _cleanup()
         self.args = args
+        self.returncode = None
         self.pipesize = pipesize
         self._sigint_wait_secs = 0.25
         self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
                                        restore_signals, cwd, env, bufsize, pipesize,
                                        encoding if self.text_mode else None,
-                                       errors if self.text_mode else None, shell, start_new_session, umask, pass_fds)
+                                       errors if self.text_mode else None, shell, start_new_session,
+                                       process_group, umask, pass_fds)
         try:
             self.stdin = _process.pipe(self._handle, 0)
             self.stdout = _process.pipe(self._handle, 1)
@@ -139,8 +220,12 @@ class Popen:
             _process.close_wait(self._handle)
             raise
 
-    def __del__(self):
-        if self._handle is not None and _process.finalize(self._handle) and _active is not None:
+    def __del__(self, _warn=_warn):
+        if self._handle is None:
+            return
+        if self.returncode is None:
+            _warn("subprocess %s is still running" % self.pid, ResourceWarning, source=self)
+        if self._internal_poll() is None and _active is not None:
             _active.append(self)
 
     @property
@@ -155,12 +240,15 @@ class Popen:
     def pid(self):
         return _process.pid(self._handle)
 
-    @property
-    def returncode(self):
-        return _process.status(self._handle, False)
+    def _internal_poll(self):
+        if self.returncode is None:
+            status = _process.poll(self._handle)
+            if status is not None:
+                self.returncode = status
+        return self.returncode
 
     def poll(self):
-        return _process.status(self._handle, True)
+        return self._internal_poll()
 
     def wait(self, timeout=None):
         endtime = None if timeout is None else _time() + timeout
@@ -171,10 +259,13 @@ class Popen:
             raise
 
     def _wait(self, timeout):
-        result = _process.wait(self._handle, timeout)
-        if result is None:
-            raise TimeoutExpired(self.args, timeout)
-        return result
+        if self.returncode is None:
+            result = _process.wait(self._handle, timeout, self)
+            if result is not None:
+                self.returncode = result
+            elif self.returncode is None:
+                raise TimeoutExpired(self.args, timeout)
+        return self.returncode
 
     def _wait_after_keyboard_interrupt(self, endtime):
         # The child may also have received SIGINT. Share one brief wait with
@@ -350,7 +441,12 @@ class Popen:
         return stdout, stderr
 
     def send_signal(self, sig):
-        _process.signal(self._handle, sig)
+        self.poll()
+        if self.returncode is None:
+            try:
+                _process.signal(self._handle, sig)
+            except ProcessLookupError:
+                pass
 
     def terminate(self):
         self.send_signal(15)
