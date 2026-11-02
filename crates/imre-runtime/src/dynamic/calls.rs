@@ -5197,7 +5197,7 @@ impl Context {
             || base.is_some_and(|base| {
                 matches!(
                     self.heap.get(base).io_kind(),
-                    Some(stdlib::io::NEWLINE_DECODER | "BufferedRWPair")
+                    Some(stdlib::io::NEWLINE_DECODER | "BufferedRWPair" | "BufferedReader")
                 )
             })
     }
