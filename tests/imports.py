@@ -296,6 +296,11 @@ REJECTED = {
     "reserved_alias": ({"main.py": "from helper import f as int\n", "helper.py": HELPER}, "reserved"),
     "normalized_reserved_alias": ({"main.py": "from helper import f as ℕone\n", "helper.py": HELPER}, "reserved"),
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
+    "operator_provider_shadow": ({
+        "main.py": "import consumer\n",
+        "consumer.py": "from _operator import _compare_digest\n",
+        "_operator.py": HELPER,
+    }, 'shadowing is unsupported: "_operator"'),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
     "token_shadow": ({"main.py": "import token\n", "token.py": HELPER}, 'shadowing is unsupported: "token"'),
     "email_address_parser_unknown_name": ({
@@ -316,6 +321,10 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "nested_operator_compare_digest": {
+        "main.py": "from consumer import equal\nprint(equal(b'ab', b'ab'), equal(b'ab', b'ac'))\n",
+        "consumer.py": "from _operator import _compare_digest as equal\n",
+    },
     "urllib_request_and_error": {
         "main.py": (
             "import urllib.request\n"
