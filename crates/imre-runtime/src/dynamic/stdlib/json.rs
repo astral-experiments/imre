@@ -17,7 +17,9 @@ use crate::{Str, StrOwner};
 /// Recognize an exact dict's bound getter without inspecting an arbitrary parse_constant hook.
 pub(super) fn is_constants_lookup(ctx: &Context, constants: Id, hook: Id) -> bool {
     let Value::Method {
-        receiver, callable, ..
+        receiver,
+        callable,
+        explicit: false,
     } = ctx.heap.get(hook)
     else {
         return false;

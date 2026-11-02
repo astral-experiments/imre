@@ -45,6 +45,9 @@ def current():
                 raise AssertionError(name)
             return object.__getattribute__(self, name)
 
+        def __eq__(self, other):
+            raise AssertionError('unexpected hook comparison')
+
         def __call__(self, name):
             raise LookupError(name)
 
