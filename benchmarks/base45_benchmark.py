@@ -16,6 +16,7 @@ from types import SimpleNamespace
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 REFERENCE = HERE / "reference/base45_codec"
+rust_sources = runpy.run_path(str(REFERENCE.parent / "wrapped_reference.py"))["source_paths"]
 OPERATIONS = ("encode", "decode-bytes", "decode-text")
 shared = SimpleNamespace(**runpy.run_path(str(HERE / "benchmark.py")))
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "base45_validate.py")))
@@ -125,17 +126,6 @@ def measure(workload: dict, commands: dict, directory: Path, args) -> dict:
         **phases,
         "summary": summaries,
         **ratios,
-    }
-
-
-def rust_sources(directory: Path) -> dict[str, Path]:
-    return {
-        str(path.relative_to(directory)): path
-        for path in (
-            directory / "Cargo.toml",
-            directory / "Cargo.lock",
-            *sorted((directory / "src").rglob("*.rs")),
-        )
     }
 
 
