@@ -1511,6 +1511,7 @@ impl IntrinsicModule {
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "get_clock_info") => Intrinsic::ObjectRuntimeExport("time.get_clock_info"),
             (Self::Time, "tzset") => Intrinsic::ObjectRuntimeExport("time.tzset"),
             (Self::Time, "timezone") => Intrinsic::ObjectRuntimeExport("time.timezone"),
             (Self::Time, "altzone") => Intrinsic::ObjectRuntimeExport("time.altzone"),
