@@ -961,6 +961,8 @@ impl Value {
             Self::Bytes(_) => "bytes",
             Self::ByteArray(_) => "bytearray",
             Self::File(file) => match file.as_ref() {
+                super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
+                super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
             },
@@ -1349,6 +1351,11 @@ impl Value {
             Self::CodecInfo { decode, .. } => visit.push(*decode),
             Self::RegexPattern(pattern) => visit.push(pattern.source),
             Self::RegexMatch { groups, .. } => visit.extend(groups.iter().flatten()),
+            Self::File(file) => {
+                if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
+                    visit.push(fd.raw);
+                }
+            }
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented
@@ -1377,7 +1384,6 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
-            | Self::File(_)
             | Self::TextFile(_)
             | Self::NamedFileCloser(_)
             | Self::BufferedRandom(_) => {}

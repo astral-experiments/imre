@@ -17,7 +17,7 @@ pub(super) const METHODS: &[&str] = &[
 ];
 
 pub(in crate::dynamic) struct RawFile {
-    fd: Cell<Option<RawFd>>,
+    pub(super) fd: Cell<Option<RawFd>>,
     closefd: bool,
     mode: &'static str,
     blksize: Cell<i64>,
@@ -47,7 +47,7 @@ impl RawFile {
         operation(self.fd.get().ok_or_else(closed)?)
     }
 
-    fn close(&self) -> Result<()> {
+    pub(super) fn close(&self) -> Result<()> {
         if let Some(fd) = self.fd.take()
             && self.closefd
         {
@@ -123,16 +123,7 @@ fn mode(raw: &str) -> Result<(u32, &'static str)> {
     Ok((flags, if update { both } else { single }))
 }
 
-pub(in crate::dynamic) fn open_raw(
-    ctx: &mut Context,
-    filename: Id,
-    mode_arg: Option<Id>,
-    encoding: Option<Id>,
-) -> Result<Id> {
-    let mode = mode_arg
-        .map(|v| ctx.str_value(v))
-        .transpose()?
-        .unwrap_or("r");
+fn validate_open_mode(mode: &str) -> Result<()> {
     let binary = mode.contains('b');
     if mode
         .chars()
@@ -152,19 +143,247 @@ pub(in crate::dynamic) fn open_raw(
             "must have exactly one of create/read/write/append mode",
         ));
     }
-    if binary && encoding.is_some_and(|v| v != NONE) {
+    Ok(())
+}
+
+fn check_open_string(ctx: &mut Context, value: Id, name: &str, expected: &str) -> Result<()> {
+    let storage = ctx.string_storage(value).ok_or_else(|| {
+        Error::new(
+            "TypeError",
+            format!(
+                "open() argument '{name}' must be {expected}, not {}",
+                if value == NONE {
+                    "None"
+                } else {
+                    ctx.type_name(value)
+                }
+            ),
+        )
+    })?;
+    if matches!(ctx.heap.get(storage), Value::SurrogateStr(_)) {
+        ctx.encode_utf8_codepoints(value, false, "strict")?;
+    }
+    if ctx.str_value(storage)?.contains('\0') {
+        return Err(Error::new("ValueError", "embedded null character"));
+    }
+    Ok(())
+}
+
+/// Resolve the public open() arguments before opening the underlying file.
+pub(in crate::dynamic) fn open(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [file, mode, buffering, encoding, errors, newline, closefd] = builtins::bind(
+        "open",
+        args,
+        kwargs,
+        [
+            "file",
+            "mode",
+            "buffering",
+            "encoding",
+            "errors",
+            "newline",
+            "closefd",
+        ],
+    )?;
+    let file = file.ok_or_else(|| Error::new("TypeError", "open requires a file"))?;
+    if let Some(mode) = mode {
+        check_open_string(ctx, mode, "mode", "str")?;
+    }
+    let buffering = buffering
+        .map(|value| ctx.index_integer(value))
+        .transpose()?
+        .map_or(Some(-1), |n| n.to_i64().and_then(|n| i32::try_from(n).ok()))
+        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))?;
+
+    let encoding = encoding.filter(|&v| v != NONE);
+    let errors = errors.filter(|&v| v != NONE);
+    let newline = newline.filter(|&v| v != NONE);
+    for (name, id) in [
+        ("encoding", encoding),
+        ("errors", errors),
+        ("newline", newline),
+    ] {
+        if let Some(id) = id {
+            check_open_string(ctx, id, name, "str or None")?;
+        }
+    }
+    let owns = closefd.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
+    // Numeric inputs reach FileIO before Python attempts their index or filesystem protocol.
+    let numeric = matches!(
+        ctx.heap.get(ctx.scalar_value(file)),
+        Value::Int(_) | Value::Bool(_) | Value::Float(_) | Value::Complex(_)
+    ) || ["__index__", "__int__", "__float__"]
+        .iter()
+        .any(|name| ctx.slot(file, name).is_some());
+    let raw_arg = if numeric {
+        file
+    } else {
+        super::super::posixpath::fspath(ctx, file)?
+    };
+    let mode_text = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
+    validate_open_mode(mode_text)?;
+    let binary = mode_text.contains('b');
+    if binary {
+        for (name, value, article) in [
+            ("encoding", encoding, "an"),
+            ("errors", errors, "an"),
+            ("newline", newline, "a"),
+        ] {
+            if value.is_some() {
+                return Err(Error::new(
+                    "ValueError",
+                    format!("binary mode doesn't take {article} {name} argument"),
+                ));
+            }
+        }
+    }
+    if buffering == 0 {
+        let raw_mode = mode_text.replace('t', "");
+        return open_raw(ctx, raw_arg, raw_mode, binary, owns);
+    }
+    // FileIO falls back to __fspath__ only when conversion to a C descriptor fails.
+    if let Some(fd) = ctx
+        .index_value(raw_arg)
+        .ok()
+        .flatten()
+        .and_then(|n| n.to_i64())
+        .and_then(|n| RawFd::try_from(n).ok())
+    {
+        if fd < 0 {
+            return Err(Error::new("ValueError", "negative file descriptor"));
+        }
+        let mode = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
+        if mode.contains('+') {
+            return Err(Error::new(
+                "NotImplementedError",
+                "buffered update descriptors are unsupported",
+            ));
+        }
+        let binary = mode.contains('b');
+        let reading = mode.contains('r');
+        let raw_mode = mode.replace('t', "");
+        if buffering > 0 {
+            return Err(Error::new(
+                "ValueError",
+                "explicit buffer sizes are unsupported",
+            ));
+        }
+        ctx.module("io")?;
+        let raw = ctx.instance(ctx.builtins["_io.FileIO"], None);
+        initialize_file(
+            ctx,
+            raw,
+            raw_arg,
+            self::mode(&raw_mode),
+            owns,
+            Some(fd),
+            None,
+        )?;
+        let handle = state(ctx, raw).expect("initialized FileIO");
+        let capacity = crate::text_output::binary_capacity(handle.blksize.get().into());
+        let buffer =
+            files::BinaryFile::Descriptor(super::BufferedFd::new(raw, handle, reading, capacity))
+                .into_value()?;
+        let buffer = ctx.heap.alloc_file_writer(buffer)?;
+        if binary {
+            return Ok(buffer);
+        }
+        let wrapper = ctx.builtins["_io.TextIOWrapper"];
+        let result = ctx.call(
+            wrapper,
+            vec![
+                buffer,
+                encoding.unwrap_or(NONE),
+                errors.unwrap_or(NONE),
+                newline.unwrap_or(NONE),
+            ],
+            Vec::new(),
+        );
+        if result.is_err() {
+            let _ = state(ctx, raw).expect("initialized FileIO").close();
+        }
+        return result;
+    }
+    let filename = if numeric {
+        super::super::posixpath::fspath(ctx, raw_arg)?
+    } else {
+        raw_arg
+    };
+    if !owns {
         return Err(Error::new(
             "ValueError",
-            "binary mode doesn't take an encoding argument",
+            "Cannot use closefd=False with file name",
         ));
     }
-    let raw_mode = mode.replace('t', "");
+    if buffering > 0 {
+        return Err(Error::new(
+            "ValueError",
+            "explicit buffer sizes are unsupported",
+        ));
+    }
+    let path = ctx.str_value(filename)?;
+    let mode = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
+    if errors
+        .map(|v| ctx.str_value(v))
+        .transpose()?
+        .is_some_and(|v| v != "strict")
+        || newline.is_some()
+    {
+        return Err(Error::new(
+            "NotImplementedError",
+            "non-default text errors or newline are unsupported",
+        ));
+    }
+    let encoding = encoding.map(|v| ctx.str_value(v)).transpose()?;
+    if !matches!(
+        crate::objects::Codec::for_stream(encoding)?,
+        crate::objects::Codec::Utf8 { signature: false }
+    ) {
+        return Err(Error::new(
+            "ValueError",
+            "text files require UTF-8 encoding",
+        ));
+    }
+    let text_mode = match mode {
+        "r" | "rt" | "tr" => Some(0),
+        "w" | "wt" | "tw" => Some(1),
+        _ => None,
+    };
+    let writing = mode.contains(['w', 'a', 'x']);
+    let file = match text_mode {
+        Some(mode) => crate::objects::TextFile::open(path, mode)
+            .map(Value::TextFile)
+            .map_err(Error::from),
+        None => files::BinaryFile::open(path, mode).and_then(files::BinaryFile::into_value),
+    };
+    match file {
+        Ok(file) if writing => ctx.heap.alloc_file_writer(file),
+        Ok(file) => Ok(ctx.alloc(file)),
+        Err(error) => Err(ctx.with_open_filename(error, raw_arg)?),
+    }
+}
+
+fn open_raw(
+    ctx: &mut Context,
+    filename: Id,
+    raw_mode: String,
+    binary: bool,
+    owns: bool,
+) -> Result<Id> {
     // CPython creates/truncates the raw file before rejecting unbuffered text.
     ctx.module("io")?;
     let class = ctx.builtins["_io.FileIO"];
     // The reported mode of w+ is rb+, but the constructor must still create/truncate.
     let mode = ctx.text(raw_mode);
-    let file = ctx.call(class, vec![filename, mode], Vec::new())?;
+    let file = ctx.call(
+        class,
+        vec![filename, mode, builtins::boolean(owns)],
+        Vec::new(),
+    )?;
     if !binary {
         let raw = state(ctx, file).unwrap();
         raw.close()?;
@@ -193,6 +412,18 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
             .unwrap_or("r"),
     );
     let owns = closefd.map(|v| ctx.truth(v)).transpose()?.unwrap_or(true);
+    initialize_file(ctx, receiver, path, selected_mode, owns, None, opener)
+}
+
+fn initialize_file(
+    ctx: &mut Context,
+    receiver: Id,
+    path: Id,
+    selected_mode: Result<(u32, &'static str)>,
+    owns: bool,
+    selected_fd: Option<RawFd>,
+    opener: Option<Id>,
+) -> Result<Id> {
     if let Some(raw) = state(ctx, receiver) {
         raw.close()?;
     }
@@ -206,12 +437,13 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         )?;
     }
     // CPython tries PyLong_AsInt, then the filesystem protocol if conversion fails.
-    let descriptor = ctx
-        .index_value(path)
-        .ok()
-        .flatten()
-        .and_then(|n| n.to_i64())
-        .and_then(|n| RawFd::try_from(n).ok());
+    let descriptor = selected_fd.or_else(|| {
+        ctx.index_value(path)
+            .ok()
+            .flatten()
+            .and_then(|n| n.to_i64())
+            .and_then(|n| RawFd::try_from(n).ok())
+    });
     let encoded;
     let pathname = match descriptor {
         Some(fd) if fd < 0 => return Err(Error::new("ValueError", "negative file descriptor")),
