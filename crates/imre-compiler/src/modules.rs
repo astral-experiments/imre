@@ -73,7 +73,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "unittest/case.py",
             include_str!("../stdlib/unittest/boxed_case.py"),
         )),
-        "pickle" => Some(("pickle.py", include_str!("../stdlib/pickle.py"))),
+        "pickle" => Some((
+            "pickle.py",
+            concat!(
+                include_str!("../stdlib/pickle.py"),
+                "\n",
+                include_str!("../stdlib/pickle_writer.py")
+            ),
+        )),
         // CPython 3.14.5 Lib/_colorize.py. See licenses/CPython.txt.
         "_colorize" => Some(("_colorize.py", include_str!("../stdlib/_colorize.py"))),
         "_compat_pickle" => Some((
@@ -887,6 +894,7 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
     pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
@@ -1170,6 +1178,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("_codecs.escape_decode")
             }
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
+            (Self::Pickle, "Pickler") => Intrinsic::PICKLER,
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),
             (Self::Pickle, "loads") => Intrinsic::ObjectRuntimeExport("pickle.loads"),
             (Self::Pickle, "_loads") => Intrinsic::ObjectRuntimeExport("pickle._loads"),
