@@ -74,6 +74,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__repr__",
                 "__str__",
                 "ctime",
+                "timestamp",
                 "timetuple",
             ],
         ),
@@ -865,6 +866,7 @@ pub(super) fn call(
         | "time.__str__"
         | "timedelta.__str__"
         | "timedelta.__bool__"
+        | "datetime.timestamp"
         | "datetime.timetuple"
         | "date.timetuple"
         | "date.toordinal"
@@ -928,6 +930,7 @@ pub(super) fn call(
                         value.text()
                     })
                 }
+                "timestamp" => ctx.alloc(Value::Float(value.timestamp()?)),
                 "total_seconds" => ctx.alloc(Value::Float(value.seconds())),
                 "toordinal" => ctx.int(value.ordinal()),
                 "ctime" => {
