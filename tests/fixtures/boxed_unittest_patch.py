@@ -52,9 +52,9 @@ with patch('__main__.with_default.__defaults__', (9,)):
     assert with_default() == 9
 assert with_default() == 7
 
-import __main__
+main_module = sys.modules[__name__]
 with patch('__main__.open', with_default):
-    assert __main__.open() == 7
-assert not hasattr(__main__, 'open')
+    assert main_module.open() == 7
+assert not hasattr(main_module, 'open')
 
 print("patch restored")
