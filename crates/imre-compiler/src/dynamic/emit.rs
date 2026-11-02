@@ -46,8 +46,9 @@ pub(crate) fn emit(
         ..Output::default()
     };
     let config = output.data(config.as_bytes());
+    // Entry-only registration must not change fingerprints of unrelated packed providers.
     let mut main = format!(
-        "define i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
+        "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
     let mut declarations = HashSet::new();
     for (unit, (name, path, source)) in modules.iter().enumerate() {
@@ -69,9 +70,15 @@ pub(crate) fn emit(
         } else {
             output.module(unit, name, path, source, &file, bundled)?
         };
+        // Retain the text of virtual providers alongside the installed initializer.
+        let (text, len) = if bundled {
+            (output.data(source.as_bytes()), source.len())
+        } else {
+            ("null".to_owned(), 0)
+        };
         writeln!(
             main,
-            "  call void @imre_dyn_register(ptr %ctx, ptr {module_name}, ptr {file}, ptr {code})"
+            "  call void @imre_dyn_register_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {len}, ptr {code})"
         )
         .unwrap();
     }
@@ -814,7 +821,7 @@ mod tests {
             let declared = format!("declare i64 @{symbol}(ptr, i64)");
             assert_eq!(ir.lines().filter(|line| *line == declared).count(), 1);
             ir.lines()
-                .filter(|line| line.contains("call void @imre_dyn_register("))
+                .filter(|line| line.contains("call void @imre_dyn_register_source("))
                 .map(|line| line.ends_with(&format!("@{symbol})")))
                 .collect::<Vec<_>>()
         };
