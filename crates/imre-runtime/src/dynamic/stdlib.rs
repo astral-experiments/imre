@@ -59,6 +59,25 @@ pub(super) mod urllib;
 mod warnings;
 mod zipimport;
 
+/// Format a type for CPython diagnostics, including a non-default module and its qualname.
+fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
+    let name = match ctx.own_class_attr(class, "__qualname__") {
+        Some(name) => name,
+        None => ctx.text(ctx.class_name(class).to_owned()),
+    };
+    let Some(module) = ctx.own_class_attr(class, "__module__") else {
+        return Ok(name);
+    };
+    if ctx.string_storage(module).is_none()
+        || matches!(ctx.str_value(module), Ok("builtins" | "__main__"))
+    {
+        return Ok(name);
+    }
+    let dot = ctx.text(".");
+    let prefix = ctx.concat_strings(module, dot)?;
+    ctx.concat_strings(prefix, name)
+}
+
 /// The JIT observer is a sys attribute with its own namespace, outside the import cache.
 pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
     let class = ctx.builtin("module");
@@ -518,8 +537,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("datetime", "UTC") => datetime::utc(ctx),
         (
             "time",
-            "time" | "time_ns" | "monotonic" | "perf_counter" | "gmtime" | "localtime" | "mktime"
-            | "strftime" | "ctime" | "struct_time",
+            "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep" | "gmtime" | "localtime"
+            | "mktime" | "strftime" | "ctime" | "struct_time",
         ) => ctx.builtin(&format!("time.{name}")),
         ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
             ctx.builtin(&format!("datetime.{name}"))
