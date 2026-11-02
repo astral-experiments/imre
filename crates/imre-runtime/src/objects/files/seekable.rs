@@ -275,6 +275,7 @@ impl FileState {
                 "cannot fit 'int' into an offset-sized integer",
             )
         })?;
+        self.check_random_reentry()?;
         self.seek(match whence {
             0 => SeekFrom::Start(disk_offset(i128::from(offset))?),
             1 => SeekFrom::Current(offset),
