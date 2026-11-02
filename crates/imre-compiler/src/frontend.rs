@@ -9268,9 +9268,7 @@ impl<'a> Checker<'a> {
         {
             return self.environ_method(attribute, call);
         }
-        if let ast::Expr::Attribute(attr) = call.func.as_ref()
-            && matches!(attr.attr.as_str(), "__reduce__" | "__reduce_ex__")
-        {
+        if let ast::Expr::Attribute(attr) = call.func.as_ref() {
             self.calendar_class_attribute(attr)?;
         }
         if let ast::Expr::Attribute(attr) = call.func.as_ref()

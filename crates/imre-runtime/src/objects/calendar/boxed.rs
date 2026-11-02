@@ -129,6 +129,12 @@ impl Calendar {
         make_zone(offset.0.clone(), name.map(text::owned_string)).map(Self)
     }
 
+    /// Format the stored fixed UTC offset for %z or %:z.
+    pub(crate) fn strftime_offset(&self, colon: bool) -> String {
+        let text = offset_text(offset(&self.0));
+        if colon { text } else { text.replace(':', "") }
+    }
+
     pub(crate) fn is_utc(&self) -> bool {
         crate::ObjectOwner::ptr_eq(&self.0, &utc())
     }
