@@ -186,6 +186,7 @@ pub(super) fn call(
         "_thread.start_new_thread",
         &[*function, *positional, keyword.unwrap_or(super::NONE)],
     )?;
+    super::thread_worker::check_start(ctx)?;
     let Some((callback, roots)) = Callback::capture(ctx, *function, *positional, &values, keyword)?
     else {
         return Err(Error::new(
