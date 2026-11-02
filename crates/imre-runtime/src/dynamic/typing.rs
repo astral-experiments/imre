@@ -904,23 +904,94 @@ pub(super) fn bind_generic_parameters(
 pub(super) const VARIANCE_FIELDS: [&str; 3] =
     ["__covariant__", "__contravariant__", "__infer_variance__"];
 
-/// Publish the implemented TypeVar class members to passive lookup and to vars(TypeVar).
-pub(super) fn install_typevar_namespace(ctx: &mut Context, class: Id) {
-    let has_default = ctx.builtin("typing.TypeVar.has_default");
-    let mut entries = vec![(ctx.text("has_default"), has_default)];
-    for field in VARIANCE_FIELDS {
-        let member = ctx.readonly_member("typing.TypeVar", field);
-        entries.push((ctx.text(field), member));
+/// Metadata for implemented class-owned methods and read-only fields of native type parameters.
+pub(super) struct ParameterClass {
+    pub(super) owner: &'static str,
+    pub(super) methods: &'static [&'static str],
+    fields: &'static [&'static str],
+    doc: &'static str,
+}
+
+impl ParameterClass {
+    pub(super) fn lookup(name: &str) -> Option<Self> {
+        let (owner, methods, fields, doc): (_, &[_], &[_], _) = match name {
+            "typing.TypeVar" => (
+                "typing.TypeVar",
+                &["has_default"],
+                &VARIANCE_FIELDS[..],
+                include_str!("../../native/typing-TypeVar-doc.txt"),
+            ),
+            "typing.TypeVarTuple" => (
+                "typing.TypeVarTuple",
+                &["__iter__", "__reduce__", "has_default"],
+                &["__name__"],
+                include_str!("../../native/typing-TypeVarTuple-doc.txt"),
+            ),
+            "typing.ParamSpec" => (
+                "typing.ParamSpec",
+                &[
+                    "__typing_subst__",
+                    "__typing_prepare_subst__",
+                    "has_default",
+                    "__reduce__",
+                ],
+                &[
+                    "__name__",
+                    "__bound__",
+                    "__covariant__",
+                    "__contravariant__",
+                    "__infer_variance__",
+                ],
+                include_str!("../../native/typing-ParamSpec-doc.txt"),
+            ),
+            "typing.ParamSpecArgs" => (
+                "typing.ParamSpecArgs",
+                &["__eq__", "__ne__"],
+                &["__origin__"],
+                include_str!("../../native/typing-ParamSpecArgs-doc.txt"),
+            ),
+            "typing.ParamSpecKwargs" => (
+                "typing.ParamSpecKwargs",
+                &["__eq__", "__ne__"],
+                &["__origin__"],
+                include_str!("../../native/typing-ParamSpecKwargs-doc.txt"),
+            ),
+            _ => return None,
+        };
+        Some(Self {
+            owner,
+            methods,
+            fields,
+            doc,
+        })
     }
-    let doc = ctx.text(include_str!("../../native/typing-TypeVar-doc.txt"));
-    entries.push((ctx.text("__doc__"), doc));
-    entries.push((ctx.text("__module__"), ctx.text("typing")));
-    let dictionary = ctx.dict(entries);
-    ctx.native_type_dicts.insert(class, dictionary);
+
+    pub(super) fn install(&self, ctx: &mut Context, class: Id) {
+        let mut entries = Vec::new();
+        for &name in self.methods {
+            let method = ctx.builtin(&format!("{}.{name}", self.owner));
+            entries.push((ctx.text(name), method));
+        }
+        for &name in self.fields {
+            let member = ctx.readonly_member(self.owner, name);
+            entries.push((ctx.text(name), member));
+        }
+        if matches!(
+            self.owner,
+            "typing.ParamSpecArgs" | "typing.ParamSpecKwargs"
+        ) {
+            entries.push((ctx.text("__hash__"), NONE));
+        }
+        entries.push((ctx.text("__doc__"), ctx.text(self.doc)));
+        entries.push((ctx.text("__module__"), ctx.text("typing")));
+        let dictionary = ctx.dict(entries);
+        ctx.native_type_dicts.insert(class, dictionary);
+    }
 }
 
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
-    if matches!(ctx.heap.get(value), Value::Native(class) if class == "typing.TypeVar")
+    if name != "__name__"
+        && matches!(ctx.heap.get(value), Value::Native(class) if class.starts_with("typing.") && ctx.native_type_dicts.contains_key(&value))
         && let Some(member) = ctx.own_class_attr(value, name)
     {
         return Some(Ok(member));
