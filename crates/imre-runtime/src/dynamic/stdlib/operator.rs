@@ -260,10 +260,7 @@ impl Operation {
                 Ok(NONE)
             }
             Self::Index if matches!(ctx.heap.get(obj), Value::Int(_)) => Ok(obj),
-            Self::Index => {
-                let value = ctx.index_integer(obj)?;
-                Ok(ctx.alloc(Value::Int(value)))
-            }
+            Self::Index => Ok(ctx.exact_index_result(obj)?.0),
             Self::LengthHint => ctx.length_hint(obj, args.get(1).copied()),
         }
     }
