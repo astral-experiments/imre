@@ -435,6 +435,7 @@ impl Context {
             Value::Method { .. } => "method",
             Value::ClassMethod(_) => "classmethod",
             Value::ThreadLocal(_) => super::thread_local::CLASS,
+            Value::ThreadHandle(_) => "_thread._ThreadHandle",
             Value::PrimitiveLock(_) => super::thread_lock::CLASS,
             Value::FormatIterator { kind, .. } => match kind {
                 FormatKind::Markup => "formatteriterator",
@@ -812,6 +813,7 @@ pub(super) enum Value {
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
+    ThreadHandle(std::rc::Rc<super::thread_worker::Handle>),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
     Traceback {
@@ -1289,6 +1291,7 @@ impl Value {
             | Self::Hash(_)
             | Self::LoggerHandle(_)
             | Self::HandlerLock(_)
+            | Self::ThreadHandle(_)
             | Self::PrimitiveLock(_)
             | Self::Poll(_)
             | Self::Socket(_)
