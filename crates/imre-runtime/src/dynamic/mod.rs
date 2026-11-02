@@ -2836,7 +2836,7 @@ impl Context {
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
-                for name in ["lockf", "posix_fadvise", "ptsname", "splice"] {
+                for name in ["get_terminal_size", "lockf", "posix_fadvise", "ptsname", "splice"] {
                     let function = self.builtin(&format!("posix.{name}"));
                     self.bind(scope, name, function);
                 }
@@ -2922,6 +2922,7 @@ impl Context {
                 if source.is_none() {
                     let posix = self.module("posix")?;
                     for attr in [
+                        "get_terminal_size",
                         "ptsname",
                         "O_NOCTTY",
                         "splice",
