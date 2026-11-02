@@ -2571,6 +2571,7 @@ impl<'a> Checker<'a> {
         let name = match attribute.attr.as_str() {
             _ if operation => "set binary operator",
             "__iand__" | "__ior__" | "__isub__" => "set in-place operator",
+            "union" => "set.union",
             "difference_update" => "set.difference_update",
             "remove" => "set.remove",
             "update" => "set.update",
@@ -2582,14 +2583,14 @@ impl<'a> Checker<'a> {
         {
             return Some(name);
         }
-        if (operation || attribute.attr.as_str() == "issubset")
+        if (operation || matches!(attribute.attr.as_str(), "issubset" | "union"))
             && (receiver == Some(Type::FrozenStrings)
                 || self.unshadowed_builtin(&attribute.value, "frozenset"))
         {
-            return Some(if operation {
-                name
-            } else {
-                "frozenset.issubset"
+            return Some(match attribute.attr.as_str() {
+                "issubset" => "frozenset.issubset",
+                "union" => "frozenset.union",
+                _ => name,
             });
         }
         None
@@ -9906,21 +9907,15 @@ impl<'a> Checker<'a> {
             if attribute.attr.as_str() == "union"
                 && let Some(key) = self.types.set_element(receiver.ty)
             {
-                self.reject_builtin_keywords(call)?;
                 let [arg] = call.arguments.args.as_ref() else {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "set.union requires one set or mapping key view",
-                    ));
+                    return Err(self.object_builtin_error("set.union", call));
                 };
+                if !call.arguments.keywords.is_empty() || arg.is_starred_expr() {
+                    return Err(self.object_builtin_error("set.union", call));
+                }
                 let (other, other_key) = self.union_operand(arg)?;
                 if other_key != Some(key) {
-                    return Err(error(
-                        self.source,
-                        arg,
-                        "set.union requires matching sets or mapping keys",
-                    ));
+                    return Err(self.object_builtin_error("set.union", call));
                 }
                 return Ok(Expr {
                     ty: receiver.ty,
