@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use crate::objects::{
-    DecodedJson, JsonNumber, decode_json, decode_json_bytes, owned_bytes_input,
+    DecodedJson, JsonNumber, decode_json_bytes, decode_json_tokens, owned_bytes_input,
     write_json_codepoints, write_json_fragment, write_json_string,
 };
 use crate::{Str, StrOwner};
@@ -21,11 +21,33 @@ pub(super) fn loads(ctx: &mut Context, input: Id, raise_error: Option<Id>) -> Re
                 let error = crate::objects::json_bom_error(document);
                 return Err(decode_error(ctx, input, raise_error, true, error));
             }
-            parse(ctx, &text)
+            parse(ctx, &text, None)
+        }
+        Value::SurrogateStr(points) => {
+            // JSON punctuation, escapes, whitespace and numbers are ASCII. One byte per original
+            // code point retains character offsets; string bodies always come from the real input.
+            let mut syntax = String::new();
+            syntax
+                .try_reserve_exact(points.len())
+                .map_err(|_| crate::Error::allocation())?;
+            for &point in points {
+                syntax.push(if point < 128 {
+                    char::from(point as u8)
+                } else {
+                    '?'
+                });
+            }
+            if points.first() == Some(&0xfeff) {
+                let owner =
+                    StrOwner::try_new(Str::from(syntax)).map_err(|_| crate::Error::allocation())?;
+                let error = crate::objects::json_bom_error(owner);
+                return Err(decode_error(ctx, input, raise_error, true, error));
+            }
+            parse(ctx, &syntax, Some(input))
         }
         Value::Bytes(bytes) => {
             let owner = owned_bytes_input(bytes)?;
-            parse(ctx, &decode_json_bytes(&owner)?)
+            parse(ctx, &decode_json_bytes(&owner)?, None)
         }
         _ => {
             return Err(Error::new(
@@ -54,7 +76,7 @@ fn decode_error(
         return error.into();
     };
     let message = ctx.text(message);
-    let document = if matches!(ctx.heap.get(input), Value::Str(_)) {
+    let document = if matches!(ctx.heap.get(input), Value::Str(_) | Value::SurrogateStr(_)) {
         input
     } else {
         ctx.text(document)
@@ -66,9 +88,78 @@ fn decode_error(
         .unwrap_or_else(|| Error::new("SystemError", "JSON error callback returned"))
 }
 
-fn parse(ctx: &mut Context, text: &str) -> std::result::Result<Id, crate::Error> {
+/// The key memo compares decoded contents, including literal and escaped spellings of a key.
+#[derive(Eq, PartialEq, Hash)]
+enum ParsedString {
+    Text(String),
+    Surrogates(Vec<u32>),
+}
+
+impl ParsedString {
+    fn read(
+        ctx: &Context,
+        syntax: &str,
+        wide: Option<Id>,
+        body: std::ops::Range<usize>,
+    ) -> std::result::Result<Self, crate::Error> {
+        let points = if let Some(id) = wide {
+            let Value::SurrogateStr(points) = ctx.heap.get(id) else {
+                unreachable!()
+            };
+            let points = &points[body];
+            scanstring::decoded_points(points.iter().copied(), points.len())?
+        } else {
+            // Keep the scalar parser's fast path. The syntax cursor has already validated this
+            // token; serde rejects it only if its decoded contents are outside Rust's str domain.
+            let token = &syntax[body.start - 1..body.end + 1];
+            if let Ok(value) = serde_json::from_str::<String>(token) {
+                return Ok(Self::Text(value));
+            }
+            let text = &syntax[body];
+            scanstring::decoded_points(text.chars().map(u32::from), text.len())?
+        };
+        if points.iter().any(|p| (0xd800..=0xdfff).contains(p)) {
+            return Ok(Self::Surrogates(points));
+        }
+        let chars = points.iter().map(|p| char::from_u32(*p).unwrap());
+        let size = chars.clone().map(char::len_utf8).sum();
+        let mut text = String::new();
+        text.try_reserve_exact(size)
+            .map_err(|_| crate::Error::allocation())?;
+        text.extend(chars);
+        Ok(Self::Text(text))
+    }
+
+    fn boxed(self, ctx: &mut Context) -> Id {
+        match self {
+            Self::Text(s) => ctx.text(s),
+            Self::Surrogates(points) => ctx.alloc(Value::SurrogateStr(points)),
+        }
+    }
+
+    fn boxed_key(&self, ctx: &mut Context) -> std::result::Result<Id, crate::Error> {
+        match self {
+            Self::Text(s) => {
+                let mut copy = String::new();
+                copy.try_reserve_exact(s.len())
+                    .map_err(|_| crate::Error::allocation())?;
+                copy.push_str(s);
+                Ok(ctx.text(copy))
+            }
+            Self::Surrogates(points) => {
+                let mut copy = Vec::new();
+                copy.try_reserve_exact(points.len())
+                    .map_err(|_| crate::Error::allocation())?;
+                copy.extend_from_slice(points);
+                Ok(ctx.alloc(Value::SurrogateStr(copy)))
+            }
+        }
+    }
+}
+
+fn parse(ctx: &mut Context, text: &str, wide: Option<Id>) -> std::result::Result<Id, crate::Error> {
     let mut keys = HashMap::new();
-    decode_json(
+    decode_json_tokens(
         text,
         || Str::try_new(text).ok().map(StrOwner::new),
         |value| {
@@ -78,7 +169,7 @@ fn parse(ctx: &mut Context, text: &str) -> std::result::Result<Id, crate::Error>
                 DecodedJson::Bool(false) => FALSE,
                 DecodedJson::Number(JsonNumber::Integer(n)) => ctx.alloc(Value::Int(n)),
                 DecodedJson::Number(JsonNumber::Float(n)) => ctx.alloc(Value::Float(n)),
-                DecodedJson::String(s) => ctx.text(s.to_string()),
+                DecodedJson::String(body) => ParsedString::read(ctx, text, wide, body)?.boxed(ctx),
                 DecodedJson::Array(items) => ctx.alloc(Value::List(items)),
                 DecodedJson::Object(fields) => {
                     let mut entries = Vec::new();
@@ -87,10 +178,15 @@ fn parse(ctx: &mut Context, text: &str) -> std::result::Result<Id, crate::Error>
                     entries.try_reserve(fields.len()).map_err(allocation)?;
                     positions.try_reserve(fields.len()).map_err(allocation)?;
                     keys.try_reserve(fields.len()).map_err(allocation)?;
-                    for (name, value) in fields {
-                        let key = *keys
-                            .entry(name)
-                            .or_insert_with_key(|s| ctx.text(s.to_string()));
+                    for (body, value) in fields {
+                        let name = ParsedString::read(ctx, text, wide, body)?;
+                        let key = match keys.entry(name) {
+                            std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+                            std::collections::hash_map::Entry::Vacant(e) => {
+                                let id = e.key().boxed_key(ctx)?;
+                                *e.insert(id)
+                            }
+                        };
                         let position = *positions.entry(key).or_insert(entries.len());
                         if position == entries.len() {
                             entries.push((key, value));
