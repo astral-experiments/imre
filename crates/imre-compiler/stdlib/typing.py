@@ -6,7 +6,7 @@ import sys as _sys
 import typing as _typing
 from _collections_abc import Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
-from collections import defaultdict as _defaultdict
+from collections import Counter as _Counter, defaultdict as _defaultdict
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
@@ -1559,6 +1559,7 @@ Type.__doc__ = \
 
     At this point the type checker knows that joe has type BasicUser.
     """
+Counter = _SpecialGenericAlias(_Counter, 1)
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
 Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
