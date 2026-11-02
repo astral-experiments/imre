@@ -17,6 +17,7 @@ from types import SimpleNamespace
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 REFERENCE = HERE / "reference/inventory_reconciliation"
+reference_build = SimpleNamespace(**runpy.run_path(str(REFERENCE.parent / "wrapped_reference.py")))
 prior = SimpleNamespace(**runpy.run_path(str(HERE / "layout_benchmark.py")))
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "inventory_validate.py")))
 shared, helpers = prior.shared, prior.helpers
@@ -278,8 +279,8 @@ def benchmark(args) -> dict:
         str(path.relative_to(validator.PACKAGE_ROOT)): shared.sha256(path)
         for path in source_paths
     }
-    rust_sources = helpers.rust_sources(source_root)
-    if rust_sources != helpers.rust_sources(REFERENCE) or shared.sha256(
+    rust_sources = reference_build.source_hashes(source_root)
+    if rust_sources != reference_build.source_hashes(REFERENCE) or shared.sha256(
         source_root / "build.py"
     ) != shared.sha256(REFERENCE / "build.py"):
         raise ValueError(
@@ -445,8 +446,8 @@ def benchmark(args) -> dict:
     protected = [
         *inputs.values(),
         *source_paths,
-        *(source_root / name for name in rust_sources),
-        *(REFERENCE / name for name in rust_sources),
+        *reference_build.source_paths(source_root).values(),
+        *reference_build.source_paths(REFERENCE).values(),
         REFERENCE / "build.py",
     ]
     helpers.boundaries.protect_outputs(
@@ -569,8 +570,8 @@ def benchmark(args) -> dict:
     )
     if (
         current_paths != source_paths
-        or helpers.rust_sources(source_root) != rust_sources
-        or helpers.rust_sources(REFERENCE) != rust_sources
+        or reference_build.source_hashes(source_root) != rust_sources
+        or reference_build.source_hashes(REFERENCE) != rust_sources
         or inventory_baseline_root
         and sorted((inventory_baseline_root / "inventory_reconciliation").rglob("*.py"))
         != inventory_baseline_paths
