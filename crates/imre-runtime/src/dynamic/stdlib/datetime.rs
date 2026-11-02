@@ -52,6 +52,7 @@ pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
             | "datetime.datetime.utcnow"
             | "datetime.datetime.utcfromtimestamp"
             | "datetime.datetime.combine"
+            | "datetime.datetime.strptime"
             | "datetime.date.today"
             | "datetime.date.fromtimestamp"
             | "datetime.date.fromordinal"
@@ -138,6 +139,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "timestamp",
                 "timetuple",
                 "utctimetuple",
+                "strptime",
             ],
         ),
         "datetime.time" => (
@@ -894,6 +896,7 @@ pub(super) fn call(
         "time" => time(ctx, args, kwargs),
         "time.fromisoformat" => time_fromisoformat(ctx, args, kwargs),
         "time.strptime" => time_strptime(ctx, args, kwargs),
+        "datetime.strptime" => datetime_strptime(ctx, args, kwargs),
         "datetime.date"
         | "datetime.time"
         | "datetime.timetz"
@@ -1362,8 +1365,13 @@ fn date_fromordinal(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     ctx.call(class, args, vec![])
 }
 
-fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (class, args) = calendar_class_args(ctx, "datetime.time", "strptime", args)?;
+fn strptime_args(
+    ctx: &mut Context,
+    owner: &'static str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<(Id, Id, Id)> {
+    let (class, args) = calendar_class_args(ctx, owner, "strptime", args)?;
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -1393,6 +1401,40 @@ fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Res
         }
     }
 
+    Ok((class, text, format))
+}
+
+fn datetime_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, text, format) = strptime_args(ctx, "datetime.datetime", args, kwargs)?;
+    let module_mark = ctx.heap.temporary_mark();
+    let module = ctx.import_with_builtins("_strptime")?;
+    let parser_mark = ctx.heap.temporary_mark();
+    let result = ctx
+        .lookup_attr(module, "_strptime_datetime_datetime")
+        .and_then(|parser| {
+            ctx.heap.keep(parser);
+            ctx.call(parser, vec![class, text, format], vec![])
+        });
+    // Release the callable before its module, preserving the result or exception across finalizers.
+    for mark in [parser_mark, module_mark] {
+        let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
+        match &result {
+            Ok(value) => ctx.heap.keep(*value),
+            Err(error) => {
+                for value in error.roots() {
+                    ctx.heap.keep(value);
+                }
+            }
+        }
+        if collect {
+            ctx.collect_unreachable();
+        }
+    }
+    result
+}
+
+fn time_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (class, text, format) = strptime_args(ctx, "datetime.time", args, kwargs)?;
     let module = ctx.module("_strptime")?;
     let parser = ctx.lookup_attr(module, "_strptime_datetime_time")?;
     ctx.call(parser, vec![class, text, format], vec![])
