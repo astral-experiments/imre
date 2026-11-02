@@ -2069,6 +2069,7 @@ impl Context {
                     return Ok(self.int(i64::from(flags)));
                 }
                 "co_name" => return Ok(code.name),
+                "co_qualname" => return Ok(code.qualname),
                 "co_filename" => return Ok(code.filename),
                 "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
                 "co_freevars" => {
@@ -3400,6 +3401,9 @@ impl Context {
                 self.update_dictionary_field(obj, dictionary, name, None)
             }
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
+            Value::Code(_) if name == "co_qualname" => {
+                Err(Error::new("AttributeError", "readonly attribute"))
+            }
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
@@ -4119,7 +4123,7 @@ impl Context {
             Value::Code(_)
                 if matches!(
                     name,
-                    "co_name" | "co_filename" | "co_firstlineno" | "co_flags"
+                    "co_name" | "co_qualname" | "co_filename" | "co_firstlineno" | "co_flags"
                 ) =>
             {
                 return Err(Error::new("AttributeError", "readonly attribute"));
