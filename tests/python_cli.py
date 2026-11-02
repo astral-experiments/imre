@@ -1907,6 +1907,8 @@ def report(text):
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
+        class_locals = fixtures / "boxed_class_locals.py"
+        compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
         compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":
@@ -2148,6 +2150,7 @@ def report(text):
             "boxed_logging_filter.py",
             "boxed_logging_file_error.py",
             "boxed_class_attribute.py",
+            "boxed_class_locals.py",
             "boxed_missing_attribute_owners.py",
             "boxed_request_strings.py",
             "boxed_str_maketrans.py",

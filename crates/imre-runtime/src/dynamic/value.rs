@@ -690,6 +690,11 @@ pub(super) struct Scope {
 }
 
 impl Scope {
+    /// The class body's live dictionary, once exposed through Python code.
+    pub(super) fn class_body_mapping(&self) -> Option<Id> {
+        self.class_body.as_ref().and(self.namespace)
+    }
+
     /// type.__qualname__ lives outside the finished class dictionary.
     pub(super) fn binding_namespace(&self, name: &str) -> Option<Id> {
         self.namespace.filter(|_| {
