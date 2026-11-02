@@ -621,13 +621,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "frozenset"
         }
-        Value::DefaultDict { .. }
-            if matches!(
-                attr,
-                "copy" | "__copy__" | "__missing__" | "__repr__" | "__reduce__"
-            ) =>
-        {
-            "collections.defaultdict"
+        Value::DefaultDict { .. } if super::defaultdict::METHODS.contains(&attr) => {
+            super::defaultdict::CLASS
         }
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         Value::Poll(_) if matches!(attr, "register" | "modify" | "unregister" | "poll") => {

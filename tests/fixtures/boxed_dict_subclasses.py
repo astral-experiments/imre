@@ -254,7 +254,44 @@ def mapping_patterns():
             assert not calls
 
 
+def defaultdict_type_namespace():
+    from collections import defaultdict
+    from types import MappingProxyType
+
+    namespace = vars(defaultdict)
+    assert type(namespace) is MappingProxyType and namespace is not defaultdict.__dict__
+    assert "get" not in namespace and "__name__" not in namespace
+    for name in ("__repr__", "__init__", "__missing__", "copy", "__copy__", "__reduce__"):
+        member = namespace[name]
+        assert member is getattr(defaultdict, name) and member.__objclass__ is defaultdict
+        assert member.__get__(None, defaultdict) is member
+    assert namespace["__module__"] is defaultdict.__module__
+
+    class Child(defaultdict):
+        pass
+
+    child = Child(list)
+    missing = namespace["__missing__"].__get__(child)
+    assert type(missing).__name__ == "builtin_function_or_method"
+    assert missing.__self__ is child and missing("new") is child["new"]
+    copied = namespace["copy"].__get__(child)()
+    assert type(copied) is Child and copied.default_factory is list and copied == child
+    try:
+        namespace["copy"].__get__({})
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("bound defaultdict.copy to a plain dict")
+    try:
+        namespace["copy"] = None
+    except TypeError:
+        assert namespace["copy"] is defaultdict.copy
+    else:
+        raise AssertionError("writable defaultdict namespace")
+
+
 def current():
+    defaultdict_type_namespace()
     from collections import defaultdict
     from types import ModuleType
 
