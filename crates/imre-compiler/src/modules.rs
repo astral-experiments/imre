@@ -227,6 +227,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             concat!(
                 include_str!("../stdlib/logging/stream.py"),
                 "\n",
+                include_str!("../stdlib/logging/records.py"),
+                "\n",
                 include_str!("../stdlib/logging/boxed.py"),
             ),
         )),
