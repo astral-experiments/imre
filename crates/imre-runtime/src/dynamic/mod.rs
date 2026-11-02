@@ -3191,6 +3191,8 @@ impl Context {
                     "addaudithook",
                     "getsizeof",
                     "getrecursionlimit",
+                    "get_asyncgen_hooks",
+                    "set_asyncgen_hooks",
                     "is_finalizing",
                     "setrecursionlimit",
                     "_getframe",

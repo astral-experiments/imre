@@ -9,6 +9,7 @@ use super::{
 use crate::objects::interpreter_stdlib as system;
 
 pub(super) mod ast;
+mod asyncgen_hooks;
 pub(super) mod audit;
 mod binascii;
 pub(super) mod codecs;
@@ -1332,7 +1333,13 @@ pub(super) fn call(
     if name == "sys.getsizeof" {
         return system_size::getsizeof(ctx, &args[1..], kwargs);
     }
-    if matches!(name, "sys.getrecursionlimit" | "sys.is_finalizing") {
+    if name == "sys.set_asyncgen_hooks" {
+        return asyncgen_hooks::set(ctx, &args[1..], kwargs);
+    }
+    if matches!(
+        name,
+        "sys.getrecursionlimit" | "sys.is_finalizing" | "sys.get_asyncgen_hooks"
+    ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -1343,6 +1350,13 @@ pub(super) fn call(
             return Err(Error::new(
                 "TypeError",
                 format!("{name}() takes no arguments ({} given)", args.len() - 1),
+            ));
+        }
+        if name == "sys.get_asyncgen_hooks" {
+            return Ok(fixed_structseq::record(
+                ctx,
+                fixed_structseq::ASYNCGEN_HOOKS,
+                ctx.threads.asyncgen_hooks.to_vec(),
             ));
         }
         if name == "sys.is_finalizing" {

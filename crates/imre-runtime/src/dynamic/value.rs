@@ -2208,6 +2208,8 @@ pub(super) struct Heap {
     // Worker heaps share the interpreter’s automatic cyclic collection setting.
     pub(super) automatic_gc: Arc<AtomicBool>,
     weak: HashMap<Id, Vec<Id>>,
+    // Callback rollback can borrow a handle without extending the object's lifetime.
+    pub(super) borrowed_hooks: Vec<Id>,
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
@@ -2304,6 +2306,7 @@ impl Heap {
             next_collection: 4096,
             automatic_gc: Arc::new(AtomicBool::new(true)),
             weak: HashMap::new(),
+            borrowed_hooks: Vec::new(),
             has_weak_values: false,
             collect_next_statement: false,
             file_writers: Vec::new(),
@@ -3954,6 +3957,11 @@ impl Heap {
     }
 
     fn sweep(&mut self) -> Option<WeakCallbacks> {
+        for id in &mut self.borrowed_hooks {
+            if self.traces[*id as usize].get() == UNMARKED {
+                *id = NONE;
+            }
+        }
         self.ordinary_finalizers
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
         self.file_writers.retain(|&id| {
