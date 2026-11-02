@@ -189,7 +189,10 @@ pub(super) fn open_code(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
 
 /// Install public metadata and the types of native buffered file handles.
 pub(in super::super) fn install(ctx: &mut Context, module: Id) {
-    let names = PUBLIC_NAMES.iter().map(|&name| ctx.text(name)).collect();
+    let names = PUBLIC_NAMES
+        .iter()
+        .map(|name| ctx.heap.code_name(name))
+        .collect();
     let exports = ctx.alloc(Value::List(names));
     ctx.bind(module, "__all__", exports);
     for (name, origin) in [("SEEK_SET", 0), ("SEEK_CUR", 1), ("SEEK_END", 2)] {
