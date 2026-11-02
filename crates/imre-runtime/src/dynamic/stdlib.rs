@@ -1142,6 +1142,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("_opcode.") {
         return opcode::call(ctx, method, &args[1..], kwargs);
     }
+    if name == "types.SimpleNamespace.__new__" {
+        return super::namespace_init::allocate(ctx, args);
+    }
     if let Some(method) = name.strip_prefix("types.SimpleNamespace.") {
         return super::namespace::method(ctx, method, args, kwargs);
     }
