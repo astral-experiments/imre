@@ -1250,6 +1250,13 @@ def main():
         )
         compare("-IB", years, native_args=("run", years, "--quiet"))
 
+        names = root / "calendar_type_names.py"
+        names.write_text(
+            "from datetime import date, datetime, timedelta\n"
+            "print(date.__module__, datetime.__qualname__, timedelta.__module__)\n"
+        )
+        compare("-IB", names, native_args=("run", names, "--quiet"))
+
         if os.name == "posix":
             compare(
                 "-IB", "-c",

@@ -256,6 +256,11 @@ class Outer:
 
 def check_global_names(protocol):
     from collections import OrderedDict, UserDict, UserList, UserString
+    from datetime import date, datetime, timedelta
+
+    for cls in (date, datetime, timedelta):
+        assert cls.__module__ == "datetime" and cls.__qualname__ == cls.__name__
+        assert pickle.loads(pickle.dumps(cls, protocol)) is cls
 
     for cls in (Outer.Middle, Outer.Middle.Inner, OrderedDict, UserDict, UserList, UserString):
         for fix_imports in (True, False):
