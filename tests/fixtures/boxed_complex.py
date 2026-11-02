@@ -4,6 +4,11 @@ def current():
     events = []
     saved = complex(1, 2)
 
+    namespace = {}
+    exec(compile("z = 2 + 1j; scaled = 2.5e1J", "<complex>", "exec"), namespace)
+    assert namespace["z"] == complex(2, 1)
+    assert namespace["scaled"] == complex(0, 25)
+
     print(abs(3+4j), abs(0j), abs(complex(float("nan"), float("inf"))))
     try:
         abs(complex(1.7e308, 1.7e308))
