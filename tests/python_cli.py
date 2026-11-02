@@ -1397,6 +1397,12 @@ def main():
         )
         compare("-Bm", "module_pkg.child", "-m", "tail")
         compare("-B", "-mmodule_pkg", "tail")
+
+        json_input = root / "input.json"
+        json_input.write_text('{"items": [1, 2]}')
+        for module in ("json", "json.tool"):
+            compare("-B", "-m", module, "--compact", json_input)
+
         entry = root / "entry"
         entry.mkdir()
         (entry / "__main__.py").write_text(

@@ -56,6 +56,11 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "json/decoder.py",
             include_str!("../../stdlib/json/decoder.py"),
         )),
+        "json.__main__" => Some((
+            "json/__main__.py",
+            include_str!("../../stdlib/json/__main__.py"),
+        )),
+        "json.tool" => Some(("json/tool.py", include_str!("../../stdlib/json/tool.py"))),
         "json.scanner" => Some((
             "json/scanner.py",
             include_str!("../../stdlib/json/scanner.py"),
