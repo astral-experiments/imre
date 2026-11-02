@@ -13,29 +13,49 @@ fn sys_binding(ctx: &mut Context, name: &str) -> Result<Option<Id>> {
     Ok(ctx.scope_name(scope, name))
 }
 
-fn record(ctx: &mut Context, value: Id, message: Id, object: Id) -> Result<Id> {
+/// Preserve the original exception and traceback before formatting or calling Python.
+fn exception_fields(ctx: &mut Context, error: Error, supply_frame: bool) -> Result<[Id; 3]> {
+    let value = ctx.raised_instance(error);
+    ctx.heap.keep(value);
     let class = ctx.exact_type(value)?;
-    let tb = ctx.exception_traceback(value)?;
-    Ok(fixed_structseq::record(
+    let mut tb = ctx.exception_traceback(value)?;
+    if tb == NONE
+        && supply_frame
+        && let Some((loc, frame)) = ctx.active_frame(0)?
+    {
+        tb = ctx.alloc(Value::Traceback {
+            frame,
+            next: NONE,
+            lineno: i64::from(loc.line),
+            span: loc.span,
+        });
+        ctx.set_traceback(value, tb)?;
+    }
+    // A deallocator's __repr__ may explicitly clear exc_value.__traceback__.
+    ctx.heap.keep(tb);
+    Ok([class, value, tb])
+}
+
+fn record(ctx: &mut Context, [class, value, tb]: [Id; 3], message: Id, object: Id) -> Id {
+    fixed_structseq::record(
         ctx,
         fixed_structseq::UNRAISABLE_ARGS,
         vec![class, value, tb, message, object],
-    ))
+    )
 }
 
 /// A hook or an audit veto can run Python, including nested collections and finalizers.
 pub(super) fn deallocator(ctx: &mut Context, error: Error, method: Id) {
-    let value = ctx.raised_instance(error);
-    ctx.heap.keep(value);
+    let Ok(fields) = exception_fields(ctx, error, true) else {
+        return;
+    };
     let message = match ctx.checked_format(method, true) {
         Ok(method) => ctx.text(format!(
             "Exception ignored while calling deallocator {method}"
         )),
         Err(_) => NONE,
     };
-    let Ok(args) = record(ctx, value, message, NONE) else {
-        return;
-    };
+    let args = record(ctx, fields, message, NONE);
     ctx.heap.keep(args);
     let Ok(hook) = sys_binding(ctx, "unraisablehook") else {
         return;
@@ -56,10 +76,9 @@ pub(super) fn deallocator(ctx: &mut Context, error: Error, method: Id) {
             Err(error) => (error, "Exception ignored in sys.unraisablehook", hook),
         },
     };
-    let value = ctx.raised_instance(error);
-    ctx.heap.keep(value);
-    let message = ctx.text(message);
-    if let Ok(args) = record(ctx, value, message, object) {
+    if let Ok(fields) = exception_fields(ctx, error, false) {
+        let message = ctx.text(message);
+        let args = record(ctx, fields, message, object);
         ctx.heap.keep(args);
         let _ = display(ctx, args);
     }
@@ -85,6 +104,17 @@ pub(super) fn default_hook(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     Ok(NONE)
 }
 
+fn write(ctx: &mut Context, stream: Id, text: Id) -> Result<()> {
+    let function = ctx.lookup_attr(stream, "write")?;
+    ctx.call(function, vec![text], Vec::new())?;
+    Ok(())
+}
+
+fn write_text(ctx: &mut Context, stream: Id, text: impl Into<String>) -> Result<()> {
+    let text = ctx.text(text);
+    write(ctx, stream, text)
+}
+
 fn display(ctx: &mut Context, args: Id) -> Result<()> {
     let Value::NamedTuple {
         class: Some(fixed_structseq::UNRAISABLE_ARGS),
@@ -104,21 +134,47 @@ fn display(ctx: &mut Context, args: Id) -> Result<()> {
         return Ok(());
     };
     ctx.heap.keep(file);
-    let mut lines = Vec::new();
-    if object != NONE {
-        let prefix = if message == NONE {
-            "Exception ignored in".to_owned()
-        } else {
-            ctx.checked_format(message, false)?
-        };
-        let object = ctx
-            .checked_format(object, true)
-            .unwrap_or_else(|_| "<object repr() failed>".to_owned());
-        lines.push(format!("{prefix}: {object}\n"));
-    } else if message != NONE {
-        lines.push(format!("{}:\n", ctx.checked_format(message, false)?));
+    let convert = ctx.builtin("str");
+    if message != NONE {
+        let prefix = ctx.call(convert, vec![message], Vec::new())?;
+        write(ctx, file, prefix)?;
+    } else if object != NONE {
+        write_text(ctx, file, "Exception ignored in")?;
     }
-    let _ = traceback::format_frames(ctx, tb, None, &mut lines);
+    if object != NONE {
+        write_text(ctx, file, ": ")?;
+        let repr = ctx.builtin("repr");
+        let object = ctx
+            .call(repr, vec![object], Vec::new())
+            .unwrap_or_else(|_| ctx.text("<object repr() failed>"));
+        write(ctx, file, object)?;
+        write_text(ctx, file, "\n")?;
+    } else if message != NONE {
+        write_text(ctx, file, ":\n")?;
+    }
+    if tb != NONE {
+        // PyTraceBack_Print retains the innermost frames, with a default limit of 1000.
+        let limit = sys_binding(ctx, "tracebacklimit")?
+            .and_then(|id| ctx.as_int(id).ok())
+            .map_or(1000, |n| {
+                n.to_i64().unwrap_or_else(|| {
+                    if n.big().sign() == num_bigint::Sign::Minus {
+                        0
+                    } else {
+                        i64::MAX
+                    }
+                })
+            });
+        let mut lines = Vec::new();
+        if limit > 0 {
+            let _ = traceback::format_frames(ctx, tb, Some(-limit), &mut lines);
+        }
+        for line in lines {
+            if write_text(ctx, file, line).is_err() {
+                break;
+            }
+        }
+    }
     let module = ctx
         .lookup_attr(class, "__module__")
         .and_then(|s| ctx.str_value(s).map(str::to_owned))
@@ -127,25 +183,20 @@ fn display(ctx: &mut Context, args: Id) -> Result<()> {
         .lookup_attr(class, "__qualname__")
         .and_then(|s| ctx.str_value(s).map(str::to_owned))
         .unwrap_or_else(|_| "<unknown>".to_owned());
-    let mut tail = if matches!(module.as_str(), "builtins" | "__main__") {
+    let name = if matches!(module.as_str(), "builtins" | "__main__") {
         name
     } else {
         format!("{module}.{name}")
     };
+    write_text(ctx, file, name)?;
     if value != NONE {
-        tail.push_str(": ");
-        tail.push_str(
-            &ctx.checked_format(value, false)
-                .unwrap_or_else(|_| "<exception str() failed>".to_owned()),
-        );
+        write_text(ctx, file, ": ")?;
+        let text = ctx
+            .call(convert, vec![value], Vec::new())
+            .unwrap_or_else(|_| ctx.text("<exception str() failed>"));
+        write(ctx, file, text)?;
     }
-    tail.push('\n');
-    lines.push(tail);
-    for line in lines {
-        let write = ctx.lookup_attr(file, "write")?;
-        let line = ctx.text(line);
-        ctx.call(write, vec![line], Vec::new())?;
-    }
+    write_text(ctx, file, "\n")?;
     let flush = ctx.lookup_attr(file, "flush")?;
     ctx.call(flush, Vec::new(), Vec::new())?;
     Ok(())
