@@ -1,5 +1,6 @@
 import subprocess as _subprocess
 from subprocess import *
+from types import GenericAlias
 from subprocess import _args_from_interpreter_flags, _optim_args_from_interpreter_flags
 
 
@@ -16,6 +17,11 @@ def interpreter_flags():
 
 def current():
     interpreter_flags()
+    for origin, item in ((Popen, bytes), (CompletedProcess, str)):
+        alias = origin[item]
+        assert type(alias) is GenericAlias
+        assert alias.__origin__ is origin
+        assert alias.__args__ == (item,)
     print(_subprocess.__all__)
     for name in _subprocess.__all__:
         assert globals()[name] is getattr(_subprocess, name)
