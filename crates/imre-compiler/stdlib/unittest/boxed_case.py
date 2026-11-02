@@ -26,6 +26,39 @@ def doModuleCleanups():
 
 
 # CPython 3.14.5 Lib/unittest/case.py. See stdlib/docstrings/LICENSE.
+def expectedFailure(test_item):
+    test_item.__unittest_expecting_failure__ = True
+    return test_item
+
+
+class _UnexpectedSuccess(Exception):
+    pass
+
+
+def _addExpectedFailure(self, result, exc_info):
+    try:
+        callback = result.addExpectedFailure
+    except AttributeError:
+        warnings.warn("TestResult has no addExpectedFailure method, reporting as passes", RuntimeWarning)
+        result.addSuccess(self)
+    else:
+        callback(self, exc_info)
+
+
+def _addUnexpectedSuccess(self, result):
+    try:
+        callback = result.addUnexpectedSuccess
+    except AttributeError:
+        import sys
+        warnings.warn("TestResult has no addUnexpectedSuccess method, reporting as failure", RuntimeWarning)
+        try:
+            raise _UnexpectedSuccess from None
+        except _UnexpectedSuccess:
+            result.addFailure(self, sys.exc_info())
+    else:
+        callback(self)
+
+
 class _ShouldStop(Exception):
     """
     The test should stop.
@@ -88,6 +121,9 @@ def _addSkip(result, test_case, reason):
     addSkip = getattr(result, 'addSkip', None)
     if addSkip is not None:
         addSkip(test_case, reason)
+        from unittest import TextTestResult
+        if isinstance(result, TextTestResult):
+            result._mark("s", "skipped " + repr(reason))
     else:
         warnings.warn("TestResult has no addSkip method, skips not reported",
                       RuntimeWarning, 2)
