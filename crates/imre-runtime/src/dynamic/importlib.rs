@@ -193,7 +193,7 @@ impl Context {
                     return Err(error);
                 }
                 let key = self.text(&child);
-                if self.registered_module(key)? == Some(NONE) {
+                if self.public_registered_module(key)? == Some(NONE) {
                     return Err(error);
                 }
             }
@@ -438,7 +438,10 @@ impl Context {
         for_resource: bool,
     ) -> Result<Id> {
         let key = self.text(fullname);
-        if let Some(module) = self.registered_module(key)? {
+        let modules = self.public_modules()?;
+        if self.contains(key, modules)? {
+            let modules = self.public_modules()?;
+            let module = self.get_item(modules, key)?;
             if module == NONE {
                 return Ok(NONE);
             }
@@ -449,11 +452,11 @@ impl Context {
                 )),
                 Err(e)
                     if self.is_attribute_error(&e)
-                        && (stdlib::is_module(fullname)
-                            || matches!(
-                                self.heap.get(module),
-                                Value::Module { origin: None, .. }
-                            )) =>
+                        && matches!(
+                            self.heap.get(module),
+                            Value::Module { constructor: None, origin, .. }
+                                if origin.is_none() || stdlib::is_module(fullname)
+                        ) =>
                 {
                     if for_resource {
                         return Ok(NONE);
@@ -475,9 +478,8 @@ impl Context {
         }
         let (child, search, top_level) =
             if let Some((parent_name, child)) = fullname.rsplit_once('.') {
-                let parent = self
-                    .find_module(parent_name)?
-                    .ok_or_else(|| Self::missing_module(parent_name))?;
+                // util.find_spec imports the parent through the ordinary __import__ fast path.
+                let parent = self.module(parent_name)?;
                 let path = match self.lookup_attr(parent, "__path__") {
                     Err(cause) if self.is_attribute_error(&cause) => {
                         let mut error = Error::new(

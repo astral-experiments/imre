@@ -21,13 +21,22 @@ struct ClosureNames {
     locals_incomplete: bool,
 }
 
-pub(super) fn class_locals(body: &[ast::Stmt]) -> std::collections::BTreeSet<String> {
+#[derive(Clone)]
+pub(super) struct ClassBindings {
+    pub(super) locals: std::collections::BTreeSet<String>,
+    pub(super) globals: std::collections::BTreeSet<String>,
+}
+
+pub(super) fn class_locals(body: &[ast::Stmt]) -> ClassBindings {
     let mut names = ClosureNames::default();
     names.visit_body(body);
     names
         .locals
         .retain(|name| !names.globals.contains(name) && !names.nonlocals.contains(name));
-    names.locals
+    ClassBindings {
+        locals: names.locals,
+        globals: names.globals,
+    }
 }
 
 impl<'a> Visitor<'a> for ClosureNames {
@@ -53,13 +62,13 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::ClassDef(c) => {
                 self.locals.insert(c.name.to_string());
                 self.incomplete = true;
+                // Only class header expressions can introduce names in this enclosing function.
                 for decorator in &c.decorator_list {
                     self.visit_decorator(decorator);
                 }
                 if let Some(args) = &c.arguments {
                     self.visit_arguments(args);
                 }
-                self.locals_incomplete |= c.type_params.is_some();
             }
             ast::Stmt::Global(g) => {
                 self.globals.extend(g.names.iter().map(ToString::to_string));
@@ -588,7 +597,7 @@ impl Function<'_, '_> {
             _ => None,
         };
         let flags = match (&body, params) {
-            (Body::Namespace(_) | Body::Annotations(_) | Body::ClassAnnotations(..), _) => None,
+            (Body::Namespace(_) | Body::Annotations(..) | Body::ClassAnnotations(..), _) => None,
             _ => {
                 use imre_ast::code_flags::*;
                 let mut flags = OPTIMIZED | NEWLOCALS;
@@ -635,15 +644,46 @@ impl Function<'_, '_> {
         let annotate = if entries.is_empty() {
             "0".into()
         } else {
+            let class = self
+                .class_locals
+                .as_ref()
+                .filter(|_| !self.source.string_annotations)
+                .cloned();
+            let reads = class_metadata::annotation_reads(
+                &entries,
+                class.as_ref(),
+                self.source.string_annotations,
+            );
+            use imre_ast::code_flags::*;
+            let mut annotation_flags = OPTIMIZED | NEWLOCALS;
+            if self.prefix.contains(".<locals>.") {
+                annotation_flags |= NESTED;
+            }
+            if self.source.string_annotations {
+                annotation_flags |= FUTURE_ANNOTATIONS;
+            }
+            if self.source.barry_as_flufl {
+                annotation_flags |= FUTURE_BARRY_AS_BDFL;
+            }
+            let sig = self.text(
+                &json!({
+                    "posonly": ["format"],
+                    "code_flags": annotation_flags,
+                    "scope_reads": reads,
+                    "scope_complete": true,
+                    "scope_locals_complete": true,
+                    "annotation_class": class.is_some(),
+                })
+                .to_string(),
+            );
             let code = self.output.definition(
                 self.source,
                 String::new(),
-                Body::Annotations(entries),
+                Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
             );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
-            let sig = self.text(r#"{"posonly":["format"]}"#);
             let defaults = self.op("dict", &[]);
             self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
         };
@@ -702,6 +742,8 @@ impl Function<'_, '_> {
                 }
             } else if let Some(names) = worker::captured_locks(stmts, params) {
                 signature["thread_captured_locks"] = json!(names);
+            } else if let Some(field) = worker::bound_lock_field(stmts, params) {
+                signature["thread_bound_lock_field"] = json!(field);
             }
         }
         let code = self.output.definition(self.source, prefix, body, start);
@@ -788,14 +830,23 @@ impl Function<'_, '_> {
         let condition = self.truth(&unsupported);
         self.branch(&condition, &bad, &good);
         self.label(&bad);
-        let error = self.lookup("NotImplementedError");
+        let name = self.code_name("NotImplementedError");
+        let error = self.op("builtin", &[&name]);
         self.raise(&error, None, false);
         self.label(&good);
     }
 
-    pub(super) fn annotations(&mut self, entries: &[(&str, &ast::Expr)]) {
+    pub(super) fn annotations(
+        &mut self,
+        entries: &[(&str, &ast::Expr)],
+        class: Option<ClassBindings>,
+    ) {
         self.check_annotation_format();
         let values = self.op("dict", &[]);
+        // The public format parameter is outside the annotation expressions' lexical scope.
+        self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
+        self.annotation_lookup = true;
+        self.class_locals = class;
         for &(name, expression) in entries {
             let key = self.code_name(name);
             let value = if self.source.string_annotations {
@@ -1228,7 +1279,7 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
             captures.visit_expr(element);
         }
         Body::Namespace(_)
-        | Body::Annotations(_)
+        | Body::Annotations(..)
         | Body::ClassAnnotations(..)
         | Body::AnnotationThunk(..)
         | Body::AnnotationValue(_)

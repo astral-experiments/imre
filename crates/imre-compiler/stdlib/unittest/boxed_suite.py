@@ -53,8 +53,9 @@ def _runBoxedCase(dispatch, test, name, method):
     try:
         dispatch._startCase(name)
         outcome = case._Outcome(result)
-        test._outcome = outcome
+        start_time = case.time.perf_counter()
         try:
+            test._outcome = outcome
             with outcome.testPartExecutor(test):
                 test._callSetUp()
             if outcome.success:
@@ -65,6 +66,7 @@ def _runBoxedCase(dispatch, test, name, method):
                 with outcome.testPartExecutor(test):
                     test._callTearDown()
             test.doCleanups()
+            test._addDuration(result, case.time.perf_counter() - start_time)
             if outcome.success:
                 if not expecting_failure:
                     result.addSuccess(test)

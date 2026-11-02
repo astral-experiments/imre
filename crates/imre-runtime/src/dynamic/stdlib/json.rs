@@ -174,6 +174,12 @@ pub(super) fn encode_basestring(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    let Some((_, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("{name} requires a module receiver"),
+        ));
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -409,9 +415,21 @@ pub(super) fn one_shot(ctx: &mut Context, args: &[Id]) -> Result<Id> {
     }
     let indent =
         (indent != NONE).then(|| Fragment::Python(ctx.string_storage(indent).unwrap_or(indent)));
-    let (ascii, quote) = match ctx.heap.get(quote) {
-        Value::Native(name) if name == "_json.encode_basestring_ascii" => (true, None),
-        Value::Native(name) if name == "_json.encode_basestring" => (false, None),
+    let symbol = if let Value::Method {
+        callable,
+        receiver,
+        explicit: false,
+    } = *ctx.heap.get(quote)
+        && matches!(ctx.heap.get(receiver), Value::Module { name, .. } if name == "_json")
+        && let Value::Native(name) = ctx.heap.get(callable)
+    {
+        Some(name.as_str())
+    } else {
+        None
+    };
+    let (ascii, quote) = match symbol {
+        Some("_json.encode_basestring_ascii") => (true, None),
+        Some("_json.encode_basestring") => (false, None),
         _ => (false, Some(quote)),
     };
     let mut encoder = Encoder {

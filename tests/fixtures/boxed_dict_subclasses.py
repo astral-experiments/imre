@@ -294,6 +294,7 @@ def current():
 
     fromkeys_construction()
     ordered_dictionary()
+    base_equality()
     allocate_without_init()
     mapping_patterns()
     counts = Counter(a=3)
@@ -860,3 +861,31 @@ def allocate_without_init():
             print(exc)
         else:
             raise AssertionError("dict allocator accepted an invalid subtype")
+
+
+def base_equality():
+    class Overrides(dict):
+        def __eq__(self, other):
+            raise AssertionError("base comparison invoked subclass __eq__")
+
+        def items(self):
+            raise AssertionError("base comparison invoked subclass items")
+
+    left = Overrides(first=1, last=2)
+    right = Overrides(last=2, first=1)
+    assert dict.__eq__(left, right) is True
+    right["first"] = 0
+    assert dict.__eq__(left, right) is False
+    assert dict.__eq__(left, list(right)) is NotImplemented
+
+    class Derived(dict):
+        pass
+
+    left, right = Derived(), Derived()
+    left[0], right[0] = left, right
+    try:
+        dict.__eq__(left, right)
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("cyclic dicts unexpectedly compared equal")

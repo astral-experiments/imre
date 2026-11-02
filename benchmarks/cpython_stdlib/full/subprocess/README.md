@@ -122,6 +122,18 @@ memoryview to an Imre `-c` child, checks the 18 echoed bytes and that stderr is
 `None`, and runs both registered pipe cleanups. Pinned CPython supplies the
 original fixture hooks. [Linux receipt](memoryview-input-linux.json)
 
+The default-poll `test_communicate_memoryview_input_nonbyte` sends a
+memoryview of an integer array to an Imre `-c` child. The original compares
+the child's binary echo with `array.tobytes()`, checks that stderr is `None`,
+and registers two pipe cleanups. [Linux receipt](communicate-nonbyte-memoryview-linux.json)
+
+Four default-poll `ProcessTestCase` methods previously had host-driven native
+operation evidence. Their bodies now run in Imre. The two EPIPE originals check that communicating with a 1 MiB input returns without a broken-pipe exception. The pipe-buffer original checks the echo under
+backpressure, and the descriptor-leak original checks all seven nonempty pipe
+configurations. Pinned CPython supplies the original fixture hooks and their
+selected zero-exit command. The stderr-only original already had native-body
+credit. [Linux receipt](communicate-pipes-family-linux.json)
+
 The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
 a 200,000-byte exchange on all three pipes, recovery after a zero deadline,
 rejection of new input, repeated output, text newline conversion, and shared

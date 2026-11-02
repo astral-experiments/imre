@@ -997,20 +997,24 @@ fn codepoint_search_window<'a>(
     Some((source.get(start..end)?, start))
 }
 
-/// Find the first occurrence when either string contains surrogate code points.
+/// Find the first or last match when either string contains surrogate code points.
 pub(crate) fn find_codepoints(
     source: &[u32],
     needle: &[u32],
     start: Option<&Int>,
     end: Option<&Int>,
+    reverse: bool,
 ) -> Int {
     let found = codepoint_search_window(source, start, end).and_then(|(window, start)| {
         if needle.is_empty() {
-            return Some(start);
+            return Some(if reverse { start + window.len() } else { start });
         }
-        let offset = window
-            .windows(needle.len())
-            .position(|part| part == needle)?;
+        let mut windows = window.windows(needle.len());
+        let offset = if reverse {
+            windows.rposition(|part| part == needle)
+        } else {
+            windows.position(|part| part == needle)
+        }?;
         Some(start + offset)
     });
     found.map_or_else(|| Int::small(-1).unwrap(), Int::from_usize)

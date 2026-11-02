@@ -43,9 +43,6 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         #[cfg(target_os = "linux")]
         "_signal" if function == "sigpending" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
-        "_json" if matches!(function, "encode_basestring" | "encode_basestring_ascii") => {
-            Some((module, function))
-        }
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
         "resource" if function == "getrlimit" => Some((module, function)),
@@ -191,9 +188,13 @@ impl Context {
 
     pub(super) fn own_class_attr(&self, class: Id, name: &str) -> Option<Id> {
         match self.heap.get(class) {
-            Value::Class { scope, .. } => self.scope_data(*scope).names.get(name).copied(),
+            Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
+            Value::Native(kind) if kind == "type" && name == "mro" => {
+                self.builtins.get("type.mro").copied()
+            }
             Value::Native(kind) if kind == "object" => match name {
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
+                "__ne__" => self.builtins.get("object.__ne__").copied(),
                 "__format__" => self.builtins.get("object.__format__").copied(),
                 "__getstate__" => self.builtins.get("object.__getstate__").copied(),
                 "__reduce__" => self.builtins.get("object.__reduce__").copied(),
@@ -876,13 +877,32 @@ impl Context {
                 "issubclass() arg 2 must be a class, a tuple of classes, or a union",
             ));
         }
-        self.require_checkable_protocol(parent)?;
-        if self.has_abc_subclass_hook(parent)
-            && let Some(result) = self.abc_hook_result(child, parent)?
-        {
+        self.check_runtime_protocol(parent, true)?;
+        self.abc_subclass_check(child, parent)
+    }
+
+    /// Consult ABC hooks and registrations without the public protocol argument guards.
+    pub(super) fn abc_subclass_check(&mut self, child: Id, parent: Id) -> Result<bool> {
+        let protocol = self.is_protocol_declaration(parent);
+        let key = [parent, child];
+        if protocol && let Some(&result) = self.heap.protocol_subclass_cache.get(&key) {
             return Ok(result);
         }
-        Ok(self.subclass(child, parent))
+        let result = if self.has_abc_subclass_hook(parent)
+            && let Some(matched) = self.abc_hook_result(child, parent)?
+        {
+            matched
+        } else {
+            self.subclass(child, parent)
+        };
+        if protocol {
+            self.heap
+                .protocol_subclass_cache
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            self.heap.protocol_subclass_cache.insert(key, result);
+        }
+        Ok(result)
     }
 
     pub(super) fn subclass(&self, class: Id, target: Id) -> bool {
@@ -905,10 +925,7 @@ impl Context {
         if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            if (child == stdlib::flags::TYPE
-                || stdlib::fixed_structseq::fixed_type(child).is_some())
-                && parent == "tuple"
-            {
+            if Self::native_base(child) == Some(parent) {
                 return true;
             }
             if parent == "object" {
@@ -919,21 +936,30 @@ impl Context {
             }
             return matches!(
                 (child.as_str(), parent.as_str()),
-                ("bool", "int")
-                    | ("datetime.datetime", "datetime.date")
-                    | ("typing._UnpackGenericAlias", "typing._GenericAlias")
-                    | (HashState::XOF_CLASS, HashState::CLASS)
-                    | (stdlib::os::stat::CLASS, "tuple")
-                    | ("collections.defaultdict", "dict")
-                    | ("odict_keys", "dict_keys")
-                    | ("odict_items", "dict_items")
-                    | ("odict_values", "dict_values")
-                    | ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
+                ("enum.IntEnum" | "enum.IntFlag", "int" | "enum.Enum")
                     | ("enum.StrEnum", "str" | "enum.Enum")
             );
         }
         false
     }
+    /// Immediate native parent shared by subclass checks and the class lineage.
+    pub(super) fn native_base(class: &str) -> Option<&'static str> {
+        Some(match class {
+            "bool" => "int",
+            "datetime.datetime" => "datetime.date",
+            "datetime.timezone" => stdlib::datetime::TZINFO,
+            stdlib::flags::TYPE | stdlib::os::stat::CLASS => "tuple",
+            class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
+            "typing._UnpackGenericAlias" => "typing._GenericAlias",
+            HashState::XOF_CLASS => HashState::CLASS,
+            "collections.defaultdict" => "dict",
+            "odict_keys" => "dict_keys",
+            "odict_items" => "dict_items",
+            "odict_values" => "dict_values",
+            _ => return None,
+        })
+    }
+
     fn equal_class(&self, a: Id, b: Id) -> bool {
         a == b
             || matches!((self.heap.get(a),self.heap.get(b)),(Value::Native(x),Value::Native(y)) if x==y)
@@ -986,6 +1012,14 @@ impl Context {
     /// Check whether an inline value is an immutable tuple position.
     fn has_namedtuple_field(&self, class: Id, name: &str) -> bool {
         matches!(self.heap.get(class), Value::Class { namedtuple_fields: Some(names), .. } if names.iter().any(|field| field == name))
+    }
+
+    pub(super) fn is_type_object(&self, obj: Id) -> bool {
+        match self.heap.get(obj) {
+            Value::Class { .. } => true,
+            Value::Native(_) => matches!(self.builtin_type_name(obj), Some("type" | "typing._AnyMeta")),
+            _ => false,
+        }
     }
 
     pub(super) fn builtin_type_name(&self, obj: Id) -> Option<&str> {
@@ -1071,6 +1105,8 @@ impl Context {
                             | "datetime.datetime"
                             | "datetime.time"
                             | "datetime.timedelta"
+                            | "datetime.timezone"
+                            | stdlib::datetime::TZINFO
                             | "collections.defaultdict"
                             | "_contextvars.Context"
                             | "_contextvars.ContextVar"
@@ -1342,7 +1378,9 @@ impl Context {
             ) if name == *class => true,
             (class, Value::Calendar { value, .. }) => {
                 class.strip_prefix("datetime.").is_some_and(|c| {
-                    c == value.class() || (c == "date" && value.class() == "datetime")
+                    c == value.class()
+                        || (c == "date" && value.class() == "datetime")
+                        || (c == "tzinfo" && value.class() == "timezone")
                 })
             }
             _ => {
@@ -1551,18 +1589,23 @@ impl Context {
         if let Some(class) = self.heap.get(obj).instance_class()
             && let Value::Class { scope, .. } = self.heap.get(class)
         {
-            let scope = self.scope_data(*scope);
-            if let Some(qualified) = scope.names.get("__qualname__") {
-                kind = self.str_value(*qualified).unwrap_or(kind);
+            if let Some(qualified) = self.namespace_binding(self.scope_data(*scope), "__qualname__") {
+                kind = self.str_value(qualified).unwrap_or(kind);
             }
-            module = match scope.names.get("__module__") {
-                Some(id) => self.str_value(*id).ok(),
-                None => Some(scope.module.as_str()),
+            module = match self.namespace_binding(self.scope_data(*scope), "__module__") {
+                Some(id) => self.str_value(id).ok(),
+                None => Some(self.scope_data(*scope).module.as_str()),
             }
             .filter(|name| !matches!(*name, "builtins" | "__main__"));
         }
         // CPython checks descriptor slots without binding the other protocol's methods.
-        let supports_async = ["__aenter__", "__aexit__"].iter().all(|name| {
+        let asynchronous = matches!(name, "__aenter__" | "__aexit__");
+        let other_methods = if asynchronous {
+            ["__enter__", "__exit__"]
+        } else {
+            ["__aenter__", "__aexit__"]
+        };
+        let supports_other = other_methods.iter().all(|name| {
             self.slot(obj, name).is_some_and(|slot| {
                 matches!(
                     self.builtin_type_name(slot),
@@ -1578,17 +1621,23 @@ impl Context {
                     || builtins::method_name(self.heap.get(slot), "__get__").is_some()
             })
         });
-        let suggestion = if supports_async {
-            " but it supports the asynchronous context manager protocol. Did you mean to use 'async with'?"
-        } else {
-            ""
+        let suggestion = match (supports_other, asynchronous) {
+            (true, true) => {
+                " but it supports the context manager protocol. Did you mean to use 'with'?"
+            }
+            (true, false) => {
+                " but it supports the asynchronous context manager protocol. Did you mean to use 'async with'?"
+            }
+            _ => "",
         };
         let parts = [
             "'",
             module.unwrap_or(""),
             if module.is_some() { "." } else { "" },
             kind,
-            "' object does not support the context manager protocol (missed ",
+            "' object does not support the ",
+            if asynchronous { "asynchronous " } else { "" },
+            "context manager protocol (missed ",
             name,
             " method)",
             suggestion,
@@ -1853,7 +1902,7 @@ impl Context {
             }
             Value::Native(ref class)
                 if ((builtins::is_builtin_type(class) && !class.contains('.'))
-                    || matches!(class.as_str(), "traceback" | "frame"))
+                    || matches!(class.as_str(), "traceback" | "frame" | "mappingproxy"))
                     && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {
@@ -1915,12 +1964,30 @@ impl Context {
             Value::None if name == "__doc__" => {
                 return Ok(self.text("The type of the None singleton."));
             }
-            Value::MemoryView { owner, .. } if matches!(name, "obj" | "readonly" | "nbytes") => {
+            Value::MemoryView { owner, .. }
+                if matches!(
+                    name,
+                    "obj" | "readonly" | "nbytes" | "itemsize" | "format" | "shape"
+                ) =>
+            {
                 let owner = Self::memoryview_owner(owner)?;
+                let (format, width, len, readonly) = match self.heap.get(self.scalar_value(owner)) {
+                    Value::Array(array) => {
+                        let (format, width) = array.view_layout();
+                        (format, width, array.len(), false)
+                    }
+                    _ => ("B", 1, self.bytes_like(owner)?.len(), true),
+                };
                 return Ok(match name {
                     "obj" => owner,
-                    "readonly" => TRUE,
-                    _ => self.int(self.bytes_like(owner)?.len() as i64),
+                    "readonly" => builtins::boolean(readonly),
+                    "nbytes" => self.int((len * width) as i64),
+                    "itemsize" => self.int(width as i64),
+                    "format" => self.text(format),
+                    _ => {
+                        let length = self.int(len as i64);
+                        self.alloc(Value::Tuple(vec![length]))
+                    }
                 });
             }
             Value::Slice(parts) if matches!(name, "start" | "stop" | "step") => {
@@ -2171,7 +2238,7 @@ impl Context {
                 }
                 _ => {}
             },
-            Value::Cell(contents) | Value::ClassCell(contents) if name == "cell_contents" => {
+            Value::Cell(contents) if name == "cell_contents" => {
                 return contents.ok_or_else(|| Error::new("ValueError", "Cell is empty"));
             }
             Value::Generator { code, .. } if name == "gi_code" => return Ok(code),
@@ -2281,6 +2348,14 @@ impl Context {
                             }
                             "__text_signature__" if method == "sys._getframemodulename" => {
                                 Some("($module, /, depth=0)")
+                            }
+                            "__doc__" if let Some(name) = method.strip_prefix("_opcode.") => {
+                                stdlib::opcode::doc(name)
+                            }
+                            "__text_signature__"
+                                if let Some(name) = method.strip_prefix("_opcode.") =>
+                            {
+                                Some(stdlib::opcode::signature(name))
                             }
                             "__text_signature__" if method == "sys.audit" => {
                                 Some("($module, event, /, *args)")
@@ -2616,8 +2691,37 @@ impl Context {
                     _ => {}
                 }
             }
-            Value::Native(ref class) if class == "datetime.timezone" && name == "utc" => {
-                return Ok(stdlib::datetime::utc(self));
+            Value::Native(ref class)
+                if class == stdlib::datetime::TZINFO || class == "datetime.timezone" =>
+            {
+                let base = class == stdlib::datetime::TZINFO;
+                match name {
+                    "__module__" => return Ok(self.text("datetime")),
+                    "__name__" | "__qualname__" => {
+                        return Ok(self.text(if base { "tzinfo" } else { "timezone" }));
+                    }
+                    "__base__" => {
+                        let parent = if base {
+                            "object"
+                        } else {
+                            stdlib::datetime::TZINFO
+                        };
+                        return Ok(self.builtin(parent));
+                    }
+                    "__bases__" | "__mro__" => return Ok(self.builtin_hierarchy_tuple(obj, name)),
+                    "utc" if !base => return Ok(stdlib::datetime::utc(self)),
+                    _ => {}
+                }
+            }
+            Value::Native(ref class)
+                if class == "mappingproxy" && matches!(name, "__repr__" | "__str__") =>
+            {
+                return Ok(self.builtin(&format!("{class}.{name}")));
+            }
+            Value::MappingProxy(_) if matches!(name, "__repr__" | "__str__") => {
+                let descriptor = self.builtin(&format!("mappingproxy.{name}"));
+                let owner = self.builtin("mappingproxy");
+                return self.bind_attribute(descriptor, obj, owner);
             }
             Value::MappingProxy(_)
                 if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
@@ -2711,6 +2815,12 @@ impl Context {
             Value::BufferedRandom(..) if name == "mode" => return Ok(self.text("rb+")),
             Value::BufferedRandom(ref file, _) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
+            }
+            Value::TextFile(ref file)
+                if name == "buffer"
+                    && let Some(buffer) = file.buffer =>
+            {
+                return Ok(buffer);
             }
             Value::TextFile(ref file) if name == "closed" => {
                 return Ok(if file.closed() { TRUE } else { FALSE });
@@ -3066,6 +3176,7 @@ impl Context {
                             | "__getattribute__"
                             | "__setattr__"
                             | "__delattr__"
+                            | "__ne__"
                             | "__init__"
                             | "__new__"
                     ) =>
@@ -3199,6 +3310,14 @@ impl Context {
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
                 }
+                if name == "_abc_caches_clear" && self.is_protocol_declaration(obj) {
+                    let callable = self.builtin("abc._abc_caches_clear");
+                    return Ok(self.alloc(Value::Method {
+                        callable,
+                        receiver: obj,
+                        explicit: true,
+                    }));
+                }
                 if name == "register"
                     && self.heap.get(obj).instance_class().is_none()
                     && (self.is_bundled_abc(obj) || super::mapping_abc::is_abc_class(self, obj))
@@ -3286,6 +3405,12 @@ impl Context {
     }
 
     fn builtin_attribute(&mut self, obj: Id, name: &str) -> Result<Id> {
+        if name == "mro" && self.is_type_object(obj) {
+            let owner = self.builtin("type");
+            let descriptor = self.builtin("type.mro");
+            let receiver = if obj == owner { NONE } else { obj };
+            return self.bind_attribute(descriptor, receiver, owner);
+        }
         if name == "__init_subclass__" {
             let class = if self.builtin_type_name(obj) == Some("type") {
                 obj
@@ -3441,7 +3566,7 @@ impl Context {
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
             self.heap.replace_cell(obj, None);
             return Ok(());
         }
@@ -3718,7 +3843,7 @@ impl Context {
                 continue;
             };
             let frame = self.scope_data(*scope);
-            shadowed |= frame.names.contains_key(name);
+            shadowed |= self.namespace_binding(frame, name).is_some();
             let Some(slots) = frame
                 .class_namespace
                 .as_deref()
@@ -4133,7 +4258,7 @@ impl Context {
                 Some(value),
             );
         }
-        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_) | Value::ClassCell(_)) {
+        if name == "cell_contents" && matches!(self.heap.get(obj), Value::Cell(_)) {
             self.heap.replace_cell(obj, Some(value));
             return Ok(());
         }
@@ -4426,25 +4551,109 @@ impl Context {
         })
     }
 
-    /// The first non-Python base owns the instance layout. Native classes
-    /// represented with a class namespace (e.g. BytesIO) have no Python class cell.
+    /// Find the allocator inherited from the first native base.
     fn allocation_base(&self, class: Id) -> Option<Id> {
-        self.find_in_mro(class, |base| match self.heap.get(base) {
-            Value::Native(_) => Some(base),
-            // These bootstrapped classes inherit object.__new__. The decoder
-            // attaches its native state later in __init__.
-            Value::Class { .. }
-                if self.classes.get("typing.Generic") == Some(&base)
-                    || self.classes.get("typing.Protocol") == Some(&base)
-                    || self.heap.get(base).io_kind() == Some(stdlib::io::NEWLINE_DECODER) =>
-            {
-                None
+        self.find_in_mro(class, |base| self.owns_allocation(base).then_some(base))
+            .map(|base| self.new_slot_owner(base))
+    }
+
+    /// The decoder owns its native layout but inherits object.__new__.
+    fn new_slot_owner(&self, base: Id) -> Id {
+        if self.heap.get(base).io_kind() == Some(stdlib::io::NEWLINE_DECODER) {
+            self.builtins["object"]
+        } else {
+            base
+        }
+    }
+
+    fn owns_allocation(&self, base: Id) -> bool {
+        match self.heap.get(base) {
+            Value::Native(_) => true,
+            // Generic and Protocol inherit object.__new__ without native storage.
+            Value::Class { scope, .. } => {
+                self.scope_data(*scope).class_cell.is_none()
+                    && self.classes.get("typing.Generic") != Some(&base)
+                    && self.classes.get("typing.Protocol") != Some(&base)
             }
-            Value::Class { scope, .. } if self.scope_data(*scope).class_cell.is_none() => {
-                Some(base)
+            _ => false,
+        }
+    }
+
+    /// Find the native layout owner for the generic allocator exposed by tzinfo.
+    /// A Python class follows its most-derived solid base, with ties going to
+    /// its first direct base. A tzinfo instance adds no storage over object.
+    pub(super) fn tzinfo_allocation_base(
+        &self,
+        mut class: Id,
+        tzinfo: Id,
+        object: Id,
+    ) -> Option<Id> {
+        while !self.owns_allocation(class) {
+            let Value::Class { scope, .. } = self.heap.get(class) else {
+                return None;
+            };
+            let namespace = self.scope_data(*scope).class_namespace.as_ref()?;
+            let Value::Tuple(bases) = self.heap.get(namespace.bases) else {
+                return None;
+            };
+            let mut primary = *bases.first().unwrap_or(&object);
+            let mut solid = object;
+            for &base in bases {
+                let candidate = self.find_in_mro(base, |owner| {
+                    if owner == tzinfo || owner == object {
+                        return None;
+                    }
+                    let slots = matches!(self.heap.get(owner), Value::Class { scope, .. }
+                        if self.scope_data(*scope).class_namespace.as_ref()
+                            .and_then(|ns| ns.slot_names.as_deref())
+                            .is_some_and(|names| names.iter().any(|n| n != "__dict__" && n != "__weakref__")));
+                    (self.owns_allocation(owner) || slots).then_some(owner)
+                }).unwrap_or(object);
+                if candidate != solid && self.direct_subclass(candidate, solid) {
+                    primary = base;
+                    solid = candidate;
+                } else if !self.direct_subclass(solid, candidate) {
+                    return None;
+                }
             }
-            _ => None,
-        })
+            class = primary;
+        }
+        Some(class)
+    }
+
+    /// Invert only the receiver's equality result, preserving a declined comparison.
+    pub(super) fn object_ne(&mut self, object: Id, other: Id) -> Result<Id> {
+        let class = self.exact_type(object)?;
+        if let Some(slot) = self.class_attr(class, "__eq__") {
+            // Re-entering the same native descriptor cannot reach a Python equality hook.
+            if self.builtins.get("object.__ne__") == Some(&slot) {
+                return Err(Error::new(
+                    "RecursionError",
+                    "maximum recursion depth exceeded in comparison",
+                ));
+            }
+            let method = self.bind_attribute(slot, object, class)?;
+            let equal = self.call(method, vec![other], Vec::new())?;
+            return if equal == value::NOT_IMPLEMENTED {
+                Ok(equal)
+            } else {
+                Ok(builtins::boolean(!self.truth(equal)?))
+            };
+        }
+        if self.allocation_base(class) == self.builtins.get("object").copied() {
+            return Ok(if object == other {
+                FALSE
+            } else {
+                value::NOT_IMPLEMENTED
+            });
+        }
+        Err(Error::new(
+            "NotImplementedError",
+            format!(
+                "object.__ne__(): the equality slot of '{}' is unsupported",
+                self.type_name(object)
+            ),
+        ))
     }
 
     /// Allocate a plain instance without invoking its constructor or initializer.
@@ -4483,6 +4692,13 @@ impl Context {
             ));
         }
         let base = self.allocation_base(class).unwrap_or(class);
+        let base = if Some(&base) == self.builtins.get(stdlib::datetime::TZINFO) {
+            self.tzinfo_allocation_base(class, base, object)
+                .map(|owner| self.new_slot_owner(owner))
+                .unwrap_or(base)
+        } else {
+            base
+        };
         let new = self.class_attr(class, "__new__");
         if base != object {
             let name = self.class_name(class);
@@ -4772,6 +4988,7 @@ impl Context {
             {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
+            Value::Native(name) if name == "type.mro" => self.type_mro(&args, &kwargs),
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
@@ -4819,6 +5036,7 @@ impl Context {
                                 | "list"
                                 | "map"
                                 | "filter"
+                                | "mappingproxy"
                                 | "set"
                                 | "int"
                                 | "frozenset"
@@ -5162,7 +5380,33 @@ impl Context {
                         "Can't instantiate typing.Generic directly",
                     ));
                 }
-                let new = self.class_attr(callable, "__new__").or_else(|| {
+                let constructor = self.class_attr(callable, "__new__");
+                let generic_tzinfo = self.builtins.get("datetime.tzinfo.__new__").copied();
+                let native_tzinfo_new = constructor.is_some()
+                    && constructor == generic_tzinfo
+                    && self.find_in_mro(callable, |base| {
+                        self.own_class_attr(base, "__new__").map(|_| base)
+                    }) == self.builtins.get(stdlib::datetime::TZINFO).copied();
+                // A subclass calling through the inherited generic constructor
+                // uses the primary base's allocator. Later Python mixins do
+                // not get a second chance to supply __new__.
+                let new = if native_tzinfo_new {
+                    let tzinfo = stdlib::datetime::tzinfo(self);
+                    let object = self.builtin("object");
+                    let owner = self
+                        .tzinfo_allocation_base(callable, tzinfo, object)
+                        .ok_or_else(|| {
+                            Error::new("TypeError", "incompatible tzinfo instance layout")
+                        })?;
+                    if owner == tzinfo {
+                        None
+                    } else {
+                        self.class_attr(owner, "__new__")
+                    }
+                } else {
+                    constructor
+                }
+                .or_else(|| {
                     [("int", "int.__new__"), ("tuple", "tuple.__new__")]
                         .into_iter()
                         .find(|(base, _)| self.has_base(callable, base))
@@ -5237,6 +5481,7 @@ impl Context {
                         ));
                     }
                 } else if new.is_none()
+                    && !native_tzinfo_new
                     && string_base.is_none()
                     && !rlock_subclass
                     && !float_subclass
@@ -5539,6 +5784,12 @@ impl Context {
             .into_iter()
             .map(|name| (class_scope.names[&name], name))
             .collect::<Vec<_>>();
+        if let Some(dict) = class_scope.class_namespace.as_ref().and_then(|namespace| {
+            namespace.annotation_dict_cell.and(namespace.dictionary)
+        }) {
+            class_scope.namespace = Some(dict);
+            class_scope.names.retain(|name, _| name == "__qualname__");
+        }
         // A hook may replace an attribute and execute code that triggers collection.
         for &(value, _) in &members {
             self.heap.keep(value);
@@ -5643,9 +5894,12 @@ impl Context {
         // inheriting type's normal namespace preparation, allocation, and MRO.
         if !is_abc
             && Some(winner) != typed_dict_meta
-            && (["__prepare__", "__new__", "__init__", "mro"]
+            && (["__prepare__", "__new__", "__init__"]
                 .iter()
                 .any(|name| self.class_attr(winner, name).is_some())
+                || self
+                    .class_attr(winner, "mro")
+                    .is_some_and(|method| Some(&method) != self.builtins.get("type.mro"))
                 || ["__call__", "__getattr__", "__getattribute__"]
                     .iter()
                     .any(|name| self.slot(winner, name).is_some()))
@@ -5715,7 +5969,7 @@ impl Context {
         let module = self.scope_data(parent).module.clone();
         let scope = self.scope(&module, Some(parent));
         let enum_kind = enum_namespace.as_ref().map(|state| state.kind);
-        let cell = self.alloc(Value::ClassCell(None));
+        let cell = self.alloc(Value::Cell(None));
         let Value::Scope(body_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -5751,6 +6005,7 @@ impl Context {
         self.execute(code, scope, FrameOwner::Function(body))?;
         let explicit_annotations = self.scope_name(scope, "__annotations__")
             .is_some_and(|value| value != annotations);
+        let annotation_body = self.finish_annotation_body(scope)?;
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
             if let Some(namespace) = &mut frame.class_namespace {
                 namespace.annotation_scratch = None;
@@ -5775,6 +6030,11 @@ impl Context {
         if let Some(&protocol) = self.classes.get("typing.Protocol")
             && bases.iter().any(|&base| self.subclass(base, protocol))
         {
+            if self.scope_name(scope, "__subclasshook__").is_none()
+                && let Some(hook) = self.module_value("typing", "_proto_hook")
+            {
+                self.bind_local(scope, "__subclasshook__", hook);
+            }
             let declaration = bases.contains(&protocol);
             if declaration {
                 self.validate_protocol_bases(&bases)?;
@@ -5793,12 +6053,6 @@ impl Context {
                 return Err(Error::new(
                     "TypeError",
                     "cannot inherit from both a TypedDict type and a non-TypedDict base class",
-                ));
-            }
-            if parameterized {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "PEP 695 generic TypedDict declarations are unsupported",
                 ));
             }
             let dict = self.builtin("dict");
@@ -5831,7 +6085,7 @@ impl Context {
         };
         *metaclass = class_meta;
         self.install_weakref_descriptor(class, scope);
-        *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
+        self.heap.replace_cell(cell, Some(class));
         let Value::Scope(class_scope) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -5847,6 +6101,21 @@ impl Context {
                 .names
                 .entry("__doc__".to_owned())
                 .or_insert(NONE);
+        }
+        if let Some((cell, body)) = annotation_body {
+            // type.__new__ replaces the body namespace with the finished type's dictionary.
+            let dict = self.class_namespace_dict(scope, false);
+            let extras = self
+                .dict_entries(body)
+                .expect("class body dictionary")
+                .iter()
+                .copied()
+                .filter(|&(key, _)| self.string_storage(key).is_none())
+                .collect::<Vec<_>>();
+            for (key, value) in extras {
+                self.put_item(dict, key, value)?;
+            }
+            self.heap.replace_cell(cell, Some(dict));
         }
         self.initialize_class_members(class, scope)?;
         if let Some(kind) = enum_kind {
@@ -5873,10 +6142,7 @@ impl Context {
         }
         self.init_abstract_class(class, scope)?;
         if self.is_protocol_declaration(class) {
-            let freeze = self
-                .module_value("typing", "_freeze_protocol_members")
-                .ok_or_else(|| Error::new("RuntimeError", "missing protocol initializer"))?;
-            self.call(freeze, vec![class, annotations], Vec::new())?;
+            self.call_typing_helper("_freeze_protocol_members", vec![class, annotations])?;
         }
         if let Some((parents, fields, annotate, generic)) = typed_dict_fields {
             if let Some(generic) = generic {

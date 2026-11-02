@@ -113,12 +113,17 @@ fn integer_overflow(value: i64, kind: &str) -> Error {
 pub(super) struct Array {
     format: Format,
     bytes: Rc<Vec<u8>>,
+    pub(super) viewed: bool,
 }
 
 impl Array {
     /// Borrow the contiguous native-order bytes used to store the elements.
     pub(super) fn as_bytes(&self) -> &[u8] {
         self.bytes.as_slice()
+    }
+
+    pub(super) fn view_layout(&self) -> (&'static str, usize) {
+        (self.format.code(), self.format.width())
     }
 
     pub(super) fn len(&self) -> usize {
@@ -129,11 +134,26 @@ impl Array {
     pub(super) fn equals_unsigned_bytes(&self, bytes: &[u8]) -> bool {
         self.format != Format::Wide
             && self.len() == bytes.len()
-            && bytes.iter().enumerate().all(|(i, &byte)| match self.at(i) {
-                Ok(Value::Int(value)) => value.as_small() == Some(i64::from(byte)),
-                Ok(Value::Float(value)) => value == f64::from(byte),
-                _ => false,
-            })
+            && bytes
+                .iter()
+                .enumerate()
+                .all(|(i, &byte)| self.numeric_item(i) == Some(f64::from(byte)))
+    }
+
+    pub(super) fn equals_numeric_array(&self, other: &Self) -> bool {
+        self.format != Format::Wide
+            && other.format != Format::Wide
+            && self.len() == other.len()
+            && (0..self.len()).all(|i| self.numeric_item(i) == other.numeric_item(i))
+    }
+
+    // Every supported integral element fits exactly in a double.
+    fn numeric_item(&self, i: usize) -> Option<f64> {
+        match self.at(i).ok()? {
+            Value::Int(n) => n.as_small().map(|n| n as f64),
+            Value::Float(f) => Some(f),
+            _ => None,
+        }
     }
 
     pub(super) fn at(&self, index: usize) -> Result<Value> {
@@ -196,15 +216,26 @@ fn append_item(ctx: &mut Context, receiver: Id, item: Id) -> Result<()> {
     let format = array.format;
     let offset = array.bytes.len();
     format.encode(ctx, item)?;
-    if ctx.buffer_exports.contains(&receiver) {
-        return Err(Error::new(
-            "BufferError",
-            "cannot resize an array that is exporting buffers",
-        ));
-    }
     let end = offset
         .checked_add(format.width())
         .ok_or_else(|| Error::new("MemoryError", ""))?;
+    // __index__ may already have grown the array to the requested size.
+    if array_mut(ctx, receiver).bytes.len() != end {
+        let has_view = if array_mut(ctx, receiver).viewed {
+            let (heap, roots) = ctx.heap_and_roots();
+            let live = heap.has_live_array_view(receiver, roots)?;
+            array_mut(ctx, receiver).viewed = live;
+            live
+        } else {
+            false
+        };
+        if has_view || ctx.buffer_exports.contains(&receiver) {
+            return Err(Error::new(
+                "BufferError",
+                "cannot resize an array that is exporting buffers",
+            ));
+        }
+    }
     let array = array_mut(ctx, receiver);
     let additional = end.saturating_sub(array.bytes.len());
     array.writable_bytes(additional)?.resize(end, 0);
@@ -263,6 +294,7 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kw: &[(String, Id)]) -> Result
     let mut array = Array {
         format,
         bytes: Rc::new(Vec::new()),
+        viewed: false,
     };
     if let [initial] = rest {
         match ctx.heap.get(ctx.scalar_value(*initial)) {

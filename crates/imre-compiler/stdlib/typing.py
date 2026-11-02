@@ -82,21 +82,7 @@ def _get_protocol_attrs(cls):
     for base in cls.__mro__[:-1]:  # without object
         if base.__name__ in {'Protocol', 'Generic'}:
             continue
-        try:
-            annotations = base.__annotations__
-        except Exception:
-            # The class builder records executed annotation declarations even
-            # when a forward reference prevents evaluating their values.
-            provider = getattr(base, '__annotate__', None)
-            if provider is None:
-                annotations = ()
-            else:
-                try:
-                    annotations = provider(3)  # annotationlib.Format.FORWARDREF
-                except NotImplementedError:
-                    if _protocol_annotation_names is None or provider not in _protocol_annotation_names:
-                        raise
-                    annotations = _protocol_annotation_names[provider]
+        annotations = _protocol_annotations(base)
         for attr in (*base.__dict__, *annotations):
             if not attr.startswith('_abc_') and attr not in EXCLUDED_ATTRIBUTES:
                 attrs.add(attr)
@@ -120,6 +106,111 @@ def get_protocol_members(tp: type, /) -> frozenset[str]:
     if not is_protocol(tp):
         raise TypeError(f'{tp!r} is not a Protocol')
     return frozenset(tp.__protocol_attrs__)
+
+
+def _protocol_annotations(base):
+    try:
+        return base.__annotations__
+    except Exception:
+        # The class builder records executed annotation declarations even
+        # when a forward reference prevents evaluating their values.
+        provider = getattr(base, '__annotate__', None)
+        if provider is None:
+            return ()
+        else:
+            try:
+                return provider(3)  # annotationlib.Format.FORWARDREF
+            except NotImplementedError:
+                if _protocol_annotation_names is None or provider not in _protocol_annotation_names:
+                    raise
+                return _protocol_annotation_names[provider]
+
+
+@classmethod
+def _proto_hook(cls, other):
+    if not cls.__dict__.get('_is_protocol', False):
+        return NotImplemented
+
+    missing = object()
+    for attr in cls.__protocol_attrs__:
+        for base in _typing._protocol_mro(other):
+            member = _typing._protocol_member(base, attr, missing)
+            if member is not missing:
+                if member is None:
+                    return NotImplemented
+                break
+
+            # ...or in annotations, if it is a sub-protocol.
+            if issubclass(other, Generic) and getattr(other, "_is_protocol", False):
+                if attr in _protocol_annotations(base):
+                    break
+        else:
+            return NotImplemented
+    return True
+
+
+def runtime_checkable(cls):
+    """Mark a protocol class as a runtime protocol.
+
+    Such protocol can be used with isinstance() and issubclass().
+    Raise TypeError if applied to a non-protocol class.
+    This allows a simple-minded structural check very similar to
+    one trick ponies in collections.abc such as Iterable.
+
+    For example::
+
+        @runtime_checkable
+        class Closable(Protocol):
+            def close(self): ...
+
+        assert isinstance(open('/some/file'), Closable)
+
+    Warning: this will check only the presence of the required methods,
+    not their type signatures!
+    """
+    if not issubclass(cls, Generic) or not getattr(cls, '_is_protocol', False):
+        raise TypeError('@runtime_checkable can be only applied to protocol classes,'
+                        ' got %r' % cls)
+    cls._is_runtime_protocol = True
+    # PEP 544 prohibits using issubclass()
+    # with protocols that have non-method members.
+    # See gh-113320 for why we compute this attribute here,
+    # rather than in `_ProtocolMeta.__init__`
+    cls.__non_callable_proto_members__ = set()
+    for attr in cls.__protocol_attrs__:
+        try:
+            is_callable = callable(getattr(cls, attr, None))
+        except Exception as e:
+            raise TypeError(
+                f"Failed to determine whether protocol member {attr!r} "
+                "is a method member"
+            ) from e
+        else:
+            if not is_callable:
+                cls.__non_callable_proto_members__.add(attr)
+    return cls
+
+
+def _check_protocol(cls, subclass):
+    if not getattr(cls, '_is_runtime_protocol', False):
+        raise TypeError("Instance and class checks can only be used with @runtime_checkable protocols")
+    if (subclass and cls.__non_callable_proto_members__
+            and cls.__dict__.get('__subclasshook__') is _proto_hook):
+        names = sorted(cls.__non_callable_proto_members__)
+        raise TypeError("Protocols with non-method members don't support issubclass()."
+                        f" Non-method members: {str(names)[1:-1]}.")
+
+
+def _protocol_instance(cls, instance):
+    from inspect import getattr_static
+    for attr in cls.__protocol_attrs__:
+        try:
+            val = getattr_static(instance, attr)
+        except AttributeError:
+            return False
+        if val is None and attr not in cls.__non_callable_proto_members__:
+            return False
+    return True
 
 
 class IO(Generic[AnyStr]):
@@ -563,7 +654,23 @@ def TypedDict(typename, fields=_typeddict_sentinel, /, *, total=True):
 
     """
     if fields is _typeddict_sentinel or fields is None:
-        raise NotImplementedError("the deprecated TypedDict fields argument requires warnings._deprecated")
+        import warnings
+
+        if fields is _typeddict_sentinel:
+            deprecated_thing = "Failing to pass a value for the 'fields' parameter"
+        else:
+            deprecated_thing = "Passing `None` as the 'fields' parameter"
+
+        example = f"`{typename} = TypedDict({typename!r}, {{{{}}}})`"
+        deprecation_msg = (
+            "{name} is deprecated and will be disallowed in Python {remove}. "
+            "To create a TypedDict class with 0 fields "
+            "using the functional syntax, "
+            "pass an empty dictionary, e.g. "
+        ) + example + "."
+        warnings._deprecated(deprecated_thing, message=deprecation_msg, remove=(3, 15))
+        fields = {}
+
     fields = dict(fields)
     td = _typing._new_typeddict(typename, False)
     td.__orig_bases__ = (TypedDict,)

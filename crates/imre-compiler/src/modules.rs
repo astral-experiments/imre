@@ -69,6 +69,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/unittest/boxed_case.py"),
         )),
         "pickle" => Some(("pickle.py", include_str!("../stdlib/pickle.py"))),
+        // CPython 3.14.5 Lib/_colorize.py. See licenses/CPython.txt.
+        "_colorize" => Some(("_colorize.py", include_str!("../stdlib/_colorize.py"))),
         "_compat_pickle" => Some((
             "_compat_pickle.py",
             include_str!("../stdlib/_compat_pickle.py"),
@@ -149,6 +151,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
         "py_compile" => Some(("py_compile.py", include_str!("../stdlib/py_compile.py"))),
+        // Based on CPython 3.14.5 Lib/pprint.py. See stdlib/docstrings/LICENSE.
+        "pprint" => Some(("pprint.py", include_str!("../stdlib/pprint.py"))),
         "difflib" => Some((
             "difflib.py",
             include_str!("../../../benchmarks/cpython_stdlib/full/difflib/upstream/Lib/difflib.py"),
@@ -241,18 +245,26 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "logging" => Some((
             "logging/__init__.py",
             concat!(
-                include_str!("../stdlib/logging/stream.py"),
-                "\n",
                 include_str!("../stdlib/logging/records.py"),
                 "\n",
                 include_str!("../stdlib/logging/formatters.py"),
                 "\n",
+                include_str!("../stdlib/logging/boxed_handler.py"),
+                "\n",
+                include_str!("../stdlib/logging/stream.py.inc"),
+                "\n",
                 include_str!("../stdlib/logging/boxed.py"),
             ),
         )),
+        // CPython 3.14.5 Lib/logging/config.py.
+        "logging.config" => Some((
+            "logging/config.py",
+            include_str!("../stdlib/logging/config.py"),
+        )),
+        // CPython 3.14.5 Lib/logging/handlers.py.
         "logging.handlers" => Some((
             "logging/handlers.py",
-            include_str!("../stdlib/logging/buffering.py"),
+            include_str!("../stdlib/logging/boxed_handlers.py"),
         )),
         "platform" => Some((
             "platform.py",
@@ -402,6 +414,7 @@ pub(crate) enum IntrinsicModule {
     LoggingConfig,
     LoggingHandlers,
     Datetime,
+    DatetimeNative,
     Abc,
     Asyncio,
     Contextlib,
@@ -846,7 +859,7 @@ impl IntrinsicModule {
     pub(crate) fn lacks_builtin_stub(self) -> bool {
         matches!(
             self,
-            Self::Opcode | Self::StringFormatting | Self::CollectionsNative
+            Self::Opcode | Self::StringFormatting | Self::CollectionsNative | Self::DatetimeNative
         )
     }
 
@@ -866,6 +879,7 @@ impl IntrinsicModule {
             "logging.config" => Some(Self::LoggingConfig),
             "logging.handlers" => Some(Self::LoggingHandlers),
             "datetime" => Some(Self::Datetime),
+            "_datetime" => Some(Self::DatetimeNative),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
             "contextvars" => Some(Self::ContextVars),
@@ -969,6 +983,9 @@ impl IntrinsicModule {
     }
 
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::DatetimeNative {
+            return Self::Datetime.symbol(name);
+        }
         if self == Self::Inspect
             && let Some(&(_, flag)) = imre_ast::code_flags::INSPECT_FLAGS
                 .iter()
@@ -1163,6 +1180,12 @@ impl IntrinsicModule {
             (Self::ImportlibResourcesAbc, "ResourceReader") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.ResourceReader")
             }
+            (Self::ImportlibResourcesAbc, "Traversable") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.abc.Traversable")
+            }
+            (Self::ImportlibResourcesAbc, "TraversalError") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.abc.TraversalError")
+            }
             (Self::ImportlibResourcesAbc, "TraversableResources") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.abc.TraversableResources")
             }
@@ -1171,6 +1194,12 @@ impl IntrinsicModule {
             }
             (Self::ImportlibResources, "files") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.files")
+            }
+            (Self::ImportlibResources, "path") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.path")
+            }
+            (Self::ImportlibResources, "read_binary") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.read_binary")
             }
             (Self::ImportlibResources, "read_text") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.read_text")
@@ -1334,6 +1363,33 @@ impl IntrinsicModule {
             // Native executables have no adaptive bytecode interpreter.
             (Self::Opcode, "ENABLE_SPECIALIZATION" | "ENABLE_SPECIALIZATION_FT") => {
                 Intrinsic::IntConstant(0)
+            }
+            (Self::Opcode, "stack_effect") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.stack_effect")
+            }
+            (Self::Opcode, "is_valid") => Intrinsic::ObjectRuntimeExport("_opcode.is_valid"),
+            (Self::Opcode, "has_arg") => Intrinsic::ObjectRuntimeExport("_opcode.has_arg"),
+            (Self::Opcode, "has_const") => Intrinsic::ObjectRuntimeExport("_opcode.has_const"),
+            (Self::Opcode, "has_name") => Intrinsic::ObjectRuntimeExport("_opcode.has_name"),
+            (Self::Opcode, "has_jump") => Intrinsic::ObjectRuntimeExport("_opcode.has_jump"),
+            (Self::Opcode, "has_free") => Intrinsic::ObjectRuntimeExport("_opcode.has_free"),
+            (Self::Opcode, "has_local") => Intrinsic::ObjectRuntimeExport("_opcode.has_local"),
+            (Self::Opcode, "has_exc") => Intrinsic::ObjectRuntimeExport("_opcode.has_exc"),
+            (Self::Opcode, "get_specialization_stats") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.get_specialization_stats")
+            }
+            (Self::Opcode, "get_nb_ops") => Intrinsic::ObjectRuntimeExport("_opcode.get_nb_ops"),
+            (Self::Opcode, "get_intrinsic1_descs") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.get_intrinsic1_descs")
+            }
+            (Self::Opcode, "get_intrinsic2_descs") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.get_intrinsic2_descs")
+            }
+            (Self::Opcode, "get_special_method_names") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.get_special_method_names")
+            }
+            (Self::Opcode, "get_executor") => {
+                Intrinsic::ObjectRuntimeExport("_opcode.get_executor")
             }
             (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
             (Self::Unidiff, "PatchedFile") => Intrinsic::PatchedFile,
@@ -1503,6 +1559,9 @@ impl IntrinsicModule {
             (Self::Datetime, "timedelta") => Intrinsic::Calendar(crate::ir::CalendarType::Delta),
             (Self::Datetime, "timezone") => Intrinsic::Calendar(crate::ir::CalendarType::Zone),
             (Self::Datetime, "UTC") => Intrinsic::CalendarUtc,
+            (Self::Datetime, "MINYEAR") => Intrinsic::IntConstant(1),
+            (Self::Datetime, "MAXYEAR") => Intrinsic::IntConstant(9999),
+            (Self::Datetime, "tzinfo") => Intrinsic::ObjectRuntimeExport("datetime.tzinfo"),
             (Self::Logging, "Logger") => Intrinsic::Logger,
             (Self::Logging, "Manager") => Intrinsic::LogManager,
             (Self::Logging, "root") => Intrinsic::LogRoot,
@@ -1556,6 +1615,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.no_type_check_decorator")
             }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
+            (Self::Typing, "runtime_checkable") => {
+                Intrinsic::ObjectRuntimeExport("typing.runtime_checkable")
+            }
             (Self::Typing, "get_protocol_members") => {
                 Intrinsic::ObjectRuntimeExport("typing.get_protocol_members")
             }
@@ -2288,7 +2350,10 @@ impl SearchRoots {
 
 /// These public names are supplied by the boxed unittest.mock module.
 pub(crate) fn boxed_mock_export(name: &str) -> bool {
-    matches!(name, "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal")
+    matches!(
+        name,
+        "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal" | "call" | "_Call" | "_CallList"
+    )
 }
 
 impl SourceModule {
@@ -2382,6 +2447,7 @@ pub(crate) struct SourceGraph {
     /// available to the child at the original point in Python's initialization.
     initialization: Vec<(ModuleId, Range<usize>)>,
     pub(crate) errno_names: Vec<String>,
+    pub(crate) doctest_imports: Vec<String>,
 }
 
 impl SourceGraph {
@@ -3527,7 +3593,7 @@ impl<'a> Loader<'a> {
                 }
             }
         }
-        self.doctest_program()?;
+        let doctest_imports = self.doctest_program()?;
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut checked_diagnostics = vec![Vec::new(); self.modules.len()];
@@ -3535,6 +3601,7 @@ impl<'a> Loader<'a> {
             checked_diagnostics[id].push(CheckedDiagnostic::BuiltinImport(name));
         }
         let mut graph = SourceGraph {
+            doctest_imports,
             command_startup: None,
             virtual_command: false,
             traceback_objects: false,
@@ -4316,7 +4383,9 @@ impl<'a> Loader<'a> {
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
                 concat!(
-                    include_str!("../stdlib/logging/stream.py"),
+                    include_str!("../stdlib/logging/typed_handler.py"),
+                    "\n",
+                    include_str!("../stdlib/logging/stream.py.inc"),
                     "\n",
                     include_str!("../stdlib/logging/classes.py")
                 ),

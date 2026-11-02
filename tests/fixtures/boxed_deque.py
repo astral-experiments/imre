@@ -213,4 +213,27 @@ def current():
     assert alias.clear() is None and not alias and alias.maxlen == 3
     alias.append(marker)
     assert alias.__init__(alias) is None and not alias and alias.maxlen is None
+    describe = deque.__repr__
+    assert type(describe).__name__ == "wrapper_descriptor" and describe.__objclass__ is deque
+    assert describe.__doc__ == "Return repr(self)." and describe.__text_signature__ == "($self, /)"
+    assert describe(deque()) == "deque([])"
+    recursive = deque(["tag"], maxlen=2)
+    recursive.append(recursive)
+    assert repr(recursive) == recursive.__repr__() == describe(recursive) == "deque(['tag', [...]], maxlen=2)"
+
+    class ClearsOnRepr:
+        def __repr__(self):
+            recursive.clear()
+            return "cleared"
+
+    recursive.extend([ClearsOnRepr(), "last"])
+    assert describe(recursive) == "deque([cleared, 'last'], maxlen=2)"
+    assert not recursive
+    try:
+        describe([])
+    except TypeError as error:
+        assert str(error) == "descriptor '__repr__' requires a 'collections.deque' object but received a 'list'"
+    else:
+        raise AssertionError("deque repr accepted a list")
+
     print("deque passed")

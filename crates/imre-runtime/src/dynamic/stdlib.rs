@@ -43,6 +43,7 @@ mod metadata;
 pub(super) mod monitoring;
 mod operator;
 mod ordered_dict;
+pub(super) mod opcode;
 pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
@@ -104,9 +105,15 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
-        "_imre_ordered_dict" | "atexit" | "builtins" | "errno" | "genericpath" | "itertools"
-    )
-        || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
+        "_datetime"
+            | "_imre_ordered_dict"
+            | "_opcode"
+            | "atexit"
+            | "builtins"
+            | "errno"
+            | "genericpath"
+            | "itertools"
+    ) || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
 }
 
@@ -138,7 +145,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "locale"
             | "_locale"
             | "traceback"
-            | "_opcode"
             | "sysconfig"
             | "ast"
             | "os"
@@ -172,7 +178,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "marshal"
             | "pickle"
             | "zlib"
-            | "datetime"
             | "email"
             | "email.utils"
             | "tempfile"
@@ -428,7 +433,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
-        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd") => {
+        ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan") => {
             ctx.builtin(&format!("math.{name}"))
         }
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -464,12 +469,14 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "_imre_importlib",
             "find_spec"
+            | "import_module"
             | "get_code"
             | "loader_fields"
             | "path_stats"
             | "cache_name"
             | "source_name"
-            | "warn_debug_override",
+            | "warn_debug_override"
+            | "warn_loader_deprecation",
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
@@ -547,6 +554,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_new_typeddict"
             | "_UnpackGenericAlias"
             | "_eval_type_expression"
+            | "_protocol_mro"
+            | "_protocol_member"
             | "_validate_forward_ref"
             | "_finish_field_ref"
             | "Any"
@@ -563,15 +572,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_LiteralGenericAlias",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
-        ("datetime", "UTC") => datetime::utc(ctx),
         (
             "time",
             "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep" | "gmtime" | "localtime"
             | "mktime" | "strftime" | "ctime" | "struct_time",
         ) => ctx.builtin(&format!("time.{name}")),
-        ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
-            ctx.builtin(&format!("datetime.{name}"))
-        }
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
             if let Some(class) = crate::objects::HashState::public_constructor(name) =>
@@ -594,6 +599,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("resource", "RLIM_INFINITY") => resource::limit(ctx, resource::INFINITY),
         ("random", "randrange") => ctx.builtin("random.randrange"),
         ("secrets", "choice") => ctx.builtin("secrets.choice"),
+        ("select", "PIPE_BUF") => ctx.int(libc::PIPE_BUF as i64),
         ("select", "select" | "poll") => ctx.builtin(&format!("select.{name}")),
         ("select", name) if let Some(flag) = crate::objects::os::poll_constant(name) => {
             ctx.int(i64::from(flag))
@@ -753,7 +759,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
-        | ("_json", "_imre_encode_one_shot" | "encode_basestring" | "encode_basestring_ascii")
+        | ("_json", "_imre_encode_one_shot")
         | ("random", "random" | "choice")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
@@ -788,7 +794,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_signature_mapping"
             | "_signature_layout",
         )
-        | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
+        | (
+            "email.utils",
+            "parsedate_to_datetime" | "format_datetime" | "formatdate" | "_has_surrogates",
+        )
         | ("warnings", "warn")
         | (
             "fnmatch",
@@ -1019,6 +1028,9 @@ pub(super) fn call(
     }
     if name == "io.open_code" {
         return io::open_code(ctx, args, kwargs);
+    }
+    if let Some(method) = name.strip_prefix("_opcode.") {
+        return opcode::call(ctx, method, &args[1..], kwargs);
     }
     if let Some(method) = name.strip_prefix("types.SimpleNamespace.") {
         return super::namespace::method(ctx, method, args, kwargs);
@@ -1661,9 +1673,24 @@ pub(super) fn call(
                 let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
                 return Ok(ctx.text(path.to_string()));
             }
+            ("warn_loader_deprecation", [globals, mismatch], []) => {
+                let (line, message) = if ctx.truth(*mismatch)? {
+                    (670, "Module globals; __loader__ != __spec__.loader")
+                } else {
+                    (663, "Module globals is missing a __spec__.loader")
+                };
+                ctx.warn_external_loader(*globals, line, message)?;
+                return Ok(NONE);
+            }
             ("warn_debug_override", [], []) => {
                 crate::objects::cache_paths::warn_debug_override()?;
                 return Ok(NONE);
+            }
+            ("import_module", [name], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx
+                    .find_module(&name)?
+                    .ok_or_else(|| Context::missing_module(&name));
             }
             ("find_spec", [fullname, original], []) => {
                 let fullname = ctx.str_value(*fullname)?.to_owned();
@@ -1750,7 +1777,7 @@ pub(super) fn call(
                 return ctx.lookup(scope, &name);
             }
             ("loaded_module", [name], []) => {
-                return Ok(ctx.registered_module(*name)?.unwrap_or(NONE));
+                return Ok(ctx.public_registered_module(*name)?.unwrap_or(NONE));
             }
             ("retarget_class_cell", [method, old, new], []) => {
                 // Compiled methods keep the implicit __class__ cell apart from ordinary freevars.
@@ -1759,15 +1786,14 @@ pub(super) fn call(
                     code,
                     ..
                 } = *ctx.heap.get(*method)
-                    && matches!(ctx.heap.get(cell), Value::ClassCell(Some(owner)) if owner == old)
+                    && matches!(ctx.heap.get(cell), Value::Cell(Some(owner)) if owner == old)
                 {
                     let parameters = ctx.code_object(code).parameters;
                     let sig: serde_json::Value =
                         serde_json::from_str(ctx.str_value(parameters)?)
                             .map_err(|e| Error::new("SystemError", e.to_string()))?;
                     if sig["class_cell"] == true {
-                        *ctx.heap.get_mut(cell) = Value::ClassCell(Some(*new));
-                        ctx.heap.weak_edge_removed(*old);
+                        ctx.heap.replace_cell(cell, Some(*new));
                         return Ok(TRUE);
                     }
                 }
@@ -1782,12 +1808,9 @@ pub(super) fn call(
             }
             ("members", [class], []) => {
                 if let Value::Class { scope, .. } = *ctx.heap.get(*class) {
-                    let names = ctx.scope_data(scope).names.clone();
-                    let entries = names
-                        .into_iter()
-                        .map(|(name, value)| (ctx.text(name), value))
-                        .collect();
-                    return Ok(ctx.dict(entries));
+                    let dictionary = ctx.class_namespace_dict(scope, false);
+                    let members = ctx.dict_entries(dictionary).expect("class dictionary").to_vec();
+                    return Ok(ctx.dict(members));
                 }
             }
             ("metadata", [mapping], []) => return ctx.mapping_proxy(*mapping),

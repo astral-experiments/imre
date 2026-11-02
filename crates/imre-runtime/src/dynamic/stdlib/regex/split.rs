@@ -50,7 +50,7 @@ pub(super) fn split(
         let span = match next_span(&pattern, text, 0, previous, &mut caps) {
             Ok(Some(span)) => span,
             Ok(None) => break,
-            Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
+            Err(message) => return Err(pattern.match_error(ctx, message)),
         };
         let eol = caps.group_info().to_index(PatternID::ZERO, "imre.eol");
         pieces.push(Some(cursor..span.start));
@@ -123,7 +123,7 @@ pub(super) fn next_span(
     }
     pattern
         .regex
-        .captures(Input::new(text).range(start..text.len()), caps);
+        .captures(Input::new(text).range(start..text.len()), caps)?;
     Ok(group_spans(caps).next().flatten())
 }
 
@@ -141,7 +141,7 @@ pub(super) fn nonempty(
     let input = Input::new(text)
         .range(start..text.len())
         .anchored(Anchored::Yes);
-    if let Some(found) = pattern.regex.asserted_search(input.clone(), caps, true) {
+    if let Some(found) = pattern.regex.asserted_search(input.clone(), caps, true)? {
         return Ok(found);
     }
     let nfa = if let Some(nfa) = pattern.regex.guarded_nfa() {

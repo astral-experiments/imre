@@ -149,6 +149,20 @@ def check_generic_bases():
     assert Fixed.__required_keys__ == {"value"} and Fixed.__optional_keys__ == {"extra"}
     assert type(Fixed()) is dict
 
+    class Pair[K, V](TypedDict):
+        first: K
+
+    class Reversed[V, K](Pair[K, V]):
+        second: V
+
+    parent_key, _ = Pair.__type_params__
+    value, key = Reversed.__type_params__
+    assert (value.__name__, key.__name__) == ("V", "K")
+    assert Reversed.__parameters__ == (value, key)
+    assert Reversed.__orig_bases__ == (Pair[key, value], Generic[value, key])
+    assert Reversed.__annotations__ == {"first": parent_key, "second": value}
+    assert parent_key is not key
+
 
 def check_deferred_fields():
     from annotationlib import Format
@@ -231,6 +245,18 @@ def current():
     namespace = {"TypedDict": TypedDict}
     exec("class Loaded(TypedDict, total=False): pass", namespace)
     assert namespace["Loaded"].__total__ is False
+
+    import warnings
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always", DeprecationWarning)
+        omitted = TypedDict("Omitted")
+        explicit_none = TypedDict("ExplicitNone", None)
+        explicit_empty = TypedDict("ExplicitEmpty", {})
+    assert omitted.__annotations__ == explicit_none.__annotations__ == explicit_empty.__annotations__ == {}
+    omitted_warning, none_warning = captured
+    assert omitted_warning.category is none_warning.category is DeprecationWarning
+    assert str(omitted_warning.message).startswith("Failing to pass a value for the 'fields' parameter")
+    assert str(none_warning.message).startswith("Passing `None` as the 'fields' parameter")
 
     Draft = TypedDict("Draft", [("title", str)], total=False)
     assert is_typeddict(Film) and is_typeddict(tp=Draft)

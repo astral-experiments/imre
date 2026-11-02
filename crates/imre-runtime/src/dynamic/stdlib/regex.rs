@@ -10,6 +10,7 @@ use crate::dynamic::builtins::bind;
 mod assertions;
 mod casefold;
 mod group_names;
+mod lookahead;
 mod progress;
 mod scanner;
 mod split;
@@ -123,6 +124,14 @@ impl Pattern {
             - 1
     }
 
+    fn match_error(&self, ctx: &mut Context, message: String) -> Error {
+        if matches!(self.regex, Matcher::Lookahead(_)) {
+            Error::new("RuntimeError", message)
+        } else {
+            pattern_error(ctx, self.source, self.flags, message)
+        }
+    }
+
     fn engine_flags(&self) -> i64 {
         if self.source == NONE && self.flags & UNICODE == 0 {
             self.flags | ASCII
@@ -160,12 +169,12 @@ impl Pattern {
                     .engine_source
                     .strip_suffix(imre_regex::FINAL_NEWLINE_ANCHOR)
                     .unwrap_or(&self.engine_source);
-                build_regex(
-                    &format!(r"(?:{source})\z"),
-                    self.bytes,
-                    self.engine_flags(),
-                    &self.assertions,
-                )
+                let full = format!(r"(?:{source})\z");
+                if let Matcher::Lookahead(matcher) = &self.regex {
+                    return lookahead::Lookahead::new(&full, matcher.groups.clone())
+                        .map(|m| Matcher::Lookahead(Box::new(m)));
+                }
+                build_regex(&full, self.bytes, self.engine_flags(), &self.assertions)
             })
             .as_ref()
             .map_err(Clone::clone)
@@ -538,6 +547,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
                 return Err(original);
             };
             let syntax = syntax(bytes, flags);
+            let mut guards = Vec::new();
             for (name, body) in extracted.guards {
                 let mut translated = fold(translate(&body)?)?;
                 // Matching the guard only needs a boolean. A terminal dollar still admits a
@@ -563,11 +573,19 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
                     .configure(Regex::config().utf8_empty(!bytes))
                     .build_from_hir(&hir)
                     .map_err(|err| err.to_string())?;
-                assertions.push((name, guard));
+                guards.push((name, guard));
             }
             let source = fold(translate(&extracted.source)?)?;
-            let matcher = build_regex(&source, bytes, flags, &assertions)?;
+            let matcher = build_regex(&source, bytes, flags, &guards)?;
+            assertions = guards;
             Ok((source, matcher))
+        })
+        .or_else(|original| {
+            if bytes {
+                Err(original)
+            } else {
+                lookahead::compile(&source, flags, original)
+            }
         })
         .map_err(|message| pattern_error(ctx, id, flags, message))?;
     // GroupInfo contains the synthetic final-newline capture as well as user names.
@@ -787,7 +805,9 @@ fn capture(
 ) -> Result<Id> {
     let text = subject_bytes(ctx, subject, bytes)?;
     let mut captures = regex.create_captures();
-    regex.captures(input(text), &mut captures);
+    regex
+        .captures(input(text), &mut captures)
+        .map_err(|message| Error::new("RuntimeError", message))?;
     if !captures.is_match() {
         return Ok(NONE);
     }
@@ -1001,7 +1021,7 @@ fn findall(ctx: &mut Context, pattern: &Pattern, text: &[u8], start: usize) -> R
     let mut captures = pattern.regex.create_captures();
     let mut previous = None;
     while let Some(span) = split::next_span(pattern, text, start, previous, &mut captures)
-        .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?
+        .map_err(|message| pattern.match_error(ctx, message))?
     {
         previous = Some(span);
         let fields: Vec<_> = group_spans(&captures)

@@ -1,5 +1,5 @@
 use super::super::calls::MappingOperation;
-use super::super::value::DictViewKind;
+use super::super::value::{DictViewKind, NOT_IMPLEMENTED};
 use super::*;
 use num_traits::Signed;
 
@@ -801,6 +801,7 @@ pub(super) fn method(
     let slot = matches!(
         name,
         "dict.__init__"
+            | "dict.__eq__"
             | "dict.__repr__"
             | "dict.__len__"
             | "dict.__iter__"
@@ -869,6 +870,18 @@ pub(super) fn method(
         }
         let representation = ctx.checked_container_slot_repr(object, receiver)?;
         return Ok(ctx.text(representation));
+    }
+    if name == "dict.__eq__" {
+        if !kwargs.is_empty() {
+            return Err(type_error("wrapper __eq__() takes no keyword arguments"));
+        }
+        let [other] = args else {
+            return Err(type_error(format!("expected 1 argument, got {}", args.len())));
+        };
+        return match ctx.dict_storage(*other) {
+            Some(right) => Ok(boolean(ctx.checked_equal(receiver, right)?)),
+            None => Ok(NOT_IMPLEMENTED),
+        };
     }
     if name == "dict.__delitem__" {
         if !kwargs.is_empty() {

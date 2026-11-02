@@ -21,6 +21,7 @@ pub(super) const METHODS: &[&str] = &[
     "reverse",
     "__len__",
     "__contains__",
+    "__repr__",
     "__iter__",
     "__reversed__",
     "__getitem__",
@@ -487,7 +488,7 @@ pub(super) fn method(
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
-            if matches!(name, "__init__" | "__contains__") {
+            if matches!(name, "__init__" | "__contains__" | "__repr__") {
                 format!("descriptor '{name}' of 'collections.deque' object needs an argument")
             } else {
                 format!("unbound method deque.{name}() needs an argument")
@@ -498,7 +499,7 @@ pub(super) fn method(
         let actual = ctx.type_name(receiver);
         return Err(Error::new(
             "TypeError",
-            if matches!(name, "__init__" | "__contains__") {
+            if matches!(name, "__init__" | "__contains__" | "__repr__") {
                 format!(
                     "descriptor '{name}' requires a 'collections.deque' object but received a '{actual}'"
                 )
@@ -516,12 +517,22 @@ pub(super) fn method(
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            if matches!(name, "__iadd__" | "__contains__") {
+            if matches!(name, "__iadd__" | "__contains__" | "__repr__") {
                 format!("wrapper {name}() takes no keyword arguments")
             } else {
                 format!("deque.{name}() takes no keyword arguments")
             },
         ));
+    }
+    if name == "__repr__" {
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("expected 0 arguments, got {}", rest.len()),
+            ));
+        }
+        let text = ctx.checked_format(receiver, true)?;
+        return Ok(ctx.text(text));
     }
     if name == "index" {
         return index(ctx, receiver, rest);

@@ -35,6 +35,40 @@ fn unsupported() -> Error {
     )
 }
 
+/// Read an ordinary instance field only when its lookup cannot execute Python.
+fn plain_field(ctx: &Context, receiver: Id, name: &str) -> Option<Id> {
+    let Value::Instance {
+        class,
+        fields,
+        namespace: None,
+        ..
+    } = ctx.heap.get(receiver)
+    else {
+        return None;
+    };
+    let Value::Class {
+        scope, ancestors, ..
+    } = ctx.heap.get(*class)
+    else {
+        return None;
+    };
+    if ancestors
+        .iter()
+        .any(|base| ctx.builtins.get("object") != Some(base))
+        || ctx
+            .scope_data(*scope)
+            .class_namespace
+            .as_ref()
+            .is_some_and(|ns| ns.slot_names.is_some())
+        || ctx.class_attr(*class, "__getattribute__").is_some()
+        || ctx.class_attr(*class, "__getattr__").is_some()
+        || ctx.class_attr(*class, name).is_some()
+    {
+        return None;
+    }
+    fields.get(name).copied()
+}
+
 impl Callback {
     pub(super) fn capture(
         ctx: &Context,
@@ -70,13 +104,19 @@ impl Callback {
         kwargs: Option<Id>,
         high_level: bool,
     ) -> Result<Option<(Operation, Vec<Id>)>> {
+        let (function, receiver) = match *ctx.heap.get(target) {
+            Value::Method {
+                callable, receiver, ..
+            } => (callable, Some(receiver)),
+            _ => (target, None),
+        };
         let Value::Function {
             code,
             scope,
             defaults,
             closure,
             ..
-        } = *ctx.heap.get(target)
+        } = *ctx.heap.get(function)
         else {
             return Ok(None);
         };
@@ -90,6 +130,36 @@ impl Callback {
         let signature = ctx.str_value(code.parameters)?;
         let meta: serde_json::Value = serde_json::from_str(signature)
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
+        if let Some(receiver) = receiver {
+            let Some(field) = meta["thread_bound_lock_field"].as_str() else {
+                return Ok(None);
+            };
+            if !code.freevars.is_empty()
+                || !pos.is_empty()
+                || kwargs.is_some_and(
+                    |id| !matches!(ctx.heap.get(id), Value::Dict(items) if items.is_empty()),
+                )
+            {
+                return Ok(None);
+            }
+            let Some(operand) = plain_field(ctx, receiver, field) else {
+                return Ok(None);
+            };
+            let Value::PrimitiveLock(lock) = ctx.heap.get(operand) else {
+                return Ok(None);
+            };
+            // The lookup is bound before startup returns. The worker owns the native
+            // lock and the parent retains the original method and Python lock wrapper.
+            let mut roots = vec![target, args, operand];
+            roots.extend(kwargs);
+            return Ok(Some((
+                Operation::Acquire {
+                    lock: Arc::clone(lock),
+                    release: None,
+                },
+                roots,
+            )));
+        }
         if !code.freevars.is_empty() {
             if high_level
                 && pos.is_empty()

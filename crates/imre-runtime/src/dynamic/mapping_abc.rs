@@ -150,10 +150,17 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
     if !matches!(ctx.builtin_type_name(cls), Some("type" | "typing._AnyMeta")) {
         return Err(Error::new("TypeError", "Can only register classes"));
     }
-    if ctx.python_subclass_check(cls, owner)? {
+    let subclass = |ctx: &mut Context, child, parent| {
+        if ctx.is_protocol_declaration(parent) {
+            ctx.abc_subclass_check(child, parent)
+        } else {
+            ctx.python_subclass_check(child, parent)
+        }
+    };
+    if subclass(ctx, cls, owner)? {
         return Ok(cls);
     }
-    if ctx.python_subclass_check(owner, cls)? {
+    if subclass(ctx, owner, cls)? {
         return Err(Error::new(
             "RuntimeError",
             "Refusing to create an inheritance cycle",
@@ -172,6 +179,9 @@ fn register(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<I
         ));
     }
     ctx.heap.abc_registrations.push([owner, cls]);
+    ctx.heap
+        .protocol_subclass_cache
+        .retain(|_, matched| *matched);
     ctx.heap.abc_cache_token = ctx.heap.abc_cache_token.wrapping_add(1);
     Ok(cls)
 }
@@ -208,6 +218,15 @@ pub(super) fn call(
             *slot = ctx.text(method);
         }
         return ctx.abc_check_methods(candidate, &names[..methods.len()]);
+    }
+    if name == "_abc_caches_clear"
+        && let [owner] = args
+        && kwargs.is_empty()
+    {
+        ctx.heap
+            .protocol_subclass_cache
+            .retain(|pair, _| pair[0] != *owner);
+        return Ok(NONE);
     }
     if name == "get_cache_token" {
         if !kwargs.is_empty() {

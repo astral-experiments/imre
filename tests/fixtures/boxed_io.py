@@ -188,6 +188,18 @@ def exercise(path):
         print(stream.readline(ReadSize(stream)), stream.tell())
     from io import UnsupportedOperation
 
+    buffered_path = path + ".buffered"
+    with open(buffered_path, "wb", 4) as writer:
+        writer.write(b"a")
+        writer.write(b"bcd")
+        with open(buffered_path, "rb") as reader:
+            assert reader.read() == b""
+        writer.write(b"e")
+        with open(buffered_path, "rb") as reader:
+            assert reader.read() == b"abcd"
+    with open(buffered_path, "rb") as reader:
+        assert reader.read() == b"abcde"
+
     target_path = path + ".output"
     with open(target_path, "wb") as output:
         assert output.name is target_path and output.mode == "wb"

@@ -94,6 +94,35 @@ def list_cases():
     return singleton, live, [shared, shared], BadReturn((iter, (["c", "a"],)))
 
 
+class RestoredMapping(dict):
+    def __reduce__(self):
+        return type(self), (), self.state, None, iter(self.items())
+
+    def __setstate__(self, state):
+        assert list(self) == ["z", "a", "m"]
+        assert self["z"] is self and self["a"] is state
+        self.state = state
+
+
+def mapping_items_case(protocol):
+    for items, error in (([], pickle.PicklingError), (iter([["a", 1]]), TypeError),
+                         (iter([("a",)]), TypeError)):
+        try:
+            pickle.dumps(BadReturn((dict, (), None, None, items)), protocol)
+        except error:
+            pass
+        else:
+            raise AssertionError("accepted invalid mapping item iterator")
+    mapping = RestoredMapping()
+    mapping["z"] = mapping
+    mapping["a"] = {}
+    mapping["m"] = 42
+    mapping.state = mapping["a"]
+    restored = pickle.loads(pickle.dumps(mapping, protocol))
+    assert restored["z"] is restored and restored.state is restored["a"]
+    return mapping
+
+
 def check_floats(protocol):
     for value, text, bits in (
         (-0.0, b"-0.0", "8000000000000000"),
@@ -127,6 +156,13 @@ def consume(streams):
             pass
         else:
             raise AssertionError("accepted invalid pickle")
+
+
+class Plain:
+    __slots__ = ("slot", "__dict__")
+
+    def __init__(self, item):
+        self.slot = self.link = item
 
 
 def check_object_reducer():
@@ -167,11 +203,52 @@ def check_object_reducer():
         raise AssertionError("ignored an error inspecting the class reducer")
     assert events == [False, True]
 
+    import copy
+    import copyreg
+
+    plain = Plain({})
+    for protocol in (2, 3, 4, 5):
+        constructor, args, state, listitems, dictitems = plain.__reduce_ex__(protocol)
+        assert constructor is copyreg.__newobj__ and args == (Plain,)
+        assert state[0] is plain.__dict__ and state[1]["slot"] is plain.slot
+        assert listitems is None and dictitems is None
+        restored = pickle.loads(pickle.dumps(plain, protocol))
+        assert type(restored) is Plain and restored.link is restored.slot
+    for args, message in (((), "expected at least 1 argument"),
+                          ((23,), "must be a class"),
+                          ((Plain,), "first argument to __newobj__() must be")):
+        try:
+            pickle.dumps(BadReturn((copyreg.__newobj__, args)), 4)
+        except pickle.PicklingError as error:
+            assert message in str(error)
+        else:
+            raise AssertionError("accepted invalid __newobj__ arguments")
+    clone = copy.copy(plain)
+    assert type(clone) is Plain and clone is not plain
+    assert clone.__dict__ is not plain.__dict__
+    assert clone.link is clone.slot is plain.slot
+
+
+class Outer:
+    class Middle:
+        class Inner:
+            pass
+
+
+def check_global_names(protocol):
+    from collections import OrderedDict, UserDict, UserList, UserString
+
+    for cls in (Outer.Middle, Outer.Middle.Inner, OrderedDict, UserDict, UserList, UserString):
+        for fix_imports in (True, False):
+            data = pickle.dumps(cls, protocol, fix_imports=fix_imports)
+            assert pickle.loads(data, fix_imports=fix_imports) is cls
+
 
 def produce():
     check_object_reducer()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        check_global_names(protocol)
         check_reduction_state(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
@@ -191,7 +268,7 @@ def produce():
         reduced = WithProtocol()
         payload = bytes(range(256))
         value = (shared, shared, reduced, reduced, WithoutProtocol(), (), dictionary_cases(protocol),
-                 (b"", payload[:-1], payload, payload, ReducedBytes(b"x")), list_cases())
+                 (b"", payload[:-1], payload, payload, ReducedBytes(b"x")), list_cases(), mapping_items_case(protocol))
         print(list(pickle.dumps(value, protocol)))
 
 

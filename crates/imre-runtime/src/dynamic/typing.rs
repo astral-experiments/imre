@@ -170,6 +170,11 @@ pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
         let generic = named_class(ctx, "typing", "Generic");
         ctx.bind(scope, "_is_protocol", TRUE);
         ctx.bind(scope, "_is_runtime_protocol", FALSE);
+        let members = ctx.alloc(Value::Set {
+            entries: Default::default(),
+            frozen: false,
+        });
+        ctx.bind(scope, "__protocol_attrs__", members);
         let parameters = ctx.alloc(Value::Tuple(Vec::new()));
         ctx.bind(scope, "__parameters__", parameters);
         let abstract_methods = ctx.alloc(Value::Set {
@@ -1202,6 +1207,35 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let ("_protocol_mro", [class], []) = (operation, args, kwargs) {
+        if matches!(ctx.heap.get(*class), Value::Native(_)) {
+            let bases = ctx.base_lineage(*class, true);
+            return Ok(ctx.alloc(Value::Tuple(bases)));
+        }
+        return ctx.lookup_attr(*class, "__mro__");
+    }
+    if let ("_protocol_member", [class, attr, missing], []) = (operation, args, kwargs) {
+        if let Value::Native(owner) = ctx.heap.get(*class) {
+            let name = ctx.str_value(*attr)?;
+            if let Some(member) = ctx.own_class_attr(*class, name) {
+                return Ok(member);
+            }
+            let symbol = format!("{owner}.{name}");
+            return Ok(
+                if super::wrapper_descriptor::BuiltinDescriptor::lookup(&symbol).is_some() {
+                    ctx.builtin(&symbol)
+                } else {
+                    *missing
+                },
+            );
+        }
+        let namespace = ctx.lookup_attr(*class, "__dict__")?;
+        return match ctx.get_item(namespace, *attr) {
+            Ok(member) => Ok(member),
+            Err(error) if error.kind == "KeyError" => Ok(*missing),
+            Err(error) => Err(error),
+        };
+    }
     if operation == "_new_typeddict" {
         let [name_id, root] = args else {
             return Err(Error::new(
@@ -1541,13 +1575,26 @@ impl Context {
             })
     }
 
-    /// Reject direct runtime checks on protocol declarations before nominal matching.
-    pub(super) fn require_checkable_protocol(&self, class: Id) -> Result<()> {
+    pub(super) fn call_typing_helper(&mut self, name: &str, args: Vec<Id>) -> Result<Id> {
+        let helper = self
+            .module_value("typing", name)
+            .ok_or_else(|| Error::new("RuntimeError", format!("missing typing.{name}")))?;
+        self.call(helper, args, Vec::new())
+    }
+
+    /// abc and functools perform internal checks while walking a class hierarchy.
+    pub(super) fn check_runtime_protocol(&mut self, class: Id, subclass: bool) -> Result<()> {
         if self.is_protocol_declaration(class) {
-            return Err(Error::new(
-                "TypeError",
-                "Instance and class checks can only be used with @runtime_checkable protocols",
-            ));
+            let caller = self
+                .heap
+                .caller_module_at(0)
+                .and_then(|module| self.str_value(module).ok());
+            if !matches!(caller, None | Some("abc" | "functools")) {
+                self.call_typing_helper(
+                    "_check_protocol",
+                    vec![class, if subclass { TRUE } else { FALSE }],
+                )?;
+            }
         }
         Ok(())
     }
@@ -1578,7 +1625,31 @@ impl Context {
                     let result = self.call(check, vec![value], Vec::new())?;
                     return self.truth(result);
                 }
-                self.require_checkable_protocol(class)?;
+                if self.is_protocol_declaration(class) {
+                    self.check_runtime_protocol(class, false)?;
+                    let actual = self.exact_type(value)?;
+                    let reported = self.lookup_attr(value, "__class__")?;
+                    if reported != actual {
+                        if !matches!(
+                            self.builtin_type_name(reported),
+                            Some("type" | "typing._AnyMeta")
+                        ) {
+                            return Err(Error::new(
+                                "TypeError",
+                                "issubclass() arg 1 must be a class",
+                            ));
+                        }
+                        if self.abc_subclass_check(reported, class)? {
+                            return Ok(true);
+                        }
+                    }
+                    if self.abc_subclass_check(actual, class)? {
+                        return Ok(true);
+                    }
+                    let matched =
+                        self.call_typing_helper("_protocol_instance", vec![class, value])?;
+                    return self.truth(matched);
+                }
                 if self.has_abc_subclass_hook(class) {
                     let actual = self.exact_type(value)?;
                     if actual == class {
@@ -1604,8 +1675,8 @@ impl Context {
         if bases.iter().any(|&base| {
             matches!(self.heap.get(base), Value::Native(name) if name == "typing.NamedTuple")
         }) {
-            let fields = self.scope_data(scope).names.get("__annotations__")
-                .and_then(|&annotations| self.dict_entries(annotations))
+            let fields = self.scope_name(scope, "__annotations__")
+                .and_then(|annotations| self.dict_entries(annotations))
                 .unwrap_or_default();
             let named_fields: std::rc::Rc<[String]> = fields
                 .iter()
@@ -1703,6 +1774,7 @@ impl Context {
                         "typing.TypeVar"
                             | "typing.TypeVarTuple"
                             | "NoDefaultType"
+                            | "datetime.timezone"
                             | super::stdlib::flags::TYPE
                             | "slice"
                             | "NoneType"
@@ -1760,7 +1832,7 @@ impl Context {
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
         // type.__new__ wraps plain functions only, before the class becomes observable.
         for name in ["__init_subclass__", "__class_getitem__"] {
-            if let Some(&function) = self.scope_data(scope).names.get(name)
+            if let Some(function) = self.namespace_binding(self.scope_data(scope), name)
                 && matches!(self.heap.get(function), Value::Function { .. })
             {
                 let method = self.alloc(Value::ClassMethod(function));

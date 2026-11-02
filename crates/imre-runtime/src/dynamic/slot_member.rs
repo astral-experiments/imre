@@ -26,7 +26,7 @@ impl Context {
             };
             let frame = self.scope_data(*scope);
             // Assigning __bases__ in boxed classes can shadow, but cannot rebuild, their layout.
-            if frame.names.contains_key("__bases__") {
+            if self.namespace_binding(frame, "__bases__").is_some() {
                 return Err(unsupported());
             }
             let layout = frame
@@ -80,10 +80,8 @@ impl Context {
             let Value::Class { scope, .. } = self.heap.get(base) else {
                 return false;
             };
-            self.scope_data(*scope)
-                .names
-                .get("__slots__")
-                .is_none_or(|&slots| {
+            self.namespace_binding(self.scope_data(*scope), "__slots__")
+                .is_none_or(|slots| {
                     matches!(
                         self.heap.get(slots),
                         Value::None
@@ -203,7 +201,7 @@ impl Context {
             .ok_or_else(|| Error::new("TypeError", "expected a class namespace dictionary"))?
             .to_vec();
         let scope = self.scope(module, None);
-        let cell = self.alloc(Value::ClassCell(None));
+        let cell = self.alloc(Value::Cell(None));
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
@@ -217,7 +215,7 @@ impl Context {
             self.bind_local(scope, &key, value);
         }
         let class = self.allocate_class(name, scope, bases)?;
-        *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
+        self.heap.replace_cell(cell, Some(class));
         self.install_weakref_descriptor(class, scope);
         self.initialize_class_members(class, scope)?;
         let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
@@ -317,7 +315,7 @@ impl Context {
                 } else {
                     original.clone()
                 };
-            if self.scope_data(scope).names.contains_key(&name) {
+            if self.namespace_binding(self.scope_data(scope), &name).is_some() {
                 return Err(Error::new(
                     "ValueError",
                     format!("'{name}' in __slots__ conflicts with class variable"),

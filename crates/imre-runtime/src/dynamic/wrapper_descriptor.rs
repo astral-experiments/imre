@@ -47,6 +47,7 @@ impl BuiltinDescriptor {
                 Some((class, attr, DictIterator::methods(class)))
             }
             Some(("generator", attr)) => Some(("generator", attr, &["__iter__", "__next__"][..])),
+            Some(("type", attr)) => Some(("type", attr, &["mro"][..])),
             Some(("float", attr)) => Some(("float", attr, &["as_integer_ratio"][..])),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("bytearray", attr)) => Some(("bytearray", attr, builtins::BYTEARRAY_METHODS)),
@@ -105,6 +106,7 @@ impl BuiltinDescriptor {
             "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
+            "object.__ne__" => ("object", "__ne__"),
             "object.__repr__" => ("object", "__repr__"),
             "object.__str__" => ("object", "__str__"),
             "function.__call__" => ("function", "__call__"),
@@ -112,8 +114,12 @@ impl BuiltinDescriptor {
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
+            "dict.__eq__" => ("dict", "__eq__"),
             "dict.__repr__" => ("dict", "__repr__"),
+            "mappingproxy.__repr__" => ("mappingproxy", "__repr__"),
+            "mappingproxy.__str__" => ("mappingproxy", "__str__"),
             "collections.deque.__contains__" => (deque::CLASS, "__contains__"),
+            "collections.deque.__repr__" => (deque::CLASS, "__repr__"),
             "collections.defaultdict.__repr__" => ("collections.defaultdict", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "set.__repr__" => ("set", "__repr__"),
@@ -193,6 +199,7 @@ impl BuiltinDescriptor {
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
             "object" => true,
+            "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
@@ -215,6 +222,7 @@ impl BuiltinDescriptor {
             "slice" => matches!(ctx.heap.get(receiver), Value::Slice(_)),
             "method_descriptor" => ctx.builtin_type_name(receiver) == Some("method_descriptor"),
             "dict" => ctx.dict_storage(receiver).is_some(),
+            "mappingproxy" => matches!(ctx.heap.get(receiver), Value::MappingProxy(_)),
             deque::CLASS => matches!(ctx.heap.get(receiver), Value::Deque(_)),
             "collections.defaultdict" => ctx.defaultdict_factory(receiver).is_some(),
             "bool" | "int" | "float" | "str" | "bytes" | "bytearray" | "list" | "tuple" | "set"
@@ -253,6 +261,7 @@ impl BuiltinDescriptor {
                     && let Some(receiver) = receiver
                 {
                     match ctx.heap.get(receiver) {
+                        _ if self.owner == "type" => ctx.class_qualname(receiver),
                         Value::NamedTuple { class: Some(stdlib::os::stat::CLASS), .. } => "stat_result",
                         value if let Some(class) = value.instance_class() => ctx
                             .class_attr(class, "__qualname__")
@@ -273,9 +282,10 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.name == "__call__" => {
                 ctx.text("($self, /, *args, **kwargs)")
             }
+            "__doc__" if self.name == "__repr__" => ctx.text("Return repr(self)."),
             "__doc__" if self.name == "__iter__" => ctx.text("Implement iter(self)."),
             "__doc__" if self.name == "__next__" => ctx.text("Implement next(self)."),
-            "__text_signature__" if matches!(self.name, "__iter__" | "__next__") => {
+            "__text_signature__" if matches!(self.name, "__iter__" | "__next__" | "__repr__") => {
                 ctx.text("($self, /)")
             }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
@@ -344,6 +354,8 @@ impl BuiltinDescriptor {
                         | "swapcase",
                         _,
                     ) => "($self, /)",
+                    ("mro", "__doc__") => "Return a type's method resolution order.",
+                    ("mro", _) => "($self, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
                     ("pop", "__doc__") => {
                         "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."

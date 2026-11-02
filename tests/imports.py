@@ -42,6 +42,18 @@ REJECTED = {
         "records.py": "from imre import struct as layout\n@layout\nclass Point:\n    x: float\n",
         "main.py": "from records import Point\nfrom weakref import ref\nref(Point(1.0))\n",
     }, "weakref.ref requires native Python object operations"),
+    "deque_repr_checks_receiver_expression": ({
+        "main.py": (
+            "from collections import deque\ndef queue(n: int) -> int:\n    return n\n"
+            "deque.__repr__(queue('wrong'))\n"
+        ),
+    }, "expected int, got str"),
+    "saved_deque_repr_keeps_checked_calls": ({
+        "main.py": (
+            "from collections import deque\ndef identity(n: int) -> int:\n    return n\n"
+            "render = deque.__repr__\nrender(deque([1]))\nidentity('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "patch_object_checks_replacement": ({
         "main.py": (
             "from unittest.mock import patch\nclass Owner:\n    value = 0\n"
@@ -61,6 +73,27 @@ REJECTED = {
             "move = chdir\nmove('.')\npath('wrong')\n"
         ),
     }, "invalid-argument-type"),
+    "captured_chdir_checks_nested_missing_argument": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int) -> str:\n    return '.'\n"
+            "move = chdir\nmove(path())\n"
+        ),
+    }, "missing-argument"),
+    "captured_chdir_checks_user_overload": ({
+        "main.py": (
+            "from os import chdir\nfrom typing import overload\n"
+            "@overload\ndef path(n: int) -> str: return '.'\n"
+            "@overload\ndef path(n: int, m: int) -> str: return '.'\n"
+            "def path(n: int, m: int = 0) -> str: return '.'\n"
+            "move = chdir\nmove(path())\n"
+        ),
+    }, "no-matching-overload"),
+    "captured_chdir_checks_user_keyword": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int = 0) -> int:\n    return n\n"
+            "move = chdir\nmove('.')\npath(typo=1)\n"
+        ),
+    }, "unknown-argument"),
     "captured_chdir_preserves_callable_parameter": ({
         "main.py": (
             "from os import chdir\nfrom typing import Callable\n"
@@ -218,6 +251,18 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "opcode_named_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "from _opcode import stack_effect\ndef effect():\n    return stack_effect(31)\n",
+    },
+    "opcode_qualified_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "import _opcode\ndef effect():\n    return _opcode.stack_effect(31)\n",
+    },
+    "opcode_star_helper": {
+        "main.py": "from helper import effect\nprint(effect())\n",
+        "helper.py": "from _opcode import *\ndef effect():\n    return stack_effect(31)\n",
+    },
     "atexit_in_dependency": {
         "main.py": "from cleanup import prepare\nprepare()\n",
         "cleanup.py": (
@@ -837,18 +882,24 @@ def main() -> None:
                 checks += 1
 
         # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
-        source = root / "opcode_flags.py"
         for level in args.opt_levels:
-            executable = temporary / f"opcode-flags-{level}"
-            command = [compiler, "build", str(source), "-o", str(executable), "--runtime", runtime,
-                       "--clang", args.clang, "--opt-level", str(level), *build_flags]
-            if args.sanitize:
-                command.append("--sanitize")
-            require_success(run(command, temporary))
-            result = run([str(executable)], temporary)
-            require_success(result)
-            assert result.stdout == "0\n0\nno bytecode specialization\n", result
-            checks += 1
+            for fixture, route, output in [
+                ("opcode_flags", [], "0\n0\nno bytecode specialization\n"),
+                ("opcode_stack_effect", [], "-1\n"),
+                ("opcode_operations", [], "opcode operations OK\n"),
+                ("opcode_operations", ["--runtime-imports"], "opcode operations OK\n"),
+            ]:
+                executable = temporary / f"{fixture}-{level}"
+                command = [compiler, "build", str(root / f"{fixture}.py"), "-o", str(executable),
+                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                           *build_flags, *route]
+                if args.sanitize:
+                    command.append("--sanitize")
+                require_success(run(command, temporary))
+                result = run([str(executable)], temporary)
+                require_success(result)
+                assert result.stdout == output, result
+                checks += 1
 
         # A failing guard must run before the next import initializes its child.
         guarded = temporary / "wrong_name"

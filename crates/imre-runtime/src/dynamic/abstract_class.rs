@@ -138,9 +138,6 @@ impl Context {
     }
 
     pub(super) fn is_bundled_abc(&self, class: Id) -> bool {
-        let Some(&abc_meta) = self.builtins.get("abc.ABCMeta") else {
-            return false;
-        };
         let Value::Class {
             metaclass,
             ancestors,
@@ -149,12 +146,10 @@ impl Context {
         else {
             return false;
         };
-        *metaclass == Some(abc_meta)
-            // Protocol uses a synthetic layout, but an inherited ABC still supplies
-            // subclass hooks and registration even when Protocol wins metaclass selection.
+        (metaclass.is_some() && metaclass.as_ref() == self.builtins.get("abc.ABCMeta"))
+            // Protocol's synthetic layout still inherits ABCMeta's hooks and registry.
             || (metaclass.is_none()
-                && self.classes.get("typing.Protocol").is_some_and(|p| ancestors.contains(p))
-                && ancestors.iter().any(|&base| self.heap.get(base).instance_class() == Some(abc_meta)))
+                && self.classes.get("typing.Protocol").is_some_and(|p| ancestors.contains(p)))
     }
 
     /// Only ABC classes use a Python subclass hook for public instance and subclass checks.
@@ -206,7 +201,10 @@ impl Context {
         {
             return Ok(());
         }
-        let mut names: BTreeSet<String> = self.scope_data(scope).names.keys().cloned().collect();
+        let mut names: BTreeSet<String> = self
+            .scope_bindings(scope)
+            .map(|(name, _)| name.to_owned())
+            .collect();
         let bases = self
             .scope_data(scope)
             .class_namespace

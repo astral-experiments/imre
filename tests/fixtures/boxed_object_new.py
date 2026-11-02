@@ -25,6 +25,7 @@ def current():
             pass
 
     check_default_state()
+    check_inherited_inequality()
     child = Child.__new__(Child, path='pkg')
     child.path = 'new'
     assert type(child) is Child and child.path == 'new'
@@ -109,3 +110,49 @@ def check_default_state():
             return super().__getstate__(), "custom"
 
     assert Custom().__getstate__() == (None, "custom")
+
+
+def check_inherited_inequality():
+    from collections.abc import Mapping, MutableMapping
+
+    assert Mapping.__ne__ is MutableMapping.__ne__ is object.__ne__
+    assert object.__ne__.__objclass__ is object
+    calls = []
+
+    class Left:
+        __ne__ = MutableMapping.__ne__
+
+        def __eq__(self, other):
+            calls.append("left")
+            return NotImplemented
+
+    class Right:
+        def __eq__(self, other):
+            calls.append("right")
+            return True
+
+    left, right = Left(), Right()
+    assert left.__ne__(right) is NotImplemented
+    assert calls == ["left"]
+    assert (left != right) is False
+    assert calls == ["left", "left", "right"]
+    assert object.__ne__(right, left) is False
+
+    class Plain:
+        pass
+
+    p = Plain()
+    assert object.__ne__(p, p) is False
+    assert object.__ne__(p, Plain()) is NotImplemented
+    assert (1 != 1.0) is False
+    assert (1 != 2.0) is True
+
+    class Recursive:
+        __eq__ = object.__ne__
+
+    try:
+        object.__ne__(Recursive(), Recursive())
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("unguarded recursive inequality slot")

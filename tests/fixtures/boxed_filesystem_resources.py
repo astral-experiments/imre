@@ -1,6 +1,6 @@
 from io import BytesIO
 from importlib import resources
-from importlib.resources.abc import ResourceReader, TraversableResources
+from importlib.resources.abc import ResourceReader, Traversable, TraversableResources, TraversalError
 import data
 
 
@@ -36,6 +36,15 @@ class LegacyReader:
 
 
 root = resources.files(data)
+assert isinstance(root, Traversable)
+assert not isinstance(object(), Traversable)
+assert Traversable.joinpath(root, 'nested/message.txt').read_bytes() == b'hello\n'
+try:
+    Traversable.joinpath(root, 'absent')
+except TraversalError:
+    pass
+else:
+    raise AssertionError('default Traversable.joinpath found a missing child')
 assert root.is_dir()
 assert 'nested' in [child.name for child in root.iterdir()]
 target = root.joinpath('nested', 'message.txt')
@@ -43,6 +52,11 @@ assert target.is_file() and target.read_bytes() == b'hello\n'
 # The source loader owns the location even if the module changes its metadata.
 data.__file__ = 'wrong/__init__.py'
 assert resources.read_text('data', 'nested/message.txt') == 'hello\n'
+assert resources.read_binary(data, 'nested', 'message.txt') == b'hello\n'
+assert resources.read_binary('data', 'nested/message.txt') == b'hello\n'
+with resources.path('data', 'nested', 'message.txt') as existing:
+    assert existing.read_bytes() == b'hello\n'
+assert existing.is_file()
 assert not (root / 'absent').is_file()
 try:
     (root / 'absent').open('rb')
@@ -88,6 +102,10 @@ assert (root / 'dir').is_dir()
 message = root / 'message.txt'
 assert message.is_file() and not list(message.iterdir())
 assert message.read_bytes() == b'caf\xc3\xa9\n'
+assert resources.read_binary(data, 'message.txt') == b'caf\xc3\xa9\n'
+with resources.path(data, 'message.txt') as temporary:
+    assert temporary.read_bytes() == b'caf\xc3\xa9\n'
+assert not temporary.exists()
 assert message.read_text(encoding='utf-8') == 'café\n'
 try:
     (root / 'absent').read_bytes()

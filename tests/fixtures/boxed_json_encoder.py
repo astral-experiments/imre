@@ -1,13 +1,32 @@
+from json import *
+
+_star_exports = {name for name in globals() if not name.startswith("_")}
+
 import importlib
 import json
 import sys
-from json import JSONEncoder, encoder
+from json import encoder
 
 
 def current():
+    expected = ["dump", "dumps", "load", "loads", "JSONDecoder", "JSONDecodeError", "JSONEncoder"]
+    assert json.__all__ == expected
+    assert _star_exports == set(expected)
     assert encoder is importlib.import_module("json.encoder") is sys.modules["json.encoder"]
     assert JSONEncoder is encoder.JSONEncoder and JSONEncoder.__module__ == "json.encoder"
     assert encoder.py_encode_basestring_ascii('a"\n\U0001d120') == '"a\\"\\n\\ud834\\udd20"'
+
+    original_module = sys.modules.pop("_json")
+    try:
+        fresh = importlib.import_module("_json")
+    finally:
+        sys.modules["_json"] = original_module
+    assert fresh is not original_module
+    for name in ("encode_basestring", "encode_basestring_ascii"):
+        quote = getattr(fresh, name)
+        assert quote.__self__ is fresh and getattr(quote.__self__, name) is quote
+        assert quote is not getattr(original_module, name)
+        assert quote("a") == '"a"'
 
     # The pure escaper still consults the live escape table for code-point strings.
     original_escape = encoder.ESCAPE_DCT["\n"]

@@ -15,7 +15,13 @@ from suite_inventory import load_suite, verify_files, verify_interpreter_tests
 from suite_native import Toolchain, native_method, run_in_fixtures, testcase_fixture
 
 # The subprocess operation, method body, and assertions all run in the binary.
-MEMORYVIEW_CASE = "test.test_subprocess.ProcessTestCase.test_communicate_memoryview_input"
+PROCESS_CASE = "test.test_subprocess.ProcessTestCase."
+EPIPE_CASES = {PROCESS_CASE + "test_communicate_epipe", PROCESS_CASE + "test_communicate_epipe_only_stdin"}
+NONBYTE_VIEW_CASE = PROCESS_CASE + "test_communicate_memoryview_input_nonbyte"
+FD_LEAK_CASE = PROCESS_CASE + "test_communicate_pipe_fd_leak"
+PIPE_BUF_CASE = PROCESS_CASE + "test_communicate_pipe_buf"
+ZERO_CMD_CASES = EPIPE_CASES | {FD_LEAK_CASE}
+BOXED_CASES = ZERO_CMD_CASES | {PIPE_BUF_CASE, NONBYTE_VIEW_CASE, PROCESS_CASE + "test_communicate_memoryview_input"}
 METHODS = {
     "ContextManagerTests": {
         "test_returncode": "int",
@@ -29,6 +35,11 @@ METHODS = {
         "test_stdout_stderr_pipe": "bytes",
         "test_communicate_stdin": "int",
         "test_communicate_memoryview_input": None,
+        "test_communicate_memoryview_input_nonbyte": None,
+        "test_communicate_epipe": None,
+        "test_communicate_epipe_only_stdin": None,
+        "test_communicate_pipe_buf": None,
+        "test_communicate_pipe_fd_leak": None,
         "test_communicate_stdout": "bytes",
         "test_communicate_stderr": "bytes",
         "test_communicate_returns": "bytes",
@@ -73,15 +84,27 @@ class NativeCase:
 
 
 def subprocess_method(tools, directory, source, cls, case_id, fixture):
-    if case_id != MEMORYVIEW_CASE:
+    if case_id not in BOXED_CASES:
         return native_method(tools, directory, source, cls, case_id, fixture)
-    # This original registers cleanup callbacks on the native instance and sends a
-    # memoryview through runtime-loaded subprocess to the same toolchain's -c child.
+    preamble = "import subprocess\nimport sys\n"
+    args = None
+    if case_id in ZERO_CMD_CASES:
+        from test import test_subprocess
+        # setUpModule can replace the fallback Python command with a checked executable.
+        args = lambda: test_subprocess.ZERO_RETURN_CMD
+        preamble += "\nZERO_RETURN_CMD = tuple(sys.argv[1:])\n"
+    elif case_id == NONBYTE_VIEW_CASE:
+        preamble += "import select\n"
+    elif case_id == PIPE_BUF_CASE:
+        from test import support
+        preamble += f"import os\n\nclass support:\n    PIPE_MAX_SIZE = {support.PIPE_MAX_SIZE!r}\n"
+
     flags = ["--opt-level", str(tools.level), "--runtime", str(tools.runtime.resolve()),
              "--clang", str(tools.clang.resolve())]
     child_env = {"IMRE_PYTHON": str(tools.imre.resolve()), "IMRE_ENCODED_FLAGS": "\x1f".join(flags)}
     return native_method(replace(tools, runtime_imports=True), directory, source, cls, case_id,
-                         "import subprocess\nimport sys\n" + testcase_fixture(), cleanups=True, extra_env=child_env)
+                         preamble + testcase_fixture(), cleanups=case_id != FD_LEAK_CASE, extra_env=child_env,
+                         assertions="none" if case_id in EPIPE_CASES else "imre", fixture_args=args)
 
 
 def main():

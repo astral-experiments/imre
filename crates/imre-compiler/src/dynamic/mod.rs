@@ -24,6 +24,7 @@ struct Imports {
     uses_import_builtin: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
+    opcode_names: HashSet<String>,
     signal_names: HashMap<String, String>,
     unittest_names: HashSet<String>,
     boxed_mock_names: HashSet<String>,
@@ -124,6 +125,15 @@ impl Imports {
     }
 }
 
+// Keep the two typed specialization constants on their existing route.
+fn boxed_opcode(name: &str) -> bool {
+    use crate::modules::{Binding, Intrinsic, IntrinsicModule};
+    matches!(
+        IntrinsicModule::Opcode.symbol(name),
+        Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(_)))
+    )
+}
+
 fn boxed_sys_export(name: &str) -> bool {
     matches!(
         name,
@@ -212,6 +222,7 @@ impl<'a> Visitor<'a> for Imports {
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
+                        "_opcode" => self.opcode_names.insert(bound.to_string()),
                         "signal" | "_signal" if cfg!(unix) => self
                             .signal_names
                             .insert(bound.to_string(), name.to_owned())
@@ -255,6 +266,7 @@ impl<'a> Visitor<'a> for Imports {
                     }
                     if imp.level == 0
                         && ((name == "operator" && boxed_operator(suffix))
+                            || (name == "_opcode" && (boxed_opcode(suffix) || suffix == "*"))
                             || (name == "sys" && boxed_sys_export(suffix))
                             || (name == "string" && suffix == "templatelib"))
                     {
@@ -336,6 +348,8 @@ impl<'a> Visitor<'a> for Imports {
             && let Expr::Name(module) = &*attr.value
             && ((boxed_operator(attr.attr.as_str())
                 && self.operator_names.contains(module.id.as_str()))
+                || (boxed_opcode(attr.attr.as_str())
+                    && self.opcode_names.contains(module.id.as_str()))
                 || self
                     .signal_names
                     .get(module.id.as_str())
@@ -438,6 +452,7 @@ pub(crate) fn compile(
             "keyword",
             "site",
             "importlib",
+            "_opcode",
             "json",
             "operator",
             "struct",
@@ -686,6 +701,7 @@ pub(crate) fn compile(
         "ast",
         "codecs",
         "copyreg",
+        "datetime",
         "genericpath",
         "hashlib",
         "itertools",

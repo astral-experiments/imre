@@ -78,7 +78,7 @@ pub(in crate::dynamic::stdlib) fn pattern_sub(
         let span = match split::next_span(&pattern, text, 0, previous, &mut caps) {
             Ok(Some(span)) => span,
             Ok(None) => break,
-            Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
+            Err(message) => return Err(pattern.match_error(ctx, message)),
         };
         if pattern.bytes != replacement_is_bytes {
             let expected = if pattern.bytes {
@@ -150,7 +150,7 @@ fn callable_sub(
         let span = match split::next_span(pattern, text, 0, previous, &mut caps) {
             Ok(Some(span)) => span,
             Ok(None) => break,
-            Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
+            Err(message) => return Err(pattern.match_error(ctx, message)),
         };
         if cursor < span.start {
             let gap = group_value(&text[cursor..span.start], pattern.bytes);

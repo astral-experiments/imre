@@ -4,6 +4,7 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "datetime" => Some(("datetime.py", include_str!("../../stdlib/datetime.py"))),
         "json" => Some((
             "json/__init__.py",
             concat!(
@@ -88,6 +89,24 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             ))
         }
         "bisect" => Some(("bisect.py", include_str!("../../stdlib/bisect.py"))),
+        "email.errors" => Some((
+            "email/errors.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/email/upstream/Lib/email/errors.py"
+            ),
+        )),
+        "email._encoded_words" => Some((
+            "email/_encoded_words.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/email/upstream/Lib/email/_encoded_words.py"
+            ),
+        )),
+        "email._header_value_parser" => Some((
+            "email/_header_value_parser.py",
+            include_str!(
+                "../../../../benchmarks/cpython_stdlib/full/email/upstream/Lib/email/_header_value_parser.py"
+            ),
+        )),
         "urllib.error" => Some((
             "urllib/error.py",
             include_str!("../../stdlib/urllib/error.py"),
@@ -298,6 +317,10 @@ pub(crate) fn registered_imports(graph: &SourceGraph) -> RegisteredImports {
             calls.visit_body(&module.parsed.syntax().body);
         }
     }
+    calls
+        .imports
+        .targets
+        .extend_from_slice(&graph.doctest_imports);
     calls.imports
 }
 

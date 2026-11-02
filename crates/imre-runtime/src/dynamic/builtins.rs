@@ -302,6 +302,7 @@ pub(super) fn is_enum_base(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__eq__",
     "__new__",
     "__repr__",
     "__init__",
@@ -1015,24 +1016,50 @@ pub(super) fn call(
     }
     if matches!(
         name,
-        "object.__hash__" | "object.__repr__" | "object.__str__"
+        "object.__hash__" | "object.__repr__" | "object.__str__" | "object.__ne__"
+            | "mappingproxy.__repr__" | "mappingproxy.__str__"
     ) {
-        let method = name.trim_start_matches("object.");
+        let (owner, method) = name.split_once('.').unwrap();
         let Some((&receiver, rest)) = args.split_first() else {
             return Err(type_error(format!(
-                "descriptor '{method}' of 'object' object needs an argument"
+                "descriptor '{method}' of '{owner}' object needs an argument"
             )));
         };
+        if owner == "mappingproxy" && !matches!(ctx.heap.get(receiver), Value::MappingProxy(_)) {
+            return Err(type_error(format!(
+                "descriptor '{method}' requires a 'mappingproxy' object but received a '{}'",
+                ctx.type_name(receiver)
+            )));
+        }
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
             )));
+        }
+        if method == "__ne__" {
+            let [other] = rest else {
+                return Err(type_error(format!(
+                    "expected 1 argument, got {}",
+                    rest.len()
+                )));
+            };
+            return ctx.with_slot_depth(
+                "maximum recursion depth exceeded while calling a Python object",
+                |ctx| ctx.object_ne(receiver, *other),
+            );
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if owner == "mappingproxy" {
+            if method == "__str__" {
+                return call(ctx, "str", &[receiver], &[]);
+            }
+            let repr = ctx.checked_format(receiver, true)?;
+            return Ok(ctx.text(repr));
         }
         if method == "__repr__" {
             return ctx.object_repr(receiver);
@@ -1621,7 +1648,13 @@ pub(super) fn call(
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
-                Value::MemoryView { .. } => ctx.bytes_like(args[0])?.len(),
+                Value::MemoryView { owner, .. } => {
+                    let owner = Context::memoryview_owner(*owner)?;
+                    match ctx.heap.get(ctx.scalar_value(owner)) {
+                        Value::Array(array) => array.len(),
+                        _ => ctx.bytes_like(owner)?.len(),
+                    }
+                }
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
                         Error::new(
@@ -1669,6 +1702,7 @@ pub(super) fn call(
             let owner = match ctx.heap.get(ctx.scalar_value(object)) {
                 Value::Bytes(_) => object,
                 Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
+                Value::Array(array) if array.view_layout().0 != "w" => object,
                 Value::Array(_) | Value::ByteArray(_) => {
                     return Err(Error::new(
                         "NotImplementedError",
@@ -1682,6 +1716,10 @@ pub(super) fn call(
                     )));
                 }
             };
+            let storage = ctx.scalar_value(owner);
+            if let Value::Array(array) = ctx.heap.get_mut(storage) {
+                array.viewed = true;
+            }
             Ok(ctx.alloc(Value::MemoryView {
                 owner: Some(owner),
                 hash: None,
@@ -1769,7 +1807,10 @@ pub(super) fn call(
             {
                 return ctx.prepare_fromlist(result, list);
             }
-            ctx.module(name.split('.').next().unwrap())
+            match name.split_once('.') {
+                Some((top, _)) => ctx.module(top),
+                None => Ok(result),
+            }
         }
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),
