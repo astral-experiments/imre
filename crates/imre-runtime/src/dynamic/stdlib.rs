@@ -274,6 +274,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         property: None,
         weak_reference: None,
         cycle: None,
+        member_values: None,
         memory_stream: None,
         fields: fields
             .iter()
@@ -418,7 +419,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "warn_debug_override",
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
-        | ("_imre_dataclasses", "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata") => {
+        | ("_imre_dataclasses", "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata" | "slotted_type" | "retarget_class_cell") => {
             ctx.builtin(&format!("{module}.{name}"))
         }
         ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
@@ -439,6 +440,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "GeneratorType") => ctx.builtin("generator"),
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
+        ("types", "MemberDescriptorType") => ctx.builtin("member_descriptor"),
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),
         ("types", "FunctionType") => ctx.builtin("function"),
@@ -1608,6 +1610,23 @@ pub(super) fn call(
             ("loaded_module", [name], []) => {
                 return Ok(ctx.registered_module(*name)?.unwrap_or(NONE));
             }
+            ("retarget_class_cell", [method, old, new], []) => {
+                // Compiled methods keep the implicit __class__ cell apart from ordinary freevars.
+                if let Value::Function { class_cell: Some(cell), code, .. } = *ctx.heap.get(*method)
+                    && matches!(ctx.heap.get(cell), Value::ClassCell(Some(owner)) if owner == old)
+                {
+                    let parameters = ctx.code_object(code).parameters;
+                    let sig: serde_json::Value = serde_json::from_str(ctx.str_value(parameters)?)
+                        .map_err(|e| Error::new("SystemError", e.to_string()))?;
+                    if sig["class_cell"] == true {
+                        *ctx.heap.get_mut(cell) = Value::ClassCell(Some(*new));
+                        ctx.heap.weak_edge_removed(*old);
+                        return Ok(TRUE);
+                    }
+                }
+                return Ok(FALSE);
+            }
+            ("slotted_type", [old, namespace], []) => return ctx.slotted_dataclass(*old, *namespace),
             ("members", [class], []) => {
                 if let Value::Class { scope, .. } = *ctx.heap.get(*class) {
                     let names = ctx.scope_data(scope).names.clone();

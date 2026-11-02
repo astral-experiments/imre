@@ -126,7 +126,7 @@ impl Context {
         Ok(obj)
     }
 
-    fn class_instances_support_weakref(&self, class: Id) -> bool {
+    pub(super) fn class_instances_support_weakref(&self, class: Id) -> bool {
         let Value::Class { ancestors, .. } = self.heap.get(class) else {
             return false;
         };
