@@ -28,6 +28,18 @@ def current():
         result_type = parse.ParseResultBytes if isinstance(url, bytes) else parse.ParseResult
         print(type(parsed) is result_type, isinstance(parsed, result_type), tuple(parsed), parsed.params)
         print(parsed.geturl(), parse.urlunparse(parsed))
+    for parser, text_class, byte_class in (
+        (parse.urlsplit, SplitResult, SplitResultBytes),
+        (parse.urlparse, parse.ParseResult, parse.ParseResultBytes),
+    ):
+        text = parser('http://USER:pw@Example:80/Málaga;p?q#f')
+        binary = text.encode('utf-8')
+        assert type(text) is text_class and type(binary) is byte_class
+        assert binary.decode('utf-8') == text
+        assert binary.hostname == b'example' and binary.port == 80
+        assert binary.decode('utf-8').geturl() == text.geturl()
+        assert type(parser(b'https://example.test/')) is byte_class
+
     class CustomSplit(str):
         def lstrip(self, chars):
             return self
