@@ -126,6 +126,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "urllib.parse"
             | "io"
             | "itertools"
+            | "json"
             | "subprocess"
             | "warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
@@ -183,7 +184,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "binascii"
             | "math"
             | "unicodedata"
-            | "json"
             | "_json"
             | "_imre_logging"
             | "_imre_subprocess"
@@ -637,7 +637,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
         ) => ctx.builtin(&format!("binascii.{name}")),
-        ("json", "JSONDecodeError") => ctx.alloc(Value::Native("JSONDecodeError".to_owned())),
         ("sys", "path") => ctx.sys_path,
         ("sys", "prefix" | "base_prefix" | "exec_prefix" | "base_exec_prefix") => {
             path_text(ctx, &layout(ctx)?.prefix)?
@@ -770,7 +769,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
-        | ("json", "dump" | "dumps" | "loads")
         | ("random", "random" | "choice" | "shuffle")
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
@@ -2283,17 +2281,6 @@ pub(super) fn call(
         name,
         "base64.urlsafe_b64encode" | "base64.urlsafe_b64decode"
     );
-    const JSON_DUMP_KEYWORDS: &[&str] = &[
-        "fp",
-        "obj",
-        "skipkeys",
-        "default",
-        "ensure_ascii",
-        "allow_nan",
-        "indent",
-        "sort_keys",
-        "separators",
-    ];
     let (max_args, keywords): (usize, &[&str]) = match name {
         "functools.cmp_to_key" => {
             let comparator = functools::key_argument("cmp_to_key", "mycmp", args, kwargs)?;
@@ -2313,13 +2300,10 @@ pub(super) fn call(
         "_json.encode_basestring" | "_json.encode_basestring_ascii" => {
             return json::encode_basestring(ctx, name, args, kwargs);
         }
-        "json.loads" => (1, &["s"]),
         "_imre_json.encoder_state" => return json::encoder_state(ctx, args, kwargs),
         "_imre_json.encoder_call" => return json::encoder_call(ctx, args, kwargs),
         "_imre_json.surrogate_text" => (1, &[]),
         "_imre_json.loads" => (2, &[]),
-        "json.dump" => (2, JSON_DUMP_KEYWORDS),
-        "json.dumps" => (1, &JSON_DUMP_KEYWORDS[1..]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.compare_digest" | "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -2575,36 +2559,7 @@ pub(super) fn call(
                 NONE
             }
         }
-        "_imre_json.loads" => json::loads(ctx, argument(args, 0)?, Some(argument(args, 1)?))?,
-        "json.loads" => {
-            let input = option(args, 0, kwargs, "s")?.ok_or_else(|| {
-                Error::new(
-                    "TypeError",
-                    "loads() missing 1 required positional argument: 's'",
-                )
-            })?;
-            json::loads(ctx, input, None)?
-        }
-        "json.dump" | "json.dumps" => {
-            let function = name.strip_prefix("json.").unwrap();
-            let input = option(args, 0, kwargs, "obj")?.ok_or_else(|| {
-                Error::new(
-                    "TypeError",
-                    format!("{function}() missing 1 required positional argument: 'obj'"),
-                )
-            })?;
-            let stream = if function == "dump" {
-                Some(option(args, 1, kwargs, "fp")?.ok_or_else(|| {
-                    Error::new(
-                        "TypeError",
-                        "dump() missing 1 required positional argument: 'fp'",
-                    )
-                })?)
-            } else {
-                None
-            };
-            json::encode(ctx, input, kwargs, stream)?
-        }
+        "_imre_json.loads" => json::loads(ctx, argument(args, 0)?, argument(args, 1)?)?,
         "functools.update_wrapper" => functools::update_wrapper(ctx, args, kwargs)?,
         "functools._cache_wrapper" => functools::make_cache(
             ctx,
