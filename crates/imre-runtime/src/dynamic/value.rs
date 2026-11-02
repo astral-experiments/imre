@@ -1038,7 +1038,7 @@ impl Value {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer(_) => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Writer { .. } => "_io.BufferedWriter",
             },
             Self::TextFile(_) => "_io.TextIOWrapper",
             Self::SequenceIterator { .. } => "iterator",
@@ -1458,6 +1458,8 @@ impl Value {
             Self::File(file) => {
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
+                } else if let Some((path, _)) = file.path_metadata() {
+                    visit.push(path);
                 }
             }
             Self::None

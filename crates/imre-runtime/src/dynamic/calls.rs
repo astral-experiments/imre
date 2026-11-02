@@ -2384,6 +2384,16 @@ impl Context {
                 };
             }
             Value::File(ref handle)
+                if matches!(name, "name" | "mode")
+                    && let Some((path, mode)) = handle.path_metadata() =>
+            {
+                return Ok(if name == "name" {
+                    path
+                } else {
+                    self.text(mode)
+                });
+            }
+            Value::File(ref handle)
                 if name == "name"
                     && let Some(fd) = handle.socket_reader_name() =>
             {
