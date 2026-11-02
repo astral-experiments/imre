@@ -1996,6 +1996,7 @@ def report(text):
             "boxed_global.py",
             "boxed_configparser.py",
             "boxed_getopt.py",
+            "boxed_logging_config.py",
             "boxed_logging.py",
             "boxed_logging_manager.py",
             "boxed_logging_formatter.py",
