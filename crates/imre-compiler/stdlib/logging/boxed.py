@@ -65,6 +65,11 @@ class _MessageFormatter:
 _default_formatter = _MessageFormatter()
 
 
+def _flush_handler_stream(handler):
+    if handler.stream and hasattr(handler.stream, "flush"):
+        handler.stream.flush()
+
+
 def _set_handler_name(handler, name):
     with _lock:
         if handler._name in _handlers:
