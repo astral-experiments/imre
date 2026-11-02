@@ -684,6 +684,10 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
                 // Matching the guard only needs a boolean. A terminal dollar still admits a
                 // final newline, but its private capture is unnecessary in this submatcher.
                 if translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
+                    if kind != Kind::Ahead {
+                        // The optional consumed newline is not part of Python's lookbehind width.
+                        return Err("terminal dollar in a bytes lookbehind is unsupported".into());
+                    }
                     translated.truncate(translated.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
                     translated.push_str(r"(?:\n)?\z");
                 }
@@ -691,15 +695,25 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
                     .map_err(|err| err.to_string())?;
                 // Bound the work done each time the main NFA visits a zero-width assertion.
                 let properties = hir.properties();
+                let invalid = if kind == Kind::Ahead {
+                    "lookahead requires a capture-free pattern of at most 256 bytes"
+                } else {
+                    "lookbehind requires a fixed-width pattern of at most 256 bytes"
+                };
                 let width = properties
                     .maximum_len()
                     .filter(|width| *width <= 256)
-                    .ok_or("regex assertion exceeds the 256-byte limit")?;
+                    .ok_or(invalid)?;
                 if kind != Kind::Ahead && properties.minimum_len() != Some(width) {
                     return Err("look-behind requires fixed-width pattern".into());
                 }
                 if kind != Kind::NegativeBehind && properties.explicit_captures_len() != 0 {
-                    return Err("positive assertion requires a capture-free pattern".into());
+                    return Err(if kind == Kind::Ahead {
+                        invalid
+                    } else {
+                        "positive lookbehind requires a capture-free pattern"
+                    }
+                    .into());
                 }
                 let guard = Regex::builder()
                     .configure(Regex::config().utf8_empty(!bytes))

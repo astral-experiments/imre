@@ -80,7 +80,10 @@ pub(super) fn extract(
                         || kind == Kind::NegativeBehind
                             && (!tail.starts_with(b"(?") || tail.starts_with(b"(?P<")))
                     {
-                        return Err("unsupported group inside a regex assertion".into());
+                        return Err(match kind {
+                            Kind::Ahead => "only capture-free expressions are supported inside a positive lookahead",
+                            _ => "unsupported group inside a bytes lookbehind",
+                        }.into());
                     }
                 } else if tail.starts_with(b"(?=") {
                     active = Some((at, depth, Kind::Ahead));
@@ -111,8 +114,12 @@ pub(super) fn extract(
             _ => at += 1,
         }
     }
-    if active.is_some() {
-        return Err("unterminated regex assertion".into());
+    if let Some((_, _, kind)) = active {
+        return Err(match kind {
+            Kind::Ahead => "unterminated positive lookahead",
+            _ => "unterminated bytes lookbehind",
+        }
+        .into());
     }
     if assertions.is_empty() {
         return Ok(None);
