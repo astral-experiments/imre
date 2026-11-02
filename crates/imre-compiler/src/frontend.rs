@@ -1192,14 +1192,7 @@ pub(crate) fn lower_with_caller_cache(
     }
     Ok((
         ir::Module {
-            ignore_python_environment: graph
-                .command_startup
-                .as_ref()
-                .is_some_and(|(flags, _)| flags.isolated),
-            command_utf8_mode: graph
-                .command_startup
-                .as_ref()
-                .map(|(flags, _)| flags.utf8_mode),
+            command_flags: graph.command_startup.as_ref().map(|(flags, _)| *flags),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,

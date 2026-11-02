@@ -1397,6 +1397,7 @@ impl Context {
                         "typing.TypeVar"
                             | "typing.TypeVarTuple"
                             | "NoDefaultType"
+                            | super::stdlib::flags::TYPE
                             | "slice"
                             | "NoneType"
                             | "NotImplementedType"
