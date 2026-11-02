@@ -83,6 +83,7 @@ const FUNCTIONS: &[&str] = &[
     "ord",
     "chr",
     "hex",
+    "oct",
     "divmod",
     "round",
     "callable",
@@ -1761,10 +1762,16 @@ pub(super) fn call(
             ctx.compile_source(args[0], args[1], args[2], false)
         }
         "eval" | "exec" => ctx.call_eval_exec(ctx.heap.current_scope(), name, args, kwargs),
-        "hex" => {
-            let value = one_positional_arg("hex", args, kwargs)?;
+        "hex" | "oct" => {
+            let value = one_positional_arg(name, args, kwargs)?;
             let number = ctx.index_integer(value)?;
-            Ok(ctx.text(format!("{:#x}", number.big().as_ref())))
+            let number = number.big();
+            let text = if name == "oct" {
+                format!("{:#o}", number.as_ref())
+            } else {
+                format!("{:#x}", number.as_ref())
+            };
+            Ok(ctx.text(text))
         }
         "abs" => {
             if !kwargs.is_empty() {

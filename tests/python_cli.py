@@ -2398,18 +2398,22 @@ def report(text):
         ):
             regex_entry.write_text(program)
             compare("-IB", regex_entry, native_args=("run", regex_entry, "--quiet"))
-        hex_entry = root / "hex_entry.py"
+        radix_entry = root / "radix_entry.py"
         for program in (
             "class Offset:\n    def __index__(self): return -(1 << 100)\nprint(hex(Offset()))",
             "formatter = hex\nprint(formatter(31))",
+            "formatter = oct\nprint(formatter(0), oct(-(1 << 150)), oct(True))",
+            "import builtins\nfrom builtins import oct as formatter\n"
+            "class Number:\n    def __index__(self): return 0o624\n"
+            "print(formatter is builtins.oct, formatter(Number()))",
             "import builtins\nprint(builtins.hex(31))",
             "from builtins import hex as formatter\nprint(formatter(31))",
             "import warnings\nclass Flag:\n    def __index__(self): return True\n"
             "warnings.simplefilter('error', DeprecationWarning)\n"
             "try: hex(Flag())\nexcept DeprecationWarning as warning: print(warning)",
         ):
-            hex_entry.write_text(program)
-            compare("-IB", hex_entry, native_args=("run", hex_entry, "--quiet"))
+            radix_entry.write_text(program)
+            compare("-IB", radix_entry, native_args=("run", radix_entry, "--quiet"))
         monitoring_entry = root / "monitoring_entry.py"
         (root / "monitoring_helper.py").write_text(
             "from sys import monitoring\ndef line_mask():\n    return monitoring.events.LINE\n"
