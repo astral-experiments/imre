@@ -3540,6 +3540,9 @@ impl Context {
                 if name == "__new__" && self.has_base(obj, "float") {
                     return Ok(self.builtin("float.__new__"));
                 }
+                if name == "__new__" && self.uses_object_new(self.allocation_base(obj)) {
+                    return Ok(self.builtin("object.__new__"));
+                }
                 if let Some((meta, member)) = metaclass_member {
                     return self.bind_attribute(member, obj, meta);
                 }
@@ -3662,9 +3665,8 @@ impl Context {
                 Value::Function { .. } => return Ok(self.builtin("function.__new__")),
                 Value::ThreadLocal(_) => return Ok(self.builtin("_thread._local.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
-                Value::Class { .. } | Value::Instance { .. } => {
-                    let class = self.heap.get(base).instance_class().unwrap_or(base);
-                    if self.uses_object_new(self.allocation_base(class)) {
+                Value::Instance { class, .. } => {
+                    if self.uses_object_new(self.allocation_base(*class)) {
                         return Ok(self.builtin("object.__new__"));
                     }
                 }
