@@ -21,6 +21,7 @@ impl CompileChildren {
     pub(super) fn prepare() -> io::Result<Self> {
         // SAFETY: sigaction initializes the output buffer without changing the disposition.
         let mut inherited = unsafe { std::mem::zeroed::<libc::sigaction>() };
+        // SAFETY: a null action only queries SIGCHLD. inherited is writable for the call.
         if unsafe { libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut inherited) } != 0 {
             return Err(io::Error::last_os_error());
         }
@@ -30,7 +31,10 @@ impl CompileChildren {
         // SAFETY: a default handler, an empty mask and zero flags form a valid action.
         let mut action = unsafe { std::mem::zeroed::<libc::sigaction>() };
         action.sa_sigaction = libc::SIG_DFL;
+        // SAFETY: sigemptyset initializes the writable mask field of this local action.
         unsafe { libc::sigemptyset(&mut action.sa_mask) };
+        // SAFETY: action holds SIG_DFL, an empty mask and zero flags. A null output
+        // pointer tells sigaction to discard the previous disposition.
         if unsafe { libc::sigaction(libc::SIGCHLD, &action, std::ptr::null_mut()) } != 0 {
             return Err(io::Error::last_os_error());
         }
