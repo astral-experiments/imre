@@ -907,6 +907,7 @@ impl Context {
                         || name.starts_with("property.")
                         || (name.starts_with("dict.") && name != "dict.__new__")
                         || name.starts_with("abc.")
+                        || name.starts_with("selectors._SelectorMapping.")
                         || name
                             .strip_prefix("str.")
                             .is_some_and(|method| builtins::STR_METHODS.contains(&method))
