@@ -7620,26 +7620,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some((key, value)) = self.types.mapping(list.ty) {
-                    // Reading an ordinary enum-keyed dictionary may probe with an equal integer.
-                    // A default factory can insert the supplied key, which changes its stored type.
-                    let integer = (matches!(key, Type::IntEnum(_))
-                        && !self.types.is_default_list_dict(list.ty)
-                        && !self.types.is_counter(list.ty))
-                    .then_some(Type::Int);
-                    let key = self.expr_expected_or(&subscript.slice, key, integer)?;
-                    let required = self.required_group_key(&list, &key);
-                    let expression = self.projected_group(&list, &key).unwrap_or_else(|| Expr {
-                        ty: value,
-                        kind: ExprKind::Builtin(Builtin::DictGet, vec![list, key]),
-                    });
-                    return Ok(if required {
-                        Expr {
-                            ty: Type::Str,
-                            kind: ExprKind::Unwrap(Box::new(expression)),
-                        }
-                    } else {
-                        expression
-                    });
+                    return self.dict_subscript(list, &subscript.slice, key, value);
                 }
                 if matches!(list.ty, Type::VarTuple(_)) {
                     let (literal, negative) = match &*subscript.slice {
@@ -8692,6 +8673,37 @@ impl<'a> Checker<'a> {
             return Ok(expression);
         }
         self.call_with_key_view(call, None, receiver)
+    }
+
+    fn dict_subscript(
+        &mut self,
+        mapping: Expr,
+        index: &ast::Expr,
+        key: Type,
+        value: Type,
+    ) -> Result<Expr, String> {
+        // Reading an ordinary enum-keyed dictionary may probe with an equal integer.
+        // A default factory can insert the supplied key, which changes its stored type.
+        let integer = (matches!(key, Type::IntEnum(_))
+            && !self.types.is_default_list_dict(mapping.ty)
+            && !self.types.is_counter(mapping.ty))
+        .then_some(Type::Int);
+        let key = self.expr_expected_or(index, key, integer)?;
+        let required = self.required_group_key(&mapping, &key);
+        let expression = self
+            .projected_group(&mapping, &key)
+            .unwrap_or_else(|| Expr {
+                ty: value,
+                kind: ExprKind::Builtin(Builtin::DictGet, vec![mapping, key]),
+            });
+        Ok(if required {
+            Expr {
+                ty: Type::Str,
+                kind: ExprKind::Unwrap(Box::new(expression)),
+            }
+        } else {
+            expression
+        })
     }
 
     fn dict_popitem(
@@ -10191,6 +10203,20 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::BinaryIO && attribute.attr.as_str() == "writelines" {
                 return Err(self.object_builtin_error("binary writelines", call));
+            }
+            if attribute.attr.as_str() == "__getitem__"
+                && let Some((key, value)) = self.types.mapping(receiver.ty)
+                && receiver.ty == self.types.dict(key, value)
+            {
+                if let [index] = call.arguments.args.as_ref()
+                    && call.arguments.keywords.is_empty()
+                {
+                    return self.dict_subscript(receiver, index, key, value);
+                }
+                let mut scope = calls::ArgumentScope::default();
+                scope.hold(self, receiver);
+                let error = self.one_positional_error(call, "dict.__getitem__", "key", value)?;
+                return Ok(scope.finish(error));
             }
             self.reject_builtin_keywords(call)?;
             if receiver.ty == Type::StringIO
