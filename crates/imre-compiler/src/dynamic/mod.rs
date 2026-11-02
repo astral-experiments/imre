@@ -24,6 +24,7 @@ struct Imports {
     uses_import_builtin: bool,
     sys_names: HashSet<String>,
     operator_names: HashSet<String>,
+    signal_names: HashSet<String>,
     unittest_names: HashSet<String>,
     pkgutil_names: HashSet<String>,
     get_data_names: HashSet<String>,
@@ -100,9 +101,6 @@ impl Imports {
     }
     fn add(&mut self, level: u32, name: &str) {
         self.names.push((level, name.to_owned()));
-        if level == 0 && cfg!(unix) && matches!(name, "signal" | "_signal") {
-            self.runtime_imports = true;
-        }
         if level == 0
             && matches!(
                 name,
@@ -126,6 +124,10 @@ fn boxed_sys_export(name: &str) -> bool {
         name,
         "path" | "modules" | "version_info" | "implementation" | "exit" | "exc_info" | "exception"
     )
+}
+
+fn boxed_signal_export(name: &str) -> bool {
+    cfg!(unix) && matches!(name, "alarm" | "SIGALRM" | "Signals")
 }
 
 fn boxed_unittest_cleanup(name: &str) -> bool {
@@ -193,6 +195,9 @@ impl<'a> Visitor<'a> for Imports {
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
                         "operator" => self.operator_names.insert(bound.to_string()),
+                        "signal" | "_signal" if cfg!(unix) => {
+                            self.signal_names.insert(bound.to_string())
+                        }
                         "unittest" => self.unittest_names.insert(bound.to_string()),
                         "pkgutil" => self.pkgutil_names.insert(bound.to_string()),
                         "importlib" => self.machinery_names.insert(format!("{bound}.machinery")),
@@ -207,7 +212,10 @@ impl<'a> Visitor<'a> for Imports {
                 self.add(imp.level, name);
                 for a in &imp.names {
                     let suffix = a.name.as_str();
-                    if imp.level == 0 && name == "unittest" && boxed_unittest_cleanup(suffix) {
+                    if imp.level == 0
+                        && (name == "unittest" && boxed_unittest_cleanup(suffix)
+                            || matches!(name, "signal" | "_signal") && boxed_signal_export(suffix))
+                    {
                         self.runtime_imports = true;
                     }
                     if imp.level == 0 && name == "pkgutil" && suffix == "get_data" {
@@ -289,6 +297,8 @@ impl<'a> Visitor<'a> for Imports {
             && let Expr::Name(module) = &*attr.value
             && ((boxed_operator(attr.attr.as_str())
                 && self.operator_names.contains(module.id.as_str()))
+                || (boxed_signal_export(attr.attr.as_str())
+                    && self.signal_names.contains(module.id.as_str()))
                 || (boxed_unittest_cleanup(attr.attr.as_str())
                     && self.unittest_names.contains(module.id.as_str())))
         {
