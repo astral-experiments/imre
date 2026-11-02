@@ -2185,6 +2185,8 @@ impl Context {
         let methods = match name {
             "type" => &["mro"][..],
             "object" => &[
+                "__init__",
+                "__lt__",
                 "__hash__",
                 "__ne__",
                 "__format__",

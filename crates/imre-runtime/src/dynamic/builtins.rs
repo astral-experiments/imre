@@ -391,10 +391,11 @@ const SET_OPERATORS: &[&str] = &[
     "__iand__", "__ior__", "__isub__", "__ixor__",
 ];
 
-/// Methods shared by the two native real number classes.
+/// Methods for the two native real number classes.
 pub(super) fn real_methods(owner: &str) -> &'static [&'static str] {
     match owner {
-        "int" | "float" => &["__abs__", "__float__", "__int__", "__round__", "__trunc__"],
+        "int" => &["__abs__", "__float__", "__int__", "__lt__", "__round__", "__trunc__"],
+        "float" => &["__abs__", "__float__", "__int__", "__round__", "__trunc__"],
         _ => &[],
     }
 }
@@ -1467,6 +1468,27 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
+            "object" | "int" if method == "__lt__" => {
+                let Some((&receiver, rest)) = args.split_first() else {
+                    return Err(type_error(format!(
+                        "descriptor '__lt__' of '{owner}' object needs an argument"
+                    )));
+                };
+                if owner == "int" && !ctx.builtin_slot_accepts(receiver, "int") {
+                    return Err(type_error(format!(
+                        "descriptor '__lt__' requires a 'int' object but received a '{}'",
+                        ctx.type_name(receiver)
+                    )));
+                }
+                positional(name, kwargs)?;
+                let [other] = rest else {
+                    return Err(type_error(format!("expected 1 argument, got {}", rest.len())));
+                };
+                if owner == "object" || !ctx.builtin_slot_accepts(*other, "int") {
+                    return Ok(NOT_IMPLEMENTED);
+                }
+                Ok(boolean(ctx.as_int(receiver)?.cmp(&ctx.as_int(*other)?).is_lt()))
+            }
             "super" if method == "__new__" => ctx.super_new(args, kwargs),
             "super" if method == "__init__" => ctx.super_init(args, kwargs),
             "int" | "float" | "str" | "bytes" if method == "__new__" => {

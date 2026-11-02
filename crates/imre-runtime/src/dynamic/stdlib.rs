@@ -547,6 +547,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CoroutineType") => ctx.builtin("coroutine"),
         ("types", "MethodType") => ctx.builtin("method"),
         ("types", "MemberDescriptorType") => ctx.builtin("member_descriptor"),
+        ("types", "WrapperDescriptorType") => ctx.builtin("wrapper_descriptor"),
         ("types", "MethodWrapperType") => ctx.builtin("method-wrapper"),
         ("types", "MethodDescriptorType") => ctx.builtin("method_descriptor"),
         ("types", "FrameType") => ctx.builtin("frame"),

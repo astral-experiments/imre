@@ -296,6 +296,7 @@ impl Context {
                 self.builtins.get("type.mro").copied()
             }
             Value::Native(kind) if kind == "object" => match name {
+                "__init__" | "__lt__" => self.builtins.get(&format!("object.{name}")).copied(),
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
                 "__ne__" => self.builtins.get("object.__ne__").copied(),
                 "__format__" => self.builtins.get("object.__format__").copied(),
@@ -3947,6 +3948,7 @@ impl Context {
                             | "__setattr__"
                             | "__delattr__"
                             | "__ne__"
+                            | "__lt__"
                             | "__init__"
                             | "__new__"
                     ) =>

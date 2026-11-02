@@ -236,6 +236,8 @@ impl BuiltinDescriptor {
             "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "collections._tuplegetter.__repr__" => (super::namedtuple::GETTER, "__repr__"),
+            "object.__init__" => ("object", "__init__"),
+            "object.__lt__" => ("object", "__lt__"),
             "object.__hash__" => ("object", "__hash__"),
             "object.__ne__" => ("object", "__ne__"),
             "object.__repr__" => ("object", "__repr__"),
@@ -498,6 +500,14 @@ impl BuiltinDescriptor {
                 } else {
                     "($self, /)"
                 })
+            }
+            "__doc__" if self.name == "__lt__" => ctx.text("Return self<value."),
+            "__text_signature__" if self.name == "__lt__" => ctx.text("($self, value, /)"),
+            "__doc__" if self.owner == "object" && self.name == "__init__" => {
+                ctx.text("Initialize self.  See help(type(self)) for accurate signature.")
+            }
+            "__text_signature__" if self.owner == "object" && self.name == "__init__" => {
+                ctx.text("($self, /, *args, **kwargs)")
             }
             "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
             "__text_signature__" if self.name == "__getattribute__" => ctx.text("($self, name, /)"),
