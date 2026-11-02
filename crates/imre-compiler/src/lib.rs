@@ -291,12 +291,21 @@ fn object_fallback<T>(
     let check_returns = || {
         if checked_file && let Some(graph) = &graph {
             let (skipped, overloads) = graph.diagnostic_scopes();
+            let entry = &graph.modules[graph.entry];
+            let all_calls = !entry.optional_imports.is_empty()
+                || !graph.needs_object_runtime.get()
+                    && graph.object_builtin_errors.borrow().contains(&error);
+            let checked_calls = if all_calls {
+                analysis::FallbackCalls::All
+            } else if entry.has_entry_guard() {
+                analysis::FallbackCalls::Entry(graph.entry)
+            } else {
+                analysis::FallbackCalls::None
+            };
             graph.session.diagnostic_copy()?.check_fallback_contracts(
                 skipped.as_deref(),
                 &overloads,
-                !graph.modules[graph.entry].optional_imports.is_empty()
-                    || !graph.needs_object_runtime.get()
-                        && graph.object_builtin_errors.borrow().contains(&error),
+                checked_calls,
                 graph
                     .modules
                     .iter()

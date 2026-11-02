@@ -2856,7 +2856,7 @@ pub(crate) struct SourceModule {
     /// Decorated declarations register their original function at module initialization.
     pub(crate) overloads: HashSet<usize>,
     pub(crate) type_guards: Vec<usize>,
-    /// Fixed pattern declarations in the entry module precede ordinary executable statements.
+    /// Entry bindings and guards that run during initialization, before later definitions.
     pub(crate) entry_globals: Vec<usize>,
     /// Guarded standard-library imports that run in source order through the object importer.
     pub(crate) optional_imports: HashMap<TextRange, String>,
@@ -2895,6 +2895,13 @@ pub(crate) fn boxed_mock_export(name: &str) -> bool {
 }
 
 impl SourceModule {
+    /// An entry capability guard runs before its subsequent declarations and calls.
+    pub(crate) fn has_entry_guard(&self) -> bool {
+        self.entry_globals
+            .iter()
+            .any(|&index| matches!(self.parsed.syntax().body[index], ast::Stmt::If(_)))
+    }
+
     fn local_value(&self, id: ModuleId, statement: &ast::Stmt) -> Option<DefinitionId> {
         let name = value_name(statement)?;
         let Binding::Value(first) = *self.bindings.get(name)? else {
@@ -4544,6 +4551,11 @@ impl<'a> Loader<'a> {
                                 module_value(statement),
                                 Some(ast::Expr::Call(call)) if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
                             ));
+                    if entry_global && module_attribute_guard(&self.modules, id, statement) {
+                        // Run the guard in the initializer before subsequent declarations.
+                        self.modules[id].entry_globals.push(index);
+                        continue;
+                    }
                     self.scan_value_writes(id, statement)?;
                     if let Some(name) = value_name(statement) {
                         if (id != 0 || entry_global)
@@ -5561,6 +5573,26 @@ fn single_import_binding(body: &[ast::Stmt]) -> Option<&str> {
     // An unaliased dotted import binds only the first component.
     let name = alias.name.as_str().split('.').next()?;
     (name != "*").then_some(name)
+}
+
+/// Recognize a module attribute test whose only branch raises.
+fn module_attribute_guard(modules: &[SourceModule], id: ModuleId, statement: &ast::Stmt) -> bool {
+    let ast::Stmt::If(guard) = statement else {
+        return false;
+    };
+    if !guard.elif_else_clauses.is_empty()
+        || !matches!(guard.body.as_slice(), [ast::Stmt::Raise(_)])
+    {
+        return false;
+    }
+    let test = match &*guard.test {
+        ast::Expr::UnaryOp(op) if op.op == ast::UnaryOp::Not => &*op.operand,
+        other => other,
+    };
+    matches!(test, ast::Expr::Attribute(attr) if matches!(
+        resolve_binding(modules, id, &attr.value),
+        Some(Binding::Module(_) | Binding::IntrinsicModule(_))
+    ))
 }
 
 /// Allow an identity check with a closed builtin raise before importing a dependency.
