@@ -2391,6 +2391,9 @@ impl IntrinsicModule {
             (Self::JsonNative, "make_scanner") => {
                 Intrinsic::ObjectRuntimeExport("_json.make_scanner")
             }
+            (Self::JsonNative, "make_encoder") => {
+                Intrinsic::ObjectRuntimeExport("_json.make_encoder")
+            }
             (Self::JsonNative, "scanstring") => Intrinsic::ObjectRuntimeExport("_json.scanstring"),
             (Self::JsonNative, "encode_basestring") => {
                 Intrinsic::ObjectRuntimeExport("_json.encode_basestring")

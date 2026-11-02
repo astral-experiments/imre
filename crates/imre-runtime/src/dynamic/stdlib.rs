@@ -770,7 +770,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
-        | ("_imre_json", "loads" | "surrogate_text")
+        | ("_imre_json", "loads" | "surrogate_text" | "encoder_state" | "encoder_call")
         | ("_imre_linecache", "source_lines")
         | (
             "_imre_metadata",
@@ -787,7 +787,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
-        | ("_json", "_imre_encode_one_shot")
         | ("random", "random" | "choice" | "shuffle")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
@@ -2324,7 +2323,8 @@ pub(super) fn call(
             return json::encode_basestring(ctx, name, args, kwargs);
         }
         "json.loads" => (1, &["s"]),
-        "_json._imre_encode_one_shot" => (10, &[]),
+        "_imre_json.encoder_state" => return json::encoder_state(ctx, args, kwargs),
+        "_imre_json.encoder_call" => return json::encoder_call(ctx, args, kwargs),
         "_imre_json.surrogate_text" => (1, &[]),
         "_imre_json.loads" => (2, &[]),
         "json.dump" => (2, JSON_DUMP_KEYWORDS),
@@ -2577,7 +2577,6 @@ pub(super) fn call(
             let (_, layout) = structure::parse(ctx, argument(args, 0)?)?;
             structure::unpack(ctx, &layout, argument(args, 1)?)?
         }
-        "_json._imre_encode_one_shot" => json::one_shot(ctx, args)?,
         "_imre_json.surrogate_text" => {
             let storage = ctx.scalar_value(argument(args, 0)?);
             if matches!(ctx.heap.get(storage), Value::SurrogateStr(_)) {

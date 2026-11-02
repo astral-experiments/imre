@@ -1,5 +1,7 @@
+mod encoder_state;
 mod notes;
 mod scanstring;
+pub(super) use encoder_state::encoder_state;
 use notes::Location;
 pub(super) use scanstring::scanstring;
 
@@ -345,27 +347,27 @@ impl Fragment {
         }
     }
 
-    fn write(&self, ctx: &mut Context, output: &mut Output) -> Result<()> {
+    fn validate_indent(&self, ctx: &mut Context) -> Result<()> {
+        if let Self::Python(id) = self
+            && ctx.string_storage(*id).is_none()
+        {
+            let class = ctx.exact_type(*id)?;
+            let name = ctx.class_name(class);
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "can only concatenate str (not \"{}\") to str",
+                    &name[..name.floor_char_boundary(200)]
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    fn write(&self, ctx: &Context, output: &mut Output) -> Result<()> {
         match self {
             Self::Text(text) => write_json_fragment(&mut output.text, text)?,
-            Self::Python(id)
-                if matches!(ctx.heap.get(*id), Value::Str(_) | Value::SurrogateStr(_)) =>
-            {
-                output.raw(ctx.heap.get(*id))?
-            }
-            // A user-defined indent multiplication may return a non-string.
-            // The C encoder first uses it when indenting a nonempty container.
-            Self::Python(id) => {
-                let class = ctx.exact_type(*id)?;
-                let name = ctx.class_name(class);
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "can only concatenate str (not \"{}\") to str",
-                        &name[..name.floor_char_boundary(200)]
-                    ),
-                ));
-            }
+            Self::Python(id) => output.raw(ctx.heap.get(*id))?,
         }
         Ok(())
     }
@@ -376,6 +378,7 @@ struct Encoder {
     quote: Option<Id>,
     allow_nan: Id,
     indent: Option<Fragment>,
+    indent_prefix: Option<Id>,
     sort_keys: Id,
     skipkeys: Id,
     item_separator: Fragment,
@@ -383,7 +386,7 @@ struct Encoder {
     default: Option<Id>,
     stream: Option<Id>,
     write_failed: bool,
-    active: Option<HashSet<Id>>,
+    markers: Markers,
     nesting: usize,
     output: Output,
 }
@@ -469,7 +472,8 @@ pub(super) fn encode(
         default: option("default").filter(|v| *v != NONE),
         stream,
         write_failed: false,
-        active: Some(HashSet::new()),
+        markers: Markers::Local(HashSet::new()),
+        indent_prefix: None,
         nesting: 0,
         output: Output::default(),
     };
@@ -481,40 +485,127 @@ pub(super) fn encode(
     })
 }
 
-/// Run the native one-shot encoder after JSONEncoder has resolved its options.
-pub(super) fn one_shot(ctx: &mut Context, args: &[Id]) -> Result<Id> {
+/// The public factory retains the caller's marker dictionary across calls. CPython
+/// removes completed entries and leaves unfinished entries visible after an error.
+enum Markers {
+    Local(HashSet<Id>),
+    External(Option<Id>),
+}
+
+impl Markers {
+    fn enter(&mut self, ctx: &mut Context, object: Id) -> Result<Option<Id>> {
+        match self {
+            Self::External(None) => return Ok(None),
+            Self::Local(active) => {
+                if active.insert(object) {
+                    return Ok(None);
+                }
+            }
+            Self::External(Some(dict)) => {
+                let key = ctx.alloc(Value::Int(crate::Int::from_usize(object as usize)));
+                let (hash, found) = ctx.find_dictionary_key(*dict, key, None)?;
+                if found.is_none() {
+                    ctx.set_dictionary_key(*dict, key, object, Some(hash), true)?;
+                    return Ok(Some(key));
+                }
+            }
+        }
+        Err(Error::new("ValueError", "Circular reference detected"))
+    }
+
+    fn leave(&mut self, ctx: &mut Context, object: Id, key: Option<Id>) -> Result<()> {
+        match self {
+            Self::Local(active) => {
+                active.remove(&object);
+            }
+            Self::External(Some(dict)) => {
+                let key = key.expect("marker inserted on entry");
+                if super::builtins::remove_dict_item(ctx, *dict, key)?.is_none() {
+                    return Err(ctx.exception("KeyError", &[key]));
+                }
+            }
+            Self::External(None) => {}
+        }
+        Ok(())
+    }
+}
+
+/// Invoke a constructed _json.Encoder with the original object and starting level.
+pub(super) fn encoder_call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let bad_state = || Error::new("TypeError", "invalid JSON encoder state");
+    let (state, positional) = args.split_first().ok_or_else(bad_state)?;
+    let Value::Tuple(fields) = ctx.heap.get(*state) else {
+        return Err(bad_state());
+    };
     let &[
-        value,
         markers,
         default,
         quote,
         indent,
         key,
         item,
-        sort,
-        skip,
-        allow,
-    ] = args
+        sort_keys,
+        skipkeys,
+        allow_nan,
+    ] = fields.as_slice()
     else {
-        return Err(Error::new(
-            "TypeError",
-            "_imre_encode_one_shot expects 10 arguments",
-        ));
+        return Err(bad_state());
+    };
+    let argument = encoder_state::required_args(
+        "_iterencode",
+        positional,
+        kwargs,
+        &["obj", "_current_indent_level"],
+    )?;
+    let value = argument(0)?;
+    let level = ctx
+        .index_integer(argument(1)?)?
+        .to_i64()
+        .and_then(|n| isize::try_from(n).ok())
+        .ok_or_else(|| {
+            Error::new(
+                "OverflowError",
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+    let marker_dict = if markers == NONE {
+        None
+    } else {
+        Some(ctx.dict_storage(markers).ok_or_else(bad_state)?)
     };
     let key_separator = Fragment::separator(ctx, key, 5)?;
     let item_separator = Fragment::separator(ctx, item, 6)?;
-    let sort_keys = super::builtins::boolean(ctx.truth(sort)?);
-    let skipkeys = super::builtins::boolean(ctx.truth(skip)?);
-    let allow_nan = super::builtins::boolean(ctx.truth(allow)?);
-    if markers != NONE && ctx.dict_entries(markers).is_none() {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "make_encoder() argument 1 must be dict or None, not {}",
-                ctx.type_name(markers)
-            ),
-        ));
-    }
+    // CPython repeats the original indent before visiting even a scalar. Subsequent
+    // levels concatenate its underlying text rather than repeating the subclass.
+    let indent_prefix = if level == 0 || indent == NONE {
+        None
+    } else {
+        let sequence = matches!(
+            ctx.heap.get(ctx.scalar_value(indent)),
+            Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::List(_)
+                | Value::Tuple(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+        );
+        if !sequence
+            && (ctx.dict_storage(indent).is_some()
+                || ctx.bound_slot(indent, "__getitem__")?.is_none()
+                || ctx.bound_slot(indent, "__mul__")?.is_none())
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!("'{}' object can't be repeated", ctx.type_name(indent)),
+            ));
+        }
+        let count = ctx.int(level as i64);
+        let repeated = ctx.binary("*", indent, count)?;
+        Some(
+            ctx.string_storage(repeated)
+                .ok_or_else(|| Error::new("SystemError", "bad argument to internal function"))?,
+        )
+    };
     let indent =
         (indent != NONE).then(|| Fragment::Python(ctx.string_storage(indent).unwrap_or(indent)));
     let symbol = if let Value::Method {
@@ -546,12 +637,14 @@ pub(super) fn one_shot(ctx: &mut Context, args: &[Id]) -> Result<Id> {
         default: Some(default),
         stream: None,
         write_failed: false,
-        active: (markers != NONE).then(HashSet::new),
+        markers: Markers::External(marker_dict),
+        indent_prefix,
         nesting: 0,
         output: Output::default(),
     };
     encoder.value(ctx, value, 0)?;
-    encoder.output.finish(ctx)
+    let text = encoder.output.finish(ctx)?;
+    Ok(ctx.alloc(Value::Tuple(vec![text])))
 }
 
 impl Encoder {
@@ -661,12 +754,13 @@ impl Encoder {
                     ctx.heap.release_temporaries_since(roots);
                     return self.emit(ctx);
                 }
-                if self
-                    .active
-                    .as_mut()
-                    .is_some_and(|active| !active.insert(id))
+                let marker = self.markers.enter(ctx, id)?;
+                // The accelerator prepares its separator before visiting any
+                // items, even if every key of the nonempty dict will be skipped.
+                if let Some(indent) = &self.indent
+                    && (sequence || ctx.dict_storage(id).is_some())
                 {
-                    return Err(Error::new("ValueError", "Circular reference detected"));
+                    indent.validate_indent(ctx)?;
                 }
                 self.nesting += 1;
                 match ctx.heap.get(contents) {
@@ -687,13 +781,11 @@ impl Encoder {
                         }
                         self.close(ctx, "]", i != 0, depth)?;
                     }
-                    Value::Dict(entries) | Value::DefaultDict { entries, .. } => {
-                        self.object(ctx, id, super::super::copy_ids(entries)?, depth)?;
-                    }
+                    Value::Dict(_) | Value::DefaultDict { .. } => self.object(ctx, id, depth)?,
                     Value::Instance {
                         dictionary: Some(_),
                         ..
-                    } => self.subclass_object(ctx, id, depth)?,
+                    } => self.object_items(ctx, id, depth)?,
                     _ => {
                         let default = self.default.ok_or_else(|| {
                             Error::new(
@@ -711,9 +803,7 @@ impl Encoder {
                     }
                 }
                 self.nesting -= 1;
-                if let Some(active) = &mut self.active {
-                    active.remove(&id);
-                }
+                self.markers.leave(ctx, id, marker)?;
                 ctx.heap.release_temporaries_since(roots);
             }
         }
@@ -746,11 +836,16 @@ impl Encoder {
 
     fn newline(&mut self, ctx: &mut Context, depth: usize) -> Result<()> {
         if let Some(indent) = &self.indent {
-            if let Some(text) = indent.text(ctx) {
+            if self.indent_prefix.is_none()
+                && let Some(text) = indent.text(ctx)
+            {
                 crate::objects::JsonIndent::Text(text)
                     .write_newline(&mut self.output.text, depth)?;
             } else {
                 write_json_fragment(&mut self.output.text, "\n")?;
+                if let Some(prefix) = self.indent_prefix {
+                    self.output.raw(ctx.heap.get(prefix))?;
+                }
                 for _ in 0..depth {
                     indent.write(ctx, &mut self.output)?;
                 }
@@ -759,13 +854,32 @@ impl Encoder {
         Ok(())
     }
 
-    fn object(
-        &mut self,
-        ctx: &mut Context,
-        id: Id,
-        mut entries: Vec<(Id, Id)>,
-        depth: usize,
-    ) -> Result<()> {
+    fn object(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
+        let entries = ctx.dict_entries(id).expect("dictionary storage");
+        if matches!(self.markers, Markers::External(_)) {
+            if matches!(ctx.heap.get(id), Value::DefaultDict { .. }) {
+                return self.object_items(ctx, id, depth);
+            }
+            let scalar = |id| {
+                matches!(
+                    ctx.heap.get(id),
+                    Value::None
+                        | Value::Bool(_)
+                        | Value::Int(_)
+                        | Value::Float(_)
+                        | Value::Str(_)
+                        | Value::SurrogateStr(_)
+                )
+            };
+            if self.quote.is_some() || !entries.iter().all(|&(k, v)| scalar(k) && scalar(v)) {
+                return if self.sort_keys == FALSE {
+                    self.live_object(ctx, id, depth)
+                } else {
+                    self.object_items(ctx, id, depth)
+                };
+            }
+        }
+        let mut entries = super::super::copy_ids(entries)?;
         // Encoding a nested subclass can call Python and clear the original mapping.
         ctx.heap
             .reserve_temporaries(entries.len().saturating_mul(2))?;
@@ -784,6 +898,23 @@ impl Encoder {
         self.close(ctx, "}", nonempty, depth)
     }
 
+    /// A Python callback may change subsequent members of an unsorted exact dict.
+    fn live_object(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
+        write_json_fragment(&mut self.output.text, "{")?;
+        let mut nonempty = false;
+        let mut position = 0;
+        while let Some((current, key, value, _)) = ctx.dictionary_pair(id, position) {
+            let roots = ctx.heap.temporary_mark();
+            ctx.heap.reserve_temporaries(2)?;
+            ctx.heap.keep(key);
+            ctx.heap.keep(value);
+            self.member(ctx, id, &mut nonempty, key, value, depth + 1)?;
+            ctx.heap.release_temporaries_since(roots);
+            position = current + 1;
+        }
+        self.close(ctx, "}", nonempty, depth)
+    }
+
     /// Materialize a subclass iterator while keeping previously yielded values alive.
     fn snapshot(ctx: &mut Context, source: Id) -> Result<Id> {
         let iterator = ctx.iterator(source)?;
@@ -792,8 +923,8 @@ impl Encoder {
         Ok(list)
     }
 
-    /// Read a dict subclass through its items method and sort the returned pairs when requested.
-    fn subclass_object(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
+    /// Read the mapping through its items method and sort the returned pairs when requested.
+    fn object_items(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
         let method = ctx.lookup_attr(id, "items")?;
         let result = ctx.call(method, Vec::new(), Vec::new())?;
         let items = if matches!(ctx.heap.get(result), Value::List(_)) {

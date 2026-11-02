@@ -16,11 +16,6 @@ try:
 except ImportError:
     c_make_encoder = None
 
-try:
-    from _json import _imre_encode_one_shot
-except ImportError:
-    _imre_encode_one_shot = None
-
 ESCAPE = re.compile(r'[\x00-\x1f\\"\b\f\n\r\t]')
 ESCAPE_ASCII = re.compile(r'([\\"]|[^\ -~])')
 HAS_UTF8 = re.compile(b'[\x80-\xff]')
@@ -290,18 +285,12 @@ class JSONEncoder(object):
             indent = self.indent
         else:
             indent = ' ' * self.indent
-        if _one_shot:
-            if c_make_encoder is not None:
-                _iterencode = c_make_encoder(
-                    markers, self.default, _encoder, indent,
-                    self.key_separator, self.item_separator, self.sort_keys,
-                    self.skipkeys, self.allow_nan)
-                return _iterencode(o, 0)
-            if _imre_encode_one_shot is not None:
-                return (_imre_encode_one_shot(
-                    o, markers, self.default, _encoder, indent,
-                    self.key_separator, self.item_separator, self.sort_keys,
-                    self.skipkeys, self.allow_nan),)
+        if _one_shot and c_make_encoder is not None:
+            _iterencode = c_make_encoder(
+                markers, self.default, _encoder, indent,
+                self.key_separator, self.item_separator, self.sort_keys,
+                self.skipkeys, self.allow_nan)
+            return _iterencode(o, 0)
         _iterencode = _make_iterencode(
             markers, self.default, _encoder, indent, floatstr,
             self.key_separator, self.item_separator, self.sort_keys,
