@@ -2735,7 +2735,32 @@ impl Heap {
         )
     }
 
-    /// Release a private argument list containing scalar tuples at its original call boundary.
+    /// Regex matches and patterns on exact text or bytes hold only their subject and pattern source.
+    fn plain_regex_operand(&self, id: Id) -> bool {
+        let weak = |id| self.has_weak_values && self.weak_edge(id);
+        let text = |id| {
+            matches!(
+                self.get(id),
+                Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
+            ) && !weak(id)
+        };
+        let pattern =
+            |id| matches!(self.get(id), Value::RegexPattern(p) if text(p.source)) && !weak(id);
+        let (value, callable) = match self.get(id) {
+            Value::Method {
+                callable, receiver, ..
+            } => (*receiver, Some(*callable)),
+            Value::RegexPattern(_) | Value::RegexMatch(_) => (id, None),
+            _ => return false,
+        };
+        !weak(id)
+            && callable.is_none_or(|f| matches!(self.get(f), Value::Native(_)) && !weak(f))
+            && (pattern(value)
+                || matches!(self.get(value), Value::RegexMatch(m)
+                    if !weak(value) && text(m.subject) && pattern(m.pattern)))
+    }
+
+    /// Release inert call arguments and peers at the same boundary as the general discard.
     pub(super) fn discard_scalar_call(&mut self, mark: usize, result: Id, arguments: Id) -> bool {
         if !self.tracks_finalizers() {
             return false;
@@ -2743,14 +2768,21 @@ impl Heap {
         let Value::List(args) = self.get(arguments) else {
             return false;
         };
+        let Some(dropped) = self.frames.last().unwrap().live.get(mark..) else {
+            return false;
+        };
+        if args.len() > 8 || dropped.len() > 64 || !dropped.contains(&arguments) {
+            return false;
+        }
         let weak = |id| self.has_weak_values && self.weak_edge(id);
         let scalar = |id| self.finalizer_free_scalar(id) && !weak(id);
         let flat = |items: &[Id]| items.len() <= 8 && items.iter().copied().all(scalar);
-        // Without a nested tuple the original discard need not truncate these temporaries.
-        if !(2..=8).contains(&args.len())
-            || !args
+        // Both a nested tuple argument and a regex operand trigger truncation in discard_operands.
+        let tuple_argument = args.len() >= 2
+            && args
                 .iter()
-                .any(|&id| matches!(self.get(id), Value::Tuple(_)))
+                .any(|&id| matches!(self.get(id), Value::Tuple(_)));
+        if (!tuple_argument && !dropped.iter().any(|&id| self.plain_regex_operand(id)))
             || weak(arguments)
             || !args.iter().all(|&id| match self.get(id) {
                 Value::Tuple(items) => !weak(id) && flat(items),
@@ -2759,19 +2791,13 @@ impl Heap {
         {
             return false;
         }
-        let Some(dropped) = self.frames.last().unwrap().live.get(mark..) else {
-            return false;
-        };
-        if dropped.len() > 64 || !dropped.contains(&arguments) {
-            return false;
-        }
         // Other operands may own resources or weak targets. Leave uncertain cases to the collector.
         if !dropped.iter().all(|&id| {
             id == arguments
                 || match self.get(id) {
                     Value::Tuple(items) | Value::List(items) => !weak(id) && flat(items),
                     Value::Dict(items) => !weak(id) && items.is_empty(),
-                    _ => scalar(id),
+                    _ => scalar(id) || self.plain_regex_operand(id),
                 }
         }) {
             return false;
