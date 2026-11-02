@@ -35,7 +35,7 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
     }
-    for name in ["has_ipv6", "socket", "error"] {
+    for name in ["has_ipv6", "socket", "close", "error"] {
         let value = attribute(ctx, name)?;
         ctx.bind(scope, name, value);
     }
@@ -51,6 +51,7 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         // whether a particular process can create or bind an IPv6 socket.
         "has_ipv6" => Ok(super::TRUE),
         "socket" => Ok(ctx.builtin("socket.socket")),
+        "close" => Ok(ctx.builtin("_socket.close")),
         "getaddrinfo" | "getfqdn" | "gaierror" => {
             Ok(ctx.alloc(Value::Native(format!("socket.{name}"))))
         }
@@ -310,6 +311,14 @@ fn getsockopt(
     let used = native::get_option_into(socket, level, name, &mut bytes)?;
     bytes.truncate(used);
     Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
+pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let arg = super::super::builtins::one_positional_arg("_socket.close", args, kwargs)?;
+    // CPython converts through C long before casting to its POSIX socket descriptor.
+    let fd = ctx.index_c_long(arg)? as i32;
+    native::close_fd(fd).map_err(crate::objects::errno_error)?;
+    Ok(NONE)
 }
 
 pub(super) fn call(

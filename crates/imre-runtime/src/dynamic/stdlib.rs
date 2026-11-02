@@ -1616,6 +1616,9 @@ pub(super) fn call(
             _ => codecs::builtin_handler(ctx, function, args, kwargs),
         };
     }
+    if name == "_socket.close" {
+        return socket::close(ctx, args, kwargs);
+    }
     if let Some(name) = name.strip_prefix("socket.") {
         return socket::call(ctx, name, args, kwargs);
     }
