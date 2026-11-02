@@ -7,6 +7,7 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         "AF_INET" => libc::AF_INET,
         "AF_UNSPEC" => libc::AF_UNSPEC,
         "AF_UNIX" => libc::AF_UNIX,
+        "AI_PASSIVE" => libc::AI_PASSIVE,
         "SOCK_STREAM" => libc::SOCK_STREAM,
         "SOL_SOCKET" => libc::SOL_SOCKET,
         "IPPROTO_TCP" => libc::IPPROTO_TCP,
