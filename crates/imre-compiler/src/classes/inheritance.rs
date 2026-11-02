@@ -123,6 +123,22 @@ pub(super) fn resolve(
                         }
                     }
                     _ => {
+                        let origin = match argument {
+                            ast::Expr::Subscript(subscript) => &*subscript.value,
+                            other => other,
+                        };
+                        if graph
+                            .session
+                            .is_builtin_sequence_class(definition.module, origin)
+                        {
+                            let error = module
+                                .error(argument, "sequence subclasses require object lowering");
+                            graph
+                                .object_builtin_errors
+                                .borrow_mut()
+                                .insert(error.clone());
+                            return Err(error);
+                        }
                         return Err(
                             module.error(argument, "the base must be a known fixed-layout class")
                         );

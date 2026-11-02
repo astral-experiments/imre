@@ -2501,6 +2501,20 @@ impl Context {
                     "__text_signature__" if symbol == "posix.kill" => {
                         return Ok(self.text("($module, pid, signal, /)"));
                     }
+                    "__doc__" if symbol == "posix.WIFSTOPPED" => {
+                        return Ok(
+                            self.text("Return True if the process returning status was stopped.")
+                        );
+                    }
+                    "__text_signature__" if symbol == "posix.WIFSTOPPED" => {
+                        return Ok(self.text("($module, /, status)"));
+                    }
+                    "__doc__" if symbol == "posix.execv" => {
+                        return Ok(self.text("Execute an executable path with arguments, replacing current process.\n\n  path\n    Path of executable file.\n  argv\n    Tuple or list of strings."));
+                    }
+                    "__text_signature__" if symbol == "posix.execv" => {
+                        return Ok(self.text("($module, path, argv, /)"));
+                    }
                     "__doc__" if symbol == "posix.getppid" => {
                         return Ok(self.text("Return the parent's process id.\n\nIf the parent process has already exited, Windows machines will still\nreturn its id; others systems will return the id of the 'init' process (1)."));
                     }

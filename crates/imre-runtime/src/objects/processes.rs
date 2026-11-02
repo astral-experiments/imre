@@ -288,7 +288,7 @@ fn cstring(bytes: &[u8]) -> Result<CString> {
 }
 
 /// Self-contained immutable C arrays: moving the owner never moves CString data.
-struct CStrings {
+pub(crate) struct CStrings {
     strings: Vec<CString>,
     pointers: Vec<*const libc::c_char>,
 }
@@ -300,7 +300,7 @@ unsafe impl Send for CStrings {}
 unsafe impl Sync for CStrings {}
 
 impl CStrings {
-    fn new(strings: Vec<CString>) -> Result<Self> {
+    pub(crate) fn new(strings: Vec<CString>) -> Result<Self> {
         let size = strings.len().checked_add(1).ok_or_else(Error::allocation)?;
         let mut pointers = Vec::new();
         pointers
@@ -309,6 +309,15 @@ impl CStrings {
         pointers.extend(strings.iter().map(|value| value.as_ptr()));
         pointers.push(std::ptr::null());
         Ok(Self { strings, pointers })
+    }
+
+    /// Replace the process with its current environment, returning the errno on failure.
+    pub(crate) fn execv(&self, executable: &CStr) -> Error {
+        let _guard = ENVIRONMENT.lock().unwrap();
+        // SAFETY: the path and all argv entries remain live and NUL-terminated,
+        // and the environment lock excludes runtime changes to libc's environ.
+        unsafe { libc::execv(executable.as_ptr(), self.pointers.as_ptr()) };
+        super::errno_error(io::Error::last_os_error())
     }
 
     fn from_environment(env: StringPairs) -> Result<Self> {

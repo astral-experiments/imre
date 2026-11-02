@@ -269,6 +269,9 @@ def makedirs(name, mode=0o777, exist_ok=False):
             raise
 
 
+from posix import WIFSTOPPED, execv
+
+
 # From CPython 3.14.5, Lib/os.py. See stdlib/docstrings/LICENSE.
 def get_exec_path(env=None):
     """Returns the sequence of directories that will be searched for the

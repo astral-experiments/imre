@@ -1884,6 +1884,17 @@ def main():
             extra={"PYTHONDONTWRITEBYTECODE": "1", "IMREFLAGS": "--bogus"},
         )
         compare("-B", "-c", "import sys\nsys.exit(37)", status=37)
+        compare("-B", "-c", "print(list.__len__([1, 2]), tuple.__len__((3,)))")
+        if os.name == "posix":
+            for base in ("list", "tuple"):
+                compare(
+                    "-B", "-c",
+                    "import os\n"
+                    f"class Args({base}):\n"
+                    f"    def __len__(self): return {base}.__len__(self)\n"
+                    f"    def __getitem__(self, index): return {base}.__getitem__(self, index)\n"
+                    "os.execv('/bin/sh', Args(['sh', '-c', 'echo replaced']))\n",
+                )
         compare(
             "-B", "-c",
             "import atexit, gc, sys\n"
@@ -2653,6 +2664,7 @@ def report(text):
             "boxed_os_pread.py",
             "boxed_os_waitpid.py",
             "boxed_os_process_signal.py",
+            "boxed_os_execv.py",
             "boxed_posix_session.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
