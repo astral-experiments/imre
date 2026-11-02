@@ -1651,6 +1651,9 @@ impl IntrinsicModule {
             }
             (Self::Inspect, "getmodule") => Intrinsic::ObjectRuntimeExport("inspect.getmodule"),
             (Self::Inspect, "isroutine") => Intrinsic::ObjectRuntimeExport("inspect.isroutine"),
+            (Self::Inspect, "isdatadescriptor") => {
+                Intrinsic::ScopedObjectExport("inspect.isdatadescriptor")
+            }
             (Self::Inspect, "ismethodwrapper") => {
                 Intrinsic::ObjectRuntimeExport("inspect.ismethodwrapper")
             }
