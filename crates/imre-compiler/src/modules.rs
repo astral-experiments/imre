@@ -1335,6 +1335,8 @@ impl IntrinsicModule {
             (Self::Codecs, "getwriter") => Intrinsic::CodecGetWriter,
             (Self::Hashlib, "md5") => Intrinsic::NamedHash("md5"),
             (Self::Hashlib, "sha1") => Intrinsic::Sha1,
+            (Self::Hmac, "new") => Intrinsic::ObjectRuntimeExport("hmac.new"),
+            (Self::Hmac, "HMAC") => Intrinsic::ObjectRuntimeExport("hmac.HMAC"),
             (Self::Hmac, "compare_digest") => Intrinsic::HmacCompareDigest,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
             (Self::Hashlib, "sha224") => Intrinsic::NamedHash("sha224"),
