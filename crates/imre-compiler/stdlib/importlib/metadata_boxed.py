@@ -1,4 +1,4 @@
-from _imre_metadata import dedent, filenames as _filenames
+from _imre_metadata import dedent, filenames as _filenames, zip_names as _zip_names, zip_open as _zip_open, zip_read as _zip_read
 from os import fspath
 from os.path import basename, isfile as _is_file, join as _join
 import sys
@@ -83,12 +83,28 @@ class PathDistribution(Distribution):
 
     @property
     def _normalized_name(self):
-        stem = _basename(str(self._path))
+        stem = basename(str(self._path))
         if stem.endswith(('.dist-info', '.egg-info')):
             name = stem.rsplit('.', 1)[0].split('-', 1)[0]
             if name:
                 return _normalize(name)
         return _normalize(self.name)
+
+
+class _ZipDistribution(PathDistribution):
+    def __init__(self, archive, entry):
+        super().__init__(entry)
+        self._archive = archive
+
+    def locate_file(self, path):
+        raise NotImplementedError('distribution archive member paths')
+
+    def read_text(self, filename):
+        key = _join(self._path, fspath(filename)) if filename else self._path
+        data = _zip_read(self._archive, key)
+        if data is not None:
+            return data.decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
+        return None
 
 
 class _Context:
@@ -114,8 +130,22 @@ def _discover(context):
     normalized = _normalize(name) if name else ''
     legacy = name.lower().replace('-', '_') if name else ''
     for root in context.path:
-        for path in _matching_paths(fspath(root), normalized, legacy):
-            yield Distribution.at(path)
+        directory = fspath(root) or '.'
+        archive = None
+        try:
+            if _is_file(directory):
+                archive = _zip_open(directory)
+                entries = _archive_children(_zip_names(archive))
+            else:
+                entries = _filenames(directory)
+        except Exception:
+            # A sys.path entry can be unreadable, malformed or an unsupported ZIP.
+            continue
+        for entry in _matching_entries(directory, entries, normalized, legacy):
+            if archive is not None:
+                yield _ZipDistribution(archive, entry)
+            else:
+                yield Distribution.at(_join(directory, entry))
 
 
 def _unique(dists):

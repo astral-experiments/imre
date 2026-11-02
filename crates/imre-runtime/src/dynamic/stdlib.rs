@@ -686,7 +686,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_csv", "read_row")
         | ("_imre_tokenize", "scan")
         | ("_imre_linecache", "source_lines")
-        | ("_imre_metadata", "filenames" | "dedent" | "exists" | "read_text")
+        | (
+            "_imre_metadata",
+            "filenames" | "dedent" | "exists" | "read_text" | "zip_names" | "zip_open" | "zip_read",
+        )
         | (
             "_imre_posixpath",
             "exists" | "extension_start" | "isdir" | "isfile" | "islink" | "relative_parts"
