@@ -1044,6 +1044,29 @@ def main():
             "except EncodingWarning as exc: print(str(exc))",
         )
 
+        compare(
+            "-X", "warn_default_encoding", "-Walways", "-c",
+            "import io, sys, warnings\n"
+            "original = sys.stderr\n"
+            "sys.stderr = io.StringIO()\n"
+            "io.text_encoding(None, 1)\n"
+            "print(sys.stderr.getvalue().strip())\n"
+            "sys.stderr = original\n"
+            "def hook(message, category, filename, lineno, file, line):\n"
+            "    print(type(message) is category is EncodingWarning, str(message), filename, lineno, file, line)\n"
+            "    raise OSError('from hook')\n"
+            "warnings.showwarning = hook\n"
+            "try: io.text_encoding(None, 1)\n"
+            "except OSError as exc: print(exc)\n"
+            "warnings.showwarning = 42\n"
+            "try: io.text_encoding(None, 1)\n"
+            "except TypeError as exc: print(exc)",
+        )
+        compare(
+            "-X", "warn_default_encoding", "-Werror::EncodingWarning", "-c",
+            "import io\n__name__ = None\nprint(io.text_encoding(None, 1))",
+        )
+
         subset_method = root / "set_issubset.py"
         for statement in (
             "print({1, 2}.issubset([2, 1]))",

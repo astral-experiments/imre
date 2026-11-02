@@ -1,11 +1,15 @@
-use super::{Context, NONE, Result};
+use super::{Context, Error, NONE, Result};
 
 impl Context {
     pub(in crate::dynamic) fn encoding_warning(&mut self, level: i32) -> Result<()> {
         let (filename, line, module) = if let Some((loc, scope)) = self.heap.warning_frame(level) {
             let globals = self.module_globals(scope)?;
-            let module = self
-                .dict_named_item(globals, "__name__")
+            let module = self.dict_named_item(globals, "__name__");
+            // CPython suppresses warnings from a module being torn down, before filtering.
+            if module == Some(NONE) {
+                return Ok(());
+            }
+            let module = module
                 .and_then(|id| self.str_value(id).ok())
                 .unwrap_or("<string>")
                 .to_owned();
@@ -22,6 +26,28 @@ impl Context {
             line as isize,
         )? {
             return Ok(());
+        }
+        let warnings_key = self.heap.code_name("warnings");
+        if let Some(warnings) = self.registered_module(warnings_key)? {
+            match self.lookup_attr(warnings, "showwarning") {
+                Ok(hook) => {
+                    if !self.callable(hook) {
+                        return Err(Error::new(
+                            "TypeError",
+                            "warnings.showwarning() must be set to a function or method",
+                        ));
+                    }
+                    let category = self.builtin("EncodingWarning");
+                    let text = self.text(message);
+                    let warning = self.call(category, vec![text], Vec::new())?;
+                    let file = self.text(filename.as_ref());
+                    let lineno = self.int(i64::from(line));
+                    let arguments = vec![warning, category, file, lineno, NONE, NONE];
+                    return self.call(hook, arguments, Vec::new()).map(|_| ());
+                }
+                Err(error) if self.is_attribute_error(&error) => {}
+                Err(error) => return Err(error),
+            }
         }
         let sys = self.module("sys")?;
         let stderr = self.lookup_attr(sys, "stderr")?;
