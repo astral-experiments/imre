@@ -55,6 +55,15 @@ The [complete TestCopyTree run](tree-linux.json) retains all 14 original methods
 
 The [copytree merge run](https://github.com/astral-sh/imre/actions/runs/40180794658) verified tree `61d5337dec05ab707494ca4150c05159ead3950b`, exactly the tree merged in [#829](https://github.com/astral-sh/imre/pull/829). Both missing-`PATH` methods ran with the environment variable absent in two native processes per optimization level. Their fixture, environment patches and assertions ran on CPython.
 
+## Focused native copytree and move classes
+
+On Linux, this command compares all 14 `TestCopyTree` and 28 `TestMove` methods with the intact classes in a test-enabled CPython 3.14.5 installation. It verifies the pinned source blobs, then compiles both classes, their original fixtures, skip decorators and POSIX test helpers into one executable per optimization level. Each run uses a fresh temporary directory. The comparison checks the reported IDs, outcomes, skip reasons and cleanup.
+
+```sh
+/path/to/cpython-3.14.5/python -B benchmarks/cpython_stdlib/full/shutil/focused_tree_move.py \
+    --imre /path/to/imre --runtime /path/to/libimre_runtime.a --clang /path/to/clang
+```
+
 ## Moving files
 
 [move_ops.py](move_ops.py) selects every original `TestMove` occurrence, including its two Linux reference skips. It attempts unchanged methods and their original helper bodies when the compiler can represent the fixture. For other cases, it calls the native operation from the untouched CPython method. A test-only interposer sends actual rename operands to the original mock; native code receives its errno and performs the fallback. A Python copy callback keeps the result mixed.
