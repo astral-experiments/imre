@@ -1308,6 +1308,9 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
     }
+    if name == "os.stat_result.__reduce__" {
+        return os::stat::reduce(ctx, args, kwargs);
+    }
     if name == os::stat::CLASS {
         return os::stat::construct(ctx, args, kwargs);
     }

@@ -435,6 +435,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             super::namedtuple::GETTER
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
+        Value::NamedTuple {
+            class: Some(super::stdlib::os::stat::CLASS),
+            ..
+        } if attr == "__reduce__" => super::stdlib::os::stat::CLASS,
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
