@@ -135,6 +135,37 @@ pub(super) struct Alias {
     pub instantiable: bool,
 }
 
+impl Alias {
+    /// Instance fields stored by the boxed Literal alias.
+    pub(super) fn literal_fields(&self) -> [(&'static str, Id); 5] {
+        [
+            ("__args__", self.args),
+            ("__origin__", self.origin),
+            ("__parameters__", self.parameters),
+            ("_name", self.name.unwrap_or(NONE)),
+            ("_inst", if self.instantiable { TRUE } else { FALSE }),
+        ]
+    }
+}
+
+/// Walk nested Literal origins without consuming native stack frames.
+pub(super) fn literal_origin(ctx: &Context, mut origin: Id) -> Result<(Id, usize)> {
+    let mut depth = 0;
+    while let Value::GenericAlias(alias) = ctx.heap.get(origin)
+        && matches!(alias.kind, AliasKind::Literal(_))
+    {
+        depth += 1;
+        ctx.check_call_depth(depth)?;
+        origin = alias.origin;
+    }
+    Ok((origin, depth))
+}
+
+/// Typing aliases delegate non-dunder attribute names to the origin.
+pub(super) fn forwards_to_origin(name: &str) -> bool {
+    !(name.starts_with("__") && name.ends_with("__"))
+}
+
 #[derive(Default)]
 pub(super) struct Registry {
     alias_caches: [Option<Id>; 2],
@@ -945,6 +976,16 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             }
             _ => return None,
         },
+        Value::GenericAlias(a) if matches!(a.kind, AliasKind::Literal(_)) => {
+            if let Some((_, field)) = a.literal_fields().into_iter().find(|(key, _)| *key == name) {
+                field
+            } else if forwards_to_origin(name) {
+                let origin = literal_origin(ctx, a.origin);
+                return Some(origin.and_then(|(origin, _)| ctx.lookup_attr(origin, name)));
+            } else {
+                return None;
+            }
+        }
         Value::GenericAlias(a) => match name {
             "__typing_is_unpacked_typevartuple__" if a.kind == AliasKind::Unpack => {
                 if is_unpacked_pack(ctx, value) {
@@ -982,7 +1023,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__args__" => a.args,
             "__origin__" => a.origin,
             "__parameters__" => a.parameters,
-            attr if a.name.is_some() && !(attr.starts_with("__") && attr.ends_with("__")) => {
+            attr if a.name.is_some() && forwards_to_origin(attr) => {
                 return Some(ctx.lookup_attr(a.origin, attr));
             }
             _ => return None,
