@@ -7,9 +7,9 @@ thread_local! {static FLAGS:Cell<u8> = const {Cell::new(31)};}
 use num_traits::ToPrimitive;
 use std::rc::Rc;
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::super::exceptions::Result;
+use super::super::time::wall_time_ns;
 use super::super::words::{NULLABLE, OwnedWord, WordKind};
 use super::super::{
     Bytes, Error, Int, Kind, List, Object, Storage, StorageCell, Str, boxed_values, finish, object,
@@ -253,13 +253,6 @@ pub(super) fn truth(v: &OwnedWord) -> bool {
     }
 }
 
-fn nanos() -> i128 {
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_nanos() as i128,
-        Err(e) => -(e.duration().as_nanos() as i128),
-    }
-}
-
 fn milliseconds(ct: i128) -> (f64, f64) {
     let created = ct as f64 / 1e9;
     let msecs = ct.rem_euclid(1_000_000_000) / 1_000_000;
@@ -278,8 +271,8 @@ impl Record {
         [name, level, path, line, msg, mut args, exc, func, stack]: [OwnedWord; 9],
     ) -> Result<Self> {
         static START: OnceLock<i128> = OnceLock::new();
-        let start = *START.get_or_init(nanos);
-        let ct = nanos();
+        let start = *START.get_or_init(wall_time_ns);
+        let ct = wall_time_ns();
         let (created, msecs) = milliseconds(ct);
         if tuple_len(&args) == Some(1) {
             let item = tuple_item(&args, 0);

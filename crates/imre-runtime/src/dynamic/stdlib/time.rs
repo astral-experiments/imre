@@ -2,7 +2,7 @@
 use super::*;
 use crate::dynamic::builtins::bind;
 use crate::objects::Calendar;
-use crate::objects::time::{ClockParts, LocalTime, wall_time};
+use crate::objects::time::{ClockParts, LocalTime, wall_time, wall_time_ns};
 
 const FIELDS: [&str; 9] = [
     "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday", "tm_isdst",
@@ -129,6 +129,7 @@ pub(super) fn call(
     }
     let function = match name {
         "time" => "time.time",
+        "time_ns" => "time.time_ns",
         "monotonic" => "time.monotonic",
         "perf_counter" => "time.perf_counter",
         "mktime" => "time.mktime",
@@ -142,12 +143,21 @@ pub(super) fn call(
     }
     match name {
         "time" if args.is_empty() => Ok(ctx.alloc(Value::Float(wall_time()))),
+        "time_ns" if args.is_empty() => {
+            let nanos = i64::try_from(wall_time_ns()).map_err(|_| {
+                Error::new(
+                    "OverflowError",
+                    "timestamp too large to convert to C PyTime_t",
+                )
+            })?;
+            Ok(ctx.int(nanos))
+        }
         "monotonic" | "perf_counter" if args.is_empty() => {
             let stamp =
                 crate::objects::time::monotonic_time().map_err(crate::objects::errno_error)?;
             Ok(ctx.alloc(Value::Float(stamp.as_secs_f64())))
         }
-        "time" | "monotonic" | "perf_counter" => Err(Error::new(
+        "time" | "time_ns" | "monotonic" | "perf_counter" => Err(Error::new(
             "TypeError",
             format!("{function}() takes no arguments ({} given)", args.len()),
         )),
