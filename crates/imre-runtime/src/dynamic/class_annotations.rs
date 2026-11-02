@@ -57,7 +57,9 @@ impl Context {
         };
         sites.insert(offset);
         let fields = *fields;
-        self.put_item(fields, name, NONE)?;
+        if fields != NONE {
+            self.put_item(fields, name, NONE)?;
+        }
         Ok(NONE)
     }
 
