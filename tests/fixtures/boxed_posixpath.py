@@ -200,6 +200,41 @@ def current():
         os.close(fd)
         raise AssertionError("closing a buffered reader left its owned descriptor open")
 
+    path = "imre-boxed-buffer-position"
+    with open(path, "xb") as stream:
+        stream.write(b"abcdefghij")
+    try:
+        for refresh, target, whence, position, next_byte, raw_position in (
+            (False, 6, os.SEEK_SET, 6, b"g", 0),
+            (True, 6, os.SEEK_SET, 6, b"g", 10),
+            (True, 2, os.SEEK_CUR, 0, b"d", 0),
+            (False, 13, os.SEEK_CUR, 4, b"e", 10),
+            (False, 14, os.SEEK_SET, 14, b"", 14),
+        ):
+            with open(os.open(path, os.O_RDONLY), "rb") as stream:
+                assert stream.read(1) == b"a"
+                os.lseek(stream.fileno(), 0, os.SEEK_SET)
+                if refresh:
+                    assert stream.tell() == 0
+                assert stream.seek(target, whence) == position
+                assert stream.read(1) == next_byte
+                assert os.lseek(stream.fileno(), 0, os.SEEK_CUR) == raw_position
+
+        fd = os.open(path, os.O_WRONLY)
+        stream = open(fd, "wb")
+        stream.write(b"XX")
+        stream.raw.close()
+        replacement = os.open(path, os.O_RDWR)
+        try:
+            assert replacement == fd
+            assert stream.close() is None
+            with open(replacement, "rb", 0, closefd=False) as borrowed:
+                assert borrowed.read() == b"abcdefghij"
+        finally:
+            os.close(replacement)
+    finally:
+        os.unlink(path)
+
     # Conversion runs before incompatible binary options are rejected.
     try:
         open(Raises(), "rb", -1, None, "replace", None)

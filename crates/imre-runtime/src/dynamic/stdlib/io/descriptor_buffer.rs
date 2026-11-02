@@ -8,11 +8,15 @@ use super::super::{builtins, files, os_error};
 use super::file_io::RawFile;
 use super::{Context, Error, Id, NONE, Result, Value};
 
-struct Descriptor(Rc<RawFile>);
+struct Descriptor {
+    handle: Rc<RawFile>,
+    raw_position: Option<u64>,
+    last_read: usize,
+}
 
 impl Descriptor {
     fn fd(&self) -> io::Result<RawFd> {
-        self.0
+        self.handle
             .fd
             .get()
             .ok_or_else(|| io::Error::from_raw_os_error(libc::EBADF))
@@ -30,7 +34,10 @@ fn count(n: isize) -> io::Result<usize> {
 impl Read for Descriptor {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         // SAFETY: the buffer is writable for its length. The kernel validates the fd.
-        count(unsafe { libc::read(self.fd()?, buf.as_mut_ptr().cast(), buf.len()) })
+        let n = count(unsafe { libc::read(self.fd()?, buf.as_mut_ptr().cast(), buf.len()) })?;
+        self.last_read = n;
+        self.raw_position = self.raw_position.and_then(|p| p.checked_add(n as u64));
+        Ok(n)
     }
 }
 
@@ -59,6 +66,7 @@ impl Seek for Descriptor {
         if n < 0 {
             Err(io::Error::last_os_error())
         } else {
+            self.raw_position = Some(n as u64);
             Ok(n as u64)
         }
     }
@@ -82,26 +90,32 @@ impl Buffer {
     }
 
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
-        if let Self::Writer(w) = self {
-            return w.seek(position);
-        }
-        // Retain read-ahead when the new offset is inside it. In particular
-        // seeking inside the buffer does not reposition the shared descriptor.
-        let relative = match position {
-            SeekFrom::Start(n) => n as i64 - self.position()? as i64,
-            SeekFrom::Current(n) => n,
-            SeekFrom::End(_) => {
-                let Self::Reader(r) = self else {
-                    unreachable!()
-                };
-                return r.seek(position);
+        let reader = match self {
+            Self::Reader(r) => r,
+            Self::Writer(w) => return w.seek(position),
+        };
+        let unread = reader.buffer().len() as i128;
+        if unread > 0 && !matches!(position, SeekFrom::End(_)) {
+            // An external lseek moves the descriptor but not buffered bytes.
+            // CPython uses the cached raw position here; tell() refreshes it.
+            let raw = reader.get_mut();
+            let end = match raw.raw_position {
+                Some(end) => end,
+                None => raw.stream_position()?,
+            };
+            let logical = i128::from(end) - unread;
+            let offset = match position {
+                SeekFrom::Start(n) => i128::from(n) - logical,
+                SeekFrom::Current(n) => i128::from(n),
+                SeekFrom::End(_) => unreachable!(),
+            };
+            let consumed = raw.last_read as i128 - unread;
+            if (-consumed..=unread).contains(&offset) {
+                reader.seek_relative(offset as i64)?;
+                return Ok((logical + offset).max(0) as u64);
             }
-        };
-        let Self::Reader(r) = self else {
-            unreachable!()
-        };
-        r.seek_relative(relative)?;
-        self.position()
+        }
+        reader.seek(position)
     }
 }
 
@@ -114,8 +128,13 @@ pub(in crate::dynamic) struct BufferedFd {
 
 impl BufferedFd {
     pub(super) fn new(raw: Id, handle: Rc<RawFile>, reading: bool, capacity: usize) -> Self {
-        let descriptor = Descriptor(handle.clone());
+        let mut descriptor = Descriptor {
+            handle: handle.clone(),
+            raw_position: None,
+            last_read: 0,
+        };
         let buffer = if reading {
+            let _ = descriptor.stream_position();
             Buffer::Reader(BufReader::with_capacity(capacity, descriptor))
         } else {
             Buffer::Writer(BufWriter::with_capacity(capacity, descriptor))
@@ -135,7 +154,11 @@ impl BufferedFd {
     fn close(&self) -> Result<()> {
         let pending = match self.buffer.borrow_mut().take() {
             Some(Buffer::Writer(mut writer)) => {
-                let flushed = writer.flush().map_err(os_error);
+                let flushed = if self.closed() {
+                    Ok(())
+                } else {
+                    writer.flush().map_err(os_error)
+                };
                 let _ = writer.into_parts(); // A failed flush must not be retried by BufWriter::drop.
                 flushed
             }
