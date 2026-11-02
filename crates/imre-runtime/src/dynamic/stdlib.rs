@@ -105,7 +105,8 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 pub(super) fn is_module(name: &str) -> bool {
     matches!(
         name,
-        "_imre_ordered_dict"
+        "_datetime"
+            | "_imre_ordered_dict"
             | "_opcode"
             | "atexit"
             | "builtins"
@@ -177,7 +178,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "marshal"
             | "pickle"
             | "zlib"
-            | "datetime"
             | "email"
             | "email.utils"
             | "tempfile"
@@ -475,7 +475,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "path_stats"
             | "cache_name"
             | "source_name"
-            | "warn_debug_override",
+            | "warn_debug_override"
+            | "warn_loader_deprecation",
         )
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
@@ -571,15 +572,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_LiteralGenericAlias",
         ) => ctx.builtin(&format!("typing.{name}")),
         ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
-        ("datetime", "UTC") => datetime::utc(ctx),
         (
             "time",
             "time" | "time_ns" | "monotonic" | "perf_counter" | "sleep" | "gmtime" | "localtime"
             | "mktime" | "strftime" | "ctime" | "struct_time",
         ) => ctx.builtin(&format!("time.{name}")),
-        ("datetime", "datetime" | "date" | "time" | "timedelta" | "timezone") => {
-            ctx.builtin(&format!("datetime.{name}"))
-        }
         ("socket", name) => return socket::attribute(ctx, name),
         ("hashlib", name)
             if let Some(class) = crate::objects::HashState::public_constructor(name) =>
@@ -761,7 +758,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
-        | ("_json", "_imre_encode_one_shot" | "encode_basestring" | "encode_basestring_ascii")
+        | ("_json", "_imre_encode_one_shot")
         | ("random", "random" | "choice")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
@@ -796,7 +793,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_signature_mapping"
             | "_signature_layout",
         )
-        | ("email.utils", "parsedate_to_datetime" | "format_datetime" | "formatdate")
+        | (
+            "email.utils",
+            "parsedate_to_datetime" | "format_datetime" | "formatdate" | "_has_surrogates",
+        )
         | ("warnings", "warn")
         | (
             "fnmatch",
@@ -1671,6 +1671,15 @@ pub(super) fn call(
                     .transpose()?;
                 let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
                 return Ok(ctx.text(path.to_string()));
+            }
+            ("warn_loader_deprecation", [globals, mismatch], []) => {
+                let (line, message) = if ctx.truth(*mismatch)? {
+                    (670, "Module globals; __loader__ != __spec__.loader")
+                } else {
+                    (663, "Module globals is missing a __spec__.loader")
+                };
+                ctx.warn_external_loader(*globals, line, message)?;
+                return Ok(NONE);
             }
             ("warn_debug_override", [], []) => {
                 crate::objects::cache_paths::warn_debug_override()?;

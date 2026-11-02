@@ -941,6 +941,9 @@ def check_pickle_reductions(imre, root, run):
                 payload = bytes(range(256))
                 assert value[7] == (b"", payload[:-1], payload, payload, ("rebuilt", protocol))
                 assert value[7][2] is value[7][3]
+                mapping = value[9]
+                assert list(mapping) == ["z", "a", "m"] and mapping["m"] == 42
+                assert mapping["z"] is mapping and mapping.state is mapping["a"]
                 singleton, live, pair, iterator = value[8]
                 assert singleton == ([7] if protocol else [7, "added"])
                 assert live == [7, "second", "added"]
@@ -1164,6 +1167,15 @@ def main():
             "print(getlocale(), getlocale(category=LC_ALL))\n"
         )
         compare("-B", locale_script)
+
+        years = root / "calendar_years.py"
+        years.write_text(
+            "from datetime import MINYEAR, date\n"
+            "from _datetime import MAXYEAR, datetime\n"
+            "assert date(MINYEAR, 1, 1).year == 1\n"
+            "assert datetime(MAXYEAR, 12, 31).year == 9999\n"
+        )
+        compare("-IB", years, native_args=("run", years, "--quiet"))
 
         if os.name == "posix":
             compare(
@@ -1788,6 +1800,7 @@ def report(text):
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
             "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
             "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
+            "boxed_thread_bound_lock.py",
             "boxed_thread_hash_update.py",
         ):
             thread_fixture = fixtures / name
@@ -1956,6 +1969,7 @@ def report(text):
             "boxed_dataclass_init_annotations.py",
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
+            "boxed_email_addresses.py",
             "boxed_http_message.py",
             "boxed_time.py",
             "boxed_time_strftime.py",
@@ -1968,12 +1982,14 @@ def report(text):
             "boxed_io_protocols.py",
             "boxed_io_abc_registration.py",
             "boxed_logging_handler_list.py",
+            "boxed_logging_handler_filters.py",
             "boxed_logging_rlock.py",
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
             "boxed_os_environb.py",
             "boxed_os_file_descriptors.py",
+            "boxed_os_fdopen.py",
             "boxed_buffered_readlines.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_waitpid.py",
@@ -1985,6 +2001,8 @@ def report(text):
             "boxed_urlsplit.py",
             "boxed_urllib_request.py",
             "boxed_urllib_file.py",
+            "boxed_urllib_cleanup.py",
+            "boxed_urllib_retrieve.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
             "boxed_exception_repr.py",
@@ -2093,6 +2111,7 @@ def report(text):
             "boxed_dict_subclasses.py",
             "boxed_dict_union.py",
             "boxed_abc_metaclass.py",
+            "boxed_bless_loader.py",
             "boxed_mapping_abc.py",
             "boxed_user_containers.py",
             "boxed_dict_pop.py",
@@ -2125,6 +2144,7 @@ def report(text):
             "boxed_min.py",
             "boxed_generator_delegation.py",
             "boxed_source_coroutine.py",
+            "boxed_source_async_with.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",
             "boxed_doctest_suite.py",
@@ -2146,6 +2166,7 @@ def report(text):
             "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
+            "boxed_colorize.py",
             "boxed_string_new.py",
             "boxed_string_repeat.py",
             "boxed_string_surrogates.py",

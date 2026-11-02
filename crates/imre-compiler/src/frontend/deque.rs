@@ -17,6 +17,27 @@ fn initialize(ty: Type, receiver: Option<Expr>, bound: Expr) -> Expr {
 }
 
 impl Checker<'_> {
+    pub(super) fn deque_repr_descriptor(&self, attr: &ast::ExprAttribute) -> bool {
+        attr.attr.as_str() == "__repr__"
+            && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::Deque))
+    }
+
+    /// A deque repr may call Python methods on its elements. Check supplied
+    /// expressions before handing the invocation to the native descriptor.
+    pub(super) fn boxed_deque_repr_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        for arg in &call.arguments.args {
+            let value = match arg {
+                ast::Expr::Starred(starred) => starred.value.as_ref(),
+                other => other,
+            };
+            self.evaluated_argument(value)?;
+        }
+        for keyword in &call.arguments.keywords {
+            self.evaluated_argument(&keyword.value)?;
+        }
+        Err(self.scoped_builtin_error("collections.deque.__repr__", call))
+    }
+
     /// A saved method owns the receiver that was evaluated at attribute access.
     /// Its adapter has the same typed arguments as the corresponding direct call.
     pub(super) fn deque_attribute(
@@ -27,6 +48,9 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
         let (builtin, parameters, returns) = match name {
+            "__repr__" => {
+                return Err(self.scoped_builtin_error("collections.deque.__repr__", attribute));
+            }
             "maxlen" => {
                 return Ok(Expr {
                     ty: self.types.optional(Type::Int),
@@ -355,6 +379,9 @@ impl Checker<'_> {
         element: Type,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if name == "__repr__" {
+            return self.boxed_deque_repr_call(call);
+        }
         if name == "__init__" {
             return self.deque_initialize(call, Some(element), Some(receiver));
         }

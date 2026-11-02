@@ -42,6 +42,18 @@ REJECTED = {
         "records.py": "from imre import struct as layout\n@layout\nclass Point:\n    x: float\n",
         "main.py": "from records import Point\nfrom weakref import ref\nref(Point(1.0))\n",
     }, "weakref.ref requires native Python object operations"),
+    "deque_repr_checks_receiver_expression": ({
+        "main.py": (
+            "from collections import deque\ndef queue(n: int) -> int:\n    return n\n"
+            "deque.__repr__(queue('wrong'))\n"
+        ),
+    }, "expected int, got str"),
+    "saved_deque_repr_keeps_checked_calls": ({
+        "main.py": (
+            "from collections import deque\ndef identity(n: int) -> int:\n    return n\n"
+            "render = deque.__repr__\nrender(deque([1]))\nidentity('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "patch_object_checks_replacement": ({
         "main.py": (
             "from unittest.mock import patch\nclass Owner:\n    value = 0\n"
@@ -61,6 +73,27 @@ REJECTED = {
             "move = chdir\nmove('.')\npath('wrong')\n"
         ),
     }, "invalid-argument-type"),
+    "captured_chdir_checks_nested_missing_argument": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int) -> str:\n    return '.'\n"
+            "move = chdir\nmove(path())\n"
+        ),
+    }, "missing-argument"),
+    "captured_chdir_checks_user_overload": ({
+        "main.py": (
+            "from os import chdir\nfrom typing import overload\n"
+            "@overload\ndef path(n: int) -> str: return '.'\n"
+            "@overload\ndef path(n: int, m: int) -> str: return '.'\n"
+            "def path(n: int, m: int = 0) -> str: return '.'\n"
+            "move = chdir\nmove(path())\n"
+        ),
+    }, "no-matching-overload"),
+    "captured_chdir_checks_user_keyword": ({
+        "main.py": (
+            "from os import chdir\ndef path(n: int = 0) -> int:\n    return n\n"
+            "move = chdir\nmove('.')\npath(typo=1)\n"
+        ),
+    }, "unknown-argument"),
     "captured_chdir_preserves_callable_parameter": ({
         "main.py": (
             "from os import chdir\nfrom typing import Callable\n"

@@ -99,8 +99,15 @@ impl Drop for FileState {
 
 impl FileState {
     /// Opens a buffered binary writer with the same ownership and errors as typed files.
-    pub(crate) fn binary_writer(path: &str, mode: u32) -> Result<Self> {
-        open_state(&super::text::try_owned_string(path)?, mode, true, false)
+    pub(crate) fn binary_writer(path: &str, mode: u32, capacity: Option<usize>) -> Result<Self> {
+        open_state_with_capacity(
+            &super::text::try_owned_string(path)?,
+            mode,
+            true,
+            false,
+            None,
+            capacity,
+        )
     }
 
     /// Opens an anonymous binary update stream, buffered against its own POSIX descriptor.
@@ -743,6 +750,17 @@ fn open_state_with_encoding(
     gzip: bool,
     encoding: Option<(&str, &str)>,
 ) -> Result<FileState> {
+    open_state_with_capacity(path, mode, binary, gzip, encoding, None)
+}
+
+fn open_state_with_capacity(
+    path: &StrOwner,
+    mode: u32,
+    binary: bool,
+    gzip: bool,
+    encoding: Option<(&str, &str)>,
+    writer_capacity: Option<usize>,
+) -> Result<FileState> {
     let (file, metadata) = open_file_with(path.as_bytes(), mode, false, |error| {
         errno_with_filenames(
             error,
@@ -751,7 +769,8 @@ fn open_state_with_encoding(
         )
     })?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-    let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
+    let capacity = writer_capacity
+        .unwrap_or_else(|| crate::text_output::binary_capacity(metadata.blksize().into()));
     let fd = file.as_raw_fd();
     let stream = match mode {
         0 if gzip => Stream::UnreadGzip { file, capacity },

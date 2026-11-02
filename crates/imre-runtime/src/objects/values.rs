@@ -723,6 +723,14 @@ unsafe fn write_repr_with(
                             output.write_char(']')?;
                             Ok(None)
                         }
+                        Storage::Deque(queue) => {
+                            let snapshot = queue.shallow_copy().map_err(|error| {
+                                error.raise();
+                                std::fmt::Error
+                            })?;
+                            output.write_str("deque([")?;
+                            Ok(Some(ReprTask::DequeMembers(snapshot, 0)))
+                        }
                         Storage::Dictionary(mapping) => {
                             format_entry(owner, mapping.repr_entry(output, position)?, &mut pending)
                         }
@@ -788,6 +796,24 @@ unsafe fn write_repr_with(
                         }
                         _ => fail("SystemError", "unsupported resource representation"),
                     })?
+                }
+                ReprTask::DequeMembers(queue, position) => {
+                    if let Some(item) = queue.items.get(position) {
+                        if position != 0 {
+                            output.write_str(", ")?;
+                        }
+                        let child = ReprTask::Word(item.word, item.kind);
+                        pending.try_reserve(1).map_err(|_| std::fmt::Error)?;
+                        pending.push(ReprTask::DequeMembers(queue, position + 1));
+                        Some(child)
+                    } else {
+                        output.write_char(']')?;
+                        if let Some(bound) = queue.maxlen {
+                            write!(output, ", maxlen={bound}")?;
+                        }
+                        output.write_char(')')?;
+                        None
+                    }
                 }
                 ReprTask::Context(view) => {
                     if let Some((word, kind, tail)) = view.begin(output)? {
@@ -857,6 +883,7 @@ unsafe fn write_repr_with(
 
 enum ReprTask {
     Leave(ReprGuard),
+    DequeMembers(super::deque::Deque, usize),
     Context(super::contextvars::ReprView),
     ContextEnd(super::contextvars::ReprEnd, bool),
     Word(usize, WordKind),
@@ -880,6 +907,7 @@ impl ReprTask {
                         {
                             Some("[...]")
                         }
+                        Storage::Deque(_) => Some("[...]"),
                         Storage::Dictionary(mapping) => Some(mapping.recursive_repr()),
                         _ => None,
                     })
@@ -911,7 +939,7 @@ impl ReprTask {
                 Some((owner as usize, WordKind::new(5)))
             }
             Self::Record(record, _, _) => Some((record as usize, WordKind::new(6))),
-            Self::Leave(_) | Self::KeySeparator => None,
+            Self::Leave(_) | Self::KeySeparator | Self::DequeMembers(..) => None,
         }
     }
 }

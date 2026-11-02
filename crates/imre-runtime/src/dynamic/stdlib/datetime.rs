@@ -35,8 +35,15 @@ pub(in crate::dynamic) struct Members {
     pub(in crate::dynamic) methods: &'static [&'static str],
 }
 
+pub(in crate::dynamic) const TZINFO: &str = "datetime.tzinfo";
+
+pub(in crate::dynamic) fn tzinfo(ctx: &mut Context) -> Id {
+    ctx.builtin(TZINFO)
+}
+
 pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
     let (owner, fields, methods): (_, &[_], &[_]) = match class {
+        TZINFO => (TZINFO, &[], &["tzname", "utcoffset", "dst"]),
         "datetime.date" => (
             "datetime.date",
             &FIELDS[..3],
@@ -476,6 +483,73 @@ pub(super) fn call(
         return read_field(ctx, owner, name, *receiver);
     }
     match method {
+        "tzinfo" => {
+            let class = tzinfo(ctx);
+            Ok(ctx.instance(class, None))
+        }
+        "tzinfo.__new__" => {
+            let Some(&class) = args.first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    "datetime.tzinfo.__new__(): not enough arguments",
+                ));
+            };
+            let base = tzinfo(ctx);
+            if !ctx.direct_subclass(class, base) {
+                return Err(ctx.invalid_new_subtype(TZINFO, class));
+            }
+            let object = ctx.builtin("object");
+            let owner = ctx.tzinfo_allocation_base(class, base, object);
+            let storage = match owner.map(|id| ctx.heap.get(id)) {
+                Some(Value::Native(kind)) if kind == TZINFO || kind == "property" => None,
+                Some(Value::Native(kind)) if kind == "list" => {
+                    Some(ctx.alloc(Value::List(Vec::new())))
+                }
+                Some(Value::Native(kind)) if kind == "bytearray" => {
+                    Some(ctx.alloc(Value::ByteArray(Vec::new())))
+                }
+                _ => {
+                    let name = ctx.class_name(class);
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "datetime.tzinfo.__new__({name}) is not safe, use {name}.__new__()"
+                        ),
+                    ));
+                }
+            };
+            let result = ctx.instance(class, None);
+            if let Value::Instance { scalar, .. } = ctx.heap.get_mut(result) {
+                *scalar = storage;
+            }
+            Ok(result)
+        }
+        "tzinfo.utcoffset" | "tzinfo.dst" | "tzinfo.tzname" => {
+            let name = method.rsplit('.').next().unwrap();
+            let Some((&receiver, args)) = args.split_first() else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("unbound method {method}() needs an argument"),
+                ));
+            };
+            let class = tzinfo(ctx);
+            if !ctx.instance_of(receiver, class) {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "descriptor '{name}' for '{TZINFO}' objects doesn't apply to a '{}' object",
+                        ctx.type_name(receiver)
+                    ),
+                ));
+            }
+            let kind = ctx.type_name(receiver);
+            let kind = kind.strip_prefix("datetime.").unwrap_or(kind);
+            crate::dynamic::builtins::one_positional_arg(&format!("{kind}.{name}"), args, kwargs)?;
+            Err(Error::new(
+                "NotImplementedError",
+                format!("a tzinfo subclass must implement {name}()"),
+            ))
+        }
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),

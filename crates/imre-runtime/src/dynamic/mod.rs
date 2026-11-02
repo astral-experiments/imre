@@ -117,6 +117,7 @@ pub(crate) struct Context {
     sorting_lists: Vec<Id>,
     // Container ancestors visible to a reentrant Python __repr__.
     repr_ancestors: Vec<Id>,
+    repr_sequence_words: Option<usize>,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,
@@ -1709,6 +1710,8 @@ impl Context {
                 let id = stdlib::datetime::store(self, value, NONE);
                 self.builtins.insert(format!("{name}.{field}"), id);
             }
+        } else if name == stdlib::datetime::TZINFO {
+            stdlib::datetime::install_members(self, name);
         }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
@@ -2303,6 +2306,20 @@ impl Context {
                 let pi = self.alloc(Value::Float(std::f64::consts::PI));
                 self.bind(scope, "pi", pi);
             }
+            "_datetime" => {
+                for name in ["date", "datetime", "time", "timedelta", "timezone"] {
+                    let class = self.builtin(&format!("datetime.{name}"));
+                    self.bind(scope, name, class);
+                }
+                let base = stdlib::datetime::tzinfo(self);
+                self.bind(scope, "tzinfo", base);
+                let utc = stdlib::datetime::utc(self);
+                self.bind(scope, "UTC", utc);
+                for (name, year) in [("MINYEAR", 1), ("MAXYEAR", 9999)] {
+                    let value = self.int(year);
+                    self.bind(scope, name, value);
+                }
+            }
             "errno" => stdlib::install_errno(self, scope)?,
             "atexit" => atexit::install(self, scope),
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
@@ -2331,6 +2348,17 @@ impl Context {
                 self.bind(scope, "_bootstrap_external", external);
             }
             "io" => stdlib::io::install(self, scope),
+            "_json" => {
+                for name in ["encode_basestring", "encode_basestring_ascii"] {
+                    let callable = self.builtin(&format!("_json.{name}"));
+                    let function = self.alloc(Value::Method {
+                        callable,
+                        receiver: module,
+                        explicit: false,
+                    });
+                    self.bind(scope, name, function);
+                }
+            }
             "_locale" => stdlib::locale::install(self, module, scope)?,
             "pickle" => stdlib::pickle::install(self, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),

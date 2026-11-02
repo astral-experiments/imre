@@ -701,6 +701,7 @@ pub(crate) fn compile(
         "ast",
         "codecs",
         "copyreg",
+        "datetime",
         "genericpath",
         "hashlib",
         "itertools",
