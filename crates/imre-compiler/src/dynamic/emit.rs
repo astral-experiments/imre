@@ -14,13 +14,13 @@ mod statements;
 mod strings;
 
 const ABI: &str = "\
+%code_site = type { ptr, ptr, i32, i32 }
 declare ptr @imre_dyn_new(i32, ptr, ptr)
 declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_class_annotation(ptr, i64, i64, i64, i32)
-declare i64 @imre_dyn_def_from_site(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
-declare void @imre_dyn_generator_body(ptr, i64, ptr, i32)
+declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
 declare i64 @imre_dyn_truth_mark(ptr)
 declare void @imre_dyn_comprehension_step(ptr, i64)
@@ -305,12 +305,18 @@ impl Output {
         body: Body<'_>,
         start: ruff_text_size::TextSize,
         in_function: bool,
+        suspended: Option<(String, usize)>,
     ) -> String {
         let site = format!("@code_site{}", self.count);
-        let code = self.code(source, prefix, body, in_function);
+        let (entry, body_line) = if let Some(source) = suspended {
+            self.count += 1;
+            source
+        } else {
+            (self.code(source, prefix, body, in_function), 0)
+        };
         writeln!(
             self.constants,
-            "{site} = private constant {{ ptr, ptr, i32 }} {{ ptr {code}, ptr {}, i32 {} }}",
+            "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {body_line} }}",
             source.file,
             source.line(start)
         )
@@ -424,7 +430,9 @@ impl Output {
                 f.declare_globals(stmts);
                 f.statements(stmts);
             }
-            Body::GeneratorFunction(_) | Body::YieldingLambda(_) => {}
+            Body::GeneratorFunction(_) | Body::YieldingLambda(_) => {
+                unreachable!("suspended definitions store their source in the code site")
+            }
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class, false),
             Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
