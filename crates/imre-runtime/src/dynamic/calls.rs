@@ -198,6 +198,7 @@ impl Context {
                 Some(NONE)
             }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
+                "add_note" => self.builtins.get("BaseException.add_note").copied(),
                 "with_traceback" => self.builtins.get("BaseException.with_traceback").copied(),
                 "__new__" => self
                     .builtins
@@ -1465,6 +1466,7 @@ impl Context {
                 constructor: Some(class),
                 ..
             } => class,
+            Value::Raised(ref error) if let Some(class) = error.class() => class,
             Value::Module { scope, .. } => {
                 return self.module_get_attribute(obj, scope, name, original);
             }
@@ -1658,7 +1660,7 @@ impl Context {
             if let Some(class) = error.class()
                 && let Some(member) = self.class_attr(class, name)
             {
-                let field = if self.data_descriptor(member) {
+                let field = if self.readable_data_descriptor(member) {
                     None
                 } else {
                     self.dictionary_field(dictionary, name)?
@@ -2910,7 +2912,10 @@ impl Context {
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
-                        && matches!(name, "__new__" | "__init__" | "with_traceback"))
+                        && matches!(
+                            name,
+                            "__new__" | "__init__" | "add_note" | "with_traceback"
+                        ))
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
@@ -3136,6 +3141,10 @@ impl Context {
             let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
             if let Some(field) = self.dictionary_field(dictionary, name)? {
                 return Ok(field);
+            }
+            if name == "add_note" {
+                let class = self.exact_type(obj)?;
+                return self.instance_attribute(obj, class, None, name);
             }
         }
         self.builtin_attribute(obj, name)
@@ -4527,6 +4536,7 @@ impl Context {
                     || matches!(
                         name.as_str(),
                         "BaseException.__init__"
+                            | "BaseException.add_note"
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"

@@ -876,6 +876,24 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "BaseException.add_note" {
+        let Some((&exception, args)) = args.split_first() else {
+            return Err(type_error(
+                "unbound method BaseException.add_note() needs an argument",
+            ));
+        };
+        if !matches!(ctx.heap.get(exception), Value::Raised(_)) {
+            let kind = ctx
+                .builtin_type_name(exception)
+                .unwrap_or_else(|| ctx.type_name(exception));
+            return Err(type_error(format!(
+                "descriptor 'add_note' for 'BaseException' objects doesn't apply to a '{kind}' object"
+            )));
+        }
+        let note = one_positional_arg(name, args, kwargs)?;
+        ctx.add_exception_note(exception, note)?;
+        return Ok(NONE);
+    }
     if name == "object.__getattribute__" {
         let Some((&object, values)) = args.split_first() else {
             return Err(type_error(
