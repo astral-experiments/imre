@@ -505,3 +505,43 @@ class islice:
             target = self._stop
         self._target = target
         return value
+
+
+class pairwise:
+    """Return an iterator of overlapping pairs taken from the input iterator.
+
+    s -> (s0,s1), (s1,s2), (s2, s3), ..."""
+
+    __slots__ = ()
+
+    def __new__(cls, iterable, /, **kwargs):
+        if not issubclass(cls, __class__):
+            raise TypeError("expected a pairwise subclass")
+        if kwargs and getattr(cls, "__init__", None) is getattr(__class__, "__init__", None):
+            raise TypeError("pairwise() takes no keyword arguments")
+        source = iter(iterable)
+        self = object.__new__(cls)
+        _pairwise_state.__set__(self, [source, False, None])
+        return self
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        state = _pairwise_state.__get__(self)
+        source, started, previous = state
+        if source is None:
+            raise StopIteration
+        try:
+            if not started:
+                previous = next(source)
+                if state[0] is None:  # A reentrant pull exhausted the iterator.
+                    raise StopIteration
+                state[1] = True
+                state[2] = previous
+            following = next(source)
+        except BaseException:
+            state[0] = state[2] = None
+            raise
+        state[2] = following
+        return previous, following

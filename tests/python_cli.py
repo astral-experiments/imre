@@ -1974,6 +1974,7 @@ def report(text):
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",
             "boxed_itertools_chain.py",
+            "boxed_pairwise.py",
             "boxed_itertools_cycle.py",
             "boxed_itertools_batched.py",
             "boxed_itertools_combinations.py",
