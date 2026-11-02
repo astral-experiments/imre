@@ -1,3 +1,5 @@
+import _codecs
+import codecs
 import pickle
 
 
@@ -24,6 +26,11 @@ class BadReturn:
 
     def __reduce__(self):
         return self.result
+
+
+class ReducedBytes(bytes):
+    def __reduce_ex__(self, protocol):
+        return rebuild, (protocol,)
 
 
 class Denied:
@@ -84,6 +91,7 @@ def check_floats(protocol):
 
 
 def produce():
+    assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
@@ -101,5 +109,7 @@ def produce():
             raise AssertionError("ignored hook error")
         shared = ("\0\n\r\\\x1aéĀ🍏", 1 << 2048, -2147483649, True, None)
         reduced = WithProtocol()
-        value = (shared, shared, reduced, reduced, WithoutProtocol(), (), dictionary_cases(protocol))
+        payload = bytes(range(256))
+        value = (shared, shared, reduced, reduced, WithoutProtocol(), (), dictionary_cases(protocol),
+                 (b"", payload[:-1], payload, payload, ReducedBytes(b"x")))
         print(list(pickle.dumps(value, protocol)))

@@ -104,6 +104,7 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "array"
             | "_collections"
             | "codecs"
+            | "_codecs"
             | "types"
             | "_io"
             | "_weakref"
@@ -391,6 +392,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
+        ("codecs" | "_codecs", "encode") => ctx.builtin("codecs.encode"),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
@@ -695,7 +697,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
         | ("random", "random" | "choice")
-        | ("codecs", "encode" | "decode" | "lookup" | "register_error" | "lookup_error")
+        | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
         | ("marshal", "loads")
         | ("pickle", "dumps")
