@@ -347,6 +347,7 @@ def current():
             compile(data, "settings.py", "exec")
         except SyntaxError as error:
             print(str(error), error.args, error.msg, error.filename, error.lineno, error.offset, error.text, error.end_lineno, error.end_offset)
+    exec("assert ... is expected", {"expected": Ellipsis, "Ellipsis": None})
     namespace = {"__name__": "template", "events": [], "external": 41, "default": 100}
     namespace["left"] = Comparable()
     namespace["right"] = object()
