@@ -1,6 +1,7 @@
 import sys
 from annotationlib import Format, get_annotations
 from collections.abc import Callable as ABCCallable
+from operator import getitem
 from types import GenericAlias, ModuleType
 from typing import Annotated, Callable, ForwardRef, List, NoDefault, ParamSpec, Tuple, TypeVar, TypeVarTuple, Unpack, get_args, get_origin
 from weakref import ref
@@ -52,6 +53,9 @@ def current():
         raise AssertionError("accepted two items in a starred annotation")
 
     assert get_origin(unpacked) is Unpack
+    rebuild, args = unpacked.__reduce__()
+    assert rebuild is getitem and args == (Unpack, ts)
+    assert rebuild(*args) is unpacked
     assert get_args(unpacked) == unpacked.__parameters__ == (ts,)
     assert repr(unpacked) == "typing.Unpack[Ts]"
     assert unpacked[int, str] == (int, str)

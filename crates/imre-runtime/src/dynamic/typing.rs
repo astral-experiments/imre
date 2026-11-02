@@ -1376,7 +1376,10 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         }
         Value::GenericAlias(alias)
             if name == "__reduce__"
-                && matches!(alias.kind, AliasKind::Generic | AliasKind::Callable) =>
+                && matches!(
+                    alias.kind,
+                    AliasKind::Generic | AliasKind::Callable | AliasKind::Unpack
+                ) =>
         {
             let class = ctx.builtin(alias.kind.class());
             return Some(
