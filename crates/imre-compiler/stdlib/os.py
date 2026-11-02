@@ -31,7 +31,8 @@ if sys.platform == "linux":
     import posix as _posix
     from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv, writev
     for _name in vars(_posix):
-        if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in (
+        if _name.startswith(("RTLD_", "POSIX_SPAWN_", "SCHED_")) or _name in (
+            "sched_getscheduler", "sched_param",
             "posix_spawn", "posix_spawnp", "sched_get_priority_min", "sched_get_priority_max", "sched_yield",
             "sched_getaffinity", "sched_setaffinity", "sched_rr_get_interval",
             "sched_getparam", "sched_setparam", "sched_setscheduler",
@@ -42,10 +43,6 @@ if sys.platform == "linux":
     from posix import (
         POSIX_FADV_DONTNEED, POSIX_FADV_NOREUSE, POSIX_FADV_NORMAL, POSIX_FADV_RANDOM,
         POSIX_FADV_SEQUENTIAL, POSIX_FADV_WILLNEED, posix_fadvise, posix_fallocate,
-    )
-    from posix import (
-        sched_getscheduler, sched_param, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE,
-        SCHED_NORMAL, SCHED_OTHER, SCHED_RESET_ON_FORK, SCHED_RR,
     )
     from posix import major, makedev, minor, mknod
     from posix import EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, eventfd, eventfd_read, eventfd_write

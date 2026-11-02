@@ -2982,7 +2982,9 @@ impl Context {
                 if source.is_none() {
                     let posix = self.module("posix")?;
                     for attr in stdlib::os::scheduler::SCHEDULER_EXPORTS
-                        .into_iter().chain(["sched_getscheduler", "sched_param"])
+                        .into_iter()
+                        .chain(["sched_getscheduler", "sched_param"])
+                        .chain(stdlib::os::scheduler::POLICIES.map(|(name, _)| name))
                     {
                         match self.lookup_attr(posix, attr) {
                             Ok(value) => self.bind(scope, attr, value),

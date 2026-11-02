@@ -15,18 +15,20 @@ pub(in crate::dynamic) const SCHEDULER_EXPORTS: [&str; 9] = [
     "sched_setscheduler",
 ];
 
+pub(in crate::dynamic) const POLICIES: [(&str, libc::c_int); 8] = [
+    ("SCHED_OTHER", libc::SCHED_OTHER),
+    ("SCHED_NORMAL", libc::SCHED_NORMAL),
+    ("SCHED_FIFO", libc::SCHED_FIFO),
+    ("SCHED_RR", libc::SCHED_RR),
+    ("SCHED_BATCH", libc::SCHED_BATCH),
+    ("SCHED_IDLE", libc::SCHED_IDLE),
+    ("SCHED_DEADLINE", libc::SCHED_DEADLINE),
+    ("SCHED_RESET_ON_FORK", libc::SCHED_RESET_ON_FORK),
+];
+
 /// Populate the Linux posix namespace so its dictionary exposes the host's policy constants.
 pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) {
-    for (name, policy) in [
-        ("SCHED_OTHER", libc::SCHED_OTHER),
-        ("SCHED_NORMAL", libc::SCHED_NORMAL),
-        ("SCHED_FIFO", libc::SCHED_FIFO),
-        ("SCHED_RR", libc::SCHED_RR),
-        ("SCHED_BATCH", libc::SCHED_BATCH),
-        ("SCHED_IDLE", libc::SCHED_IDLE),
-        ("SCHED_DEADLINE", libc::SCHED_DEADLINE),
-        ("SCHED_RESET_ON_FORK", libc::SCHED_RESET_ON_FORK),
-    ] {
+    for (name, policy) in POLICIES {
         let value = ctx.int(i64::from(policy));
         ctx.bind(scope, name, value);
     }
