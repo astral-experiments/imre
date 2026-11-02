@@ -1131,12 +1131,16 @@ impl Context {
 
     /// Return the actual class independently of an instance's Python-level __class__ attribute.
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
+        if let Some(name) = self.heap.get(obj).native_io_class_name() {
+            if !self.builtins.contains_key("_io._IOBase") {
+                self.module("_io")?;
+            }
+            return self.builtins.get(name).copied().ok_or_else(|| {
+                Error::new("ImportError", format!("native class {name} is unavailable"))
+            });
+        }
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
-            Value::TextFile(_) => {
-                self.module("io")?;
-                Ok(self.builtins["_io.TextIOWrapper"])
-            }
             Value::Instance { class, .. }
             | Value::Class {
                 metaclass: Some(class),
@@ -1203,8 +1207,8 @@ impl Context {
         if let Value::Tuple(classes) = self.heap.get(class) {
             return classes.iter().any(|&c| self.instance_of(value, c));
         }
-        if matches!(self.heap.get(value), Value::TextFile(_)) {
-            if let Some(&actual) = self.builtins.get("_io.TextIOWrapper")
+        if let Some(name) = self.heap.get(value).native_io_class_name() {
+            if let Some(&actual) = self.builtins.get(name)
                 && self.subclass(actual, class)
             {
                 return true;
@@ -1627,6 +1631,17 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if self.heap.get(obj).native_io_class_name() == Some("_io.BufferedReader") {
+            let class = self.exact_type(obj)?;
+            if let Some(member) = self.class_attr(class, name)
+                && matches!(
+                    self.heap.get(member),
+                    Value::IoMethod { .. } | Value::GetSetDescriptor { .. }
+                )
+            {
+                return self.bind_attribute(member, obj, class);
+            }
+        }
         let metaclass_member = match *self.heap.get(obj) {
             Value::Class {
                 metaclass: Some(meta),
@@ -2237,6 +2252,14 @@ impl Context {
                 explicit,
             } => match name {
                 "__self__" => return Ok(receiver),
+                _ if matches!(
+                    self.heap.get(callable),
+                    Value::IoMethod { name: "open", .. }
+                ) =>
+                {
+                    let original = self.builtin("open");
+                    return self.lookup_attr(original, name);
+                }
                 "__func__"
                     if explicit || matches!(self.heap.get(callable), Value::Function { .. }) =>
                 {
@@ -2600,6 +2623,14 @@ impl Context {
                 if matches!(name, "keys" | "items" | "values" | "get" | "copy") =>
             {
                 return self.lookup_attr(self.mapping_proxy_target(obj), name);
+            }
+            Value::Native(ref symbol) if symbol == "open" && name == "__self__" => {
+                if !self.builtins.contains_key("_io.open.__self__") {
+                    self.module("_io")?;
+                }
+                return self.builtins.get("_io.open.__self__").copied().ok_or_else(|| {
+                    Error::new("ImportError", "native _io module is unavailable")
+                });
             }
             Value::Native(ref symbol)
                 if name == "__self__"
@@ -3405,6 +3436,7 @@ impl Context {
     pub(super) fn default_delete_attr(&mut self, obj: Id, name: &str) -> Result<()> {
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
+        stdlib::io::check_class_write(self, obj, name)?;
         self.check_thread_reporting_binding(obj, name)?;
         if name == "__doc__" && matches!(self.heap.get(obj), Value::TupleGetter { .. }) {
             return super::namedtuple::set_document(self, obj, None).map(|_| ());
@@ -4005,6 +4037,7 @@ impl Context {
         }
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
+        stdlib::io::check_class_write(self, obj, name)?;
         if let Value::Native(class) = self.heap.get(obj)
             && (builtins::is_static_gc_type(class)
                 || HashState::is_provider_class(class)
