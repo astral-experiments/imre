@@ -121,6 +121,7 @@ def tuple_directories():
 
 
 def current():
+    weak_proxy_directory()
     import _io
     tuple_directories()
     operation = dir
@@ -190,3 +191,27 @@ def current():
             bad()
         except TypeError as error:
             print(type(error).__name__, str(error))
+
+
+def weak_proxy_directory():
+    from gc import collect
+    from weakref import proxy
+
+    class Target(Parent):
+        def __dir__(self):
+            return ["custom"]
+
+    owner = Target()
+    owner.instance_field = 1
+    observer = proxy(owner)
+    assert dir(owner) == ["custom"]
+    names = dir(observer)
+    assert "inherited" in names and "instance_field" in names and "custom" not in names
+    del owner
+    collect()
+    try:
+        dir(observer)
+    except ReferenceError:
+        pass
+    else:
+        raise AssertionError("dead proxy supplied a directory")
