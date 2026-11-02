@@ -597,8 +597,12 @@ pub(crate) fn compile(
     let tokenize_script = !object_entry && imports_provider("tokenize");
     let ordered_only = !object_entry && !logging_script && !tokenize_script;
     if ordered_only
-        && (!ordered_command || first.uses_import_builtin
-            || first.names.iter().any(|(level, name)| *level != 0 || name == "__future__"))
+        && (!ordered_command
+            || first.uses_import_builtin
+            || first
+                .names
+                .iter()
+                .any(|(level, name)| *level != 0 || name == "__future__"))
     {
         return Ok(None);
     }

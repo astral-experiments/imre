@@ -382,7 +382,8 @@ fn object_fallback<T>(
         module_root,
         options,
         runtime_imports,
-        operation.or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
+        operation
+            .or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
         registered_imports,
         check_returns,
     )? {

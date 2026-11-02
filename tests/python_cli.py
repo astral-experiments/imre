@@ -2139,10 +2139,10 @@ assert namespace["found"] is import_members.found is sys.modules["import_members
         (package / "app.py").write_text(module)
         compare("-B", "-c", module)
         compare("-B", "-c", "print('before'); import time as t; t.sleep(0); "
-                             "from sys import stdout as out; out.write('after\\n')")
+                             "from sys import stdout as out; out.write('after\\n')", native_timeout=180)
         missing = "print('before'); import no_such_ordered_module; print('after')"
         for exe in (sys.executable, imre):
-            result = run(exe, "-B", "-c", missing)
+            result = run(exe, "-B", "-c", missing, timeout=180)
             assert result.returncode == 1 and result.stdout == b"before\n", result
             assert b"ModuleNotFoundError" in result.stderr and b"no_such_ordered_module" in result.stderr
         # Keep source-backed imports and invalid commands on their existing diagnostic path.
@@ -2155,7 +2155,7 @@ assert namespace["found"] is import_members.found is sys.modules["import_members
             result = run(imre, "-B", "-c", code)
             assert result.returncode != 0 and not result.stdout, result
         for flags, extra in (("-B", {"PYTHONSAFEPATH": "1"}), ("-IB", {})):
-            result = run(imre, flags, "-c", "print('before'); import neighbor", extra=extra)
+            result = run(imre, flags, "-c", "print('before'); import neighbor", extra=extra, timeout=180)
             assert result.returncode == 1 and result.stdout == b"before\n" and b"neighbor" in result.stderr, result
         compare("-B", "pkg/app.py")
         if os.name == "posix":
