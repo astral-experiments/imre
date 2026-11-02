@@ -695,18 +695,19 @@ pub(super) fn ascii_decode_error(bytes: crate::BytesOwner, index: usize) -> Erro
 
 /// Most decoders already own the immutable input. Retain it only on the failing path.
 pub(super) fn decode_owned_error(value: crate::BytesOwner, error: std::str::Utf8Error) -> Error {
-    Utf8Issue::new(&value, 0, error).owned_error(value)
+    DecodeIssue::utf8(&value, 0, error).owned_error(value)
 }
 
-/// A failing UTF-8 sequence uses offsets in the whole input, including after resuming.
-pub(crate) struct Utf8Issue {
+/// A failing decode sequence uses offsets in the whole input, including after resuming.
+pub(crate) struct DecodeIssue {
+    pub(crate) encoding: &'static str,
     pub(crate) start: usize,
     pub(crate) end: usize,
     pub(crate) reason: &'static str,
 }
 
-impl Utf8Issue {
-    pub(super) fn new(data: &[u8], offset: usize, error: std::str::Utf8Error) -> Self {
+impl DecodeIssue {
+    pub(super) fn utf8(data: &[u8], offset: usize, error: std::str::Utf8Error) -> Self {
         let start = offset + error.valid_up_to();
         let end = error
             .error_len()
@@ -716,22 +717,38 @@ impl Utf8Issue {
             Some(_) if !(0xc2..=0xf4).contains(&data[start]) => "invalid start byte",
             _ => "invalid continuation byte",
         };
-        Self { start, end, reason }
+        Self {
+            encoding: "utf-8",
+            start,
+            end,
+            reason,
+        }
     }
 
     fn message(&self, data: &[u8]) -> String {
-        let Self { start, end, reason } = *self;
+        let Self {
+            encoding,
+            start,
+            end,
+            reason,
+        } = *self;
         let location = if end == start + 1 {
             format!("byte 0x{:02x} in position {start}", data[start])
         } else {
             format!("bytes in position {start}-{}", end - 1)
         };
-        format!("'utf-8' codec can't decode {location}: {reason}")
+        format!("'{encoding}' codec can't decode {location}: {reason}")
     }
 
     fn owned_error(&self, value: crate::BytesOwner) -> Error {
         let message = self.message(&value);
-        Error::unicode_decode("utf-8", value, self.start..self.end, self.reason, message)
+        Error::unicode_decode(
+            self.encoding,
+            value,
+            self.start..self.end,
+            self.reason,
+            message,
+        )
     }
 
     pub(crate) fn error(&self, data: &[u8]) -> Error {
@@ -747,7 +764,7 @@ pub(super) fn utf8_error_details(
     value: &[u8],
     error: std::str::Utf8Error,
 ) -> (std::ops::Range<usize>, &'static str, String) {
-    let issue = Utf8Issue::new(value, 0, error);
+    let issue = DecodeIssue::utf8(value, 0, error);
     (issue.start..issue.end, issue.reason, issue.message(value))
 }
 

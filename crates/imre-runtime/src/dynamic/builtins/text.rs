@@ -11,22 +11,13 @@ use ruff_python_literal::format::{
 };
 
 use super::super::operators::append_rendered_text;
-use super::super::stdlib::codecs::encode_text;
+use super::super::stdlib::codecs::{decode_named, encode_text};
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
 
 mod bytes_fields;
 mod maketrans;
-
-fn decode(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) -> Result<Id> {
-    let encoding = encoding
-        .map(|id| ctx.str_value(id))
-        .transpose()?
-        .unwrap_or("utf-8");
-    let codec = crate::objects::Codec::lookup(encoding)?;
-    super::super::stdlib::codecs::decode_bytes(ctx, codec, ctx.scalar_value(id), errors)
-}
 
 pub(super) fn construct(
     ctx: &mut Context,
@@ -105,7 +96,7 @@ pub(super) fn construct(
                 return Ok(ctx.text(""));
             };
             if encoding.is_some() || errors.is_some() {
-                return decode(ctx, value, encoding, errors);
+                return decode_named(ctx, ctx.scalar_value(value), encoding, errors);
             }
             let target = ctx.weak_proxy_target(value)?;
             if target != value {
@@ -1297,7 +1288,7 @@ pub(super) fn method(
     if name == "decode" || name == "encode" {
         let [encoding, errors] = bind(name, args, kwargs, ["encoding", "errors"])?;
         return if name == "decode" {
-            decode(ctx, receiver, encoding, errors)
+            decode_named(ctx, ctx.scalar_value(receiver), encoding, errors)
         } else {
             let b = encode_text(ctx, receiver, encoding, errors)?;
             Ok(ctx.alloc(Value::Bytes(b)))
