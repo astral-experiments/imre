@@ -2,11 +2,26 @@ import errno
 import io
 import os
 import subprocess
+from pathlib import Path
 from subprocess import Popen
 
 
 def current():
     assert subprocess.Popen is Popen and Popen.__module__ == "subprocess"
+    args = ["imre-argv-zero", "-c", 'printf "%s" "$0"']
+    with Popen(args, executable=b"./sh", cwd="/bin", stdout=subprocess.PIPE) as child:
+        assert child.args is args
+        assert child.stdout.read() == b"imre-argv-zero"
+        assert child.wait() == 0
+
+    executable = Path("null/child")
+    try:
+        Popen(["/bin/true"], executable=executable, cwd="/dev")
+    except NotADirectoryError as exc:
+        assert exc.errno == errno.ENOTDIR and exc.filename is executable
+    else:
+        raise AssertionError("launched a program below /dev/null")
+
     text = subprocess.run(["/bin/sh", "-c", "printf 'one\\r\\ntwo\\r'"],
                           text=True, capture_output=True, check=True)
     assert text.stdout == "one\ntwo\n" and text.stderr == "" and text.returncode == 0

@@ -94,6 +94,7 @@ fn environment(ctx: &mut Context, mapping: Id) -> Result<Option<Environment>> {
 fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let &[
         args,
+        executable,
         stdin,
         stdout,
         stderr,
@@ -125,8 +126,12 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         .slot(args, "__fspath__")
         .is_some_and(|slot| slot != NONE);
     let items = if scalar { vec![args] } else { ctx.items(args)? };
-    let Some(&program) = items.first() else {
-        return Err(Error::new("IndexError", "list index out of range"));
+    let (&program, arguments) = if executable == NONE {
+        items
+            .split_first()
+            .ok_or_else(|| Error::new("IndexError", "list index out of range"))?
+    } else {
+        (&executable, items.as_slice())
     };
     ctx.heap.reserve_temporaries(items.len())?;
     for &item in &items {
@@ -140,14 +145,21 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let resolved_program = posixpath::fspath(ctx, program)?;
     ctx.heap.reserve_temporaries(1)?;
     ctx.heap.keep(resolved_program);
-    argv.push(os::c_path(ctx, resolved_program, "embedded null byte")?.into_bytes());
-    for arg in &items[1..] {
+    let program_bytes = os::c_path(ctx, resolved_program, "embedded null byte")?.into_bytes();
+    let alternate = if executable == NONE {
+        argv.push(program_bytes);
+        None
+    } else {
+        Some(program_bytes)
+    };
+    for arg in arguments {
         argv.push(path(ctx, *arg)?);
     }
     let directory = (cwd != NONE).then(|| path(ctx, cwd)).transpose()?;
     let mut warning_error = None;
     let child = BoxedPopen::launch(
         argv,
+        alternate,
         streams,
         ctx.truth(close_fds)?,
         ctx.truth(restore_signals)?,

@@ -31,8 +31,6 @@ class Popen:
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
                  stderr=None, *, close_fds=True, cwd=None, env=None, restore_signals=True,
                  universal_newlines=None, encoding=None, errors=None, text=None, pipesize=-1):
-        if executable is not None:
-            raise NotImplementedError("an alternate subprocess executable is unsupported")
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -64,7 +62,7 @@ class Popen:
         self.args = args
         self.pipesize = pipesize
         self._sigint_wait_secs = 0.25
-        self._handle = _process.launch(args, stdin, stdout, stderr, close_fds,
+        self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
                                        restore_signals, cwd, env, bufsize, pipesize,
                                        encoding if self.text_mode else None,
                                        errors if self.text_mode else None)

@@ -162,9 +162,18 @@ pub(super) unsafe fn spawn(
         })
     }
     .map_err(|e| popen::error_after_handles(pending, !direct, e))?;
-    if launch.argv.strings.is_empty() && direct {
-        let error = Error::new(Kind::ValueError, "posix_spawn: argv must not be empty");
-        return Err(popen::error_after_handles(pending, false, error));
+    if direct {
+        let error = match launch.argv.strings.first() {
+            None => Some("posix_spawn: argv must not be empty"),
+            Some(arg) if arg.as_bytes().is_empty() => {
+                Some("posix_spawn: argv first element cannot be empty")
+            }
+            _ => None,
+        };
+        if let Some(message) = error {
+            let error = Error::new(Kind::ValueError, message);
+            return Err(popen::error_after_handles(pending, false, error));
+        }
     }
     if redirects.oversized {
         return Err(popen::error_after_handles(pending, false, c_int_overflow()));

@@ -35,6 +35,7 @@ impl BoxedPopen {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn launch(
         argv: Vec<Vec<u8>>,
+        executable: Option<Vec<u8>>,
         streams: [(u32, Option<Int>); 3],
         close_fds: bool,
         restore_signals: bool,
@@ -57,6 +58,10 @@ impl BoxedPopen {
         }
         let argv = crate::ObjectOwner::try_new(Object(crate::StorageCell::new(words.into_storage())))
             .map_err(|_| Error::allocation())?;
+        let executable = executable
+            .map(crate::BytesOwner::try_new)
+            .transpose()
+            .map_err(|_| Error::allocation())?;
         let cwd = cwd
             .map(crate::BytesOwner::try_new)
             .transpose()
@@ -70,6 +75,10 @@ impl BoxedPopen {
             bufsize.0,
         );
         config.close_fds = close_fds;
+        if let Some(program) = &executable {
+            config.executable = crate::BytesOwner::as_ptr(program).cast();
+            config.executable_kind = 8;
+        }
         if let Some(path) = &cwd {
             config.cwd = crate::BytesOwner::as_ptr(path).cast();
             config.cwd_kind = 8;
@@ -98,7 +107,7 @@ impl BoxedPopen {
         }
         // Reserve the public handle before a successful spawn can leave a child to reap.
         let mut owner = triomphe::UniqueArc::try_new_uninit().map_err(|_| Error::allocation())?;
-        // SAFETY: argv, cwd, both size integers and descriptor integers stay rooted through spawn.
+        // SAFETY: argv, executable, cwd, sizes and descriptor integers stay rooted through spawn.
         let process = unsafe { spawn(&config, extras) }.map_err(|error| BoxedLaunchError {
             error,
             directory: site.map(|(site, _)| matches!(site, launch_error::Site::Directory)),
