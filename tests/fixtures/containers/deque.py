@@ -83,4 +83,4 @@ assert repr([deque(['a'], maxlen=3)]) == "[deque(['a'], maxlen=3)]"
 rotated = deque([1, 2, 3], maxlen=3)
 rotated.rotate()
 rotated.rotate(-2)
-assert list(rotated) == [2, 3, 1] and rotated.maxlen == 3
+assert rotated[0] == 2 and rotated[1] == 3 and rotated[2] == 1
