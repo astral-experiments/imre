@@ -131,6 +131,22 @@ impl Pattern {
             - 1
     }
 
+    /// Map public capture names to their one-based indices in pattern order.
+    pub(in crate::dynamic) fn group_index(&self, ctx: &mut Context) -> Result<Id> {
+        let info = self.regex.group_info();
+        let mut fields = Vec::new();
+        for index in 1..=self.group_count() {
+            if let Some(name) = info.to_name(PatternID::ZERO, index) {
+                fields.push((ctx.text(name.to_owned()), ctx.int(index as i64)));
+            }
+        }
+        if fields.is_empty() {
+            return Ok(ctx.dict(fields));
+        }
+        let mapping = ctx.dict(fields);
+        ctx.mapping_proxy(mapping)
+    }
+
     fn match_error(&self, ctx: &mut Context, message: String) -> Error {
         if matches!(self.regex, Matcher::Lookahead(_)) {
             Error::new("RuntimeError", message)
