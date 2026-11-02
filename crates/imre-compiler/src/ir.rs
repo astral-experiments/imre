@@ -2423,6 +2423,53 @@ pub(crate) enum Statement {
     Raise(Option<Expr>),
 }
 
+impl Statement {
+    /// Visits nested suites in source order, excluding suites owned by expressions.
+    pub(crate) fn suites<'a>(&'a self, mut visit: impl FnMut(&'a [Statement])) {
+        match self {
+            Self::Scope { body, .. } => visit(body),
+            Self::If(_, body, orelse)
+            | Self::While(_, body, orelse)
+            | Self::For { body, orelse, .. } => {
+                visit(body);
+                visit(orelse);
+            }
+            Self::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                visit(body);
+                for handler in handlers {
+                    visit(&handler.body);
+                }
+                visit(orelse);
+                visit(finalbody);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Visits each statement in ordinary suites. Expression-owned suites have separate roots.
+pub(crate) fn walk_block<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Statement)) {
+    for statement in body {
+        visit(statement);
+        statement.suites(|body| walk_block(body, visit));
+    }
+}
+
+/// Visits all statement nodes once, including those nested inside eager expressions.
+pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Statement)) {
+    walk_block(body, visit);
+    walk_expressions(body, &mut |expression| {
+        if let ExprKind::Scope { body, .. } = &expression.kind {
+            walk_block(body, visit);
+        }
+    });
+}
+
 /// Visits expression trees, including statements embedded in eager expressions.
 /// Analyses must include every checked branch, even when it never executes.
 pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
@@ -2431,63 +2478,37 @@ pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut
             Statement::Assign(_, value)
             | Statement::Expr(value)
             | Statement::Return(value)
-            | Statement::Assert(value) => walk_expression(value, visit),
+            | Statement::Assert(value)
+            | Statement::If(value, _, _)
+            | Statement::While(value, _, _)
+            | Statement::Raise(Some(value)) => walk_expression(value, visit),
             Statement::SetItem(receiver, index, value)
             | Statement::AugmentItem(receiver, index, _, value) => {
-                walk_expression(receiver, visit);
-                walk_expression(index, visit);
-                walk_expression(value, visit);
+                for operand in [receiver, index, value] {
+                    walk_expression(operand, visit);
+                }
             }
             Statement::SetField(receiver, _, value)
             | Statement::AugmentField(receiver, _, _, value) => {
                 walk_expression(receiver, visit);
                 walk_expression(value, visit);
             }
-            Statement::Scope { body, .. } => walk_expressions(body, visit),
-            Statement::If(test, yes, no) => {
-                walk_expression(test, visit);
-                walk_expressions(yes, visit);
-                walk_expressions(no, visit);
-            }
-            Statement::While(test, body, orelse) => {
-                walk_expression(test, visit);
-                walk_expressions(body, visit);
-                walk_expressions(orelse, visit);
-            }
-            Statement::For {
-                args, body, orelse, ..
-            } => {
+            Statement::For { args, .. } => {
                 for arg in args {
                     walk_expression(arg, visit);
-                }
-                walk_expressions(body, visit);
-                walk_expressions(orelse, visit);
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
-                walk_expressions(body, visit);
-                for handler in handlers {
-                    walk_expressions(&handler.body, visit);
-                }
-                walk_expressions(orelse, visit);
-                walk_expressions(finalbody, visit);
-            }
-            Statement::Raise(value) => {
-                if let Some(value) = value {
-                    walk_expression(value, visit);
                 }
             }
             Statement::Move(..)
             | Statement::Clear(_)
+            | Statement::Scope { .. }
+            | Statement::Try { .. }
+            | Statement::Raise(None)
             | Statement::IterNext { .. }
             | Statement::Break
             | Statement::Continue
             | Statement::Exhaust => {}
         }
+        statement.suites(|body| walk_expressions(body, visit));
     }
 }
 
