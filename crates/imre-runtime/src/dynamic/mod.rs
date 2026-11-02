@@ -1511,20 +1511,21 @@ impl Context {
         if let Some(order) = &mut data.class_body {
             order.retain(|member| member != name);
         }
-        let previous = data.names.shift_remove(name);
-        if previous.is_some()
-            && name != "__qualname__"
-            && let Some(dictionary) = data
-                .class_namespace
-                .as_ref()
-                .and_then(|class| class.dictionary)
+        let Some(previous) = data.names.shift_remove(name) else {
+            return Ok(false);
+        };
+        let dictionary = data
+            .class_namespace
+            .as_ref()
+            .and_then(|class| class.dictionary);
+        // Deleting the class dictionary entry can collect the removed value.
+        self.heap.weak_edge_removed(previous);
+        if name != "__qualname__"
+            && let Some(dictionary) = dictionary
         {
             self.delete_item(dictionary, key)?;
         }
-        if let Some(value) = previous {
-            self.heap.weak_edge_removed(value);
-        }
-        Ok(previous.is_some())
+        Ok(true)
     }
 
     /// Bind a parameter in a fresh function scope using checked name and table storage.
