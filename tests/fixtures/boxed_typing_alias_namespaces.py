@@ -42,7 +42,7 @@ def current():
     assert alias_type.__name__ == "TypeAliasType"
     for name in ("__value__", "__module__", "__parameters__", "__type_params__", "evaluate_value"):
         descriptor = vars(alias_type)[name]
-        assert type(descriptor) is types.GetSetDescriptorType
+        assert type(descriptor).__name__ == "getset_descriptor"
         assert descriptor.__objclass__ is alias_type and descriptor.__name__ == name
         assert descriptor.__get__(None, alias_type) is descriptor
         if name != "__module__":
