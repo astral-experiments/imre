@@ -2638,6 +2638,9 @@ impl Context {
             Value::Socket(ref socket) if name == "family" => {
                 return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
             }
+            Value::Socket(ref socket) if name == "proto" => {
+                return Ok(self.int(i64::from(crate::objects::socket::proto(socket))));
+            }
             Value::Socket(ref socket) if name == "type" => {
                 return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
             }

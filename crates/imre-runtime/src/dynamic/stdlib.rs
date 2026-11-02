@@ -1856,6 +1856,9 @@ pub(super) fn call(
     if name == "_socket.getaddrinfo" {
         return socket::getaddrinfo(ctx, args, kwargs);
     }
+    if name == "_socket.socketpair" {
+        return socket::socketpair(ctx, args, kwargs);
+    }
     if name == "_socket.close" {
         return socket::close(ctx, args, kwargs);
     }

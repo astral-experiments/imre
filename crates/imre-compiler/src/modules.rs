@@ -1638,6 +1638,7 @@ impl IntrinsicModule {
                 "SHUT_RDWR" => "_socket.SHUT_RDWR",
                 "SOMAXCONN" => "_socket.SOMAXCONN",
                 "socket" => "_socket.socket",
+                "socketpair" => "_socket.socketpair",
                 "close" => "_socket.close",
                 "gethostname" => "_socket.gethostname",
                 "gethostbyname" => "_socket.gethostbyname",
@@ -1695,6 +1696,7 @@ impl IntrinsicModule {
             (Self::Socket, "SOCK_SEQPACKET") => {
                 Intrinsic::ObjectRuntimeExport("socket.SOCK_SEQPACKET")
             }
+            (Self::Socket, "socketpair") => Intrinsic::ObjectRuntimeExport("socket.socketpair"),
             (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
             (Self::Socket, "gethostname") => Intrinsic::ObjectRuntimeExport("socket.gethostname"),
             (Self::Socket, "gethostbyname") => {
