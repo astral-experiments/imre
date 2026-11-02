@@ -16,6 +16,7 @@ pub(super) struct Program {
     pub filename: Rc<str>,
     pub name: String,
     qualname: String,
+    nested_global: bool,
     class_attributes: Option<BTreeSet<String>>,
     class_cell: bool,
     class_nonlocal: bool,
@@ -1434,6 +1435,7 @@ impl Program {
             filename,
             name: name.to_owned(),
             qualname: name.to_owned(),
+            nested_global: false,
             class_attributes: None,
             class_cell: false,
             class_nonlocal: false,
@@ -1510,8 +1512,15 @@ impl Program {
             .as_ref()
             .map_or(name.as_str(), |p| p.definition(name));
         let mut child = self.nested_program(original);
-        child.qualname =
-            Self::qualified_name(&self.qualname, self.class_attributes.is_some(), original);
+        child.nested_global = self.name != "<module>"
+            && matches!(
+                self.directives.get(name.as_str()),
+                Some((ScopeDirective::Global, _))
+            );
+        if !child.nested_global {
+            child.qualname =
+                Self::qualified_name(&self.qualname, self.class_attributes.is_some(), original);
+        }
         child.method_imports = self.method_imports.clone();
         child.private_names = self.private_names.clone();
         child.template_expressions = self.template_expressions.clone();
@@ -2545,7 +2554,7 @@ impl Context {
             doc,
             filename,
             first_line: program.first_line,
-            module_definition: program.name == program.qualname,
+            module_definition: !program.nested_global && program.name == program.qualname,
             coroutine: program.kind == FunctionKind::Coroutine,
             body: Body::Source(program),
             flags: None,

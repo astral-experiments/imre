@@ -279,6 +279,30 @@ class Outer:
 
 
 def check_global_names(protocol):
+    import _operator
+    import operator
+    import types
+
+    getitem = operator.getitem
+    assert getitem is _operator.getitem is operator.__getitem__
+    assert type(getitem) is types.BuiltinFunctionType
+    assert (getitem.__module__, getitem.__name__, getitem.__qualname__) == (
+        "_operator", "getitem", "getitem")
+    assert getitem.__self__ is _operator
+    data = pickle.dumps(getitem, protocol)
+    assert pickle.loads(data) is getitem
+    _operator.getitem = operator.setitem
+    try:
+        assert pickle.loads(data) is operator.setitem
+        try:
+            pickle.dumps(getitem, protocol)
+        except pickle.PicklingError:
+            pass
+        else:
+            raise AssertionError("accepted a replaced global")
+    finally:
+        _operator.getitem = getitem
+
     from collections import OrderedDict, UserDict, UserList, UserString
     from datetime import date, datetime, timedelta
 

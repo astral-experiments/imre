@@ -156,7 +156,7 @@ use super::super::{builtins, value::NONE};
 /// Operations captured by Werkzeug's LocalProxy descriptor declarations.
 /// Binary and item operations share the boxed expression dispatch.
 #[derive(Clone, Copy)]
-pub(super) enum Operation {
+pub(in crate::dynamic) enum Operation {
     Binary(&'static str),
     InPlace(&'static str),
     Unary(&'static str),
@@ -168,54 +168,40 @@ pub(super) enum Operation {
     LengthHint,
 }
 
-impl Operation {
-    pub(super) fn named(name: &str) -> Option<Self> {
-        use Operation::{Binary, InPlace, Unary};
-        Some(match name {
-            "lt" => Binary("<"),
-            "le" => Binary("<="),
-            "eq" => Binary("=="),
-            "ne" => Binary("!="),
-            "gt" => Binary(">"),
-            "ge" => Binary(">="),
-            "add" => Binary("+"),
-            "sub" => Binary("-"),
-            "mul" => Binary("*"),
-            "matmul" => Binary("@"),
-            "truediv" => Binary("/"),
-            "floordiv" => Binary("//"),
-            "mod" => Binary("%"),
-            "lshift" => Binary("<<"),
-            "rshift" => Binary(">>"),
-            "and_" => Binary("&"),
-            "xor" => Binary("^"),
-            "or_" => Binary("|"),
-            "iadd" => InPlace("+"),
-            "isub" => InPlace("-"),
-            "imul" => InPlace("*"),
-            "imatmul" => InPlace("@"),
-            "itruediv" => InPlace("/"),
-            "ifloordiv" => InPlace("//"),
-            "imod" => InPlace("%"),
-            "ipow" => InPlace("**"),
-            "ilshift" => InPlace("<<"),
-            "irshift" => InPlace(">>"),
-            "iand" => InPlace("&"),
-            "ixor" => InPlace("^"),
-            "ior" => InPlace("|"),
-            "neg" => Unary("neg"),
-            "pos" => Unary("pos"),
-            "invert" => Unary("~"),
-            "contains" => Self::Contains,
-            "getitem" => Self::GetItem,
-            "setitem" => Self::SetItem,
-            "delitem" => Self::DelItem,
-            "index" => Self::Index,
-            "length_hint" => Self::LengthHint,
-            _ => return None,
-        })
-    }
+macro_rules! operator_functions {
+    ($($name:literal => $operation:expr),* $(,)?) => {
+        impl Operation {
+            const NAMES: &[&str] = &[$($name),*];
 
+            pub(in crate::dynamic) fn named(name: &str) -> Option<Self> {
+                Some(match name {
+                    $($name => $operation,)*
+                    _ => return None,
+                })
+            }
+        }
+    };
+}
+
+include!("../../../native/operator-functions.rs");
+
+/// Install the same callable objects in the private extension and its public wrapper.
+pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id, module: &str) {
+    for &name in Operation::NAMES {
+        let function = ctx.builtin(&format!("operator.{name}"));
+        ctx.bind(scope, name, function);
+        if module == "operator" && name != "length_hint" {
+            let alias = format!("__{}__", name.trim_end_matches('_'));
+            ctx.bind(scope, &alias, function);
+        }
+    }
+    for name in ["attrgetter", "itemgetter"] {
+        let class = ctx.builtin(&format!("operator.{name}"));
+        ctx.bind(scope, name, class);
+    }
+}
+
+impl Operation {
     pub(super) fn call(
         self,
         ctx: &mut Context,
