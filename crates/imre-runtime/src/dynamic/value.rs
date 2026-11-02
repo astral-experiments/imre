@@ -1575,9 +1575,10 @@ impl Value {
                         visit.extend(reader.raw.get());
                         visit.push(reader.buffer);
                     }
-                    Some(super::stdlib::io::MemoryStream::UninitializedReader(raw)) => {
-                        visit.extend(raw)
-                    }
+                    Some(
+                        super::stdlib::io::MemoryStream::UninitializedReader(raw)
+                        | super::stdlib::io::MemoryStream::UninitializedWriter(raw),
+                    ) => visit.extend(raw),
                     Some(super::stdlib::io::MemoryStream::BufferedBytes(writer)) => {
                         visit.extend(writer.raw.get())
                     }
