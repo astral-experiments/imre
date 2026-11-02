@@ -1881,6 +1881,7 @@ pub(super) fn call(
     const JSON_DUMP_KEYWORDS: &[&str] = &[
         "fp",
         "obj",
+        "skipkeys",
         "default",
         "ensure_ascii",
         "allow_nan",
