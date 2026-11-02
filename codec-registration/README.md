@@ -17,3 +17,5 @@ Public #4033 (0c9885cf2953271a30a7a40b7ac2f5a8bf4f76db) restores the runtime bui
 The intact O0 class on public 0c9885cf registered all 82 originals. Its first completed test, module ordinal 445 (test_append_bom), raised LookupError at the upstream UTF-16 encode on line 3517. Ordinal 446 (test_basic_io) errored on TextIOWrapper.truncate. Ordinal 447 (test_bufio_write_through) was the first original to emit success and stop. The live prefixes record completed callbacks while the process is running. Clean independent qualification is recorded separately.
 
 PR #4034 merged as e64c7815dbdd35d7261edfb9c78bac90df29cbad from independently reviewed eaeb30852ebc6a892972345aeaaef48231c15f8f. The integrated head matched the eight CPython callback controls at native O0 and O3. The original writable reader fixture and hash/lifetime controls passed. These view tests are separate from the 82 original-case results pinned to #4033.
+
+Public O0 completed its first 37 original bodies with 25 success callbacks, 7 errors and 5 failures. All twelve exception traces lead into the original bodies. The live checkpoint predates the outcome of module ordinal 482.
