@@ -584,6 +584,23 @@ fn collect_class(
     let mut method_kinds = Vec::new();
     let mut initializer = None;
     for (ordinal, statement) in node.body.iter().enumerate() {
+        // A type-only method declaration may have a separate runtime signature.
+        let statement = match statement {
+            ast::Stmt::If(guard)
+                if guard
+                    .test
+                    .as_name_expr()
+                    .is_some_and(|test| !class_bindings.contains(test.id.as_str()))
+                    && graph.resolve(definition.module, &guard.test)
+                        == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
+                    && let [otherwise] = guard.elif_else_clauses.as_slice()
+                    && otherwise.test.is_none()
+                    && let [method @ ast::Stmt::FunctionDef(_)] = otherwise.body.as_slice() =>
+            {
+                method
+            }
+            _ => statement,
+        };
         // A call through an upcast uses its declared layout. Do not erase an
         // override which could select a different callable at runtime.
         let member = match statement {
