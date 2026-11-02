@@ -26,6 +26,13 @@ def _close_handler(handler: Handler) -> None:
     _rename_handler(handler, handler._name, None)
 
 
+def _flush_handler_stream(handler: StreamHandler) -> None:
+    # Every fixed-layout _TextOutput provides flush().
+    stream = handler.stream
+    if stream is not None:
+        stream.flush()
+
+
 def _handle_error(record: LogRecord) -> None:
     if not logging.raiseExceptions:
         return
