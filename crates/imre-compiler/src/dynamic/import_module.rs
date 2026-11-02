@@ -316,7 +316,9 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     .replace("with _ImportLockContext():", "with _import_lock:")
                     .replace("_warnings.warn('sys.meta_path is empty', ImportWarning)",
                              "_import_warning('sys.meta_path is empty', 1254)");
-                let load = section("def _load_backward_compatible(", "def _load(spec):")
+                let exec = section("def _exec(spec, module):", "def _load_backward_compatible(")
+                    .replace("_warnings.warn(msg, ImportWarning)", "_import_warning(msg, 866)");
+                let load = section("def _load_backward_compatible(", "# Loaders")
                     .replace("_warnings.warn(msg, ImportWarning)", "_import_warning(msg, 921)");
                 // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
                 [
@@ -328,6 +330,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     section("def _sanity_check(", "_ERR_MSG_PREFIX ="),
                     section("def _object_name(", "# Bootstrap-related"),
                     &find,
+                    &exec,
                     &load,
                     &imports,
                 ].join("\n")
