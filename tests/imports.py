@@ -16,6 +16,15 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "generator_local_keeps_typed_call": ({
+        "helper.py": (
+            "def values():\n"
+            "    def pair(left, right): return left + right\n"
+            "    yield pair(2, 3)\n"
+            "def typed(n: int) -> int: return n\n"
+        ),
+        "main.py": "from helper import values, typed\nprint(next(values()))\ntyped('wrong')\n",
+    }, "invalid-argument-type"),
     "unittest_method_skip_preserves_typed_call": ({
         "main.py": (
             "import unittest\n"
@@ -380,6 +389,21 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "generator_local_argument_binding": {
+        "helper.py": (
+            "def values():\n"
+            "    def pair(left, right): return left + right\n"
+            "    yield pair(2, 3)\n"
+            "    yield pair(2, 3, 4)\n"
+        ),
+        "main.py": (
+            "from helper import values\n"
+            "gen = values()\n"
+            "print(next(gen))\n"
+            "try: next(gen)\n"
+            "except TypeError as error: print(error)\n"
+        ),
+    },
     "imported_method_mixin": {
         "helper.py": (
             "OFFSET = 7\n"
@@ -506,6 +530,20 @@ ACCEPTED = {
             "print(available is after.sys, missing is None)\n"
         ),
         "after.py": "import sys\nprint('after')\n",
+    },
+    "optional_import_in_dependency": {
+        "helper.py": (
+            "try:\n    import sys as provider\nexcept ImportError:\n    provider = None\n"
+            "import child\n"
+            "assert provider is not None\n"
+            "def value() -> int: return 7\n"
+        ),
+        "child.py": (
+            "from importlib import import_module\n"
+            "parent = import_module('helper')\n"
+            "print(parent.provider is not None)\n"
+        ),
+        "main.py": "from helper import value\nprint(value())\n",
     },
     "optional_import_error_alternatives": {
         "main.py": "from pkg.adapter import chosen, available, recovered\nprint(chosen, available, recovered)\n",

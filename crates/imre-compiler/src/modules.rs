@@ -4594,7 +4594,7 @@ impl<'a> Loader<'a> {
                     }
                 }
                 ast::Stmt::Try(guard)
-                    if id == 0
+                    if (id == 0 || self.partial_source(id))
                         && !executable
                         && self.modules[id].entry_globals.is_empty()
                         && let Some((module, name)) =
@@ -5734,7 +5734,7 @@ fn stdlib_top_level(name: &str) -> bool {
         || vendored.is_file(format!("stdlib/{name}/__init__.pyi").as_str())
 }
 
-/// An optional module import may occur between ordinary imports in the entry prefix.
+/// A source module can probe a standard library module before its next import.
 fn optional_stdlib_import<'a>(
     modules: &[SourceModule],
     module: ModuleId,
