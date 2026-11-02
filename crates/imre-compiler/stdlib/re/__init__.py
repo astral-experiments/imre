@@ -50,7 +50,8 @@ def _compile_cached(compile_uncached, pattern, flags):
     compiled = _cache.pop(key, None)
     if compiled is None:
         compiled = compile_uncached(pattern, flags)
-        if compiled is pattern:
+        # DEBUG (128) emits a fresh diagnostic on each compilation.
+        if compiled is pattern or compiled.flags & 128:
             return compiled
         if len(_cache) >= 512:
             del _cache[next(iter(_cache))]
