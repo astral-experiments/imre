@@ -645,7 +645,7 @@ pub(super) fn new_context<S: Into<String>>(
         default_encoding: NONE,
         audit_hooks: Vec::new(),
         contexts: Vec::new(),
-        bytearray_exports: Vec::new(),
+        buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
         token_missing: NONE,
@@ -1320,7 +1320,7 @@ impl Context {
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
                 .chain(self.contexts.iter().copied())
-                .chain(self.bytearray_exports.iter().copied())
+                .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
                 .chain(self.source_builtins)
                 .chain([
