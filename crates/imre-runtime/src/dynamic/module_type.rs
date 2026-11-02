@@ -5,13 +5,15 @@ pub(super) const DOC: &str = "Create a module object.\n\nThe name must be a stri
 impl Context {
     /// Copy live exports from a module in their original order. A failing lookup
     /// leaves earlier bindings visible, just like successive assignments.
-    pub(super) fn import_star(&mut self, scope: Id, module: Id) -> Result<Id> {
+    pub(super) fn import_star(&mut self, scope: Id, module: Id, custom_hook: bool) -> Result<Id> {
         self.heap.reserve_temporaries(1)?;
         self.heap.keep(module);
         let (names, implicit) = match self.lookup_attr(module, "__all__") {
             Ok(names) => {
-                // Packages also preload child modules from their fromlist before binding.
-                if let Value::Module { scope, .. } = *self.heap.get(module)
+                // Custom import hooks have already handled the fromlist. The native importer
+                // does not yet preload package children named by __all__.
+                if !custom_hook
+                    && let Value::Module { scope, .. } = *self.heap.get(module)
                     && self.scope_name(scope, "__path__").is_some()
                 {
                     return Err(Error::new(
@@ -32,7 +34,15 @@ impl Context {
                         format!("wildcard export enumeration for native module '{name}'"),
                     ));
                 }
-                let namespace = self.lookup_attr(module, "__dict__")?;
+                let namespace = match self.lookup_attr(module, "__dict__") {
+                    Err(error) if self.is_attribute_error(&error) => {
+                        return Err(Error::new(
+                            "ImportError",
+                            "from-import-* object has no __dict__ and no __all__",
+                        ));
+                    }
+                    result => result?,
+                };
                 let entries = self.dict_entries(namespace).ok_or_else(|| {
                     Error::new("TypeError", "module namespace must be a dictionary")
                 })?;
@@ -47,7 +57,14 @@ impl Context {
         if let Some(kind @ ("dict" | "collections.defaultdict")) = self.builtin_type_name(names) {
             return Err(Error::new("TypeError", format!("{kind} is not a sequence")));
         }
+        // IMPORT_STAR writes directly to the current locals mapping, including when
+        // exec has separate globals or the hook supplies a string subclass as a key.
+        let locals = match self.scope_data(scope).exec_locals {
+            Some(locals) => locals,
+            None => self.module_globals(scope)?,
+        };
         for index in 0.. {
+            let mark = self.heap.temporary_mark();
             let index = self.int(index);
             let key = match self.get_item(names, index) {
                 Ok(key) => key,
@@ -74,10 +91,21 @@ impl Context {
                 }
             };
             if implicit && name.starts_with('_') {
+                self.heap.release_temporaries_since(mark);
                 continue;
             }
-            let value = self.lookup_attr(module, &name)?;
-            self.bind_source_name(scope, &name, value)?;
+            // Attribute hooks can remove this key from __all__ and collect it.
+            self.heap.reserve_temporaries(2)?;
+            self.heap.keep(key);
+            let value = self.lookup_named_attr(module, &name, Some(key))?;
+            self.heap.keep(value);
+            let replaced = self.replacing_finalizer(scope, &name, value);
+            self.put_item(locals, key, value)?;
+            self.heap.release_temporaries_since(mark);
+            if replaced && self.heap.has_unbound_finalizer(NONE) {
+                self.collect_unreachable();
+                self.heap.release_unbound_finalizers();
+            }
         }
         Ok(NONE)
     }
