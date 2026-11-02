@@ -145,6 +145,11 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         ctx.items(args)?
     };
+    // Truth-testing a shell override can mutate the original argument container.
+    ctx.heap.reserve_temporaries(items.len())?;
+    for &item in &items {
+        ctx.heap.keep(item);
+    }
     if shell {
         // Preserve the shell's argv[0] until argv and executable are converted separately.
         let shell_program = if executable != NONE && ctx.truth(executable)? {
@@ -163,10 +168,6 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         (&executable, items.as_slice())
     };
-    ctx.heap.reserve_temporaries(items.len())?;
-    for &item in &items {
-        ctx.heap.keep(item);
-    }
     // CPython's dirname probe can call __fspath__ before the actual executable conversion.
     let probed_directory = if executable != NONE && BoxedPopen::probes_executable() {
         let probe = posixpath::fspath(ctx, executable)?;
