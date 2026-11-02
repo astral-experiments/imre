@@ -138,6 +138,16 @@ def test_tzinfo_instance_layout():
             else:
                 raise AssertionError(name)
     assert not hasattr(base, "__dict__")
+    for value, message in (
+        (1, "__class__ must be set to a class, not 'int' object"),
+        (tzinfo, "__class__ assignment only supported for mutable types or ModuleType subclasses"),
+    ):
+        try:
+            object.__setattr__(base, "__class__", value)
+        except TypeError as exc:
+            assert str(exc) == message
+        else:
+            raise AssertionError(value)
 
     class Zone(tzinfo):
         pass
