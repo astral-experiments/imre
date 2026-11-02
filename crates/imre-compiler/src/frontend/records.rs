@@ -1606,6 +1606,11 @@ impl Checker<'_> {
         let materialized = self.immediate_constructor_input(call, class);
         let call = materialized.as_ref().unwrap_or(call);
         let signature = self.classes.methods[class]["__init__"].clone();
+        if let Some(&parent) = self.classes.forwarded_initializers.get(&signature.id)
+            && let Some(error) = self.forwarded_init_error(class, parent, call, &signature)?
+        {
+            return Ok(error);
+        }
         let mut scope = calls::ArgumentScope::default();
         let normalization = self.normalized_record_input(class);
         let args = if let Some((field, wrapper, template)) = normalization {

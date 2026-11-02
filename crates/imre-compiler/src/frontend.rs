@@ -161,6 +161,8 @@ struct ClassInfo {
     methods: Vec<HashMap<String, Signature>>,
     setters: Vec<HashMap<String, Signature>>,
     keyword_copies: HashSet<usize>,
+    /// Original base called by a constructor with statically forwarded packs.
+    forwarded_initializers: HashMap<usize, DefinitionId>,
     raising_methods: HashSet<usize>,
     cached: HashMap<usize, function_caches::Policy>,
     cached_properties: cached_properties::Slots,
@@ -393,6 +395,7 @@ impl ClassInfo {
             methods: vec![HashMap::new(); fields.len()],
             setters: vec![HashMap::new(); fields.len()],
             keyword_copies: HashSet::new(),
+            forwarded_initializers: HashMap::new(),
             raising_methods: HashSet::new(),
             cached: HashMap::new(),
             cached_properties,
@@ -719,8 +722,12 @@ pub(crate) fn lower_with_caller_cache(
                 })]
                 .into();
             }
-            let defaults = keyword_forwarding::prepare_method(
-                graph, module_id, &mut method, context, &classes.declarations,
+            let (defaults, forwarded_base) = keyword_forwarding::prepare_method(
+                graph,
+                module_id,
+                &mut method,
+                context,
+                &classes.declarations,
             );
             let mut signature = signature(
                 &method,
@@ -746,6 +753,9 @@ pub(crate) fn lower_with_caller_cache(
                 && signature.returns != Type::Str
             {
                 return Err(module.error(&method, &format!("{} must return str", method.name)));
+            }
+            if let Some(base) = forwarded_base {
+                classes.forwarded_initializers.insert(signature.id, base);
             }
             if keyword_copy {
                 classes.keyword_copies.insert(signature.id);

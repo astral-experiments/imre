@@ -36,3 +36,14 @@ print(Forward().value)
 print(Forward(29).value)
 print(InheritedForward(value=31).value)
 print(InheritedForward().tag)
+
+
+try:
+    Forward(23, value=29)
+except TypeError as error:
+    print(str(error))
+
+try:
+    Forward(other=31)
+except TypeError as error:
+    print(str(error))

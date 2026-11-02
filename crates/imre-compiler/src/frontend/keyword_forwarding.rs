@@ -37,16 +37,19 @@ pub(super) fn prepare_method(
     method: &mut ast::StmtFunctionDef,
     context: records::MethodContext,
     classes: &Classes,
-) -> Defaults {
+) -> (Defaults, Option<DefinitionId>) {
     if method.name.as_str() == "__init__"
         && let Some(origin) = expand_initializer(graph, module, method, context, classes)
     {
-        Defaults {
-            module,
-            forwarded: Some((1, origin)),
-        }
+        (
+            Defaults {
+                module,
+                forwarded: Some((1, origin.module)),
+            },
+            Some(origin),
+        )
     } else {
-        prepare(graph, module, method)
+        (prepare(graph, module, method), None)
     }
 }
 
@@ -56,7 +59,7 @@ fn expand_initializer(
     method: &mut ast::StmtFunctionDef,
     context: records::MethodContext,
     classes: &Classes,
-) -> Option<ModuleId> {
+) -> Option<DefinitionId> {
     let parameters = &method.parameters;
     let positional = parameters.vararg.as_ref()?;
     let keywords = parameters.kwarg.as_ref()?;
@@ -139,6 +142,7 @@ fn expand_initializer(
     // Limit inherited defaults to immutables lowered from their defining module.
     if fixed.iter().any(|p| {
         p.name() == receiver
+            || ruff_python_stdlib::identifiers::is_mangled_private(p.name().as_str())
             || uses.names.contains(p.name().as_str())
             || !p.annotation().is_some_and(scalar_annotation)
             || p.default.as_deref().is_some_and(|d| {
@@ -168,7 +172,7 @@ fn expand_initializer(
     method.parameters.vararg = None;
     method.parameters.kwarg = None;
     method.parameters.args.extend(fixed.iter().cloned());
-    Some(base_module)
+    Some(parent.method_origins[index])
 }
 
 struct Uses<'a> {
