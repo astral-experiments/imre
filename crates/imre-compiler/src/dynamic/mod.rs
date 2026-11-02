@@ -116,6 +116,7 @@ impl Imports {
                     | "platform"
                     | "keyword"
                     | "site"
+                    | "importlib.abc"
                     | "importlib.machinery"
                     | "traceback"
                     | "unittest.case"
@@ -580,6 +581,11 @@ pub(crate) fn compile(
             return Ok(None);
         }
         let mut names = imports.names;
+        if owner == "importlib" {
+            // Filesystem modules can import the loader protocols through either public module.
+            names.push((0, "importlib.abc".to_owned()));
+            names.push((0, "importlib.util".to_owned()));
+        }
         // A late import of native pickle also needs its bundled reader and dependencies.
         if imports.uses_import_builtin {
             late_pprint = true;

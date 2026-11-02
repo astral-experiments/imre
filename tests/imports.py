@@ -592,6 +592,33 @@ ACCEPTED = {
             "after.__module__ is None)\n"
         ),
     },
+    "nested_importlib_abc": {
+        "main.py": "import helper\nhelper.check()\n",
+        "helper.py": (
+            "from importlib import abc\n"
+            "import importlib.abc as protocols\n"
+            "from importlib.abc import FileLoader\n"
+            "from importlib._abc import Loader\n"
+            "from importlib.util import Loader as UtilLoader\n"
+            "def check():\n"
+            "    assert abc is protocols and FileLoader is abc.FileLoader\n"
+            "    assert Loader is UtilLoader is abc.Loader\n"
+            "    assert abc.MetaPathFinder().invalidate_caches() is None\n"
+        ),
+    },
+    "late_importlib_abc": {
+        "main.py": (
+            "import importlib\nimport os\n"
+            "name = 'installed_loader_plugin'\n"
+            "path = os.path.join(os.path.dirname(__file__), name + '.py')\n"
+            "with open(path, 'w') as file:\n"
+            "    file.write('def check():\\n    from importlib import abc, util\\n'\n"
+            "               '    from importlib._abc import Loader\\n'\n"
+            "               '    assert abc.Loader is util.Loader is Loader\\n')\n"
+            "try:\n    importlib.import_module(name).check()\n"
+            "finally:\n    os.remove(path)\n"
+        ),
+    },
     "unregistered_source_loader": {
         "main.py": (
             "from importlib.machinery import SourceFileLoader\n"
