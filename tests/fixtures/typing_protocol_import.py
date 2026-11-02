@@ -16,16 +16,16 @@ class Item:
         return "item"
 
 
+class Number(SupportsInt):
+    def __int__(self):
+        return 42
+
+
 print(isinstance(Item(), HasName), isinstance(object(), HasName))
 try:
     t.runtime_checkable(Item)
 except TypeError as exc:
     print(type(exc).__name__)
-
-
-class Number(SupportsInt):
-    def __int__(self):
-        return 42
 
 
 assert SupportsInt is t.SupportsInt
