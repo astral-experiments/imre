@@ -104,7 +104,7 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-The table covers 25 standard library modules as of November 1, 2026.
+The table covers 25 standard library modules as of November 2, 2026 (UTC).
 A **paired pass** means the same original CPython 3.14.5 test passed at both
 `-O0` and `-O3`. Counts include selected tests and results from development
 branches. Skipped tests count toward the suite size only.
@@ -112,31 +112,31 @@ branches. Skipped tests count toward the suite size only.
 | Module | Paired passes | Upstream tests | How the tests ran |
 | --- | ---: | ---: | --- |
 | `argparse` | 1,103 | 1,893 | Selected cases |
-| `collections` | 378 | 659 | Selected cases and registered doctests |
+| `collections` | 481 | 659 | Selected cases, registered doctests, and an intact 295-case OrderedDict run |
 | `csv` | 122 | 128 | Complete suite on `main`, six skips |
-| `dataclasses` | 219 | 276 | Selected cases |
+| `dataclasses` | 220 | 276 | Selected cases |
 | `datetime` | 1 | 1,098 | Selected cases |
 | `fnmatch` | 24 | 24 | Complete suite on `main` |
-| `functools` | 21 | 329 | Selected cases |
-| `hashlib` | 63 | 82 | Selected cases across builds (41 passed in a separate intact run on `main`) |
+| `functools` | 41 | 329 | Selected cases across two development builds |
+| `hashlib` | 65 | 82 | Selected and intact runs (44 passed together on `main`, 45 on a development branch) |
 | `importlib` | 15 | 1,346 | 15 of 16 selected cases in both import modes |
-| `io` | 107 | 1,038 | 107 of 123 selected cases across four test suites |
+| `io` | 110 | 1,038 | 110 of 123 selected cases across five test suites |
 | `itertools` | 105 | 138 | Selected cases |
-| `json` | 72 | 216 | Selected cases |
-| `logging` | 21 | 272 | Selected cases |
-| `os` | 6 | 579 | Selected cases on `main` |
+| `json` | 109 | 216 | Selected cases across builds (103 passed together) |
+| `logging` | 25 | 272 | Selected cases |
+| `os` | 33 | 579 | 24 of 25 intact genericpath tests and nine selected OS tests |
 | `pathlib` | 220 | 1,369 | All 1,369 cases ran on a development branch |
-| `re` | 120 | 165 | Selected cases across builds (56 passed in a separate intact run) |
-| `shutil` | 31 | 223 | Selected cases |
+| `re` | 120 | 165 | 120 passed in an intact development run, 69 on a smaller set of changes |
+| `shutil` | 34 | 223 | Selected cases |
 | `socket` | 47 | 746 | Intact suite on a development branch |
-| `subprocess` | 16 | 353 | Selected cases |
+| `subprocess` | 33 | 353 | Selected cases |
 | `tempfile` | 5 | 118 | Selected cases |
 | `textwrap` | 68 | 68 | Complete suite on `main` |
-| `threading` | 66 | 228 | All 228 cases ran on a development branch |
+| `threading` | 67 | 228 | All 228 cases ran on a development branch |
 | `typing` | 107 | 712 | Selected tests across development builds |
 | `unittest` | 156 | 1,090 | Package runner on a development branch |
 | `urllib` | 84 | 178 | Selected cases |
-| **Total** | **3,177** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **3,395** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
