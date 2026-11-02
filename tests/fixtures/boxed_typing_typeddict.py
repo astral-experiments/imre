@@ -149,6 +149,20 @@ def check_generic_bases():
     assert Fixed.__required_keys__ == {"value"} and Fixed.__optional_keys__ == {"extra"}
     assert type(Fixed()) is dict
 
+    class Pair[K, V](TypedDict):
+        first: K
+
+    class Reversed[V, K](Pair[K, V]):
+        second: V
+
+    parent_key, _ = Pair.__type_params__
+    value, key = Reversed.__type_params__
+    assert (value.__name__, key.__name__) == ("V", "K")
+    assert Reversed.__parameters__ == (value, key)
+    assert Reversed.__orig_bases__ == (Pair[key, value], Generic[value, key])
+    assert Reversed.__annotations__ == {"first": parent_key, "second": value}
+    assert parent_key is not key
+
 
 def check_deferred_fields():
     from annotationlib import Format

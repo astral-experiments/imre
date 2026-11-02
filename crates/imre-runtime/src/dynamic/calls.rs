@@ -5752,12 +5752,6 @@ impl Context {
                     "cannot inherit from both a TypedDict type and a non-TypedDict base class",
                 ));
             }
-            if parameterized {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "PEP 695 generic TypedDict declarations are unsupported",
-                ));
-            }
             let dict = self.builtin("dict");
             let generic = generic.filter(|&g| bases.iter().any(|&base| self.subclass(base, g)));
             let parents = std::mem::take(&mut bases);
