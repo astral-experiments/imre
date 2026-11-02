@@ -65,7 +65,7 @@ def formatannotation(annotation, base_module=None, *, quote_annotation_strings=T
     return repr(annotation)
 
 
-def _constructor(obj):
+def _constructor(obj, follow_wrapper_chains):
     # Inspect binds a metaclass's __call__ descriptor to the metaclass itself.
     meta = type(obj)
     for base in getattr(meta, "__mro__", ()):
@@ -93,7 +93,12 @@ def _constructor(obj):
             if name not in seen and name in namespace:
                 seen.add(name)
                 method = obj.__new__ if name == "__new__" else namespace[name]
-                if method is default:
+                # A decorator can wrap the object default without defining a constructor.
+                original = method
+                if follow_wrapper_chains:
+                    original = unwrap(method, stop=lambda f: hasattr(f, "__signature__")
+                                      or isbuiltin(f) or ismethoddescriptor(f))
+                if original is default:
                     continue
                 uses_object_defaults = False
                 if method is None:
@@ -168,7 +173,7 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
         return _signature_get_partial(wrapped, obj)
     if not isinstance(obj, types.FunctionType):
         if isinstance(obj, type):
-            method, drop_first = _constructor(obj)
+            method, drop_first = _constructor(obj, follow_wrapper_chains)
             if method is None:
                 return sigcls()
         else:
