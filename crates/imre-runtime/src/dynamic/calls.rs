@@ -2687,7 +2687,7 @@ impl Context {
             Value::Native(ref builtin)
                 if matches!(
                     builtin.as_str(),
-                    "binascii.Error" | "binascii.Incomplete" | "socket.gaierror"
+                    "binascii.Error" | "binascii.Incomplete" | "socket.gaierror" | "socket.herror"
                 ) =>
             {
                 let (module, short) = builtin.split_once('.').unwrap();
@@ -2696,7 +2696,7 @@ impl Context {
                     "__module__" => return Ok(self.text(module.to_owned())),
                     "__base__" | "__bases__" => {
                         let base = self.builtin(match short {
-                            "gaierror" => "OSError",
+                            "gaierror" | "herror" => "OSError",
                             "Error" => "ValueError",
                             _ => "Exception",
                         });

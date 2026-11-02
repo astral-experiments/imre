@@ -5394,6 +5394,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BadZipFile)) => Some(36),
             Some(Binding::Intrinsic(Intrinsic::CsvError)) => Some(67),
             Some(Binding::Intrinsic(Intrinsic::GaiError)) => Some(68),
+            Some(Binding::Intrinsic(Intrinsic::HError)) => Some(72),
             Some(Binding::Intrinsic(Intrinsic::BinasciiError)) => Some(69),
             Some(Binding::Intrinsic(Intrinsic::BinasciiIncomplete)) => Some(70),
             Some(Binding::Intrinsic(Intrinsic::PackageNotFoundError)) => Some(71),

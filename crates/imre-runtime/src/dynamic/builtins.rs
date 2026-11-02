@@ -26,6 +26,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
     match name {
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
         "socket.gaierror" => Some(Kind::GaiError),
+        "socket.herror" => Some(Kind::HError),
         "binascii.Error" => Some(Kind::BinasciiError),
         "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
         _ => imre_ast::exceptions::boxed_builtin_kind(name),
@@ -936,7 +937,10 @@ pub(super) fn call(
         }
         return Ok(NONE);
     }
-    if let Some((owner, method)) = name.split_once('.') {
+    // A module-qualified OSError subclass uses the exception constructor below.
+    if let Some((owner, method)) = name.split_once('.')
+        && exception_subclass(name, "OSError") != Some(true)
+    {
         return match owner {
             "coroutine" | "coroutine_wrapper" => {
                 positional(name, kwargs)?;

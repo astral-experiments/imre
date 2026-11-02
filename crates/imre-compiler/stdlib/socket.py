@@ -9,6 +9,14 @@ for _name in ("NI_DGRAM", "NI_NAMEREQD", "NI_NOFQDN", "NI_NUMERICHOST", "NI_NUME
         globals()[_name] = getattr(_socket, _name)
 del _name
 
+if hasattr(_socket, "gethostname"):
+    gethostname = _socket.gethostname
+if hasattr(_socket, "gethostbyname"):
+    gethostbyname = _socket.gethostbyname
+if hasattr(_socket, "gethostbyaddr"):
+    gethostbyaddr = _socket.gethostbyaddr
+if hasattr(_socket, "herror"):
+    herror = _socket.herror
 if hasattr(_socket, "SocketType"):
     SocketType = _socket.SocketType
 if hasattr(_socket, "IPPROTO_UDP"):

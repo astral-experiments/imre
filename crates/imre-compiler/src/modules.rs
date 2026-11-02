@@ -631,6 +631,7 @@ pub(crate) enum Intrinsic {
     RegisteredImport(&'static str),
     Socket,
     GaiError,
+    HError,
     SocketGetFqdn,
     SocketConstant(&'static str),
     Sha1,
@@ -1492,6 +1493,7 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
             (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
+            (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
             (Self::SocketNative, name) => Intrinsic::ObjectRuntimeExport(match name {
                 "gaierror" => "_socket.gaierror",
                 "getnameinfo" => "_socket.getnameinfo",
@@ -1535,6 +1537,9 @@ impl IntrinsicModule {
                 "SOMAXCONN" => "_socket.SOMAXCONN",
                 "socket" => "_socket.socket",
                 "close" => "_socket.close",
+                "gethostname" => "_socket.gethostname",
+                "gethostbyname" => "_socket.gethostbyname",
+                "gethostbyaddr" => "_socket.gethostbyaddr",
                 "error" => "_socket.error",
                 _ => return None,
             }),
@@ -1585,6 +1590,13 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("socket.SOCK_SEQPACKET")
             }
             (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
+            (Self::Socket, "gethostname") => Intrinsic::ObjectRuntimeExport("socket.gethostname"),
+            (Self::Socket, "gethostbyname") => {
+                Intrinsic::ObjectRuntimeExport("socket.gethostbyname")
+            }
+            (Self::Socket, "gethostbyaddr") => {
+                Intrinsic::ObjectRuntimeExport("socket.gethostbyaddr")
+            }
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
