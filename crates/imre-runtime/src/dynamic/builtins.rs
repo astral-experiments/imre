@@ -369,7 +369,7 @@ pub(super) fn set_operator(method: &str) -> Option<&'static str> {
     })
 }
 
-pub(super) const MEMORYVIEW_METHODS: &[&str] = &["release"];
+pub(super) const MEMORYVIEW_METHODS: &[&str] = &["__enter__", "__exit__", "release"];
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "__repr__",
@@ -1327,9 +1327,18 @@ pub(super) fn call(
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)
             }
-            "memoryview" if method == "release" => {
+            "memoryview" if MEMORYVIEW_METHODS.contains(&method) => {
                 positional(name, kwargs)?;
-                arity(name, args, 1, 1)?;
+                // CPython's __exit__ ignores any positional exception information.
+                let max_args = if method == "__exit__" { usize::MAX } else { 1 };
+                arity(name, args, 1, max_args)?;
+                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
+                    return Err(type_error("expected memoryview"));
+                };
+                if method == "__enter__" {
+                    Context::memoryview_owner(*owner)?;
+                    return Ok(args[0]);
+                }
                 let exports = ctx
                     .buffer_exports
                     .iter()
@@ -1342,9 +1351,6 @@ pub(super) fn call(
                         format!("memoryview has {exports} exported {unit}"),
                     ));
                 }
-                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
-                    return Err(type_error("expected memoryview"));
-                };
                 *owner = None;
                 Ok(NONE)
             }
