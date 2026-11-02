@@ -56,7 +56,8 @@ def current():
     else:
         raise AssertionError("member accepted unrelated receiver")
 
-    from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
+    from annotationlib import Format
+    from typing import NoDefault, ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
     P = ParamSpec("P")
     parameters = (P, P.args, P.kwargs, TypeVarTuple("Ts"))
@@ -82,3 +83,11 @@ def current():
         assert method.__get__(parameter)() is parameter.has_default() is False
     assert isinstance(ParamSpec.__name__, str)
     assert vars(ParamSpec)["__name__"].__get__(P) == "P"
+
+    marker = []
+    for default in (None, (), marker, NoDefault):
+        parameter = TypeVar("T", default=default)
+        assert parameter.__default__ is default
+        assert parameter.has_default() is (default is not NoDefault)
+        assert parameter.evaluate_default(Format.VALUE) is default
+    assert variable.evaluate_default(Format.VALUE) is NoDefault
