@@ -4219,13 +4219,14 @@ impl Context {
     }
 
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
-        if !inplace
-            && op == "|"
-            && (matches!(self.heap.get(a), Value::MappingProxy(_))
-                || matches!(self.heap.get(b), Value::MappingProxy(_))
-                    && !matches!(self.heap.get(a), Value::Weak(wr) if wr.kind != weakref::Kind::Reference))
-        {
-            return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
+        if !inplace && op == "|" {
+            let weak_proxy = |id| matches!(self.heap.get(id), Value::Weak(wr) if wr.kind != weakref::Kind::Reference);
+            if matches!(self.heap.get(a), Value::MappingProxy(_))
+                || (matches!(self.heap.get(b), Value::MappingProxy(_)) && !weak_proxy(a))
+                || (weak_proxy(b) && self.dict_storage(a).is_some())
+            {
+                return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
+            }
         }
         if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
             let left = self.weak_proxy_target(a)?;
@@ -4263,14 +4264,6 @@ impl Context {
         }
         let truth = |v| if v { TRUE } else { FALSE };
         match op {
-            "|" if !inplace
-                && matches!(self.heap.get(a), Value::Dict(_))
-                && matches!(self.heap.get(b), Value::Dict(_)) =>
-            {
-                let merged = builtins::copy_dict(self, a, a)?;
-                builtins::update_dict(self, merged, Some(b), &[])?;
-                return Ok(merged);
-            }
             "|" | "&" | "-"
                 if [a, b].into_iter().any(|id| {
                     matches!(
@@ -4295,6 +4288,7 @@ impl Context {
                         value
                     };
                     matches!(self.heap.get(storage), Value::Set { .. })
+                        || (op == "|" && self.dict_storage(value).is_some())
                 }) =>
             {
                 if matches!(
@@ -4697,9 +4691,14 @@ impl Context {
         {
             return Ok(None);
         }
-        let method = if matches!(name, "__xor__" | "__rxor__")
-            && matches!(self.heap.get(obj), Value::Set { .. })
-        {
+        let method = if matches!(
+            (name, self.heap.get(obj)),
+            ("__xor__" | "__rxor__", Value::Set { .. })
+                | (
+                    "__or__" | "__ror__",
+                    Value::Dict(_) | Value::DefaultDict { .. }
+                )
+        ) {
             Some(self.lookup_attr(obj, name)?)
         } else if name == "__ne__" && !self.has_custom_ne(obj) {
             None
@@ -4797,7 +4796,7 @@ impl Context {
             (Some(left), Some(right))
                 if left != right && self.direct_subclass(right, left) && python_slot(b) =>
             {
-                !python_slot(a) || self.reflected_divmod_overridden(left, right)?
+                !python_slot(a) || self.reflected_slot_overridden(left, right, "__rdivmod__")?
             }
             _ => false,
         };
@@ -4836,14 +4835,22 @@ impl Context {
         ))
     }
 
+    /// Python-defined union slots compare the reflected methods after binding them to each class.
+    fn has_python_union_slot(&self, obj: Id) -> bool {
+        ["__or__", "__ror__"].iter().any(|name| {
+            self.slot(obj, name)
+                .is_some_and(|slot| !matches!(self.heap.get(slot), Value::Native(_)))
+        })
+    }
+
     /// Compare the attributes on the two classes after applying descriptor binding.
-    fn reflected_divmod_overridden(&mut self, left: Id, right: Id) -> Result<bool> {
-        let right = match self.lookup_attr(right, "__rdivmod__") {
+    fn reflected_slot_overridden(&mut self, left: Id, right: Id, name: &str) -> Result<bool> {
+        let right = match self.lookup_attr(right, name) {
             Ok(slot) => slot,
             Err(error) if self.is_attribute_error(&error) => return Ok(false),
             Err(error) => return Err(error),
         };
-        let left = match self.lookup_attr(left, "__rdivmod__") {
+        let left = match self.lookup_attr(left, name) {
             Ok(slot) => slot,
             Err(error) if self.is_attribute_error(&error) => return Ok(true),
             Err(error) => return Err(error),
@@ -5038,9 +5045,13 @@ impl Context {
             && [a, b]
                 .into_iter()
                 .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
-        if set_xor {
+        let dict_union = op == "|" && [a, b].into_iter().any(|id| self.dict_storage(id).is_some());
+        if set_xor || dict_union {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
-                if matches!(self.heap.get(value), Value::Set { .. }) {
+                if matches!(
+                    (op, self.heap.get(value)),
+                    ("^", Value::Set { .. }) | ("|", Value::Dict(_) | Value::DefaultDict { .. })
+                ) {
                     *class = Some(self.exact_type(value)?);
                 }
             }
@@ -5093,13 +5104,17 @@ impl Context {
         }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
             let strict_subclass = ac != bc
-                && if set_xor {
+                && if set_xor || dict_union {
                     self.direct_subclass(bc, ac)
                 } else {
                     self.subclass(bc, ac)
                 };
             strict_subclass
-                && (inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right))
+                && if dict_union && self.has_python_union_slot(a) && self.has_python_union_slot(b) {
+                    self.reflected_slot_overridden(ac, bc, right)?
+                } else {
+                    inplace.is_empty() || self.class_attr(bc, right) != self.class_attr(ac, right)
+                }
         } else {
             false
         };
