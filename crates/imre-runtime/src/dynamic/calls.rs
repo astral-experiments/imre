@@ -4941,12 +4941,31 @@ impl Context {
         }
     }
 
+    /// Reject changes through an immutable instance's object.__class__ descriptor.
+    pub(super) fn immutable_class_assignment(&self, value: Option<Id>) -> Error {
+        let message = match value {
+            None => "can't delete __class__ attribute".to_owned(),
+            Some(value) if !self.is_type_object(value) => {
+                format!(
+                    "__class__ must be set to a class, not '{}' object",
+                    self.type_name(value)
+                )
+            }
+            Some(_) => {
+                "__class__ assignment only supported for mutable types or ModuleType subclasses"
+                    .to_owned()
+            }
+        };
+        Error::new("TypeError", message)
+    }
+
     /// A slot-only instance can retain fields declared by any of its Python bases.
     fn check_instance_field(&mut self, obj: Id, name: &str) -> Result<()> {
         let Value::Instance { class, .. } = *self.heap.get(obj) else {
             return Ok(());
         };
-        if !matches!(self.heap.get(class), Value::Class { .. }) {
+        let exact_tzinfo = self.builtins.get(stdlib::datetime::TZINFO) == Some(&class);
+        if !exact_tzinfo && !matches!(self.heap.get(class), Value::Class { .. }) {
             return Ok(());
         }
         let layout = self.instance_layout(class, name);
@@ -4956,7 +4975,10 @@ impl Context {
         let attribute = self.text(name);
         let quoted = self.repr(attribute);
         let kind = self.type_name(obj);
-        let message = if self.class_attr(class, name).is_some() {
+        // Exact native tzinfo has no stored MRO for object methods.
+        let inherited =
+            exact_tzinfo && (name == "__doc__" || crate::objects::OBJECT_METHODS.contains(&name));
+        let message = if self.class_attr(class, name).is_some() || inherited {
             format!("'{kind}' object attribute {quoted} is read-only")
         } else {
             format!(
@@ -5340,6 +5362,12 @@ impl Context {
             && self.replace_defaultdict_factory(obj, value)
         {
             return Ok(());
+        }
+        if name == "__class__"
+            && let Value::Instance { class, .. } = self.heap.get(obj)
+            && self.builtins.get(stdlib::datetime::TZINFO) == Some(class)
+        {
+            return Err(self.immutable_class_assignment(Some(value)));
         }
         self.check_instance_field(obj, name)?;
         if let Value::Partial { dictionary, .. } = *self.heap.get(obj)
