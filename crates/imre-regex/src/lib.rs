@@ -1279,7 +1279,7 @@ fn escaped(
 }
 
 fn class(input: &mut Input<'_>, output: &mut String, escapes: &mut Escapes) -> Result<(), String> {
-    parse_class(input, output, escapes, &mut None)
+    parse_class(input, output, escapes, None)
 }
 
 /// Inspect one class in its original spelling before the backend expands Python categories.
@@ -1294,16 +1294,22 @@ pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usiz
         },
         bracketed_word: false,
     };
-    let mut from_end = None;
-    let error = parse_class(&mut input, &mut String::new(), &mut escapes, &mut from_end).err()?;
-    Some((error, source.chars().count() - from_end?))
+    let mut from_end = 0;
+    let error = parse_class(
+        &mut input,
+        &mut String::new(),
+        &mut escapes,
+        Some(&mut from_end),
+    )
+    .err()?;
+    (from_end != 0).then(|| (error, source.chars().count() - from_end))
 }
 
 fn parse_class(
     input: &mut Input<'_>,
     output: &mut String,
     escapes: &mut Escapes,
-    from_end: &mut Option<usize>,
+    from_end: Option<&mut usize>,
 ) -> Result<(), String> {
     output.push('[');
     // An immediate second '[' is CPython's possible nested set (FutureWarning).
@@ -1319,6 +1325,10 @@ fn parse_class(
     let mut left_atom = None;
     let mut range_start = None;
     while let Some(c) = input.next() {
+        if from_end.is_some() {
+            // Diagnostics only need the current atom's decoded value.
+            output.clear();
+        }
         if c == ']' && !first {
             output.push(']');
             return Ok(());
@@ -1350,7 +1360,9 @@ fn parse_class(
                     .chain(['-', c])
                     .chain(second)
                     .collect();
-                *from_end = Some(input.clone().count() + range.chars().count());
+                if let Some(offset) = from_end {
+                    *offset = input.clone().count() + range.chars().count();
+                }
                 return Err(format!("bad character range {range}"));
             }
         } else {

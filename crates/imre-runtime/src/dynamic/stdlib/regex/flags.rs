@@ -46,10 +46,18 @@ fn delimited(source: &[u8], mut i: usize, delimiter: u8) -> Option<usize> {
 // Properly ordered ASCII literals need no Python range check. Escapes and non-ASCII
 // endpoints are compared by the class parser after decoding.
 fn suspect_range(source: &[u8]) -> bool {
-    let encoded = source.contains(&b'\\') || !source.is_ascii();
-    source
-        .windows(3)
-        .any(|p| p[1] == b'-' && p[2] != b']' && (encoded || p[0] > p[2]))
+    let long_escape = source
+        .windows(2)
+        .any(|p| p[0] == b'\\' && matches!(p[1], b'0'..=b'7' | b'x' | b'u' | b'U'));
+    source.windows(3).enumerate().any(|(i, p)| {
+        p[1] == b'-'
+            && p[2] != b']'
+            && (p[0] > p[2]
+                || !p.is_ascii()
+                || p[2] == b'\\'
+                || (i > 0 && source[i - 1] == b'\\')
+                || long_escape)
+    })
 }
 
 pub(super) fn parse(
