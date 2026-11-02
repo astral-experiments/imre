@@ -61,3 +61,26 @@ def current():
     assert boundary.search("a中", 1) is None
     assert re.fullmatch(r"\B(?=$)", "").span() == (0, 0)
     assert [m.start() for m in re.finditer(r"\B(?=.)", "a_\u200d!")] == [1, 3]
+
+    # Lookbehind can read and capture before pos. The assertion consumes no input.
+    p = re.compile(r"(?<=\A(?P<prefix>é|𐀀))(b)")
+    m = p.fullmatch("𐀀b!", 1, 2)
+    assert m.groups() == ("𐀀", "b") and m.span() == (1, 2) and m.span("prefix") == (0, 1)
+    assert p.search("xéb", 2) is None
+    assert re.fullmatch(r"ab(?<=b)cd", "abcd").span() == (0, 4)
+    assert re.fullmatch(r"ab(?<!b)cd", "abcd") is None
+    assert re.search(r"(?<!x{2})z", "z").span() == (0, 1)
+    assert re.search(r"(ab)\1(?<=\1)c", "ababc").groups() == ("ab",)
+    assert re.match(r"(?:(a)|(x))b(?<=(?(2)x|b))c", "abc").groups() == ("a", None)
+    assert re.search(r"(?<=(?:a{2}|bb))c", "aac").span() == (2, 3)
+    assert re.search(r"(?<!(?:a{2}|bb))c", "bbc") is None
+    assert re.search(r"(?<!(?:a{2}|bb))c", "abc").span() == (2, 3)
+    assert re.match(r"(a{2}|bb)c(?<=\1c)", "aac").groups() == ("aa",)
+    for invalid in (r"(?<=x*)z", r"(?<!é|ab)z", r"(?<=a{1,2})", r"(a+)(?<=\1)",
+                    r"(?<=(a)\1)", r"(?<=(?(1)x|y))(a)"):
+        try:
+            re.compile(invalid)
+        except re.PatternError:
+            pass
+        else:
+            raise AssertionError(invalid)

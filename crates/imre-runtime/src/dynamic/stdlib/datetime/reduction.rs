@@ -1,6 +1,78 @@
 //! CPython's compact constructor arguments for immutable calendar values.
 use super::*;
 
+/// Implement the two zero-argument descriptors shared by timezone reduction.
+pub(super) fn reduce_zone(
+    ctx: &mut Context,
+    kind: &str,
+    operation: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let Some((&receiver, rest)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            format!("unbound method {kind}.{operation}() needs an argument"),
+        ));
+    };
+    let base = ctx.builtin(&format!("datetime.{kind}"));
+    let actual = ctx.exact_type(receiver).ok();
+    let fixed = match *ctx.heap.get(receiver) {
+        Value::Calendar {
+            tzoffset, tzname, ..
+        } if tzoffset != NONE => Some((tzoffset, tzname)),
+        _ => None,
+    };
+    let valid = if kind == "timezone" {
+        fixed.is_some()
+    } else {
+        actual.is_some_and(|class| ctx.direct_subclass(class, base))
+    };
+    if !valid {
+        let name = actual.map_or_else(|| ctx.type_name(receiver), |class| ctx.class_name(class));
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "descriptor '{operation}' for 'datetime.{kind}' objects doesn't apply to a '{name}' object"
+            ),
+        ));
+    }
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!("{kind}.{operation}() takes no keyword arguments"),
+        ));
+    }
+    if !rest.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "{kind}.{operation}() takes no arguments ({} given)",
+                rest.len()
+            ),
+        ));
+    }
+    if kind == "timezone"
+        && let Some((tzoffset, tzname)) = fixed
+    {
+        let mut result = vec![tzoffset];
+        if tzname != NONE {
+            result.push(tzname);
+        }
+        return Ok(ctx.alloc(Value::Tuple(result)));
+    }
+    let arguments = match ctx.lookup_attr(receiver, "__getinitargs__") {
+        Ok(hook) => ctx.call(hook, Vec::new(), Vec::new())?,
+        Err(err) if ctx.is_attribute_error(&err) => ctx.alloc(Value::Tuple(Vec::new())),
+        Err(err) => return Err(err),
+    };
+    ctx.heap.keep(arguments);
+    let hook = ctx.lookup_attr(receiver, "__getstate__")?;
+    let state = ctx.call(hook, Vec::new(), Vec::new())?;
+    let class = ctx.exact_type(receiver)?;
+    Ok(ctx.alloc(Value::Tuple(vec![class, arguments, state])))
+}
+
 /// Reduce the descriptor's native fields, retaining the actual receiver class.
 pub(super) fn reduce(
     ctx: &mut Context,
@@ -127,7 +199,8 @@ pub(super) fn from_state(ctx: &mut Context, kind: &str, args: &[Id]) -> Result<O
         _ => return Ok(None),
     };
     let tzinfo = args.get(1).copied().unwrap_or(NONE);
-    let zone = zone(ctx, tzinfo).map_err(|_| Error::new("TypeError", "bad tzinfo state arg"))?;
+    let zone =
+        super::zone(ctx, tzinfo).map_err(|_| Error::new("TypeError", "bad tzinfo state arg"))?;
     let mut fields = [0; 8];
     if kind != "time" {
         fields[0] = i32::from(u16::from_be_bytes([bytes[0], bytes[1]]));

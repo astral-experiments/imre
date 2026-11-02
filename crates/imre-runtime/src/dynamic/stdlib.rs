@@ -113,6 +113,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "builtins"
             | "errno"
             | "genericpath"
+            | "io"
             | "itertools"
     ) || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
         || has_lazy_attributes(name)
@@ -142,7 +143,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "types"
             | "_io"
             | "_weakref"
-            | "io"
             | "locale"
             | "_locale"
             | "traceback"
@@ -433,7 +433,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("codecs" | "_codecs", "encode" | "escape_decode") => ctx.builtin(&format!("codecs.{name}")),
-        ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
+        ("_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan") => {
             ctx.builtin(&format!("math.{name}"))
         }
@@ -471,6 +471,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_imre_importlib",
             "find_spec"
             | "import_module"
+            | "namespace_locations"
             | "get_code"
             | "loader_fields"
             | "path_stats"
@@ -671,6 +672,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
         ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", "statvfs_result") => ctx.builtin(os::stat::VFS_CLASS),
+        #[cfg(target_os = "linux")]
+        ("os" | "posix", name @ ("statvfs" | "fstatvfs")) => ctx.builtin(&format!("posix.{name}")),
         ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
         ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
             ctx.builtin(&format!("posix.{name}"))
@@ -778,7 +783,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
             | "finditer",
         )
-        | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator" | "Sequence")
+        | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator")
         | ("enum", "_simple_enum")
         | (
             "functools",
@@ -1515,11 +1520,15 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("_imre_metadata.") {
         return metadata::call(ctx, operation, args, kwargs);
     }
-    if name == "os.stat_result.__reduce__" {
-        return os::stat::reduce(ctx, args, kwargs);
+    if let Some(layout) = name.strip_suffix(".__reduce__").and_then(os::stat::layout) {
+        return os::stat::reduce(ctx, layout, args, kwargs);
     }
-    if name == os::stat::CLASS {
-        return os::stat::construct(ctx, args, kwargs);
+    if let Some(layout) = os::stat::layout(name) {
+        return os::stat::construct(ctx, layout, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("statvfs" | "fstatvfs")) = name.strip_prefix("posix.") {
+        return os::statvfs::call(ctx, op, args, kwargs);
     }
     if let Some(op @ ("stat" | "lstat" | "fstat")) = name.strip_prefix("posix.") {
         return os::stat::call(ctx, op, args, kwargs);
@@ -1750,6 +1759,10 @@ pub(super) fn call(
                 let fullname = ctx.str_value(*fullname)?.to_owned();
                 let original = ctx.str_value(*original)?.to_owned();
                 return ctx.find_spec(&fullname, &original, false);
+            }
+            ("namespace_locations", [name, path], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx.namespace_locations(&name, *path);
             }
             ("get_code", [name, path], []) => return ctx.registered_code(*name, *path),
             ("path_stats", [path], []) => return os::source_path_stats(ctx, *path),

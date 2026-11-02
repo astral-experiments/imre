@@ -72,7 +72,10 @@ class zipimporter(_ZipResourceLoader):
             return None
         origin, loader = resolved
         if loader is None:
-            raise NotImplementedError('ZIP namespace packages are unsupported')
+            from _frozen_importlib import ModuleSpec
+            spec = ModuleSpec(fullname, None, is_package=True)
+            spec.submodule_search_locations.append(origin)
+            return spec
         locations = [origin.rpartition('/')[0]] if origin.endswith('/__init__.py') else None
         return _file_spec(fullname, origin, locations, loader)
 

@@ -41,6 +41,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             "_imre_ordered_dict.py",
             include_str!("../../stdlib/_imre_ordered_dict.py"),
         )),
+        "runpy" => Some(("runpy.py", include_str!("../../stdlib/runpy.py"))),
         "traceback" => Some((
             "traceback.py",
             include_str!("../../stdlib/traceback_stack.py"),
@@ -88,8 +89,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         section("def ismodule(object):", "def ispackage(object):"),
                         section("def isfunction(object):", "def _has_code_flag("),
                         section("def istraceback(object):", "def isbuiltin(object):"),
-                        section("def getfile(object):", "def getmodulename(path):"),
-                        section("def getsourcefile(object):", "class ClassFoundException("),
+                        section("def getfile(object):", "class ClassFoundException("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),
                         &classes,

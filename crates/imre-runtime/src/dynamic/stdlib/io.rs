@@ -11,9 +11,13 @@ pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,
 };
 mod bytes_io;
+mod bytes_writer;
 mod docstrings;
 mod file_io;
-pub(super) use file_io::check_text_options;
+pub(super) use file_io::{
+    check_binary_options, check_open_string, check_text_options, mode as fileio_mode,
+    validate_open_mode,
+};
 pub(in crate::dynamic) use file_io::{open, popen_pipe};
 mod text_wrapper;
 pub(super) use text_wrapper::text_options;
@@ -22,6 +26,7 @@ pub(super) use text_wrapper::text_options;
 pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
     BufferedFile(Id),
+    BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
     Bytes(std::rc::Rc<bytes_io::BytesIo>),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
@@ -202,6 +207,8 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         .collect();
     let exports = ctx.alloc(Value::List(names));
     ctx.bind(module, "__all__", exports);
+    let open_code = ctx.builtin("io.open_code");
+    ctx.bind(module, "open_code", open_code);
     for (name, origin) in [("SEEK_SET", 0), ("SEEK_CUR", 1), ("SEEK_END", 2)] {
         let value = ctx.int(origin);
         ctx.bind(module, name, value);

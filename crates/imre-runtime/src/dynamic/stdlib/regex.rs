@@ -131,6 +131,22 @@ impl Pattern {
             - 1
     }
 
+    /// Map public capture names to their one-based indices in pattern order.
+    pub(in crate::dynamic) fn group_index(&self, ctx: &mut Context) -> Result<Id> {
+        let info = self.regex.group_info();
+        let mut fields = Vec::new();
+        for index in 1..=self.group_count() {
+            if let Some(name) = info.to_name(PatternID::ZERO, index) {
+                fields.push((ctx.text(name.to_owned()), ctx.int(index as i64)));
+            }
+        }
+        if fields.is_empty() {
+            return Ok(ctx.dict(fields));
+        }
+        let mapping = ctx.dict(fields);
+        ctx.mapping_proxy(mapping)
+    }
+
     fn match_error(&self, ctx: &mut Context, message: String) -> Error {
         if matches!(self.regex, Matcher::Lookahead(_)) {
             Error::new("RuntimeError", message)
@@ -563,19 +579,15 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     // the literal guard without extending Python's word-category membership.
     let literal_guards = !bytes && (flags & IGNORECASE == 0 || ascii);
     let translate = |spelling: &str| {
-        let mut translated = imre_regex::translate_pattern(
+        imre_regex::translate_pattern_with_line_mode(
             spelling,
             flags & VERBOSE != 0,
             alphabet(bytes, ascii, flags),
             flags & DOTALL != 0,
             literal_guards,
-        )?
-        .source;
-        if flags & MULTILINE != 0 && translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
-            translated.truncate(translated.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
-            translated.push('$');
-        }
-        Ok(translated)
+            flags & MULTILINE != 0,
+        )
+        .map(|parsed| parsed.source)
     };
     let build = |source: String| {
         let matcher = build_regex(&source, bytes, flags, &[])?;

@@ -151,8 +151,11 @@ pub(super) fn initialize(
             "buffer size must be strictly positive",
         ));
     }
+    if !reading && super::bytes_writer::is_bytes_io(ctx, raw) {
+        return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize);
+    }
     let handle = native_raw(ctx, raw, methods, owner)?;
-    if backing(ctx, receiver).is_some() {
+    if backing(ctx, receiver).is_some() || super::bytes_writer::state(ctx, receiver).is_some() {
         return Err(Error::new(
             "NotImplementedError",
             format!("{owner} reinitialization is unsupported"),
@@ -504,7 +507,7 @@ impl BufferedFd {
         self.handle.live_fd().is_none()
     }
 
-    fn close(&self, ctx: Option<&mut Context>, flush: bool) -> Result<()> {
+    fn close(&self, mut ctx: Option<&mut Context>, flush: bool) -> Result<()> {
         let pending = match self.buffer.borrow_mut().take() {
             Some(Buffer::Pipe(pipe)) => pipe.close().map_err(Into::into),
             Some(Buffer::Random(mut file)) if flush && !self.closed() => {
@@ -512,7 +515,7 @@ impl BufferedFd {
             }
             Some(Buffer::Writer(mut writer)) if flush && !self.closed() => {
                 writer.flush().map_err(|error| {
-                    if let Some(ctx) = ctx {
+                    if let Some(ctx) = ctx.as_deref_mut() {
                         buffer_error(ctx, error)
                     } else {
                         os_error(error)
@@ -521,7 +524,16 @@ impl BufferedFd {
             }
             _ => Ok(()),
         };
-        self.handle.close().and(pending)
+        match (pending, self.handle.close(), ctx) {
+            (Err(mut flush), Err(mut close), Some(ctx)) => {
+                if flush.context == NONE {
+                    flush.context = ctx.heap.active_exception();
+                }
+                close.context = ctx.raised_instance(flush);
+                Err(close)
+            }
+            (pending, closed, _) => closed.and(pending),
+        }
     }
 
     /// A BufferedWriter subclass has already had its one opportunity to flush.

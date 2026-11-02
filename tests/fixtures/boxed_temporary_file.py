@@ -76,3 +76,20 @@ def current():
         translated.write("left\r\nright\r")
         translated.seek(0)
         print(list(translated))
+
+    class Mode(str):
+        pass
+
+    with TemporaryFile(Mode("tw"), encoding="latin-1", newline="\r\n") as writer:
+        raw = writer.buffer.raw
+        print(writer.mode, type(writer.mode) is str, raw.mode, writer.fileno() == raw.name, writer.readable())
+        writer.write("é\n")
+        writer.flush()
+        os.lseek(raw.name, 0, os.SEEK_SET)
+        print(os.read(raw.name, 8))
+    print(raw.closed)
+    for mode, encoding in (("wr", None), ("w", "bad-encoding")):
+        try:
+            TemporaryFile(mode, encoding=encoding)
+        except (ValueError, LookupError) as error:
+            print(type(error).__name__, str(error))

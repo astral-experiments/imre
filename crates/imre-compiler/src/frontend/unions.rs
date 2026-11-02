@@ -275,6 +275,14 @@ impl Checker<'_> {
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
         use InstanceType::{Deque, Exact, List, Tuple};
+        let classinfo = expression
+            .as_subscript_expr()
+            .map_or(expression, |item| item.value.as_ref());
+        if self.collection_binding(classinfo)
+            == Some(Binding::Intrinsic(Intrinsic::TYPING_SEQUENCE))
+        {
+            return Err(self.object_runtime_export("typing.Sequence", expression));
+        }
         if self.collection_binding(expression) == Some(Binding::Intrinsic(Intrinsic::Number)) {
             // int includes bool and IntEnum. The typed value representation has no complex.
             return Ok(vec![Exact(Type::Int), Exact(Type::Float)]);

@@ -208,10 +208,7 @@ impl Context {
             "lookup" | "lookup_class_local" => {
                 let name = copy_label(self.str_value(b)?)?;
                 if op == "lookup_class_local" {
-                    if let Some(value) = self.scope_name(a, &name) {
-                        return Ok(value);
-                    }
-                    return self.lookup(self.root_scope(a), &name);
+                    return self.lookup_class_local(a, &name);
                 }
                 self.lookup(a, &name)
             }
@@ -405,9 +402,12 @@ impl Context {
                 Ok(scope)
             }
             "class" | "parameterized_class" => {
-                let metaclass = self.dict_named_item(a, "metaclass");
-                let total = self.dict_named_item(a, "total");
-                self.class(b, c, metaclass, total, op == "parameterized_class")
+                let keywords = if a == NONE {
+                    Vec::new()
+                } else {
+                    self.keyword_args(a)?
+                };
+                self.class(b, c, keywords, op == "parameterized_class")
             }
             "coroutine_function" => {
                 let Value::Function { code, .. } = *self.heap.get(a) else {
@@ -420,7 +420,7 @@ impl Context {
                 Ok(a)
             }
             "annotate" => {
-                if let Some(mapping) = self.scope_name(a, "__annotations__") {
+                if let Some(mapping) = self.lookup_scope_name(a, "__annotations__")? {
                     self.put_item(mapping, b, c)?;
                 }
                 Ok(NONE)
@@ -623,6 +623,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     argv: *const *const c_char,
     config: *const c_char,
 ) -> *mut Context {
+    crate::initialize_io();
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
@@ -763,7 +764,12 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // The module registry now owns sys. Its startup temporaries must not
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
-        ctx.module("__main__")
+        let main = ctx.module("__main__")?;
+        if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
+            ctx.run_module_as_main(name)
+        } else {
+            Ok(main)
+        }
     });
     let status = match result {
         Ok(_) => 0,
@@ -1436,6 +1442,7 @@ impl Context {
         let data = self.scope_data(scope);
         data.exec_locals.is_some()
             || data.exec_globals.is_some()
+            || data.class_body_mapping().is_some()
             || self
                 .scope_name(scope, name)
                 .is_some_and(|old| old != value && self.heap.could_own_finalizer(old, false))

@@ -378,13 +378,8 @@ impl Function<'_, '_> {
                     });
                     let bases = self.op("list", &[]);
                     let kwargs = if let Some(args) = v.arguments.as_deref() {
-                        if args
-                            .keywords
-                            .iter()
-                            .any(|kw| !matches!(kw.arg.as_deref(), Some("total" | "metaclass")))
-                            || args.keywords.len() > 1
-                        {
-                            self.unsupported("class keyword arguments");
+                        if args.keywords.iter().any(|kw| kw.arg.is_none()) {
+                            self.unsupported("expanded class keyword arguments");
                         }
                         self.arguments(&bases, args, "0")
                     } else {

@@ -3,7 +3,7 @@
 import builtins as _builtins
 import functools
 import typing as _typing
-from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
+from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from collections import defaultdict as _defaultdict
 from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
@@ -1307,6 +1307,7 @@ Type.__doc__ = \
     At this point the type checker knows that joe has type BasicUser.
     """
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
+Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
@@ -1509,6 +1510,10 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, forward
         return value
     args = getattr(value, '__args__', ())
     resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, forwardrefs) for a in args)
+    if isinstance(value, _AnnotatedAlias):
+        if not include_extras:
+            return resolved[0]
+        return value if resolved == args else value.copy_with(resolved)
     if not include_extras:
         for name in ('Required', 'NotRequired', 'ReadOnly'):
             if origin is getattr(_typing, name, None):

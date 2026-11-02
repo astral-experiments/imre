@@ -177,18 +177,30 @@ pub fn translate_pattern(
     dotall: bool,
     literal_guards: bool,
 ) -> Result<FixedPattern, String> {
+    translate_pattern_with_line_mode(pattern, verbose, alphabet, dotall, literal_guards, false)
+}
+
+/// Translate a boxed pattern with the matcher's line mode for zero-width anchors.
+pub fn translate_pattern_with_line_mode(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    literal_guards: bool,
+    multiline: bool,
+) -> Result<FixedPattern, String> {
     let (output, groups) = tokenize(
         pattern,
         verbose,
         alphabet,
         dotall,
         literal_guards,
-        Grammar::Standard,
+        Grammar::Standard { multiline },
     )?;
     analyze(output, groups)
 }
 
-/// Normalize a text pattern requiring a lookahead without accepting backend-specific syntax.
+/// Normalize a text pattern requiring a lookaround without accepting backend-specific syntax.
 pub fn lookahead_source(
     pattern: &str,
     verbose: bool,
@@ -205,7 +217,7 @@ pub fn lookahead_source(
     )
 }
 
-/// Normalize text for the boxed matcher when a lookahead, Python word boundary,
+/// Normalize text for the boxed matcher when a lookaround, Python word boundary,
 /// or scoped case/alphabet rule needs its extended group and capture support.
 pub fn lookahead_or_scoped_source(
     pattern: &str,
@@ -225,7 +237,7 @@ pub fn lookahead_or_scoped_source(
 
 #[derive(Clone, Copy, PartialEq)]
 enum Grammar {
-    Standard,
+    Standard { multiline: bool },
     Lookahead,
     LookaheadOrScoped,
 }
@@ -234,6 +246,42 @@ enum Scope {
     Plain,
     Capture(usize),
     Conditional { has_else: bool },
+    Lookahead,
+    Lookbehind { first_local_group: usize },
+}
+
+// Widths count Python characters rather than UTF-8 bytes. Saturation also
+// covers widths beyond Python's maximum representable lookbehind distance.
+const VARIABLE_WIDTH: u64 = u64::MAX;
+
+#[derive(Default)]
+struct BranchWidth {
+    prefix: u64,
+    atom: u64,
+    previous: Option<u64>,
+}
+
+impl BranchWidth {
+    fn push(&mut self, atom: u64) {
+        self.prefix = self.prefix.saturating_add(self.atom);
+        self.atom = atom;
+    }
+
+    fn width(&self) -> u64 {
+        let width = self.prefix.saturating_add(self.atom);
+        if self.previous.is_some_and(|other| other != width) {
+            VARIABLE_WIDTH
+        } else {
+            width
+        }
+    }
+
+    fn finish_branch(&mut self) {
+        *self = Self {
+            previous: Some(self.width()),
+            ..Self::default()
+        };
+    }
 }
 
 struct GroupState {
@@ -242,6 +290,7 @@ struct GroupState {
     dotall: bool,
     verbose: bool,
     atomic_assertion: bool,
+    width: BranchWidth,
     scope: Scope,
 }
 
@@ -250,9 +299,11 @@ struct GroupState {
 /// as Python's invalid backreferences to an open group.
 fn check_reference(id: usize, open: &[GroupState]) -> Result<(), String> {
     if id == 0
-        || open
-            .iter()
-            .any(|g| matches!(g.scope, Scope::Capture(n) if n == id))
+        || open.iter().any(|g| match g.scope {
+            Scope::Capture(n) => n == id,
+            Scope::Lookbehind { first_local_group } => id >= first_local_group,
+            _ => false,
+        })
     {
         return Err("invalid or open regex group reference".into());
     }
@@ -287,14 +338,18 @@ fn tokenize(
     literal_guards: bool,
     grammar: Grammar,
 ) -> Result<(String, Vec<Option<String>>), String> {
-    let lookahead = grammar != Grammar::Standard;
+    let lookahead = !matches!(grammar, Grammar::Standard { .. });
     let mut escapes = Escapes {
         alphabet,
         bracketed_word: false,
     };
     let mut modes = vec![(0, alphabet)];
     let mut scoped_mode = false;
-    let mut has_lookahead = false;
+    // Earlier captures can provide the width of a later lookbehind backreference.
+    let needs_lookbehind_width = lookahead && pattern.contains("(?<");
+    let mut has_lookaround = false;
+    let mut width = BranchWidth::default();
+    let mut group_widths = Vec::new(); // Indexed by capture number minus one.
     let mut has_boundary = false;
     let mut highest_condition = 0;
     let mut literal_brace = false;
@@ -305,7 +360,7 @@ fn tokenize(
     let mut may_backtrack = false;
     let mut outer_prefixes = Vec::new();
     while let Some(c) = next_token(&mut input, verbose)? {
-        match c {
+        let atom_width = match c {
             '(' => {
                 let extension = input.next_if_eq(&'?').is_some();
                 if literal_guards
@@ -316,6 +371,7 @@ fn tokenize(
                     guarded_class(&mut input, &mut output, verbose, &mut escapes)?;
                     // A following quantifier would repeat the consumed class alone.
                     can_repeat = false;
+                    width.push(1);
                     continue;
                 }
                 // A standalone (?x) may follow only earlier global flags and ignored layout.
@@ -335,13 +391,18 @@ fn tokenize(
                     check_reference(id, &outer_prefixes)?;
                     write!(output, r"\k<{id}>").unwrap();
                     can_repeat = true;
+                    width.push(group_widths[id - 1]);
                     continue;
                 }
+                let behind = lookahead && extension && input.next_if_eq(&'<').is_some();
                 let assertion = if lookahead && extension {
                     input.next_if(|c| matches!(c, '=' | '!'))
                 } else {
                     None
                 };
+                if behind && assertion.is_none() {
+                    return Err("expected Python lookbehind assertion".into());
+                }
                 let atomic_assertion = assertion == Some('=');
                 let mut group = GroupState {
                     alphabet: escapes.alphabet,
@@ -350,13 +411,22 @@ fn tokenize(
                     verbose,
                     atomic_assertion,
                     scope: Scope::Plain,
+                    width: std::mem::take(&mut width),
                 };
                 may_backtrack = false;
                 output.push('(');
                 if extension {
                     if let Some(assertion) = assertion {
-                        has_lookahead = true;
+                        has_lookaround = true;
                         output.push('?');
+                        group.scope = if behind {
+                            output.push('<');
+                            Scope::Lookbehind {
+                                first_local_group: groups.len(),
+                            }
+                        } else {
+                            Scope::Lookahead
+                        };
                         output.push(assertion);
                         if atomic_assertion {
                             // CPython commits to the first successful positive assertion.
@@ -407,6 +477,8 @@ fn tokenize(
                     } else if input.next_if_eq(&'>').is_some() {
                         atomic_delimited(&mut input, &mut output, dotall, verbose, &mut escapes)?;
                         may_backtrack = group.backtrack;
+                        width = group.width;
+                        width.push(VARIABLE_WIDTH);
                         can_repeat = true;
                         continue;
                     } else if input.next_if_eq(&'P').is_some() && input.next_if_eq(&'<').is_some() {
@@ -432,15 +504,18 @@ fn tokenize(
                         }
                         group.scope = Scope::Capture(groups.len());
                         groups.push(Some(name));
+                        group_widths.push(VARIABLE_WIDTH);
                     } else {
                         return Err("unsupported regex group, assertion, or inline flag".into());
                     }
                 } else {
                     group.scope = Scope::Capture(groups.len());
                     groups.push(None);
+                    group_widths.push(VARIABLE_WIDTH);
                 }
                 outer_prefixes.push(group);
                 can_repeat = false;
+                continue;
             }
             '|' => {
                 // regex-syntax factors identical prefixes. Moving a repetition
@@ -457,12 +532,45 @@ fn tokenize(
                         may_backtrack = false; // A conditional cannot take an extra unreachable branch.
                     }
                 }
-                output.push_str(if may_backtrack { r"|[^\s\S]|" } else { "|" });
+                output.push('|');
+                if may_backtrack {
+                    // A synthetic branch must preserve the backend's fixed-width
+                    // analysis inside lookbehinds and the captures they reference.
+                    let size = if needs_lookbehind_width {
+                        width.width()
+                    } else {
+                        1
+                    };
+                    if size == 0 {
+                        output.push_str("(?!)");
+                    } else {
+                        output.push_str(r"[^\s\S]");
+                        if (2..u64::from(u32::MAX)).contains(&size) {
+                            write!(output, "{{{size}}}").unwrap();
+                        }
+                    }
+                    output.push('|');
+                }
                 may_backtrack = false;
                 can_repeat = false;
+                width.finish_branch();
+                continue;
             }
             ')' => {
+                let mut body_width = width.width();
                 if let Some(group) = outer_prefixes.pop() {
+                    match group.scope {
+                        Scope::Lookbehind { .. } if body_width > u64::from(u32::MAX) => {
+                            return Err("look-behind requires fixed-width pattern".into());
+                        }
+                        Scope::Lookbehind { .. } | Scope::Lookahead => body_width = 0,
+                        Scope::Capture(id) => group_widths[id - 1] = body_width,
+                        Scope::Conditional { has_else: false } if body_width != 0 => {
+                            body_width = VARIABLE_WIDTH
+                        }
+                        _ => {}
+                    }
+                    width = group.width;
                     may_backtrack |= group.backtrack;
                     dotall = group.dotall;
                     verbose = group.verbose;
@@ -476,15 +584,18 @@ fn tokenize(
                 }
                 output.push(c);
                 can_repeat = true;
+                body_width
             }
             '.' | '^' => {
                 output.push(c);
                 can_repeat = c == '.';
+                u64::from(can_repeat)
             }
-            '$' if lookahead => {
+            '$' if grammar != (Grammar::Standard { multiline: false }) => {
                 // Literals are escaped, so the runtime can lower this anchor using its line mode.
                 output.push('$');
                 can_repeat = false;
+                0
             }
             '$' if input.peek().is_none()
                 || verbose && next_token(&mut input.clone(), true)?.is_none() =>
@@ -493,11 +604,13 @@ fn tokenize(
                 // from group zero. Dots are not valid in Python group names.
                 output.push_str(FINAL_NEWLINE_ANCHOR);
                 can_repeat = false;
+                0
             }
             '$' => return Err("the $ anchor is supported only at the end of a pattern".into()),
             '[' => {
                 class(&mut input, &mut output, &mut escapes)?;
                 can_repeat = true;
+                1
             }
             '\\' if lookahead && matches!(input.peek(), Some('b' | 'B')) => {
                 // Compare the Python word status on either side without consuming a scalar.
@@ -521,6 +634,7 @@ fn tokenize(
                 )
                 .unwrap();
                 can_repeat = false;
+                0
             }
             '\\' if lookahead && matches!(input.peek(), Some('1'..='9')) => {
                 let first = input.next().unwrap();
@@ -539,15 +653,18 @@ fn tokenize(
                 check_reference(id, &outer_prefixes)?;
                 write!(output, r"\k<{id}>").unwrap();
                 can_repeat = true;
+                group_widths[id - 1]
             }
             '\\' => {
                 let kind = escaped(&mut input, &mut output, false, &mut escapes)?;
                 can_repeat = kind != Escape::Anchor;
+                u64::from(can_repeat)
             }
             '{' if !starts_counted_repeat(input.clone()) => {
                 literal_brace = true;
                 literal(&mut output, c);
                 can_repeat = true;
+                1
             }
             '*' | '+' | '?' | '{' => {
                 may_backtrack = true;
@@ -555,21 +672,28 @@ fn tokenize(
                     return Err("regex quantifier requires a preceding atom".into());
                 }
                 output.push(c);
+                let mut repetitions = None;
                 if c == '{' {
-                    if input.peek() == Some(&',') {
+                    let lo = if input.peek() == Some(&',') {
                         output.push('0');
-                    } else if !count(&mut input, &mut output)? {
-                        return Err("expected a compact regex repetition count".into());
-                    }
+                        0
+                    } else {
+                        count(&mut input, &mut output)?
+                            .ok_or("expected a compact regex repetition count")?
+                    };
+                    repetitions = Some(lo);
                     if input.next_if_eq(&',').is_some() {
                         output.push(',');
-                        count(&mut input, &mut output)?;
+                        repetitions = count(&mut input, &mut output)?.filter(|&hi| hi == lo);
                     }
                     if input.next_if_eq(&'}').is_none() {
                         return Err("expected a compact regex repetition count".into());
                     }
                     output.push('}');
                 }
+                width.atom = width
+                    .atom
+                    .saturating_mul(repetitions.map_or(VARIABLE_WIDTH, u64::from));
                 if input.next_if_eq(&'?').is_some() {
                     output.push('?');
                 }
@@ -577,12 +701,15 @@ fn tokenize(
                 // or possessive quantifiers in this subset. Verbose stripping must
                 // not accidentally turn a separated '?' into a modifier.
                 can_repeat = false;
+                continue;
             }
             c => {
                 literal(&mut output, c);
                 can_repeat = true;
+                1
             }
-        }
+        };
+        width.push(atom_width);
     }
     if (literal_brace || lookahead || scoped_mode) && escapes.bracketed_word {
         return Err(
@@ -593,7 +720,7 @@ fn tokenize(
         return Err("invalid conditional group reference".into());
     }
     if lookahead
-        && !has_lookahead
+        && !has_lookaround
         && !(grammar == Grammar::LookaheadOrScoped && (scoped_mode || has_boundary))
     {
         return Err("expected a Python lookahead assertion".into());
@@ -771,17 +898,19 @@ pub fn starts_counted_repeat(mut input: Input<'_>) -> bool {
     }
 }
 
-fn count(input: &mut Input<'_>, output: &mut String) -> Result<bool, String> {
+fn count(input: &mut Input<'_>, output: &mut String) -> Result<Option<u32>, String> {
     let digits: String = std::iter::from_fn(|| input.next_if(char::is_ascii_digit)).collect();
     if digits.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     // Python reserves UINT32_MAX to mean unbounded repetition.
-    if digits.parse::<u32>().ok().is_none_or(|n| n == u32::MAX) {
-        return Err("regex repetition count is too large".into());
-    }
+    let value = digits
+        .parse::<u32>()
+        .ok()
+        .filter(|&n| n != u32::MAX)
+        .ok_or("regex repetition count is too large")?;
     output.push_str(&digits);
-    Ok(true)
+    Ok(Some(value))
 }
 
 /// Skip ignored VERBOSE layout outside character classes.

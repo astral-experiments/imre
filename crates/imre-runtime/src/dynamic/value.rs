@@ -690,6 +690,11 @@ pub(super) struct Scope {
 }
 
 impl Scope {
+    /// The class body's live dictionary, once exposed through Python code.
+    pub(super) fn class_body_mapping(&self) -> Option<Id> {
+        self.class_body.as_ref().and(self.namespace)
+    }
+
     /// type.__qualname__ lives outside the finished class dictionary.
     pub(super) fn binding_namespace(&self, name: &str) -> Option<Id> {
         self.namespace.filter(|_| {
@@ -739,7 +744,8 @@ pub(super) enum Value {
     Calendar {
         value: crate::objects::Calendar,
         tzinfo: Id,
-        // Preserve the fixed timezone name and its Python str subclass methods.
+        // Preserve a fixed zone's Python constructor objects, including subclasses.
+        tzoffset: Id,
         tzname: Id,
     },
     Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
@@ -943,7 +949,10 @@ pub(super) enum Value {
         receiver: Id,
         explicit: bool,
     },
-    ClassMethod(Id),
+    ClassMethod {
+        callable: Id,
+        dictionary: Id,
+    },
     StaticMethod {
         callable: Id,
         dictionary: Id,
@@ -1183,7 +1192,7 @@ impl Value {
                 (DictViewKind::Items, true) => "odict_items",
                 (DictViewKind::Values, true) => "odict_values",
             },
-            Self::ClassMethod(_) => "classmethod",
+            Self::ClassMethod { .. } => "classmethod",
             Self::ThreadLocal(_) => super::thread_local::CLASS,
             Self::ThreadHandle(_) => "_thread._ThreadHandle",
             Self::HandlerLock(_) => super::thread_rlock::CLASS,
@@ -1273,7 +1282,6 @@ impl Value {
             }
             Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
-            Self::ClassMethod(callable) => visit.push(*callable),
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
@@ -1344,7 +1352,12 @@ impl Value {
             Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
-            Self::Calendar { tzinfo, tzname, .. } => visit.extend([*tzinfo, *tzname]),
+            Self::Calendar {
+                tzinfo,
+                tzoffset,
+                tzname,
+                ..
+            } => visit.extend([*tzinfo, *tzoffset, *tzname]),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
                 for (key, value) in entries {
@@ -1501,6 +1514,7 @@ impl Value {
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::BufferedFile(file)) => visit.push(*file),
+                    Some(super::stdlib::io::MemoryStream::BufferedBytes(writer)) => visit.extend(writer.raw.get()),
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
                     }
@@ -1523,7 +1537,11 @@ impl Value {
             Self::Method {
                 callable, receiver, ..
             } => visit.extend([*callable, *receiver]),
-            Self::StaticMethod {
+            Self::ClassMethod {
+                callable,
+                dictionary,
+            }
+            | Self::StaticMethod {
                 callable,
                 dictionary,
             } => visit.extend([*callable, *dictionary]),

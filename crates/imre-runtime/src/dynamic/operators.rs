@@ -270,7 +270,7 @@ impl Context {
             _ => None,
         }
     }
-    fn sequence_at(&self, id: Id, index: usize) -> Option<(usize, Option<Id>)> {
+    pub(super) fn sequence_at(&self, id: Id, index: usize) -> Option<(usize, Option<Id>)> {
         match self.tuple_backing(id) {
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => {
                 Some((v.len(), v.get(index).copied()))

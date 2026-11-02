@@ -138,6 +138,13 @@ impl Calendar {
         make_zone(offset.0.clone(), name.map(text::owned_string)).map(Self)
     }
 
+    pub(crate) fn zone_offset(&self) -> Option<Self> {
+        with(&self.0, |value| match value {
+            Value::Zone { offset, .. } => Some(Self(offset.clone())),
+            _ => None,
+        })
+    }
+
     /// Format the stored fixed UTC offset for %z or %:z.
     pub(crate) fn strftime_offset(&self, colon: bool) -> String {
         let text = offset_text(offset(&self.0));

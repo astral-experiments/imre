@@ -14,11 +14,6 @@ from _imre_importlib import (
 )
 from os import fspath as _fspath, sep
 
-SOURCE_SUFFIXES = ['.py']
-if sys.platform == 'win32':
-    SOURCE_SUFFIXES.append('.pyw')
-BYTECODE_SUFFIXES = ['.pyc']
-
 
 # Boxed source directories are searched directly; only ZIP path finders are cached.
 _zip_path_importers = {}
@@ -32,6 +27,7 @@ def _invalidate_default_path_caches():
             del _zip_path_importers[path]
         elif hasattr(finder, "invalidate_caches"):
             finder.invalidate_caches()
+    _NamespacePath._epoch += 1
 
 
 def _bless_my_loader(module_globals):

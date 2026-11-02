@@ -212,7 +212,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
     (matches!(
         owner,
-        "object" | "dict" | "float" | "int" | "str" | super::thread_local::CLASS
+        "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
     ) || is_exception(owner))
     .then_some(owner)
 }
@@ -264,6 +264,24 @@ pub(super) fn is_static_gc_type(name: &str) -> bool {
 
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
+    is_final_iterator_type(name)
+        || matches!(
+            name,
+            "reversed"
+                | "enumerate"
+                | "map"
+                | "filter"
+                | "zip"
+                | "itertools.count"
+                | "itertools.repeat"
+                | "_io.BufferedRandom"
+                | "_io.BufferedReader"
+                | "_io.BufferedWriter"
+        )
+}
+
+/// Iterator implementations that CPython does not expose as subclassable types.
+pub(super) fn is_final_iterator_type(name: &str) -> bool {
     if DictIterator::class(name).is_some() {
         return true;
     }
@@ -285,16 +303,6 @@ pub(super) fn is_iterator_type(name: &str) -> bool {
             | "keys"
             | "values"
             | "items"
-            | "reversed"
-            | "enumerate"
-            | "map"
-            | "filter"
-            | "zip"
-            | "itertools.count"
-            | "itertools.repeat"
-            | "_io.BufferedRandom"
-            | "_io.BufferedReader"
-            | "_io.BufferedWriter"
             | super::deque::ITERATOR
             | super::deque::REVERSE_ITERATOR
     )
@@ -374,6 +382,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "reverse",
     "rstrip",
     "split",
+    "splitlines",
     "startswith",
     "strip",
 ];
@@ -391,6 +400,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "rsplit",
     "rstrip",
     "split",
+    "splitlines",
     "startswith",
     "strip",
     "translate",
@@ -484,11 +494,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
         Value::NamedTuple {
-            class: Some(super::stdlib::os::stat::CLASS),
+            class:
+                Some(owner @ (super::stdlib::os::stat::CLASS | super::stdlib::os::stat::VFS_CLASS)),
             ..
-        } if attr == "__reduce__" => super::stdlib::os::stat::CLASS,
+        } if attr == "__reduce__" => owner,
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
-        Value::ClassMethod(_) if attr == "__get__" => "classmethod",
+        Value::ClassMethod { .. } if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
@@ -574,6 +585,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             "TextIOWrapper"
         }
         Value::List(_) if LIST_METHODS.contains(&attr) => "list",
+        Value::Tuple(_) | Value::NamedTuple { .. } if attr == "index" => "tuple",
         Value::Tuple(_) if matches!(attr, "__getitem__" | "__repr__") => "tuple",
         Value::Set { frozen: false, .. } if SET_OPERATORS.contains(&attr) => "set",
         Value::Set { frozen: true, .. } if FROZENSET_OPERATORS.contains(&attr) => "frozenset",
@@ -1122,7 +1134,16 @@ pub(super) fn call(
         let [class, rest @ ..] = args else {
             return Err(type_error("missing class for __init_subclass__"));
         };
-        if !rest.is_empty() || !kwargs.is_empty() {
+        if !kwargs.is_empty() {
+            let name = ctx
+                .own_class_attr(*class, "__qualname__")
+                .and_then(|id| ctx.str_value(id).ok())
+                .unwrap_or_else(|| ctx.class_name(*class));
+            return Err(type_error(format!(
+                "{name}.__init_subclass__() takes no keyword arguments"
+            )));
+        }
+        if !rest.is_empty() {
             return Err(type_error(format!(
                 "{}.__init_subclass__() takes no arguments",
                 ctx.class_name(*class)
@@ -1254,7 +1275,14 @@ pub(super) fn call(
             "bytearray"
                 if matches!(
                     method,
-                    "decode" | "endswith" | "lstrip" | "rstrip" | "split" | "startswith" | "strip"
+                    "decode"
+                        | "endswith"
+                        | "lstrip"
+                        | "rstrip"
+                        | "split"
+                        | "splitlines"
+                        | "startswith"
+                        | "strip"
                 ) =>
             {
                 text::method(ctx, owner, method, args, kwargs)
@@ -1319,6 +1347,15 @@ pub(super) fn call(
             }
             "map" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
+            "function" if method == "__new__" => {
+                let Some((&class, args)) = args.split_first() else {
+                    return Err(type_error("function.__new__(): not enough arguments"));
+                };
+                if class != ctx.builtin("function") {
+                    return Err(ctx.invalid_new_subtype("function", class));
+                }
+                ctx.construct_function(args, kwargs)
+            }
             "function" | "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
@@ -1379,22 +1416,12 @@ pub(super) fn call(
             let [mapping] = bind_builtin_arguments(name, args, kwargs, ["mapping"], 1)?;
             ctx.mapping_proxy(mapping.expect("required mapping"))
         }
-        "type" => {
-            let [object] = args else {
-                return Err(if args.len() == 3 {
-                    Error::new(
-                        "NotImplementedError",
-                        "dynamic class construction with type() is unsupported",
-                    )
-                } else {
-                    type_error("type() takes 1 or 3 arguments")
-                });
-            };
-            if !kwargs.is_empty() {
-                return Err(type_error("type() takes no keyword arguments"));
-            }
-            ctx.exact_type(*object)
-        }
+        "type" => match args {
+            [object] if kwargs.is_empty() => ctx.exact_type(*object),
+            [_] => Err(type_error("type() takes no keyword arguments")),
+            [name, bases, namespace] => ctx.type_from_namespace(*name, *bases, *namespace, kwargs),
+            _ => Err(type_error("type() takes 1 or 3 arguments")),
+        },
         "super" => {
             if !kwargs.is_empty() {
                 return Err(type_error("super() takes no keyword arguments"));
@@ -1844,7 +1871,7 @@ pub(super) fn call(
         "classmethod" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
-            Ok(ctx.alloc(Value::ClassMethod(args[0])))
+            super::method_decorator::class_method(ctx, args[0])
         }
         "staticmethod" => {
             if !kwargs.is_empty() {
@@ -1856,7 +1883,7 @@ pub(super) fn call(
                     args.len()
                 )));
             };
-            super::static_method::construct(ctx, *callable)
+            super::method_decorator::static_method(ctx, *callable)
         }
         "property" => super::property::construct(ctx, args, kwargs),
         "open" => super::stdlib::io::open(ctx, args, kwargs),

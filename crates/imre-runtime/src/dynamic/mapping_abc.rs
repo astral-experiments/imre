@@ -57,7 +57,7 @@ pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
     }
     if structural_methods(name).is_some() {
         let function = ctx.builtin(&format!("abc.hook.{name}.__subclasshook__"));
-        let hook = ctx.alloc(Value::ClassMethod(function));
+        let hook = super::method_decorator::class_method(ctx, function)?;
         ctx.bind(scope, "__subclasshook__", hook);
     }
     for &method in abstract_methods {

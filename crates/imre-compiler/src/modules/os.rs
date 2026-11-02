@@ -60,6 +60,7 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "sendfile" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.sendfile"),
         "readlink" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.readlink"),
+        "getsid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getsid"),
         "waitpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.waitpid"),
         "WNOHANG" if cfg!(unix) => Intrinsic::DescriptorConstant("wnohang"),
         "getpid" if cfg!(unix) => Intrinsic::ObjectRuntimeExport("posix.getpid"),
@@ -71,6 +72,11 @@ pub(super) fn symbol(name: &str) -> Option<Intrinsic> {
         }
         "strerror" => Intrinsic::Strerror,
         "stat_result" => Intrinsic::StatResult,
+        "statvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.statvfs"),
+        "fstatvfs" if cfg!(target_os = "linux") => Intrinsic::ObjectRuntimeExport("posix.fstatvfs"),
+        "statvfs_result" if cfg!(target_os = "linux") => {
+            Intrinsic::ObjectRuntimeExport("os.statvfs_result")
+        }
         "terminal_size" => Intrinsic::ObjectRuntimeExport("os.terminal_size"),
         "close" => Intrinsic::Fd(FdOperation::Close),
         "read" => Intrinsic::Fd(FdOperation::Read),

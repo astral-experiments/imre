@@ -20,6 +20,7 @@ mod importlib;
 mod iterators;
 mod lowlevel_threads;
 mod mapping_abc;
+mod method_decorator;
 mod module_type;
 mod namedtuple;
 mod namespace;
@@ -34,7 +35,6 @@ mod range;
 mod slice;
 mod slot_member;
 mod source_code;
-mod static_method;
 mod stdlib;
 mod super_object;
 mod templatelib;
@@ -1746,6 +1746,23 @@ impl Context {
         error
     }
 
+    /// A class body can insert arbitrary keys into its live namespace through locals().
+    fn lookup_scope_name(&mut self, scope: Id, name: &str) -> Result<Option<Id>> {
+        if let Some(dict) = self.scope_data(scope).class_body_mapping() {
+            let key = self.heap.code_name(name);
+            let (_, index) = self.find_dictionary_key(dict, key, None)?;
+            return Ok(index.map(|i| self.stored_entries(dict)[i].1));
+        }
+        Ok(self.scope_name(scope, name))
+    }
+
+    fn lookup_class_local(&mut self, scope: Id, name: &str) -> Result<Id> {
+        if let Some(value) = self.lookup_scope_name(scope, name)? {
+            return Ok(value);
+        }
+        self.lookup(self.root_scope(scope), name)
+    }
+
     fn lookup(&mut self, mut scope: Id, name: &str) -> Result<Id> {
         let origin = scope;
         loop {
@@ -1765,9 +1782,10 @@ impl Context {
             if let Some(globals) = s.exec_globals {
                 return self.source_global(globals, name);
             }
-            if let Some(id) = self.scope_name(scope, name) {
+            if let Some(id) = self.lookup_scope_name(scope, name)? {
                 return Ok(id);
             }
+            let s = self.scope_data(scope);
             if s.class_body.is_none() && s.closure.declared.contains(name) {
                 return Err(self.missing_binding(origin, scope, name));
             }
@@ -1832,6 +1850,9 @@ impl Context {
                 let id = stdlib::datetime::store(self, value, NONE);
                 self.builtins.insert(format!("{name}.{field}"), id);
             }
+        } else if name == "datetime.timezone" {
+            self.builtin(stdlib::datetime::TZINFO);
+            self.builtin("datetime.timezone.__getinitargs__");
         } else if name == stdlib::datetime::TZINFO {
             stdlib::datetime::install_members(self, name);
         }
@@ -1867,7 +1888,7 @@ impl Context {
             }
             "list" => builtins::LIST_METHODS,
             "method_descriptor" => &["__get__"],
-            "tuple" => &["__repr__", "__getitem__"],
+            "tuple" => &["__repr__", "__getitem__", "index"],
             "set" => &["__repr__", "__reduce__", "issubset", "update"],
             "frozenset" => &["__repr__", "__reduce__", "issubset"],
             "bytearray" => {
@@ -2648,10 +2669,11 @@ impl Context {
         }
         if let Some((path, body)) = source {
             let result = match body {
-                importlib::SourceBody::Zip(NONE) => Err(Error::new(
-                    "NotImplementedError",
-                    "ZIP namespace packages are unsupported",
-                )),
+                importlib::SourceBody::Namespace if self.sources.contains_key("importlib") => {
+                    self.lookup_attr(module, "__path__")
+                        .and_then(|locations| self.namespace_spec(name_id, locations, module))
+                }
+                importlib::SourceBody::Namespace => Ok(NONE),
                 importlib::SourceBody::Zip(loader) => self.initialize_source(
                     module,
                     scope,

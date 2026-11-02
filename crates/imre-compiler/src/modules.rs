@@ -144,6 +144,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
+        "dis" => Some(("dis.py", include_str!("../stdlib/dis.py"))),
         "opcode" => Some(("opcode.py", include_str!("../stdlib/opcode.py"))),
         "_opcode_metadata" => Some((
             "_opcode_metadata.py",
@@ -722,7 +723,6 @@ pub(crate) enum Intrinsic {
     Union,
     Literal,
     Callable,
-    Sequence,
     Mapping,
     Iterable,
     Iterator,
@@ -891,7 +891,9 @@ impl Intrinsic {
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
     pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
     pub(crate) const TEXT_IO_BASE: Self = Self::ObjectRuntimeExport("io.TextIOBase");
+    pub(crate) const TYPING_PROTOCOL: Self = Self::ObjectRuntimeExport("typing.Protocol");
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
+    pub(crate) const TYPING_SEQUENCE: Self = Self::ObjectRuntimeExport("typing.Sequence");
 
     /// Subclasses of these immutable types keep their calendar value in the object runtime.
     pub(crate) fn is_subclassable_calendar(self) -> bool {
@@ -1301,6 +1303,12 @@ impl IntrinsicModule {
             (Self::ImportlibResources, "files") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.files")
             }
+            (Self::ImportlibResources, "open_binary") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.open_binary")
+            }
+            (Self::ImportlibResources, "open_text") => {
+                Intrinsic::ObjectRuntimeExport("importlib.resources.open_text")
+            }
             (Self::ImportlibResources, "path") => {
                 Intrinsic::ObjectRuntimeExport("importlib.resources.path")
             }
@@ -1318,6 +1326,9 @@ impl IntrinsicModule {
             }
             (Self::ImportlibMetadata, "FileHash") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.FileHash")
+            }
+            (Self::ImportlibMetadata, "packages_distributions") => {
+                Intrinsic::ObjectRuntimeExport("importlib.metadata.packages_distributions")
             }
             (Self::ImportlibMetadata, "files") => {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.files")
@@ -1351,6 +1362,21 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("importlib.metadata.entry_points")
             }
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
+            (Self::ImportlibMachinery, "all_suffixes") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.all_suffixes")
+            }
+            (Self::ImportlibMachinery, "SOURCE_SUFFIXES") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.SOURCE_SUFFIXES")
+            }
+            (Self::ImportlibMachinery, "BYTECODE_SUFFIXES") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.BYTECODE_SUFFIXES")
+            }
+            (Self::ImportlibMachinery, "EXTENSION_SUFFIXES") => {
+                Intrinsic::ObjectRuntimeExport("importlib.machinery.EXTENSION_SUFFIXES")
+            }
+            (Self::ImportlibMachinery | Self::ImportlibBootstrapExternal, "NamespaceLoader") => {
+                Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.NamespaceLoader")
+            }
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
             }
@@ -1415,6 +1441,9 @@ impl IntrinsicModule {
                 "cache" => crate::ir::LinecacheOperation::Cache,
                 _ => return None,
             }),
+            (Self::Inspect, "getmodulename") => {
+                Intrinsic::ObjectRuntimeExport("inspect.getmodulename")
+            }
             (Self::Inspect, "Signature") => Intrinsic::ObjectRuntimeExport("inspect.Signature"),
             (Self::Inspect, "Parameter") => Intrinsic::ObjectRuntimeExport("inspect.Parameter"),
             (Self::Inspect, "BoundArguments") => {
@@ -1744,6 +1773,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.no_type_check_decorator")
             }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
+            (Self::Typing, "Protocol") => Intrinsic::TYPING_PROTOCOL,
             (Self::Typing, "runtime_checkable") => {
                 Intrinsic::ObjectRuntimeExport("typing.runtime_checkable")
             }
@@ -1770,7 +1800,7 @@ impl IntrinsicModule {
             (Self::Typing, "assert_type") => Intrinsic::ObjectRuntimeExport("typing.assert_type"),
             (Self::Typing, "cast") => Intrinsic::Cast,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
-            (Self::Typing, "Sequence") => Intrinsic::Sequence,
+            (Self::Typing, "Sequence") => Intrinsic::TYPING_SEQUENCE,
             (Self::CollectionsAbc, "Mapping") => Intrinsic::Mapping,
             (Self::Typing | Self::CollectionsAbc, "Iterable") => Intrinsic::Iterable,
             (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
@@ -3262,6 +3292,18 @@ impl SourceGraph {
         resolve_binding(&self.modules, module, expression)
     }
 
+    /// Recognize Protocol and Protocol[T] at the point where the class is defined.
+    pub(crate) fn is_protocol_base(&self, module: ModuleId, expression: &ast::Expr) -> bool {
+        let origin = match expression {
+            ast::Expr::Subscript(subscript) => &*subscript.value,
+            base => base,
+        };
+        matches!(
+            self.resolve(module, origin),
+            Some(Binding::Intrinsic(Intrinsic::TYPING_PROTOCOL))
+        ) && self.session.is_typing_protocol(module, origin)
+    }
+
     /// An import binds its name throughout the function, even before the import executes.
     fn local_static_binding(
         &self,
@@ -4357,6 +4399,7 @@ impl<'a> Loader<'a> {
                         };
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         let binding = self.named_import(binding, alias.name.as_str());
+                        // A Sequence annotation keeps its typed list contract; value uses request boxing.
                         self.needs_object_imports |= !matches!(
                             module,
                             IntrinsicModule::Marshal
@@ -4368,8 +4411,8 @@ impl<'a> Loader<'a> {
                         ) && matches!(
                             binding,
                             Binding::Intrinsic(
-                                Intrinsic::ObjectRuntimeExport(_) | Intrinsic::Awaitable
-                            )
+                                export @ (Intrinsic::ObjectRuntimeExport(_) | Intrinsic::Awaitable)
+                            ) if export != Intrinsic::TYPING_SEQUENCE
                         );
                         if module == IntrinsicModule::Collections
                             && binding == Binding::Intrinsic(Intrinsic::CountElements)
@@ -4442,9 +4485,11 @@ impl<'a> Loader<'a> {
                         } else {
                             Binding::Module(self.load_module(&child_name)?)
                         }
-                    } else if self.modules[target].is_bundled("http.client") {
-                        // The checked source defines fixed-layout headers. Other imports
-                        // are resolved by the full Python module at run time.
+                    } else if self.modules[target].is_bundled("http.client")
+                        || self.modules[target].is_bundled("dis")
+                    {
+                        // http.client supplies names beyond its checked header types.
+                        // dis imports opcode's public names with a wildcard.
                         Binding::ConditionalValue
                     } else {
                         return Err(format!(

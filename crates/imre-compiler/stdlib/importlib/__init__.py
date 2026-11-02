@@ -2,8 +2,8 @@
 
 
 import sys
-from _imre_importlib import import_module as _import_module
-from _frozen_importlib import ModuleSpec as _ModuleSpec
+from _imre_importlib import import_module as _import_module, namespace_locations as _namespace_locations
+from _frozen_importlib import ModuleSpec as _ModuleSpec, _init_module_attrs
 import _frozen_importlib_external as _bootstrap_external
 
 _bootstrap_external.__name__ = "importlib._bootstrap_external"
@@ -28,6 +28,23 @@ def _file_spec(name, origin, locations, loader=None):
     spec = _ModuleSpec(name, loader, origin=origin)
     spec.submodule_search_locations = locations
     spec.has_location = True
+    return spec
+
+
+def _find_namespace_portions(name, path):
+    locations = _namespace_locations(name, path)
+    if locations is not None:
+        spec = _ModuleSpec(name, None)
+        spec.submodule_search_locations = locations
+        return spec
+
+
+def _namespace_spec(name, locations, module):
+    spec = _ModuleSpec(name, None)
+    spec.submodule_search_locations = _bootstrap_external._NamespacePath(name, locations, _find_namespace_portions)
+    if module is not None:
+        _init_module_attrs(spec, module, override=True)
+        spec._initializing = False
     return spec
 
 

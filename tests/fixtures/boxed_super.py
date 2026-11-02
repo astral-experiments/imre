@@ -177,6 +177,34 @@ def check_subclass_hooks():
         ("field", "Child"), ("left", "Child"), ("right", "Child"),
         ("root", "Child"), ("decorator", "Child"),
     ]
+    class Configure:
+        def __init_subclass__(cls, *, tag, **extras):
+            super().__init_subclass__()
+            cls.settings = tag, tuple(extras.items())
+
+    class Tagged(Configure, first=1, metaclass=type, tag=2, total=False):
+        pass
+
+    assert Tagged.settings == (2, (("first", 1), ("total", False)))
+    scope = {"Configure": Configure}
+    exec("class Loaded(Configure, first=3, tag=4, total=True): pass", scope)
+    assert scope["Loaded"].settings == (4, (("first", 3), ("total", True)))
+    try:
+        class Refused(extra=True):
+            pass
+    except TypeError as error:
+        assert str(error) == "check_subclass_hooks.<locals>.Refused.__init_subclass__() takes no keyword arguments"
+    else:
+        raise AssertionError("object accepted class keywords")
+
+    calls = []
+    try:
+        exec("calls.append(0)\nclass Duplicate(tag=calls.append(1), tag=calls.append(2)): pass", {"calls": calls})
+    except SyntaxError as error:
+        assert error.msg == "keyword argument repeated: tag"
+    else:
+        raise AssertionError("duplicate class keyword compiled")
+    assert calls == []
     assert isinstance(Left.__dict__["__init_subclass__"], classmethod)
     assert Child.__init_subclass__.__self__ is Child
 

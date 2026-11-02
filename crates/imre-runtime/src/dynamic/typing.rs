@@ -4,6 +4,14 @@ use std::collections::HashMap;
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
+/// Namespace type calls validate native layouts before using ordinary member slots.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ClassLayout {
+    Specialized,
+    OrdinarySlots,
+    TypeNamespace,
+}
+
 #[derive(Clone)]
 pub(super) struct TypeVariable {
     pub name: Id,
@@ -1778,48 +1786,52 @@ impl Context {
             }))
     }
 
-    fn declared_slot_names(&mut self, scope: Id) -> Result<Option<std::rc::Rc<[String]>>> {
-        let Some(slots) = self.scope_name(scope, "__slots__") else {
+    pub(super) fn declared_slot_names(
+        &mut self,
+        slots: Option<Id>,
+        base: Id,
+    ) -> Result<Option<std::rc::Rc<[String]>>> {
+        let Some(slots) = slots else {
             return Ok(None);
         };
-        if let Ok(name) = self.str_value(slots) {
-            return Ok(Some([name.to_owned()].into()));
-        }
-        let iterator = self.iterator(slots)?;
-        self.heap.keep(iterator);
         let mut items = Vec::new();
-        while let Some(slot) = self.next_item(iterator)? {
-            self.heap.keep(slot);
-            items.push(slot);
+        if self.string_storage(slots).is_some() {
+            items.push(slots);
+        } else {
+            let iterator = self.iterator(slots)?;
+            self.heap.keep(iterator);
+            while let Some(slot) = self.next_item(iterator)? {
+                self.heap.keep(slot);
+                items.push(slot);
+            }
         }
-        let mut names = Vec::with_capacity(items.len());
-        for slot in items {
-            let name = self.str_value(slot).map_err(|_| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "__slots__ items must be strings, not '{}'",
-                        self.type_name(slot)
-                    ),
-                )
-            })?;
-            names.push(name.to_owned());
-        }
-        Ok(Some(names.into()))
+        Ok(Some(self.checked_slot_names(base, &items)?.into()))
     }
 
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
     pub(super) fn allocate_class(&mut self, name: String, scope: Id, bases: Vec<Id>) -> Result<Id> {
-        self.allocate_class_with_slots(name, scope, bases, false)
+        self.allocate_class_with_slots(name, scope, bases, ClassLayout::Specialized)
     }
 
     pub(super) fn allocate_class_with_slots(
         &mut self,
         name: String,
         scope: Id,
-        mut bases: Vec<Id>,
-        ordinary_slots: bool,
+        bases: Vec<Id>,
+        layout: ClassLayout,
     ) -> Result<Id> {
+        let bases = self.validate_class_bases(bases, layout)?;
+        let ancestors = self.linearized_bases(&bases, false)?;
+        let layout_base = self.member_layout_base(&bases)?;
+        let slots = self.declared_slot_names(self.scope_name(scope, "__slots__"), layout_base)?;
+        self.allocate_prepared_class(name, scope, bases, ancestors, layout, slots)
+    }
+
+    pub(super) fn validate_class_bases(
+        &mut self,
+        mut bases: Vec<Id>,
+        layout: ClassLayout,
+    ) -> Result<Vec<Id>> {
         for &base in &bases {
             if matches!(self.heap.get(base), Value::Native(name) if name == "typing._UnpackGenericAlias")
             {
@@ -1831,6 +1843,7 @@ impl Context {
             if let Value::Native(name) = self.heap.get(base)
                 && (super::stdlib::fixed_structseq::fixed_type(name).is_some()
                     || crate::objects::HashState::is_provider_class(name)
+                    || super::builtins::is_final_iterator_type(name)
                     || matches!(
                         name.as_str(),
                         "typing.TypeVar"
@@ -1842,7 +1855,31 @@ impl Context {
                             | "NoDefaultType"
                             | "datetime.timezone"
                             | super::stdlib::flags::TYPE
+                            | "bool"
+                            | "range"
+                            | "memoryview"
                             | "slice"
+                            | "function"
+                            | "builtin_function_or_method"
+                            | "method"
+                            | "method-wrapper"
+                            | "code"
+                            | "frame"
+                            | "traceback"
+                            | "cell"
+                            | "dict_keys"
+                            | "dict_values"
+                            | "dict_items"
+                            | "odict_keys"
+                            | "odict_values"
+                            | "odict_items"
+                            | "coroutine"
+                            | "async_generator"
+                            | "mappingproxy"
+                            | "classmethod_descriptor"
+                            | "getset_descriptor"
+                            | "method_descriptor"
+                            | "wrapper_descriptor"
                             | "NoneType"
                             | "NotImplementedType"
                             | "ellipsis"
@@ -1863,11 +1900,12 @@ impl Context {
                 ));
             }
         }
+        if layout == ClassLayout::TypeNamespace {
+            self.check_namespace_layouts(&bases)?;
+        }
         if bases.is_empty() {
             bases.push(self.builtin("object"));
         }
-        let ancestors = self.linearized_bases(&bases, false)?;
-        self.check_member_slot_bases(&bases, &ancestors)?;
         // A mixed layout needs CPython's solid-base check before choosing a native allocator.
         if bases.len() > 1
             && bases
@@ -1879,6 +1917,18 @@ impl Context {
                 "multiple bases for a thread-local subclass are unsupported",
             ));
         }
+        Ok(bases)
+    }
+
+    pub(super) fn allocate_prepared_class(
+        &mut self,
+        name: String,
+        scope: Id,
+        bases: Vec<Id>,
+        ancestors: Vec<Id>,
+        layout: ClassLayout,
+        slot_names: Option<std::rc::Rc<[String]>>,
+    ) -> Result<Id> {
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
         // Keep allocation and special-slot dispatch on their existing native layout.
@@ -1890,10 +1940,9 @@ impl Context {
         } else {
             mro.extend_from_slice(&ancestors);
         }
-        let slot_names = self.declared_slot_names(scope)?;
         // Other dunder names can replace special methods or class metadata. Keep
         // their existing layout until their type slots can be updated as well.
-        let ordinary_slots = ordinary_slots
+        let ordinary_slots = layout != ClassLayout::Specialized
             && slot_names.as_deref().is_some_and(|names| {
                 names.iter().all(|name| {
                     !name.starts_with("__")
@@ -1901,6 +1950,12 @@ impl Context {
                         || matches!(name.as_str(), "__dict__" | "__weakref__")
                 })
             });
+        if layout == ClassLayout::TypeNamespace && slot_names.is_some() && !ordinary_slots {
+            return Err(Error::new(
+                "NotImplementedError",
+                "dynamic type() does not support slots that replace special class attributes",
+            ));
+        }
         let member_slots = ordinary_slots
             || self
                 .scope_data(scope)
@@ -1911,7 +1966,6 @@ impl Context {
             self.prepare_slot_members(
                 &name,
                 scope,
-                &bases,
                 slot_names.as_deref().unwrap_or_default(),
                 ordinary_slots,
             )?
@@ -1924,7 +1978,11 @@ impl Context {
             if let Some(function) = self.namespace_binding(self.scope_data(scope), name)
                 && matches!(self.heap.get(function), Value::Function { .. })
             {
-                let method = self.alloc(Value::ClassMethod(function));
+                let dictionary = self.dict(Vec::new());
+                let method = self.alloc(Value::ClassMethod {
+                    callable: function,
+                    dictionary,
+                });
                 self.bind_local(scope, name, method);
             }
         }
@@ -1939,13 +1997,15 @@ impl Context {
         mro[0] = class;
         let bases = self.alloc(Value::Tuple(bases));
         let mro = self.alloc(Value::Tuple(mro));
+        // A class-body __eq__ suppresses inherited hashing at type creation.
+        if self.namespace_binding(self.scope_data(scope), "__eq__").is_some()
+            && self.namespace_binding(self.scope_data(scope), "__hash__").is_none()
+        {
+            self.bind_local(scope, "__hash__", NONE);
+        }
         let Value::Scope(fields) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        // A class-body __eq__ suppresses inherited hashing at type creation.
-        if fields.names.contains_key("__eq__") && !fields.names.contains_key("__hash__") {
-            fields.names.insert("__hash__".to_owned(), NONE);
-        }
         let namespace = fields.class_namespace.get_or_insert_with(Default::default);
         namespace.member_slots = member_slots;
         namespace.slot_names = slot_names;
