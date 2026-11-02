@@ -240,6 +240,7 @@ REJECTED = {
     "normalized_reserved_alias": ({"main.py": "from helper import f as ℕone\n", "helper.py": HELPER}, "reserved"),
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
+    "token_shadow": ({"main.py": "import token\n", "token.py": HELPER}, 'shadowing is unsupported: "token"'),
     "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
     "opcode_unknown_operation": ({"main.py": "from _opcode import not_an_opcode_operation\n"}, "not_an_opcode_operation"),
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
@@ -251,6 +252,14 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "token_named_helper": {
+        "main.py": "from helper import read\nprint(read())\n",
+        "helper.py": "from token import EXACT_TOKEN_TYPES, tok_name\ndef read():\n    return tok_name[EXACT_TOKEN_TYPES[':=']]\n",
+    },
+    "token_qualified_helper": {
+        "main.py": "from helper import read\nprint(read())\n",
+        "helper.py": "import token\ndef read():\n    return token.tok_name[token.EXACT_TOKEN_TYPES[':=']]\n",
+    },
     "opcode_named_helper": {
         "main.py": "from helper import effect\nprint(effect())\n",
         "helper.py": "from _opcode import stack_effect\ndef effect():\n    return stack_effect(31)\n",

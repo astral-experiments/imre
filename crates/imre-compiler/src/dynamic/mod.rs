@@ -737,6 +737,7 @@ pub(crate) fn compile(
         "stat",
         "string",
         "string.templatelib",
+        "token",
         "zipimport",
     ]
     .into_iter()

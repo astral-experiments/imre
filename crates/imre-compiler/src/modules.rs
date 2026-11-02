@@ -200,6 +200,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "base64" => Some(("base64.py", include_str!("../stdlib/base64.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
+        "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
         "collections" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             Some(("collections/__init__.py", SOURCE.get_or_init(|| {
@@ -4594,6 +4595,8 @@ impl<'a> Loader<'a> {
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
+            // token initializes its public tables from the live module globals.
+            self.needs_object_imports |= name == "token";
             let pkgutil_source;
             let source = if name == "pkgutil" {
                 let paths = self.filesystem_search_path()?;
