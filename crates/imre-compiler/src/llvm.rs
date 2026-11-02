@@ -859,15 +859,19 @@ impl Emitter<'_, '_> {
         self.void_call(&name, &[&payload]);
     }
 
+    fn may_own_reference(&self, ty: Type, small_integer: bool) -> bool {
+        !small_integer
+            && ty != Type::Float
+            && !matches!(
+                self.module.types.payload(ty).unwrap_or(ty),
+                Type::Bool | Type::None | Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_)
+            )
+    }
+
     /// Registers one owner only after a call's error check. Fallible universal
     /// word getters may return zero on failure, which is not a valid owned Int.
     fn owned(&mut self, value: Value) -> Value {
-        if value.ty != Type::Float
-            && !matches!(
-                self.module.types.payload(value.ty).unwrap_or(value.ty),
-                Type::Bool | Type::None | Type::IntEnum(_) | Type::StrEnum(_) | Type::Enum(_)
-            )
-            && !value.small_integer
+        if self.may_own_reference(value.ty, value.small_integer)
             && !self
                 .temporaries
                 .iter()
@@ -1488,13 +1492,6 @@ impl Emitter<'_, '_> {
         same_local && self.ranges.integer(left).is_some() && expression_preserves_local(right, slot)
     }
 
-    fn cleanup(&mut self, slots: &[usize]) {
-        for &slot in slots {
-            let value = self.take_slot(slot);
-            self.release(&value);
-        }
-    }
-
     /// Releases initialized module owners and harmless defaults on either exit.
     fn cleanup_globals(&mut self) {
         for slot in (0..self.module.globals.len()).rev() {
@@ -1782,7 +1779,10 @@ impl Emitter<'_, '_> {
                 !rebound[slot] && !self.resource_types.contains(&function.locals[slot]);
         }
         let mut cleanup_slots: Vec<_> = (0..self.locals.len())
-            .filter(|&slot| self.owns_slot(slot))
+            .filter(|&slot| {
+                self.owns_slot(slot)
+                    && self.may_own_reference(self.locals[slot], self.small_locals[slot])
+            })
             .collect();
         if !entry
             && cleanup_slots
@@ -2004,7 +2004,10 @@ impl Emitter<'_, '_> {
         } else {
             None
         };
-        self.cleanup(&cleanup_slots);
+        for slot in cleanup_slots {
+            let value = self.borrow_slot(slot);
+            self.reference(&value, "release");
+        }
         if let Some(leave) = leave_frame {
             self.line(leave);
         }
