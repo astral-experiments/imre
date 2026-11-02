@@ -235,6 +235,9 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
             _ => return Err(unsupported()),
         });
     }
+    if module == "copyreg" {
+        return Ok(("copy_reg", name));
+    }
     const LEGACY_MODULES: &[&str] = &[
         "_bz2",
         "_dbm",
@@ -248,7 +251,6 @@ fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str
         "collections",
         "collections.abc",
         "configparser",
-        "copyreg",
         "dbm",
         "dbm.bsd",
         "dbm.dumb",
