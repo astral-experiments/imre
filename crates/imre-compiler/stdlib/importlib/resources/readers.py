@@ -1,4 +1,4 @@
-"""Traversable readers for ZIP and namespace package resources (CPython 3.14.5)."""
+"""Traversable readers for filesystem, ZIP and namespace package resources (CPython 3.14.5)."""
 
 from __future__ import annotations
 
@@ -15,11 +15,27 @@ from collections.abc import Iterator
 from . import abc
 from ._itertools import only
 
-__all__ = ["ZipReader", "MultiplexedPath", "NamespaceReader"]
+__all__ = ["FileReader", "ZipReader", "MultiplexedPath", "NamespaceReader"]
 
 
 def remove_duplicates(items):
     return iter(collections.OrderedDict.fromkeys(items))
+
+
+class FileReader(abc.TraversableResources):
+    def __init__(self, loader):
+        self.path = pathlib.Path(loader.path).parent
+
+    def resource_path(self, resource):
+        """
+        Return the file system path to prevent
+        `resources.path()` from creating a temporary
+        copy.
+        """
+        return str(self.path.joinpath(resource))
+
+    def files(self):
+        return self.path
 
 
 class ZipReader(abc.TraversableResources):
