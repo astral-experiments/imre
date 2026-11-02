@@ -273,8 +273,13 @@ pub(in crate::dynamic) fn open(
     let text_output = !binary && !mode_text.contains('+') && mode_text.contains(['w', 'a', 'x']);
     let text_input_with_newline =
         buffering < 0 && newline.is_some() && matches!(mode_text, "r" | "rt" | "tr");
+    let binary_bytes_path = binary
+        && buffering < 0
+        && !mode_text.contains('+')
+        && !numeric
+        && matches!(ctx.heap.get(ctx.scalar_value(raw_arg)), Value::Bytes(_));
     let fd = descriptor_from_argument(ctx, raw_arg);
-    if fd.is_some() || text_output || text_input_with_newline {
+    if fd.is_some() || text_output || text_input_with_newline || binary_bytes_path {
         if fd.is_some_and(|fd| fd < 0) {
             return Err(Error::new("ValueError", "negative file descriptor"));
         }
