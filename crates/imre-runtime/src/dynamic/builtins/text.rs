@@ -1276,6 +1276,59 @@ fn split_codepoints(
     }
 }
 
+/// Strip matching Python code points while keeping scalar strings in UTF-8.
+fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) -> Result<Id> {
+    let chars = chars
+        .map(|id| {
+            ctx.string_storage(id)
+                .map(|storage| ctx.heap.get(storage))
+                .ok_or_else(|| type_error(format!("{name} arg must be None or str")))
+        })
+        .transpose()?;
+    let remove = |point| match chars {
+        None => char::from_u32(point).is_some_and(python_whitespace),
+        Some(Value::Str(set)) => char::from_u32(point).is_some_and(|ch| set.contains(ch)),
+        Some(Value::SurrogateStr(set)) => set.contains(&point),
+        _ => unreachable!("validated str cutset"),
+    };
+    let storage = ctx
+        .string_storage(receiver)
+        .expect("validated str receiver");
+    match ctx.heap.get(storage) {
+        Value::Str(source) => {
+            let matches = |ch: char| remove(u32::from(ch));
+            let part = match name {
+                "lstrip" => source.trim_start_matches(matches),
+                "rstrip" => source.trim_end_matches(matches),
+                _ => source.trim_matches(matches),
+            };
+            if part.len() == source.len() {
+                if receiver == storage || source.is_empty() {
+                    return Ok(storage);
+                }
+                // An unchanged nonempty str subclass produces a fresh exact str.
+                return ctx.heap.fresh_string(Value::Str(part.to_owned()));
+            }
+            Ok(ctx.text(part.to_owned()))
+        }
+        Value::SurrogateStr(points) => {
+            let mut start = 0;
+            let mut end = points.len();
+            while name != "rstrip" && start < end && remove(points[start]) {
+                start += 1;
+            }
+            while name != "lstrip" && start < end && remove(points[end - 1]) {
+                end -= 1;
+            }
+            if receiver == storage && start == 0 && end == points.len() {
+                return Ok(storage);
+            }
+            Ok(ctx.text_codepoints(points[start..end].to_vec()))
+        }
+        _ => unreachable!("validated str receiver"),
+    }
+}
+
 fn split_string(
     ctx: &mut Context,
     receiver: Id,
@@ -1863,7 +1916,9 @@ pub(super) fn method(
         }
         return Ok(ctx.alloc(Value::Int(found)));
     }
-    if matches!(owner, "bytes" | "bytearray") && matches!(name, "strip" | "lstrip" | "rstrip") {
+    if matches!(owner, "str" | "bytes" | "bytearray")
+        && matches!(name, "strip" | "lstrip" | "rstrip")
+    {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "{}.{name}() takes no keyword arguments",
@@ -1876,10 +1931,11 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        let chars = args
-            .first()
-            .copied()
-            .filter(|&id| id != NONE)
+        let chars = args.first().copied().filter(|&id| id != NONE);
+        if owner == "str" {
+            return strip_string(ctx, receiver, name, chars);
+        }
+        let chars = chars
             .map(|id| match ctx.heap.get(ctx.scalar_value(id)) {
                 Value::Array(array) => Ok(array.as_bytes()),
                 _ => ctx.bytes_like(id),
@@ -2313,22 +2369,6 @@ pub(super) fn method(
             let mut values = Vec::new();
             split_lines(&source, keep, |field| values.push(ctx.text(field)));
             Ok(ctx.alloc(Value::List(values)))
-        }
-        "strip" | "lstrip" | "rstrip" => {
-            positional(name, kwargs)?;
-            arity(name, args, 0, 1)?;
-            let chars = args
-                .first()
-                .filter(|&&x| x != NONE)
-                .map(|&x| ctx.str_value(x))
-                .transpose()?;
-            let matches = |c: char| chars.map_or_else(|| python_whitespace(c), |s| s.contains(c));
-            let trimmed = match name {
-                "strip" => source.trim_matches(matches),
-                "rstrip" => source.trim_end_matches(matches),
-                _ => source.trim_start_matches(matches),
-            };
-            Ok(ctx.text(trimmed))
         }
         "capitalize" | "lower" | "upper" => {
             positional(name, kwargs)?;
