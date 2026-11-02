@@ -1076,9 +1076,18 @@ pub(super) struct CachedCall {
 impl Value {
     /// Class of a native file whose Python descriptors are installed by _io.
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
+        let name = self.file_class_name()?;
+        // BufferedRandom still uses its intrinsic methods rather than installed _io descriptors.
+        (name != "_io.BufferedRandom").then_some(name)
+    }
+
+    fn file_class_name(&self) -> Option<&'static str> {
         match self {
             Self::TextFile(_) => Some("_io.TextIOWrapper"),
             Self::File(file) => Some(match file.as_ref() {
+                super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing => {
+                    "_io.BufferedRandom"
+                }
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
                 super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
@@ -1113,7 +1122,7 @@ impl Value {
             Self::Bytes(_) => "bytes",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
-            Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
+            Self::File(_) | Self::TextFile(_) => return self.file_class_name(),
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::SequenceIterator { .. } => "iterator",
