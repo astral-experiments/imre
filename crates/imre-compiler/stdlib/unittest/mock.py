@@ -62,6 +62,11 @@ class _DictionaryPatch:
 
 
 class _PatchFactory:
+    TEST_PREFIX: str
+
+    def __init__(self) -> None:
+        self.TEST_PREFIX = "test"
+
     def _dictionary(self, in_dict: dict[str, str], values: dict[str, str] | None, clear: bool, kwargs: dict[str, str]) -> _DictionaryPatch:
         if values is None:
             raise TypeError("'NoneType' object is not iterable")

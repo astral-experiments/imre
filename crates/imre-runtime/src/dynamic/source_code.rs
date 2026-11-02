@@ -1957,19 +1957,26 @@ impl Context {
         Ok(suffix)
     }
 
-    pub(super) fn compile_source(&mut self, source: Id, filename: Id, mode: Id) -> Result<Id> {
+    pub(super) fn compile_source(
+        &mut self,
+        source: Id,
+        filename: Id,
+        mode: Id,
+        strip_indent: bool,
+    ) -> Result<Id> {
+        use ruff_python_parser::Mode;
         let mode = self.str_value(mode)?;
         let interactive = mode == "single";
-        if mode != "exec" && !interactive {
-            return Err(if mode == "eval" {
-                unsupported(format!("compile mode {mode}"))
-            } else {
-                Error::new(
+        let parser_mode = match mode {
+            "exec" | "single" => Mode::Module,
+            "eval" => Mode::Expression,
+            _ => {
+                return Err(Error::new(
                     "ValueError",
                     "compile() mode must be 'exec', 'eval' or 'single'",
-                )
-            });
-        }
+                ));
+            }
+        };
         let filename_text = self.str_value(filename)?;
         let source = match self.heap.get(self.scalar_value(source)) {
             Value::Bytes(data) | Value::ByteArray(data) => {
@@ -1981,37 +1988,50 @@ impl Context {
             _ => Cow::Borrowed(self.str_value(source)?),
         };
         let filename = filename_text;
-        let parsed = ruff_python_parser::parse_module(&source)
+        let source = if strip_indent {
+            source.trim_start_matches([' ', '\t'])
+        } else {
+            &source
+        };
+        let parsed = ruff_python_parser::parse(source, parser_mode.into())
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
-        if interactive {
-            check_single_input(&parsed.syntax().body, parsed.tokens())?;
+        if interactive && let ast::Mod::Module(module) = parsed.syntax() {
+            check_single_input(&module.body, parsed.tokens())?;
         }
-        let spellings = check_runtime_strings(&source, parsed.tokens())?;
+        let spellings = check_runtime_strings(source, parsed.tokens())?;
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
         let mut code = Program::new(Rc::from(filename), "<module>", source.contains(":="));
         code.interactive = interactive;
-        code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
         code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
-            &source,
+            source,
             parsed.tokens(),
             parsed.syntax(),
         ));
-        let mut body = parsed.into_syntax().body;
-        let caller = self.heap.current_code();
-        let inherited = matches!(self.heap.get(caller), Value::Code(code) if
+        match parsed.into_syntax() {
+            ast::Mod::Expression(expression) => {
+                code.instructions
+                    .push((1, Instruction::Return(Some(*expression.body))));
+            }
+            ast::Mod::Module(module) => {
+                let mut body = module.body;
+                code.method_imports = Rc::new(imre_ast::module_imports(&body));
+                let caller = self.heap.current_code();
+                let inherited = matches!(self.heap.get(caller), Value::Code(code) if
             code.flags.unwrap_or(0) & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0
             || matches!(&code.body, Body::Source(p) if p.private_names.as_ref().is_some_and(|n| n.string_annotations)));
-        if inherited || imre_ast::future_annotations(&body) {
-            code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
-        }
-        code.lower(body, &lines, false, None)?;
-        let mut module_globals = HashSet::new();
-        code.resolve_directives(&|_| None, &mut module_globals)?;
-        // A global declared by a nested block makes module assignments use the globals dictionary.
-        for name in module_globals {
-            code.directives
-                .entry(name)
-                .or_insert((ScopeDirective::Global, 0.into()));
+                if inherited || imre_ast::future_annotations(&body) {
+                    code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
+                }
+                code.lower(body, &lines, false, None)?;
+                let mut module_globals = HashSet::new();
+                code.resolve_directives(&|_| None, &mut module_globals)?;
+                // A global declared by a nested block makes module assignments use the globals dictionary.
+                for name in module_globals {
+                    code.directives
+                        .entry(name)
+                        .or_insert((ScopeDirective::Global, 0.into()));
+                }
+            }
         }
         code.prepare_strings(
             &mut self.heap,
@@ -2342,7 +2362,6 @@ impl Context {
                 format!("Forward reference must be an expression -- got {source:?}"),
             )
         })?;
-        let spellings = check_runtime_strings(source, parsed.tokens())?;
         if let ast::Expr::Name(ident) = parsed.syntax().body.as_ref()
             && usize::from(ident.range().len()) == source.len()
         {
@@ -2355,25 +2374,80 @@ impl Context {
             }
             return Err(Self::undefined_source_name(self.str_value(text)?, text));
         }
-        let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        // Forward references use the caller's lookup namespace without compiling assignment targets.
-        let mut program = Program::new(Rc::from("<string>"), "<module>", false);
-        program.template_expressions = Rc::new(imre_ast::strings::template_expressions(
-            source,
-            parsed.tokens(),
-            parsed.syntax(),
-        ));
-        program
-            .instructions
-            .push((1, Instruction::Return(Some(*parsed.into_syntax().body))));
-        program.prepare_strings(
-            &mut self.heap,
-            &mut SharedConstants::default(),
-            &spellings,
-            &|offset| lines.partition_point(|n| *n <= offset) as u32,
-        )?;
-        let code = self.box_source_code(Rc::new(program), None);
-        self.run_in_namespace(code, globals, Some(locals), None)
+        let filename = self.text("<string>");
+        let mode = self.text("eval");
+        let code = self.compile_source(text, filename, mode, false)?;
+        self.run_in_namespace(code, globals, Some(locals), None, "eval")
+    }
+
+    /// Evaluate an expression in the supplied namespaces or the active Python frame.
+    pub(super) fn eval_source(
+        &mut self,
+        scope: Id,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        let Some((&source, namespaces)) = args.split_first() else {
+            return Err(Error::new(
+                "TypeError",
+                "eval expected at least 1 positional argument",
+            ));
+        };
+        let [globals, locals] =
+            builtins::bind_method_arguments("eval", namespaces, kwargs, ["globals", "locals"], 2)?;
+        let globals = globals.filter(|&g| g != NONE);
+        let locals = match locals.filter(|&l| l != NONE) {
+            Some(locals) => Some(locals),
+            None if globals.is_none() => self.eval_frame_locals(scope)?,
+            None => None,
+        };
+        let globals = match globals {
+            Some(globals) => globals,
+            None => self.module_globals(scope)?,
+        };
+        self.run_in_namespace(source, globals, locals, None, "eval")
+    }
+
+    /// Function locals are a fresh snapshot; exec mappings retain their own lookup semantics.
+    fn eval_frame_locals(&mut self, scope: Id) -> Result<Option<Id>> {
+        let frame = self.scope_data(scope);
+        if frame.exec_locals.is_some() || frame.parent.is_none() {
+            return Ok(frame.exec_locals);
+        }
+        if frame.class_body.is_some() {
+            return Err(unsupported("eval with implicit class locals"));
+        }
+        let mut names = BTreeSet::new();
+        let mut local = scope;
+        loop {
+            let frame = self.scope_data(local);
+            names.extend(
+                frame
+                    .names
+                    .keys()
+                    .chain(frame.closure.cells.keys())
+                    .cloned(),
+            );
+            let Some(parent) = frame.parent else { break };
+            if frame.comprehension != Some(ComprehensionKind::Ordinary)
+                || self.scope_data(parent).parent.is_none()
+            {
+                break;
+            }
+            local = parent;
+        }
+        if let Value::Code(code) = self.heap.get(self.heap.current_code()) {
+            names.extend(code.freevars.iter().cloned());
+        }
+        let mut bindings = Vec::new();
+        for name in names {
+            match self.lookup(scope, &name) {
+                Ok(value) => bindings.push((self.heap.code_name(&name), value)),
+                Err(error) if self.is_builtin_error(&error, "NameError") => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(Some(self.dict(bindings)))
     }
 
     pub(super) fn exec_source(
@@ -2383,7 +2457,7 @@ impl Context {
         locals: Option<Id>,
         function: Option<Id>,
     ) -> Result<Id> {
-        self.run_in_namespace(source, globals, locals, function)
+        self.run_in_namespace(source, globals, locals, function, "exec")
             .map(|_| NONE)
     }
 
@@ -2393,12 +2467,13 @@ impl Context {
         globals: Id,
         locals: Option<Id>,
         function: Option<Id>,
+        mode: &str,
     ) -> Result<Id> {
         if self.dict_storage(globals).is_none() {
             let ty = self.type_name(globals);
             return Err(Error::new(
                 "TypeError",
-                format!("exec() globals must be a dict, not {ty}"),
+                format!("{mode}() globals must be a dict, not {ty}"),
             ));
         }
         let effective_locals = locals.filter(|&id| id != NONE).unwrap_or(globals);
@@ -2444,19 +2519,27 @@ impl Context {
             )?;
             builtins
         };
-        let code_id = if matches!(self.heap.get(source), Value::Str(_)) {
-            let filename = self.text("<string>");
-            let mode = self.text("exec");
-            self.compile_source(source, filename, mode)?
-        } else {
-            source
+        let code_id = match self.heap.get(self.scalar_value(source)) {
+            Value::Code(code) if mode == "eval" && !code.freevars.is_empty() => {
+                return Err(Error::new(
+                    "TypeError",
+                    "code object passed to eval() may not contain free variables",
+                ));
+            }
+            Value::Code(_) => source,
+            Value::Str(_) | Value::Bytes(_) | Value::ByteArray(_) => {
+                let filename = self.text("<string>");
+                let mode_id = self.text(mode);
+                self.compile_source(source, filename, mode_id, mode == "eval")?
+            }
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{mode}() arg 1 must be a string, bytes or code object"),
+                ));
+            }
         };
-        let Value::Code(code) = self.heap.get(code_id) else {
-            return Err(Error::new(
-                "TypeError",
-                "exec() arg 1 must be a string or code object",
-            ));
-        };
+        let code = self.code_object(code_id);
         let function_code = code.parameters != NONE;
         let module_definition = code.module_definition;
         let scope = self.scope("<exec>", None);
@@ -3849,6 +3932,17 @@ impl Context {
         Ok(())
     }
 
+    /// Release completed formatting operands before evaluating the next Python expression.
+    fn keep_format_result(&mut self, mark: usize, value: Id) -> Result<Id> {
+        let collect = self.heap.discard_truth_operands(mark);
+        self.heap.reserve_temporaries(1)?;
+        self.heap.keep(value);
+        if collect {
+            self.collect_unreachable();
+        }
+        Ok(value)
+    }
+
     fn join_source_format(&mut self, parts: Vec<Id>) -> Result<Id> {
         // A lone field preserves the exact object returned by __format__.
         if let [part] = parts.as_slice() {
@@ -3874,25 +3968,28 @@ impl Context {
                     if let Some(debug) = &field.debug_text {
                         parts.push(self.text(debug.as_str()));
                     }
+                    let mark = self.heap.temporary_mark();
                     let mut value = self.source_expr(code, scope, &field.expression)?;
                     let conversion = field.conversion.to_char().or_else(|| {
                         (field.debug_text.is_some() && field.format_spec.is_none()).then_some('r')
                     });
                     if let Some(conversion) = conversion {
                         value = builtins::format_conversion(self, value, conversion)?;
-                        self.heap.keep(value);
+                        self.keep_format_result(mark, value)?;
                     }
                     let spec = if let Some(spec) = &field.format_spec {
+                        let spec_mark = self.heap.temporary_mark();
                         let mut nested = Vec::new();
                         self.source_format_elements(code, scope, &spec.elements, &mut nested)?;
-                        Some(self.join_source_format(nested)?)
+                        let spec = self.join_source_format(nested)?;
+                        Some(self.keep_format_result(spec_mark, spec)?)
                     } else {
                         None
                     };
-                    builtins::format_value(self, value, spec)?
+                    let rendered = builtins::format_value(self, value, spec)?;
+                    self.keep_format_result(mark, rendered)?
                 }
             };
-            self.heap.keep(part);
             parts.push(part);
         }
         Ok(())
@@ -3954,6 +4051,7 @@ impl Context {
             }
             Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
             Expr::FString(fstring) => {
+                let mark = self.heap.temporary_mark();
                 let mut parts = Vec::new();
                 for part in fstring.value.iter() {
                     match part {
@@ -3966,7 +4064,8 @@ impl Context {
                         }
                     }
                 }
-                self.join_source_format(parts)
+                let result = self.join_source_format(parts)?;
+                self.keep_format_result(mark, result)
             }
             Expr::TString(template) => {
                 let strings = code.literals[&expr.range()];

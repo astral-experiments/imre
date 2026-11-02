@@ -5,7 +5,7 @@ import functools
 import typing as _typing
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from collections import defaultdict as _defaultdict
-from annotationlib import ForwardRef
+from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
 from typing import Any, Callable, Generic, Protocol, TypeVar
 
@@ -60,22 +60,11 @@ class _TypedDictMeta(type):
     __instancecheck__ = __subclasscheck__
 
 
-def _typeddict_forward_ref(arg, module=None, owner=None, *, is_class=False):
-    from annotationlib import ForwardRef
-    # typing._make_forward_ref eagerly checks the syntax, without resolving names.
-    source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
-    try:
-        _typing._validate_forward_ref(source)
-    except SyntaxError:
-        raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
-    return ForwardRef(arg, module=module, owner=owner, is_class=is_class)
-
-
 def _typeddict_field(value, module, owner=None):
     if value is None:
         return type(None)
     if isinstance(value, str):
-        return _typeddict_forward_ref(value, module, owner)
+        return _make_forward_ref(value, module, owner)
     message = "TypedDict('Name', {f0: t0, f1: t1, ...}); each t must be a type"
     return _type_check(value, message)
 
@@ -849,7 +838,7 @@ def _type_check(arg, message, *, allow_special_forms=False):
 def _typeddict_qualifier_alias(form, parameters):
     item = _type_check(parameters, f"{form._name} accepts only a single type.")
     if isinstance(item, str):
-        item = _typeddict_forward_ref(item)
+        item = _make_forward_ref(item)
     return _typing._GenericAlias(form, (type(None) if item is None else item,))
 
 
@@ -1273,7 +1262,7 @@ def Annotated(self, *parameters):
         raise TypeError("Annotated[...] should not be used with an unpacked TypeVarTuple")
     origin = _type_check(origin, "Annotated[t, ...]: t must be a type.", allow_special_forms=True)
     if isinstance(origin, str):
-        origin = _typeddict_forward_ref(origin, is_class=True)
+        origin = _make_forward_ref(origin, is_class=True)
     return _AnnotatedAlias(type(None) if origin is None else origin, parameters[1:])
 
 
@@ -1295,7 +1284,7 @@ def _hint_scope(params, globalns, localns, is_class):
     return globalns, localns
 
 
-def _resolve_hint(value, globalns, localns, owner, seen, include_extras):
+def _resolve_hint(value, globalns, localns, owner, seen, include_extras, forwardrefs=False):
     from annotationlib import ForwardRef
     from types import GenericAlias
     if isinstance(value, str):
@@ -1310,14 +1299,21 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras):
             if module is not None:
                 globalns = module.__dict__
         source = f'({expr},)[0]' if expr.lstrip().startswith('*') else expr
-        result = _typing._eval_type_expression(source, globalns, localns)
-        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras)
+        try:
+            result = _typing._eval_type_expression(source, globalns, localns)
+        except NameError as error:
+            if forwardrefs and error.name == expr:
+                from inspect import _signature_identifier
+                if _signature_identifier(expr):
+                    return value
+            raise
+        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras, forwardrefs)
 
     origin = _typing.get_origin(value)
     if origin is None or origin is Literal:
         return value
     args = getattr(value, '__args__', ())
-    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras) for a in args)
+    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, forwardrefs) for a in args)
     if not include_extras:
         for name in ('Required', 'NotRequired', 'ReadOnly'):
             if origin is getattr(_typing, name, None):
@@ -1339,7 +1335,9 @@ def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, fo
     if getattr(obj, '__no_type_check__', None):
         return {}
     from annotationlib import Format, _get_value_annotations
-    if format is not None and format != Format.VALUE:
+    from types import FunctionType
+    forwardrefs = format == Format.FORWARDREF and isinstance(obj, FunctionType)
+    if format is not None and format != Format.VALUE and not forwardrefs:
         if format == Format.VALUE_WITH_FAKE_GLOBALS:
             raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
         if format not in (Format.STRING, Format.FORWARDREF):
@@ -1366,7 +1364,19 @@ def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, fo
                 hints[name] = type(None) if result is None else result
         return hints
 
-    hints = _get_value_annotations(obj)
+    if forwardrefs:
+        try:
+            hints = _get_value_annotations(obj)
+        except Exception:
+            annotate = obj.__annotate__
+            if annotate is None:
+                raise
+            hints = annotate(format)
+            if not isinstance(hints, dict):
+                raise ValueError(f"{obj!r}.__annotate__ returned a non-dict")
+            hints = dict(hints)
+    else:
+        hints = _get_value_annotations(obj)
     if globalns is None:
         from types import ModuleType
         if isinstance(obj, ModuleType):
@@ -1384,7 +1394,7 @@ def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, fo
         localns = globalns
     globalns, localns = _hint_scope(getattr(obj, '__type_params__', ()), globalns, localns, False)
     for name, value in hints.items():
-        result = _resolve_hint(value, globalns, localns, obj, (), include_extras)
+        result = _resolve_hint(value, globalns, localns, obj, (), include_extras, forwardrefs)
         hints[name] = type(None) if result is None else result
     return hints
 

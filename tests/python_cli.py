@@ -1151,6 +1151,15 @@ def main():
                 expected.stderr,
             )
 
+        locale_script = root / "get_locale.py"
+        locale_script.write_text(
+            "from _locale import LC_ALL, setlocale\n"
+            "from locale import getlocale\n"
+            "setlocale(LC_ALL, 'C')\n"
+            "print(getlocale(), getlocale(category=LC_ALL))\n"
+        )
+        compare("-B", locale_script)
+
         if os.name == "posix":
             compare(
                 "-IB", "-c",
@@ -1777,6 +1786,16 @@ def report(text):
             "decoder = __import__(''.join(('co', 'decs'))).IncrementalDecoder\n"
             "print(decoder.__module__, decoder('replace').errors, decoder().getstate())",
         )
+        compare(
+            "-IB", "-c",
+            "import sys\n"
+            "print(2 | 4, 'typing' in sys.modules)\n"
+            "union = int\n"
+            "union |= str\n"
+            "union |= 'C'\n"
+            "reference = union.__args__[-1]\n"
+            "print(type(reference).__name__, reference.__forward_arg__)",
+        )
         monitoring_entry = root / "monitoring_entry.py"
         (root / "monitoring_helper.py").write_text(
             "from sys import monitoring\ndef line_mask():\n    return monitoring.events.LINE\n"
@@ -1845,6 +1864,7 @@ def report(text):
             "boxed_temporary_file.py",
             "boxed_spooled_temporary_file.py",
             "boxed_named_temporary_file.py",
+            "boxed_temporary_directory.py",
             "boxed_tempfile_default_directory.py",
             "boxed_tempfile_mktemp.py",
             "boxed_tempfile_wrapper.py",
@@ -1911,7 +1931,9 @@ def report(text):
             "boxed_selector_wide_fds.py",
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
+            "boxed_os_environb.py",
             "boxed_os_file_descriptors.py",
+            "boxed_buffered_readlines.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_waitpid.py",
             "boxed_os_stat.py",
@@ -1938,7 +1960,9 @@ def report(text):
             "boxed_any_generator.py",
             "boxed_global.py",
             "boxed_configparser.py",
+            "boxed_getopt.py",
             "boxed_logging.py",
+            "boxed_logging_manager.py",
             "boxed_logging_formatter.py",
             "boxed_logging_file.py",
             "boxed_logging_adapter.py",
@@ -2123,6 +2147,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_os_scandir.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_fcntl.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             shim = root / "secrets_entropy.so"

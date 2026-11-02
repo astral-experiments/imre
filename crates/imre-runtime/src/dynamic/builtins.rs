@@ -107,6 +107,7 @@ const FUNCTIONS: &[&str] = &[
     "format",
     "compile",
     "exec",
+    "eval",
     "iter",
     "next",
 ];
@@ -205,7 +206,8 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
-    (matches!(owner, "object" | "float" | "int" | "str") || is_exception(owner)).then_some(owner)
+    (matches!(owner, "object" | "dict" | "float" | "int" | "str") || is_exception(owner))
+        .then_some(owner)
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
@@ -300,6 +302,7 @@ pub(super) fn is_enum_base(name: &str) -> bool {
 }
 
 pub(super) const DICT_METHODS: &[&str] = &[
+    "__new__",
     "__repr__",
     "__init__",
     "__len__",
@@ -427,7 +430,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Float(_) if matches!(attr, "__repr__" | "as_integer_ratio") => "float",
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
-        Value::DictIterator(iter) if DictIterator::METHODS.contains(&attr) => iter.class_name(),
+        Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
+            iter.class_name()
+        }
         Value::RangeIterator(iter)
             if matches!(attr, "__iter__" | "__next__" | "__length_hint__") =>
         {
@@ -601,6 +606,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "read"
                     | "fileno"
                     | "readline"
+                    | "readlines"
                     | "readinto"
                     | "write"
                     | "flush"
@@ -929,6 +935,10 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
+        if scope != NONE && matches!(self.heap.get(callable), Value::Native(name) if name == "eval")
+        {
+            return self.eval_source(scope, &args, &kwargs);
+        }
         if scope != NONE
             && args.is_empty()
             && kwargs.is_empty()
@@ -1287,8 +1297,9 @@ pub(super) fn call(
         "compile" => {
             positional(name, kwargs)?;
             arity(name, args, 3, 3)?;
-            ctx.compile_source(args[0], args[1], args[2])
+            ctx.compile_source(args[0], args[1], args[2], false)
         }
+        "eval" => ctx.eval_source(ctx.heap.current_scope(), args, kwargs),
         "exec" => {
             positional(name, kwargs)?;
             arity(name, args, 2, 3)?;

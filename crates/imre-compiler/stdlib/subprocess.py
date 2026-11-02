@@ -28,18 +28,27 @@ class Popen:
     _handle = None
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
-                 stderr=None, *, close_fds=True, cwd=None, env=None, restore_signals=True):
+                 stderr=None, *, close_fds=True, cwd=None, env=None, restore_signals=True,
+                 pipesize=-1):
         if executable is not None:
             raise NotImplementedError("an alternate subprocess executable is unsupported")
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
             raise TypeError("bufsize must be an integer")
+        # Boxed exact ints may not share CPython's cached -2 object.
+        if stdout is STDOUT or (type(stdout) is int and stdout == STDOUT):
+            raise ValueError("STDOUT can only be used for stderr")
+        if pipesize is None:
+            pipesize = -1
+        if not isinstance(pipesize, int):
+            raise TypeError("pipesize must be an integer")
         _cleanup()
         self.args = args
+        self.pipesize = pipesize
         self._sigint_wait_secs = 0.25
         self._handle = _process.launch(args, stdin, stdout, stderr, close_fds,
-                                       restore_signals, cwd, env, bufsize)
+                                       restore_signals, cwd, env, bufsize, pipesize)
         try:
             self.stdin = _process.pipe(self._handle, 0)
             self.stdout = _process.pipe(self._handle, 1)

@@ -41,6 +41,7 @@ impl BoxedPopen {
         cwd: Option<Vec<u8>>,
         env: Option<ByteEnvironment>,
         bufsize: Int,
+        pipesize: Int,
         warn_line_buffering: &mut dyn FnMut() -> Result<()>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
@@ -78,6 +79,7 @@ impl BoxedPopen {
             failure_site: Some(&mut site),
             warn_line_buffering: Some(warn_line_buffering),
             environment: env,
+            pipe_size: Some((pipesize.0, 2)),
             ..Default::default()
         };
         for (i, ((mode, fd), shift)) in streams.iter().zip([12, 0, 4]).enumerate() {
@@ -96,7 +98,7 @@ impl BoxedPopen {
         }
         // Reserve the public handle before a successful spawn can leave a child to reap.
         let mut owner = triomphe::UniqueArc::try_new_uninit().map_err(|_| Error::allocation())?;
-        // SAFETY: argv, cwd, buffer size and descriptor integers stay rooted through spawn.
+        // SAFETY: argv, cwd, both size integers and descriptor integers stay rooted through spawn.
         let process = unsafe { spawn(&config, extras) }.map_err(|error| BoxedLaunchError {
             error,
             directory: site.map(|(site, _)| matches!(site, launch_error::Site::Directory)),

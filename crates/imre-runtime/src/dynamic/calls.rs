@@ -773,7 +773,7 @@ impl Context {
                         })
                         || name.starts_with("collections.defaultdict.")
                         || name.starts_with("property.")
-                        || name.starts_with("dict.")
+                        || (name.starts_with("dict.") && name != "dict.__new__")
                         || name.starts_with("abc.")
                         || name
                             .strip_prefix("str.")
@@ -2054,6 +2054,9 @@ impl Context {
                     "__text_signature__" if symbol == "_thread.start_new_thread" => {
                         return Ok(self.text("($module, function, args, kwargs={}, /)"));
                     }
+                    "__text_signature__" if symbol == "fcntl.fcntl" => {
+                        return Ok(self.text("($module, fd, cmd, arg=0, /)"));
+                    }
                     "__doc__" if symbol == "resource.getrlimit" => return Ok(NONE),
                     "__text_signature__" if symbol == "resource.getrlimit" => {
                         return Ok(self.text("($module, resource, /)"));
@@ -2509,6 +2512,11 @@ impl Context {
             }
             Value::DirEntry(ref entry) if name == "name" => return Ok(entry.name),
             Value::DirEntry(ref entry) if name == "path" => return Ok(entry.path),
+            Value::DirEntry(_) if matches!(name, "__new__" | "__reduce__" | "__reduce_ex__") => {
+                let method = self.builtin(&format!("object.{name}"));
+                let class = self.builtin(stdlib::os::scandir::ENTRY);
+                return self.bind_attribute(method, obj, class);
+            }
             Value::Native(ref class)
                 if matches!(
                     class.as_str(),
@@ -2516,6 +2524,11 @@ impl Context {
                 ) =>
             {
                 match name {
+                    "__new__" | "__reduce__" | "__reduce_ex__"
+                        if class == stdlib::os::scandir::ENTRY =>
+                    {
+                        return Ok(self.builtin(&format!("object.{name}")));
+                    }
                     "name" if class == stdlib::os::scandir::ENTRY => {
                         return Ok(self.readonly_member(stdlib::os::scandir::ENTRY, "name"));
                     }
@@ -3020,7 +3033,7 @@ impl Context {
                 return Ok(self.builtin(&format!("object.{name}")));
             }
             Value::Native(ref class)
-                if DictIterator::METHODS.contains(&name)
+                if DictIterator::methods(class).contains(&name)
                     && DictIterator::class(class).is_some() =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
@@ -3278,6 +3291,9 @@ impl Context {
         }
         if name == "__new__" {
             match self.heap.get(base) {
+                Value::Dict(_) | Value::DefaultDict { .. } => {
+                    return Ok(self.builtin("dict.__new__"));
+                }
                 Value::Int(_) => return Ok(self.builtin("int.__new__")),
                 Value::Str(_) | Value::SurrogateStr(_) => return Ok(self.builtin("str.__new__")),
                 Value::Class { .. } | Value::Instance { .. } => {
@@ -4412,7 +4428,10 @@ impl Context {
         if let Value::Native(name) = self.heap.get(class)
             && matches!(
                 name.as_str(),
-                KEY_WRAPPER | value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE
+                KEY_WRAPPER
+                    | value::REGEX_PATTERN_TYPE
+                    | value::REGEX_MATCH_TYPE
+                    | stdlib::os::scandir::ENTRY
             )
         {
             return Err(Error::new(
@@ -4495,6 +4514,33 @@ impl Context {
             member_values: None,
             memory_stream: None,
         }))
+    }
+
+    /// Create empty mapping storage for the requested type without running its initializer.
+    fn new_dict(&mut self, args: &[Id]) -> Result<Id> {
+        let Some(&class) = args.first() else {
+            return Err(Error::new(
+                "TypeError",
+                "dict.__new__(): not enough arguments",
+            ));
+        };
+        let dict = self.builtin("dict");
+        if !self.direct_subclass(class, dict) {
+            return Err(self.invalid_new_subtype("dict", class));
+        }
+        let storage = if self.has_base(class, "collections.defaultdict") {
+            self.alloc(Value::DefaultDict {
+                factory: NONE,
+                entries: Default::default(),
+            })
+        } else {
+            self.dict(Vec::new())
+        };
+        if matches!(self.heap.get(class), Value::Class { .. }) {
+            Ok(self.instance(class, Some(storage)))
+        } else {
+            Ok(storage)
+        }
     }
 
     /// Describe a receiver rejected by a builtin allocator.
@@ -4678,12 +4724,13 @@ impl Context {
             }
             Value::Native(ref name)
                 if let Some((owner, slot)) = name.split_once('.')
-                    && DictIterator::METHODS.contains(&slot)
+                    && DictIterator::methods(owner).contains(&slot)
                     && DictIterator::class(owner).is_some() =>
             {
                 self.iterator_method(owner, slot, &args, &kwargs)
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
+            Value::Native(name) if name == "dict.__new__" => self.new_dict(&args),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),
             Value::Native(name) if name == "tuple.__new__" => {
                 if args.first().is_some_and(|&class| matches!(self.heap.get(class), Value::Native(name) if name == stdlib::flags::TYPE)) {
@@ -5111,15 +5158,6 @@ impl Context {
                         .collect::<Vec<_>>();
                     self.new_float(&positional, &kwargs)?
                 } else {
-                    let dictionary = if self.has_base(callable, "collections.defaultdict") {
-                        Some(self.alloc(Value::DefaultDict {
-                            factory: NONE,
-                            entries: Default::default(),
-                        }))
-                    } else {
-                        self.has_base(callable, "dict")
-                            .then(|| self.dict(Vec::new()))
-                    };
                     let storage = if rlock_subclass {
                         Some(self.alloc(Value::HandlerLock(Default::default())))
                     } else if self.has_base(callable, "list") {
@@ -5136,7 +5174,7 @@ impl Context {
                     } else {
                         None
                     };
-                    let object = self.instance(callable, dictionary);
+                    let object = self.instance(callable, None);
                     if let Value::Instance { scalar, .. } = self.heap.get_mut(object) {
                         *scalar = storage;
                     }

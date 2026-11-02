@@ -118,6 +118,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/tempfile/names.py"),
                 "\n",
                 include_str!("../../stdlib/tempfile/boxed_spool.py"),
+                "\n",
+                include_str!("../../stdlib/tempfile/directory.py"),
             ),
         )),
         "doctest" => Some((

@@ -14,6 +14,30 @@ def ordered_dictionary():
     dense[0] = "updated"
     assert list(items) == [(0, "updated"), (2, "two")]
 
+    for view in (dense.keys(), dense.values(), dense.items()):
+        for direction in (iter, reversed):
+            cursor = direction(view)
+            expected = list(direction(view))[1:]
+            next(cursor)
+            rebuild, args = cursor.__reduce__()
+            assert rebuild is iter and args == (expected,)
+            assert list(rebuild(*args)) == list(cursor) == expected
+            assert cursor.__reduce__() == (iter, ([],))
+    invalid = iter(dense)
+    dense.move_to_end(2)
+    try:
+        invalid.__reduce__()
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("reduction ignored out-of-order keys")
+    try:
+        next(invalid)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("failed snapshot consumed the live cursor")
+
     class NoKeys(OrderedDict):
         def keys(self):
             raise AssertionError("comparison called keys")
@@ -36,6 +60,24 @@ def ordered_dictionary():
     assert endpoints.popitem(last=False) == ("a", 1)
     assert endpoints.popitem() == ("c", 3)
     assert list(endpoints.items()) == [("b", 2)]
+    class Missing(OrderedDict):
+        def __missing__(self, key):
+            raise AssertionError("consulted __missing__")
+
+        def __setitem__(self, key, value):
+            super().__setitem__(key, [value])
+
+    mapping = Missing()
+    assert mapping.setdefault(key="a", default=1) == 1
+    assert mapping.setdefault(key="a", default=2) == [1]
+    assert mapping.pop(key="a") == [1]
+    assert mapping.pop(key="a", default=None) is None
+    try:
+        mapping.pop([], default=3)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("skipped hashing on an empty OrderedDict")
     source.clear()
     source["self"] = source
     assert repr(source) == "OrderedDict({'self': ...})"
@@ -222,6 +264,7 @@ def current():
 
     fromkeys_construction()
     ordered_dictionary()
+    allocate_without_init()
     mapping_patterns()
     counts = Counter(a=3)
     clone = copy(counts)
@@ -758,3 +801,32 @@ def missing_key_errors():
         raise AssertionError("lookup suppressed a hashing exception")
     assert table["absent"] == 12
     assert calls == ["absent"]
+
+
+def allocate_without_init():
+    from collections import defaultdict
+
+    class Derived(dict):
+        def __init__(self):
+            raise AssertionError("allocator called subclass initializer")
+
+    class Defaults(defaultdict):
+        pass
+
+    for cls in (dict, Derived, defaultdict, Defaults):
+        value = dict.__new__(cls, [("ignored", 1)], extra=2)
+        assert type(value) is cls and not value
+        assert cls.__new__ is value.__new__ is dict.__new__
+        assert value.__new__.__self__ is dict
+        value["entry"] = 3
+        assert value["entry"] == 3
+        if isinstance(value, defaultdict):
+            assert value.default_factory is None
+
+    for args in ((), (object,), (17,)):
+        try:
+            dict.__new__(*args)
+        except TypeError as exc:
+            print(exc)
+        else:
+            raise AssertionError("dict allocator accepted an invalid subtype")

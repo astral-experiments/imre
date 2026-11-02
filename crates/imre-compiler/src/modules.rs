@@ -294,6 +294,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_gettext_locale.py",
             include_str!("../stdlib/_imre_gettext_locale.py"),
         )),
+        "getopt" => Some(("getopt.py", include_str!("../stdlib/getopt.py"))),
         "gettext" => Some(("gettext.py", include_str!("../stdlib/gettext.py"))),
         "uuid" => Some(("uuid.py", include_str!("../stdlib/uuid.py"))),
         _ => None,
@@ -397,6 +398,7 @@ pub(crate) enum IntrinsicModule {
     Inspect,
     Linecache,
     Locale,
+    LocaleNative,
     Functools,
     Fnmatch,
     Time,
@@ -405,6 +407,7 @@ pub(crate) enum IntrinsicModule {
     TomliW,
     Shutil,
     Resource,
+    Fcntl,
     Random,
     Secrets,
     Sysconfig,
@@ -858,7 +861,8 @@ impl IntrinsicModule {
             "_contextvars" => Some(Self::ContextVarsNative),
             "inspect" => Some(Self::Inspect),
             "linecache" => Some(Self::Linecache),
-            "locale" | "_locale" => Some(Self::Locale),
+            "locale" => Some(Self::Locale),
+            "_locale" => Some(Self::LocaleNative),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
             "fnmatch" => Some(Self::Fnmatch),
@@ -867,6 +871,7 @@ impl IntrinsicModule {
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
+            "fcntl" if cfg!(target_os = "linux") => Some(Self::Fcntl),
             "resource" if cfg!(target_os = "linux") => Some(Self::Resource),
             "random" => Some(Self::Random),
             "secrets" => Some(Self::Secrets),
@@ -1402,7 +1407,38 @@ impl IntrinsicModule {
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
             (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
-            (Self::Locale, "getencoding") => Intrinsic::SysEncoding(SysEncoding::Locale),
+            (Self::Locale | Self::LocaleNative, "getencoding") => {
+                Intrinsic::SysEncoding(SysEncoding::Locale)
+            }
+            (Self::Locale, "getlocale") => Intrinsic::ObjectRuntimeExport("locale.getlocale"),
+            (Self::Locale, "setlocale") => Intrinsic::ObjectRuntimeExport("locale.setlocale"),
+            (Self::LocaleNative, "setlocale") => {
+                Intrinsic::ObjectRuntimeExport("_locale.setlocale")
+            }
+            (Self::Locale | Self::LocaleNative, "Error") => {
+                Intrinsic::ObjectRuntimeExport("_locale.Error")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_ALL") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_ALL")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_COLLATE") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_COLLATE")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_CTYPE") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_CTYPE")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_MESSAGES") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_MESSAGES")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_MONETARY") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_MONETARY")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_NUMERIC") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_NUMERIC")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_TIME") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_TIME")
+            }
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding(SysEncoding::Default),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding(SysEncoding::Filesystem),
             (Self::Sys, "getfilesystemencodeerrors") => {
@@ -1658,6 +1694,8 @@ impl IntrinsicModule {
                 "socket" => "_socket.socket",
                 "socketpair" => "_socket.socketpair",
                 "close" => "_socket.close",
+                "getservbyname" => "_socket.getservbyname",
+                "getservbyport" => "_socket.getservbyport",
                 "gethostname" => "_socket.gethostname",
                 "gethostbyname" => "_socket.gethostbyname",
                 "gethostbyaddr" => "_socket.gethostbyaddr",
@@ -1716,6 +1754,12 @@ impl IntrinsicModule {
             }
             (Self::Socket, "socketpair") => Intrinsic::ObjectRuntimeExport("socket.socketpair"),
             (Self::Socket, "close") => Intrinsic::ObjectRuntimeExport("socket.close"),
+            (Self::Socket, "getservbyname") => {
+                Intrinsic::ObjectRuntimeExport("socket.getservbyname")
+            }
+            (Self::Socket, "getservbyport") => {
+                Intrinsic::ObjectRuntimeExport("socket.getservbyport")
+            }
             (Self::Socket, "gethostname") => Intrinsic::ObjectRuntimeExport("socket.gethostname"),
             (Self::Socket, "gethostbyname") => {
                 Intrinsic::ObjectRuntimeExport("socket.gethostbyname")
@@ -1931,6 +1975,13 @@ impl IntrinsicModule {
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
+            (Self::Fcntl, "fcntl") => Intrinsic::ObjectRuntimeExport("fcntl.fcntl"),
+            (Self::Fcntl, "F_GETFD") => Intrinsic::ObjectRuntimeExport("fcntl.F_GETFD"),
+            (Self::Fcntl, "F_SETFD") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETFD"),
+            (Self::Fcntl, "F_GETFL") => Intrinsic::ObjectRuntimeExport("fcntl.F_GETFL"),
+            (Self::Fcntl, "F_SETFL") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETFL"),
+            (Self::Fcntl, "F_GETPIPE_SZ") => Intrinsic::ObjectRuntimeExport("fcntl.F_GETPIPE_SZ"),
+            (Self::Fcntl, "F_SETPIPE_SZ") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETPIPE_SZ"),
             (Self::Resource, "getrlimit") => Intrinsic::ObjectRuntimeExport("resource.getrlimit"),
             (Self::Resource, "RLIMIT_STACK") => {
                 Intrinsic::ObjectRuntimeExport("resource.RLIMIT_STACK")
@@ -2019,6 +2070,9 @@ impl IntrinsicModule {
             }
             (Self::GenericPath | Self::PosixPath, "getmtime") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.getmtime")
+            }
+            (Self::GenericPath | Self::PosixPath, "isjunction") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.isjunction")
             }
             (Self::GenericPath | Self::PosixPath, "lexists") => {
                 Intrinsic::ObjectRuntimeExport("genericpath.lexists")
@@ -3654,14 +3708,18 @@ impl<'a> Loader<'a> {
                                     && value_name(stmt).is_some()
                                     && module_value(stmt).is_some_and(literal_export))
                         });
+                        let nested_source = module.name.contains('.') && !module.bundled;
                         let ordered = !module.is_package
-                            && module.name.contains('.')
-                            && !module.bundled
                             && module.archive.is_none()
                             && prefix.clone().all(|stmt| {
                                 module_name_guard(stmt)
-                                    || value_name(stmt).is_some() && module_value(stmt).is_some()
-                                    || matches!(stmt, ast::Stmt::Expr(_))
+                                    || value_name(stmt).is_some()
+                                        && module_value(stmt).is_some_and(|value| {
+                                            nested_source
+                                                || literal_export(value)
+                                                    && module.rebound_target(id, stmt).is_none()
+                                        })
+                                    || nested_source && matches!(stmt, ast::Stmt::Expr(_))
                             });
                         if id == 0 || !simple && !ordered {
                             return Err(self.modules[id].error(

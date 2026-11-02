@@ -16,6 +16,8 @@ mod contextvars;
 mod csv;
 pub(super) mod datetime;
 mod email;
+#[cfg(target_os = "linux")]
+mod fcntl;
 mod files;
 pub(super) mod fixed_structseq;
 pub(super) mod flags;
@@ -110,7 +112,7 @@ pub(super) fn is_module(name: &str) -> bool {
 pub(super) fn has_lazy_attributes(name: &str) -> bool {
     if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport")
         || cfg!(all(unix, not(target_os = "linux"))) && name == "_signal"
-        || cfg!(target_os = "linux") && name == "resource"
+        || cfg!(target_os = "linux") && matches!(name, "resource" | "fcntl")
     {
         return true;
     }
@@ -390,6 +392,12 @@ fn path_text(ctx: &mut Context, path: &Path) -> Result<Id> {
 }
 
 pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<Id> {
+    #[cfg(target_os = "linux")]
+    if module == "fcntl"
+        && let Some(value) = fcntl::constant(name)
+    {
+        return Ok(ctx.int(i64::from(value)));
+    }
     if module == "_imre_subprocess" && subprocess::function(name) {
         return Ok(ctx.builtin(&format!("{module}.{name}")));
     }
@@ -505,8 +513,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "_count_elements"
             | "_ordered_dict_equal"
             | "_ordered_dict_move_to_end"
+            | "_ordered_dict_pop"
             | "_ordered_dict_popitem"
             | "_ordered_dict_repr"
+            | "_ordered_dict_setdefault"
             | "_ordered_dict_view",
         ) => ctx.builtin(&format!("_collections.{name}")),
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
@@ -569,6 +579,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("hashlib", "algorithms_available" | "algorithms_guaranteed") => {
             return hashlib::algorithms(ctx);
         }
+        #[cfg(target_os = "linux")]
+        ("fcntl", "fcntl") => ctx.builtin("fcntl.fcntl"),
         #[cfg(target_os = "linux")]
         ("resource", "getrlimit") => ctx.builtin("resource.getrlimit"),
         #[cfg(target_os = "linux")]
@@ -1265,6 +1277,10 @@ pub(super) fn call(
             // As in typed SysJitPredicate, Imre compiles before the process starts.
             _ => FALSE,
         });
+    }
+    #[cfg(target_os = "linux")]
+    if name == "fcntl.fcntl" {
+        return fcntl::call(ctx, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "resource.getrlimit" {
@@ -2089,7 +2105,7 @@ pub(super) fn call(
         "subprocess.run" => (1, &["text", "capture_output", "stdout", "stderr", "check"]),
         "file.seek" => (3, &["whence"]),
         "file.__exit__" => (4, &[]),
-        "struct.unpack" | "file.read" | "file.read1" | "file.readline"
+        "struct.unpack" | "file.read" | "file.read1" | "file.readline" | "file.readlines"
         | "file.readinto" | "file.write" | "warnings.warn" => (2, &[]),
         "match.group" => (usize::MAX, &[]),
         "collections.defaultdict.__missing__" => (2, &[]),
