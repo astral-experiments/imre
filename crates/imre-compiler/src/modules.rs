@@ -2517,6 +2517,12 @@ impl IntrinsicModule {
             }
             (Self::Collections | Self::CollectionsNative, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Collections | Self::CollectionsNative, "deque") => Intrinsic::Deque,
+            (Self::Collections | Self::CollectionsNative, "_deque_iterator") => {
+                Intrinsic::ObjectRuntimeExport("collections._deque_iterator")
+            }
+            (Self::CollectionsNative, "_deque_reverse_iterator") => {
+                Intrinsic::ObjectRuntimeExport("_collections._deque_reverse_iterator")
+            }
             (Self::Collections, "ChainMap") => Intrinsic::ChainMap,
             (Self::Collections | Self::CollectionsNative, "OrderedDict") => Intrinsic::OrderedDict,
             (Self::Collections, "namedtuple") => Intrinsic::NamedTuple,

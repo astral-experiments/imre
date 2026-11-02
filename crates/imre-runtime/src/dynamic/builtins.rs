@@ -756,6 +756,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Filter { .. } if matches!(attr, "__iter__" | "__next__") => "filter",
         Value::Enumerate { .. } if matches!(attr, "__iter__" | "__next__") => "enumerate",
         Value::Count { .. } if matches!(attr, "__iter__" | "__next__") => "itertools.count",
+        Value::Deque(_) if attr == "__reduce_ex__" => "object",
         Value::Deque(_) if super::deque::member(attr).is_some() => super::deque::CLASS,
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
@@ -1952,7 +1953,7 @@ pub(super) fn call(
                 return Ok(ctx.alloc(Value::RangeIterator(range.iter(true))));
             }
             if let Value::Deque(ring) = ctx.heap.get(object) {
-                let iter = super::deque::iterator(object, ring, true);
+                let iter = super::deque::iterator(object, ring, true, 0);
                 return Ok(ctx.alloc(iter));
             }
             let start = match ctx.heap.get(object) {
