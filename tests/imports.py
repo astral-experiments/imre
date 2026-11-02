@@ -241,7 +241,7 @@ REJECTED = {
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
     "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
-    "opcode_bytecode_operation": ({"main.py": "from _opcode import stack_effect\n"}, "stack_effect"),
+    "opcode_unknown_operation": ({"main.py": "from _opcode import not_an_opcode_operation\n"}, "not_an_opcode_operation"),
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
     "unstubbed_builtin_shadow": ({"main.py": "import _types\n", "_types.py": HELPER}, "standard-library"),
     "frozen_shadow": ({"main.py": "import __hello__\n", "__hello__.py": HELPER}, "standard-library"),
@@ -881,11 +881,27 @@ def main() -> None:
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 checks += 1
 
+        late_import = temporary / "late_import.py"
+        late_import.write_text(
+            "import builtins\nimport sys\nprint(builtins.__import__(sys.argv[1]).opmap['POP_TOP'])\n"
+        )
+        for level in args.opt_levels:
+            executable = temporary / f"late-opcode-{level}"
+            require_success(run([compiler, "build", str(late_import), "-o", str(executable),
+                                 "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                                 "--runtime-imports", "--no-cache"], temporary))
+            for module in ("opcode", "_opcode_metadata"):
+                result = run([str(executable), module], temporary)
+                require_success(result)
+                assert result.stdout == "31\n", (module, level, result.stdout)
+                checks += 1
+
         # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
         for level in args.opt_levels:
             for fixture, route, output in [
                 ("opcode_flags", [], "0\n0\nno bytecode specialization\n"),
                 ("opcode_stack_effect", [], "-1\n"),
+                ("opcode_module", [], "opcode module OK\n"),
                 ("opcode_operations", [], "opcode operations OK\n"),
                 ("opcode_operations", ["--runtime-imports"], "opcode operations OK\n"),
             ]:

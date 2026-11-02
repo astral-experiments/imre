@@ -139,6 +139,11 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
+        "opcode" => Some(("opcode.py", include_str!("../stdlib/opcode.py"))),
+        "_opcode_metadata" => Some((
+            "_opcode_metadata.py",
+            include_str!("../stdlib/_opcode_metadata.py"),
+        )),
         "warnings" => Some((
             "warnings.py",
             include_str!(
