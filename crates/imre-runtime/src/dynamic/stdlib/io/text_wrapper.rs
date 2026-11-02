@@ -151,36 +151,24 @@ fn validate_newline(value: &str) -> Result<&'static str> {
 }
 
 pub(in crate::dynamic::stdlib) fn text_options(
-    ctx: &Context,
+    ctx: &mut Context,
     encoding: Id,
     errors: Id,
     newline: Id,
 ) -> Result<(String, Option<&'static str>, StreamCodec)> {
-    let string = |id, key: &str| -> Result<Option<String>> {
-        if id == NONE {
-            return Ok(None);
+    // Argument Clinic converts encoding and newline before __init__ checks errors.
+    for (id, name) in [
+        (encoding, "encoding"),
+        (newline, "newline"),
+        (errors, "errors"),
+    ] {
+        if id != NONE {
+            super::file_io::check_string_arg(ctx, id, "TextIOWrapper", name, "str or None")?;
         }
-        let v = ctx.str_value(id).map_err(|_| {
-            Error::new(
-                "TypeError",
-                format!(
-                    "TextIOWrapper() argument '{key}' must be str or None, not {}",
-                    ctx.type_name(id)
-                ),
-            )
-        })?;
-        if v.contains('\0') {
-            return Err(Error::new("ValueError", "embedded null character"));
-        }
-        Ok(Some(v.to_owned()))
-    };
-    let encoding = string(encoding, "encoding")?;
-    let encoding = crate::sys::file_encoding(encoding.as_deref()).into_owned();
-    string(errors, "errors")?;
-    let newline = string(newline, "newline")?
-        .as_deref()
-        .map(validate_newline)
-        .transpose()?;
+    }
+    let string = |id| (id != NONE).then(|| ctx.str_value(id)).transpose();
+    let encoding = crate::sys::file_encoding(string(encoding)?).into_owned();
+    let newline = string(newline)?.map(validate_newline).transpose()?;
     let codec = StreamCodec::lookup(&encoding)?;
     Ok((encoding, newline, codec))
 }
