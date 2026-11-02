@@ -670,7 +670,9 @@ pub(super) fn descriptor_get(
         )),
         [NONE] | [NONE, NONE] => Err(Error::new("TypeError", "__get__(None, None) is invalid")),
         [receiver] | [receiver, _] => {
-            if let Some(slot) = slot {
+            if let Some(slot) = slot
+                && !matches!(ctx.heap.get(descriptor), Value::Native(symbol) if stdlib::datetime::clock_classmethod(symbol))
+            {
                 return slot.bind(ctx, descriptor, receiver);
             }
             if let Value::HashMethod { owner, .. } = *ctx.heap.get(descriptor) {
@@ -683,6 +685,9 @@ pub(super) fn descriptor_get(
                 None | Some(&NONE) => ctx.exact_type(receiver)?,
                 Some(&owner) => owner,
             };
+            if let Some(slot) = slot {
+                stdlib::datetime::validate_classmethod_receiver(ctx, slot.owner, slot.name, owner)?;
+            }
             ctx.bind_attribute(descriptor, receiver, owner)
         }
         _ => Err(Error::new(
