@@ -1442,7 +1442,9 @@ impl IntrinsicModule {
             (Self::Threading, "local") | (Self::Thread, "_local") => {
                 Intrinsic::ObjectRuntimeExport("_thread._local")
             }
-            (Self::Thread, "RLock") => Intrinsic::ObjectRuntimeExport("_thread.RLock"),
+            (Self::Thread | Self::Functools, "RLock") => {
+                Intrinsic::ObjectRuntimeExport("_thread.RLock")
+            }
             (Self::WeakRef, "WeakKeyDictionary") => {
                 Intrinsic::ObjectRuntimeExport("weakref.WeakKeyDictionary")
             }
