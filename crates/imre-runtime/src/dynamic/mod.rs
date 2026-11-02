@@ -280,6 +280,8 @@ impl Context {
             | ("bytearray", Value::ByteArray(_))
             | ("set", Value::Set { frozen: false, .. })
             | ("frozenset", Value::Set { frozen: true, .. })
+            | (value::REGEX_PATTERN_TYPE, Value::RegexPattern(_))
+            | (value::REGEX_MATCH_TYPE, Value::RegexMatch(_))
             | (thread_local::CLASS, Value::ThreadLocal(_)) => true,
             _ => false,
         }
