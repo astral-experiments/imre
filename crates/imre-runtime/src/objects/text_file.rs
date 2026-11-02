@@ -115,6 +115,20 @@ impl TextFile {
         unsafe { self.0.0.with_mut(|storage| storage.file_mut().write(value)) }
     }
 
+    pub(crate) fn has_encoding(&self) -> bool {
+        // SAFETY: reading the retained encoding presence cannot call Python.
+        unsafe { self.0.0.with(|storage| storage.file().has_encoding()) }
+    }
+
+    pub(crate) fn write_escaped_display(&self, value: &str) -> Result<()> {
+        // SAFETY: the caller finished rendering before taking this exclusive file borrow.
+        unsafe {
+            self.0
+                .0
+                .with_mut(|storage| storage.file_mut().write_escaped_display(value))
+        }
+    }
+
     pub(crate) fn flush(&self) -> Result<()> {
         // SAFETY: flushing the owned stream does not reenter native Python code.
         unsafe { self.0.0.with_mut(|storage| storage.file_mut().flush()) }

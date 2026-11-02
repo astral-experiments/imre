@@ -1091,6 +1091,10 @@ pub(super) fn call(
             .caller_module_at(depth.max(0) as usize)
             .unwrap_or(NONE));
     }
+    if name == "sys.displayhook" {
+        let value = builtins::one_positional_arg(name, &args[1..], kwargs)?;
+        return super::displayhook::default_hook(ctx, value);
+    }
     if name == "sys.unraisablehook" {
         return super::unraisable::default_hook(ctx, args, kwargs);
     }
