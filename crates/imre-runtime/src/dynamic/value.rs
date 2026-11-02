@@ -3406,9 +3406,11 @@ mod tests {
             assert_eq!(order.tail, kept.last().copied().unwrap_or(END));
             let remaining: Vec<_> = std::iter::from_fn(|| order.pop(&slots)).collect();
             assert_eq!(remaining, kept);
-            assert!(slots.iter().all(|slot| {
-                slot.gc_prev.get() == UNMARKED && slot.gc_next.get() == UNMARKED
-            }));
+            assert!(
+                slots.iter().all(|slot| {
+                    slot.gc_prev.get() == UNMARKED && slot.gc_next.get() == UNMARKED
+                })
+            );
         }
     }
 
