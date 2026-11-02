@@ -941,6 +941,11 @@ def check_pickle_reductions(imre, root, run):
                 payload = bytes(range(256))
                 assert value[7] == (b"", payload[:-1], payload, payload, ("rebuilt", protocol))
                 assert value[7][2] is value[7][3]
+                singleton, live, pair, iterator = value[8]
+                assert singleton == ([7] if protocol else [7, "added"])
+                assert live == [7, "second", "added"]
+                assert pair[0] is pair[1] and pair[0][0] is pair[0]
+                assert list(iterator) == ["c", "a"]
                 graph, small, wide, replaced, recursive = value[6]
                 assert graph["self"] is graph and graph["left"] is graph["right"]
                 assert graph["distinct"] == graph["left"] == {} and graph["distinct"] is not graph["left"]
