@@ -151,10 +151,10 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
         raise ValueError(f"callable {obj!r} is not supported by signature")
     if getattr(obj, "__text_signature__", None):
         raise NotImplementedError("text signatures are not yet supported")
-    if eval_str or annotation_format != Format.VALUE:
-        raise NotImplementedError("native signatures currently support value annotations without string evaluation")
+    from annotationlib import get_annotations
     layout = _signature_layout(obj)
-    annotations = obj.__annotations__
+    annotations = get_annotations(obj, globals=globals, locals=locals,
+                                  eval_str=eval_str, format=annotation_format)
     defaults = obj.__defaults__ or ()
     keyword_defaults = obj.__kwdefaults__ or {}
     positional = [name for kind, name in layout if kind < _VAR_POSITIONAL]

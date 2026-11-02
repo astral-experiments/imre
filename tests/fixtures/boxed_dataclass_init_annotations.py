@@ -66,4 +66,29 @@ def current():
     assert Mutable.__init__.__annotations__ == {"a": str, "return": None}
     assert Custom(obj).x is obj and Custom.__init__.__annotations__ == {"x": "Target"}
     assert SelfField(self=8).self == 8
+    from annotationlib import Format, ForwardRef
+    from inspect import signature
+
+    @dataclass
+    class Deferred:
+        value: Later
+        count: int = field(kw_only=True, default=1)
+
+    doc = "Deferred(value: Later, *, count: int = 1)"
+    assert Deferred.__doc__ == doc
+    forward = signature(Deferred, annotation_format=Format.FORWARDREF)
+    assert isinstance(forward.parameters["value"].annotation, ForwardRef)
+    assert forward.return_annotation is None
+    try:
+        signature(Deferred)
+    except NameError:
+        pass
+    else:
+        raise AssertionError("a missing annotation was cached as a value")
+    globals()["Later"] = Target
+    try:
+        assert signature(Deferred).parameters["value"].annotation is Target
+        assert Deferred.__doc__ == doc
+    finally:
+        del globals()["Later"]
     print("initializer annotations passed")
