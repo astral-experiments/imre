@@ -959,11 +959,32 @@ def check_pickle_reductions(imre, root, run):
         sys.path.pop(0)
 
 
-def check_unittest_main_names(imre, root, run):
-    source = root / "selected_tests.py"
+def check_boxed_unittest_main_reporting(imre, root, run):
+    source = root / "reporting_tests.py"
     source.write_text(
         "import importlib\n"
         "unittest = importlib.import_module('unittest')\n"
+        "class Cases(unittest.TestCase):\n"
+        "    def test_pass(self): pass\n"
+        "    def test_failure(self):\n"
+        "        with self.subTest(item=1): self.fail('intentional failure')\n"
+        "unittest.main()\n"
+    )
+    executable = root / "reporting_tests"
+    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable)
+    assert built.returncode == 0, built
+    passed = run(executable, "-v", "Cases.test_pass")
+    assert passed.returncode == 0, passed
+    assert "test_pass (__main__.Cases.test_pass) ... ok" in passed.stderr.splitlines(), passed
+    failed = run(executable, "-v", "Cases.test_failure")
+    assert failed.returncode == 1 and "(item=1) ... FAIL" in failed.stderr, failed
+    assert failed.stderr.rstrip().endswith("FAILED (failures=1)"), failed
+
+
+def check_unittest_main_names(imre, root, run):
+    source = root / "selected_tests.py"
+    source.write_text(
+        "import unittest\n"
         "class Cases(unittest.TestCase):\n"
         "    def test_a(self): print('a')\n"
         "    def test_b(self): print('b')\n"
@@ -976,8 +997,6 @@ def check_unittest_main_names(imre, root, run):
                          (("-vk", "test_b", "Cases"), "b\n")]:
         result = run(executable, *args)
         assert result.returncode == 0 and result.stdout == output, result
-        if "-vk" in args:
-            assert "test_b (__main__.Cases.test_b) ... ok" in result.stderr.splitlines(), result
     extra = run(executable, "Cases", "-v", "Cases.test_b")
     assert extra.returncode == 2 and not extra.stdout and "unrecognized arguments" in extra.stderr, extra
     for flags in [("-k", "-1"), ("-k=two words",)]:
@@ -985,7 +1004,6 @@ def check_unittest_main_names(imre, root, run):
         assert filtered.returncode == 5 and not filtered.stdout, filtered
     missing = run(executable, "-v", "Cases.test_missing")
     assert missing.returncode == 1 and "_FailedTest" in missing.stderr, missing
-    assert missing.stderr.rstrip().endswith("FAILED (errors=1)"), missing
 
 
 def check_unittest_file_discovery(imre, root, run):
@@ -2428,6 +2446,7 @@ def report(text):
                         extra={"PYTHONINTMAXSTRDIGITS": str(limit)},
                     )
         if os.name == "posix":
+            check_boxed_unittest_main_reporting(imre, root, run)
             check_unittest_main_names(imre, root, run)
             check_unittest_file_discovery(imre, root, run)
             plugin.write_bytes((fixtures / "boxed_subprocess_fileio.py").read_bytes())
