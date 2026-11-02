@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::Context;
-use crate::objects::exceptions::ExitStatus;
 
 pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
@@ -102,7 +101,8 @@ pub(super) struct Error {
     // Keep the context reachable even if the optional traceback cannot be allocated.
     pub context: Id,
     pub trace: Option<allocator_api2::boxed::Box<Trace>>,
-    pub exit_status: Option<ExitStatus>,
+    /// Python object held by the writable SystemExit.code member.
+    pub exit_code: Id,
     pub import: Option<crate::shared::Shared<ImportFields>>,
 }
 
@@ -131,7 +131,7 @@ impl Error {
             os_args: None,
             context: NONE,
             trace: None,
-            exit_status: None,
+            exit_code: NONE,
             import: None,
         }
     }
@@ -182,10 +182,20 @@ impl Error {
         }
     }
 
+    /// SystemExit.__init__ keeps the previous code when called without arguments.
+    pub(super) fn initialize_exit_code(&mut self, args: &[Id]) {
+        match args {
+            [] => {}
+            [value] => self.exit_code = *value,
+            _ => self.exit_code = self.args.expect("initialized exception argument tuple"),
+        }
+    }
+
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.args
             .into_iter()
             .chain(self.class())
+            .chain((self.exit_code != NONE).then_some(self.exit_code))
             .chain((self.context != NONE).then_some(self.context))
             .chain(
                 self.decode
@@ -575,15 +585,7 @@ impl Context {
         }
         error.message = self.exception_message(&error);
         if kind == "SystemExit" {
-            error.exit_status = match args {
-                [] | [NONE] => Some(ExitStatus::Code(0)),
-                [code] => match self.heap.get(*code) {
-                    Value::Int(i) => Some(ExitStatus::from_i64(i.to_i64())),
-                    Value::Bool(b) => Some(ExitStatus::Code(i32::from(*b))),
-                    _ => None,
-                },
-                _ => None,
-            };
+            error.initialize_exit_code(args);
         }
         error
     }
