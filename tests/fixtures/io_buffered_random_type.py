@@ -265,3 +265,36 @@ for cls in (io.BufferedRandom, FirstInit):
         assert raw.closed
     assert rejected.read() == b"old"
     rejected.close()
+
+
+class AttachingRaw(io.BytesIO):
+    def tell(self):
+        assert self.target.raw is self
+        self.target.__init__(self.inner, 4)
+        if self.write_during_probe:
+            assert self.target.write(b"X") == 1
+        else:
+            assert self.target.read(1) == b"i"
+        return super().tell()
+
+
+for descriptor in (False, True):
+    for write in (False, True):
+        inner = io.FileIO(path, "w+") if descriptor else io.BytesIO()
+        try:
+            inner.write(b"inner")
+            inner.seek(0)
+            outer = AttachingRaw()
+            target = io.BufferedRandom.__new__(io.BufferedRandom)
+            outer.target, outer.inner, outer.write_during_probe = target, inner, write
+            target.__init__(outer, 2)
+            assert target.raw is inner and not outer.closed
+            assert target.tell() == (0 if write else 4)
+            assert target.read() == (b"inner" if write else b"r")
+            target.close()
+            assert inner.closed
+            outer.close()
+        finally:
+            inner.close()
+            if descriptor:
+                os.unlink(path)

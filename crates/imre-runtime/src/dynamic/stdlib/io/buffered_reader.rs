@@ -95,9 +95,22 @@ pub(super) fn install(
         .and_then(|n| index(ctx, n))
         .ok()
         .filter(|n| *n >= 0);
-    if update && super::descriptor_buffer::random_initialized(ctx, receiver) {
-        // A callback in raw.tell() finished initializing this same wrapper.
-        return Ok(NONE);
+    if update {
+        // A nested first initialization can finish inside raw.tell(). Keep its raw,
+        // but discard reads and writes buffered before the outer probe returned.
+        if let Ok(live) = Reader::get(ctx, receiver)
+            && let Some(update) = &live.update
+        {
+            update.dirty.set(None);
+            live.reset();
+            if absolute.is_some() {
+                live.absolute.set(absolute);
+            }
+            return Ok(NONE);
+        }
+        if super::descriptor_buffer::finish_random_probe(ctx, receiver) {
+            return Ok(NONE);
+        }
     }
     let state = Reader {
         raw: Cell::new(Some(raw)),

@@ -112,6 +112,17 @@ pub(super) fn finish_writer_probe(ctx: &Context, receiver: Id) -> Result<()> {
     ))
 }
 
+/// A descriptor installed inside a Random raw.tell() keeps its physical position.
+pub(super) fn finish_random_probe(ctx: &Context, receiver: Id) -> bool {
+    let Some((_, fd, _)) = wrapper_fallback(ctx, receiver) else {
+        return false;
+    };
+    if let Some(Buffer::Random(file)) = fd.buffer.borrow_mut().as_mut() {
+        file.reset();
+    }
+    true
+}
+
 /// A Python finalizer can decline close, raise, or resurrect the writer.
 pub(in crate::dynamic) fn note_writer_finalizer(ctx: &Context, owner: Id) {
     if let Some((_, _, armed)) = wrapper_fallback(ctx, owner) {
@@ -192,7 +203,7 @@ pub(super) fn ssize(ctx: &mut Context, value: Id) -> Result<i64> {
     })
 }
 
-pub(super) fn random_initialized(ctx: &Context, receiver: Id) -> bool {
+fn random_initialized(ctx: &Context, receiver: Id) -> bool {
     backing(ctx, receiver).is_some()
         || matches!(
             ctx.heap.get(receiver),
