@@ -5971,7 +5971,7 @@ mod native_tests {
                 .llvm_ir
                 .matches("call void @imre_extension_clear()")
                 .count(),
-            2
+            1
         );
 
         fs::write(&stub, "def combine(data: str, /) -> int: ...\n").unwrap();
