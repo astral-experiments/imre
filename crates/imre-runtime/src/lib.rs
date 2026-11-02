@@ -483,7 +483,7 @@ fn initialize_io() {
 /// Standard output uses bounded block buffering for pipes and files, while
 /// terminals flush each printed line. LLVM supplies the process entry point, so
 /// input, fatal errors, and normal entry-point return explicitly flush it.
-struct Output<W = RawStdout> {
+struct Output<W = RawOutput> {
     raw: BinaryOutput<W>,
     text: text_output::PendingText,
     line_buffered: bool,
@@ -529,12 +529,19 @@ impl std::fmt::Display for BlockedWrite {
 
 impl std::error::Error for BlockedWrite {}
 
-/// Writes directly to fd 1 so the native binary buffer observes descriptor errors.
-struct RawStdout;
+/// Write directly so both standard buffers report errors on the underlying descriptor.
+enum RawOutput {
+    Stdout,
+    Stderr,
+}
 
-impl Write for RawStdout {
+impl Write for RawOutput {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        rustix::io::write(io::stdout(), bytes).map_err(Into::into)
+        match self {
+            Self::Stdout => rustix::io::write(io::stdout(), bytes),
+            Self::Stderr => rustix::io::write(io::stderr(), bytes),
+        }
+        .map_err(Into::into)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -728,7 +735,7 @@ impl<W: Write> Write for BinaryOutput<W> {
 static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
     initialize_io();
     Mutex::new(Output::with_stream(
-        RawStdout,
+        RawOutput::Stdout,
         STDIO_SETTINGS.stdout_capacity,
         STDIO_SETTINGS.stdout_line_buffered,
     ))

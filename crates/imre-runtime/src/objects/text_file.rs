@@ -130,6 +130,12 @@ impl TextFile {
         }
     }
 
+    /// Closing the binary layer flushes only its bytes and closes the enclosing text view.
+    pub(crate) fn close_standard_buffer(&self) -> Result<()> {
+        // SAFETY: this owned file state is a standard output stream; flushing runs no Python.
+        unsafe { self.0.0.with_mut(|s| s.file_mut().close_standard_buffer()) }
+    }
+
     pub(crate) fn flush(&self) -> Result<()> {
         // SAFETY: flushing the owned stream does not reenter native Python code.
         unsafe { self.0.0.with_mut(|storage| storage.file_mut().flush()) }

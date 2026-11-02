@@ -1091,8 +1091,12 @@ def main():
         expected = run(sys.executable, "-B", streams)
         actual = run(imre, "run", streams, "--runtime-imports", "--quiet")
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
-        assert actual.stdout == expected.stdout == "stdout π\n".encode()
-        assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\n".encode()
+        assert actual.stdout == expected.stdout == "stdout π\nraw:then:text\n".encode()
+        assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\nbinary stderr\n".encode()
+
+        text_close = run(imre, "-B", "-c", "import streams", "close-text")
+        assert text_close.returncode == 0, text_close.stderr
+        assert (text_close.stdout, text_close.stderr) == (expected.stdout, expected.stderr)
 
         string_io = root / "string_io.py"
         string_io.write_bytes((Path(__file__).with_name("fixtures") / "boxed_string_io.py").read_bytes())
