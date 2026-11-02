@@ -14,6 +14,18 @@ def current():
         assert child.stdout.read() == b"imre-argv-zero"
         assert child.wait() == 0
 
+    class ChangingExecutable:
+        def __init__(self):
+            self.calls = 0
+
+        def __fspath__(self):
+            self.calls += 1
+            return "/bin/false" if self.calls == 1 else "/bin/true"
+
+    changing = ChangingExecutable()
+    with Popen(["ignored"], executable=changing, cwd=".") as child:
+        print("changing executable", changing.calls, child.wait())
+
     executable = Path("null/child")
     try:
         Popen(["/bin/true"], executable=executable, cwd="/dev")
