@@ -342,21 +342,9 @@ impl Function<'_, '_> {
                                 Body::AnnotationValue(&v.annotation),
                                 false,
                             );
-                            let code = self.output.definition(
-                                self.source,
-                                String::new(),
-                                Body::AnnotationThunk(value.clone(), v.annotation.range()),
-                                v.annotation.start(),
-                                false,
-                                None,
-                            );
                             self.remember_annotation(v, name.id.as_str(), &value);
-                            let name = self.text("__annotate__");
-                            let sig = self.text("{}");
-                            let defaults = self.op("dict", &[]);
-                            let thunk = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
                             let offset = v.start().to_u32();
-                            self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
+                            self.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
                         } else if let Some(sites) = &mut self.module_annotation_sites {
                             let index = sites.len();
                             sites.push((name.id.to_string(), (*v.annotation).clone()));

@@ -19,7 +19,7 @@ declare ptr @imre_dyn_new(i32, ptr, ptr)
 declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
-declare i64 @imre_dyn_class_annotation(ptr, i64, i64, i64, i32)
+declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
 declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
 declare i64 @imre_dyn_truth_mark(ptr)
@@ -237,7 +237,6 @@ enum Body<'a> {
         Option<statements::ClassBindings>,
     ),
     AnnotationValue(&'a ast::Expr),
-    AnnotationThunk(String, ruff_text_size::TextRange),
     Expression(&'a ast::Expr),
     YieldingLambda(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
@@ -441,11 +440,6 @@ impl Output {
                 f.unsupported("async function");
             }
             Body::Generator(generators, element) => f.generator_step(generators, element),
-            Body::AnnotationThunk(entry, range) => {
-                f.checkpoint(&range);
-                let value = f.checked(&format!("call i64 {entry}(ptr %ctx, i64 {})", f.scope));
-                f.end(&format!("ret i64 {value}"));
-            }
             Body::AnnotationValue(expr) => {
                 let value = f.expr(expr);
                 f.end(&format!("ret i64 {value}"));
