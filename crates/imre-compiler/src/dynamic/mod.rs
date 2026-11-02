@@ -564,7 +564,6 @@ pub(crate) fn compile(
                     ))
                 } else {
                     import_module::boxed_source(&prefix)
-                        .or_else(|| crate::modules::bundled_runtime_source(&prefix))
                 };
                 if let Some((filename, source)) = bundled {
                     let path = Path::new(bundled_root).join(filename);
@@ -635,6 +634,7 @@ pub(crate) fn compile(
         "ast",
         "codecs",
         "genericpath",
+        "hashlib",
         "platform",
         "re",
         "signal",
@@ -644,7 +644,7 @@ pub(crate) fn compile(
         "zipimport",
     ] {
         if !seen.contains(name)
-            && let Some((file, source)) = crate::modules::bundled_runtime_source(name)
+            && let Some((file, source)) = import_module::boxed_source(name)
         {
             sources.push((
                 name.into(),
