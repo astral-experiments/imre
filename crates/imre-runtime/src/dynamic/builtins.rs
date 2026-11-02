@@ -1500,6 +1500,7 @@ pub(super) fn call(
             let object = object.ok_or_else(|| {
                 type_error("memoryview() missing required argument 'object' (pos 1)")
             })?;
+            ctx.check_buffer_exporter(object)?;
             let owner = match ctx.heap.get(ctx.scalar_value(object)) {
                 Value::Bytes(_) => object,
                 Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,

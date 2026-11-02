@@ -637,7 +637,11 @@ fn capture(
 }
 
 fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
-    match ctx.heap.get(ctx.scalar_value(id)) {
+    let value = ctx.heap.get(ctx.scalar_value(id));
+    if !matches!(value, Value::Str(_) | Value::SurrogateStr(_)) {
+        ctx.check_buffer_exporter(id)?;
+    }
+    match value {
         Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { owner: Some(_), .. } => {
             if bytes {
                 return ctx.bytes_like(id);
