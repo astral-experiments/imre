@@ -366,6 +366,82 @@ def _make_compress(_allocate, _state):
 
 
 compress = _make_compress(_itertools._predicate_allocate, _itertools._predicate_state)
+
+
+class _ZipLongestState:
+    __slots__ = ("sources", "active", "fillvalue")
+
+    def __init__(self, iterables, fillvalue):
+        self.sources = [iter(source) for source in iterables]
+        self.active = len(self.sources)
+        self.fillvalue = fillvalue
+
+    def next_row(self):
+        if not self.active:
+            raise StopIteration
+        row = []
+        for i, source in enumerate(self.sources):
+            if source is None:
+                item = self.fillvalue
+            else:
+                try:
+                    item = next(source)
+                except StopIteration:
+                    if self.active <= 1:
+                        self.active = 0
+                        # CPython keeps the final exhausted iterator until the zipper dies.
+                        break
+                    self.active -= 1
+                    self.sources[i] = None
+                    item = self.fillvalue
+                except BaseException:
+                    self.active = 0
+                    raise
+            row.append(item)
+        else:
+            return tuple(row)
+        raise StopIteration
+
+
+def _make_zip_longest(_allocate, _state, _State):
+    class zip_longest:
+        """Return a zip_longest object whose .__next__() method returns a tuple where
+        the i-th element comes from the i-th iterable argument.  The .__next__()
+        method continues until the longest iterable in the argument sequence
+        is exhausted and then it raises StopIteration.  When the shorter iterables
+        are exhausted, the fillvalue is substituted in their place.  The fillvalue
+        defaults to None or can be specified by a keyword argument.
+        """
+
+        __slots__ = ()
+
+        def __new__(cls, /, *iterables, **kwargs):
+            if cls is not __class__:
+                if not isinstance(cls, type):
+                    raise TypeError(f"itertools.zip_longest.__new__(X): X is not a type object ({type(cls).__name__})")
+                if not issubclass(cls, __class__):
+                    raise TypeError(f"itertools.zip_longest.__new__({cls.__name__}): {cls.__name__} is not a subtype of itertools.zip_longest")
+            if kwargs and (len(kwargs) != 1 or "fillvalue" not in kwargs):
+                raise TypeError("zip_longest() got an unexpected keyword argument")
+            return _allocate(__class__, cls, _State(iterables, kwargs.get("fillvalue")))
+
+        def __init__(self, *args, **kwargs):
+            if (args or kwargs) and type(self).__init__ is not __class__.__init__:
+                raise TypeError("object.__init__() takes exactly one argument (the instance to initialize)")
+
+        def __iter__(self):
+            if not isinstance(self, __class__):
+                raise TypeError("expected a zip_longest instance")
+            return self
+
+        def __next__(self):
+            return _state(__class__, self).next_row()
+
+    zip_longest.__qualname__ = "zip_longest"
+    return zip_longest
+
+
+zip_longest = _make_zip_longest(_itertools._zip_longest_allocate, _itertools._zip_longest_state, _ZipLongestState)
 del _itertools
 
 

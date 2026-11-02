@@ -465,15 +465,31 @@ impl Overrides {
         }
     }
 
-    /// Try exact two-row encoding at geometric growth points. The bitmap must
-    /// fit within the estimated storage already paid for by sparse exceptions.
-    pub(super) fn write_binary(&mut self, at: usize, len: usize, row: &[usize]) -> bool {
+    /// Write either known row directly, or try promoting sparse exceptions as their count doubles.
+    pub(super) fn write_known(
+        &mut self,
+        at: usize,
+        len: usize,
+        row: &[usize],
+        default: &[usize],
+    ) -> bool {
         let sparse = match self {
             Self::Binary(binary) => {
-                return binary.row == row && binary.insert(at);
+                if binary.row == row {
+                    return binary.insert(at);
+                }
+                if row == default {
+                    binary.remove(at);
+                    return true;
+                }
+                return false;
             }
             Self::Sparse(sparse) => sparse,
         };
+        if row == default {
+            sparse.remove(at, row.len());
+            return true;
+        }
         if !sparse.len.is_power_of_two()
             || sparse.len <= sparse.last_binary_probe
             || sparse.get(at, row.len()).is_some()

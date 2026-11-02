@@ -25,6 +25,8 @@ pub(super) mod flags;
 mod fnmatch;
 mod formatters;
 pub(super) mod functools;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) mod grp;
 pub(super) mod hashlib;
 mod hmac;
 mod inspect;
@@ -50,6 +52,8 @@ mod ordered_dict;
 pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
+#[cfg(target_os = "linux")]
+pub(super) mod posix_spawn;
 mod posixpath;
 mod random;
 pub(super) mod readiness;
@@ -135,7 +139,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "subprocess"
             | "warnings"
     ) || (cfg!(unix) && matches!(name, "_signal" | "_imre_signal"))
-        || (cfg!(any(target_os = "linux", target_os = "macos")) && name == "pwd")
+        || (cfg!(any(target_os = "linux", target_os = "macos")) && matches!(name, "grp" | "pwd"))
         || has_lazy_attributes(name)
 }
 
@@ -1490,6 +1494,10 @@ pub(super) fn call(
         });
     }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(function @ ("getgrall" | "getgrgid" | "getgrnam")) = name.strip_prefix("grp.") {
+        return grp::call(ctx, function, args, kwargs);
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     if let Some(function @ ("getpwall" | "getpwnam" | "getpwuid")) = name.strip_prefix("pwd.") {
         return pwd::call(ctx, function, args, kwargs);
     }
@@ -1731,6 +1739,10 @@ pub(super) fn call(
     if let Some(op @ ("eventfd" | "eventfd_read" | "eventfd_write")) = name.strip_prefix("posix.") {
         return os::eventfd::call(ctx, op, args, kwargs);
     }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("posix_spawn" | "posix_spawnp")) = name.strip_prefix("posix.") {
+        return posix_spawn::call(ctx, op, args, kwargs);
+    }
     if name == "posix.strerror" {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -1827,7 +1839,13 @@ pub(super) fn call(
         return itertools::predicate_allocate(ctx, args, kwargs);
     }
     if name == "_imre_itertools._predicate_state" {
-        return itertools::predicate_state(ctx, args, kwargs);
+        return itertools::iterator_state(ctx, args, kwargs, "predicate iterator");
+    }
+    if name == "_imre_itertools._zip_longest_allocate" {
+        return itertools::zip_longest_allocate(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._zip_longest_state" {
+        return itertools::iterator_state(ctx, args, kwargs, "zip_longest");
     }
     if name == "_imre_itertools._chain_allocate" {
         let [base, class, source] = args else {
@@ -1905,26 +1923,21 @@ pub(super) fn call(
         }
         if let Value::Function { code, .. } = *ctx.heap.get(func) {
             let original = ctx.code_object(code);
-            if original.coroutine {
+            use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
+            if original.coroutine || original.flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {
                 return Ok(func);
             }
-            if let Some(flags) = original.flags {
-                use imre_ast::code_flags::{COROUTINE, GENERATOR, ITERABLE_COROUTINE};
-                if flags & (COROUTINE | ITERABLE_COROUTINE) != 0 {
-                    return Ok(func);
-                }
-                if flags & GENERATOR != 0 && !matches!(original.body, super::value::Body::Native(_))
-                {
-                    // Other functions and existing generators retain their original code.
-                    let mut marked = original.clone();
-                    marked.flags = Some(flags | ITERABLE_COROUTINE);
-                    let marked = ctx.alloc(Value::Code(marked));
-                    let Value::Function { code, .. } = ctx.heap.get_mut(func) else {
-                        unreachable!()
-                    };
-                    *code = marked;
-                    return Ok(func);
-                }
+            if original.flags & GENERATOR != 0 && !matches!(original.body, super::value::Body::Native(_))
+            {
+                // Other functions and existing generators retain their original code.
+                let mut marked = original.clone();
+                marked.flags |= ITERABLE_COROUTINE;
+                let marked = ctx.alloc(Value::Code(marked));
+                let Value::Function { code, .. } = ctx.heap.get_mut(func) else {
+                    unreachable!()
+                };
+                *code = marked;
+                return Ok(func);
             }
         }
         return Err(Error::new(

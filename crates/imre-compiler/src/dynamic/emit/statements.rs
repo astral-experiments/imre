@@ -348,12 +348,13 @@ impl Function<'_, '_> {
                                 Body::AnnotationThunk(value.clone(), v.annotation.range()),
                                 v.annotation.start(),
                                 false,
+                                None,
                             );
                             self.remember_annotation(v, name.id.as_str(), &value);
                             let name = self.text("__annotate__");
                             let sig = self.text("{}");
                             let defaults = self.op("dict", &[]);
-                            let thunk = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
+                            let thunk = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
                             let offset = v.start().to_u32();
                             self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
                         } else if let Some(sites) = &mut self.module_annotation_sites {
@@ -783,11 +784,12 @@ impl Function<'_, '_> {
                 Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
                 false,
+                None,
             );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
             let defaults = self.op("dict", &[]);
-            self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", scope))
+            self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", scope))
         };
         let qualname = self.text(&qualname);
         let mut signature =
@@ -889,9 +891,6 @@ impl Function<'_, '_> {
             self.op("put", &[&defaults, &format, &value_format]);
         }
         let in_function = self.in_function || !matches!(body, Body::Namespace(_));
-        let code = self
-            .output
-            .definition(self.source, prefix, body, start, in_function);
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         let scalar = |expr: &ast::Expr| {
@@ -902,6 +901,9 @@ impl Function<'_, '_> {
         if generator.is_none() {
             signature["return_type"] = json!(returns.and_then(scalar));
         }
+        let code = self
+            .output
+            .definition(self.source, prefix, body, start, in_function, generator);
         if let Some(p) = params {
             self.output
                 .interned_identifiers
@@ -957,15 +959,12 @@ impl Function<'_, '_> {
         signature["scope_locals_complete"] = json!(!closure_names.locals_incomplete);
         let sig = self.text(&signature.to_string());
         let name = self.code_name(name);
-        let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", scope));
+        let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", scope));
         if type_params.is_some() {
             let key = self.code_name(".type_params");
             let params = self.op("lookup", &[&scope, &key]);
             let key = self.code_name("__type_params__");
             self.op("setattr", &[&function, &key, &params]);
-        }
-        if let Some((source, line)) = generator {
-            self.line(&format!("call void @imre_dyn_generator_body(ptr %ctx, i64 {function}, ptr {source}, i32 {line})"));
         }
         function
     }
@@ -1007,10 +1006,11 @@ impl Function<'_, '_> {
                 Body::ModuleAnnotations(entries),
                 self.source.module_start,
                 false,
+                None,
             );
             let name = self.text("__annotate__");
             let defaults = self.op("dict", &[]);
-            let provider = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
+            let provider = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
             self.bind("__annotate__", &provider);
         }
         self.op("setup_module_annotations", &[&self.scope.clone()]);

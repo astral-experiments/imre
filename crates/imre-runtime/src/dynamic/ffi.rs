@@ -1158,29 +1158,6 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
     finish_at(ctx, result, span)
 }
 
-/// Attach the original generator suite to the code object before applying Python decorators.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_generator_body(
-    ctx: *mut Context,
-    function: Id,
-    source: *const c_char,
-    body_line: u32,
-) {
-    // SAFETY: the generated call provides the live context that owns the function.
-    let ctx = unsafe { &mut *ctx };
-    let Value::Function { code, .. } = *ctx.heap.get(function) else {
-        unreachable!("compiled Python function");
-    };
-    let Value::Code(code) = ctx.heap.get_mut(code) else {
-        unreachable!("compiled code object");
-    };
-    if matches!(code.body, value::Body::Native(_)) {
-        // SAFETY: the UTF-8 constant is embedded in the executable and outlives all code objects.
-        let source = unsafe { cstr(source) };
-        code.body = value::Body::PendingGenerator { source, body_line };
-    }
-}
-
 /// Record a class annotation only when its statement executes.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_class_annotation(
@@ -1196,16 +1173,23 @@ pub(super) unsafe extern "C" fn imre_dyn_class_annotation(
     finish(ctx, result)
 }
 
-/// Static per-definition record emitted beside its native entry point.
+/// The compiler emits a native entry when body_line is zero, or generator source otherwise.
+#[repr(C)]
+union PrelinkedEntry {
+    native: Code,
+    source: *const c_char,
+}
+
 #[repr(C)]
 pub(super) struct PrelinkedSite {
-    entry: Code,
+    entry: PrelinkedEntry,
     filename: *const c_char,
     first_line: u32,
+    body_line: u32,
 }
 
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
+pub(super) unsafe extern "C" fn imre_dyn_define(
     ctx: *mut Context,
     site: *const PrelinkedSite,
     scope: Id,
@@ -1225,8 +1209,20 @@ pub(super) unsafe extern "C" fn imre_dyn_def_from_site(
     } else {
         // SAFETY: the filename is a nul-terminated constant in the native executable.
         let file = unsafe { cstr(definition.filename) };
+        // SAFETY: the compiler tags native functions with line zero and suspended suites
+        // with their one-based source line and a static, nul-terminated UTF-8 string.
+        let body = unsafe {
+            if definition.body_line == 0 {
+                value::Body::Native(definition.entry.native)
+            } else {
+                value::Body::PendingGenerator {
+                    source: cstr(definition.entry.source),
+                    body_line: definition.body_line,
+                }
+            }
+        };
         let code = ctx.prelinked_code(
-            definition.entry,
+            body,
             scope,
             name,
             parameters,
@@ -1296,7 +1292,7 @@ impl Context {
 
     pub(super) fn prelinked_code(
         &mut self,
-        entry: Code,
+        body: value::Body,
         scope: Id,
         name: Id,
         parameters: Id,
@@ -1347,8 +1343,11 @@ impl Context {
         });
         let closure_supported = freevars.is_some();
         let freevars = freevars.unwrap_or_default();
+        let flags = metadata["code_flags"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok());
         self.alloc(Value::Code(value::CodeObject {
-            body: value::Body::Native(entry),
+            body,
             name,
             qualname,
             doc,
@@ -1357,9 +1356,8 @@ impl Context {
             first_line: location.line,
             module_definition,
             coroutine: false,
-            flags: metadata["code_flags"]
-                .as_u64()
-                .and_then(|v| u32::try_from(v).ok()),
+            flags: flags.unwrap_or_default(),
+            flags_complete: flags.is_some(),
             nested: Vec::new(),
             freevars,
             closure_supported,
@@ -1917,7 +1915,14 @@ mod tests {
             line: 1,
             span: None,
         };
-        let code = ctx.prelinked_code(read, outer, name, signature, (name, NONE), location.clone());
+        let code = ctx.prelinked_code(
+            value::Body::Native(read),
+            outer,
+            name,
+            signature,
+            (name, NONE),
+            location.clone(),
+        );
         let defaults = ctx.dict(Vec::new());
         let function = ctx.define_function(code, outer, name, defaults, name, NONE, NONE, false);
         let closure = ctx.lookup_attr(function, "__closure__").unwrap();

@@ -137,7 +137,12 @@ def current():
     shadow.left = 8
     assert shadow.left == 8 and Fields.left.__get__(shadow) == 3
 
+    slot = type(getter).__repr__
+    bound = getter.__repr__
+    assert slot.__objclass__ is type(getter)
+    assert slot.__get__(getter)() == bound() == "_tuplegetter(1, 'Alias for field number 1')"
     getter.__doc__ = "right coordinate"
+    assert slot(getter) == bound() == repr(getter)
     assert repr(getter) == "_tuplegetter(1, 'right coordinate')"
     assert type(getter).__doc__.__get__(getter) == "right coordinate"
 

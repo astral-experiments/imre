@@ -194,14 +194,8 @@ impl BoxedPopen {
         self.0.borrow().control.pid
     }
 
-    pub(crate) fn status(&self, poll: bool) -> Result<Option<i32>> {
-        let process = self.0.borrow();
-        let status = if poll {
-            process.control.poll()?
-        } else {
-            process.control.status()
-        };
-        Ok(status.map(ReturnCode::kernel))
+    pub(crate) fn poll(&self) -> Result<Option<i32>> {
+        Ok(self.0.borrow().control.poll()?.map(ReturnCode::kernel))
     }
 
     pub(crate) fn wait<E: From<Error>>(

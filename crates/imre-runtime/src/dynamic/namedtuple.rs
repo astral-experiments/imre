@@ -8,7 +8,8 @@ use ruff_python_stdlib::{identifiers::is_identifier, keyword::is_keyword};
 pub(super) const GETTER: &str = "collections._tuplegetter";
 pub(super) const DOC_REPR: &str = "<member '__doc__' of 'collections._tuplegetter' objects>";
 pub(super) const MEMBER_SLOTS: &[&str] = &["__get__", "__set__", "__delete__"];
-pub(super) const GETTER_METHODS: &[&str] = &["__get__", "__set__", "__delete__", "__reduce__"];
+pub(super) const GETTER_METHODS: &[&str] =
+    &["__get__", "__set__", "__delete__", "__reduce__", "__repr__"];
 
 /// Return the shared native type attributes that describe the tuple field descriptor.
 pub(super) fn class_attribute(ctx: &mut Context, class: Id, name: &str) -> Option<Id> {
@@ -285,6 +286,10 @@ pub(super) fn getter_method(
         }
         ("__set__", [_, _]) => Err(Error::new("AttributeError", "can't set attribute")),
         ("__delete__", [_]) => Err(Error::new("AttributeError", "can't delete attribute")),
+        ("__repr__", []) => {
+            let text = ctx.checked_format(receiver, true)?;
+            Ok(ctx.text(text))
+        }
         ("__reduce__", []) => {
             let doc = doc
                 .ok_or_else(|| Error::new("SystemError", "NULL object passed to Py_BuildValue"))?;

@@ -82,6 +82,10 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(any(target_os = "linux", target_os = "macos"))]
+        "grp" if matches!(function, "getgrall" | "getgrgid" | "getgrnam") => {
+            Some((module, function))
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         "pwd" if matches!(function, "getpwall" | "getpwnam" | "getpwuid") => {
             Some((module, function))
         }
@@ -1925,7 +1929,8 @@ impl Context {
         if matches!(
             self.heap.get(obj),
             Value::File(_) | Value::BufferedRandom(..)
-        ) {
+        ) || (name == "truncate" && matches!(self.heap.get(obj), Value::TextFile(_)))
+        {
             let class = self.exact_type(obj)?;
             if let Some(member) = self.class_attr(class, name)
                 && matches!(
@@ -2601,13 +2606,13 @@ impl Context {
             }
             Value::Code(ref code) => match name {
                 "co_flags" => {
-                    let flags = code.flags.ok_or_else(|| {
-                        Error::new(
+                    if !code.flags_complete {
+                        return Err(Error::new(
                             "NotImplementedError",
                             "co_flags unavailable for this code object",
-                        )
-                    })?;
-                    return Ok(self.int(i64::from(flags)));
+                        ));
+                    }
+                    return Ok(self.int(i64::from(code.flags)));
                 }
                 "co_name" => return Ok(code.name),
                 "co_qualname" => return Ok(code.qualname),

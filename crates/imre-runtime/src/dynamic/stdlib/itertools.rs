@@ -283,7 +283,7 @@ pub(super) fn accumulate_allocate(
             if ancestors.iter().all(|&a| !matches!(ctx.heap.get(a), Value::Native(name) if name != "object")))
         && ctx.allocation_base(*class) == Some(*base)
     {
-        return Ok(iterator_with_state(ctx, *base, *class, *state));
+        return Ok(instance_with_state(ctx, *base, *class, *state));
     }
     Err(Error::new(
         "TypeError",
@@ -313,6 +313,30 @@ pub(super) fn accumulate_state(
     ))
 }
 
+fn compatible_cursor_class(ctx: &Context, base: Id, class: Id, layout: &str) -> bool {
+    ctx.itertools_layout(base) == Some(layout)
+        && matches!(ctx.heap.get(class), Value::Class { ancestors, .. }
+            if (class == base || ancestors.contains(&base))
+                && ancestors.iter().all(|a| !matches!(ctx.heap.get(*a), Value::Native(kind) if kind != "object")))
+}
+
+pub(super) fn zip_longest_allocate(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if let [base, class, state] = args
+        && kwargs.is_empty()
+        && compatible_cursor_class(ctx, *base, *class, "itertools.zip_longest")
+    {
+        return Ok(instance_with_state(ctx, *base, *class, *state));
+    }
+    Err(Error::new(
+        "TypeError",
+        "expected a zip_longest subclass with compatible layout",
+    ))
+}
+
 pub(super) fn starmap_allocate(
     ctx: &mut Context,
     args: &[Id],
@@ -324,12 +348,7 @@ pub(super) fn starmap_allocate(
             "invalid starmap allocation arguments",
         ));
     };
-    if !kwargs.is_empty()
-        || ctx.itertools_layout(*base) != Some("itertools.starmap")
-        || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
-            if (*class == *base || ancestors.contains(base))
-                && ancestors.iter().all(|a| !matches!(ctx.heap.get(*a), Value::Native(kind) if kind != "object")))
-    {
+    if !kwargs.is_empty() || !compatible_cursor_class(ctx, *base, *class, "itertools.starmap") {
         return Err(Error::new(
             "TypeError",
             "expected a starmap subclass with compatible layout",
@@ -395,10 +414,10 @@ pub(super) fn predicate_allocate(
 fn iterator_instance(ctx: &mut Context, base: Id, class: Id, source: Id, state: Id) -> Id {
     ctx.heap.keep(source);
     let state = ctx.alloc(Value::Tuple(vec![source, state]));
-    iterator_with_state(ctx, base, class, state)
+    instance_with_state(ctx, base, class, state)
 }
 
-fn iterator_with_state(ctx: &mut Context, base: Id, class: Id, state: Id) -> Id {
+fn instance_with_state(ctx: &mut Context, base: Id, class: Id, state: Id) -> Id {
     ctx.heap.keep(state);
     let result = ctx.instance(class, None);
     let Value::Instance { member_values, .. } = ctx.heap.get_mut(result) else {
@@ -411,10 +430,11 @@ fn iterator_with_state(ctx: &mut Context, base: Id, class: Id, state: Id) -> Id 
     result
 }
 
-pub(super) fn predicate_state(
-    ctx: &mut Context,
+pub(super) fn iterator_state(
+    ctx: &Context,
     args: &[Id],
     kwargs: &[(String, Id)],
+    kind: &str,
 ) -> Result<Id> {
     if let [base, receiver] = args
         && kwargs.is_empty()
@@ -429,7 +449,7 @@ pub(super) fn predicate_state(
     }
     Err(Error::new(
         "TypeError",
-        "expected a predicate iterator instance",
+        format!("expected a {kind} instance"),
     ))
 }
 

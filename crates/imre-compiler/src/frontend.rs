@@ -8859,6 +8859,9 @@ impl<'a> Checker<'a> {
         if let Some((origin, declaration)) = self.namedtuple_factory(&call.func) {
             return self.namedtuple_call(origin, &declaration, call);
         }
+        if self.collection_binding(&call.func) == Some(Binding::Intrinsic(Intrinsic::NamedTuple)) {
+            return Err(self.scoped_builtin_error("collections.namedtuple", call));
+        }
         if let Some((method, name)) = crate::classes::super_method(call)
             && self.unshadowed_builtin(name, "super")
         {

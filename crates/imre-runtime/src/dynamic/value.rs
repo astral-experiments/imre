@@ -24,7 +24,9 @@ pub(super) struct CodeObject {
     pub module_definition: bool,
     pub coroutine: bool,
     /// CPython flags for boxed Python function definitions.
-    pub flags: Option<u32>,
+    pub flags: u32,
+    /// Runtime source retains execution flags even when its complete co_flags is unknown.
+    pub flags_complete: bool,
     pub nested: Vec<(usize, Id)>,
     pub freevars: Vec<String>,
     pub closure_supported: bool,
@@ -1117,7 +1119,10 @@ pub(super) enum Value {
         name: &'static str,
         unsupported: Id,
     },
-    ProcessHandle(crate::objects::BoxedPopen),
+    ProcessHandle {
+        child: crate::objects::BoxedPopen,
+        reported: bool,
+    },
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
     TextFile(BoxedTextFile),
     RegexScanner {
@@ -1216,7 +1221,7 @@ impl Value {
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
-            Self::ProcessHandle(_) => "_imre_subprocess.Handle",
+            Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
@@ -1349,7 +1354,7 @@ impl Value {
             | Self::Native(_)
             | Self::Scope(_)
             | Self::LoopIterator { .. }
-            | Self::ProcessHandle(_)
+            | Self::ProcessHandle { .. }
             | Self::Yielded(_) => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
@@ -1789,7 +1794,7 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
-            | Self::ProcessHandle(_) => {}
+            | Self::ProcessHandle { .. } => {}
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
