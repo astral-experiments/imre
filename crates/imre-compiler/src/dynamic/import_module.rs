@@ -16,7 +16,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             Some((
                 "types.py",
                 UPSTREAM[start..]
-                    .split_once("def get_original_bases(")
+                    .split_once("class DynamicClassAttribute:")
                     .unwrap()
                     .0,
             ))
