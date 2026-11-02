@@ -1,0 +1,628 @@
+{
+  "schema": "imre.subprocess.intact.33/v1",
+  "original": {
+    "key": [
+      33,
+      "test.test_subprocess.POSIXProcessTestCase.test_communicate_BrokenPipeError_stdin_flush",
+      1
+    ],
+    "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "source_hashes": {
+      "stage_module_sha256": "f616fdc01e845d6a74012db6e4bb64216a850bed9d74721b4bd3a5fd2cfd66a7",
+      "vendored_module_sha256": "f616fdc01e845d6a74012db6e4bb64216a850bed9d74721b4bd3a5fd2cfd66a7",
+      "method_sha256": "4b92086565bda7896c6300c2132283bea045ce11d4dc8e010e82dea25fb40c95",
+      "driver_sha256": "e20e6ffa3f0a78e38744e4df217c18f60ce3b7a95bb88f3247547d86637c7bd9",
+      "reference_sha256": "505ce5d2b1fa32d257708c502d19daa78cb042c0592cd39a0a0d8aa4c501ce96"
+    },
+    "verifier_sha256": "d1925169710b0082612b89dcb37b0687d06759acb4e4c3a1b6b69d587e5466d8",
+    "stock_exe": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "setup_true_exe": "b381cc8c55ec524b9fa92897f0882e855357468b4a763519cec47e05994d61ff",
+    "builds": {
+      "before": {
+        "commit": "8ea92fe7cc490b1e375bf16efd913fcdf57161ac",
+        "compiler": "a7ddac87f22e1556480653f6233fc13e1088a9ed5a0edccbbb05cca82a73b67e",
+        "runtime": "4349287c0350d83fd13edb531d0479b6aceedfe3a13cf133585f2e209dcf97cc",
+        "subprocess_py": "c2af37d5ed7a3da9aa8c03cd3fcd3e0495cd76e2eae510b38d65e13608372f8f"
+      },
+      "reviewed": {
+        "commit": "1d9f3a96995e2036354c098eacfb58274a65b9f7",
+        "compiler": "30e02c231d7715d2376fcd8afbd30b7731366f46a306bd07173e5094274154b4",
+        "runtime": "6915425f45510d1ee25a87127a19acc7e7e069e2db53886e97e6f031d2b21595",
+        "subprocess_py": "ad57c39c680685538b929c1fe9a75a2cbf79c34a2a637f7af0fd818ec204f4d8"
+      },
+      "public": {
+        "commit": "934c42f012fcdad7c3f6345a2983e47f3f2f68fc",
+        "compiler": "c908c1275242fa8c7ff9fc5652a0c080442569d36c75e17a636ae672c737f24f",
+        "runtime": "b5a8f9a59932f2c5a9a2e2406fb05229759fc3df5ec7b757d05cf5d76e396902",
+        "subprocess_py": "ad57c39c680685538b929c1fe9a75a2cbf79c34a2a637f7af0fd818ec204f4d8"
+      }
+    },
+    "columns": [
+      "lane",
+      "result",
+      "parent_pid",
+      "parent_sha256",
+      "parent_wait_raw",
+      "setup_true_pid",
+      "help_pid",
+      "stdout_bytes_submitted",
+      "stdout_bytes_read",
+      "stdout_EOF_reads",
+      "stdin_requested_return_errno",
+      "child_stderr_submissions"
+    ],
+    "rows": [
+      [
+        "stock-original",
+        "pass",
+        85930,
+        "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        0,
+        85931,
+        85932,
+        2607,
+        2607,
+        1,
+        [],
+        []
+      ],
+      [
+        "before-O0-original",
+        "failure",
+        86780,
+        "1badf4ccc59a4cfba46c912056fa916b4e14c37ee065621b97b29d1dd62e2a9d",
+        256,
+        86846,
+        86847,
+        2163,
+        2163,
+        1,
+        [
+          [
+            5,
+            -1,
+            32
+          ]
+        ],
+        []
+      ],
+      [
+        "before-O3-original",
+        "failure",
+        87194,
+        "19be05835bad093ebde8125dc67a64042cad274e89e2774da7d8921aa659997b",
+        256,
+        87433,
+        87434,
+        2163,
+        2163,
+        1,
+        [
+          [
+            5,
+            -1,
+            32
+          ]
+        ],
+        []
+      ],
+      [
+        "reviewed-O0-original",
+        "pass",
+        93474,
+        "4e49605239bab9acee3fe6a576acce9ccc3e0b93f220a77d2a2481853b8f666a",
+        0,
+        93545,
+        93546,
+        2163,
+        2163,
+        1,
+        [],
+        []
+      ],
+      [
+        "reviewed-O3-original",
+        "pass",
+        94009,
+        "f79552194cdceda652ddc008e2dbf473e1faff2107603a7db4c82ec57f24517d",
+        0,
+        94080,
+        94081,
+        2163,
+        2163,
+        1,
+        [],
+        []
+      ],
+      [
+        "public-O0-original",
+        "pass",
+        94605,
+        "b7ed88964e4a3c3906c7be40fb71192bf795af8237e120dba893240f7cd8deab",
+        0,
+        94648,
+        94649,
+        2163,
+        2163,
+        1,
+        [],
+        []
+      ],
+      [
+        "public-O3-original",
+        "pass",
+        94991,
+        "5159390f3be89422a35d0e4f9f4cff40bc6360125a64348c3ccc9f358da157ea",
+        0,
+        95046,
+        95047,
+        2163,
+        2163,
+        1,
+        [],
+        []
+      ]
+    ],
+    "waits": "The listed parent collected both listed direct children with raw status 0. The targeted post-wait query returned ECHILD for each.",
+    "result": "All 353 ordered keys matched; exactly one case ran with zero skips. Before: addFailure at the original assertion, Expected flush to be called once. Called 0 times. Stock/reviewed/public: addSuccess.",
+    "io_scope": "The -h child is the identified interpreter CLI. Its stdout reader closed after EOF. The original replaces stdin and configures its fileno for /dev/null. The help text and input payload are not inferred from write submissions."
+  },
+  "controls": {
+    "columns": [
+      "mode",
+      "parent_pid",
+      "help_pid",
+      "parent_wait_raw"
+    ],
+    "by_lane": {
+      "stock": [
+        [
+          "closed",
+          88414,
+          88415,
+          0
+        ],
+        [
+          "alternate",
+          88418,
+          88419,
+          0
+        ],
+        [
+          "wrong-target",
+          88422,
+          88423,
+          256
+        ],
+        [
+          "eio",
+          88426,
+          88432,
+          0
+        ],
+        [
+          "value",
+          88450,
+          88451,
+          0
+        ],
+        [
+          "retry",
+          88454,
+          88455,
+          0
+        ]
+      ],
+      "before-O0": [
+        [
+          "closed",
+          88466,
+          88467,
+          256
+        ],
+        [
+          "alternate",
+          88483,
+          88484,
+          256
+        ]
+      ],
+      "before-O3": [
+        [
+          "closed",
+          88539,
+          88540,
+          256
+        ]
+      ],
+      "reviewed-O0": [
+        [
+          "closed",
+          93318,
+          93321,
+          0
+        ],
+        [
+          "alternate",
+          93352,
+          93354,
+          0
+        ],
+        [
+          "wrong-target",
+          93360,
+          93361,
+          256
+        ],
+        [
+          "eio",
+          93365,
+          93368,
+          0
+        ],
+        [
+          "value",
+          93374,
+          93375,
+          0
+        ],
+        [
+          "retry",
+          93378,
+          93379,
+          0
+        ]
+      ],
+      "reviewed-O3": [
+        [
+          "closed",
+          93594,
+          93595,
+          0
+        ],
+        [
+          "alternate",
+          93598,
+          93599,
+          0
+        ],
+        [
+          "wrong-target",
+          93602,
+          93603,
+          256
+        ],
+        [
+          "eio",
+          93606,
+          93607,
+          0
+        ],
+        [
+          "value",
+          93610,
+          93611,
+          0
+        ],
+        [
+          "retry",
+          93614,
+          93615,
+          0
+        ]
+      ],
+      "public-O0": [
+        [
+          "closed",
+          94675,
+          94676,
+          0
+        ],
+        [
+          "alternate",
+          94679,
+          94680,
+          0
+        ],
+        [
+          "wrong-target",
+          94683,
+          94684,
+          256
+        ],
+        [
+          "eio",
+          94687,
+          94688,
+          0
+        ],
+        [
+          "value",
+          94691,
+          94692,
+          0
+        ],
+        [
+          "retry",
+          94695,
+          94696,
+          0
+        ]
+      ],
+      "public-O3": [
+        [
+          "closed",
+          95095,
+          95096,
+          0
+        ],
+        [
+          "alternate",
+          95100,
+          95101,
+          0
+        ],
+        [
+          "wrong-target",
+          95104,
+          95105,
+          256
+        ],
+        [
+          "eio",
+          95108,
+          95109,
+          0
+        ],
+        [
+          "value",
+          95112,
+          95113,
+          0
+        ],
+        [
+          "retry",
+          95116,
+          95117,
+          0
+        ]
+      ]
+    },
+    "before_columns": [
+      "lane",
+      "mode",
+      "flushes",
+      "original_pipe_hex",
+      "failed_checks"
+    ],
+    "before": [
+      [
+        "before-O0",
+        "closed",
+        0,
+        "70696e656170706c65",
+        [
+          "original_left_open",
+          "flush_once",
+          "exact_pipe_bytes"
+        ]
+      ],
+      [
+        "before-O0",
+        "alternate",
+        0,
+        "70696e656170706c65",
+        [
+          "original_left_open",
+          "flush_once",
+          "exact_pipe_bytes",
+          "selector_fd",
+          "close_count"
+        ]
+      ],
+      [
+        "before-O3",
+        "closed",
+        0,
+        "70696e656170706c65",
+        [
+          "original_left_open",
+          "flush_once",
+          "exact_pipe_bytes"
+        ]
+      ]
+    ],
+    "contract": "Stock/reviewed/public: one flush; original descriptor remains open, original pipe empty. All three readers observed EOF following cleanup. Help child returned 0 with targeted ECHILD.",
+    "bytes": "Alternate and timeout/retry delivered hex 70696e656170706c65 once to the intended pipe. Wrong-target delivered it to the decoy and the payload assertion failed. Nine bytes in each case.",
+    "errors": "Live ValueError and OSError(errno 5) propagated. Closed replacement suppressed BrokenPipeError without fileno or close."
+  },
+  "regressions": {
+    "fixture_sha256": "649bc0c824ed7d553eb695bbb70c6796b08a7f94be7e12e4c2cbcaf3685b77b2",
+    "export_source_sha256": "7e80c4a3cc385b5f9068919ead7c2b636401b0a81ced194d14ae46905d0b3e7a",
+    "parent_pids": {
+      "stock2-buffer-regression": 91191,
+      "stock-export": 91600,
+      "reviewed-O0-buffer-regression": 93423,
+      "reviewed-O0-export": 93315,
+      "reviewed-O3-buffer-regression": 93736,
+      "reviewed-O3-export": 93356,
+      "public-O0-buffer-regression": 94725,
+      "public-O0-export": 94768,
+      "public-O3-buffer-regression": 95219,
+      "public-O3-export": 95300
+    },
+    "buffering": "Dropping the only public writer and calling gc.collect allowed /bin/cat to see EOF. A zero-timeout retry after mutable input changed delivered redirected plus EOF.",
+    "export": "After the transfer and EOF, the caller released its memoryview and resized its backing array."
+  },
+  "process_accounting": {
+    "groups": 99,
+    "by_guard_result": {
+      "natural": 99
+    },
+    "by_phase": {
+      "after": {
+        "natural": 4
+      },
+      "before": {
+        "natural": 11
+      },
+      "candidate": {
+        "natural": 18
+      },
+      "history": {
+        "natural": 4
+      },
+      "public": {
+        "natural": 26
+      },
+      "reviewed": {
+        "natural": 26
+      },
+      "stock": {
+        "natural": 9
+      },
+      "stock2": {
+        "natural": 1
+      }
+    },
+    "terminated": 0,
+    "nonnatural": [],
+    "traced_processes": 417,
+    "traced_processes_with_positive_wait": 411,
+    "all_owned_groups_empty": true,
+    "all_outer_ECHILD": true,
+    "all_traced_processes_positively_waited": false,
+    "all_intact_33_and_replacement_stdin_control_positive_waits_observed": true,
+    "auxiliary_shell_cat_wait_gaps": [
+      {
+        "lane": "public-O0-buffer-regression",
+        "parent_pid": 94725,
+        "shell_pid": 94742,
+        "shell_wait_raw": 1792,
+        "cat_pid": 94743,
+        "observed_positive_cat_waits": 0
+      },
+      {
+        "lane": "public-O3-buffer-regression",
+        "parent_pid": 95219,
+        "shell_pid": 95235,
+        "shell_wait_raw": 1792,
+        "cat_pid": 95236,
+        "observed_positive_cat_waits": 0
+      },
+      {
+        "lane": "reviewed-O0-buffer-regression",
+        "parent_pid": 93423,
+        "shell_pid": 93439,
+        "shell_wait_raw": 1792,
+        "cat_pid": 93440,
+        "observed_positive_cat_waits": 0
+      },
+      {
+        "lane": "reviewed-O3-buffer-regression",
+        "parent_pid": 93736,
+        "shell_pid": 93752,
+        "shell_wait_raw": 1792,
+        "cat_pid": 93753,
+        "observed_positive_cat_waits": 0
+      },
+      {
+        "lane": "stock-buffer-regression",
+        "parent_pid": 90873,
+        "shell_pid": 90890,
+        "shell_wait_raw": 1792,
+        "cat_pid": 90891,
+        "observed_positive_cat_waits": 0
+      },
+      {
+        "lane": "stock2-buffer-regression",
+        "parent_pid": 91191,
+        "shell_pid": 91207,
+        "shell_wait_raw": 1792,
+        "cat_pid": 91208,
+        "observed_positive_cat_waits": 0
+      }
+    ],
+    "prototype_columns": [
+      "root_pid",
+      "root_wait_raw",
+      "last_diagnostic"
+    ],
+    "prototypes": {
+      "after-O0-original": [
+        89266,
+        256,
+        "AttributeError: 'memoryview' object has no attribute 'cast'"
+      ],
+      "after-O3-original": [
+        90906,
+        256,
+        "AttributeError: 'memoryview' object has no attribute 'cast'"
+      ],
+      "candidate-O0-original": [
+        91319,
+        0,
+        null
+      ],
+      "candidate-O3-original": [
+        93229,
+        0,
+        null
+      ]
+    }
+  },
+  "historical": {
+    "six_seal": {
+      "pr": 3827,
+      "squash": "5b39972865c7bbcd3a2ce64d64702fd488a5a1ce",
+      "ordinals": [
+        118,
+        119,
+        122,
+        123,
+        124,
+        126
+      ],
+      "compact_sha256": "7ce0fb60ad3c01f8daf300292b81d4f601cc23de09fac3871fceffb39e1ee7d3",
+      "release": "6a399d7f10fa9b7c6413de6eb6e8371deff851e1",
+      "receipt_sha256": "4b086a985bd0b3eaf58966229289df604b30a4f2a56f00fb0d42eac24a92323d"
+    },
+    "official_credit": {
+      "pr": "https://github.com/astral-experiments/imre/pull/3851",
+      "squash": "53760dd2edb676b943dbfbdfe228170d02d173ca",
+      "passed": 178,
+      "denominator": 353,
+      "prior": 177,
+      "added_from_six": [
+        122
+      ],
+      "overlapping_from_six": [
+        118,
+        119,
+        123,
+        124,
+        126
+      ],
+      "union_sha256": "b4142550111c9cf04426d5d4d55752cb728c34de21ffba56b2a061c44f65cf77"
+    },
+    "historical_recheck": {
+      "source": "45cd1587035f83b455041972030588a82c20ff3d",
+      "sha256": "370dffa8b17ccebb744e31b284f11a271c24139a5347f95ccb53752f14459f9f",
+      "paired_O0_O3": {
+        "33": "addFailure",
+        "118": "addSuccess",
+        "119": "addSuccess",
+        "122": "addError",
+        "123": "addSuccess",
+        "124": "addSuccess",
+        "126": "addSuccess"
+      },
+      "diagnostics": [
+        "AssertionError: Expected 'flush' to be called once. Called 0 times.",
+        "NotImplementedError: memoryview of a mutable buffer is unsupported"
+      ]
+    },
+    "limitation": "The #33 fail-to-pass is measured directly. Rebuilt historical source and the published cwd additions do not establish whether #33 belonged to the retained 14. No campaign count beyond the official 178/353 is assigned here."
+  },
+  "scope": "All process counts concern owned groups on this worker. The cause of the old worker's PID-1 zombies remains unproven."
+}
