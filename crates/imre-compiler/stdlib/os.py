@@ -16,6 +16,7 @@ except ImportError:
     pass
 
 if sys.platform == "linux":
+    from posix import MFD_CLOEXEC, memfd_create
     import posix as _posix
     for _name in vars(_posix):
         if _name.startswith("RTLD_"):
