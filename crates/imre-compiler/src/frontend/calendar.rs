@@ -120,8 +120,9 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
         "__mod__" | "__rmod__" | "__divmod__" | "__rdivmod__" => {
             receiver == Type::Calendar(C::Delta)
         }
-        "fromisoformat" => receiver == Type::ClockTime,
-        "strptime" => matches!(receiver, Type::Calendar(C::DateTime) | Type::ClockTime),
+        "fromisoformat" | "strptime" => {
+            matches!(receiver, Type::Calendar(C::DateTime) | Type::ClockTime)
+        }
         "fromtimestamp" => receiver == Type::Calendar(C::Date),
         "ctime" | "fromisocalendar" | "fromordinal" | "isoweekday" | "today" => {
             matches!(receiver, Type::Calendar(C::Date | C::DateTime))

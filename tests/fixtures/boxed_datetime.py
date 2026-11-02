@@ -420,6 +420,22 @@ def test_subclass_construction():
         raise AssertionError("date allocated an incompatible datetime layout")
 
 
+def test_datetime_fromisoformat():
+    class Stamp(dt):
+        pass
+
+    class Fields(dt):
+        def __new__(cls, *fields):
+            return fields
+
+    bound = Stamp(2000, 1, 1).fromisoformat
+    value = bound("2020-W53-7\ud80024:00:00-00:00:30.000005")
+    assert type(value) is Stamp and value.date() == date(2021, 1, 4)
+    assert value.utcoffset() == -timedelta(seconds=30, microseconds=5)
+    assert dt.fromisoformat("20200103T125530Z").tzinfo is UTC
+    assert Fields.fromisoformat("9999-12-31T24:00") == (10000, 1, 1, 0, 0, 0, 0, None)
+
+
 def test_timedelta_negation():
     class Delta(timedelta):
         @property
@@ -903,6 +919,7 @@ def current():
     test_astimezone_subtype()
     test_tzinfo_reduction()
     test_calendar_format()
+    test_datetime_fromisoformat()
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
     test_timedelta_remainder()
