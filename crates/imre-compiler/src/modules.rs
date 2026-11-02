@@ -2274,7 +2274,10 @@ impl SearchRoots {
 
 /// These public names are supplied by the boxed unittest.mock module.
 pub(crate) fn boxed_mock_export(name: &str) -> bool {
-    matches!(name, "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal")
+    matches!(
+        name,
+        "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal" | "call" | "_Call" | "_CallList"
+    )
 }
 
 impl SourceModule {
