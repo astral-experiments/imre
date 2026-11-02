@@ -1646,6 +1646,7 @@ impl Context {
         let methods = match name {
             "object" => &["__hash__", "__format__", "__init_subclass__"],
             "dict" => builtins::DICT_METHODS,
+            "function" => &["__call__"],
             "collections.defaultdict" => {
                 self.builtin("dict");
                 &[
@@ -2021,6 +2022,13 @@ impl Context {
             self.bind(scope, "RLock", rlock);
         }
         match name {
+            #[cfg(target_os = "linux")]
+            "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
+            #[cfg(target_os = "linux")]
+            "_imre_signal" if source.is_none() => {
+                let factory = self.builtin("_imre_signal.make_signals");
+                self.bind(scope, "make_signals", factory);
+            }
             "_thread" => {
                 for name in ["allocate_lock", "allocate"] {
                     let factory = self.builtin(&format!("_thread.{name}"));
@@ -2064,6 +2072,7 @@ impl Context {
             }
             "errno" => stdlib::install_errno(self, scope)?,
             "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
+            "socket" if source.is_none() => stdlib::import_socket_constants(self, scope)?,
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);

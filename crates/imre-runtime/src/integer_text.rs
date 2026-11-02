@@ -369,6 +369,17 @@ pub(super) fn decimal_digit(value: char) -> Option<u8> {
     (digit < 10).then_some(digit as u8)
 }
 
+/// CPython accepts Unicode 16 Decimal and Digit characters in str.isdigit().
+pub(super) fn is_digit(c: char) -> bool {
+    decimal_digit(c).is_some()
+        || matches!(c as u32,
+        0xb2..=0xb3 | 0xb9 | 0x1369..=0x1371 | 0x19da | 0x2070 | 0x2074..=0x2079 |
+        0x2080..=0x2089 | 0x2460..=0x2468 | 0x2474..=0x247c | 0x2488..=0x2490 |
+        0x24ea | 0x24f5..=0x24fd | 0x24ff | 0x2776..=0x277e | 0x2780..=0x2788 |
+        0x278a..=0x2792 | 0x10a40..=0x10a43 | 0x10e60..=0x10e68 | 0x11052..=0x1105a |
+        0x1f100..=0x1f10a)
+}
+
 /// Identifies characters printable in locked ICU 2.3 data but not Unicode 16.
 ///
 /// These sorted half-open ranges are the complete difference between Ruff's

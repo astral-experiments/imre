@@ -62,7 +62,7 @@ pub(crate) use json::{
     write_fragment as write_json_fragment, write_string as write_json_string,
 };
 mod linecache;
-pub(crate) use linecache::{SourceDecodeError, decode_compile_source};
+pub(crate) use linecache::{SourceDecodeError, decode_compile_source, decode_source_lines};
 pub(crate) mod locks;
 pub(crate) mod logging;
 pub(crate) use logging::record::{brace_integer_field, percent_float_field, percent_integer_field};
@@ -100,7 +100,8 @@ pub(crate) mod time;
 pub(crate) use text::{UrlInput, capitalize, urlquote, urlsplit};
 pub(crate) use text::{
     count_codepoints, count_text, expand_tabs, find_text, normalize_unicode, ord_byte, ord_char,
-    partition_text, python_alnum, python_islower, python_isspace, python_isupper, split_parts,
+    partition_text, python_alnum, python_isalpha, python_isdigit, python_islower, python_isspace,
+    python_isupper, split_parts,
 };
 mod typing;
 pub(crate) use text::{chr_scalar, short_string};

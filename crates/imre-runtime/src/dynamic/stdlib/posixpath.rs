@@ -28,6 +28,8 @@ pub(super) fn path_arg(ctx: &mut Context, path: Id, expected: &str) -> Result<Id
     if let Some(method) = method.filter(|&method| method != NONE) {
         let value = ctx.call(method, Vec::new(), Vec::new())?;
         if spelling(ctx, value) {
+            // A native slot can return a borrowed value. Keep it through later argument conversions.
+            ctx.heap.keep(value);
             return Ok(value);
         }
         return Err(Error::new(

@@ -345,13 +345,15 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
-pub(super) const BYTEARRAY_METHODS: &[&str] =
-    &["__repr__", "append", "clear", "copy", "extend", "reverse"];
+pub(super) const BYTEARRAY_METHODS: &[&str] = &[
+    "__repr__", "append", "clear", "copy", "endswith", "extend", "reverse",
+];
 
 pub(super) const BYTES_METHODS: &[&str] = &[
     "__mod__",
     "__repr__",
     "decode",
+    "endswith",
     "rfind",
     "rsplit",
     "rstrip",
@@ -371,6 +373,8 @@ pub(super) const STR_METHODS: &[&str] = &[
     "format",
     "isalnum",
     "isascii",
+    "isalpha",
+    "isdigit",
     "islower",
     "isspace",
     "isupper",
@@ -433,6 +437,10 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             super::namedtuple::GETTER
         }
         Value::ItemGetter(_) if attr == "__reduce__" => "operator.itemgetter",
+        Value::NamedTuple {
+            class: Some(super::stdlib::os::stat::CLASS),
+            ..
+        } if attr == "__reduce__" => super::stdlib::os::stat::CLASS,
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
         Value::ClassMethod(_) if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
@@ -1035,7 +1043,9 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if method == "decode" => text::method(ctx, owner, method, args, kwargs),
+            "bytearray" if matches!(method, "decode" | "endswith") => {
+                text::method(ctx, owner, method, args, kwargs)
+            }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
             "bytearray" if BYTEARRAY_METHODS.contains(&method) => {
                 text::bytearray_method(ctx, name, method, args, kwargs)

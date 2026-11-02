@@ -39,6 +39,8 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             Some(("_functools", function))
         }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
+        #[cfg(target_os = "linux")]
+        "_signal" if function == "sigpending" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
         "zlib" if function == "adler32" => Some((module, function)),
@@ -159,8 +161,9 @@ impl Context {
                         | "property"
                         | "module"
                         | weakref::REFERENCE_TYPE
-                ) || (matches!(name, "__repr__" | "issubset")
-                    && matches!(kind.as_str(), "set" | "frozenset")) =>
+                ) || (kind == "function" && name == "__call__")
+                    || (matches!(name, "__repr__" | "issubset")
+                        && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
                 self.builtins.get(&format!("{kind}.{name}")).copied()
             }
@@ -1813,6 +1816,9 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "_signal.sigpending" => {
+                        return Ok(self.text("Examine pending signals.\n\nReturns a set of signal numbers that are pending for delivery to\nthe calling thread."));
+                    }
                     "__doc__" if symbol == "_thread.allocate" => {
                         return Ok(self.text("An obsolete synonym of allocate_lock()."));
                     }
@@ -1878,6 +1884,7 @@ impl Context {
                         if matches!(
                             symbol.as_str(),
                             "posix.getpid"
+                                | "_signal.sigpending"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
                                 | "_thread._count"
@@ -1976,6 +1983,11 @@ impl Context {
                 }
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
+                }
+                if name == "__call__" {
+                    let class = self.builtin("function");
+                    let descriptor = self.builtin("function.__call__");
+                    return self.bind_attribute(descriptor, obj, class);
                 }
             }
             Value::Method {
@@ -2091,6 +2103,7 @@ impl Context {
                 return stdlib::datetime::attribute(self, obj, &value.clone(), tzinfo, name);
             }
             Value::Native(ref class) if class == stdlib::os::stat::CLASS => match name {
+                "__reduce__" => return Ok(self.builtin("os.stat_result.__reduce__")),
                 field if let Some(id) = stdlib::os::stat::member(self, field) => return Ok(id),
                 "__module__" => return Ok(self.text("os")),
                 "__name__" | "__qualname__" => return Ok(self.text("stat_result")),
@@ -2398,7 +2411,9 @@ impl Context {
             Value::Socket(ref socket) if name == "family" => {
                 return Ok(self.int(i64::from(crate::objects::socket::family(socket))));
             }
-            Value::Socket(_) if name == "type" => return Ok(self.int(i64::from(libc::SOCK_STREAM))),
+            Value::Socket(ref socket) if name == "type" => {
+                return Ok(self.int(i64::from(crate::objects::socket::kind(socket))));
+            }
             Value::BufferedRandom(ref file) if name == "closed" => {
                 return Ok(if file.borrow().closed() { TRUE } else { FALSE });
             }
@@ -2699,6 +2714,7 @@ impl Context {
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "dict" | "list" | "tuple")
+                    || (class == "function" && name == "__call__")
                     || builtins::is_enum_base(class)
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(class.as_str(), "set" | "frozenset"))
@@ -3956,6 +3972,7 @@ impl Context {
             dictionary,
             property,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
             fields: Default::default(),
             scalar: None,
@@ -3967,10 +3984,16 @@ impl Context {
     fn allocation_base(&self, class: Id) -> Option<Id> {
         self.find_in_mro(class, |base| match self.heap.get(base) {
             Value::Native(_) => Some(base),
-            Value::Class { scope, .. }
-                if self.scope_data(*scope).class_cell.is_none()
-                    && self.builtins.get(stdlib::io::NEWLINE_DECODER) != Some(&base) =>
+            // These bootstrapped classes inherit object.__new__. The decoder
+            // attaches its native state later in __init__.
+            Value::Class { .. }
+                if self.classes.get("typing.Generic") == Some(&base)
+                    || self.classes.get("typing.Protocol") == Some(&base)
+                    || self.builtins.get(stdlib::io::NEWLINE_DECODER) == Some(&base) =>
             {
+                None
+            }
+            Value::Class { scope, .. } if self.scope_data(*scope).class_cell.is_none() => {
                 Some(base)
             }
             _ => None,
@@ -4075,6 +4098,7 @@ impl Context {
             dictionary: None,
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }
@@ -4121,6 +4145,7 @@ impl Context {
             scalar: Some(text),
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }
@@ -4216,6 +4241,27 @@ impl Context {
                     return Err(error);
                 }
                 Ok(result)
+            }
+            Value::Native(name) if name == "function.__call__" => {
+                let mut arguments = args.into_iter();
+                let function = arguments.next().ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        "descriptor '__call__' of 'function' object needs an argument",
+                    )
+                })?;
+                if !matches!(self.heap.get(function), Value::Function { .. }) {
+                    let actual = self
+                        .builtin_type_name(function)
+                        .unwrap_or_else(|| self.type_name(function));
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "descriptor '__call__' requires a 'function' object but received a '{actual}'"
+                        ),
+                    ));
+                }
+                self.call(function, arguments.collect(), kwargs)
             }
             Value::Native(name) if name == "classmethod.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "classmethod", &args, &kwargs)

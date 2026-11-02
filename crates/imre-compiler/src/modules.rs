@@ -117,6 +117,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         "copy" => Some(("copy.py", include_str!("../stdlib/copy.py"))),
         "copyreg" => Some(("copyreg.py", include_str!("../stdlib/copyreg.py"))),
+        "warnings" => Some((
+            "warnings.py",
+            include_str!("../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"),
+        )),
+        "_py_warnings" => Some((
+            "_py_warnings.py",
+            include_str!("../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"),
+        )),
         "re" => Some(("re.py", include_str!("../stdlib/re.py"))),
         "decimal" => Some(("decimal.py", include_str!("../stdlib/decimal.py"))),
         // CPython 3.14.5 Lib/py_compile.py. See stdlib/docstrings/LICENSE.
@@ -1064,6 +1072,7 @@ impl IntrinsicModule {
             (Self::ImportlibUtil, "source_from_cache") => Intrinsic::CachePath { reverse: true },
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Logging, "Formatter") => Intrinsic::LogFormatter,
+            (Self::Time, "ctime") => Intrinsic::ObjectRuntimeExport("time.ctime"),
             (Self::Time, "monotonic") => Intrinsic::ObjectRuntimeExport("time.monotonic"),
             (Self::Time, "perf_counter") => Intrinsic::ObjectRuntimeExport("time.perf_counter"),
             (Self::Time, "struct_time") => Intrinsic::StructTime,
@@ -1156,6 +1165,27 @@ impl IntrinsicModule {
             (Self::Signal, "Signals") if cfg!(unix) => {
                 Intrinsic::ObjectRuntimeExport("signal.Signals")
             }
+            #[cfg(unix)]
+            (Self::Signal, "sigpending") => Intrinsic::ObjectRuntimeExport("signal.sigpending"),
+            #[cfg(unix)]
+            (Self::SignalNative, "sigpending") => {
+                Intrinsic::ObjectRuntimeExport("_signal.sigpending")
+            }
+            #[cfg(unix)]
+            (Self::Signal | Self::SignalNative, "NSIG") => {
+                Intrinsic::ObjectRuntimeExport("signal.NSIG")
+            }
+            // Signal numbers are IntEnum instances when accessed through the boxed module.
+            #[cfg(unix)]
+            (
+                Self::Signal | Self::SignalNative,
+                "SIGHUP" | "SIGQUIT" | "SIGILL" | "SIGTRAP" | "SIGABRT" | "SIGIOT" | "SIGBUS"
+                | "SIGFPE" | "SIGKILL" | "SIGUSR1" | "SIGSEGV" | "SIGUSR2" | "SIGPIPE" | "SIGCHLD"
+                | "SIGCLD" | "SIGCONT" | "SIGSTOP" | "SIGTSTP" | "SIGTTIN" | "SIGTTOU" | "SIGURG"
+                | "SIGXCPU" | "SIGXFSZ" | "SIGVTALRM" | "SIGPROF" | "SIGWINCH" | "SIGIO"
+                | "SIGPOLL" | "SIGPWR" | "SIGSYS" | "SIGSTKFLT" | "SIGEMT" | "SIGRTMIN"
+                | "SIGRTMAX",
+            ) => Intrinsic::ObjectRuntimeExport("signal.Signals"),
             // Native executables have no adaptive bytecode interpreter.
             (Self::Opcode, "ENABLE_SPECIALIZATION" | "ENABLE_SPECIALIZATION_FT") => {
                 Intrinsic::IntConstant(0)
@@ -1323,6 +1353,7 @@ impl IntrinsicModule {
             (Self::Typing, "T") => Intrinsic::ObjectRuntimeExport("typing.T"),
             (Self::Typing, "KT") => Intrinsic::ObjectRuntimeExport("typing.KT"),
             (Self::Typing, "VT") => Intrinsic::ObjectRuntimeExport("typing.VT"),
+            (Self::Typing, "Type") => Intrinsic::ObjectRuntimeExport("typing.Type"),
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
             (Self::Typing, "DefaultDict") => Intrinsic::ObjectRuntimeExport("typing.DefaultDict"),
@@ -1428,6 +1459,7 @@ impl IntrinsicModule {
             (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
             (Self::SocketNative, name) => Intrinsic::ObjectRuntimeExport(match name {
                 "has_ipv6" => "_socket.has_ipv6",
+                "SocketType" => "_socket.SocketType",
                 "AF_INET" => "_socket.AF_INET",
                 "AF_INET6" => "_socket.AF_INET6",
                 "AF_UNSPEC" => "_socket.AF_UNSPEC",
@@ -1439,6 +1471,7 @@ impl IntrinsicModule {
                 "SOCK_SEQPACKET" => "_socket.SOCK_SEQPACKET",
                 "SOL_SOCKET" => "_socket.SOL_SOCKET",
                 "IPPROTO_TCP" => "_socket.IPPROTO_TCP",
+                "IPPROTO_UDP" => "_socket.IPPROTO_UDP",
                 "IPPROTO_IPV6" => "_socket.IPPROTO_IPV6",
                 "IPV6_V6ONLY" => "_socket.IPV6_V6ONLY",
                 "SO_REUSEADDR" => "_socket.SO_REUSEADDR",
@@ -1453,9 +1486,11 @@ impl IntrinsicModule {
                 "error" => "_socket.error",
                 _ => return None,
             }),
+            (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
             (Self::Socket, "has_dualstack_ipv6") => {
                 Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")
             }
+            (Self::Socket, "IPPROTO_UDP") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_UDP"),
             (Self::Socket, "IPPROTO_IPV6") => Intrinsic::ObjectRuntimeExport("socket.IPPROTO_IPV6"),
             (Self::Socket, "IPV6_V6ONLY") => Intrinsic::ObjectRuntimeExport("socket.IPV6_V6ONLY"),
             (Self::Socket, "has_ipv6") => Intrinsic::ObjectRuntimeExport("socket.has_ipv6"),
@@ -1555,6 +1590,7 @@ impl IntrinsicModule {
             }
             (Self::Csv, "Error") => Intrinsic::CsvError,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
+            (Self::Re, "escape") => Intrinsic::ObjectRuntimeExport("re.escape"),
             (Self::Re, "compile") => Intrinsic::RegexCompile,
             (Self::Re, "search") => Intrinsic::RegexSearch,
             (Self::Re, "match") => Intrinsic::RegexMatchStart,
@@ -1873,6 +1909,11 @@ impl SourceModule {
             if let Some(export) = export {
                 return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(export)));
             }
+        }
+        if self.is_bundled("unittest.mock") && matches!(name, "sentinel" | "DEFAULT") {
+            return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
+                "unittest.mock sentinel objects",
+            )));
         }
         let binding = *self.bindings.get(name)?;
         (self.archive.is_none() || matches!(binding, Binding::Definition(_))).then_some(binding)

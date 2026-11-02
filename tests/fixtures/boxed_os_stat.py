@@ -2,10 +2,44 @@ import os
 import posix
 
 
+def check_reduction(result):
+    descriptor = os.stat_result.__reduce__
+    assert type(descriptor).__name__ == "method_descriptor"
+    assert descriptor.__objclass__ is os.stat_result
+    for method in (descriptor, descriptor.__get__(result)):
+        assert method.__qualname__ == "stat_result.__reduce__"
+        assert method.__doc__ is None and method.__text_signature__ == "($self, /)"
+    shared = []
+    made = os.stat_result([shared] * 10, {"st_atime_ns": shared})
+    names = ("st_atime st_mtime st_ctime st_atime_ns st_mtime_ns st_ctime_ns "
+             "st_blksize st_blocks st_rdev st_flags st_gen st_birthtime").split()
+    for value in (result, made):
+        constructor, (items, fields) = value.__reduce__()
+        assert constructor is os.stat_result
+        assert type(items) is tuple and len(items) == 10
+        assert list(fields) == [name for name in names if hasattr(value, name)]
+        assert len(fields) == value.n_fields - len(items)
+        restored = constructor(items, fields)
+        for i in range(len(items)):
+            assert restored[i] is items[i] is value[i]
+        for name, item in fields.items():
+            assert getattr(restored, name) is item is getattr(value, name)
+        _, (_, other_fields) = os.stat_result.__reduce__(value)
+        assert other_fields == fields and other_fields is not fields
+    assert made.st_atime_ns is shared and made.st_mtime_ns is None
+    try:
+        os.stat_result.__reduce__(())
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("stat_result reducer accepted a plain tuple")
+
+
 def current():
     assert os.stat is posix.stat and posix.stat_result is os.stat_result
     assert issubclass(os.stat_result, tuple)
     result = os.stat(path=__file__)
+    check_reduction(result)
     assert type(result) is result.__class__ is os.stat_result
     assert len(result) == result.n_sequence_fields == 10
     assert result.st_size == result[6] and type(result.st_mtime) is float

@@ -62,6 +62,7 @@ impl Context {
             dictionary: None,
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }
