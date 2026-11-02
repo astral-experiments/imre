@@ -2893,6 +2893,7 @@ def report(text):
             "boxed_deque_cycle_callbacks.py",
             "boxed_deque_mixed_equal.py",
             "boxed_deque_nested_mutation.py",
+            "boxed_deque_concat.py",
             "boxed_zip.py",
             "boxed_map.py",
             "boxed_python_iterators.py",

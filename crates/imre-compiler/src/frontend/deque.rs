@@ -20,7 +20,7 @@ impl Checker<'_> {
     pub(super) fn boxed_deque_descriptor(&self, attr: &ast::ExprAttribute) -> bool {
         matches!(
             attr.attr.as_str(),
-            "__repr__" | "__mul__" | "__rmul__" | "__imul__"
+            "__add__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__"
         ) && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::Deque))
     }
 
@@ -53,7 +53,7 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
         let (builtin, parameters, returns) = match name {
-            "__repr__" | "__mul__" | "__rmul__" | "__imul__" => {
+            "__add__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__" => {
                 return Err(
                     self.scoped_builtin_error(&format!("collections.deque.{name}"), attribute)
                 );
@@ -386,7 +386,7 @@ impl Checker<'_> {
         element: Type,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
-        if matches!(name, "__repr__" | "__mul__" | "__rmul__" | "__imul__") {
+        if matches!(name, "__repr__" | "__add__" | "__mul__" | "__rmul__" | "__imul__") {
             return self.boxed_deque_call(name, call);
         }
         if name == "__init__" {

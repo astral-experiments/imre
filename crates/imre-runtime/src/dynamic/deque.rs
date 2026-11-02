@@ -47,6 +47,7 @@ const MEMBERS: &[Member] = &[
         "($self, /, *args, **kwargs)",
     ),
     Member::new("__len__", "Return len(self).", "($self, /)"),
+    Member::new("__add__", "Return self+value.", "($self, value, /)"),
     Member::new("__mul__", "Return self*value.", "($self, value, /)"),
     Member::new("__rmul__", "Return value*self.", "($self, value, /)"),
     Member::new("__getitem__", "Return self[key].", "($self, key, /)"),
@@ -490,6 +491,30 @@ pub(super) fn extend(ctx: &mut Context, queue: Id, source: Id, left: bool) -> Re
     result
 }
 
+/// Concatenate by copying the left deque and consuming the right operand's iterator.
+pub(super) fn concat(ctx: &mut Context, left: Id, right: Id) -> Result<Id> {
+    if !matches!(ctx.heap.get(ctx.scalar_value(right)), Value::Deque(_)) {
+        // CPython uses isinstance here, which also accepts a reported __class__.
+        let deque = ctx.builtin(CLASS);
+        let reported_deque = match ctx.lookup_attr(right, "__class__") {
+            Ok(class) => ctx.direct_subclass(class, deque),
+            Err(error) if ctx.is_attribute_error(&error) => false,
+            Err(error) => return Err(error),
+        };
+        if !reported_deque {
+            let name = ctx.type_name(right);
+            let name = &name[..name.floor_char_boundary(200)];
+            return Err(Error::new(
+                "TypeError",
+                format!("can only concatenate deque (not \"{name}\") to deque"),
+            ));
+        }
+    }
+    let result = copy(ctx, left)?;
+    extend(ctx, result, right, false)?;
+    Ok(result)
+}
+
 /// Compare through live cursors so a callback can mutate either deque or raise.
 pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Result<bool> {
     use std::collections::HashMap;
@@ -903,7 +928,7 @@ pub(super) fn method(
             "TypeError",
             if matches!(
                 name,
-                "__iadd__" | "__contains__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__"
+                "__add__" | "__iadd__" | "__contains__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__"
             ) {
                 format!("wrapper {name}() takes no keyword arguments")
             } else {
@@ -973,11 +998,12 @@ pub(super) fn method(
             return IndexOp::Set(*value).apply(ctx, storage, *index, true);
         }
         ("__delitem__", [index]) => return IndexOp::Delete.apply(ctx, storage, *index, true),
+        ("__add__", [other]) => return concat(ctx, receiver, *other),
         ("__iadd__", [item]) => {
             extend(ctx, receiver, *item, false)?;
             return Ok(receiver);
         }
-        ("__getitem__" | "__delitem__" | "__iadd__" | "__contains__" | "__eq__" | "__ne__", _) => {
+        ("__getitem__" | "__delitem__" | "__add__" | "__iadd__" | "__contains__" | "__eq__" | "__ne__", _) => {
             return Err(Error::new(
                 "TypeError",
                 format!("expected 1 argument, got {}", rest.len()),

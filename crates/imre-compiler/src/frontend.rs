@@ -6156,6 +6156,9 @@ impl<'a> Checker<'a> {
                 return Ok((Binary::Repeat, right));
             }
         }
+        if op == ast::Operator::Add && matches!(left, Type::Deque(_)) {
+            return Err(self.object_builtin_error("collections.deque concatenation", node));
+        }
         if op == ast::Operator::Add && matches!(left, Type::Str | Type::Bytes) && right == left {
             return Ok((Binary::Concat, left));
         }
