@@ -130,4 +130,23 @@ def current():
         assert notes == ["existing"] + expected
         assert calls == (expected if streaming else [])
 
+    # The default result loses the encoder's reference before the next item.
+    row = [object(), "initial"]
+    retained = []
+    class Replacement(str):
+        def __del__(self):
+            row[1] = "updated"
+
+    def default(obj):
+        result = Replacement("first")
+        if keep:
+            retained.append(result)
+        return result
+
+    for keep, second in [(False, "updated"), (True, "initial")]:
+        row[1] = "initial"
+        assert json.dumps(row, default=default) == '["first", "' + second + '"]'
+        retained.clear()
+        assert row[1] == "updated"
+
     print("encoded container subclasses")

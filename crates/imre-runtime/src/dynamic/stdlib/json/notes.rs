@@ -10,6 +10,16 @@ pub(super) enum Location {
 /// Attach the location of a child that failed to serialize.
 pub(super) fn noted(ctx: &mut Context, error: Error, owner: Id, location: Location) -> Error {
     let exception = ctx.raised_instance(error);
+    noted_instance(ctx, exception, owner, location)
+}
+
+/// Annotate the live exception, including changes a replacement's finalizer made to it.
+pub(super) fn noted_instance(
+    ctx: &mut Context,
+    exception: Id,
+    owner: Id,
+    location: Location,
+) -> Error {
     // Reserve the exception and any replacement produced while formatting its note.
     if let Err(mut failure) = ctx.heap.reserve_temporaries(2) {
         failure.context = exception;

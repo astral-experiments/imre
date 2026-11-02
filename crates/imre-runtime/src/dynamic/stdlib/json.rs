@@ -602,10 +602,34 @@ impl Encoder {
                         ..
                     } => self.object_items(ctx, id, depth)?,
                     _ => {
+                        let mark = ctx.heap.temporary_mark();
                         let result =
                             ctx.call(self.default, super::super::copy_ids(&[id])?, Vec::new())?;
-                        self.value(ctx, result, depth)
-                            .map_err(|e| noted(ctx, e, id, Location::Object))?;
+                        ctx.heap.reserve_temporaries(1)?;
+                        ctx.heap.keep(result);
+                        let error = self
+                            .value(ctx, result, depth)
+                            .err()
+                            .map(|e| ctx.raised_instance(e));
+                        // Dropping the replacement can run Python before we annotate an
+                        // error or remove the original object's circular-reference marker.
+                        let collect = ctx.heap.observes_released_roots()
+                            && ctx.heap.could_own_finalizer(result, true);
+                        ctx.heap.release_temporaries_since(mark);
+                        if let Some(exception) = error {
+                            ctx.heap.keep(exception);
+                        }
+                        if collect {
+                            ctx.collect_unreachable();
+                        }
+                        if let Some(exception) = error {
+                            return Err(notes::noted_instance(
+                                ctx,
+                                exception,
+                                id,
+                                Location::Object,
+                            ));
+                        }
                     }
                 }
                 self.nesting -= 1;
