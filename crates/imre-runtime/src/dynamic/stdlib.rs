@@ -47,6 +47,8 @@ pub(super) mod readiness;
 pub(super) mod regex;
 mod secrets;
 mod select;
+#[cfg(target_os = "linux")]
+pub(super) mod signal;
 mod socket;
 mod structure;
 mod traceback;
@@ -74,13 +76,17 @@ pub(super) fn jit_module(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn is_module(name: &str) -> bool {
-    matches!(name, "builtins" | "errno" | "genericpath") || has_lazy_attributes(name)
+    matches!(name, "builtins" | "errno" | "genericpath")
+        || (cfg!(target_os = "linux") && matches!(name, "_signal" | "_imre_signal"))
+        || has_lazy_attributes(name)
 }
 
 /// These providers synthesize attributes on lookup. Their module dictionaries
 /// alone do not enumerate their exports.
 pub(super) fn has_lazy_attributes(name: &str) -> bool {
-    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport" | "_signal") {
+    if cfg!(unix) && matches!(name, "zipimport" | "_imre_zipimport")
+        || cfg!(all(unix, not(target_os = "linux"))) && name == "_signal"
+    {
         return true;
     }
     matches!(
@@ -369,13 +375,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         return Ok(ctx.int(i64::from(value)));
     }
     let id = match (module, name) {
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "SIGINT") => ctx.int(i64::from(libc::SIGINT)),
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "SIGALRM") => ctx.int(i64::from(libc::SIGALRM)),
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "SIGTERM") => ctx.int(i64::from(libc::SIGTERM)),
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         ("_signal", "alarm") => ctx.builtin("_signal.alarm"),
         ("io" | "_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf") => ctx.builtin(&format!("math.{name}")),
@@ -851,6 +857,10 @@ pub(super) fn call(
     }
     if super::lowlevel_threads::function_name(name).is_some() {
         return super::lowlevel_threads::call(ctx, name, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if matches!(name, "_signal.sigpending" | "_imre_signal.make_signals") {
+        return signal::call(ctx, name, args, kwargs);
     }
     if name == "_thread.get_ident"
         || (cfg!(any(target_os = "linux", target_os = "macos")) && name == "_thread.get_native_id")

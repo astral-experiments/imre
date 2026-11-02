@@ -1165,6 +1165,27 @@ impl IntrinsicModule {
             (Self::Signal, "Signals") if cfg!(unix) => {
                 Intrinsic::ObjectRuntimeExport("signal.Signals")
             }
+            #[cfg(unix)]
+            (Self::Signal, "sigpending") => Intrinsic::ObjectRuntimeExport("signal.sigpending"),
+            #[cfg(unix)]
+            (Self::SignalNative, "sigpending") => {
+                Intrinsic::ObjectRuntimeExport("_signal.sigpending")
+            }
+            #[cfg(unix)]
+            (Self::Signal | Self::SignalNative, "NSIG") => {
+                Intrinsic::ObjectRuntimeExport("signal.NSIG")
+            }
+            // Signal numbers are IntEnum instances when accessed through the boxed module.
+            #[cfg(unix)]
+            (
+                Self::Signal | Self::SignalNative,
+                "SIGHUP" | "SIGQUIT" | "SIGILL" | "SIGTRAP" | "SIGABRT" | "SIGIOT" | "SIGBUS"
+                | "SIGFPE" | "SIGKILL" | "SIGUSR1" | "SIGSEGV" | "SIGUSR2" | "SIGPIPE" | "SIGCHLD"
+                | "SIGCLD" | "SIGCONT" | "SIGSTOP" | "SIGTSTP" | "SIGTTIN" | "SIGTTOU" | "SIGURG"
+                | "SIGXCPU" | "SIGXFSZ" | "SIGVTALRM" | "SIGPROF" | "SIGWINCH" | "SIGIO"
+                | "SIGPOLL" | "SIGPWR" | "SIGSYS" | "SIGSTKFLT" | "SIGEMT" | "SIGRTMIN"
+                | "SIGRTMAX",
+            ) => Intrinsic::ObjectRuntimeExport("signal.Signals"),
             // Native executables have no adaptive bytecode interpreter.
             (Self::Opcode, "ENABLE_SPECIALIZATION" | "ENABLE_SPECIALIZATION_FT") => {
                 Intrinsic::IntConstant(0)
