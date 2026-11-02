@@ -265,6 +265,14 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "string/templatelib.py",
             include_str!("../stdlib/string/templatelib.py"),
         )),
+        "email.message" => Some((
+            "email/message.py",
+            concat!(
+                include_str!("../stdlib/email/message.py"),
+                "\n",
+                include_str!("../stdlib/email/boxed_message.py"),
+            ),
+        )),
         "http" => Some((
             "http/__init__.py",
             include_str!("../stdlib/http/__init__.py"),
@@ -4297,6 +4305,9 @@ impl<'a> Loader<'a> {
                 "string/__init__.py",
                 include_str!("../stdlib/string/__init__.py"),
             )),
+            // The boxed email package is intrinsic. Typed child modules need a package root.
+            "email" => Some(("email/__init__.py", "")),
+            "email.message" => Some(("email/message.py", include_str!("../stdlib/email/message.py"))),
             "unittest" => Some((
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),
