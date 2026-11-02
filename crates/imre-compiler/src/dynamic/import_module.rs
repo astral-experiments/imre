@@ -4,6 +4,10 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 /// Python sources used only by the boxed importer.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
+        "traceback" => Some((
+            "traceback.py",
+            include_str!("../../stdlib/traceback_stack.py"),
+        )),
         "linecache" => {
             static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             const UPSTREAM: &str = include_str!(
