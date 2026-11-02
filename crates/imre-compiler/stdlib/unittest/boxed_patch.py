@@ -143,7 +143,32 @@ class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
     def _enter(self):
         if isinstance(self.in_dict, str):
             self.in_dict = _patch_owner(self.in_dict)
-        return super()._enter()
+        mapping = self.in_dict
+        try:
+            self._original = mapping.copy()
+        except AttributeError:
+            self._original = {key: mapping[key] for key in mapping}
+        self._change(self.values, self.clear)
+        return mapping
+
+    def _change(self, values, clear):
+        mapping = self.in_dict
+        if clear:
+            try:
+                mapping.clear()
+            except AttributeError:
+                for key in list(mapping):
+                    del mapping[key]
+        try:
+            mapping.update(values)
+        except AttributeError:
+            for key in values:
+                mapping[key] = values[key]
+
+    def _exit(self):
+        if self._original is not None:
+            self._change(self._original, True)
+        return False
 
     __enter__ = _enter
 

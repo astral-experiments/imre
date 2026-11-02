@@ -60,6 +60,33 @@ with patch('__main__.with_default.__defaults__', (9,), create=True):
     assert with_default() == 9
 assert with_default.__defaults__ is None
 
+class Mapping:
+    def __init__(self):
+        self.items = {"original": 1}
+
+    def __getitem__(self, key):
+        return self.items[key]
+
+    def __setitem__(self, key, value):
+        self.items[key] = value
+
+    def __delitem__(self, key):
+        del self.items[key]
+
+    def __iter__(self):
+        return iter(self.items)
+
+
+mapping = Mapping()
+try:
+    with patch.dict(mapping, {"new": 2}, clear=True) as patched:
+        assert patched is mapping
+        assert mapping.items == {"new": 2}
+        raise ValueError("mapping body")
+except ValueError as error:
+    assert str(error) == "mapping body"
+assert mapping.items == {"original": 1}
+
 main_module = sys.modules[__name__]
 with patch('__main__.open', with_default):
     assert main_module.open(7) == 7
