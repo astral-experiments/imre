@@ -4,7 +4,7 @@ import builtins as _builtins
 import functools
 import sys as _sys
 import typing as _typing
-from _collections_abc import Iterable as _Iterable
+from _collections_abc import Generator as _Generator, Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
 from collections import Counter as _Counter, defaultdict as _defaultdict
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
@@ -1427,7 +1427,7 @@ class _SpecialGenericAlias(_NotIterable):
     """A named typing alias for a builtin collection."""
     __module__ = __name__
 
-    def __init__(self, origin, nparams, *, inst=True, name=None):
+    def __init__(self, origin, nparams, *, inst=True, name=None, defaults=()):
         if name is None:
             name = origin.__name__
         self.__origin__ = origin
@@ -1435,6 +1435,7 @@ class _SpecialGenericAlias(_NotIterable):
         self.__qualname__ = name
         self._inst = inst
         self._nparams = nparams
+        self._defaults = defaults
         self.__slots__ = None
         module = "" if origin.__module__ == "builtins" else origin.__module__ + "."
         self.__doc__ = f"Deprecated alias to {module}{origin.__qualname__}."
@@ -1453,7 +1454,7 @@ class _SpecialGenericAlias(_NotIterable):
         raise AttributeError(attr)
 
     def __setattr__(self, attr, value):
-        if (attr.startswith("__") and attr.endswith("__")) or attr in ("_name", "_inst", "_nparams"):
+        if (attr.startswith("__") and attr.endswith("__")) or attr in ("_name", "_inst", "_nparams", "_defaults"):
             object.__setattr__(self, attr, value)
         else:
             setattr(self.__origin__, attr, value)
@@ -1472,9 +1473,13 @@ class _SpecialGenericAlias(_NotIterable):
         if not isinstance(params, tuple):
             params = (params,)
         args = tuple(_alias_type_arg(p) for p in params)
-        if len(args) != self._nparams:
+        missing = self._nparams - len(args)
+        if 0 < missing <= len(self._defaults):
+            args += self._defaults[-missing:]
+        elif missing:
+            expected = f"at least {self._nparams - len(self._defaults)}" if self._defaults else self._nparams
             count = "many" if len(args) > self._nparams else "few"
-            raise TypeError(f"Too {count} arguments for {self}; actual {len(args)}, expected {self._nparams}")
+            raise TypeError(f"Too {count} arguments for {self}; actual {len(args)}, expected {expected}")
         return self.copy_with(args)
 
     @lru_cache
@@ -1538,6 +1543,7 @@ Tuple.__doc__ = \
     """
 Awaitable = _SpecialGenericAlias(_Awaitable, 1)
 AsyncIterator = _SpecialGenericAlias(_AsyncIterator, 1)
+Generator = _SpecialGenericAlias(_Generator, 3, defaults=(type(None), type(None)))
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
 Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
 Type = _SpecialGenericAlias(type, 1, name="Type", inst=False)
@@ -2009,6 +2015,10 @@ def __getattr__(attr):
     if attr in {"Pattern", "Match"}:
         import re
         alias = _SpecialGenericAlias(getattr(re, attr), 1)
-        globals()[attr] = alias
-        return alias
-    raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
+    elif attr in {"ContextManager", "AsyncContextManager"}:
+        import contextlib
+        alias = _SpecialGenericAlias(getattr(contextlib, f"Abstract{attr}"), 2, name=attr, defaults=(bool | None,))
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
+    globals()[attr] = alias
+    return alias

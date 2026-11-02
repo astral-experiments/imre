@@ -262,6 +262,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             concat!(
                 include_str!("../stdlib/contextlib.py"),
                 "\n",
+                include_str!("../stdlib/contextlib_abstract_async.py"),
+                "\n",
                 include_str!("../stdlib/contextlib_nullcontext.py"),
                 "\n",
                 include_str!("../stdlib/contextlib_exitstack.py"),
@@ -1584,6 +1586,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("contextlib.redirect_stderr")
             }
             (Self::Contextlib, "suppress") => Intrinsic::ObjectRuntimeExport("contextlib.suppress"),
+            (Self::Contextlib, "AbstractAsyncContextManager") => {
+                Intrinsic::ObjectRuntimeExport("contextlib.AbstractAsyncContextManager")
+            }
             (Self::Contextlib, "closing") => Intrinsic::ObjectRuntimeExport("contextlib.closing"),
             (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "warn") => Intrinsic::ObjectRuntimeExport("warnings.warn"),
@@ -1896,6 +1901,13 @@ impl IntrinsicModule {
             (Self::Typing, "Type") => Intrinsic::ObjectRuntimeExport("typing.Type"),
             (Self::Typing, "Tuple") => Intrinsic::ObjectRuntimeExport("typing.Tuple"),
             (Self::Typing, "Dict") => Intrinsic::ObjectRuntimeExport("typing.Dict"),
+            (Self::Typing, "Generator") => Intrinsic::ObjectRuntimeExport("typing.Generator"),
+            (Self::Typing, "ContextManager") => {
+                Intrinsic::ObjectRuntimeExport("typing.ContextManager")
+            }
+            (Self::Typing, "AsyncContextManager") => {
+                Intrinsic::ObjectRuntimeExport("typing.AsyncContextManager")
+            }
             (Self::Typing, "Awaitable") => Intrinsic::ObjectRuntimeExport("typing.Awaitable"),
             (Self::Typing, "AsyncIterator") => {
                 Intrinsic::ObjectRuntimeExport("typing.AsyncIterator")
