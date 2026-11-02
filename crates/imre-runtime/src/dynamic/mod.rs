@@ -2308,6 +2308,14 @@ impl Context {
             {
                 self.publish_module("importlib._bootstrap_external", external)?;
             }
+            if name == "itertools"
+                && let Some(owner) = self.scope_name(scope, "batched")
+            {
+                // Keep the iterator state outside Python attribute lookup, even on subclasses.
+                let name = self.text("_batched_state");
+                let member = self.alloc(Value::SlotMember { owner, name });
+                self.bind(scope, "_batched_state", member);
+            }
             if name == "re"
                 && let Some(class) = self.scope_name(scope, "PatternError")
             {
