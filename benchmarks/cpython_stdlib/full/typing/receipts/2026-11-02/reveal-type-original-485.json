@@ -1,0 +1,228 @@
+{
+  "case": "test.test_typing.RevealTypeTests.test_reveal_type",
+  "comparison": "stock vs independent native processes, ordinary and --runtime-imports kept separate",
+  "driver_sources": {
+    "driver.py": "import sys\nimport from_client\nimport module_client\nimport original_case\n\nif sys.argv[2] == \"from\":\n    from_client.current()\nelif sys.argv[2] == \"module\":\n    module_client.current()\nelif sys.argv[2] == \"original\":\n    original_case.current()\nelse:\n    raise AssertionError(\"unknown probe\")\n",
+    "from_client.py": "import sys\nimport io\nimport typing\nfrom typing import reveal_type\n\nclass FromWitness:\n    pass\n\nobj = FromWitness()\n\ndef current():\n    if sys.argv[1] == 'core':\n        assert reveal_type(obj) is obj\n        print('identity')\n\n    if sys.argv[1] == 'metadata':\n        fn = reveal_type\n        other = typing.reveal_type\n        assert fn is other\n        params = fn.__type_params__\n        assert len(params) == 1\n        t = params[0]\n        assert isinstance(t, typing.TypeVar)\n        assert t.__name__ == 'T'\n        assert t is not typing.T\n        assert t.__infer_variance__ is True\n        assert fn.__annotations__ == {'obj': t, 'return': t}\n        print('metadata')\n\n    if sys.argv[1] == 'arguments':\n\n        try:\n            reveal_type(obj=obj)\n        except TypeError:\n            print('positional-only')\n        else:\n            raise AssertionError(\"accepted keyword obj\")\n\n    if sys.argv[1] == 'redirect':\n\n\n        captured = io.StringIO()\n        saved = sys.stderr\n        try:\n            sys.stderr = captured\n            assert reveal_type(obj) is obj\n            assert captured.getvalue() == \"Runtime type is 'FromWitness'\\n\"\n        finally:\n            sys.stderr = saved\n        print('redirected')\n\n    if sys.argv[1] == 'broken':\n\n\n        failure = RuntimeError(\"write failed\")\n\n        class BrokenStream:\n            def write(self, text):\n                raise failure\n\n        saved = sys.stderr\n        try:\n            sys.stderr = BrokenStream()\n            try:\n                reveal_type(obj)\n            except RuntimeError as error:\n                assert error is failure\n            else:\n                raise AssertionError(\"lost stderr write failure\")\n        finally:\n            sys.stderr = saved\n        print('propagated')\n\n    if sys.argv[1] == 'negative':\n        assert reveal_type(obj) is not obj\n",
+    "module_client.py": "import sys\nimport io\nimport typing\n\nclass ModuleWitness:\n    pass\n\nobj = ModuleWitness()\n\ndef current():\n    if sys.argv[1] == 'core':\n        assert typing.reveal_type(obj) is obj\n        print('identity')\n\n    if sys.argv[1] == 'metadata':\n        fn = typing.reveal_type\n        other = typing.reveal_type\n        assert fn is other\n        params = fn.__type_params__\n        assert len(params) == 1\n        t = params[0]\n        assert isinstance(t, typing.TypeVar)\n        assert t.__name__ == 'T'\n        assert t is not typing.T\n        assert t.__infer_variance__ is True\n        assert fn.__annotations__ == {'obj': t, 'return': t}\n        print('metadata')\n\n    if sys.argv[1] == 'arguments':\n\n        try:\n            typing.reveal_type(obj=obj)\n        except TypeError:\n            print('positional-only')\n        else:\n            raise AssertionError(\"accepted keyword obj\")\n\n    if sys.argv[1] == 'redirect':\n\n\n        captured = io.StringIO()\n        saved = sys.stderr\n        try:\n            sys.stderr = captured\n            assert typing.reveal_type(obj) is obj\n            assert captured.getvalue() == \"Runtime type is 'ModuleWitness'\\n\"\n        finally:\n            sys.stderr = saved\n        print('redirected')\n\n    if sys.argv[1] == 'broken':\n\n\n        failure = RuntimeError(\"write failed\")\n\n        class BrokenStream:\n            def write(self, text):\n                raise failure\n\n        saved = sys.stderr\n        try:\n            sys.stderr = BrokenStream()\n            try:\n                typing.reveal_type(obj)\n            except RuntimeError as error:\n                assert error is failure\n            else:\n                raise AssertionError(\"lost stderr write failure\")\n        finally:\n            sys.stderr = saved\n        print('propagated')\n\n    if sys.argv[1] == 'negative':\n        assert typing.reveal_type(obj) is not obj\n",
+    "original_case.py": "import unittest\nfrom test.test_typing import RevealTypeTests\n\nclass Result(unittest.TestResult):\n    def startTest(self, test):\n        print('START',test.id(),flush=True)\n        super().startTest(test)\n    def addSuccess(self, test):\n        print('PASS',test.id(),flush=True)\n        super().addSuccess(test)\n    def addSkip(self, test, reason):\n        print('SKIP',test.id(),repr(reason),flush=True)\n        super().addSkip(test,reason)\n    def addFailure(self, test, err):\n        print('FAIL',test.id(),repr(err[1]),flush=True)\n        super().addFailure(test,err)\n    def addError(self, test, err):\n        print('ERROR',test.id(),repr(err[1]),flush=True)\n        super().addError(test,err)\ndef current():\n    case=RevealTypeTests(\"test_reveal_type\")\n    result=Result()\n    case.run(result)\n    assert result.testsRun==1 and result.wasSuccessful() and len(result.skipped)==0\n"
+  },
+  "hostname": "a0f7c43eb913",
+  "imre_revision": "16d16baf7a054a064a5c76e065bdd1440cd6dbe9",
+  "input_fragments": [
+    {
+      "first_line": 67,
+      "last_line": 71,
+      "object": "BaseTestCase",
+      "sha256": "5e0340982625ae25e08d606ddc4b96caad0db46f7edbb755546c902cef590cf3",
+      "source": "class BaseTestCase(TestCase):\n\n    def clear_caches(self):\n        for f in typing._cleanups:\n            f()\n",
+      "upstream": "Lib/test/test_typing.py"
+    },
+    {
+      "first_line": 10728,
+      "last_line": 10733,
+      "object": "RevealTypeTests",
+      "sha256": "aefda642e9b9480082849854599163864b824fa04f38723ebee11beb22daff70",
+      "source": "class RevealTypeTests(BaseTestCase):\n    def test_reveal_type(self):\n        obj = object()\n        with captured_stderr() as stderr:\n            self.assertIs(obj, reveal_type(obj))\n        self.assertEqual(stderr.getvalue(), \"Runtime type is 'object'\\n\")\n",
+      "upstream": "Lib/test/test_typing.py"
+    },
+    {
+      "first_line": 805,
+      "last_line": 815,
+      "object": "captured_output",
+      "sha256": "5eb1ef3fb3ae98a3ad41fc694cd46eba91c1d400d44477050813d7e5387d65ca",
+      "source": "@contextlib.contextmanager\ndef captured_output(stream_name):\n    \"\"\"Return a context manager used by captured_stdout/stdin/stderr\n    that temporarily replaces the sys stream *stream_name* with a StringIO.\"\"\"\n    import io\n    orig_stdout = getattr(sys, stream_name)\n    setattr(sys, stream_name, io.StringIO())\n    try:\n        yield getattr(sys, stream_name)\n    finally:\n        setattr(sys, stream_name, orig_stdout)\n",
+      "upstream": "Lib/test/support/__init__.py"
+    },
+    {
+      "first_line": 826,
+      "last_line": 833,
+      "object": "captured_stderr",
+      "sha256": "ec921b779e5d00b0541e6f62f75b9b52220e9d797597cd994c081a57790f6e92",
+      "source": "def captured_stderr():\n    \"\"\"Capture the output of sys.stderr:\n\n       with captured_stderr() as stderr:\n           print(\"hello\", file=sys.stderr)\n       self.assertEqual(stderr.getvalue(), \"hello\\\\n\")\n    \"\"\"\n    return captured_output(\"stderr\")\n",
+      "upstream": "Lib/test/support/__init__.py"
+    }
+  ],
+  "observations": [
+    {
+      "level": "",
+      "matches_stock": true,
+      "mode": "stock",
+      "run": {
+        "argv": [
+          "/tmp/imre-stock/build/python",
+          "-B",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "case",
+          "original"
+        ],
+        "returncode": 0,
+        "seconds": 0.662,
+        "stderr": "",
+        "stdout": "START test.test_typing.RevealTypeTests.test_reveal_type\nPASS test.test_typing.RevealTypeTests.test_reveal_type\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/simpler-v4/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/simpler-v4/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/actual-v4/ordinary0/program"
+        ],
+        "returncode": 0,
+        "seconds": 55.371,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/actual-v4/ordinary0/program in 55.30 s\n",
+        "stdout": ""
+      },
+      "level": "0",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/actual-v4/ordinary0/program",
+          "case",
+          "original"
+        ],
+        "returncode": 0,
+        "seconds": 14.167,
+        "stderr": "",
+        "stdout": "START test.test_typing.RevealTypeTests.test_reveal_type\nPASS test.test_typing.RevealTypeTests.test_reveal_type\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/simpler-v4/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "3",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/simpler-v4/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/actual-v4/ordinary3/program"
+        ],
+        "returncode": 0,
+        "seconds": 293.61,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O3)\n  Finished /workspace/scratch/controls/results/actual-v4/ordinary3/program in 293.56 s\n",
+        "stdout": ""
+      },
+      "level": "3",
+      "matches_stock": true,
+      "mode": "ordinary",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/actual-v4/ordinary3/program",
+          "case",
+          "original"
+        ],
+        "returncode": 0,
+        "seconds": 29.8,
+        "stderr": "",
+        "stdout": "START test.test_typing.RevealTypeTests.test_reveal_type\nPASS test.test_typing.RevealTypeTests.test_reveal_type\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/simpler-v4/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "0",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/simpler-v4/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/actual-v4/boxed0/program",
+          "--runtime-imports"
+        ],
+        "returncode": 0,
+        "seconds": 59.901,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O0)\n  Finished /workspace/scratch/controls/results/actual-v4/boxed0/program in 59.81 s\n",
+        "stdout": ""
+      },
+      "level": "0",
+      "matches_stock": true,
+      "mode": "boxed",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/actual-v4/boxed0/program",
+          "case",
+          "original"
+        ],
+        "returncode": 0,
+        "stderr": "",
+        "stdout": "START test.test_typing.RevealTypeTests.test_reveal_type\nPASS test.test_typing.RevealTypeTests.test_reveal_type\n"
+      }
+    },
+    {
+      "build": {
+        "argv": [
+          "/workspace/scratch/simpler-v4/imre",
+          "build",
+          "/workspace/scratch/controls/final-stage/driver.py",
+          "--module-root",
+          "/workspace/scratch/controls/final-stage",
+          "--opt-level",
+          "3",
+          "--clang",
+          "/workspace/scratch/intact/tools/usr/bin/clang-19",
+          "--runtime",
+          "/workspace/scratch/simpler-v4/libimre_runtime.a",
+          "--no-cache",
+          "-o",
+          "/workspace/scratch/controls/results/actual-v4/boxed3/program",
+          "--runtime-imports"
+        ],
+        "returncode": 0,
+        "seconds": 307.419,
+        "stderr": " Compiling /workspace/scratch/controls/final-stage/driver.py (-O3)\n  Finished /workspace/scratch/controls/results/actual-v4/boxed3/program in 307.22 s\n",
+        "stdout": ""
+      },
+      "level": "3",
+      "matches_stock": true,
+      "mode": "boxed",
+      "run": {
+        "argv": [
+          "/workspace/scratch/controls/results/actual-v4/boxed3/program",
+          "case",
+          "original"
+        ],
+        "returncode": 0,
+        "stderr": "",
+        "stdout": "START test.test_typing.RevealTypeTests.test_reveal_type\nPASS test.test_typing.RevealTypeTests.test_reveal_type\n"
+      }
+    }
+  ],
+  "ordinal": 485,
+  "roles": {
+    "assertions": "original unchanged, native unittest",
+    "body": "original unchanged, native",
+    "fixture": "native execution of unchanged base and captured_output/captured_stderr with reduced import set and explicit observer",
+    "observation": "native TestResult.startTest/addSuccess with the original ID; any skip includes its original reason",
+    "operation": "actual native reveal_type and real captured sys.stderr"
+  },
+  "scope": "isolated original case; distinct from intact discovery or historical 107",
+  "upstream_cpython": "5607950ef232dad16d75c0cf53101d9649d89115"
+}
