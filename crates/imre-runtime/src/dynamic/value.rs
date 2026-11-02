@@ -3030,15 +3030,15 @@ impl Heap {
             self.collect_next_statement = true;
             return None;
         };
-        self.mark(globals);
+        // A weakref callback can drop an unrelated owner. Keep its graph intact
+        // for Python dispatch when this sweep releases temporary callback roots.
+        self.mark(globals.chain(self.ordinary_finalizers.iter().copied()));
         self.identify_cycles(&mut cycles);
-        // A weakref callback can drop an unrelated owner. Leave its graph intact
-        // for Python dispatch if this sweep only releases temporary callback roots.
-        self.mark(
-            cycles
-                .members()
-                .chain(self.ordinary_finalizers.iter().copied()),
-        );
+        // Peeling leaves both cycles and their unreachable descendants. Every
+        // strong child of a member is therefore already live or itself a member.
+        for id in cycles.members() {
+            self.slots[id as usize].trace.set(END);
+        }
         self.sweep()
     }
 
@@ -3364,6 +3364,34 @@ mod tests {
         heap.collect([child].into_iter());
         assert!(matches!(heap.get(parent), Value::Tuple(items) if items == &[keep]));
         assert_eq!(heap.free_count, 0);
+    }
+
+    #[test]
+    fn prompt_sweep_preserves_cycle_descendants_and_pending_owners() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let leaf = heap.alloc(Value::List(Vec::new()));
+        let cycle = heap.alloc(Value::List(vec![leaf, leaf]));
+        let Value::List(items) = heap.get_mut(cycle) else {
+            unreachable!()
+        };
+        items.push(cycle);
+        let child = heap.alloc(Value::List(Vec::new()));
+        let owner = heap.alloc(Value::List(vec![child]));
+        heap.register_finalizer(owner);
+        let discarded = heap.alloc(Value::List(Vec::new()));
+        heap.release_temporaries_since(mark);
+
+        heap.collect(std::iter::empty());
+        for id in [leaf, cycle, child, owner] {
+            assert!(heap.slots[id as usize].value.is_some());
+        }
+        assert!(heap.slots[discarded as usize].value.is_none());
+
+        heap.take_finalizer(owner, true);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[owner as usize].value.is_none());
+        assert!(heap.slots[child as usize].value.is_none());
     }
 
     #[test]
