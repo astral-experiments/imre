@@ -640,6 +640,8 @@ pub(super) struct ClassNamespace {
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
     pub annotation_thunks: Option<Id>,
+    /// Closure cell shared by runtime-source method annotation providers.
+    pub annotation_dict_cell: Option<Id>,
     /// TypedDict installs a class-wide annotation function in place of its field thunks.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
@@ -1290,6 +1292,7 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.name_override);
                     visit.extend(class.annotation_thunks);
+                    visit.extend(class.annotation_dict_cell);
                     visit.extend(class.dictionary);
                 }
                 visit.extend(scope.parent);

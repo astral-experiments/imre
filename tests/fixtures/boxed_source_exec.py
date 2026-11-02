@@ -167,6 +167,63 @@ class Case(Base):
     assert namespace["Broken"] is old and events[-2:] == ["decorated", "Broken"]
 
 
+def source_annotations():
+    from types import FunctionType
+
+    ns = {"__name__": "annotations", "format": bytes, "Alias": bytes}
+    exec("""def factory(outer, Alias):
+    class C:
+        def method(self, first: Late, /, normal: outer, *args: format,
+                   named: Alias, **kw: int) -> None: ...
+        Alias = str
+        def sibling(self, arg: Alias): ...
+    return C
+""", ns)
+    cls = ns["factory"](bool, int)
+    provider = cls.method.__annotate__
+    assert provider.__code__.co_freevars == ("__classdict__", "outer")
+    assert provider.__closure__[0] is cls.sibling.__annotate__.__closure__[0]
+    assert provider.__globals__ is ns
+    try:
+        cls.method.__annotations__
+    except NameError as exc:
+        assert exc.name == "Late"
+    else:
+        raise AssertionError("unresolved annotation was evaluated")
+    for unsupported in (3, 4):
+        try:
+            provider(unsupported)
+        except NotImplementedError as exc:
+            assert exc.args == ()
+        else:
+            raise AssertionError("raw provider accepted a public replay format")
+    # Replay with replacement globals, as annotationlib does for missing names.
+    clone = FunctionType(provider.__code__, {"Late": complex, "format": list},
+                         closure=provider.__closure__)
+    cls.Alias = float
+    replayed = clone(2)
+    assert list(replayed) == ["normal", "first", "args", "named", "kw", "return"]
+    assert replayed == {"normal": bool, "first": complex, "args": list, "named": float,
+                        "kw": int, "return": None}
+    del cls.Alias
+    ns["Late"] = tuple
+    values = cls.method.__annotations__
+    assert values["first"] is tuple and values["args"] is bytes
+    assert values["named"] is bytes
+    assert cls.method.__annotations__ is values
+    exec("from __future__ import annotations\nclass F:\n    def f(self, n: Missing, obj: 'A') -> tuple[int]: ...", ns)
+    future = ns["F"].f
+    assert future.__annotate__.__closure__ is None
+    assert future.__annotations__ == {"n": "Missing", "obj": "'A'", "return": "tuple[int]"}
+    for expr in ("(tmp := int)", "(yield int)", "(await T)"):
+        try:
+            compile("def f(arg: " + expr + "): pass", "<annotations>", "exec")
+        except SyntaxError:
+            pass
+        else:
+            raise AssertionError("invalid annotation expression compiled")
+
+
 def source_test_cases():
     import types
     import unittest
@@ -354,6 +411,7 @@ def make(events):
 
 
 def current():
+    source_annotations()
     source_genexpr()
     source_match()
     check_scope_directives()

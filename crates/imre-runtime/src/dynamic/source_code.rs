@@ -1,5 +1,7 @@
 //! In-process execution of source received by the boxed Python runtime.
 
+mod annotations;
+
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
@@ -73,6 +75,10 @@ enum Instruction {
     },
     From(String, u32, Vec<(String, String)>),
     Define(Definition),
+    Annotations {
+        entries: Vec<(String, ast::Expr)>,
+        class: bool,
+    },
     ClassStart,
     ClassEnd,
     Yield(Option<ast::Expr>),
@@ -124,6 +130,7 @@ struct Definition {
     decorators: Vec<ast::Decorator>,
     body: Rc<Program>,
     kind: DefinitionKind,
+    annotate: Option<Rc<Program>>,
 }
 
 enum DefinitionKind {
@@ -691,6 +698,17 @@ impl Program {
         spellings: &TemplateReplacements,
         line_at: &impl Fn(usize) -> u32,
     ) -> Result<(Id, &'a BTreeSet<String>)> {
+        self.prepare_scope_strings(heap, shared, spellings, line_at, None)
+    }
+
+    fn prepare_scope_strings<'a>(
+        &'a mut self,
+        heap: &mut value::Heap,
+        shared: &mut SharedConstants<'a>,
+        spellings: &TemplateReplacements,
+        line_at: &impl Fn(usize) -> u32,
+        annotation_class: Option<&HashSet<String>>,
+    ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
         let mut nested_reads = BTreeSet::new();
         let mut strings = CompiledStrings {
@@ -772,7 +790,28 @@ impl Program {
                         strings.heap.code_name(alias);
                     }
                 }
+                Instruction::Annotations { entries, .. } => {
+                    for (name, expression) in entries.iter() {
+                        strings.heap.code_name(name);
+                        strings.visit_expr(expression);
+                    }
+                }
                 Instruction::Define(definition) => {
+                    if let Some(provider) = &mut definition.annotate {
+                        let provider = Rc::get_mut(provider).expect("new annotation code");
+                        let (roots, reads) = provider.prepare_scope_strings(
+                            strings.heap,
+                            strings.shared,
+                            spellings,
+                            line_at,
+                            self.class_attributes.is_some().then_some(&self.locals),
+                        )?;
+                        // The annotation scope is a sibling of the function body.
+                        nested_reads.extend(reads.iter().cloned());
+                        if roots != NONE {
+                            strings.keep(roots)?;
+                        }
+                    }
                     let child =
                         Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                     strings.heap.code_name(&definition.binding);
@@ -866,6 +905,7 @@ impl Program {
                         decorators: Vec::new(),
                         body: Rc::new(child),
                         kind: DefinitionKind::Function(params),
+                        annotate: None,
                     },
                 ),
             );
@@ -884,6 +924,12 @@ impl Program {
             }
         }
         self.string_roots = strings.finish();
+        // An annotation's class-local name falls back to globals when the class
+        // dictionary lacks it. Functions nested inside the annotation skip the class.
+        if let Some(class) = annotation_class {
+            self.reads
+                .retain(|name| name == "__classdict__" || !class.contains(name));
+        }
         // Even a nonlocal that is only assigned or deleted needs an enclosing cell.
         self.reads.extend(
             self.directives
@@ -1271,18 +1317,9 @@ impl Program {
                     }
                     Instruction::From(module.to_owned(), s.level, names)
                 }
-                Stmt::FunctionDef(s) if s.type_params.is_none() => {
-                    if (function || self.class_attributes.is_some())
-                        && (s.returns.is_some()
-                            || s.parameters.iter().any(|p| p.annotation().is_some()))
-                    {
-                        return Err(unsupported(if function {
-                            "annotated nested function definition"
-                        } else {
-                            "annotated method definition"
-                        }));
-                    }
+                Stmt::FunctionDef(mut s) if s.type_params.is_none() => {
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
+                    let annotate = self.annotation_program(&mut s, &child, line)?;
                     if s.is_async {
                         if imre_ast::code_flags::is_generator(&s.body) {
                             return Err(unsupported("async generator function"));
@@ -1306,6 +1343,7 @@ impl Program {
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
                         kind: DefinitionKind::Function(s.parameters),
+                        annotate,
                     })
                 }
                 Stmt::ClassDef(mut s) if s.type_params.is_none() => {
@@ -1338,6 +1376,7 @@ impl Program {
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
                         kind: DefinitionKind::Class(s.arguments),
+                        annotate: None,
                     })
                 }
                 Stmt::Break(_) => {
@@ -1717,7 +1756,15 @@ impl Context {
             parsed.tokens(),
             parsed.syntax(),
         ));
-        code.lower(parsed.into_syntax().body, &lines, false, None)?;
+        let mut body = parsed.into_syntax().body;
+        let caller = self.heap.current_code();
+        let inherited = matches!(self.heap.get(caller), Value::Code(code) if
+            code.flags.unwrap_or(0) & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0
+            || matches!(&code.body, Body::Source(p) if p.private_names.as_ref().is_some_and(|n| n.string_annotations)));
+        if inherited || imre_ast::future_annotations(&body) {
+            code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
+        }
+        code.lower(body, &lines, false, None)?;
         let mut module_globals = HashSet::new();
         code.resolve_directives(&|_| None, &mut module_globals)?;
         // A global declared by a nested block makes module assignments use the globals dictionary.
@@ -1965,7 +2012,7 @@ impl Context {
             ));
         }
         for &cell in cells {
-            if !matches!(self.heap.get(cell), Value::Cell(_)) {
+            if !matches!(self.heap.get(cell), Value::Cell(_) | Value::ClassCell(_)) {
                 return Err(Error::new(
                     "TypeError",
                     format!(
@@ -2920,6 +2967,10 @@ impl Context {
         } = cursor;
         let eval = |ctx: &mut Self, e: &ast::Expr| ctx.source_expr(code, scope, e);
         match op {
+            Instruction::Annotations { entries, class } => {
+                let values = self.source_annotations(code, scope, entries, *class)?;
+                return Ok(Some(Step::Return(values)));
+            }
             Instruction::ReturnSent => return Ok(Some(Step::Return(*sent))),
             Instruction::BindSent(targets) => {
                 for target in targets {
@@ -3349,6 +3400,10 @@ impl Context {
             scope
         };
         let mut value = self.source_function(code, defining_scope, defaults);
+        if let Some(provider) = &definition.annotate {
+            let annotate = self.source_annotator(provider, code, defining_scope)?;
+            self.set_function_attr(value, "__annotate__", annotate)?;
+        }
         if let Some((bases, metaclass, total)) = bases {
             value = self.class(bases, value, metaclass, total, false)?;
         }
