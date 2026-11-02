@@ -25,7 +25,7 @@
       "id": "test.test_subprocess.ProcessTestCase.test_communicate_epipe",
       "occurrence": 1,
       "method_sha256": "5394f54904cc3c1159574c0b3bace6dbe0b4bd2e3c7311fa63aa914c7e916a17",
-      "operation": "A 1 MiB stdin write to an exiting child returns without propagating EPIPE.",
+      "operation": "communicate accepts 1 MiB of input. A 4096-byte write request gets EPIPE, which is suppressed.",
       "control": "Expose EIO after the observed EPIPE.",
       "stock": [
         "addSuccess",
@@ -45,7 +45,7 @@
       "id": "test.test_subprocess.ProcessTestCase.test_communicate_epipe_only_stdin",
       "occurrence": 1,
       "method_sha256": "2682f8abc8bade4cb384ab45b004ceb8dcd0851b2d7020991cb7157443516251",
-      "operation": "After wait(), communicate writes to the reaped child's stdin pipe without propagating EPIPE.",
+      "operation": "After wait(), communicate attempts to write to the reaped child's stdin pipe and suppresses EPIPE.",
       "control": "Expose EIO after the post-wait EPIPE.",
       "stock": [
         "addSuccess",
