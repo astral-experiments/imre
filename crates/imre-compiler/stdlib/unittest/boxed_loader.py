@@ -174,7 +174,11 @@ def _convert_name(name):
 
 
 def _main_option(arg):
-    # argparse treats negative numbers and strings containing spaces as positionals.
+    # argparse recognizes a known option before treating strings with spaces as names.
+    if arg[:2] in ("-k", "-v", "-q", "-f"):
+        return True
+    if "=" in arg and arg.partition("=")[0] in ("--verbose", "--quiet", "--failfast"):
+        return True
     return (arg.startswith("-") and arg != "-" and " " not in arg
             and not re.match(r"-\.?\d", arg))
 

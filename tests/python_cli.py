@@ -974,8 +974,9 @@ def check_unittest_main_names(imre, root, run):
         assert result.returncode == 0 and result.stdout == output, result
     extra = run(executable, "Cases", "-v", "Cases.test_b")
     assert extra.returncode == 2 and not extra.stdout and "unrecognized arguments" in extra.stderr, extra
-    filtered = run(executable, "-k", "-1", "Cases")
-    assert filtered.returncode == 5 and not filtered.stdout, filtered
+    for flags in [("-k", "-1"), ("-k=two words",)]:
+        filtered = run(executable, *flags, "Cases")
+        assert filtered.returncode == 5 and not filtered.stdout, filtered
     missing = run(executable, "-v", "Cases.test_missing")
     assert missing.returncode == 1 and "_FailedTest" in missing.stderr, missing
 
