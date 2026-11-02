@@ -203,6 +203,7 @@ impl BuiltinDescriptor {
             "frozenset.__sizeof__" => ("frozenset", "__sizeof__"),
             "object.__getstate__" => ("object", "__getstate__"),
             "object.__reduce__" => ("object", "__reduce__"),
+            "builtin_function_or_method.__reduce__" => ("builtin_function_or_method", "__reduce__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
             "int.__add__" => ("int", "__add__"),
             "int.__index__" => ("int", "__index__"),
@@ -432,6 +433,7 @@ impl BuiltinDescriptor {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" => ctx.class_qualname(receiver),
                         _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE) => self.owner.rsplit('.').next()?,
+                        _ if self.owner == "builtin_function_or_method" => self.owner,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
                         Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",
                         Value::NamedTuple { class: Some(owner), .. } if let Some(layout) = stdlib::os::stat::layout(owner) => layout.name(),
@@ -536,6 +538,8 @@ impl BuiltinDescriptor {
                 let value = match (self.name, name) {
                     ("utctimetuple", "__doc__") if self.owner == "datetime.datetime" => "Return UTC time tuple, compatible with time.localtime().",
                     ("utctimetuple", _) if self.owner == "datetime.datetime" => "($self, /)",
+                    ("__reduce__", "__doc__") if self.owner == "builtin_function_or_method" => return Some(NONE),
+                    ("__reduce__", _) if self.owner == "builtin_function_or_method" => "($self, /)",
                     ("__reduce__", "__doc__") if self.owner == stdlib::datetime::TZINFO => "-> (cls, state)",
                     ("__reduce__", _) if self.owner == stdlib::datetime::TZINFO => "($self, /)",
                     ("tzname", "__doc__") if self.owner == "datetime.timezone" => "If name is specified when timezone is created, returns the name.  Otherwise returns offset as 'UTC(+|-)HH:MM'.",
@@ -585,6 +589,10 @@ impl BuiltinDescriptor {
                     ("center", "__doc__") => {
                         "Return a centered string of length width.\n\nPadding is done using the specified fill character (default is a space)."
                     }
+                    ("ljust", "__doc__") if matches!(self.owner, "bytes" | "bytearray") => {
+                        "Return a left-justified string of length width.\n\nPadding is done using the specified fill character."
+                    }
+                    ("ljust", _) if matches!(self.owner, "bytes" | "bytearray") => "($self, width, fillchar=b' ', /)",
                     ("ljust", "__doc__") => {
                         "Return a left-justified string of length width.\n\nPadding is done using the specified fill character (default is a space)."
                     }

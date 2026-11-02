@@ -136,7 +136,28 @@ impl Checker<'_> {
     pub(super) fn boolean_value(
         &mut self,
         boolean: &ast::ExprBoolOp,
+        expected: Option<Type>,
+    ) -> Result<Expr, String> {
+        self.boolean_result(boolean, expected, false)
+    }
+
+    pub(super) fn class_skip_condition(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let ast::Expr::BoolOp(boolean) = expression
+            && !boolean
+                .values
+                .iter()
+                .any(|v| matches!(v, ast::Expr::BoolOp(_)))
+        {
+            return self.boolean_result(boolean, None, true);
+        }
+        self.expr(expression)
+    }
+
+    fn boolean_result(
+        &mut self,
+        boolean: &ast::ExprBoolOp,
         mut expected: Option<Type>,
+        class_skip: bool,
     ) -> Result<Expr, String> {
         let and = boolean.op == ast::BoolOp::And;
         let (last, prefix) = boolean
@@ -161,6 +182,27 @@ impl Checker<'_> {
         }
         let mut right = self.boolean_operand(last, expected)?;
         exits.finish(self, reachable);
+
+        // Exact strings and booleans have immutable, non-raising truth. The
+        // decorator observes the same flag after its reason is evaluated.
+        let immutable_truth = |ty| matches!(ty, Type::Str | Type::Bool);
+        if class_skip
+            && immutable_truth(right.ty)
+            && operands
+                .iter()
+                .all(|(_, value, _, _)| immutable_truth(value.ty))
+            && operands.iter().any(|(_, value, _, _)| value.ty != right.ty)
+        {
+            let mut values = operands
+                .into_iter()
+                .map(|(_, value, _, _)| self.truth_value(value))
+                .collect::<Vec<_>>();
+            values.push(self.truth_value(right));
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Boolean(and, values),
+            });
+        }
 
         // A skipped right operand can still affect type checking. Build each
         // right-hand result before its enclosing short-circuit expression.

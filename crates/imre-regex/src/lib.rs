@@ -196,6 +196,7 @@ pub fn translate_pattern_with_line_mode(
         dotall,
         literal_guards,
         Grammar::Standard { multiline },
+        None,
     )?;
     analyze(output, groups)
 }
@@ -214,6 +215,7 @@ pub fn lookahead_source(
         dotall,
         false,
         Grammar::Lookahead,
+        None,
     )
 }
 
@@ -232,7 +234,51 @@ pub fn backtracking_source(
         dotall,
         false,
         Grammar::Backtracking,
+        None,
     )
+}
+
+/// Fixed regex lowering cannot execute Python warning filters.
+pub const NEEDS_CLASS_WARNING: &str = "ambiguous character class requires runtime warning handling";
+
+/// A warning label and its zero-based position in the Python spelling.
+pub type ClassWarning = (&'static str, usize);
+
+struct WarningVisitor<'a> {
+    scoped_verbose: fn(&str, bool, bool) -> Option<bool>,
+    literals: &'a mut Vec<usize>,
+    valid_name: fn(&str, bool) -> bool,
+    emit: &'a mut dyn FnMut(ClassWarning) -> bool,
+}
+
+/// Report ambiguous tokens as the Python grammar consumes them. A promoted warning
+/// stops parsing immediately, including before another error in the same class.
+pub fn visit_class_warnings(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    scoped_verbose: fn(&str, bool, bool) -> Option<bool>,
+    valid_name: fn(&str, bool) -> bool,
+    mut emit: impl FnMut(ClassWarning) -> bool,
+) -> Vec<usize> {
+    let mut literals = Vec::new();
+    let mut visitor = WarningVisitor {
+        scoped_verbose,
+        literals: &mut literals,
+        valid_name,
+        emit: &mut emit,
+    };
+    let _ = tokenize(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        false,
+        Grammar::Validation,
+        Some(&mut visitor),
+    );
+    literals
 }
 
 /// Translate Python syntax for validation without requiring a particular matcher.
@@ -249,6 +295,7 @@ pub fn validation_source(
         dotall,
         false,
         Grammar::Validation,
+        None,
     )
 }
 
@@ -396,8 +443,10 @@ fn tokenize(
     mut dotall: bool,
     literal_guards: bool,
     grammar: Grammar,
+    mut warnings: Option<&mut WarningVisitor<'_>>,
 ) -> Result<(String, Vec<Option<String>>), String> {
     let lookahead = !matches!(grammar, Grammar::Standard { .. });
+    let visiting = warnings.is_some();
     let mut escapes = Escapes {
         alphabet,
         bracketed_word: false,
@@ -416,7 +465,7 @@ fn tokenize(
     let mut has_boundary = false;
     let mut highest_condition = 0;
     let mut literal_brace = false;
-    let mut input = pattern.chars().peekable();
+    let mut input = Input::new(pattern);
     let mut output = String::new();
     let mut groups = vec![None]; // Group zero is the whole match.
     let mut can_repeat = false;
@@ -503,11 +552,37 @@ fn tokenize(
                         }
                     } else if lookahead && input.next_if_eq(&'(').is_some() {
                         let id = reference_id(&mut input, &groups, true)?;
-                        check_reference(id, &outer_prefixes)?;
+                        if visiting {
+                            if id == 0
+                                || id >= (1 << 30) - 1
+                                || outer_prefixes.iter().any(|g| {
+                                    matches!(g.scope,
+                                Scope::Lookbehind { first_local_group } if id >= first_local_group)
+                                })
+                            {
+                                return Err("invalid conditional group reference".into());
+                            }
+                        } else {
+                            check_reference(id, &outer_prefixes)?;
+                        }
                         highest_condition = highest_condition.max(id);
                         write!(output, "?({id})").unwrap();
                         group.scope = Scope::Conditional { has_else: false };
                     } else if input.next_if_eq(&':').is_some() {
+                        output.push_str("?:");
+                    } else if visiting && input.peek().is_some_and(|c| "aiLmsux-".contains(*c)) {
+                        let spec: String =
+                            std::iter::from_fn(|| input.next_if(|c| "aiLmsux-".contains(*c)))
+                                .collect();
+                        if input.next() != Some(':') {
+                            return Err("expected a scoped flag".into());
+                        }
+                        verbose = (warnings.as_ref().unwrap().scoped_verbose)(
+                            &spec,
+                            alphabet == Alphabet::Bytes,
+                            verbose,
+                        )
+                        .ok_or("invalid scoped flags")?;
                         output.push_str("?:");
                     } else if matches!(input.peek(), Some('a' | 'u' | 'i' | 's' | 'x' | '-')) {
                         let enable = input.next_if_eq(&'-').is_none();
@@ -544,7 +619,7 @@ fn tokenize(
                         };
                         output.push_str(opener);
                     } else if input.next_if_eq(&'>').is_some() {
-                        if grammar == Grammar::Backtracking {
+                        if grammar == Grammar::Backtracking || visiting {
                             has_atomic = true;
                             output.push_str("?>");
                         } else {
@@ -576,6 +651,12 @@ fn tokenize(
                                 }
                                 _ => return Err("expected an ASCII Python capture name".into()),
                             }
+                        }
+                        if let Some(visitor) = warnings.as_ref()
+                            && (!(visitor.valid_name)(&name, alphabet == Alphabet::Bytes)
+                                || groups.iter().flatten().any(|old| old == &name))
+                        {
+                            return Err("invalid Python group name".into());
                         }
                         // The text lookahead backend uses the original Python names
                         // separately, including identifiers outside its own name syntax.
@@ -640,7 +721,9 @@ fn tokenize(
                 let mut body_width = width.width();
                 if let Some(group) = outer_prefixes.pop() {
                     match group.scope {
-                        Scope::Lookbehind { .. } if body_width.exact() > u64::from(u32::MAX) => {
+                        Scope::Lookbehind { .. }
+                            if !visiting && body_width.exact() > u64::from(u32::MAX) =>
+                        {
                             return Err("look-behind requires fixed-width pattern".into());
                         }
                         Scope::Lookbehind { .. } | Scope::Lookahead => body_width = Width::fixed(0),
@@ -659,6 +742,8 @@ fn tokenize(
                     if group.atomic_assertion {
                         output.push(')');
                     }
+                } else if visiting {
+                    return Err("unbalanced parenthesis".into());
                 }
                 output.push(c);
                 can_repeat = true;
@@ -686,7 +771,13 @@ fn tokenize(
             }
             '$' => return Err("the $ anchor is supported only at the end of a pattern".into()),
             '[' => {
-                class(&mut input, &mut output, &mut escapes)?;
+                parse_class(
+                    &mut input,
+                    &mut output,
+                    &mut escapes,
+                    None,
+                    warnings.as_deref_mut(),
+                )?;
                 can_repeat = true;
                 Width::fixed(1)
             }
@@ -785,7 +876,9 @@ fn tokenize(
                 // Modifiers must be adjacent even in verbose mode.
                 if input.next_if_eq(&'?').is_some() {
                     output.push('?');
-                } else if grammar == Grammar::Backtracking && input.next_if_eq(&'+').is_some() {
+                } else if (grammar == Grammar::Backtracking || visiting)
+                    && input.next_if_eq(&'+').is_some()
+                {
                     has_atomic = true;
                     output.push('+');
                 }
@@ -904,12 +997,52 @@ fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, 
 mod replacement;
 pub use replacement::{ReplacementError, ReplacementPart, parse_replacement, replacement};
 
-type Input<'a> = std::iter::Peekable<std::str::Chars<'a>>;
+/// Position in the original Python spelling, before escape expansion.
+#[derive(Clone)]
+struct Input<'a> {
+    chars: std::iter::Peekable<std::str::Chars<'a>>,
+    position: usize,
+}
+
+impl<'a> Input<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            chars: source.chars().peekable(),
+            position: 0,
+        }
+    }
+
+    fn peek(&mut self) -> Option<&char> {
+        self.chars.peek()
+    }
+
+    fn next_if(&mut self, accept: impl FnOnce(&char) -> bool) -> Option<char> {
+        if self.peek().is_some_and(accept) {
+            self.next()
+        } else {
+            None
+        }
+    }
+
+    fn next_if_eq(&mut self, value: &char) -> Option<char> {
+        self.next_if(|c| c == value)
+    }
+}
+
+impl Iterator for Input<'_> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<char> {
+        let c = self.chars.next()?;
+        self.position += 1;
+        Some(c)
+    }
+}
 
 /// Does the text after an unescaped opening brace form a Python repetition count?
 /// Only a complete ASCII bound (including an omitted bound in `{,}`) is a quantifier.
-pub fn starts_counted_repeat(mut input: Input<'_>) -> bool {
-    if !matches!(input.peek(), Some('0'..='9' | ',')) {
+pub fn starts_counted_repeat(input: impl Iterator<Item = char> + Clone) -> bool {
+    if !matches!(input.clone().next(), Some('0'..='9' | ',')) {
         return false;
     }
     let mut suffix = input.skip_while(char::is_ascii_digit);
@@ -974,7 +1107,7 @@ pub fn repeat_diagnostic(source: &str, verbose: bool) -> Option<(&'static str, u
                 pending.push(&inner.ast);
                 let start = inner.op.span.start.offset;
                 let end = outer.op.span.end.offset;
-                let mut chars = source[start..end].chars().peekable();
+                let mut chars = Input::new(&source[start..end]);
                 if chars.next() == Some('{') {
                     if !starts_counted_repeat(chars.clone()) {
                         continue;
@@ -1078,7 +1211,7 @@ fn guarded_class(
     }
     output.push('[');
     match next_token(input, verbose)? {
-        Some('[') => class(input, output, escapes)?,
+        Some('[') => parse_class(input, output, escapes, None, None)?,
         Some('\\') if escaped(input, output, false, escapes)? == Escape::Class => {}
         _ => return Err(unsupported.into()),
     }
@@ -1101,7 +1234,7 @@ fn atomic_delimited(
     }
     let mut delimiter = String::new();
     match input.next() {
-        Some('[') => class(input, &mut delimiter, escapes)?,
+        Some('[') => parse_class(input, &mut delimiter, escapes, None, None)?,
         Some('\\') => {
             // The delimiter also appears inside a negated class in the lowered scan.
             let word_delimiter = matches!(input.peek(), Some('w' | 'W'));
@@ -1271,21 +1404,17 @@ fn escaped(
             }
             char::from_u32(result).ok_or("regex escape is not a Unicode scalar")?
         }
-        c if c.is_ascii_punctuation() || verbose_space(c) => c,
+        c if !c.is_ascii_alphanumeric() => c,
         _ => return Err(format!("unsupported Python regex escape \\{c}")),
     };
     literal(output, value);
     Ok(Escape::Scalar(value))
 }
 
-fn class(input: &mut Input<'_>, output: &mut String, escapes: &mut Escapes) -> Result<(), String> {
-    parse_class(input, output, escapes, None)
-}
-
 /// Inspect one class in its original spelling before the backend expands Python categories.
 /// CPython computes the position from tokenizer heads, even for multi-digit escapes.
 pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usize)> {
-    let mut input = source.strip_prefix('[')?.chars().peekable();
+    let mut input = Input::new(source.strip_prefix('[')?);
     let mut escapes = Escapes {
         alphabet: if bytes {
             Alphabet::Bytes
@@ -1300,6 +1429,7 @@ pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usiz
         &mut String::new(),
         &mut escapes,
         Some(&mut from_end),
+        None,
     )
     .err()?;
     if from_end == 0 {
@@ -1326,11 +1456,16 @@ fn parse_class(
     output: &mut String,
     escapes: &mut Escapes,
     from_end: Option<&mut usize>,
+    mut warnings: Option<&mut WarningVisitor<'_>>,
 ) -> Result<(), String> {
     output.push('[');
-    // An immediate second '[' is CPython's possible nested set (FutureWarning).
-    if input.peek() == Some(&'[') {
-        return Err("nested or ambiguous regex character class is not supported".into());
+    if input.peek() == Some(&'[')
+        && from_end.is_none()
+        && !warnings
+            .as_mut()
+            .is_some_and(|v| (v.emit)(("nested set", input.position)))
+    {
+        return Err(NEEDS_CLASS_WARNING.into());
     }
     if input.next_if_eq(&'^').is_some() {
         output.push('^');
@@ -1349,8 +1484,27 @@ fn parse_class(
             output.push(']');
             return Ok(());
         }
-        if !first && matches!(c, '&' | '~' | '|' | '-') && input.peek() == Some(&c) {
-            return Err("nested or ambiguous regex character class is not supported".into());
+        if !first && range_start.is_none() && input.peek() == Some(&c) && from_end.is_none() {
+            let operation = match c {
+                '-' => Some("set difference"),
+                '&' => Some("set intersection"),
+                '|' => Some("set union"),
+                '~' => Some("set symmetric difference"),
+                _ => None,
+            };
+            if let Some(name) = operation {
+                // When '-' separates two endpoints, the tokenizer has already
+                // fetched the token following the right endpoint.
+                let missing_escape =
+                    c == '-' && left_atom.is_some() && input.clone().skip(1).eq(['\\']);
+                if !missing_escape
+                    && !warnings
+                        .as_mut()
+                        .is_some_and(|v| (v.emit)((name, input.position - 1)))
+                {
+                    return Err(NEEDS_CLASS_WARNING.into());
+                }
+            }
         }
         if c == '-' && left_atom.is_some() && input.peek() != Some(&']') {
             output.push('-');
@@ -1362,6 +1516,11 @@ fn parse_class(
             second = input.peek().copied();
             escaped(input, output, true, escapes)?.scalar()
         } else {
+            if matches!(c, '[' | '-' | '&' | '~' | '|')
+                && let Some(visitor) = warnings.as_mut()
+            {
+                visitor.literals.push(input.position - 1);
+            }
             literal(output, c);
             Some(c)
         };

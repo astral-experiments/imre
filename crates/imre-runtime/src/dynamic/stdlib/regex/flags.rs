@@ -4,6 +4,7 @@ use super::*;
 pub(super) struct Flags {
     pub bits: i64,
     pub skip: usize,
+    pub fatal: Option<(&'static str, usize)>,
     pub deferred: Option<DeferredError>,
 }
 
@@ -43,7 +44,7 @@ fn delimited(source: &[u8], mut i: usize, delimiter: u8) -> Option<usize> {
     (delimiter == b'\n').then_some(i)
 }
 
-fn original_spelling(source: &[u8], bytes: bool) -> std::borrow::Cow<'_, str> {
+pub(super) fn original_spelling(source: &[u8], bytes: bool) -> std::borrow::Cow<'_, str> {
     if bytes && !source.is_ascii() {
         source
             .iter()
@@ -73,20 +74,67 @@ fn suspect_range(source: &[u8]) -> bool {
     })
 }
 
-pub(super) fn parse(
+fn inline_flags(
     source: &[u8],
-    bits: i64,
+    mut j: usize,
     bytes: bool,
-) -> std::result::Result<Flags, (&'static str, usize)> {
+) -> (usize, i64, i64, bool, Option<(&'static str, usize)>) {
+    let mut added = 0;
+    let mut removed = 0;
+    let mut invalid = None;
+    while let Some(flag) = source.get(j).and_then(|c| bit(*c)) {
+        j += 1;
+        let message = match flag {
+            LOCALE if !bytes => Some("bad inline flags: cannot use 'L' flag with a str pattern"),
+            UNICODE if bytes => Some("bad inline flags: cannot use 'u' flag with a bytes pattern"),
+            ASCII | LOCALE | UNICODE if added & (ASCII | LOCALE | UNICODE) & !flag != 0 => {
+                Some("bad inline flags: flags 'a', 'u' and 'L' are incompatible")
+            }
+            _ => None,
+        };
+        if let Some(msg) = message {
+            invalid.get_or_insert_with(|| (msg, j));
+        }
+        added |= flag;
+    }
+    let removing = source.get(j) == Some(&b'-');
+    if removing {
+        j += 1;
+        while let Some(flag) = source.get(j).and_then(|c| bit(*c)) {
+            j += 1;
+            if flag & (ASCII | LOCALE | UNICODE) != 0 {
+                invalid.get_or_insert_with(|| {
+                    (
+                        "bad inline flags: cannot turn off flags 'a', 'u' and 'L'",
+                        j,
+                    )
+                });
+            }
+            removed |= flag;
+        }
+    }
+
+    (j, added, removed, removing, invalid)
+}
+
+// The warning visitor needs lexical layout, independent of the matcher’s flag support.
+pub(super) fn scoped_verbose(spec: &str, bytes: bool, verbose: bool) -> Option<bool> {
+    let (end, added, removed, removing, invalid) = inline_flags(spec.as_bytes(), 0, bytes);
+    (end == spec.len() && invalid.is_none() && !(removing && removed == 0) && added & removed == 0)
+        .then_some((verbose || added & VERBOSE != 0) && removed & VERBOSE == 0)
+}
+
+pub(super) fn parse(source: &[u8], bits: i64, bytes: bool) -> Flags {
     let mut result = Flags {
         bits,
         skip: 0,
+        fatal: None,
         deferred: None,
     };
     if !source.windows(2).any(|pair| pair == b"(?")
         && !(source.contains(&b'[') && suspect_range(source))
     {
-        return Ok(result);
+        return result;
     }
     let position = |i| {
         if bytes {
@@ -159,7 +207,8 @@ pub(super) fn parse(
                             if !prior.contains(&b'{')
                                 && valid_translated_prefix(prior, result.bits, bytes)
                             {
-                                return Err((msg, position(result.skip) + start));
+                                result.fatal = Some((msg, position(result.skip) + start));
+                                return result;
                             }
                         } else if bad.prefix.is_empty()
                             || valid_translated_prefix(&bad.prefix, result.bits, bytes)
@@ -180,47 +229,8 @@ pub(super) fn parse(
                 let open = i;
                 i += 1;
                 if source.get(i) == Some(&b'?') {
-                    let mut j = i + 1;
-                    let mut added = 0;
-                    let mut removed = 0;
-                    let mut invalid = None;
-                    while let Some(flag) = source.get(j).and_then(|c| bit(*c)) {
-                        j += 1;
-                        let message = match flag {
-                            LOCALE if !bytes => {
-                                Some("bad inline flags: cannot use 'L' flag with a str pattern")
-                            }
-                            UNICODE if bytes => {
-                                Some("bad inline flags: cannot use 'u' flag with a bytes pattern")
-                            }
-                            ASCII | LOCALE | UNICODE
-                                if added & (ASCII | LOCALE | UNICODE) & !flag != 0 =>
-                            {
-                                Some("bad inline flags: flags 'a', 'u' and 'L' are incompatible")
-                            }
-                            _ => None,
-                        };
-                        if let Some(msg) = message {
-                            invalid.get_or_insert_with(|| (msg, position(j)));
-                        }
-                        added |= flag;
-                    }
-                    let removing = source.get(j) == Some(&b'-');
-                    if removing {
-                        j += 1;
-                        while let Some(flag) = source.get(j).and_then(|c| bit(*c)) {
-                            j += 1;
-                            if flag & (ASCII | LOCALE | UNICODE) != 0 {
-                                invalid.get_or_insert_with(|| {
-                                    (
-                                        "bad inline flags: cannot turn off flags 'a', 'u' and 'L'",
-                                        position(j),
-                                    )
-                                });
-                            }
-                            removed |= flag;
-                        }
-                    }
+                    let (j, added, removed, removing, invalid) = inline_flags(source, i + 1, bytes);
+                    let mut invalid = invalid.map(|(msg, at)| (msg, position(at)));
                     if (added != 0 || removing) && source.get(j) == Some(&b')') {
                         // Removing flags requires both a flag and a scoped body.
                         if removing {
@@ -233,7 +243,8 @@ pub(super) fn parse(
                         }
                         if leading {
                             if let Some(error) = invalid {
-                                return Err(error);
+                                result.fatal = Some(error);
+                                return result;
                             }
                             result.bits |= added;
                             verbose = result.bits & VERBOSE != 0;
@@ -261,5 +272,5 @@ pub(super) fn parse(
             _ => i += 1,
         }
     }
-    Ok(result)
+    result
 }

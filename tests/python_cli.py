@@ -2594,6 +2594,7 @@ def report(text):
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
+            "boxed_binary_ljust.py",
             "boxed_binary_strip.py",
             "boxed_class_union.py",
             "boxed_bytes_octal.py",
@@ -2717,6 +2718,7 @@ def report(text):
             "boxed_os_eventfd.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_ftruncate.py",
+            "boxed_os_lockf.py",
             "boxed_os_pread.py",
             "boxed_os_pwrite.py",
             "boxed_os_readinto.py",
@@ -2869,6 +2871,9 @@ def report(text):
             "boxed_itertools_product.py",
             "boxed_itertools_groupby.py",
             "boxed_itertools_filterfalse.py",
+            "boxed_itertools_takewhile.py",
+            "boxed_itertools_dropwhile.py",
+            "boxed_itertools_compress.py",
             "boxed_starmap_subclass.py",
             "boxed_object_new.py",
             "boxed_module_type.py",
@@ -2990,6 +2995,8 @@ def report(text):
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_pass_fds.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_subprocess_lifetime.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_buffering.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_subprocess_text.py").read_bytes())
@@ -3032,6 +3039,8 @@ def report(text):
             plugin.write_bytes((fixtures / "boxed_posix_rtld_flags.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_posix_sysconf.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            plugin.write_bytes((fixtures / "boxed_posix_device.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_resource.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")

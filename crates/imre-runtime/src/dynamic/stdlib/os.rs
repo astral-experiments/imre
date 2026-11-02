@@ -1,4 +1,6 @@
 #[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod device;
+#[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod eventfd;
 pub(in crate::dynamic) mod scandir;
 pub(in crate::dynamic) mod stat;
@@ -448,6 +450,9 @@ pub(in crate::dynamic) mod xattr;
 
 /// POSIX functions exported as the same builtins by both os and posix.
 pub(super) fn is_descriptor_function(name: &str) -> bool {
+    if matches!(name, "getpgid" | "setpgid") {
+        return cfg!(unix);
+    }
     if name == "_exit" {
         return cfg!(unix);
     }
@@ -497,7 +502,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "symlink"
     ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
         || (cfg!(target_os = "linux")
-            && matches!(name, "posix_fadvise" | "posix_fallocate" | "sendfile"))
+            && matches!(name, "lockf" | "posix_fadvise" | "posix_fallocate" | "sendfile"))
 }
 
 /// Retry a POSIX call that returns its error number directly instead of setting errno.
@@ -939,6 +944,31 @@ pub(super) fn descriptor(
         let previous = unsafe { libc::umask(mask as libc::mode_t) };
         return Ok(ctx.int(i64::from(previous)));
     }
+    #[cfg(unix)]
+    if name == "getpgid" {
+        let [Some(pid)] = builtins::bind_builtin_arguments(name, args, kwargs, ["pid"], 1)? else {
+            unreachable!("pid is required")
+        };
+        let group = native::getpgid(c_int(ctx, pid)?)?;
+        return Ok(ctx.int(i64::from(group)));
+    }
+    #[cfg(unix)]
+    if name == "setpgid" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "posix.setpgid() takes no keyword arguments",
+            ));
+        }
+        let [pid, group] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("setpgid expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        native::setpgid(c_int(ctx, *pid)?, c_int(ctx, *group)?)?;
+        return Ok(NONE);
+    }
     if name == "open" {
         return open(ctx, args, kwargs);
     }
@@ -1039,6 +1069,23 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    #[cfg(target_os = "linux")]
+    if name == "ptsname" {
+        let [fd] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.ptsname() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        stat::warn_bool_fd(ctx, *fd)?;
+        let fd = super::select::fd(ctx, *fd)?;
+        let bytes = native::ptsname(fd).map_err(super::os_error)?;
+        let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        return Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?));
     }
     #[cfg(target_os = "linux")]
     if name == "posix_fadvise" {
@@ -1204,6 +1251,30 @@ pub(super) fn descriptor(
         let low = c_int(ctx, *low)?;
         let high = c_int(ctx, *high)?;
         native::close_range(low, high);
+        return Ok(NONE);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "lockf" {
+        let [fd, command, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("lockf expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let command = c_int(ctx, *command)?;
+        let length = file_offset(ctx, *length)?;
+        let audit_fd = ctx.int(i64::from(fd));
+        let audit_command = ctx.int(i64::from(command));
+        let audit_length = ctx.int(length);
+        super::audit::event(ctx, "os.lockf", &[audit_fd, audit_command, audit_length])?;
+        if let Err(error) = native::lockf(fd, command, length) {
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                // A raising signal handler takes precedence over EINTR. Do not retry the lock.
+                ctx.dispatch_signals()?;
+            }
+            return Err(super::os_error(error));
+        }
         return Ok(NONE);
     }
     if name == "ftruncate" {

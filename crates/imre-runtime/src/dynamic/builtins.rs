@@ -224,6 +224,16 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     .then_some(owner)
 }
 
+/// The declaring type stored on standalone builtin method handles.
+pub(super) fn native_method_owner(symbol: &str) -> Option<&str> {
+    match symbol {
+        "str.maketrans" => Some("str"),
+        "bytes.maketrans" => Some("bytes"),
+        "bytearray.maketrans" => Some("bytearray"),
+        _ => constructor_owner(symbol),
+    }
+}
+
 pub(super) fn is_builtin_type(name: &str) -> bool {
     TYPES.contains(&name)
         || super::stdlib::fixed_structseq::fixed_type(name).is_some()
@@ -410,6 +420,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "endswith",
     "extend",
     "hex",
+    "ljust",
     "lstrip",
     "reverse",
     "rstrip",
@@ -430,6 +441,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "hex",
     "index",
     "join",
+    "ljust",
     "lstrip",
     "rfind",
     "rsplit",
@@ -612,10 +624,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "socket.socket"
         }
-        Value::BufferedRandom(..) if attr == "writelines" => "file",
-        Value::BufferedRandom(..) if super::stdlib::tempfile::METHODS.contains(&attr) => {
-            "BufferedRandom"
-        }
+        // Context-manager lookup bypasses the normal _io descriptors for native files.
+        Value::BufferedRandom(..) if matches!(attr, "__enter__" | "__exit__") => "BufferedRandom",
+        Value::File(_) if matches!(attr, "__enter__" | "__exit__") => "file",
         Value::TextFile(_)
             if matches!(
                 attr,
@@ -701,42 +712,6 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ) =>
         {
             "selectors"
-        }
-        Value::File(handle)
-            if attr == "truncate"
-                && matches!(handle.as_ref(), super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing) =>
-        {
-            "file"
-        }
-        Value::File(handle)
-            if attr == "read1"
-                && matches!(handle.as_ref(), super::stdlib::BinaryFile::Descriptor(fd) if fd.reading) =>
-        {
-            "file"
-        }
-        Value::File(_)
-            if matches!(
-                attr,
-                "readable"
-                    | "writable"
-                    | "seekable"
-                    | "isatty"
-                    | "seek"
-                    | "tell"
-                    | "read"
-                    | "fileno"
-                    | "readline"
-                    | "readlines"
-                    | "readinto"
-                    | "write"
-                    | "writelines"
-                    | "flush"
-                    | "close"
-                    | "__enter__"
-                    | "__exit__"
-            ) =>
-        {
-            "file"
         }
         Value::RegexPattern(_) | Value::RegexMatch(_)
             if value::REGEX_COPY_METHODS.contains(&attr) =>
@@ -1146,6 +1121,50 @@ fn noargs_method_receiver(
     Ok(receiver)
 }
 
+/// Reduce a builtin using its stored receiver and name, without consulting receiver attributes.
+fn reduce_builtin_method(ctx: &mut Context, method: Id) -> Result<Id> {
+    let (callable, receiver) = match *ctx.heap.get(method) {
+        Value::Method {
+            callable, receiver, ..
+        } => (callable, Some(receiver)),
+        Value::Native(ref symbol) => {
+            let owner = native_method_owner(symbol).map(str::to_owned);
+            (method, owner.map(|owner| ctx.builtin(&owner)))
+        }
+        _ => unreachable!("validated builtin function or method"),
+    };
+    let name = match ctx.heap.get(callable) {
+        Value::Native(symbol) => symbol.rsplit('.').next().unwrap(),
+        Value::HeapTypeMethod { name, .. } | Value::IoMethod { name, .. } => name,
+        Value::IoOpen { .. } => "open",
+        _ => unreachable!("validated native callable"),
+    }
+    .to_owned();
+    let Some(receiver) =
+        receiver.filter(|&value| !matches!(ctx.heap.get(value), Value::Module { .. }))
+    else {
+        return Ok(ctx.text(name));
+    };
+    let scope = ctx.heap.current_scope();
+    let builtins = if scope != NONE
+        && let Some(globals) = ctx.scope_data(ctx.root_scope(scope)).exec_globals
+    {
+        globals.builtins
+    } else {
+        ctx.default_source_builtins()?
+    };
+    let getattr = ctx.load_exec_name(builtins, "getattr").map_err(|error| {
+        if ctx.is_builtin_error(&error, "KeyError") {
+            Error::new("AttributeError", "getattr")
+        } else {
+            error
+        }
+    })?;
+    let name = ctx.text(name);
+    let args = ctx.alloc(Value::Tuple(vec![receiver, name]));
+    Ok(ctx.alloc(Value::Tuple(vec![getattr, args])))
+}
+
 /// Apply the native absolute-value implementation without invoking an override.
 fn absolute_value(ctx: &mut Context, value: Id) -> Result<Id> {
     let scalar = ctx.scalar_value(value);
@@ -1186,6 +1205,12 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "builtin_function_or_method.__reduce__" {
+        let method = noargs_method_receiver(
+            ctx, "builtin_function_or_method", "__reduce__", args, kwargs,
+        )?;
+        return reduce_builtin_method(ctx, method);
+    }
     if name == "BaseException.add_note" {
         let Some((&exception, args)) = args.split_first() else {
             return Err(type_error(
@@ -1580,6 +1605,7 @@ pub(super) fn call(
                     method,
                     "decode"
                         | "endswith"
+                        | "ljust"
                         | "lstrip"
                         | "rstrip"
                         | "split"

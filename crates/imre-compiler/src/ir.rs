@@ -1547,6 +1547,7 @@ pub(crate) enum Builtin {
     },
     DequeClear,
     DequeReverse,
+    DequeRotate,
     DequeGet {
         method: bool,
     },
@@ -2172,6 +2173,7 @@ pub(crate) enum FdOperation {
     Dup,
     Isatty,
     DeviceEncoding,
+    PtsName,
     GetBlocking,
     SetBlocking,
     GetInheritable,

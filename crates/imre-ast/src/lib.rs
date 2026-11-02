@@ -7,7 +7,7 @@ pub mod exceptions;
 pub mod startup;
 pub mod strings;
 mod type_aliases;
-pub use type_aliases::type_alias_error;
+pub use type_aliases::{generic_class_arguments_error, type_alias_error};
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};

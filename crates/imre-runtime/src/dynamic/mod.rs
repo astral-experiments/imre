@@ -267,6 +267,9 @@ impl Context {
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
+            ("builtin_function_or_method", _) => {
+                self.builtin_type_name(object) == Some("builtin_function_or_method")
+            }
             ("list", Value::List(_)) | ("tuple", Value::Tuple(_) | Value::NamedTuple { .. }) => {
                 true
             }
@@ -2129,6 +2132,7 @@ impl Context {
             ],
             "dict" => builtins::DICT_METHODS,
             "function" => &["__call__"],
+            "builtin_function_or_method" => &["__reduce__"],
             defaultdict::CLASS => {
                 self.builtin("dict");
                 defaultdict::METHODS
@@ -2714,6 +2718,10 @@ impl Context {
     ) -> Result<()> {
         #[cfg(target_os = "linux")]
         if source.is_none() && matches!(name, "os" | "posix") {
+            for name in ["major", "minor", "makedev"] {
+                let function = self.builtin(&format!("posix.{name}"));
+                self.bind(scope, name, function);
+            }
             stdlib::os::eventfd::initialize(self, scope);
         }
         if name == "_thread" && source.is_none() {
@@ -2778,8 +2786,8 @@ impl Context {
                     "_cycle_next",
                     "_starmap_allocate",
                     "_starmap_next",
-                    "_filterfalse_allocate",
-                    "_filterfalse_state",
+                    "_predicate_allocate",
+                    "_predicate_state",
                     "_chain_allocate",
                     "_chain_next",
                     "_chain_set",
@@ -2821,11 +2829,18 @@ impl Context {
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
-                let fadvise = self.builtin("posix.posix_fadvise");
-                self.bind(scope, "posix_fadvise", fadvise);
+                for name in ["lockf", "posix_fadvise", "ptsname"] {
+                    let function = self.builtin(&format!("posix.{name}"));
+                    self.bind(scope, name, function);
+                }
                 for (attr, flag) in [
                     ("O_PATH", libc::O_PATH),
+                    ("O_NOCTTY", libc::O_NOCTTY),
                     ("O_TMPFILE", libc::O_TMPFILE),
+                    ("F_LOCK", libc::F_LOCK),
+                    ("F_TLOCK", libc::F_TLOCK),
+                    ("F_ULOCK", libc::F_ULOCK),
+                    ("F_TEST", libc::F_TEST),
                     ("POSIX_FADV_NORMAL", libc::POSIX_FADV_NORMAL),
                     ("POSIX_FADV_SEQUENTIAL", libc::POSIX_FADV_SEQUENTIAL),
                     ("POSIX_FADV_RANDOM", libc::POSIX_FADV_RANDOM),
@@ -2892,6 +2907,7 @@ impl Context {
                 if source.is_none() {
                     let posix = self.module("posix")?;
                     for attr in [
+                        "ptsname", "O_NOCTTY",
                         "getxattr", "setxattr", "listxattr", "removexattr",
                         "XATTR_CREATE", "XATTR_REPLACE", "XATTR_SIZE_MAX",
                     ] {
@@ -3263,16 +3279,19 @@ impl Context {
                     .as_str()
                     .is_some_and(|root| path == std::path::Path::new(root).join("itertools.py"))
             {
-                for (attr, name) in [
-                    ("starmap", "itertools.starmap"),
+                for (name, owner) in [
                     ("accumulate", "itertools.accumulate"),
+                    ("starmap", "itertools.starmap"),
+                    ("takewhile", "itertools.takewhile"),
+                    ("dropwhile", "itertools.dropwhile"),
+                    ("compress", "itertools.compress"),
                 ] {
-                    if let Some(class) = self.scope_name(scope, attr)
+                    if let Some(class) = self.scope_name(scope, name)
                         && let Value::Class { scope, .. } = *self.heap.get(class)
                         && let Value::Scope(frame) = self.heap.get_mut(scope)
                         && let Some(layout) = &mut frame.class_namespace
                     {
-                        layout.itertools_layout = Some(name);
+                        layout.itertools_layout = Some(owner);
                     }
                 }
             }

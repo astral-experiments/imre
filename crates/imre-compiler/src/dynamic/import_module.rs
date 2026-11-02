@@ -121,7 +121,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                         include_str!("../../stdlib/inspect_signature.py"),
                         "import functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys",
                         section("def ismodule(object):", "def ispackage(object):"),
-                        section("def ismethoddescriptor(object):", "def isdatadescriptor(object):"),
+                        section("def ismethoddescriptor(object):", "if hasattr(types, 'MemberDescriptorType'):"),
                         section("def isfunction(object):", "def _has_code_flag("),
                         section("def istraceback(object):", "def isabstract(object):"),
                         section("def getfile(object):", "class ClassFoundException("),

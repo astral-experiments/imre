@@ -433,6 +433,13 @@ pub(crate) fn defines_pickle_reducer(node: &ast::StmtClassDef) -> bool {
     })
 }
 
+// Keep a decorator error local to its class until we know how that class is built.
+#[derive(Default)]
+struct DeferredMethodDecorators {
+    has_runtime_method: bool,
+    unsupported: Option<String>,
+}
+
 fn collect_class(
     graph: &SourceGraph,
     module: &SourceModule,
@@ -441,6 +448,7 @@ fn collect_class(
     parents: [Option<(usize, &Class)>; 2],
     exception_layout: bool,
     exceptions: &HashMap<DefinitionId, u32>,
+    decorators: &mut DeferredMethodDecorators,
 ) -> Result<Class, String> {
     let base = parents[0];
     if defines_pickle_reducer(node) {
@@ -584,6 +592,23 @@ fn collect_class(
     let mut method_kinds = Vec::new();
     let mut initializer = None;
     for (ordinal, statement) in node.body.iter().enumerate() {
+        // A type-only method declaration may have a separate runtime signature.
+        let statement = match statement {
+            ast::Stmt::If(guard)
+                if guard
+                    .test
+                    .as_name_expr()
+                    .is_some_and(|test| !class_bindings.contains(test.id.as_str()))
+                    && graph.resolve(definition.module, &guard.test)
+                        == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
+                    && let [otherwise] = guard.elif_else_clauses.as_slice()
+                    && otherwise.test.is_none()
+                    && let [method @ ast::Stmt::FunctionDef(_)] = otherwise.body.as_slice() =>
+            {
+                method
+            }
+            _ => statement,
+        };
         // A call through an upcast uses its declared layout. Do not erase an
         // override which could select a different callable at runtime.
         let member = match statement {
@@ -810,9 +835,25 @@ fn collect_class(
                     );
                     graph.class_body_error.borrow_mut().get_or_insert(error);
                     graph.check_decorated_method_calls.set(true);
+                    decorators.has_runtime_method = true;
                     MethodKind::Instance
                 } else {
-                    method_kind(graph, definition.module, method, &class_bindings)?
+                    match method_kind(graph, definition.module, method, &class_bindings) {
+                        Err(error)
+                            if graph.command_startup.is_none() && !name.starts_with("__") =>
+                        {
+                            // An arbitrary decorator may bind a descriptor or a non-callable.
+                            // Preserve the class name without inventing a fixed method slot.
+                            decorators.unsupported.get_or_insert(error);
+                            if !names.insert(name.to_owned()) {
+                                return Err(module
+                                    .error(method, &format!("duplicate class member {name:?}")));
+                            }
+                            class_bindings.insert(name.to_owned());
+                            continue;
+                        }
+                        kind => kind?,
+                    }
                 };
                 if name == "__call__" && kind != MethodKind::Instance {
                     return Err(module.error(

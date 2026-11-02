@@ -22,10 +22,26 @@ REJECTED = {
             "class Case(unittest.TestCase):\n"
             "    @unittest.skipUnless(False, 'feature required')\n"
             "    def test_body(self): pass\n"
+            "    @staticmethod\n"
+            "    @staticmethod\n"
+            "    def extra(): pass\n"
             "def typed(n: int) -> int: return n\n"
             "typed('wrong')\n"
         ),
     }, "invalid-argument-type"),
+    "runtime_method_skip_leaves_other_class_checked": ({
+        "main.py": (
+            "import unittest\n"
+            "class Case(unittest.TestCase):\n"
+            "    @unittest.skipUnless(False, 'feature required')\n"
+            "    def test_body(self): pass\n"
+            "class Other:\n"
+            "    @staticmethod\n"
+            "    @staticmethod\n"
+            "    def extra(): pass\n"
+            "print(Other.extra())\n"
+        ),
+    }, "method decorators cannot be stacked"),
     "second_base_has_storage": ({
         "main.py": (
             "class Left:\n    def __init__(self, x: int): self.left = x\n"
@@ -33,6 +49,14 @@ REJECTED = {
             "class Both(Left, Right): pass\n"
         ),
     }, "multiple independent base classes"),
+    "inspect_isdatadescriptor_preserves_typed_call": ({
+        "main.py": (
+            "from inspect import isdatadescriptor\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(isdatadescriptor(property()))\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "optional_import_keeps_typed_call_check": ({
         "main.py": (
             "import http.client\n"

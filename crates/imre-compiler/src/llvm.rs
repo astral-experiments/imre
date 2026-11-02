@@ -7258,6 +7258,13 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_deque_clear", &[&args[0].value]);
                 none()
             }
+            Builtin::DequeRotate => {
+                self.checked_line(format!(
+                    "call void @imre_deque_rotate(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             Builtin::DequeReverse => {
                 self.void_call("imre_deque_reverse", &[&args[0].value]);
                 none()
@@ -8805,6 +8812,7 @@ declare ptr @imre_subprocess_quote_argument(i64, i32)
 @imre_os_o_directory = external constant i64
 @imre_os_o_nofollow = external constant i64
 @imre_os_o_nonblock = external constant i64
+@imre_os_o_noctty = external constant i64
 @imre_os_o_path = external constant i64
 @imre_os_o_tmpfile = external constant i64
 @imre_os_seek_set = external constant i64
@@ -8829,6 +8837,7 @@ declare void @imre_os_openpty(ptr)
 declare void @imre_os_pipe(ptr)
 declare void @imre_os_pipe2(ptr, i64)
 declare i32 @imre_os_isatty(i64)
+declare ptr @imre_os_ptsname(i64, ptr, ptr, i64)
 declare i64 @imre_os_device_encoding(i64)
 declare i32 @imre_os_get_blocking(i64)
 declare void @imre_os_set_blocking(i64, i64)
@@ -9448,6 +9457,7 @@ declare ptr @imre_deque_copy(ptr)
 declare i64 @imre_deque_pop(ptr, i32)
 declare void @imre_deque_clear(ptr)
 declare void @imre_deque_reverse(ptr)
+declare void @imre_deque_rotate(ptr, i64)
 declare void @imre_deque_check_method_index(i64)
 declare i64 @imre_deque_get(ptr, i64)
 declare void @imre_deque_set(ptr, i64, i64)

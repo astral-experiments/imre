@@ -2,6 +2,7 @@
 import _imre_subprocess as _process
 from _weakref import ref as _ref
 from time import monotonic as _time
+from warnings import warn as _warn
 import io
 import selectors
 
@@ -83,7 +84,8 @@ class Popen:
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
                  stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
-                 universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False, umask=-1, pipesize=-1):
+                 universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False,
+                 umask=-1, pipesize=-1, process_group=None):
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -119,7 +121,8 @@ class Popen:
         self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
                                        restore_signals, cwd, env, bufsize, pipesize,
                                        encoding if self.text_mode else None,
-                                       errors if self.text_mode else None, shell, start_new_session, umask, pass_fds)
+                                       errors if self.text_mode else None, shell, start_new_session,
+                                       process_group, umask, pass_fds)
         try:
             self.stdin = _process.pipe(self._handle, 0)
             self.stdout = _process.pipe(self._handle, 1)
@@ -139,8 +142,12 @@ class Popen:
             _process.close_wait(self._handle)
             raise
 
-    def __del__(self):
-        if self._handle is not None and _process.finalize(self._handle) and _active is not None:
+    def __del__(self, _warn=_warn):
+        if self._handle is None:
+            return
+        if self.returncode is None:
+            _warn("subprocess %s is still running" % self.pid, ResourceWarning, source=self)
+        if _process.status(self._handle, True) is None and _active is not None:
             _active.append(self)
 
     @property

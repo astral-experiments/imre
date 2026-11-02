@@ -313,7 +313,7 @@ pub(super) fn starmap_allocate(
             "expected a starmap subclass with compatible layout",
         ));
     }
-    Ok(callable_iterator(ctx, *base, *class, *function, *source))
+    Ok(iterator_instance(ctx, *base, *class, *source, *function))
 }
 
 /// Fetch one row, fully unpack it, then invoke the saved callable.
@@ -345,31 +345,34 @@ pub(super) fn starmap_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     Err(Error::new("TypeError", "expected an initialized starmap"))
 }
 
-pub(super) fn filterfalse_allocate(
+pub(super) fn predicate_allocate(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let [base, class, predicate, iterable] = args else {
+    let [base, class, state, iterable] = args else {
         return Err(Error::new(
             "TypeError",
-            "invalid filterfalse allocation arguments",
+            "invalid predicate iterator allocation arguments",
         ));
     };
     if !kwargs.is_empty()
         || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
         if *class == *base || ancestors.contains(base))
     {
-        return Err(Error::new("TypeError", "expected a filterfalse subclass"));
+        return Err(Error::new(
+            "TypeError",
+            "expected a predicate iterator subclass",
+        ));
     }
     let source = ctx.iterator(*iterable)?;
-    Ok(callable_iterator(ctx, *base, *class, *predicate, source))
+    Ok(iterator_instance(ctx, *base, *class, source, *state))
 }
 
-/// Retain the callable and acquired source in a GC-traced, class-owned slot.
-fn callable_iterator(ctx: &mut Context, base: Id, class: Id, function: Id, source: Id) -> Id {
+/// Retain the source and cursor state in a GC-traced, class-owned slot.
+fn iterator_instance(ctx: &mut Context, base: Id, class: Id, source: Id, state: Id) -> Id {
     ctx.heap.keep(source);
-    let state = ctx.alloc(Value::Tuple(vec![source, function]));
+    let state = ctx.alloc(Value::Tuple(vec![source, state]));
     iterator_with_state(ctx, base, class, state)
 }
 
@@ -386,7 +389,7 @@ fn iterator_with_state(ctx: &mut Context, base: Id, class: Id, state: Id) -> Id 
     result
 }
 
-pub(super) fn filterfalse_state(
+pub(super) fn predicate_state(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
@@ -402,7 +405,10 @@ pub(super) fn filterfalse_state(
     {
         return Ok(state);
     }
-    Err(Error::new("TypeError", "expected a filterfalse instance"))
+    Err(Error::new(
+        "TypeError",
+        "expected a predicate iterator instance",
+    ))
 }
 
 /// Build the shared repeat cursor, converting a supplied count exactly once.
