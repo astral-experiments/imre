@@ -961,6 +961,10 @@ pub(super) enum Value {
         origin: Id,
     },
     CoroutineWrapper(Id),
+    ANextAwaitable {
+        wrapped: Id,
+        default: Id,
+    },
     Generator {
         owner: FrameOwner,
         frame: Option<Id>,
@@ -1305,6 +1309,7 @@ impl Value {
             Self::Generator { .. } => "generator",
             Self::Coroutine { .. } => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
+            Self::ANextAwaitable { .. } => "anext_awaitable",
             Self::NoDefault => "NoDefaultType",
             Self::TypeAlias { .. } => "typing.TypeAliasType",
             Self::Class { .. } => "type",
@@ -1563,6 +1568,7 @@ impl Value {
             Self::Cell(value) => visit.extend(value),
             Self::Coroutine { frame, origin } => visit.extend([*frame, *origin]),
             Self::CoroutineWrapper(coroutine) => visit.push(*coroutine),
+            Self::ANextAwaitable { wrapped, default } => visit.extend([*wrapped, *default]),
             Self::Function {
                 closure,
                 scope,
