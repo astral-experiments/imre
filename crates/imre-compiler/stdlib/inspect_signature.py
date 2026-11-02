@@ -149,6 +149,12 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
         if not isinstance(explicit, Signature):
             raise TypeError(f"unexpected object {explicit!r} in __signature__ attribute")
         return explicit
+    if isinstance(obj, functools.partial):
+        wrapped = _signature_from_callable(
+            obj.func, sigcls=sigcls, follow_wrapper_chains=follow_wrapper_chains,
+            globals=globals, locals=locals, eval_str=eval_str,
+            annotation_format=annotation_format)
+        return _signature_get_partial(wrapped, obj)
     if not isinstance(obj, types.FunctionType):
         if isinstance(obj, type):
             method, drop_first = _constructor(obj)
