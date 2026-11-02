@@ -3,14 +3,12 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
-import os
 from pathlib import Path
-import signal
-import subprocess
 import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from audit_worker import run_worker
 from host_popen import HERE, verify
 from suite_inventory import cases, load_suite
 
@@ -43,24 +41,16 @@ def main():
                 # Some originals exhaust or replace descriptors, manipulate signals,
                 # or can hang on a broken pipe implementation. Isolate and reap each.
                 with tempfile.TemporaryFile() as log:
-                    child = subprocess.Popen(cmd, cwd=cwd, stdout=log, stderr=log, start_new_session=True)
-                    try:
-                        child.wait(timeout=65)
-                    except subprocess.TimeoutExpired:
+                    returncode = run_worker(cmd, cwd, log)
+                    if returncode is None:
                         return name, {"status": "failed", "reason": "isolated worker exceeded 65s"}
-                    finally:
-                        try:
-                            os.killpg(child.pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
-                        child.wait()
-                    if child.returncode or not result.exists():
+                    if returncode or not result.exists():
                         log.seek(0)
                         tail = log.read().decode(errors="replace").strip().splitlines()[-1:]
-                        return name, {"status": "failed", "reason": f"worker {child.returncode}: " + "".join(tail)}
+                        return name, {"status": "failed", "reason": f"worker {returncode}: " + "".join(tail)}
                 return name, json.loads(result.read_text())
         with ThreadPoolExecutor(max_workers=2) as pool:
-            for name, row in pool.map(attempt, ids):
+            for name, row in pool.map(attempt, ids, buffersize=2):
                 rows[name] = row
                 if len(rows) % 25 == 0:
                     print(f"{len(rows)} / {len(ids)}", flush=True)
