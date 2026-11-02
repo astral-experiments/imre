@@ -1957,6 +1957,9 @@ impl Context {
                                 AliasKind::Callable | AliasKind::AbcCallable
                             ) && !matches!(args.as_slice(), [arg, _] if typing::is_param_expr(&ctx, *arg));
                             if args.is_empty() {
+                                if callable {
+                                    return Err(Error::new("IndexError", "tuple index out of range"));
+                                }
                                 work.push(Part::Text("()"));
                             }
                             for (index, &arg) in args.iter().enumerate().rev() {

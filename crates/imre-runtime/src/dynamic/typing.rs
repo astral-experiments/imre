@@ -1632,7 +1632,9 @@ pub(super) fn call(
                 let Value::Tuple(args) = ctx.heap.get(a.args) else {
                     unreachable!()
                 };
-                let (result, params) = args.split_last().expect("a callable has a result");
+                let (result, params) = args
+                    .split_last()
+                    .ok_or_else(|| Error::new("IndexError", "tuple index out of range"))?;
                 if matches!(params, [param] if is_param_expr(ctx, *param)) {
                     a.args
                 } else {

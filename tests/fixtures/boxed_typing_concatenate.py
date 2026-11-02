@@ -52,6 +52,23 @@ for callable_form in (typing.Callable, abc.Callable):
     assert callback[int, [bytes]] == callable_form[[int, bytes], int]
     assert callback[int, Q] == callable_form[typing.Concatenate[int, Q], int]
 
+
+typed = typing.Callable[[T], P][str, [int, bytes]]
+abc_typed = abc.Callable[[T], P][str, [int, bytes]]
+assert typed.__args__ == (str, int, bytes)
+assert typing.get_args(typed) == ([str, int], bytes)
+assert abc_typed.__args__ == (str, (int, bytes))
+assert typing.get_args(abc_typed) == ([str], (int, bytes))
+empty = typing.Callable[[], P][[]]
+assert empty.__args__ == ()
+for read in (repr, typing.get_args):
+    try:
+        read(empty)
+    except IndexError as error:
+        assert str(error) == "tuple index out of range"
+    else:
+        raise AssertionError("empty Callable exposed a result type")
+
 try:
     prefix[int, float]
 except TypeError as error:

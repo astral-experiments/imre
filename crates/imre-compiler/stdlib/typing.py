@@ -1467,11 +1467,15 @@ def _specialize_generic_alias_uncached(alias, args):
     args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
     if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):
         return alias.copy_with(args)
+    if type(alias) is _typing._CallableGenericAlias:
+        # typing flattens each substituted tuple, even one in the result position.
+        flat = tuple(item for arg in args for item in (arg if isinstance(arg, tuple) else (arg,)))
+        return _typing._CallableGenericAlias(alias.__origin__, flat, name="Callable")
     if alias.__origin__ is _typing.get_origin(Callable):
-        callable_form = Callable if type(alias) is _typing._CallableGenericAlias else alias.__origin__
-        original = alias.__args__
-        params = args[0] if len(original) == 2 and _is_param_expr(original[0]) else args[:-1]
-        return callable_form[params, args[-1]]
+        # collections.abc.Callable rebuilds its argument list separately from its result.
+        if not isinstance(args[0], (tuple, list)):
+            args = (args[:-1], args[-1])
+        return alias.__origin__[args]
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
