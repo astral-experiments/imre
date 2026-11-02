@@ -1547,6 +1547,7 @@ impl Context {
         if generator {
             Ok(self.alloc(Value::Generator {
                 owner,
+                frame: None,
                 code,
                 scope,
                 iterators: Vec::new(),
@@ -1724,13 +1725,13 @@ impl Context {
             }
         }
         let Value::Generator {
-            owner,
             code,
             scope,
             iterators,
             protected,
             running,
             offset,
+            ..
         } = self.heap.get_mut(id)
         else {
             unreachable!()
@@ -1745,7 +1746,7 @@ impl Context {
             };
         };
         *running = true;
-        let (code, frame_scope, owner) = (*code, *scope, *owner);
+        let (code, frame_scope) = (*code, *scope);
         let mut active = std::mem::take(iterators);
         let mut blocks = std::mem::take(protected);
         self.heap.disarm_generator_finalizer(id);
@@ -1758,7 +1759,7 @@ impl Context {
                     && cursor.advanced.is_none()
                     && cursor.sent == NONE
                     && cursor.thrown.is_none();
-                self.run_source(code, frame_scope, owner, cursor)
+                self.run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
             })
             .map_err(|error| self.generator_error(error));
         let suspended_at_delegate = matches!(&result, Ok(Step::Yield(_, ip))
@@ -1769,6 +1770,7 @@ impl Context {
             offset,
             scope,
             owner,
+            frame,
             iterators,
             protected,
             ..
@@ -1793,6 +1795,7 @@ impl Context {
             Err(error) => Err(error),
         };
         *scope = NONE;
+        *frame = None;
         *owner = FrameOwner::Module(NONE);
         self.heap.disarm_generator_finalizer(id);
         if self.heap.tracks_finalizers()
