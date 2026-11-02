@@ -25,7 +25,7 @@ impl Context {
                 // Some intrinsic namespaces synthesize names on first attribute lookup.
                 // Their currently materialized dictionary is not their public API.
                 if let Value::Module { name, .. } = self.heap.get(module)
-                    && super::stdlib::is_module(name)
+                    && super::stdlib::has_lazy_attributes(name)
                 {
                     return Err(Error::new(
                         "NotImplementedError",

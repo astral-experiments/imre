@@ -151,6 +151,34 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "wildcard_native_namespaces": {
+        "main.py": "import paths\nimport prepare\nimport codes\nimport computed\n",
+        "paths.py": (
+            "import genericpath as _path\nfrom genericpath import *\n"
+            "assert [n for n in globals() if not n.startswith('_')] == _path.__all__\n"
+            "assert ALLOW_MISSING is _path.ALLOW_MISSING and samefile is _path.samefile\n"
+        ),
+        "prepare.py": (
+            "import errno\n"
+            "def resolve(name):\n    if name == '_computed': return 19\n    raise AttributeError(name)\n"
+            "errno.custom = 37\nerrno._private = 42\n"
+        ),
+        "codes.py": (
+            "import errno as _errno\nimport prepare as _prepare\nfrom errno import *\n"
+            "assert [n for n in globals() if not n.startswith('_')] == "
+            "[n for n in _errno.__dict__ if not n.startswith('_')]\n"
+            "assert '_private' not in globals() and custom == 37\n"
+            "assert ENOENT == _errno.ENOENT and errorcode is _errno.errorcode\n"
+            "assert dir(_errno) == sorted(_errno.__dict__)\n"
+            "del _errno.EINVAL\n_errno.ENOENT = 'rebound'\n"
+            "_errno.__all__ = ['_private', 'ENOENT', 'EINVAL']\n"
+            "try:\n    from errno import *\n"
+            "except AttributeError:\n    assert _private == 42 and ENOENT == 'rebound'\n"
+            "else:\n    raise AssertionError('deleted errno constant was resurrected')\n"
+            "_errno.__getattr__ = _prepare.resolve\n_errno.__all__ = ['_computed']\n"
+        ),
+        "computed.py": "from errno import *\nassert _computed == 19\n",
+    },
     "wildcard_dict_subclass_all": {
         "main.py": (
             "from custom_names import *\nprint(custom)\n"
