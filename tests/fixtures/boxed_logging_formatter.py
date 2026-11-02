@@ -35,3 +35,17 @@ def current():
     assert ExceptionFormatter().format(record) == "job\nboom\nstack: worker"
     assert record.exc_text == "boom"
     assert logging.Formatter().format(record) == "job\nboom\nworker"
+
+    class Framed(logging.BufferingFormatter):
+        def formatHeader(self, records):
+            return "["
+
+        def formatFooter(self, records):
+            return "]"
+
+    first = logging.makeLogRecord({"msg": "one"})
+    second = logging.makeLogRecord({"msg": "two"})
+    batch = Framed(logging.Formatter("<%(message)s>"))
+    assert batch.format(()) == ""
+    assert batch.format((first, second)) == "[<one><two>]"
+    assert logging.BufferingFormatter(False).linefmt is logging.BufferingFormatter().linefmt
