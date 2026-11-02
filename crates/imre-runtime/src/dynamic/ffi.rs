@@ -233,8 +233,9 @@ impl Context {
                 let name = copy_label(self.str_value(b)?)?;
                 self.module(&name)
             }
+            "fromlist" => self.prepare_fromlist(a, b),
             "from" => self.import_from(a, b),
-            "import_star" => self.import_star(a, b, false),
+            "import_star" => self.import_star(a, b),
             "lookup_enter" => self.context_method(a, "__enter__"),
             "lookup_exit" => self.context_method(a, "__exit__"),
             "attr" | "method" => {

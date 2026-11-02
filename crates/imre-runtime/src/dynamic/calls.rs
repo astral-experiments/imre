@@ -658,6 +658,10 @@ impl Context {
                             | "OSError.__init__"
                             | "StopIteration.__init__"
                             | "module.__init__"
+                            | "module.__dir__"
+                            | "module.__repr__"
+                            | "module.__getattribute__"
+                            | "object.__str__"
                             | "bytes.decode"
                             | "bytes.rfind"
                             | "bytes.rsplit"
@@ -1383,10 +1387,15 @@ impl Context {
                 constructor: Some(class),
                 ..
             } => class,
+            Value::Module { scope, .. } => {
+                return self.module_get_attribute(obj, scope, name, original);
+            }
             _ => return self.default_get_attr(obj, name),
         };
         let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
             self.attribute_hook(hook, obj, class, name, original)
+        } else if let Value::Module { scope, .. } = *self.heap.get(obj) {
+            self.module_get_attribute(obj, scope, name, original)
         } else {
             self.default_get_attr(obj, name)
         };
@@ -1782,7 +1791,9 @@ impl Context {
             }
             Value::Native(ref class) if class == "module" => match name {
                 "__doc__" => return Ok(self.text(module_type::DOC)),
-                "__init__" | "__new__" => return Ok(self.builtin(&format!("module.{name}"))),
+                "__init__" | "__new__" | "__dir__" | "__repr__" | "__getattribute__" => {
+                    return Ok(self.builtin(&format!("module.{name}")));
+                }
                 "__name__" | "__qualname__" => return Ok(self.text("module")),
                 "__module__" => return Ok(self.text("builtins")),
                 _ => {}
@@ -2845,21 +2856,21 @@ impl Context {
                 if name == "__class__" {
                     return Ok(constructor.unwrap_or_else(|| self.builtin("module")));
                 }
-                if let Some(class) = constructor {
-                    return self.module_instance_attribute(obj, class, scope, name);
-                }
-                if let Some(value) = self.scope_name(scope, name) {
-                    return Ok(value);
-                }
-                if stdlib::is_module(module) {
-                    if !stdlib::has_lazy_attributes(module) {
-                        let class = self.builtin("module");
-                        return self.module_instance_attribute(obj, class, scope, name);
+                if constructor.is_none() && stdlib::has_lazy_attributes(module) {
+                    if let Some(value) = self.scope_name(scope, name) {
+                        return Ok(value);
                     }
-                    let value = stdlib::attribute(self, &module.to_owned(), name)?;
-                    self.bind(scope, name, value);
-                    return Ok(value);
+                    match stdlib::attribute(self, &module.to_owned(), name) {
+                        Ok(value) => {
+                            self.bind(scope, name, value);
+                            return Ok(value);
+                        }
+                        Err(error) if self.is_attribute_error(&error) => {}
+                        Err(error) => return Err(error),
+                    }
                 }
+                let class = constructor.unwrap_or_else(|| self.builtin("module"));
+                return self.module_instance_attribute(obj, class, scope, name);
             }
             Value::Class {
                 name: ref class_name,
@@ -3265,12 +3276,8 @@ impl Context {
             Value::StaticMethod { dictionary, .. } => {
                 super::static_method::update_attribute(self, obj, dictionary, name, None)
             }
-            Value::Module {
-                scope, constructor, ..
-            } => {
-                if constructor.is_some() {
-                    self.update_module_annotations(scope, name, None)?;
-                }
+            Value::Module { scope, .. } => {
+                self.update_module_annotations(scope, name, None)?;
                 if name == "__dict__" {
                     return Err(Error::new("AttributeError", "readonly attribute"));
                 }
@@ -3997,9 +4004,7 @@ impl Context {
                     self.sys_path = value;
                 }
                 let scope = *scope;
-                if constructor.is_some() {
-                    self.update_module_annotations(scope, name, Some(value))?;
-                }
+                self.update_module_annotations(scope, name, Some(value))?;
                 self.bind(scope, name, value);
             }
             Value::Instance { class, fields, .. } if Some(*class) != object_class => {

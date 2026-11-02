@@ -23,24 +23,8 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     };
     let names = if let Some(method) = ctx.bound_slot(object, "__dir__")? {
         ctx.call(method, vec![], vec![])?
-    } else if let Value::Module {
-        scope,
-        name,
-        constructor,
-        ..
-    } = ctx.heap.get(object)
-    {
-        let scope = *scope;
-        if let Some(method) = ctx.scope_name(scope, "__dir__") {
-            ctx.call(method, vec![], vec![])?
-        } else if constructor.is_none() && super::super::stdlib::has_lazy_attributes(name) {
-            return Err(Error::new(
-                "NotImplementedError",
-                "dir() cannot enumerate lazy native module exports",
-            ));
-        } else {
-            ctx.module_globals(scope)?
-        }
+    } else if let Value::Module { scope, .. } = *ctx.heap.get(object) {
+        ctx.module_dir(object, scope)?
     } else {
         object_names(ctx, object)?
     };

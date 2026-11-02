@@ -1805,6 +1805,7 @@ def report(text):
             "boxed_itertools_groupby.py",
             "boxed_object_new.py",
             "boxed_module_type.py",
+            "boxed_source_module_getattr.py",
             "boxed_thread_local.py",
             "boxed_threading_lock.py",
             "boxed_import_depth.py",
