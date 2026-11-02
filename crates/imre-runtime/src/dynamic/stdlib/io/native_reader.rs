@@ -8,6 +8,7 @@ use files::{BinaryFile, ReadSource};
 pub(super) const METHODS: &[&str] = &[
     "__init__",
     "__repr__",
+    "__getstate__",
     "_dealloc_warn",
     "raw",
     "closed",
@@ -150,6 +151,13 @@ pub(super) fn call(
     validate(owner, name, args.len(), kwargs)?;
     if name == "__repr__" {
         return repr(ctx, receiver);
+    }
+    if name == "__getstate__" {
+        let class = ctx.exact_type(receiver)?;
+        return Err(Error::new(
+            "TypeError",
+            format!("cannot pickle '{}' instances", ctx.class_name(class)),
+        ));
     }
     if name == "peek"
         && let Some(&size) = args.first()
