@@ -2216,26 +2216,30 @@ def _specialize_generic_alias_uncached(alias, args):
         if _typing.get_origin(arg) is Unpack:
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
-    # Generic class aliases retain a ParamSpec argument as a nested tuple.
-    # Callable aliases flatten tuple arguments separately below.
-    parameter_tuples = type(alias) is _typing._GenericAlias and alias.__origin__ is not _typing.get_origin(Callable)
-    args = _substitute_alias_arguments(alias.__args__, replacements, parameter_tuples=parameter_tuples)
+
+    def substituted_args(*, parameter_tuples=False):
+        return _substitute_alias_arguments(alias.__args__, replacements, parameter_tuples=parameter_tuples)
+
     if type(alias) is GenericAlias:
-        return _rebuild_builtin_alias(alias, args)
+        return _rebuild_builtin_alias(alias, substituted_args())
     if isinstance(alias, _typing.Union):
-        return _typing.Union[args]
+        return _typing.Union[substituted_args()]
     if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):
-        return alias.copy_with(args)
+        return alias.copy_with(substituted_args())
     if type(alias) is _typing._CallableGenericAlias:
         # typing flattens each substituted tuple, even one in the result position.
-        flat = tuple(item for arg in args for item in (arg if isinstance(arg, tuple) else (arg,)))
+        flat = tuple(item for arg in substituted_args() for item in (arg if isinstance(arg, tuple) else (arg,)))
         return _typing._CallableGenericAlias(alias.__origin__, flat, name="Callable")
     if alias.__origin__ is _typing.get_origin(Callable):
         # collections.abc.Callable rebuilds its argument list separately from its result.
+        args = substituted_args()
         if not isinstance(args[0], (tuple, list)):
             args = (args[:-1], args[-1])
         return alias.__origin__[args]
-    return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
+    constructor = _typing._GenericAlias
+    # Only a generic class alias stores a ParamSpec expression as a nested tuple.
+    args = substituted_args(parameter_tuples=type(alias) is constructor)
+    return constructor(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
 _cached_generic_specialization = lru_cache(_specialize_generic_alias_uncached)
