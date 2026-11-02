@@ -30,15 +30,23 @@ pub(super) struct ChildPipes {
     pub(super) devnull: Option<fs::File>,
 }
 
+/// Child and parent handles opened together before resolving the executable.
+pub(crate) struct PreparedHandles {
+    child: ChildPipes,
+    parents: [Option<OwnedFd>; 3],
+    child_fds: [RawFd; 3],
+}
+
 impl ChildPipes {
     /// Open all pipe handles before allocating their Python stream buffers.
     fn open(
         modes: &[u32],
         descriptors: [RawFd; 3],
         pipe_capacity: Option<u32>,
-    ) -> io::Result<(Self, [Option<OwnedFd>; 3])> {
+    ) -> io::Result<PreparedHandles> {
         let mut child = Self::default();
         let mut parents = [None, None, None];
+        let mut child_fds = descriptors;
         if modes.iter().any(|mode| matches!(mode, 1 | 2)) {
             // Remember closed explicit descriptors before a new pipe can reuse their number.
             child.closed_descriptor = descriptors.into_iter().any(|fd| {
@@ -52,17 +60,26 @@ impl ChildPipes {
                 let (read, write): (OwnedFd, OwnedFd) = (read.into(), write.into());
                 let (parent, other) = if i == 0 { (write, read) } else { (read, write) };
                 parents[i] = Some(parent);
+                child_fds[i] = other.as_raw_fd();
                 child.ends[i] = Some(Stdio::from(other));
-            } else if mode == 2 && child.devnull.is_none() {
-                child.devnull = Some(
-                    fs::OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .open("/dev/null")?,
-                );
+            } else if mode == 2 {
+                let file = match &mut child.devnull {
+                    Some(file) => file,
+                    slot => slot.insert(
+                        fs::OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .open("/dev/null")?,
+                    ),
+                };
+                child_fds[i] = file.as_raw_fd();
             }
         }
-        Ok((child, parents))
+        Ok(PreparedHandles {
+            child,
+            parents,
+            child_fds,
+        })
     }
 }
 
@@ -72,6 +89,8 @@ pub(super) struct Redirects<'a> {
     pub(super) oversized: bool,
     pub(super) prepared: Option<ChildPipes>,
     pub(super) environment: Option<ByteEnvironment>,
+    pub(super) direct: Option<bool>,
+    pub(super) search_path: Option<Vec<u8>>,
     pub(super) failure_site: Option<&'a mut Option<(launch_error::Site, bool)>>,
 }
 
@@ -82,6 +101,8 @@ impl Default for Redirects<'_> {
             oversized: false,
             prepared: None,
             environment: None,
+            direct: None,
+            search_path: None,
             failure_site: None,
         }
     }
@@ -218,12 +239,15 @@ struct SizedPipeConfig {
 
 #[derive(Default)]
 struct LaunchExtras<'a> {
+    prepared: Option<PreparedHandles>,
     redirects: [usize; 3],
     child: Option<(usize, usize, bool)>,
     keep: Option<(usize, u32)>,
     pipe_size: Option<(usize, u32)>,
     environment: Option<ByteEnvironment>,
     failure_site: Option<&'a mut Option<(launch_error::Site, bool)>>,
+    direct: Option<bool>,
+    search_path: Option<Vec<u8>>,
     warn_line_buffering: Option<&'a mut dyn FnMut() -> Result<()>>,
 }
 
@@ -345,6 +369,17 @@ pub(super) fn error_after_handles(modes: &[u32], fork_error_pipe: bool, error: E
         .map_or(error, errno_error)
 }
 
+/// Preserve the fd's ordering against standard streams even when it exceeds C int bounds.
+fn redirect_number(fd: &Int) -> (i32, bool) {
+    if let Some(number) = fd.to_i64().and_then(|n| i32::try_from(n).ok()) {
+        (number, false)
+    } else if fd.big().sign() == num_bigint::Sign::Minus {
+        (i32::MIN, true)
+    } else {
+        (i32::MAX, true)
+    }
+}
+
 /// Create a native child with independently owned pipe ends and the original argv owner.
 ///
 /// # Safety
@@ -387,15 +422,9 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
             6 => {
                 // SAFETY: mode 6 denotes the caller's rooted integer descriptor.
                 let fd = unsafe { Int::borrow(extras.redirects[i]) };
-                c_int(&fd).unwrap_or_else(|| {
-                    oversized = true;
-                    // Preserve the launch-mode comparison to fd 2 without truncation.
-                    if fd.big().sign() == num_bigint::Sign::Minus {
-                        i32::MIN
-                    } else {
-                        i32::MAX
-                    }
-                })
+                let (number, overflow) = redirect_number(&fd);
+                oversized |= overflow;
+                number
             }
             // SAFETY: mode 7 denotes a rooted native file; only its fd escapes the borrow.
             7 => unsafe {
@@ -411,8 +440,14 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
             _ => -1,
         };
     }
-    let (prepared, parents) =
-        ChildPipes::open(&modes, descriptors, pipe_capacity).map_err(errno_error)?;
+    let PreparedHandles {
+        child: prepared,
+        parents,
+        ..
+    } = match extras.prepared.take() {
+        Some(handles) => handles,
+        None => ChildPipes::open(&modes, descriptors, pipe_capacity).map_err(errno_error)?,
+    };
     // Python opens the parent-side pipe wrappers after it collects the file handles.
     let bufsize = if modes.contains(&1) {
         // SAFETY: the caller roots the buffer-size integer.
@@ -492,6 +527,8 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_>) -> Result<P
         prepared: Some(prepared),
         environment: extras.environment,
         failure_site: extras.failure_site,
+        direct: extras.direct,
+        search_path: extras.search_path,
     };
     // SAFETY: the compiler supplies the same exact owners as subprocess.run.
     let child =
