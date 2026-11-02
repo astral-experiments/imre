@@ -1866,6 +1866,7 @@ def report(text):
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
             "boxed_os_file_descriptors.py",
+            "boxed_buffered_readlines.py",
             "boxed_os_descriptor_io.py",
             "boxed_os_waitpid.py",
             "boxed_os_stat.py",
