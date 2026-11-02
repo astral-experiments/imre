@@ -3397,27 +3397,6 @@ mod tests {
     }
 
     #[test]
-    fn mixed_input_owners_leave_unreachable_finalizers_eligible() {
-        let mut heap = Heap::new();
-        let mark = heap.temporary_mark();
-        let indirect = heap.alloc(Value::List(Vec::new()));
-        let buffer = heap.alloc(Value::List(vec![indirect]));
-        let input = heap.alloc(Value::List(vec![buffer]));
-        let dead = heap.alloc(Value::List(Vec::new()));
-        for owner in [input, indirect, dead] {
-            heap.register_finalizer(owner);
-        }
-        heap.release_temporaries_since(mark);
-
-        // Only one distinct pending owner is proven by this chain.
-        let chain = [input, buffer, input];
-        let check = |roots| heap.acyclic_finalizer(roots, Some(&chain)).unwrap();
-        assert_eq!(check(vec![input].into_iter()), Some(dead));
-        assert_eq!(check(vec![input, dead].into_iter()), None);
-        assert_eq!(check(vec![input].into_iter()), Some(dead));
-    }
-
-    #[test]
     fn prompt_sweep_preserves_cycle_descendants_and_pending_owners() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
@@ -3458,6 +3437,27 @@ mod tests {
         let ordinary = heap.alloc(Value::List(Vec::new()));
         assert_eq!(ordinary, list);
         assert!(!heap.mock_call_lists.contains(&ordinary));
+    }
+
+    #[test]
+    fn mixed_input_owners_leave_unreachable_finalizers_eligible() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let indirect = heap.alloc(Value::List(Vec::new()));
+        let buffer = heap.alloc(Value::List(vec![indirect]));
+        let input = heap.alloc(Value::List(vec![buffer]));
+        let dead = heap.alloc(Value::List(Vec::new()));
+        for owner in [input, indirect, dead] {
+            heap.register_finalizer(owner);
+        }
+        heap.release_temporaries_since(mark);
+
+        // Only one distinct pending owner is proven by this chain.
+        let chain = [input, buffer, input];
+        let check = |roots| heap.acyclic_finalizer(roots, Some(&chain)).unwrap();
+        assert_eq!(check(vec![input].into_iter()), Some(dead));
+        assert_eq!(check(vec![input, dead].into_iter()), None);
+        assert_eq!(check(vec![input].into_iter()), Some(dead));
     }
 
     #[test]
