@@ -41,6 +41,16 @@ impl BuiltinDescriptor {
                 method: member.is_method(),
             });
         }
+        if let Some((owner, attr)) = symbol.rsplit_once('.')
+            && let Some(class) = typing::ParameterClass::lookup(owner)
+            && let Some(&name) = class.methods.iter().find(|&&name| name == attr)
+        {
+            return Some(Self {
+                owner: class.owner,
+                name,
+                method: !matches!(name, "__eq__" | "__ne__" | "__iter__"),
+            });
+        }
         if symbol == "typing.Union.__mro_entries__" {
             return Some(Self {
                 owner: "typing.Union",
@@ -278,6 +288,9 @@ impl BuiltinDescriptor {
                 matches!(ctx.heap.get(receiver), Value::DictIterator(iter) if iter.class_name() == owner)
             }
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
+            owner if typing::ParameterClass::lookup(owner).is_some() => {
+                ctx.builtin_type_name(receiver) == Some(owner)
+            }
             "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),
             "object" => true,
             "type" => ctx.is_type_object(receiver),
