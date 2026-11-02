@@ -1102,11 +1102,15 @@ pub(super) fn call(
             ));
         }
     }
-    if name == "collections.defaultdict.__repr__" {
+    if let Some(method @ ("__repr__" | "__or__" | "__ror__")) =
+        name.strip_prefix("collections.defaultdict.")
+    {
         let Some((&object, args)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
-                "descriptor '__repr__' of 'collections.defaultdict' object needs an argument",
+                format!(
+                    "descriptor '{method}' of 'collections.defaultdict' object needs an argument"
+                ),
             ));
         };
         let Some(storage) = ctx
@@ -1116,7 +1120,7 @@ pub(super) fn call(
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "descriptor '__repr__' requires a 'collections.defaultdict' object but received a '{}'",
+                    "descriptor '{method}' requires a 'collections.defaultdict' object but received a '{}'",
                     ctx.type_name(object)
                 ),
             ));
@@ -1124,8 +1128,22 @@ pub(super) fn call(
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                "wrapper __repr__() takes no keyword arguments",
+                format!("wrapper {method}() takes no keyword arguments"),
             ));
+        }
+        if method != "__repr__" {
+            let [other] = args else {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("expected 1 argument, got {}", args.len()),
+                ));
+            };
+            let (left, right) = if method == "__ror__" {
+                (*other, object)
+            } else {
+                (object, *other)
+            };
+            return super::defaultdict::union(ctx, left, right);
         }
         if !args.is_empty() {
             return Err(Error::new(
