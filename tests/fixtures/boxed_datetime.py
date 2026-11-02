@@ -438,6 +438,55 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_date_clock_constructors():
+    import time as clock
+
+    assert date.fromtimestamp(-0.0000001).timetuple()[:3] == clock.localtime(-1)[:3]
+
+    class Day(date):
+        @classmethod
+        def fromtimestamp(cls, stamp):
+            return cls, stamp
+
+    old = clock.time
+    token = object()
+    try:
+        clock.time = lambda: token
+        assert Day.today() == (Day, token)
+        assert Day(2001, 1, 1).today() == (Day, token)
+
+        class Clock:
+            def __call__(self):
+                clock.time = old
+                return token
+
+            def __del__(self):
+                Day.fromtimestamp = classmethod(lambda cls, stamp: stamp)
+
+        clock.time = Clock()
+        assert Day.today() is token
+    finally:
+        clock.time = old
+
+    def import_clock(name, caller, locals, fromlist, level):
+        assert (name, caller is locals, fromlist, level) == ("time", True, [], 0)
+        return object()
+
+    namespace = {"__builtins__": {"__import__": import_clock}, "Day": Day}
+    try:
+        clock.time = lambda: token
+        assert eval("Day.today()", namespace) is token
+        namespace["__builtins__"] = {}
+        try:
+            eval("Day.today()", namespace)
+        except KeyError as exc:
+            assert exc.args == ("__import__",)
+        else:
+            raise AssertionError("date.today ignored the caller's missing import hook")
+    finally:
+        clock.time = old
+
+
 def test_timedelta_remainder():
     unit = timedelta(microseconds=3)
     for left, right, quotient, remainder in ((7, 3, 2, 1), (-7, 3, -3, 2),
@@ -782,6 +831,7 @@ def current():
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
     test_timedelta_remainder()
+    test_date_clock_constructors()
     test_subclass_construction()
     test_now()
     test_time_fromisoformat()
