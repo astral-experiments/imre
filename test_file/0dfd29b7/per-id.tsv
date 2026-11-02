@@ -1,0 +1,37 @@
+ordinal	original_id	earlier_boxed0	boxed0	boxed3
+1	test.test_file.CAutoFileTests.testAttributes	ok	ok	ok
+2	test.test_file.CAutoFileTests.testErrors	ok	ok	ok
+3	test.test_file.CAutoFileTests.testMethods	ERROR	ok	ok
+4	test.test_file.CAutoFileTests.testReadWhenWriting	ok	ok	ok
+5	test.test_file.CAutoFileTests.testReadinto	ERROR	ok	ok
+6	test.test_file.CAutoFileTests.testReadinto_text	ok	ok	ok
+7	test.test_file.CAutoFileTests.testWeakRefs	ERROR	ok	ok
+8	test.test_file.CAutoFileTests.testWritelinesIntegers	ok	ok	ok
+9	test.test_file.CAutoFileTests.testWritelinesIntegersUserList	ok	ok	ok
+10	test.test_file.CAutoFileTests.testWritelinesNonString	ok	ok	ok
+11	test.test_file.CAutoFileTests.testWritelinesUserList	ok	ok	ok
+12	test.test_file.COtherFileTests.testBadModeArgument	ok	ok	ok
+13	test.test_file.COtherFileTests.testDefaultBufferSize	ERROR	ERROR	ERROR
+14	test.test_file.COtherFileTests.testIteration	ERROR	ok	ok
+15	test.test_file.COtherFileTests.testModeStrings	ok	ok	ok
+16	test.test_file.COtherFileTests.testSetBufferSize	ERROR	ERROR	ERROR
+17	test.test_file.COtherFileTests.testStdin	skipped 'stdin must be a TTY in this test'	skipped 'stdin must be a TTY in this test'	skipped 'stdin must be a TTY in this test'
+18	test.test_file.COtherFileTests.testTruncateOnWindows	ERROR	ok	ok
+19	test.test_file.PyAutoFileTests.testAttributes	ok	ok	ok
+20	test.test_file.PyAutoFileTests.testErrors	ok	ok	ok
+21	test.test_file.PyAutoFileTests.testMethods	ERROR	ERROR	ERROR
+22	test.test_file.PyAutoFileTests.testReadWhenWriting	ok	ok	ok
+23	test.test_file.PyAutoFileTests.testReadinto	ERROR	ERROR	ERROR
+24	test.test_file.PyAutoFileTests.testReadinto_text	ERROR	ok	ok
+25	test.test_file.PyAutoFileTests.testWeakRefs	ok	ok	ok
+26	test.test_file.PyAutoFileTests.testWritelinesIntegers	ok	ok	ok
+27	test.test_file.PyAutoFileTests.testWritelinesIntegersUserList	ok	ok	ok
+28	test.test_file.PyAutoFileTests.testWritelinesNonString	ok	ok	ok
+29	test.test_file.PyAutoFileTests.testWritelinesUserList	ERROR	ERROR	ERROR
+30	test.test_file.PyOtherFileTests.testBadModeArgument	ok	ok	ok
+31	test.test_file.PyOtherFileTests.testDefaultBufferSize	ok	ok	ok
+32	test.test_file.PyOtherFileTests.testIteration	ERROR	ERROR	ERROR
+33	test.test_file.PyOtherFileTests.testModeStrings	ok	ok	ok
+34	test.test_file.PyOtherFileTests.testSetBufferSize	ERROR	ERROR	ERROR
+35	test.test_file.PyOtherFileTests.testStdin	skipped 'stdin must be a TTY in this test'	skipped 'stdin must be a TTY in this test'	skipped 'stdin must be a TTY in this test'
+36	test.test_file.PyOtherFileTests.testTruncateOnWindows	ERROR	ok	ok
