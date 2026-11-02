@@ -18,6 +18,26 @@ def current():
     assert json.dumps(Array([1, 2]), default=reject) == "[1, 2]"
     assert json.dumps([Values((9,))]) == "[[4, 3]]"
     assert json.dumps(Record(key=0), sort_keys=True) == '{"a": 1, "b": 2}'
+    class BadList(list):
+        def __iter__(self):
+            raise TypeError("iterator unavailable")
+
+    class BadItems(dict):
+        def items(self):
+            return None
+
+    for value, expected in (
+        (BadList([1]), "_iterencode_list needs a sequence"),
+        (BadItems(a=1), "BadItems.items() returned a non-iterable (type NoneType)"),
+    ):
+        try:
+            json.dumps([value])
+        except TypeError as error:
+            assert error.args == (expected,)
+            assert error.__notes__ == ["when serializing list item 0"]
+        else:
+            raise AssertionError("expected a container iterator")
+
     class Shrinking(list):
         def __iter__(self):
             if self:
