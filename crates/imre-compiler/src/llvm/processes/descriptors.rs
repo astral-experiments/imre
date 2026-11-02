@@ -70,6 +70,29 @@ impl Emitter<'_, '_> {
                 }
                 return tuple;
             }
+            FdOperation::PtsName => {
+                let (word, site) = match args {
+                    [fd] => (
+                        fd.value.operand.clone(),
+                        "ptr null, ptr null, i64 0".to_owned(),
+                    ),
+                    [fd, module, filename, line] => (
+                        self.instruction(format!("select i1 {}, i64 3, i64 1", fd.value.operand)),
+                        format!(
+                            "ptr {}, ptr {}, i64 {}",
+                            module.value.operand, filename.value.operand, line.value.operand
+                        ),
+                    ),
+                    _ => unreachable!(),
+                };
+                let operand = self
+                    .checked_instruction(format!("call ptr @imre_os_ptsname(i64 {word}, {site})"));
+                return self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                });
+            }
             FdOperation::TransferFd => "transfer_fd",
             FdOperation::Read => "read",
             FdOperation::Write => "write",

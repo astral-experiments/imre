@@ -2827,12 +2827,13 @@ impl Context {
             "posix" if source.is_none() => {
                 stdlib::os::scheduler::initialize(self, scope);
                 stdlib::os::sysconf::initialize(self, module, scope);
-                let lockf = self.builtin("posix.lockf");
-                self.bind(scope, "lockf", lockf);
-                let fadvise = self.builtin("posix.posix_fadvise");
-                self.bind(scope, "posix_fadvise", fadvise);
+                for name in ["lockf", "posix_fadvise", "ptsname"] {
+                    let function = self.builtin(&format!("posix.{name}"));
+                    self.bind(scope, name, function);
+                }
                 for (attr, flag) in [
                     ("O_PATH", libc::O_PATH),
+                    ("O_NOCTTY", libc::O_NOCTTY),
                     ("O_TMPFILE", libc::O_TMPFILE),
                     ("F_LOCK", libc::F_LOCK),
                     ("F_TLOCK", libc::F_TLOCK),
@@ -2904,6 +2905,7 @@ impl Context {
                 if source.is_none() {
                     let posix = self.module("posix")?;
                     for attr in [
+                        "ptsname", "O_NOCTTY",
                         "getxattr", "setxattr", "listxattr", "removexattr",
                         "XATTR_CREATE", "XATTR_REPLACE", "XATTR_SIZE_MAX",
                     ] {

@@ -14,6 +14,17 @@ def current():
         expected = "utf-8" if sys.flags.utf8_mode else locale.getencoding()
         assert os.device_encoding(master) == posix.device_encoding(fd=slave) == expected
         assert not os.get_inheritable(master) and not os.get_inheritable(slave)
+        if sys.platform == "linux":
+            assert os.ptsname is posix.ptsname
+            assert os.O_NOCTTY == posix.O_NOCTTY
+            with open(master, "rb", closefd=False) as stream:
+                path = os.ptsname(stream)
+            reopened = os.open(path, os.O_RDWR | os.O_NOCTTY)
+            try:
+                os.write(reopened, b"slave")
+                assert os.read(master, 5) == b"slave"
+            finally:
+                os.close(reopened)
         assert os.write(slave, b"pty") == 3
         assert os.read(master, 3) == b"pty"
     finally:
