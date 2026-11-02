@@ -183,6 +183,8 @@ impl Emitter<'_, '_> {
         let whole = self.instruction(format!("or i1 {exact}, {short}"));
         let count = self.instruction(format!("select i1 {whole}, i64 {count}, i64 65536"));
         let end = self.instruction(format!("add i64 {at}, {count}"));
+        self.output
+            .local_helper("imre_repeat_fadd", STRUCT_RUN_HELPERS);
         let result = self.instruction(format!(
             "call double @imre_repeat_fadd(double {}, double {}, i64 {count})",
             sum.operand, term.operand
@@ -357,6 +359,70 @@ impl Emitter<'_, '_> {
         self.jump(ordinary);
     }
 }
+
+const STRUCT_RUN_HELPERS: &str = r"
+; The cursor holds a valid, nonempty span after a sparse row read. A dense
+; span or a boxed single row retains the original one-element advance.
+define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline nounwind {
+  %lp = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 1
+  %mp = getelementptr inbounds {i64,i64,i64,ptr}, ptr %span, i32 0, i32 2
+  %start = load i64, ptr %span
+  %len = load i64, ptr %lp
+  %mask = load i64, ptr %mp
+  %end = add i64 %start, %len
+  %repeat = icmp eq i64 %mask, 0
+  %selected = select i1 %repeat, i64 %end, i64 %next
+  ret i64 %selected
+}
+
+; Bound the absolute value of every partial sum for an integral projection.
+; The strict comparison also rejects a rounded-up or rounded-down boundary.
+define internal i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count) alwaysinline nounwind {
+  %n = uitofp i64 %count to double
+  %ni = icmp ule i64 %count, 9007199254740992
+  %t = call double @llvm.trunc.f64(double %term)
+  %s = call double @llvm.trunc.f64(double %sum)
+  %ti = fcmp oeq double %term, %t
+  %si = fcmp oeq double %sum, %s
+  %a = call double @llvm.fabs.f64(double %sum)
+  %b = call double @llvm.fabs.f64(double %term)
+  %delta = fmul double %b, %n
+  %limit = fadd double %a, %delta
+  %bounded = fcmp olt double %limit, 9007199254740992.0
+  %integral = and i1 %ti, %si
+  %fits = and i1 %ni, %bounded
+  %exact = and i1 %integral, %fits
+  ret i1 %exact
+}
+
+; Reassociation is exact only if the integral term, count and every partial
+; sum fit in binary64's consecutive integer range. Otherwise preserve each add.
+define internal double @imre_repeat_fadd(double %sum, double %term, i64 %count) alwaysinline nounwind {
+entry:
+  %single = icmp eq i64 %count, 1
+  br i1 %single, label %one, label %bounds
+one:
+  %single_sum = fadd double %sum, %term
+  ret double %single_sum
+bounds:
+  %exact = call i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count)
+  br i1 %exact, label %bulk, label %ordered
+bulk:
+  %n = uitofp i64 %count to double
+  %product = fmul double %term, %n
+  %result = fadd double %sum, %product
+  ret double %result
+ordered:
+  %left = phi i64 [%count, %bounds], [%remaining, %ordered]
+  %acc = phi double [%sum, %bounds], [%added, %ordered]
+  %added = fadd double %acc, %term
+  %remaining = sub i64 %left, 1
+  %done = icmp eq i64 %remaining, 0
+  br i1 %done, label %finish, label %ordered
+finish:
+  ret double %added
+}
+";
 
 #[cfg(test)]
 mod tests {

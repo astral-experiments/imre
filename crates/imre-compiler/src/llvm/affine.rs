@@ -267,11 +267,22 @@ impl Emitter<'_, '_> {
         let at = self.borrow_slot(cursor);
         let end = self.borrow_slot(stop);
         let total = self.borrow_slot(sum);
-        let (helper, extent) = if count == 1023 {
-            ("imre_affine_fixed_prefix", String::new())
+        let (helper, definition, extent) = if count == 1023 {
+            (
+                "imre_affine_fixed_prefix",
+                AFFINE_FIXED_PREFIX,
+                String::new(),
+            )
         } else {
-            ("imre_affine_range_prefix", format!("i64 {count}, "))
+            (
+                "imre_affine_range_prefix",
+                AFFINE_RANGE_PREFIX,
+                format!("i64 {count}, "),
+            )
         };
+        self.output
+            .local_helper("imre_affine_checked_prefix", AFFINE_CHECKED_PREFIX);
+        self.output.local_helper(helper, definition);
         let prefix = self.instruction(format!(
             "call {{i64,i64}} @{helper}(i64 {}, i64 {}, i64 {}, {extent}i64 {scale}, i64 {offset})",
             at.operand, end.operand, total.operand
@@ -298,3 +309,59 @@ impl Emitter<'_, '_> {
         self.start(&resume);
     }
 }
+
+const AFFINE_FIXED_PREFIX: &str = r"
+; Skip complete periods (at most 1,023 iterations) and publish locals in the ordinary body.
+; Nonnegative i32 ordinals and coefficients keep each scalar expression small.
+; The chunk subtotal is computed in i128 before narrowing to a tagged integer.
+; Keep the usual fixed extent constant when this module also emits shorter periods.
+define internal {i64,i64} @imre_affine_fixed_prefix(i64 %at, i64 %end, i64 %total, i64 %scale, i64 %offset) noinline nounwind memory(none) {
+  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 1023, i64 %scale, i64 %offset)
+  ret {i64,i64} %result
+}
+";
+
+const AFFINE_RANGE_PREFIX: &str = r"
+define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset) noinline nounwind memory(none) {
+  %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset)
+  ret {i64,i64} %result
+}
+";
+
+const AFFINE_CHECKED_PREFIX: &str = r"
+define internal {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset) alwaysinline nounwind memory(none) {
+  %tags0 = and i64 %at, %end
+  %tags = and i64 %tags0, %total
+  %small = trunc i64 %tags to i1
+  %i = ashr i64 %at, 1
+  %stop = ashr i64 %end, 1
+  %sum = ashr i64 %total, 1
+  %bounded = icmp ule i64 %i, 2147482624
+  %last = add i64 %i, %count
+  %within = icmp slt i64 %last, %stop
+  %valid = and i1 %small, %bounded
+  %chunk = and i1 %valid, %within
+  br i1 %chunk, label %check_sum, label %fallback
+check_sum:
+  %a = zext i64 %scale to i128
+  %b = zext i64 %offset to i128
+  %x = zext i64 %i to i128
+  %linear = mul i128 %x, %a
+  %delta = add i128 %linear, %b
+  %initial = sext i64 %sum to i128
+  %partial = add i128 %initial, %delta
+  %fits = icmp sle i128 %partial, 4611686018427387903
+  br i1 %fits, label %success, label %fallback
+success:
+  %advance = shl i64 %count, 1
+  %new_at = add i64 %at, %advance
+  %n = trunc i128 %partial to i64
+  %shift = shl i64 %n, 1
+  %new_total = or i64 %shift, 1
+  %r0 = insertvalue {i64,i64} zeroinitializer, i64 %new_at, 0
+  %r = insertvalue {i64,i64} %r0, i64 %new_total, 1
+  ret {i64,i64} %r
+fallback:
+  ret {i64,i64} zeroinitializer
+}
+";
