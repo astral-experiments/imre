@@ -32,6 +32,7 @@ pub(super) mod locale;
 pub(super) mod tempfile;
 pub(super) mod time;
 mod tokenize;
+mod unicodedata;
 pub(super) use files::{BinaryFile, ReadSource};
 pub(super) use socket::{import_socket_constants, install_lowlevel_socket};
 pub(super) mod io;
@@ -461,7 +462,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin("tempfile.TemporaryFile")
         }
         ("gc", "enable" | "disable" | "isenabled") => ctx.builtin(&format!("gc.{name}")),
-        ("unicodedata", "normalize") => ctx.builtin("unicodedata.normalize"),
+        ("unicodedata", "normalize" | "decomposition") => ctx.builtin(&format!("unicodedata.{name}")),
         (
             "_imp",
             "is_frozen"
@@ -631,6 +632,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         ("sys", "executable" | "_base_executable") => ctx.text(ctx.helper_executable.clone()),
         ("sys", "maxsize") => ctx.int(isize::MAX as i64),
+        ("sys", "maxunicode") => ctx.int(0x10FFFF),
         ("sys", "platform") => ctx.text(if cfg!(target_os = "macos") {
             "darwin"
         } else {
@@ -1475,6 +1477,9 @@ pub(super) fn call(
     }
     if name == "struct.Struct" {
         return structure::new(ctx, args, kwargs);
+    }
+    if name == "unicodedata.decomposition" {
+        return unicodedata::decomposition(ctx, args, !kwargs.is_empty());
     }
     if name == "unicodedata.normalize" {
         if !kwargs.is_empty() {
