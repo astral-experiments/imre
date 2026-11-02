@@ -1,0 +1,14 @@
+{
+  "stage": "final",
+  "receipt_commit": "24f0785a1bd0825c76bee95e6f592cdf9dea2931",
+  "base": "d7beefe0352e3cd83a6d4a1642357b499dcd4eee",
+  "link": "https://raw.githubusercontent.com/astral-experiments/imre/24f0785a1bd0825c76bee95e6f592cdf9dea2931/",
+  "archive_name": "cbwc-receipts.tar.gz",
+  "archive_sha256": "c3594e8dd2354e83c6b84675b75b5616e46421c9bf22b2aa9b15e813f35059ae",
+  "archive_bytes": 321487,
+  "key_spki_sha256": "196e7b8a7df217e481f6e74eba8dc0e88589309e77d4389d9da6077ca44cd71f",
+  "payloads": 2181,
+  "registration_sha256": "f9f1de4a9d4b94ccedb251f600eda959f735b391e006bfd8cd287a7a1add3223",
+  "callbacks_sha256": "e9b55d8c6da39f2a0e51e9bdf222d856500dcfdd5db295a30142c609efdf77f4",
+  "originals_sha256": "153e91b453fb7f0447988884373add0d4029e9d3d9f9546ac87af3d9fdc0cf53"
+}
