@@ -913,20 +913,26 @@ pub(super) fn call(
     {
         return exceptions::initialize(ctx, owner, args, kwargs);
     }
-    if name == "object.__hash__" {
+    if matches!(name, "object.__hash__" | "object.__repr__") {
+        let method = name.trim_start_matches("object.");
         let Some((&receiver, rest)) = args.split_first() else {
-            return Err(type_error(
-                "descriptor '__hash__' of 'object' object needs an argument",
-            ));
+            return Err(type_error(format!(
+                "descriptor '{method}' of 'object' object needs an argument"
+            )));
         };
         if !kwargs.is_empty() {
-            return Err(type_error("wrapper __hash__() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "wrapper {method}() takes no keyword arguments"
+            )));
         }
         if !rest.is_empty() {
             return Err(type_error(format!(
                 "expected 0 arguments, got {}",
                 rest.len()
             )));
+        }
+        if method == "__repr__" {
+            return ctx.object_repr(receiver);
         }
         return Ok(ctx.int(Context::identity_hash(receiver)));
     }
