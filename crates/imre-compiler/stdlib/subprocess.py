@@ -27,6 +27,41 @@ def _cleanup():
     _process.cleanup()
 
 
+# From CPython 3.14.5, Lib/subprocess.py. See stdlib/docstrings/LICENSE.
+def list2cmdline(seq):
+    """Translate arguments into a command line using the Microsoft C runtime's rules."""
+    from os import fsdecode
+
+    result = []
+    for arg in map(fsdecode, seq):
+        if result:
+            result.append(' ')
+        quoted = " " in arg or "\t" in arg or not arg
+        if quoted:
+            result.append('"')
+
+        # Backslashes are literal unless followed by a quote, including a closing quote.
+        backslashes = []
+        for char in arg:
+            if char == '\\':
+                backslashes.append(char)
+            elif char == '"':
+                result.append('\\' * (2 * len(backslashes)))
+                backslashes = []
+                result.append('\\"')
+            else:
+                if backslashes:
+                    result.extend(backslashes)
+                    backslashes = []
+                result.append(char)
+
+        result.extend(backslashes)
+        if quoted:
+            result.extend(backslashes)
+            result.append('"')
+    return ''.join(result)
+
+
 def _optim_args_from_interpreter_flags():
     """Return a list of command-line arguments reproducing the current
     optimization settings in sys.flags."""
