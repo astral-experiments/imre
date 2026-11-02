@@ -1258,6 +1258,10 @@ pub(super) fn call(
             let class = ctx.builtin("object");
             Ok(ctx.instance(class, None))
         }
+        "mappingproxy" => {
+            let [mapping] = bind_builtin_arguments(name, args, kwargs, ["mapping"], 1)?;
+            ctx.mapping_proxy(mapping.expect("required mapping"))
+        }
         "type" => {
             let [object] = args else {
                 return Err(if args.len() == 3 {
