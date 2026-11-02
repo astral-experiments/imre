@@ -109,6 +109,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         Value::Class { .. } | Value::Native(_) => object,
         Value::Count { .. }
         | Value::Repeat(_)
+        | Value::DequeIterator { .. }
         | Value::Union(_)
         | Value::Dict(_)
         | Value::Tuple(_)
