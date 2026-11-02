@@ -17,7 +17,9 @@ mod ffi;
 mod finalizers;
 mod function_fields;
 mod generator_protocol;
+mod import_meta;
 mod importlib;
+mod importlib_registered;
 mod iterators;
 mod lowlevel_threads;
 mod mapping_abc;
@@ -139,6 +141,7 @@ pub(crate) struct Context {
     import_missing: Id,
     // The running frozen bootstrap keeps its globals even if its registry entry is replaced.
     bootstrap_globals: Id,
+    import_registry_installed: bool,
     bootstrap_file_spec: Id,
     // The native path finder stays installed across fresh public bootstrap imports.
     finder_external: Id,
@@ -149,6 +152,7 @@ pub(crate) struct Context {
     // Python wrappers retain their registered logger for the lifetime of this heap.
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
+    native_type_dicts: HashMap<Id, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
     call_depth: usize,
     deque_comparison_repeats: usize,
@@ -1914,6 +1918,9 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if let Some(owner) = stdlib::itertools::cursor_type(name) {
+            stdlib::itertools::install_namespace(self, value, owner);
+        }
         if builtins::is_enum_base(name) {
             self.install_enum_base(value, name);
         }
@@ -1925,6 +1932,11 @@ impl Context {
             }
         } else if matches!(name, "datetime.timezone" | stdlib::datetime::TZINFO) {
             stdlib::datetime::install_members(self, name);
+        }
+        if name == "typing.TypeVar" {
+            for field in typing::VARIANCE_FIELDS {
+                self.readonly_member("typing.TypeVar", field);
+            }
         }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
@@ -2274,6 +2286,27 @@ impl Context {
                 return Ok(Some(child));
             }
         }
+        if self.import_registry_installed {
+            let path = match parent {
+                Some((parent, _)) => self.parent_import_path(name, parent)?,
+                None => NONE,
+            };
+            let name_id = self.text(name);
+            let spec = self.meta_call(source_globals, "_find_spec", vec![name_id, path])?;
+            if spec == NONE {
+                return Ok(None);
+            }
+            let module = self.meta_call(source_globals, "_load_unlocked", vec![spec])?;
+            self.bind_import_child(name, source_globals, module)?;
+            return Ok(Some(module));
+        }
+        self.load_bootstrap_module(name, parent, source_globals)
+    }
+
+    /// Before installing the registry, execute its dependencies and the script's explicit entry.
+    fn load_bootstrap_module(
+        &mut self, name: &str, parent: Option<(Id, &str)>, source_globals: Id,
+    ) -> Result<Option<Id>> {
         let mut locations = Vec::new();
         let source = if name == "__main__" {
             self.sources
@@ -2302,23 +2335,7 @@ impl Context {
             })
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
-                (
-                    self.lookup_attr(parent, "__path__").map_err(|err| {
-                        if !self.is_attribute_error(&err) {
-                            return err;
-                        }
-                        Error::new(
-                            "ModuleNotFoundError",
-                            format!(
-                                "No module named {}; {} is not a package",
-                                string_repr(name),
-                                string_repr(name.rsplit_once('.').unwrap().0)
-                            ),
-                        )
-                        .with_import(Some(name), None, None)
-                    })?,
-                    child,
-                )
+                (self.parent_import_path(name, parent)?, child)
             } else {
                 (self.sys_path, name)
             };
@@ -2327,6 +2344,80 @@ impl Context {
         if source.is_none() && !stdlib::is_module(name) {
             return Ok(None);
         }
+        let (module, scope, name_id, origin) =
+            self.allocate_import_module(name, &locations, source.as_ref())?;
+        let key = self.text(name);
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, module)?;
+        if let Err(error) = self.run_initializer(
+            name,
+            module,
+            scope,
+            name_id,
+            source_globals,
+            source.map(|(path, body)| (path, body, origin)),
+        ) {
+            // The executing script remains importable during interpreter shutdown.
+            if name == "__main__" {
+                return Err(error);
+            }
+            let exception = self.raised_instance(error);
+            self.with_import_exception(exception, |ctx| {
+                let modules = ctx.public_modules()?;
+                match ctx.delete_item(modules, key) {
+                    Err(error) if ctx.is_builtin_error(&error, "KeyError") => Ok(()),
+                    result => result,
+                }
+            })?;
+            return self.op("reraise", exception, NONE, NONE).map(Some);
+        }
+        // A script can delete its own __main__ binding. Its exit status is determined by the script.
+        if name == "__main__" {
+            return Ok(Some(module));
+        }
+        // An initializer can replace its own registry entry. The successful import
+        // returns that value and moves its binding after the dependencies it imported.
+        let modules = self.public_modules()?;
+        let pop = self.lookup_attr(modules, "pop")?;
+        let loaded = self.call(pop, vec![key], Vec::new())?;
+        self.heap.keep(loaded);
+        let modules = self.public_modules()?;
+        self.put_item(modules, key, loaded)?;
+        self.bind_import_child(name, source_globals, loaded)?;
+        Ok(Some(loaded))
+    }
+
+    fn bind_import_child(&mut self, name: &str, source_globals: Id, loaded: Id) -> Result<()> {
+        if let Some((parent_name, child)) = name.rsplit_once('.') {
+            let modules = self.public_modules()?;
+            let parent_key = self.text(parent_name);
+            let parent = self.get_item(modules, parent_key)?;
+            if let Err(error) = self.set_attr(parent, child, loaded) {
+                if !self.is_attribute_error(&error) {
+                    return Err(error);
+                }
+                let exception = self.raised_instance(error);
+                self.with_import_exception(exception, |ctx| {
+                    ctx.warn_child_binding(
+                        source_globals,
+                        &format!(
+                            "Cannot set an attribute on {} for child module {}",
+                            string_repr(parent_name),
+                            string_repr(child)
+                        ),
+                    )
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    fn allocate_import_module(
+        &mut self,
+        name: &str,
+        locations: &[PathBuf],
+        source: Option<&(PathBuf, importlib::SourceBody)>,
+    ) -> Result<(Id, Id, Id, Option<Id>)> {
         let scope = self.scope(name, None);
         // CPython's private module publishes its ABCs under the public name.
         let name_id = self.text(if name == "_collections_abc" {
@@ -2370,7 +2461,7 @@ impl Context {
             };
             self.bind(scope, "__builtins__", builtins);
         }
-        let origin = source.as_ref().and_then(|(path, _)| {
+        let origin = source.and_then(|(path, _)| {
             if locations.contains(path) {
                 self.bind(scope, "__file__", NONE);
             } else if name != "__main__" || !self.config["command"].as_bool().unwrap_or(false) {
@@ -2388,65 +2479,7 @@ impl Context {
             locale_error: None,
             constructor: None,
         });
-        let key = self.text(name);
-        let modules = self.public_modules()?;
-        self.put_item(modules, key, module)?;
-        if let Err(error) = self.run_initializer(
-            name,
-            module,
-            scope,
-            name_id,
-            source_globals,
-            source.map(|(path, body)| (path, body, origin)),
-        ) {
-            // The executing script remains importable during interpreter shutdown.
-            if name == "__main__" {
-                return Err(error);
-            }
-            let exception = self.raised_instance(error);
-            self.with_import_exception(exception, |ctx| {
-                let modules = ctx.public_modules()?;
-                match ctx.delete_item(modules, key) {
-                    Err(error) if ctx.is_builtin_error(&error, "KeyError") => Ok(()),
-                    result => result,
-                }
-            })?;
-            return self.op("reraise", exception, NONE, NONE).map(Some);
-        }
-        // A script can delete its own __main__ binding. Its exit status is determined by the script.
-        if name == "__main__" {
-            return Ok(Some(module));
-        }
-        // An initializer can replace its own registry entry. The successful import
-        // returns that value and moves its binding after the dependencies it imported.
-        let modules = self.public_modules()?;
-        let pop = self.lookup_attr(modules, "pop")?;
-        let loaded = self.call(pop, vec![key], Vec::new())?;
-        self.heap.keep(loaded);
-        let modules = self.public_modules()?;
-        self.put_item(modules, key, loaded)?;
-        if let Some((parent_name, child)) = name.rsplit_once('.') {
-            let modules = self.public_modules()?;
-            let parent_key = self.text(parent_name);
-            let parent = self.get_item(modules, parent_key)?;
-            if let Err(error) = self.set_attr(parent, child, loaded) {
-                if !self.is_attribute_error(&error) {
-                    return Err(error);
-                }
-                let exception = self.raised_instance(error);
-                self.with_import_exception(exception, |ctx| {
-                    ctx.warn_child_binding(
-                        source_globals,
-                        &format!(
-                            "Cannot set an attribute on {} for child module {}",
-                            string_repr(parent_name),
-                            string_repr(child)
-                        ),
-                    )
-                })?;
-            }
-        }
-        Ok(Some(loaded))
+        Ok((module, scope, name_id, origin))
     }
 
     /// Run an importlib exception handler with its caught exception visible to Python callbacks.
@@ -2502,6 +2535,12 @@ impl Context {
                     self.zip_path_importers = self.dict(Vec::new());
                 }
                 self.bind(scope, "_zip_path_importers", self.zip_path_importers);
+                // Source loaders can compile directly even when ordinary module imports are disabled.
+                let index = self.builtin("operator.index");
+                self.bind(scope, "index", index);
+                let factory = self.builtin(thread_rlock::CLASS);
+                let lock = self.call(factory, vec![], vec![])?;
+                self.bind(scope, "_import_lock", lock);
             }
             "itertools" => {
                 for attr in [
@@ -2545,6 +2584,20 @@ impl Context {
                 stdlib::os::scheduler::initialize(self, scope);
                 let tmpfile = self.int(i64::from(libc::O_TMPFILE));
                 self.bind(scope, "O_TMPFILE", tmpfile);
+                #[cfg(any(target_env = "gnu", target_env = "musl"))]
+                for (attr, flag) in [
+                    ("RTLD_LAZY", libc::RTLD_LAZY),
+                    ("RTLD_NOW", libc::RTLD_NOW),
+                    ("RTLD_GLOBAL", libc::RTLD_GLOBAL),
+                    ("RTLD_LOCAL", libc::RTLD_LOCAL),
+                    ("RTLD_NODELETE", libc::RTLD_NODELETE),
+                    ("RTLD_NOLOAD", libc::RTLD_NOLOAD),
+                    #[cfg(target_env = "gnu")]
+                    ("RTLD_DEEPBIND", libc::RTLD_DEEPBIND),
+                ] {
+                    let value = self.int(i64::from(flag));
+                    self.bind(scope, attr, value);
+                }
             }
             #[cfg(unix)]
             "_signal" if source.is_none() => {
@@ -2741,6 +2794,12 @@ impl Context {
                 if self.threads.system_module.is_none() {
                     self.bind(scope, "modules", self.modules);
                 }
+                let byteorder = self.text(if cfg!(target_endian = "little") {
+                    "little"
+                } else {
+                    "big"
+                });
+                self.bind(scope, "byteorder", byteorder);
                 for name in [
                     "audit",
                     "addaudithook",

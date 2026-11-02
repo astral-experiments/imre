@@ -151,6 +151,53 @@ def test_time_of_day():
         def __index__(self):
             return 17
     assert time(Hour()).hour == 17
+    extracted = combined.time()
+    assert type(extracted) is time and extracted.tzinfo is None and extracted.fold == 1
+    assert extracted == time(12, 34, 56, 7)
+    replaced = clock.replace(Hour(), microsecond=8)
+    assert replaced == time(17, 34, 56, 8, east) and replaced.fold == 1 and replaced.tzinfo is east
+    cleared = time.__replace__(clock, tzinfo=None, fold=0)
+    assert cleared == extracted and cleared.fold == 0 and clock.replace() is not clock
+
+    class Moment(dt):
+        @property
+        def hour(self):
+            raise AssertionError("used overridden hour")
+
+    assert type(Moment(1, 1, 1).time()) is time
+    for method, args, kwargs in (
+        (time.__replace__, (), {}), (time.replace, (object(),), {}),
+        (dt.time, (object(),), {}), (combined.time, (1,), {}), (combined.time, (), {"bad": 1}),
+    ):
+        try:
+            method(*args, **kwargs)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("invalid clock method arguments accepted")
+
+    calls = []
+    class Clock(time):
+        def __new__(cls, *args, **kwargs):
+            calls.append((args, kwargs))
+            return super().__new__(cls, *args, **kwargs)
+
+    child = Clock(1, fold=1)
+    assert type(child.replace(Hour())) is Clock
+    assert calls[-1] == ((17, 0, 0, 0, None), {"fold": 1})
+    assert child.replace(fold=0).fold == 0 and calls[-1] == ((1, 0, 0, 0, None), {})
+    for args, kwargs, error_type in (
+        ((24,), {}, ValueError), ((), {"fold": 2}, ValueError),
+        ((1 << 100,), {}, OverflowError), (("bad",), {}, TypeError),
+        ((0, 0, 0, 0, None, 1), {}, TypeError), ((1,), {"hour": 2}, TypeError),
+        ((), {"tzinfo": True}, TypeError), ((), {"span": 1}, TypeError),
+    ):
+        try:
+            clock.replace(*args, **kwargs)
+        except error_type:
+            pass
+        else:
+            raise AssertionError("invalid replacement accepted")
     for args, keywords in (
         ((24,), {}), ((0, 60), {}), ((0, 0, -1), {}), ((0, 0, 0, 1000000), {}),
         ((), {"fold": 2}), ((0, 0, 0, 0, True), {}), ((0, 0, 0, 0, None, 1), {}),
@@ -579,6 +626,7 @@ def current():
         raise AssertionError("invalid timezone accepted")
     test_calendar_ordering()
     test_calendar_day_methods()
+    test_timestamp()
 
 
 def test_calendar_ordering():
@@ -640,6 +688,35 @@ def test_calendar_day_methods():
     assert date.ctime(value) == "Tue Dec 31 00:00:00 0030"
     assert date(1, 1, 1).ctime() == "Mon Jan  1 00:00:00 0001"
     assert value.isoweekday() == 2 and date(2024, 3, 3).isoweekday() == 7
+
+
+def test_timestamp():
+    import os
+    import time as clock
+
+    class Stamp(dt):
+        pass
+
+    offset = timezone(timedelta(microseconds=1))
+    assert Stamp(1970, 1, 1, tzinfo=offset).timestamp() == -0.000001
+    assert dt.timestamp(dt(1970, 1, 1, tzinfo=UTC)) == 0.0
+    if hasattr(clock, "tzset"):
+        saved = os.environ.get("TZ")
+        try:
+            os.environ["TZ"] = "UTC0"
+            clock.tzset()
+            assert dt(1969, 12, 31, 23, 59, 59, 999999).timestamp() == -1 + 999999 / 1000000
+            os.environ["TZ"] = "EST+05EDT,M3.2.0,M11.1.0"
+            clock.tzset()
+            for fold, gap, repeat in ((0, 1331451000, 1352007000), (1, 1331447400, 1352010600)):
+                assert dt(2012, 3, 11, 2, 30, fold=fold).timestamp() == gap
+                assert dt(2012, 11, 4, 1, 30, fold=fold).timestamp() == repeat
+        finally:
+            if saved is None:
+                del os.environ["TZ"]
+            else:
+                os.environ["TZ"] = saved
+            clock.tzset()
 
 
 if __name__ == "__main__":

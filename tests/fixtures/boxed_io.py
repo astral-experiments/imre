@@ -171,6 +171,19 @@ def exercise(path):
         except ValueError:
             print(events)
 
+    text_path = path + ".text-input"
+    with open(text_path, "wb") as writer:
+        writer.write(b"A\xe9\r\nZ\n")
+    encoded_path = text_path.encode()
+    with open(encoded_path, "rt", encoding="latin-1") as reader:
+        assert reader.buffer.raw.closefd and reader.name == encoded_path
+        assert reader.fileno() == reader.buffer.raw.fileno()
+        assert reader.readline() == "A\xe9\n"
+        assert reader.read() == "Z\n"
+        assert reader.seek(0) == 0
+        assert reader.read() == "A\xe9\nZ\n"
+    assert reader.closed
+
     with open(path, "rb") as reader:
         reader.read(1)
         try:

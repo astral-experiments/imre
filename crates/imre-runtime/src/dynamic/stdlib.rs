@@ -65,6 +65,7 @@ pub(super) mod traceback;
 pub(super) mod urllib;
 mod warnings;
 mod zipimport;
+mod zlib;
 
 /// Format a type for CPython diagnostics, including a non-default module and its qualname.
 fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
@@ -481,6 +482,12 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | (
             "_imre_importlib",
             "find_spec"
+            | "native_spec_info"
+            | "create_native_module"
+            | "exec_native_module"
+            | "warn_import"
+            | "registered_path"
+            | "registered_path_spec"
             | "import_module"
             | "namespace_locations"
             | "get_code"
@@ -551,6 +558,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_typing", "_idfunc") => ctx.builtin("_typing._idfunc"),
         ("typing", "NoDefault") => super::typing::no_default(ctx),
         ("typing", "TYPE_CHECKING") => FALSE,
+        ("typing", "_NamedTuple") => ctx.builtin("typing.NamedTuple"),
         ("typing", "Union") | ("types", "UnionType") => super::union::class(ctx),
         ("typing", "Generic" | "Protocol") => super::typing::named_class(ctx, "typing", name),
         ("_collections_abc", abc) if super::mapping_abc::bootstrapped(abc) => {
@@ -629,7 +637,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             let items = options.into_iter().map(|option| ctx.text(option)).collect();
             ctx.alloc(Value::List(items))
         }
-        ("zlib", "adler32" | "crc32" | "error") => ctx.builtin(&format!("zlib.{name}")),
+        ("zlib", "adler32" | "crc32" | "compress" | "decompress" | "error") => ctx.builtin(&format!("zlib.{name}")),
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
@@ -784,7 +792,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
             | "finditer",
         )
-        | ("typing", "IO" | "NamedTuple" | "Generator" | "Iterator")
+        | ("typing", "IO" | "Generator" | "Iterator")
         | ("enum", "_simple_enum")
         | (
             "functools",
@@ -1532,6 +1540,9 @@ pub(super) fn call(
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
     }
+    if let Some(method @ ("compress" | "decompress")) = name.strip_prefix("zlib.") {
+        return zlib::call(ctx, method, args, kwargs);
+    }
     if let Some(method @ ("adler32" | "crc32")) = name.strip_prefix("zlib.") {
         return binascii::checksum(ctx, method, args, kwargs);
     }
@@ -1712,11 +1723,10 @@ pub(super) fn call(
     if name == "itertools.repeat" {
         return itertools::repeat(ctx, args, kwargs);
     }
-    if let Some(method) = name
-        .strip_prefix("itertools.count.")
-        .or_else(|| name.strip_prefix("itertools.repeat."))
+    if let Some((owner, method)) = name.rsplit_once('.')
+        && let Some(owner) = itertools::cursor_type(owner)
     {
-        return itertools::method(ctx, method, args, kwargs);
+        return itertools::method(ctx, owner, method, args, kwargs);
     }
     if name == "types.coroutine" {
         let func = single_argument("coroutine", "func", args, kwargs)?;
@@ -1809,6 +1819,29 @@ pub(super) fn call(
                 }
                 return Ok(NONE);
             }
+            ("native_spec_info", [name, path, bundled], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx.native_spec_info(&name, *path, *bundled == TRUE);
+            }
+            ("registered_path", [path], []) => return ctx.registered_path(*path),
+            ("registered_path_spec", [name, path], []) => {
+                return ctx.registered_path_spec(*name, *path);
+            }
+            ("create_native_module", [name], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                return ctx.create_native_module(&name);
+            }
+            ("exec_native_module", [module], []) => return ctx.exec_native_module(*module),
+            ("warn_import", [globals, message, line] | [globals, message, line, _], []) => {
+                let message = ctx.str_value(*message)?.to_owned();
+                let line = ctx
+                    .index_integer(*line)?
+                    .to_i64()
+                    .and_then(|line| u32::try_from(line).ok())
+                    .ok_or_else(|| Error::new("OverflowError", "invalid warning line"))?;
+                ctx.warn_import(*globals, &message, line, args.get(3).map(|id| *id == TRUE))?;
+                return Ok(NONE);
+            }
             ("import_module", [name] | [name, _], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
                 let source_globals = args.get(1).copied().unwrap_or(NONE);
@@ -1816,10 +1849,10 @@ pub(super) fn call(
                     .find_module_from(&name, source_globals)?
                     .ok_or_else(|| Context::missing_module(&name));
             }
-            ("find_spec", [fullname, original], []) => {
+            ("find_spec", [fullname, original, finder], []) => {
                 let fullname = ctx.str_value(*fullname)?.to_owned();
                 let original = ctx.str_value(*original)?.to_owned();
-                return ctx.find_spec(&fullname, &original, false);
+                return ctx.find_spec(&fullname, &original, false, Some(*finder));
             }
             ("namespace_locations", [name, path], []) => {
                 let name = ctx.str_value(*name)?.to_owned();

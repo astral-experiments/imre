@@ -4,14 +4,15 @@ import _imp
 import sys
 
 from _imre_importlib import (
-    _zip_path_importers,
     cache_name as _cache_name,
     get_code as _registered_code,
+    index as _index,
     loader_fields as _loader_fields,
     path_stats as _path_stats,
     source_name as _source_name,
     warn_debug_override as _warn_debug_override,
     warn_loader_deprecation as _warn_loader_deprecation,
+    warn_import as _warn_import,
 )
 from os import fspath as _fspath, sep
 
@@ -37,17 +38,6 @@ if _is_frozen:
 else:
     # The package connects the selected core after this module has executed.
     _bootstrap = None
-
-
-def _invalidate_default_path_caches():
-    if hasattr(sys, "path_hooks") or hasattr(sys, "path_importer_cache"):
-        raise NotImplementedError("custom sys.path_hooks and sys.path_importer_cache")
-    for path, finder in list(_zip_path_importers.items()):
-        if finder is None or not path.startswith("/"):
-            del _zip_path_importers[path]
-        elif hasattr(finder, "invalidate_caches"):
-            finder.invalidate_caches()
-    _finder_external._NamespacePath._epoch += 1
 
 
 def _bless_my_loader(module_globals):
@@ -107,11 +97,6 @@ def source_from_cache(path):
     if sys.implementation.cache_tag is None:
         raise NotImplementedError("sys.implementation.cache_tag is None")
     return _source_name(_cache_path(path), sys.pycache_prefix)
-
-
-def _get_cached(origin):
-    # The standalone runtime has no bytecode cache tag.
-    return origin if origin.endswith(".pyc") else None
 
 
 class _LoaderBasics:
@@ -182,13 +167,12 @@ class SourceFileLoader(FileLoader, _LoaderBasics):
         return _path_stats(path)
 
     def source_to_code(self, data, path, *, _optimize=-1):
-        from operator import index
-        from os import fsdecode
-
-        filename = fsdecode(path)
+        filename = _fspath(path)
+        if isinstance(filename, bytes):
+            filename = filename.decode(sys.getfilesystemencoding(), sys.getfilesystemencodeerrors())
         if "\0" in filename:
             raise ValueError("embedded null character")
-        level = index(_optimize)
+        level = _index(_optimize)
         if level < -2147483648 or level > 2147483647:
             raise OverflowError("Python int too large to convert to C int")
         if level < -1 or level > 2:

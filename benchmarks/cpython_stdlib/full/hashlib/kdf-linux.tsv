@@ -1,0 +1,71 @@
+product	revision	mode	profile	suite_ordinal	class_ordinal	unittest_id	raw_verdict
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	original	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	original	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	original	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	original	82	4	test.test_hashlib.KDFTests.test_scrypt	ok
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	inverse	81	3	test.test_hashlib_kdf_inverse.KDFTests.test_pbkdf2_hmac_c	FAIL
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	reference	inverse	82	4	test.test_hashlib_kdf_inverse.KDFTests.test_scrypt	FAIL
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	extension-hidden	original	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	extension-hidden	original	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	extension-hidden	original	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	skipped 'requires OpenSSL bindings'
+cpython	5607950ef232dad16d75c0cf53101d9649d89115	extension-hidden	original	82	4	test.test_hashlib.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O0	original	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O0	original	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O0	original	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	skipped 'requires OpenSSL bindings'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O0	original	82	4	test.test_hashlib.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O0	inverse	81	3	test.test_hashlib_kdf_inverse.KDFTests.test_pbkdf2_hmac_c	skipped 'requires OpenSSL bindings'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O0	inverse	82	4	test.test_hashlib_kdf_inverse.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O3	original	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O3	original	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O3	original	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	skipped 'requires OpenSSL bindings'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O3	original	82	4	test.test_hashlib.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O3	inverse	81	3	test.test_hashlib_kdf_inverse.KDFTests.test_pbkdf2_hmac_c	skipped 'requires OpenSSL bindings'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	ordinary-O3	inverse	82	4	test.test_hashlib_kdf_inverse.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O0	original	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O0	original	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O0	original	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	skipped 'requires OpenSSL bindings'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O0	original	82	4	test.test_hashlib.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O0	inverse	81	3	test.test_hashlib_kdf_inverse.KDFTests.test_pbkdf2_hmac_c	skipped 'requires OpenSSL bindings'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O0	inverse	82	4	test.test_hashlib_kdf_inverse.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O3	original	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O3	original	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O3	original	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	skipped 'requires OpenSSL bindings'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O3	original	82	4	test.test_hashlib.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O3	inverse	81	3	test.test_hashlib_kdf_inverse.KDFTests.test_pbkdf2_hmac_c	skipped 'requires OpenSSL bindings'
+base	5472a33cc16130407cc906daf38d3ce50332ea88	boxed-O3	inverse	82	4	test.test_hashlib_kdf_inverse.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O0	original	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O0	original	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O0	original	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O0	original	82	4	test.test_hashlib.KDFTests.test_scrypt	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O0	inverse	81	3	test.test_hashlib_kdf_inverse.KDFTests.test_pbkdf2_hmac_c	FAIL
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O0	inverse	82	4	test.test_hashlib_kdf_inverse.KDFTests.test_scrypt	FAIL
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O3	original	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O3	original	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O3	original	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O3	original	82	4	test.test_hashlib.KDFTests.test_scrypt	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O3	inverse	81	3	test.test_hashlib_kdf_inverse.KDFTests.test_pbkdf2_hmac_c	FAIL
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	ordinary-O3	inverse	82	4	test.test_hashlib_kdf_inverse.KDFTests.test_scrypt	FAIL
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O0	original	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O0	original	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O0	original	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O0	original	82	4	test.test_hashlib.KDFTests.test_scrypt	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O0	inverse	81	3	test.test_hashlib_kdf_inverse.KDFTests.test_pbkdf2_hmac_c	FAIL
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O0	inverse	82	4	test.test_hashlib_kdf_inverse.KDFTests.test_scrypt	FAIL
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O3	original	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O3	original	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O3	original	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O3	original	82	4	test.test_hashlib.KDFTests.test_scrypt	ok
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O3	inverse	81	3	test.test_hashlib_kdf_inverse.KDFTests.test_pbkdf2_hmac_c	FAIL
+merged	6c0cab3a668b7000322557f472f0666a4c4c6c81	boxed-O3	inverse	82	4	test.test_hashlib_kdf_inverse.KDFTests.test_scrypt	FAIL
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-normal	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-normal	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-normal	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-normal	82	4	test.test_hashlib.KDFTests.test_scrypt	ok
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-absent	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-absent	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-absent	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	skipped 'requires OpenSSL bindings'
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-absent	82	4	test.test_hashlib.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-no_scrypt	79	1	test.test_hashlib.KDFTests.test_file_digest	ok
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-no_scrypt	80	2	test.test_hashlib.KDFTests.test_normalized_name	ok
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-no_scrypt	81	3	test.test_hashlib.KDFTests.test_pbkdf2_hmac_c	ok
+candidate-debug	dc91d1e2adcf1197150f05640bfd0187f1d694cc	ordinary-O0	provider-no_scrypt	82	4	test.test_hashlib.KDFTests.test_scrypt	skipped '   test requires OpenSSL > 1.1'

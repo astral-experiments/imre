@@ -1,6 +1,13 @@
 """Legacy direct loading with a SourceFileLoader, including replacement modules."""
 
 import sys
+from _imre_importlib import (
+    _import_lock,
+    create_native_module as _create_native_module,
+    exec_native_module as _exec_native_module,
+    native_spec_info as _native_spec_info,
+    warn_import as _warn_import,
+)
 from _imre_importlib import import_module as _native_import, warn_legacy_load as _warn_legacy_load
 from os import altsep, sep
 
@@ -27,6 +34,36 @@ def _setup(sys_module, _imp_module):
 
 def _find_and_load(name, import_):
     return _native_import(name, None if _is_frozen else globals())
+
+
+def _import_warning(message, line):
+    _warn_import(None if _is_frozen else globals(), message, line)
+
+
+class _NativeImporter:
+    """Find and initialize the modules provided by this native interpreter."""
+
+    @classmethod
+    def find_spec(cls, fullname, path=None, target=None):
+        info = _native_spec_info(fullname, path, cls is _BundledImporter)
+        if info is None:
+            return None
+        origin, locations = info
+        spec = ModuleSpec(fullname, cls, origin=origin)
+        spec.submodule_search_locations = locations
+        return spec
+
+    @staticmethod
+    def create_module(spec):
+        return _create_native_module(spec.name)
+
+    @staticmethod
+    def exec_module(module):
+        _exec_native_module(module)
+
+
+class _BundledImporter(_NativeImporter):
+    """Find bundled Python sources after entries on the application's path."""
 
 
 def _new_module(name):

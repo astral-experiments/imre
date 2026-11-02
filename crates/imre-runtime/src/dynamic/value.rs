@@ -3028,13 +3028,18 @@ impl Heap {
         roots: impl Iterator<Item = Id>,
         stdin: Option<&[Id; 3]>,
     ) -> Result<Option<Id>> {
-        // Input's wrapper and raw file usually survive every allocation checkpoint.
-        if let Some(chain) = stdin
-            && self
-                .ordinary_finalizers
-                .iter()
-                .all(|owner| chain.contains(owner))
-        {
+        // These owners are reachable through the current sys.__stdin__ even in a mixed set.
+        let mut remaining = self.ordinary_finalizers.len();
+        if let Some(chain) = stdin {
+            for (index, &id) in chain.iter().enumerate() {
+                if self.slots[id as usize].finalization == Finalization::Pending
+                    && !chain[..index].contains(&id)
+                {
+                    remaining -= 1;
+                }
+            }
+        }
+        if remaining == 0 {
             return Ok(None);
         }
         // A suspended caller keeps earlier operands live across a nested call.
@@ -3052,7 +3057,6 @@ impl Heap {
         // If the roots keep every pending finalizer alive, no finalizer can run.
         // Keep the visited links until the search ends so resetting a partial
         // trace costs only the slots it touched, even after a large heap peak.
-        let mut remaining = self.ordinary_finalizers.len();
         let mut visited = END;
         let mut pending = MarkQueue {
             slots: &self.slots,
@@ -3066,7 +3070,9 @@ impl Heap {
             let slot = &self.slots[id as usize];
             slot.trace.set(visited);
             visited = id as usize;
-            if slot.finalization == Finalization::Pending {
+            if slot.finalization == Finalization::Pending
+                && !stdin.is_some_and(|chain| chain.contains(&id))
+            {
                 remaining -= 1;
             }
             if remaining != 0 {
@@ -3721,6 +3727,27 @@ mod tests {
         let ordinary = heap.alloc(Value::List(Vec::new()));
         assert_eq!(ordinary, list);
         assert!(!heap.mock_call_lists.contains(&ordinary));
+    }
+
+    #[test]
+    fn mixed_input_owners_leave_unreachable_finalizers_eligible() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let indirect = heap.alloc(Value::List(Vec::new()));
+        let buffer = heap.alloc(Value::List(vec![indirect]));
+        let input = heap.alloc(Value::List(vec![buffer]));
+        let dead = heap.alloc(Value::List(Vec::new()));
+        for owner in [input, indirect, dead] {
+            heap.register_finalizer(owner);
+        }
+        heap.release_temporaries_since(mark);
+
+        // Only one distinct pending owner is proven by this chain.
+        let chain = [input, buffer, input];
+        let check = |roots| heap.acyclic_finalizer(roots, Some(&chain)).unwrap();
+        assert_eq!(check(vec![input].into_iter()), Some(dead));
+        assert_eq!(check(vec![input, dead].into_iter()), None);
+        assert_eq!(check(vec![input].into_iter()), Some(dead));
     }
 
     #[test]

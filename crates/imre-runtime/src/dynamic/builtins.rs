@@ -215,7 +215,8 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     (matches!(
         owner,
         "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
-    ) || is_exception(owner)
+    ) || super::stdlib::itertools::cursor_type(owner).is_some()
+        || is_exception(owner)
         || crate::objects::HashState::is_provider_class(owner))
     .then_some(owner)
 }
@@ -786,6 +787,7 @@ pub(super) fn bind<const N: usize>(
 }
 
 /// Bind positional and keyword method arguments using Argument Clinic's diagnostics.
+/// An empty name marks a positional-only parameter.
 pub(super) fn bind_method_arguments<const N: usize>(
     name: &str,
     args: &[Id],
@@ -815,7 +817,7 @@ pub(super) fn bind_method_arguments<const N: usize>(
         )));
     }
     for (i, key) in names[..args.len()].iter().enumerate() {
-        if kwargs.iter().any(|(provided, _)| provided == key) {
+        if !key.is_empty() && kwargs.iter().any(|(provided, _)| provided == key) {
             return Err(type_error(format!(
                 "argument for {name}() given by name ('{key}') and position ({})",
                 i + 1
@@ -824,7 +826,7 @@ pub(super) fn bind_method_arguments<const N: usize>(
     }
     let mut values = std::array::from_fn(|i| args.get(i).copied());
     for (key, value) in kwargs {
-        let index = names.iter().position(|&arg| arg == key).ok_or_else(|| {
+        let index = names.iter().position(|&arg| !arg.is_empty() && arg == key).ok_or_else(|| {
             type_error(format!(
                 "{name}() got an unexpected keyword argument '{key}'"
             ))

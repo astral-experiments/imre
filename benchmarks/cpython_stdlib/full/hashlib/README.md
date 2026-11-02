@@ -72,3 +72,13 @@ The remaining error was `test_threaded_hashing` (row 75).
 Nine original cases (rows 3, 4, 6 and 11–16) checked fixed digests. Changing one expected hexadecimal digit in each case made all nine fail their own digest comparisons on CPython and in both runtime-import builds of Imre. Rows 9 and 69 passed their metadata and Unicode-input checks.
 
 In a separate run with the upstream keyed BLAKE2b and BLAKE2s vector files, rows 5 and 7 each passed 256 records. Changing one digit in the last expected digest of either file failed just that row on CPython and on runtime-import Imre at O0 and O3.
+
+## Key derivation
+
+The complete, unchanged CPython 3.14.5 `KDFTests` class passed all four tests on Linux with OpenSSL 3.5.6 and FIPS disabled. On public Imre `5472a33`, `test_file_digest` and `test_normalized_name` passed, while `test_pbkdf2_hmac_c` and `test_scrypt` skipped because Imre lacked the extension. At `6c0cab3`, all four passed in ordinary and runtime-import builds at O0 and O3 with system OpenSSL 3.5.7. Rows 81 and 82 add two distinct paired passes.
+
+The intact PBKDF2 test exercised SHA-1, SHA-256 and SHA-512. A native call trace counted 55 successful PBKDF2 derivations, four successful scrypt derivations and two rejected scrypt preflights. Changing one expected hex digit for each KDF made both cases fail their own byte comparisons on CPython and in each native mode. In a separate native control, hiding only the scrypt symbol kept PBKDF2 passing and skipped scrypt. Making the provider unavailable reproduced the two upstream skips.
+
+The empty-cache, ordinary O0 run of all 82 registrations went from 63 passed, 18 skipped and one error on the baseline to 66 passed, 15 skipped and one error on the candidate. All 63 prior passes held. The additional pass outside this class was `test_hash_disallow_instantiation`. Both runs errored in `test_threaded_hashing`.
+
+The keyed ledger records the original unittest IDs, suite ordinals and verdicts, with mutated inputs and optional-provider runs in separate profiles. The terminal ledger records the raw runner summaries and exit codes. [Keyed outcomes](kdf-linux.tsv) · [Terminal counts](kdf-terminals-linux.tsv)

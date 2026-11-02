@@ -27,8 +27,7 @@ def abstractmethod(funcobj):
     return funcobj
 
 
-# The native class builder installs ABC semantics on this root class.
-class Hashable:
+class Hashable(metaclass=_ABCMeta):
 
     __slots__ = ()
 
@@ -43,7 +42,7 @@ class Hashable:
         return NotImplemented
 
 
-class Awaitable:
+class Awaitable(metaclass=_ABCMeta):
 
     __slots__ = ()
 
@@ -101,7 +100,7 @@ class Coroutine(Awaitable):
         return NotImplemented
 
 
-class AsyncIterable:
+class AsyncIterable(metaclass=_ABCMeta):
 
     __slots__ = ()
 
@@ -185,7 +184,7 @@ class AsyncGenerator(AsyncIterator):
         return NotImplemented
 
 
-class Buffer:
+class Buffer(metaclass=_ABCMeta):
 
     __slots__ = ()
 

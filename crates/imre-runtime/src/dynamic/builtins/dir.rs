@@ -41,6 +41,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             ctx.builtin("object")
         }
         Value::Class { .. } | Value::Native(_) => object,
+        Value::Count { .. } | Value::Repeat(_) => ctx.exact_type(object)?,
         Value::NamedTuple {
             class: Some(class), ..
         } if crate::dynamic::stdlib::os::stat::layout(class).is_some()
@@ -169,6 +170,12 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 }
             } else {
                 names.extend(["__dict__".to_owned(), "__weakref__".to_owned()]);
+            }
+        }
+        Value::Native(_) if let Some(&dictionary) = ctx.native_type_dicts.get(&class) => {
+            class_names(ctx, ctx.builtins["object"], names)?;
+            for &(key, _) in ctx.dict_entries(dictionary).expect("native class dictionary") {
+                names.insert(ctx.str_value(key)?.to_owned());
             }
         }
         Value::Native(name)

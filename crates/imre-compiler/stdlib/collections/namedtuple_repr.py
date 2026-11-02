@@ -25,3 +25,17 @@ def _namedtuple_repr(typename, field_names):
 
     __repr__.__qualname__ = f'{typename}.__repr__'
     return __repr__
+
+
+def _namedtuple_replace(typename, field_names):
+    _map = map
+
+    def _replace(self, /, **kwds):
+        result = self._make(_map(kwds.pop, field_names, self))
+        if kwds:
+            raise TypeError(f'Got unexpected field names: {list(kwds)!r}')
+        return result
+
+    _replace.__doc__ = f'Return a new {typename} object replacing specified fields with new values'
+    _replace.__qualname__ = f'{typename}._replace'
+    return _replace

@@ -146,6 +146,9 @@ fn boxed_sys_export(name: &str) -> bool {
     matches!(
         name,
         "path"
+            | "meta_path"
+            | "path_hooks"
+            | "path_importer_cache"
             | "modules"
             | "_xoptions"
             | "version_info"
@@ -475,6 +478,7 @@ pub(crate) fn compile(
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
     if !runtime_imports
+        && !(startup.is_some() && src.contains("urllib"))
         && !(src.contains("class") && src.contains('='))
         && !(cfg!(unix) && src.contains("signal"))
         && ![
@@ -510,27 +514,32 @@ pub(crate) fn compile(
     {
         return Ok(None);
     }
-    let mut first = match imports(
+    let Ok(mut first) = imports(
         &src,
         if command.is_some() {
             SourceKind::Command
         } else {
             SourceKind::File
         },
-    ) {
-        // A checked operation can require the object ABI even in a file without imports.
-        Ok(i)
-            if module_entry.is_some()
-                || i.runtime_imports
-                || operation.is_some()
-                || (runtime_imports && !i.names.is_empty()) =>
-        {
-            i
-        }
-        // Closed file builds still require a statically resolved import graph.
-        Ok(i) if i.uses_import_builtin && (startup.is_some() || options.runtime_imports) => i,
-        _ => return Ok(None),
+    ) else {
+        return Ok(None);
     };
+    // Python scripts load urllib.request and its transport dependencies as boxed modules.
+    let request_script = startup.is_some()
+        && !options.runtime_imports
+        && first
+            .names
+            .iter()
+            .any(|(level, name)| *level == 0 && name == "urllib.request");
+    if !(module_entry.is_some()
+        || first.runtime_imports
+        || operation.is_some()
+        || (runtime_imports && !first.names.is_empty())
+        || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
+        || request_script)
+    {
+        return Ok(None);
+    }
     if let Some(name) = module_entry {
         first.add(0, "runpy");
         // Register source candidates without interpreting a module operand as a filesystem path.
@@ -628,6 +637,7 @@ pub(crate) fn compile(
         if module_entry.is_none()
             && !options.runtime_imports
             && !registered_imports.called
+            && (!request_script || owner == "__main__")
             && imports.needs_typed_machinery()
             // Enforce the checked-file machinery contract on the original graph.
             // A module discovered only by boxed imports has no typed layout to preserve.
@@ -755,6 +765,10 @@ pub(crate) fn compile(
                         }
                         continue;
                     };
+                    // The boxed urllib transport cannot stand in for an earlier project package.
+                    if request_script && prefix == "urllib" && initial.contains(root) {
+                        return Ok(None);
+                    }
                     let src = std::fs::read_to_string(&path)
                         .map_err(|e| format!("{}: {e}", path.display()))?;
                     let imports = imports_for_module(&path, &src)?;
@@ -801,6 +815,8 @@ pub(crate) fn compile(
     for name in [
         "__future__",
         "__hello__",
+        "_frozen_importlib",
+        "_frozen_importlib_external",
         "_opcode_metadata",
         "_tokenize",
         "abc",

@@ -358,7 +358,7 @@ def _annotation_type_repr(value):
     return repr(value)
 
 
-def _typeddict_annotation_strings(annotations):
+def _annotation_strings(annotations):
     return {name: value if isinstance(value, str) else _annotation_type_repr(value)
             for name, value in annotations.items()}
 
@@ -586,7 +586,7 @@ def _call_annotate(annotate, format, owner=None):
         result = probe(Format.VALUE_WITH_FAKE_GLOBALS)
     except NotImplementedError:
         values = annotate(Format.VALUE)
-        return _typeddict_annotation_strings(values) if format == Format.STRING else values
+        return _annotation_strings(values) if format == Format.STRING else values
     except Exception:
         pass
     else:
@@ -604,6 +604,104 @@ def _call_annotate(annotate, format, owner=None):
     names.finish()
     return {key: value.evaluate(format=Format.FORWARDREF)
             if isinstance(value, ForwardRef) else value for key, value in result.items()}
+
+
+_sentinel = object()
+
+
+def _make_eager_annotate(types):
+    checked = {key: _type_check(value, f"field {key} annotation must be a type")
+               for key, value in types.items()}
+
+    def annotate(format):
+        if format in (1, 3):
+            return checked
+        if format == 4:
+            return _annotation_strings(types)
+        raise NotImplementedError(format)
+
+    return annotate
+
+
+# Functional NamedTuple from CPython 3.14.5 Lib/typing.py.
+def NamedTuple(typename, fields=_sentinel, /, **kwargs):
+    """Typed version of namedtuple.
+
+    Usage::
+
+        class Employee(NamedTuple):
+            name: str
+            id: int
+
+    This is equivalent to::
+
+        Employee = collections.namedtuple('Employee', ['name', 'id'])
+
+    The resulting class has an extra __annotations__ attribute, giving a
+    dict that maps field names to types.  (The field names are also in
+    the _fields attribute, which is part of the namedtuple API.)
+    An alternative equivalent functional syntax is also accepted::
+
+        Employee = NamedTuple('Employee', [('name', str), ('id', int)])
+    """
+    from collections import namedtuple
+
+    if fields is _sentinel:
+        if kwargs:
+            deprecated_thing = "Creating NamedTuple classes using keyword arguments"
+            deprecation_msg = (
+                "{name} is deprecated and will be disallowed in Python {remove}. "
+                "Use the class-based or functional syntax instead."
+            )
+        else:
+            deprecated_thing = "Failing to pass a value for the 'fields' parameter"
+            example = f"`{typename} = NamedTuple({typename!r}, [])`"
+            deprecation_msg = (
+                "{name} is deprecated and will be disallowed in Python {remove}. "
+                "To create a NamedTuple class with 0 fields "
+                "using the functional syntax, "
+                "pass an empty list, e.g. "
+            ) + example + "."
+    elif fields is None:
+        if kwargs:
+            raise TypeError(
+                "Cannot pass `None` as the 'fields' parameter "
+                "and also specify fields using keyword arguments"
+            )
+        else:
+            deprecated_thing = "Passing `None` as the 'fields' parameter"
+            example = f"`{typename} = NamedTuple({typename!r}, [])`"
+            deprecation_msg = (
+                "{name} is deprecated and will be disallowed in Python {remove}. "
+                "To create a NamedTuple class with 0 fields "
+                "using the functional syntax, "
+                "pass an empty list, e.g. "
+            ) + example + "."
+    elif kwargs:
+        raise TypeError("Either list of fields or keywords"
+                        " can be provided to NamedTuple, not both")
+    if fields is _sentinel or fields is None:
+        import warnings
+        warnings._deprecated(deprecated_thing, message=deprecation_msg, remove=(3, 15))
+        fields = kwargs.items()
+    types = {n: _type_check(t, f"field {n} annotation must be a type")
+             for n, t in fields}
+    field_names = [n for n, _ in fields]
+
+    annotate = _make_eager_annotate(types)
+    nt = namedtuple(typename, field_names, defaults=(), module=_caller())
+    nt.__annotate__ = nt.__new__.__annotate__ = annotate
+    nt.__orig_bases__ = (NamedTuple,)
+    return nt
+
+
+def _namedtuple_mro_entries(bases):
+    assert NamedTuple in bases
+    return (_typing._NamedTuple,)
+
+
+NamedTuple.__mro_entries__ = _namedtuple_mro_entries
+
 
 def _namedtuple_annotate(original):
     # Check field types at declaration time, even if a name is still undefined.
@@ -639,7 +737,7 @@ def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
             if format != 4:
                 own = {key: _typeddict_field(tp, cls.__module__) for key, tp in own.items()}
         elif format == 4:
-            own = _typeddict_annotation_strings(fields)
+            own = _annotation_strings(fields)
         elif format in (1, 3):
             own = annotations
         else:
@@ -684,10 +782,7 @@ def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
     cls.__total__ = total
 
 
-_typeddict_sentinel = object()
-
-
-def TypedDict(typename, fields=_typeddict_sentinel, /, *, total=True):
+def TypedDict(typename, fields=_sentinel, /, *, total=True):
     """A simple typed namespace. At runtime it is equivalent to a plain dict.
 
     TypedDict creates a dictionary type such that a type checker will expect all
@@ -742,10 +837,10 @@ def TypedDict(typename, fields=_typeddict_sentinel, /, *, total=True):
             username: str      # the "username" key can be changed
 
     """
-    if fields is _typeddict_sentinel or fields is None:
+    if fields is _sentinel or fields is None:
         import warnings
 
-        if fields is _typeddict_sentinel:
+        if fields is _sentinel:
             deprecated_thing = "Failing to pass a value for the 'fields' parameter"
         else:
             deprecated_thing = "Passing `None` as the 'fields' parameter"

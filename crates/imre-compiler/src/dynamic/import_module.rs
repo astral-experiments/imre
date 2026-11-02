@@ -3,7 +3,7 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph};
 
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
-    if let Some(source) = asyncio_source(name) {
+    if let Some(source) = stdlib_package_source(name) {
         return Some(source);
     }
     match name {
@@ -312,14 +312,23 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 // The native warning backend is the public warnings module; load it only on emission.
                 let imports = section("def _gcd_import(", "def _builtin_from_name(")
                     .replace("_warnings.warn(", "_warning_module().warn(");
+                let find = section("def _find_spec(", "def _sanity_check(")
+                    .replace("with _ImportLockContext():", "with _import_lock:")
+                    .replace("_warnings.warn('sys.meta_path is empty', ImportWarning)",
+                             "_import_warning('sys.meta_path is empty', 1254)");
+                let load = section("def _load_backward_compatible(", "def _load(spec):")
+                    .replace("_warnings.warn(msg, ImportWarning)", "_import_warning(msg, 921)");
                 // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
                 [
                     include_str!("../../stdlib/importlib/legacy_source_loader.py"),
-                    section("class ModuleSpec:", "def spec_from_loader("),
+                    section("class ModuleSpec:", "def _spec_from_module("),
                     section("def _init_module_attrs(", "def _module_repr_from_spec("),
                     section("def _call_with_frames_removed(", "def _requires_builtin("),
                     section("def _resolve_name(", "def _find_spec("),
                     section("def _sanity_check(", "_ERR_MSG_PREFIX ="),
+                    section("def _object_name(", "# Bootstrap-related"),
+                    &find,
+                    &load,
                     &imports,
                 ].join("\n")
             })))
@@ -343,9 +352,13 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     include_str!("../../stdlib/importlib/source_loader.py"),
                     section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _pack_uint32("),
                     section("if _MS_WINDOWS:\n    def _path_join(", "def _write_atomic("),
+                    section("def _get_cached(", "def _calc_mode("),
                     &spec,
-                    section("class _NamespacePath:", "class PathFinder:"),
+                    &section("class _NamespacePath:", "class FileFinder:")
+                        .replace("_warnings.warn('sys.path_hooks is empty', ImportWarning)",
+                                 "_warn_import(globals(), 'sys.path_hooks is empty', 1224, _is_frozen)"),
                     section("class FileFinder:", "class AppleFrameworkLoader("),
+                    include_str!("../../stdlib/importlib/registered_finder.py"),
                     section("def _set_bootstrap_module(", "def _install("),
                 ].join("\n")
             })))
@@ -354,8 +367,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
-/// CPython 3.14.5 sources for asyncio and its concurrent.futures dependency.
-fn asyncio_source(name: &str) -> Option<(&'static str, &'static str)> {
+/// Pinned CPython 3.14.5 packages for runtime imports.
+fn stdlib_package_source(name: &str) -> Option<(&'static str, &'static str)> {
     macro_rules! source {
         ($file:literal) => {
             Some(($file, include_str!(concat!("../../stdlib/", $file))))
@@ -403,6 +416,29 @@ fn asyncio_source(name: &str) -> Option<(&'static str, &'static str)> {
         "concurrent.futures.interpreter" => source!("concurrent/futures/interpreter.py"),
         "concurrent.futures.process" => source!("concurrent/futures/process.py"),
         "concurrent.futures.thread" => source!("concurrent/futures/thread.py"),
+        "multiprocessing" => source!("multiprocessing/__init__.py"),
+        "multiprocessing.connection" => source!("multiprocessing/connection.py"),
+        "multiprocessing.context" => source!("multiprocessing/context.py"),
+        "multiprocessing.dummy" => source!("multiprocessing/dummy/__init__.py"),
+        "multiprocessing.dummy.connection" => source!("multiprocessing/dummy/connection.py"),
+        "multiprocessing.forkserver" => source!("multiprocessing/forkserver.py"),
+        "multiprocessing.heap" => source!("multiprocessing/heap.py"),
+        "multiprocessing.managers" => source!("multiprocessing/managers.py"),
+        "multiprocessing.pool" => source!("multiprocessing/pool.py"),
+        "multiprocessing.popen_fork" => source!("multiprocessing/popen_fork.py"),
+        "multiprocessing.popen_forkserver" => source!("multiprocessing/popen_forkserver.py"),
+        "multiprocessing.popen_spawn_posix" => source!("multiprocessing/popen_spawn_posix.py"),
+        "multiprocessing.popen_spawn_win32" => source!("multiprocessing/popen_spawn_win32.py"),
+        "multiprocessing.process" => source!("multiprocessing/process.py"),
+        "multiprocessing.queues" => source!("multiprocessing/queues.py"),
+        "multiprocessing.reduction" => source!("multiprocessing/reduction.py"),
+        "multiprocessing.resource_sharer" => source!("multiprocessing/resource_sharer.py"),
+        "multiprocessing.resource_tracker" => source!("multiprocessing/resource_tracker.py"),
+        "multiprocessing.shared_memory" => source!("multiprocessing/shared_memory.py"),
+        "multiprocessing.sharedctypes" => source!("multiprocessing/sharedctypes.py"),
+        "multiprocessing.spawn" => source!("multiprocessing/spawn.py"),
+        "multiprocessing.synchronize" => source!("multiprocessing/synchronize.py"),
+        "multiprocessing.util" => source!("multiprocessing/util.py"),
         _ => None,
     }
 }
