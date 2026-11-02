@@ -1542,6 +1542,9 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("genericpath.samestat")
             }
             (Self::GenericPath | Self::PosixPath, "exists") => Intrinsic::OsPathExists,
+            (Self::GenericPath | Self::PosixPath, "lexists") => {
+                Intrinsic::ObjectRuntimeExport("genericpath.lexists")
+            }
             (Self::PosixPath, "commonpath") => Intrinsic::PosixPath(PosixPathOperation::Commonpath),
             (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),
             (Self::PosixPath, "basename") => Intrinsic::PosixPath(PosixPathOperation::Basename),

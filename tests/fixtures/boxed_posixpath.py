@@ -100,6 +100,15 @@ def current():
     assert genericpath.exists.__module__ == "genericpath"
     assert os.path.exists(Path(b".")) and not os.path.exists(b"imre\0missing")
     assert not os.path.exists(-1)
+    assert os.path.lexists is posixpath.lexists is genericpath.lexists
+    assert genericpath.lexists(path=Path(os.fsencode(__file__)))
+    assert not posixpath.lexists(Path(b"missing\0file"))
+    try:
+        genericpath.lexists(0)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("lexists must reject file descriptors")
     key = "IMRE_BOXED_GETENV_FIXTURE"
     missing = []
     assert os.getenv("not=a=variable", missing) is missing
