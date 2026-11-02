@@ -31,6 +31,11 @@ fn unsigned(ctx: &mut Context, id: Id, max: u64, kind: &str) -> Result<u64> {
     })
 }
 
+fn descriptor(ctx: &mut Context, id: Id) -> Result<i32> {
+    super::stat::warn_bool_fd(ctx, id)?;
+    super::super::select::fd(ctx, id)
+}
+
 fn checked(result: libc::c_int) -> Result<libc::c_int> {
     if result < 0 {
         return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
@@ -60,7 +65,7 @@ pub(in crate::dynamic::stdlib) fn call(
         }
         "eventfd_read" => {
             let [fd] = builtins::bind_builtin_arguments(op, args, kwargs, ["fd"], 1)?;
-            let fd = super::super::select::fd(ctx, fd.unwrap())?;
+            let fd = descriptor(ctx, fd.unwrap())?;
             let mut value = 0;
             // SAFETY: value points to writable storage for one eventfd_t.
             checked(unsafe { libc::eventfd_read(fd, &mut value) })?;
@@ -69,7 +74,7 @@ pub(in crate::dynamic::stdlib) fn call(
         "eventfd_write" => {
             let [fd, value] =
                 builtins::bind_builtin_arguments(op, args, kwargs, ["fd", "value"], 2)?;
-            let fd = super::super::select::fd(ctx, fd.unwrap())?;
+            let fd = descriptor(ctx, fd.unwrap())?;
             let value = unsigned(ctx, value.unwrap(), u64::MAX, "long long")?;
             // SAFETY: eventfd_write borrows the descriptor and takes the counter increment by value.
             checked(unsafe { libc::eventfd_write(fd, value) })?;
