@@ -103,3 +103,35 @@ def current():
             print(str(error))
         else:
             raise AssertionError("invalid struct input accepted")
+
+    class HookOverflow(OverflowError):
+        pass
+
+    class OverflowingIndex:
+        def __index__(self):
+            raise HookOverflow("conversion failed")
+
+    for prefix in ("", "@", "=", "<", ">", "!"):
+        fmt = prefix + "l"
+        width = struct.calcsize(fmt)
+        assert width == (struct.calcsize("@L") if prefix in ("", "@") else 4)
+        limit = 1 << (8 * width - 1)
+        words = (-limit, -7, 0, limit - 1)
+        layout = struct.Struct(prefix + "4l")
+        packed = layout.pack(*words)
+        assert layout.unpack(bytearray(packed)) == words
+        assert struct.unpack(fmt, struct.pack(fmt, Field(-12))) == (-12,)
+        for n in (-limit - 1, limit, 1 << 1000, OverflowingIndex()):
+            try:
+                struct.pack(fmt, n)
+            except struct.error as error:
+                assert str(error) == "'l' format requires %d <= number <= %d" % (-limit, limit - 1)
+            else:
+                raise AssertionError("signed long overflow accepted")
+    assert struct.pack(">l", -2) == b"\xff\xff\xff\xfe"
+    assert struct.unpack("<l", b"\xfe\xff\xff\xff") == (-2,)
+    assert struct.unpack("!0l", b"") == ()
+    assert struct.calcsize("@B0l") == struct.calcsize("@B0L")
+    bcm = struct.Struct("@3I4l2I")
+    fields = (1, 2, 3, -1, 17, -19, 23, 29, 31)
+    assert bcm.unpack(bcm.pack(*fields)) == fields

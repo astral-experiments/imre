@@ -81,6 +81,7 @@ pub(super) fn unpack(ctx: &mut Context, layout: &StructFormat, buffer: Id) -> Re
         .into_iter()
         .map(|field| match field {
             UnpackedField::Integer(word) => ctx.alloc(Value::Int(crate::Int::new(word.into()))),
+            UnpackedField::Signed(number) => ctx.int(number),
             UnpackedField::Bytes(bytes) => ctx.alloc(Value::Bytes(bytes)),
         })
         .collect();
@@ -148,8 +149,27 @@ pub(super) fn pack(ctx: &mut Context, layout: &StructFormat, args: &[Id]) -> Res
 
 fn integer_field(ctx: &mut Context, id: Id, code: u8, width: usize) -> Result<u64> {
     let value = ctx
-        .index_value(id)?
-        .ok_or_else(|| format_error("required argument is not an integer"))?;
+        .index_value(id)
+        .and_then(|value| value.ok_or_else(|| format_error("required argument is not an integer")));
+    if code == b'l' {
+        let max = i64::MAX >> ((8 - width) * 8);
+        let min = !max;
+        let number = match value {
+            Ok(value) => value.to_i64(),
+            Err(error) => {
+                let overflow = ctx.builtin("OverflowError");
+                if !ctx.raised_error_matches(&error, overflow) {
+                    return Err(error);
+                }
+                None
+            }
+        };
+        return number
+            .filter(|n| (min..=max).contains(n))
+            .map(|n| n as u64)
+            .ok_or_else(|| format_error(format!("'l' format requires {min} <= number <= {max}")));
+    }
+    let value = value?;
     let number = value.big().to_u64();
     let max = u64::MAX >> ((8 - width) * 8);
     if let Some(n) = number.filter(|&n| n <= max) {
