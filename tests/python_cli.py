@@ -1613,6 +1613,15 @@ def main():
         compare("-IB", "-c", "import sys; print(__import__(sys.argv[1]).SelectorKey('f', 7, 1, 'd'))", "selectors")
         compare("-IB", "-c", "load = __import__; print(load('selectors').EVENT_READ)")
         compare(
+            "-IB", "-c",
+            "import copyreg\n"
+            "from copyreg import dispatch_table, pickle\n"
+            "pickle(bytes, tuple)\n"
+            "print(dispatch_table is copyreg.dispatch_table, dispatch_table[bytes] is tuple)\n"
+            "try: pickle(bytes, None)\n"
+            "except TypeError as error: print(error)\n",
+        )
+        compare(
             "-IB", "-c", "import sys; sys.path; m = __import__(sys.argv[1]); "
             "sys.version = '7.42 (custom) [cc]'; print(m.python_version())", "platform",
         )

@@ -111,6 +111,7 @@ impl Imports {
                     | "faulthandler"
                     | "code"
                     | "codeop"
+                    | "copyreg"
                     | "json"
                     | "json.encoder"
                     | "opcode"
@@ -502,6 +503,7 @@ pub(crate) fn compile(
             "atexit",
             "faulthandler",
             "code",
+            "copyreg",
             "weakref",
             "pathlib",
             "sys",
