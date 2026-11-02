@@ -8,6 +8,7 @@ use crate::objects::{Calendar, CalendarNumber};
 
 pub(in crate::dynamic) mod comparison;
 mod fromutc;
+mod iso_datetime;
 mod iso_time;
 mod reduction;
 pub(in crate::dynamic) mod render;
@@ -51,6 +52,7 @@ pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
             | "datetime.datetime.fromtimestamp"
             | "datetime.datetime.utcnow"
             | "datetime.datetime.utcfromtimestamp"
+            | "datetime.datetime.fromisoformat"
             | "datetime.datetime.combine"
             | "datetime.datetime.strptime"
             | "datetime.date.today"
@@ -122,6 +124,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__radd__",
                 "__sub__",
                 "__rsub__",
+                "fromisoformat",
                 "astimezone",
                 "combine",
                 "now",
@@ -877,6 +880,7 @@ pub(super) fn call(
             Ok(result)
         }
         "tzinfo.fromutc" | "timezone.fromutc" => fromutc::method(ctx, method, args, kwargs),
+        "datetime.fromisoformat" => iso_datetime::fromisoformat(ctx, args, kwargs),
         "datetime.astimezone" => fromutc::astimezone(ctx, args, kwargs),
         "timezone.utcoffset" | "timezone.dst" | "timezone.tzname" => {
             fixed_zone_method(ctx, method, args, kwargs)
@@ -1517,15 +1521,19 @@ fn time_fromisoformat(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         }
         hour = 0;
     }
-    let zone = match offset {
+    let zone = iso_zone(ctx, offset)?;
+    time_for_class(ctx, class, [hour, minute, second, micros, 0], zone)
+}
+
+fn iso_zone(ctx: &mut Context, offset: Option<i64>) -> Result<Id> {
+    Ok(match offset {
         None => NONE,
         Some(0) => utc(ctx),
         Some(us) => {
-            let offset = Calendar::from_delta_microseconds(&crate::Int::from(us))?;
-            store(ctx, Calendar::zone(&offset, None)?, NONE)
+            let delta = Calendar::from_delta_microseconds(&crate::Int::from(us))?;
+            store(ctx, Calendar::zone(&delta, None)?, NONE)
         }
-    };
-    time_for_class(ctx, class, [hour, minute, second, micros, 0], zone)
+    })
 }
 
 /// Read native civil fields even when the receiver overrides their descriptors.
