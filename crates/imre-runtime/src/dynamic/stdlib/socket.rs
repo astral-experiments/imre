@@ -22,23 +22,37 @@ const CONSTANTS: &[(&str, i32)] = &[
     ("SOMAXCONN", libc::SOMAXCONN),
 ];
 
+// socket.py imports these constants once, so deletion must not fall back to a native value.
+const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
+    ("IPPROTO_UDP", libc::IPPROTO_UDP),
+    ("SOCK_DGRAM", libc::SOCK_DGRAM),
+    ("SOCK_RAW", libc::SOCK_RAW),
+    ("SOCK_RDM", libc::SOCK_RDM),
+    ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
+];
+
 /// Seed the low-level module once so normal module assignment and deletion remain observable.
 pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) -> Result<()> {
-    // socket.py imports these names once, so deletion must not fall back to a native value.
-    let imported = [
-        ("IPPROTO_UDP", libc::IPPROTO_UDP),
-        ("SOCK_DGRAM", libc::SOCK_DGRAM),
-        ("SOCK_RAW", libc::SOCK_RAW),
-        ("SOCK_RDM", libc::SOCK_RDM),
-        ("SOCK_SEQPACKET", libc::SOCK_SEQPACKET),
-    ];
-    for (name, value) in CONSTANTS.iter().copied().chain(imported) {
+    for &(name, value) in CONSTANTS.iter().chain(IMPORTED_CONSTANTS) {
         let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
     }
     for name in ["has_ipv6", "socket", "error"] {
         let value = attribute(ctx, name)?;
         ctx.bind(scope, name, value);
+    }
+    Ok(())
+}
+
+/// An ordinary importlib-only executable can load socket without its bundled Python source.
+pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) -> Result<()> {
+    let low = ctx.module("_socket")?;
+    for &(name, _) in IMPORTED_CONSTANTS {
+        match ctx.lookup_attr(low, name) {
+            Ok(value) => ctx.bind(scope, name, value),
+            Err(error) if ctx.is_attribute_error(&error) => {}
+            Err(error) => return Err(error),
+        }
     }
     Ok(())
 }
