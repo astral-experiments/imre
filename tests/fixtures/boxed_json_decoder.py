@@ -69,3 +69,10 @@ def current():
             return self.label, text
 
     assert json.loads(b'123', cls=Decoder, label='document') == ('document', '123')
+
+    class Text(str):
+        pass
+
+    fresh.JSONDecoder = None
+    assert fresh.loads(Text('[3]')) == [3]
+    assert fresh.loads(bytearray(b'\xff\xfe1\x00')) == 1
