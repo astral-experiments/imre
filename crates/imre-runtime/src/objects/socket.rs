@@ -9,13 +9,15 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::ptr;
+use std::time::{Duration, Instant};
 
 pub(super) struct Socket {
     family: i32,
     kind: i32,
     proto: i32,
     fd: RawFd,
-    blocking: bool,
+    // None blocks indefinitely; zero is nonblocking. Positive timeouts use nonblocking fds.
+    timeout: Option<Duration>,
     readers: usize,
     close_requested: bool,
 }
@@ -58,6 +60,7 @@ impl Drop for Socket {
 pub(crate) struct SocketInput {
     socket: Option<crate::ObjectOwner>,
     buffer: io::Cursor<Vec<u8>>,
+    timed_out: bool,
 }
 
 const SOCKET_BUFFER_SIZE: usize = 128 * 1024;
@@ -74,7 +77,28 @@ impl SocketInput {
         Ok(Self {
             socket: Some(socket),
             buffer: io::Cursor::new(bytes),
+            timed_out: false,
         })
+    }
+
+    // SocketIO permanently refuses reads after the first read timeout on this file.
+    unsafe fn read_socket(&mut self, target: *mut u8, size: usize) -> io::Result<usize> {
+        if size == 0 {
+            return Ok(0);
+        }
+        if self.timed_out {
+            return Err(io::Error::other("cannot read from timed out object"));
+        }
+        let socket = self
+            .socket
+            .as_ref()
+            .ok_or_else(|| io::Error::from_raw_os_error(libc::EBADF))?;
+        // SAFETY: the caller provides size writable bytes.
+        let result = unsafe { receive(socket, target, size, 0) };
+        if let Err(err) = &result {
+            self.timed_out = err.kind() == io::ErrorKind::TimedOut;
+        }
+        result
     }
 
     /// Consume buffered input first, otherwise receive at most the requested bytes once.
@@ -83,7 +107,7 @@ impl SocketInput {
             return io::Read::read(&mut self.buffer, target);
         }
         // SAFETY: target is writable for its length, and receive does not retain it.
-        match unsafe { receive(self.as_raw_fd(), target.as_mut_ptr(), target.len(), 0) } {
+        match unsafe { self.read_socket(target.as_mut_ptr(), target.len()) } {
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(0),
             result => result,
         }
@@ -119,7 +143,7 @@ impl io::Read for SocketInput {
             && buffer.len() >= SOCKET_BUFFER_SIZE
         {
             // SAFETY: buffer exposes this many exclusively writable bytes.
-            return unsafe { receive(self.as_raw_fd(), buffer.as_mut_ptr(), buffer.len(), 0) };
+            return unsafe { self.read_socket(buffer.as_mut_ptr(), buffer.len()) };
         }
         let count = io::Read::read(&mut io::BufRead::fill_buf(self)?, buffer)?;
         io::BufRead::consume(self, count);
@@ -130,13 +154,12 @@ impl io::Read for SocketInput {
 impl io::BufRead for SocketInput {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         if self.buffer.position() >= self.buffer.get_ref().len() as u64 {
-            let raw = self.as_raw_fd();
-            let bytes = self.buffer.get_mut();
-            bytes.clear();
+            self.buffer.get_mut().clear();
+            let target = self.buffer.get_mut().as_mut_ptr();
             // SAFETY: try_new reserved this many bytes, and recv initializes the returned prefix.
-            let count = unsafe { receive(raw, bytes.as_mut_ptr(), SOCKET_BUFFER_SIZE, 0)? };
+            let count = unsafe { self.read_socket(target, SOCKET_BUFFER_SIZE)? };
             // SAFETY: receive initialized exactly count bytes in the reserved buffer.
-            unsafe { bytes.set_len(count) };
+            unsafe { self.buffer.get_mut().set_len(count) };
             self.buffer.set_position(0);
         }
         self.buffer.fill_buf()
@@ -192,6 +215,82 @@ fn retry<T>(mut call: impl FnMut() -> io::Result<T>) -> io::Result<T> {
         match call() {
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             result => return result,
+        }
+    }
+}
+
+/// Return a single deadline for an entire socket operation, including retries and sendall.
+#[derive(Clone, Copy)]
+struct Deadline {
+    start: Instant,
+    duration: Duration,
+}
+
+impl Deadline {
+    fn remaining(self) -> Duration {
+        self.duration.saturating_sub(self.start.elapsed())
+    }
+}
+
+fn deadline(socket: &Object) -> Option<Deadline> {
+    get_timeout(socket)
+        .filter(|d| !d.is_zero())
+        .map(|duration| Deadline {
+            start: Instant::now(),
+            duration,
+        })
+}
+
+fn timed_out() -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, "timed out")
+}
+
+/// Wait without extending the deadline on a signal, spurious readiness or a long poll interval.
+fn poll_socket(fd: RawFd, events: i16, until: Option<Deadline>) -> io::Result<()> {
+    let mut pollfd = libc::pollfd {
+        fd,
+        events,
+        revents: 0,
+    };
+    loop {
+        let timeout = until.map_or(-1, |end| {
+            end.remaining()
+                .as_nanos()
+                .div_ceil(1_000_000)
+                .min(i32::MAX as u128) as i32
+        });
+        // SAFETY: poll may write revents on this one live descriptor record.
+        match checked(unsafe { libc::poll(&raw mut pollfd, 1, timeout) }) {
+            Ok(n) if n > 0 => return Ok(()),
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+        if until.is_some_and(|end| end.remaining().is_zero()) {
+            return Err(timed_out());
+        }
+    }
+}
+
+/// Issue a nonblocking syscall and retry on readiness only when a timeout was requested.
+fn socket_call<T>(
+    fd: RawFd,
+    event: i16,
+    until: Option<Deadline>,
+    mut call: impl FnMut() -> io::Result<T>,
+) -> io::Result<T> {
+    loop {
+        // A negative fd is ignored by poll; the syscall itself must report EBADF.
+        if fd >= 0 && until.is_some() {
+            poll_socket(fd, event, until)?;
+        }
+        match call() {
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) if until.is_some() && e.kind() == io::ErrorKind::WouldBlock => {}
+            result => return result,
+        }
+        if until.is_some_and(|end| end.remaining().is_zero()) {
+            return Err(timed_out());
         }
     }
 }
@@ -262,7 +361,7 @@ fn handle(
         family,
         kind,
         proto,
-        blocking,
+        timeout: (!blocking).then_some(Duration::ZERO),
         readers: 0,
         close_requested: false,
     }))))
@@ -1101,23 +1200,22 @@ pub extern "C" fn imre_socket_shutdown(s: &Object, how: usize) {
     finish(c_int(how).and_then(|n| shutdown(s, n)), ());
 }
 
-fn connect(fd: RawFd, addr: &InternetAddress, blocking: bool) -> io::Result<()> {
+fn connect(socket: &Object, addr: &InternetAddress) -> io::Result<()> {
+    let fd = fd(socket);
+    let until = deadline(socket);
     let (ptr, len) = addr.raw_parts();
     // SAFETY: addr owns the complete socket address through the syscall.
     let result = checked(unsafe { libc::connect(fd, ptr, len) });
     match result {
-        Err(e) if e.kind() == io::ErrorKind::Interrupted && blocking => {}
+        Err(e)
+            if e.kind() == io::ErrorKind::Interrupted
+                && get_timeout(socket) != Some(Duration::ZERO) => {}
+        Err(e) if until.is_some() && e.raw_os_error() == Some(libc::EINPROGRESS) => {}
         other => return other.map(|_| ()),
     }
     // An interrupted blocking connect is already in progress. Calling connect again
     // can report EISCONN or start a different attempt. Observe the existing attempt.
-    let mut pfd = libc::pollfd {
-        fd,
-        events: libc::POLLOUT,
-        revents: 0,
-    };
-    // SAFETY: poll writes one live pollfd in place.
-    retry(|| checked(unsafe { libc::poll(&raw mut pfd, 1, -1) }))?;
+    poll_socket(fd, libc::POLLOUT, until)?;
     // Retry the completion check itself on EINTR, without reconnecting.
     retry(|| {
         let mut error: i32 = 0;
@@ -1153,7 +1251,7 @@ pub unsafe extern "C" fn imre_socket_connect(s: &Object, pair: *const usize) {
 }
 
 pub(crate) fn connect_address(s: &Object, addr: &InternetAddress) -> Result<()> {
-    connect(fd(s), addr, state(s, |s| s.blocking)).map_err(errno_error)
+    connect(s, addr).map_err(errno_error)
 }
 
 // Caller supplies the generated tuple descriptor so repr, projection and release
@@ -1250,7 +1348,7 @@ pub unsafe extern "C" fn imre_socket_sockname(
 
 pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, InternetAddress)> {
     let raw = fd(s);
-    let (child, addr, len) = retry(|| {
+    let (child, addr, len) = socket_call(raw, libc::POLLIN, deadline(s), || {
         peer_call(|a, n| {
             // SAFETY: peer_call provides a fresh address and resets its capacity on every attempt.
             unsafe {
@@ -1267,6 +1365,10 @@ pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, InternetAddress)
     })
     .map_err(errno_error)?;
     let child = handle(child, true, family(s), kind(s), proto(s))?;
+    if get_timeout(s).is_some_and(|d| !d.is_zero()) {
+        // The accepted fd may inherit O_NONBLOCK on BSD, but its Python timeout defaults to None.
+        set_blocking(fd(&child), true).map_err(errno_error)?;
+    }
     // SAFETY: the kernel filled the supplied storage, and child owns its fd on errors.
     let addr = unsafe { InternetAddress::read((&raw const addr).cast(), len) }?;
     Ok((child, addr))
@@ -1346,7 +1448,7 @@ pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
         }
         // SAFETY: the allocation has at least size writable bytes.
         let received =
-            unsafe { receive(fd(s), bytes.as_mut_ptr(), size, flags) }.map_err(errno_error)?;
+            unsafe { receive(s, bytes.as_mut_ptr(), size, flags) }.map_err(errno_error)?;
         let n = received.min(size);
         // SAFETY: the kernel initialized the returned prefix or MSG_TRUNC
         // selected initialized storage. A reported packet length can exceed size.
@@ -1362,16 +1464,17 @@ pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
 
 pub(crate) fn recv_into(s: &Object, buffer: &mut [u8], flags: i32) -> Result<usize> {
     // SAFETY: buffer exposes this many exclusively writable bytes.
-    unsafe { receive(fd(s), buffer.as_mut_ptr(), buffer.len(), flags) }.map_err(errno_error)
+    unsafe { receive(s, buffer.as_mut_ptr(), buffer.len(), flags) }.map_err(errno_error)
 }
 
 /// # Safety
 /// The caller retains exclusive access to len writable bytes at buffer.
-unsafe fn receive(fd: RawFd, buffer: *mut u8, len: usize, flags: i32) -> io::Result<usize> {
+unsafe fn receive(socket: &Object, buffer: *mut u8, len: usize, flags: i32) -> io::Result<usize> {
     if len == 0 {
         return Ok(0);
     }
-    retry(|| {
+    let fd = fd(socket);
+    socket_call(fd, libc::POLLIN, deadline(socket), || {
         // SAFETY: the caller supplies len writable bytes. Flags can make the
         // returned count differ from the number of bytes actually copied.
         let n = unsafe { libc::recv(fd, buffer.cast(), len, flags) };
@@ -1379,10 +1482,14 @@ unsafe fn receive(fd: RawFd, buffer: *mut u8, len: usize, flags: i32) -> io::Res
     })
 }
 
-pub(crate) fn send(raw: RawFd, bytes: &[u8], flags: i32) -> Result<usize> {
+pub(crate) fn send(socket: &Object, bytes: &[u8], flags: i32) -> Result<usize> {
+    send_until(fd(socket), bytes, flags, deadline(socket))
+}
+
+fn send_until(raw: RawFd, bytes: &[u8], flags: i32, until: Option<Deadline>) -> Result<usize> {
     #[cfg(not(target_vendor = "apple"))]
     let flags = flags | libc::MSG_NOSIGNAL;
-    retry(|| {
+    socket_call(raw, libc::POLLOUT, until, || {
         // SAFETY: the slice stays initialized and immovable across retries.
         let n = unsafe { libc::send(raw, bytes.as_ptr().cast(), bytes.len(), flags) };
         usize::try_from(n).map_err(|_| io::Error::last_os_error())
@@ -1394,7 +1501,7 @@ pub(crate) fn send(raw: RawFd, bytes: &[u8], flags: i32) -> Result<usize> {
 pub extern "C" fn imre_socket_send(s: &Object, data: &Bytes, flags: usize) -> usize {
     finish(
         c_int(flags)
-            .and_then(|flags| send(fd(s), data, flags))
+            .and_then(|flags| send(s, data, flags))
             .map(|n| Int::from_usize(n).into_raw()),
         word(0),
     )
@@ -1407,13 +1514,17 @@ pub extern "C" fn imre_socket_sendall(s: &Object, data: &Bytes, flags: usize) {
 
 pub(crate) fn send_all(s: &Object, data: &[u8], flags: i32) -> Result<()> {
     let raw = fd(s);
+    let until = deadline(s);
     let mut remaining = data;
     // Empty input still makes one send: EBADF/EPIPE are observable.
     loop {
-        let written = send(raw, remaining, flags)?;
+        let written = send_until(raw, remaining, flags, until)?;
         remaining = &remaining[written..];
         if remaining.is_empty() {
             return Ok(());
+        }
+        if until.is_some_and(|end| end.remaining().is_zero()) {
+            return Err(errno_error(timed_out()));
         }
         if written == 0 {
             return Err(errno_error(io::Error::from_raw_os_error(libc::EPIPE)));
@@ -1458,26 +1569,34 @@ pub extern "C" fn imre_socket_setblocking(s: &Object, flag: usize) {
 }
 
 pub(crate) fn set_blocking_mode(s: &Object, blocking: bool) -> Result<()> {
-    // CPython updates its socket timeout state even if fcntl later reports EBADF.
-    state(s, |s| s.blocking = blocking);
-    set_blocking(fd(s), blocking).map_err(errno_error)
+    set_timeout(s, (!blocking).then_some(Duration::ZERO))
+}
+
+pub(crate) fn get_timeout(s: &Object) -> Option<Duration> {
+    state(s, |s| s.timeout)
+}
+
+pub(crate) fn set_timeout(s: &Object, timeout: Option<Duration>) -> Result<()> {
+    // CPython updates timeout even when fcntl subsequently reports EBADF.
+    state(s, |s| s.timeout = timeout);
+    set_blocking(fd(s), timeout.is_none()).map_err(errno_error)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_getblocking(s: &Object) -> bool {
-    state(s, |s| s.blocking)
+    get_timeout(s) != Some(Duration::ZERO)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_socket_dup(s: &Object) -> *const Object {
     let result = (|| {
-        let (raw, blocking, family, kind) = state(s, |s| (s.fd, s.blocking, s.family, s.kind));
+        let (raw, timeout, family, kind) = state(s, |s| (s.fd, s.timeout, s.family, s.kind));
         // SAFETY: the kernel validates even a closed fd; its copy is non-inheritable from creation.
         let copy =
             checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) }).map_err(errno_error)?;
-        let child = handle(copy, blocking, family, kind, proto(s))?;
+        let child = handle(copy, timeout.is_none(), family, kind, proto(s))?;
         // socket.dup reapplies its source's blocking mode to the shared open file.
-        set_blocking(copy, blocking).map_err(errno_error)?;
+        set_timeout(&child, timeout)?;
         Ok(crate::ObjectOwner::into_raw(child))
     })();
     finish(result, ptr::null())

@@ -536,6 +536,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
                     | "getsockopt"
                     | "setsockopt"
                     | "setblocking"
+                    | "settimeout"
+                    | "gettimeout"
                     | "get_inheritable"
                     | "getblocking"
                     | "__enter__"
