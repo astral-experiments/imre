@@ -521,6 +521,8 @@ pub(crate) enum IntrinsicModule {
     PosixPath,
     Urllib,
     UrllibParse,
+    UrllibRequest,
+    UrllibError,
     Email,
     EmailUtils,
     Collections,
@@ -766,6 +768,8 @@ pub(crate) enum Intrinsic {
     CodecInfoClass,
     UnicodeNormalize { check: bool },
     ObjectRuntimeExport(&'static str),
+    /// Bind the object provider when this export is used, after checking typed calls.
+    ScopedObjectExport(&'static str),
     WeakProxy,
     WeakProxyClass { callable: bool },
     CodecLookup,
@@ -1005,6 +1009,8 @@ impl IntrinsicModule {
             "email.utils" => Some(Self::EmailUtils),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
+            "urllib.request" => Some(Self::UrllibRequest),
+            "urllib.error" => Some(Self::UrllibError),
             "importlib" => Some(Self::Importlib),
             "importlib.abc" => Some(Self::ImportlibAbc),
             "importlib._abc" => Some(Self::ImportlibLoaderAbc),
@@ -1121,8 +1127,14 @@ impl IntrinsicModule {
         if self == Self::Email && name == "utils" {
             return Some(Binding::IntrinsicModule(Self::EmailUtils));
         }
-        if self == Self::Urllib && name == "parse" {
-            return Some(Binding::IntrinsicModule(Self::UrllibParse));
+        if self == Self::Urllib {
+            let child = match name {
+                "parse" => Self::UrllibParse,
+                "request" => Self::UrllibRequest,
+                "error" => Self::UrllibError,
+                _ => return None,
+            };
+            return Some(Binding::IntrinsicModule(child));
         }
         if self == Self::ImportlibAbc && name == "machinery" {
             return Some(Binding::IntrinsicModule(Self::ImportlibMachinery));
@@ -2492,6 +2504,33 @@ impl IntrinsicModule {
             (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),
             (Self::PosixPath, "normpath") => Intrinsic::PosixPath(PosixPathOperation::Normpath),
             (Self::PosixPath, "abspath") => Intrinsic::PosixPath(PosixPathOperation::Abspath),
+            (Self::UrllibRequest, "Request") => {
+                Intrinsic::ScopedObjectExport("urllib.request.Request")
+            }
+            (Self::UrllibRequest, "urlopen") => {
+                Intrinsic::ScopedObjectExport("urllib.request.urlopen")
+            }
+            (Self::UrllibRequest, "urlretrieve") => {
+                Intrinsic::ScopedObjectExport("urllib.request.urlretrieve")
+            }
+            (Self::UrllibRequest, "urlcleanup") => {
+                Intrinsic::ScopedObjectExport("urllib.request.urlcleanup")
+            }
+            (Self::UrllibRequest, "build_opener") => {
+                Intrinsic::ScopedObjectExport("urllib.request.build_opener")
+            }
+            (Self::UrllibRequest, "install_opener") => {
+                Intrinsic::ScopedObjectExport("urllib.request.install_opener")
+            }
+            (Self::UrllibError, "URLError") => {
+                Intrinsic::ScopedObjectExport("urllib.error.URLError")
+            }
+            (Self::UrllibError, "HTTPError") => {
+                Intrinsic::ScopedObjectExport("urllib.error.HTTPError")
+            }
+            (Self::UrllibError, "ContentTooShortError") => {
+                Intrinsic::ScopedObjectExport("urllib.error.ContentTooShortError")
+            }
             (Self::UrllibParse, "uses_relative") => {
                 Intrinsic::ObjectRuntimeExport("urllib.parse.uses_relative")
             }
