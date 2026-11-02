@@ -2295,6 +2295,8 @@ impl IntrinsicModule {
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::Zlib, "adler32") => Intrinsic::Adler32,
+            (Self::Zlib, "compress") => Intrinsic::ObjectRuntimeExport("zlib.compress"),
+            (Self::Zlib, "decompress") => Intrinsic::ObjectRuntimeExport("zlib.decompress"),
             (Self::Zlib, "crc32") => Intrinsic::ObjectRuntimeExport("zlib.crc32"),
             (Self::ImreJson, "decode") => Intrinsic::JsonDecode,
             (Self::JsonNative, "scanstring") => Intrinsic::ObjectRuntimeExport("_json.scanstring"),
