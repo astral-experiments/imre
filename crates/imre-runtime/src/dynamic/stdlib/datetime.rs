@@ -7,6 +7,7 @@ use crate::dynamic::builtins::bind;
 use crate::objects::{Calendar, CalendarNumber};
 
 mod reduction;
+mod strftime;
 
 const FIELDS: [&str; 8] = [
     "year",
@@ -49,6 +50,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "toordinal",
                 "weekday",
                 "timetuple",
+                "strftime",
             ],
         ),
         "datetime.datetime" => (
@@ -72,6 +74,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "__reduce_ex__",
                 "__repr__",
                 "__str__",
+                "strftime",
             ],
         ),
         "datetime.timedelta" => (
@@ -137,7 +140,11 @@ pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
 }
 
 pub(in crate::dynamic) fn store(ctx: &mut Context, value: Calendar, tzinfo: Id) -> Id {
-    ctx.alloc(Value::Calendar { value, tzinfo })
+    ctx.alloc(Value::Calendar {
+        value,
+        tzinfo,
+        tzname: NONE,
+    })
 }
 
 pub(in crate::dynamic) fn utc(ctx: &mut Context) -> Id {
@@ -201,7 +208,7 @@ pub(in crate::dynamic) fn read_field(
     receiver: Id,
 ) -> Result<Id> {
     let class = owner.strip_prefix("datetime.").unwrap();
-    let Value::Calendar { value, tzinfo } = ctx.heap.get(ctx.scalar_value(receiver)) else {
+    let Value::Calendar { value, tzinfo, .. } = ctx.heap.get(ctx.scalar_value(receiver)) else {
         return Err(field_type_error(ctx, owner, name, receiver));
     };
     if value.class() != class && !(class == "date" && value.class() == "datetime") {
@@ -416,6 +423,8 @@ pub(super) fn call(
         return read_field(ctx, owner, name, *receiver);
     }
     match method {
+        "date.strftime" => strftime::format(ctx, "date", args, kwargs),
+        "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
         "timedelta.__mul__"
         | "timedelta.__rmul__"
@@ -445,7 +454,7 @@ pub(super) fn call(
             };
             let clock = required(clock, "combine()", "time", 2)?;
             let (clock, clock_tz) = match ctx.heap.get(ctx.scalar_value(clock)) {
-                Value::Calendar { value, tzinfo } if value.class() == "time" => {
+                Value::Calendar { value, tzinfo, .. } if value.class() == "time" => {
                     (value.clone(), *tzinfo)
                 }
                 _ => return Err(invalid(ctx, clock, 2, "time")),
@@ -488,6 +497,7 @@ pub(super) fn call(
                     ),
                 )
             })?;
+            let tzname = name.unwrap_or(NONE);
             let name = name
                 .map(|id| {
                     ctx.str_value(id).map_err(|_| {
@@ -509,7 +519,11 @@ pub(super) fn call(
             Ok(if zone.is_utc() {
                 utc(ctx)
             } else {
-                store(ctx, zone, NONE)
+                ctx.alloc(Value::Calendar {
+                    value: zone,
+                    tzinfo: NONE,
+                    tzname,
+                })
             })
         }
         "datetime.now" => {
