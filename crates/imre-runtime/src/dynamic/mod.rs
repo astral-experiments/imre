@@ -2784,6 +2784,8 @@ impl Context {
                     "_cycle_next",
                     "_starmap_allocate",
                     "_starmap_next",
+                    "_zip_longest_allocate",
+                    "_zip_longest_state",
                     "_predicate_allocate",
                     "_predicate_state",
                     "_chain_allocate",
@@ -3282,6 +3284,7 @@ impl Context {
                     ("takewhile", "itertools.takewhile"),
                     ("dropwhile", "itertools.dropwhile"),
                     ("compress", "itertools.compress"),
+                    ("zip_longest", "itertools.zip_longest"),
                 ] {
                     if let Some(class) = self.scope_name(scope, name)
                         && let Value::Class { scope, .. } = *self.heap.get(class)
