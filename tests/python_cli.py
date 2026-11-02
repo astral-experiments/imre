@@ -1932,6 +1932,7 @@ def report(text):
             "boxed_ast_visitors.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
+            "boxed_inspect_getmodule.py",
             "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",

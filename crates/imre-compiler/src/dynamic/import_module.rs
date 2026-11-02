@@ -84,7 +84,12 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                     [
                         include_str!("../../stdlib/inspect.py"),
                         include_str!("../../stdlib/inspect_signature.py"),
-                        section("def ismodule(object):", "def isclass(object):"),
+                        "import importlib.machinery\nimport linecache\nimport os\nimport sys",
+                        section("def ismodule(object):", "def ispackage(object):"),
+                        section("def isfunction(object):", "def _has_code_flag("),
+                        section("def istraceback(object):", "def isbuiltin(object):"),
+                        section("def getfile(object):", "def getmodulename(path):"),
+                        section("def getsourcefile(object):", "class ClassFoundException("),
                         section("def _signature_bound_method(", "def _signature_is_builtin("),
                         section("class _void:", "class _ParameterKind("),
                         &classes,
