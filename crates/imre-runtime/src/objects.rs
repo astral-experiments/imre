@@ -124,15 +124,13 @@ use super::{
 use num_traits::ToPrimitive;
 use std::rc::Rc;
 
-/// Methods inherited from the native object type.
+/// Methods in the native object dictionary, in insertion order.
 pub(crate) const OBJECT_METHODS: &[&str] = &[
     "__new__",
     "__repr__",
-    "__getattribute__",
-    "__init__",
-    "__dir__",
     "__hash__",
     "__str__",
+    "__getattribute__",
     "__setattr__",
     "__delattr__",
     "__lt__",
@@ -141,6 +139,7 @@ pub(crate) const OBJECT_METHODS: &[&str] = &[
     "__ne__",
     "__gt__",
     "__ge__",
+    "__init__",
     "__reduce_ex__",
     "__reduce__",
     "__getstate__",
@@ -148,6 +147,7 @@ pub(crate) const OBJECT_METHODS: &[&str] = &[
     "__init_subclass__",
     "__format__",
     "__sizeof__",
+    "__dir__",
 ];
 
 /// Literal constructors share the same empty and Latin-1 owners as chr and indexing.

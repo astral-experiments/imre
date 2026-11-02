@@ -1046,30 +1046,8 @@ fn class_attribute(name: &str) -> bool {
             | "__static_attributes__"
             | "__dict__"
             | "__weakref__"
-            | "__new__"
-            | "__repr__"
-            | "__hash__"
-            | "__str__"
-            | "__getattribute__"
-            | "__setattr__"
-            | "__delattr__"
-            | "__lt__"
-            | "__le__"
-            | "__eq__"
-            | "__ne__"
-            | "__gt__"
-            | "__ge__"
-            | "__init__"
-            | "__reduce_ex__"
-            | "__reduce__"
-            | "__getstate__"
-            | "__subclasshook__"
-            | "__init_subclass__"
-            | "__format__"
-            | "__sizeof__"
-            | "__dir__"
             | "__class__"
-    )
+    ) || crate::objects::OBJECT_METHODS.contains(&name)
 }
 
 /// Test attribute presence on a concrete LogRecord, including inherited descriptors.

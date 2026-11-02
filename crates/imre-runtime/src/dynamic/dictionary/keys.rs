@@ -678,13 +678,14 @@ impl Context {
     pub(in super::super) fn lookup_builtin_type_name(
         &mut self,
         key: Id,
-        names: &[&'static str],
+        groups: &[&[&'static str]],
     ) -> Option<&'static str> {
+        let mut names = groups.iter().flat_map(|group| group.iter().copied());
         if let Value::Str(text) = self.heap.get(key) {
-            return names.iter().copied().find(|&name| name == text);
+            return names.find(|&name| name == text);
         }
         let hash = self.dictionary_hash(key).ok()?;
-        for &name in names {
+        for name in names {
             if normalized(crate::python_hash::text(name)) == hash {
                 let stored = self.text(name);
                 if self.dictionary_equal(stored, key).ok()? {
