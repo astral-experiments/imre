@@ -358,7 +358,9 @@ pub(in crate::dynamic) fn open(
         Some(mode) => crate::objects::TextFile::open(path, mode)
             .map(Value::TextFile)
             .map_err(Error::from),
-        None => files::BinaryFile::open(path, mode).and_then(files::BinaryFile::into_value),
+        None => {
+            files::BinaryFile::open(path, filename, mode).and_then(files::BinaryFile::into_value)
+        }
     };
     match file {
         Ok(file) if writing => ctx.heap.alloc_file_writer(file),
