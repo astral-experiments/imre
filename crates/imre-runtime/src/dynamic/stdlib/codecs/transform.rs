@@ -1,7 +1,7 @@
 //! Stateless codec calls preserve the Python input and result when the API permits it.
 use super::{
-    Context, Error, Id, NONE, Result, Value, decode_bytes, encode_text, error_name, lookup_name,
-    raw_unicode_escape, type_error, wide_unicode,
+    Context, Error, Id, NONE, Result, Value, decode_bytes, encode_text, error_name,
+    lookup_transform, raw_unicode_escape, type_error, wide_unicode,
 };
 use crate::objects::{Codec, FixedUnicode, exceptions::Kind};
 
@@ -139,19 +139,13 @@ pub(in crate::dynamic::stdlib) fn transform(
     }
     let encoding = spelling(ctx, encoding, "utf-8")?;
     error_name(ctx, errors)?;
-    // Fixed-width and raw escape decoders predate native CodecInfo entries.
-    if name == "decode"
-        && let Some(result) = special_decode(
-            ctx,
-            &crate::objects::normalize_codec(&encoding)?,
-            input,
-            errors,
-        )
-    {
-        return result;
+    let key = crate::objects::normalize_codec(&encoding)?;
+    let wide = wide_unicode::encoding(&key);
+    let native = name == "decode" && (wide.is_some() || key == "raw_unicode_escape");
+    match lookup_transform(ctx, &encoding, native)? {
+        Some(entry) => apply(ctx, entry, name, input, &encoding, errors, false),
+        None => native_decode(ctx, wide, input, errors),
     }
-    let entry = lookup_name(ctx, &encoding)?;
-    apply(ctx, entry, name, input, &encoding, errors, false)
 }
 
 /// Python-visible encoding preserves bytes subclass identities from custom encoders.
@@ -164,11 +158,15 @@ pub(in crate::dynamic) fn encode_text_object(
     let name = spelling(ctx, encoding, "utf-8")?;
     error_name(ctx, errors)?;
     let key = crate::objects::normalize_codec(&name)?;
-    if shortcut(&key) || FixedUnicode::by_key(&key).is_some() {
+    let entry = if shortcut(&key) {
+        None
+    } else {
+        lookup_transform(ctx, &name, FixedUnicode::by_key(&key).is_some())?
+    };
+    let Some(entry) = entry else {
         let data = encode_text(ctx, input, encoding, errors)?;
         return Ok(ctx.alloc(Value::Bytes(data)));
-    }
-    let entry = lookup_name(ctx, &name)?;
+    };
     let result = apply(ctx, entry, "encode", input, &name, errors, true)?;
     match ctx.heap.get(ctx.scalar_value(result)) {
         Value::Bytes(_) => Ok(result),
@@ -186,23 +184,18 @@ pub(in crate::dynamic) fn encode_text_object(
     }
 }
 
-fn special_decode(
+/// The default search provider implements wide and raw escape decoding without a CodecInfo.
+fn native_decode(
     ctx: &mut Context,
-    key: &str,
+    wide: Option<(FixedUnicode, bool)>,
     input: Id,
     errors: Option<Id>,
-) -> Option<Result<Id>> {
-    let format = wide_unicode::encoding(key);
-    if format.is_none() && key != "raw_unicode_escape" {
-        return None;
-    }
-    Some((|| {
-        let policy = error_name(ctx, errors)?.to_owned();
-        ctx.with_buffer_export(input, |ctx| match format {
-            Some((format, bom)) => wide_unicode::decode(ctx, input, &policy, format, bom),
-            None => raw_unicode_escape::decode(ctx, input, &policy),
-        })
-    })())
+) -> Result<Id> {
+    let policy = error_name(ctx, errors)?.to_owned();
+    ctx.with_buffer_export(input, |ctx| match wide {
+        Some((format, bom)) => wide_unicode::decode(ctx, input, &policy, format, bom),
+        None => raw_unicode_escape::decode(ctx, input, &policy),
+    })
 }
 
 /// bytes.decode supplies an anonymous, readonly byte view to a registered text codec.
@@ -218,13 +211,19 @@ pub(in crate::dynamic) fn decode_named(
     if ctx.bytes_like(input)?.is_empty() {
         return Ok(ctx.text(""));
     }
-    if let Some(result) = special_decode(ctx, &key, input, errors) {
-        return result;
-    }
+    let wide = wide_unicode::encoding(&key);
     if shortcut(&key) {
-        return decode_bytes(ctx, Codec::by_key(&key, &name)?, input, errors);
+        return if wide.is_some() {
+            native_decode(ctx, wide, input, errors)
+        } else {
+            decode_bytes(ctx, Codec::by_key(&key, &name)?, input, errors)
+        };
     }
     ctx.with_buffer_export(input, |ctx| {
+        let native = wide.is_some() || key == "raw_unicode_escape";
+        let Some(entry) = lookup_transform(ctx, &name, native)? else {
+            return native_decode(ctx, wide, input, errors);
+        };
         let owner = if matches!(ctx.heap.get(input), Value::Bytes(_)) {
             input
         } else {
@@ -232,7 +231,6 @@ pub(in crate::dynamic) fn decode_named(
             ctx.alloc(Value::Bytes(bytes))
         };
         let view = ctx.alloc(Value::MemoryView { owner: Some(owner), anonymous: true, hash: None });
-        let entry = lookup_name(ctx, &name)?;
         let result = apply(ctx, entry, "decode", view, &name, errors, true)?;
         if ctx.string_storage(result).is_none() {
             return Err(type_error(format!("'{name}' decoder returned '{}' instead of 'str'; use codecs.decode() to decode to arbitrary types", ctx.type_name(result))));

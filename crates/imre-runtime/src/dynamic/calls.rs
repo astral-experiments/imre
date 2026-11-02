@@ -3240,12 +3240,11 @@ impl Context {
             }
             Value::CodecInfo {
                 ref entry,
-                class,
                 encode,
                 decode,
                 text_encoding_override,
+                ..
             } => match name {
-                "__class__" => return Ok(class),
                 "encode" => return Ok(encode),
                 "_is_text_encoding" => return Ok(text_encoding_override.unwrap_or(TRUE)),
                 "name" => return Ok(self.text(entry.codec().name())),

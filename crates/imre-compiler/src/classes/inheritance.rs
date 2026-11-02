@@ -59,7 +59,7 @@ pub(super) fn resolve(
                         );
                     }
                     Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
-                        "codecs.IncrementalDecoder",
+                        "codecs.IncrementalDecoder" | "codecs.CodecInfo",
                     ))) => {
                         graph.needs_object_runtime.set(true);
                         return Err(

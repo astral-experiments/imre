@@ -767,7 +767,6 @@ pub(crate) enum Intrinsic {
     Sha1,
     Sha256,
     NamedHash(&'static str),
-    CodecInfoClass,
     UnicodeNormalize { check: bool },
     ObjectRuntimeExport(&'static str),
     WeakProxy,
@@ -1893,7 +1892,7 @@ impl IntrinsicModule {
             (Self::Codecs, "IncrementalDecoder") => {
                 Intrinsic::ObjectRuntimeExport("codecs.IncrementalDecoder")
             }
-            (Self::Codecs, "CodecInfo") => Intrinsic::CodecInfoClass,
+            (Self::Codecs, "CodecInfo") => Intrinsic::ObjectRuntimeExport("codecs.CodecInfo"),
             (Self::Threading, "_RLock") => Intrinsic::ObjectRuntimeExport("threading._RLock"),
             (Self::Threading, "_PyRLock") => Intrinsic::ObjectRuntimeExport("threading._PyRLock"),
             (Self::Threading, "_CRLock") => Intrinsic::ObjectRuntimeExport("threading._CRLock"),
