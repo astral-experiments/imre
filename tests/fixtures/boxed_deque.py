@@ -1,8 +1,45 @@
+import gc
+import weakref
 from collections import deque
 from types import MappingProxyType
 
 
+def check_weakrefs():
+    class Slotted(deque):
+        __slots__ = ()
+
+    for cls in (deque, Slotted):
+        target = cls([1])
+        holder = deque([target])
+        callbacks = []
+        watch = weakref.ref(target, callbacks.append)
+        proxy = weakref.proxy(target)
+        assert watch() is target and str(proxy) == str(target)
+        assert not hasattr(target, "__weakref__")
+        del target
+        gc.collect()
+        assert watch() is holder[0] and not callbacks
+        holder.clear()
+        gc.collect()
+        assert watch() is None and len(callbacks) == 1 and callbacks[0] is watch
+        try:
+            str(proxy)
+        except ReferenceError:
+            pass
+        else:
+            raise AssertionError("dead deque proxy still forwards")
+
+    for obj in ([], iter(deque()), reversed(deque())):
+        try:
+            weakref.ref(obj)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("unexpected weak reference support")
+
+
 def current():
+    check_weakrefs()
     marker = []
     queue = deque((item for item in (marker, "middle", 3)))
     assert type(queue) is deque and isinstance(queue, deque)
