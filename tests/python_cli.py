@@ -1242,6 +1242,24 @@ def main():
         (later / "__init__.py").write_text("invalid syntax!\n")
         compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
 
+        decorated = root / "method_decorators.py"
+        decorated.write_text(
+            "def prefix(tag):\n"
+            "    print('evaluate', tag)\n"
+            "    def decorate(method):\n"
+            "        print('apply', tag)\n"
+            "        return lambda self: tag + method(self)\n"
+            "    return decorate\n"
+            "\n"
+            "class Example:\n"
+            "    @prefix('outer/')\n"
+            "    @prefix('inner/')\n"
+            "    def value(self):\n"
+            "        return 'method'\n"
+            "\n"
+            "print(Example().value())\n"
+        )
+        compare("-IB", decorated)
 
         locale_script = root / "get_locale.py"
         locale_script.write_text(
