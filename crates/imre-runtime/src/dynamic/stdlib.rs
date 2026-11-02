@@ -2019,16 +2019,28 @@ pub(super) fn call(
     }
     if name == "types._mark_generator" {
         let [func, code] = *args else {
-            return Err(Error::new("TypeError", "_mark_generator expects a function and code"));
+            return Err(Error::new(
+                "TypeError",
+                "_mark_generator expects a function and code",
+            ));
         };
         if !kwargs.is_empty() {
-            return Err(Error::new("TypeError", "_mark_generator accepts no keyword arguments"));
+            return Err(Error::new(
+                "TypeError",
+                "_mark_generator accepts no keyword arguments",
+            ));
         }
         let Value::Code(original) = ctx.heap.get(code) else {
-            return Err(Error::new("TypeError", "_mark_generator expects a code object"));
+            return Err(Error::new(
+                "TypeError",
+                "_mark_generator expects a code object",
+            ));
         };
         if matches!(original.body, super::value::Body::Native(_)) {
-            return Err(Error::new("NotImplementedError", "cannot mark this native generator function"));
+            return Err(Error::new(
+                "NotImplementedError",
+                "cannot mark this native generator function",
+            ));
         }
         let mut marked = original.clone();
         marked.flags |= imre_ast::code_flags::ITERABLE_COROUTINE;
