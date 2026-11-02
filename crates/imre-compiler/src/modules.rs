@@ -83,6 +83,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         // CPython 3.14.5 Lib/_colorize.py. See licenses/CPython.txt.
         "_colorize" => Some(("_colorize.py", include_str!("../stdlib/_colorize.py"))),
+        // CPython 3.14.5 Lib/_strptime.py and its calendar dependency. See licenses/CPython.txt.
+        "_strptime" => Some(("_strptime.py", include_str!("../stdlib/_strptime.py"))),
+        "calendar" => Some(("calendar.py", include_str!("../stdlib/calendar.py"))),
         "_compat_pickle" => Some((
             "_compat_pickle.py",
             include_str!("../stdlib/_compat_pickle.py"),

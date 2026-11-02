@@ -654,6 +654,10 @@ pub(crate) fn compile(
             if late_pprint && !seen.contains("pprint") {
                 imports.names.push((0, "pprint".to_owned()));
             }
+            // The native time.strptime classmethod imports its Python parser on first use.
+            if seen.contains("_datetime") && !seen.contains("_strptime") {
+                imports.names.push((0, "_strptime".to_owned()));
+            }
             // Python 3.13 path pickles name this module even when the reader never imports pathlib.
             if (seen.contains("pickle") || seen.contains("pathlib"))
                 && !seen.contains("pathlib._local")

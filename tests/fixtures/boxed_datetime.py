@@ -168,6 +168,21 @@ def test_time_fromisoformat():
             raise AssertionError(text)
 
 
+def test_time_strptime():
+    class Clock(time):
+        pass
+
+    value = Clock().strptime("4:05:06.123 -0130", "%H:%M:%S.%f %z")
+    assert type(value) is Clock
+    assert value.isoformat() == "04:05:06.123000-01:30"
+    try:
+        time.strptime("25", "%H")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid hour")
+
+
 def test_time_of_day():
     midnight = time()
     assert type(midnight) is time and isinstance(midnight, time)
@@ -759,6 +774,7 @@ def current():
     test_subclass_construction()
     test_now()
     test_time_fromisoformat()
+    test_time_strptime()
     test_time_of_day()
     test_http_date()
     test_module_exports()
