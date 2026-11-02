@@ -360,6 +360,7 @@ pub(crate) enum IntrinsicModule {
     Tomli,
     TomliW,
     Shutil,
+    Resource,
     Random,
     Secrets,
     Sysconfig,
@@ -803,6 +804,7 @@ impl IntrinsicModule {
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
             "shutil" => Some(Self::Shutil),
+            "resource" if cfg!(target_os = "linux") => Some(Self::Resource),
             "random" => Some(Self::Random),
             "secrets" => Some(Self::Secrets),
             "sysconfig" => Some(Self::Sysconfig),
@@ -1637,6 +1639,13 @@ impl IntrinsicModule {
             }
             (Self::Pathlib, "PureWindowsPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
+            }
+            (Self::Resource, "getrlimit") => Intrinsic::ObjectRuntimeExport("resource.getrlimit"),
+            (Self::Resource, "RLIMIT_STACK") => {
+                Intrinsic::ObjectRuntimeExport("resource.RLIMIT_STACK")
+            }
+            (Self::Resource, "RLIM_INFINITY") => {
+                Intrinsic::ObjectRuntimeExport("resource.RLIM_INFINITY")
             }
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
             (Self::Secrets, "choice") => Intrinsic::RandomChoice { secure: true },

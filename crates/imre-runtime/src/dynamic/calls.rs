@@ -41,6 +41,8 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
+        #[cfg(target_os = "linux")]
+        "resource" if function == "getrlimit" => Some((module, function)),
         "zlib" if function == "adler32" => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
@@ -1871,6 +1873,10 @@ impl Context {
                     }
                     "__text_signature__" if symbol == "_thread.start_new_thread" => {
                         return Ok(self.text("($module, function, args, kwargs={}, /)"));
+                    }
+                    "__doc__" if symbol == "resource.getrlimit" => return Ok(NONE),
+                    "__text_signature__" if symbol == "resource.getrlimit" => {
+                        return Ok(self.text("($module, resource, /)"));
                     }
                     "__doc__" if symbol == "posix.getpid" => {
                         return Ok(self.text("Return the current process id."));
