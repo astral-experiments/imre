@@ -1006,6 +1006,11 @@ impl Checker<'_> {
                 | "assertIsSubclass"
                 | "assertNotIsSubclass"
                 | "assertNotHasAttr"
+                | "assertStartsWith"
+                | "assertNotStartsWith"
+                | "assertEndsWith"
+                | "assertNotEndsWith"
+                | "assertSequenceEqual"
         ) && self.unittest_case(class)
         {
             return self.object_runtime_export(name, node);
