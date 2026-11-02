@@ -1,10 +1,11 @@
 """Stream annotations and special forms for the runtime typing module."""
 
+import builtins as _builtins
 import typing as _typing
 from _collections_abc import MutableMapping as _MutableMapping
 from collections import defaultdict as _defaultdict
 from functools import lru_cache
-from typing import Generic, TypeVar
+from typing import Any, Callable, Generic, Protocol, TypeVar
 
 
 T = TypeVar("T")
@@ -804,3 +805,93 @@ def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, fo
         result = _resolve_hint(value, globalns, localns, obj, (), include_extras)
         hints[name] = type(None) if result is None else result
     return hints
+
+
+# PEP 681 decorator from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+class _IdentityCallable(Protocol):
+    def __call__[T](self, arg: T, /) -> T:
+        ...
+
+
+def dataclass_transform(
+    *,
+    eq_default: _builtins.bool = True,
+    order_default: _builtins.bool = False,
+    kw_only_default: _builtins.bool = False,
+    frozen_default: _builtins.bool = False,
+    field_specifiers: tuple[type[Any] | Callable[..., Any], ...] = (),
+    **kwargs: Any,
+) -> _IdentityCallable:
+    """Decorator to mark an object as providing dataclass-like behaviour.
+
+    The decorator can be applied to a function, class, or metaclass.
+
+    Example usage with a decorator function::
+
+        @dataclass_transform()
+        def create_model[T](cls: type[T]) -> type[T]:
+            ...
+            return cls
+
+        @create_model
+        class CustomerModel:
+            id: int
+            name: str
+
+    On a base class::
+
+        @dataclass_transform()
+        class ModelBase: ...
+
+        class CustomerModel(ModelBase):
+            id: int
+            name: str
+
+    On a metaclass::
+
+        @dataclass_transform()
+        class ModelMeta(type): ...
+
+        class ModelBase(metaclass=ModelMeta): ...
+
+        class CustomerModel(ModelBase):
+            id: int
+            name: str
+
+    The ``CustomerModel`` classes defined above will
+    be treated by type checkers similarly to classes created with
+    ``@dataclasses.dataclass``.
+    For example, type checkers will assume these classes have
+    ``__init__`` methods that accept ``id`` and ``name``.
+
+    The arguments to this decorator can be used to customize this behavior:
+    - ``eq_default`` indicates whether the ``eq`` parameter is assumed to be
+        ``True`` or ``False`` if it is omitted by the caller.
+    - ``order_default`` indicates whether the ``order`` parameter is
+        assumed to be True or False if it is omitted by the caller.
+    - ``kw_only_default`` indicates whether the ``kw_only`` parameter is
+        assumed to be True or False if it is omitted by the caller.
+    - ``frozen_default`` indicates whether the ``frozen`` parameter is
+        assumed to be True or False if it is omitted by the caller.
+    - ``field_specifiers`` specifies a static list of supported classes
+        or functions that describe fields, similar to ``dataclasses.field()``.
+    - Arbitrary other keyword arguments are accepted in order to allow for
+        possible future extensions.
+
+    At runtime, this decorator records its arguments in the
+    ``__dataclass_transform__`` attribute on the decorated object.
+    It has no other runtime effect.
+
+    See PEP 681 for more details.
+    """
+    def decorator(cls_or_fn):
+        cls_or_fn.__dataclass_transform__ = {
+            "eq_default": eq_default,
+            "order_default": order_default,
+            "kw_only_default": kw_only_default,
+            "frozen_default": frozen_default,
+            "field_specifiers": field_specifiers,
+            "kwargs": kwargs,
+        }
+        return cls_or_fn
+    return decorator

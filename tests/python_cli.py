@@ -1559,6 +1559,7 @@ def report(text):
             "boxed_annotationlib_refs.py",
             "boxed_typing_assert_type.py",
             "boxed_typing_typeddict.py",
+            "boxed_typing_dataclass_transform.py",
             "boxed_typing_optional.py",
             "boxed_typing_literal.py",
             "boxed_typing_protocol.py",
