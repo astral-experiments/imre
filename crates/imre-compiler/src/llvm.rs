@@ -1610,11 +1610,13 @@ impl Emitter<'_, '_> {
         }
         match completion {
             Completion::Return(value) => {
-                self.line(format!(
-                    "store {} {}, ptr %function_return",
-                    value.ty.llvm(),
-                    value.operand
-                ));
+                if value.ty != Type::None {
+                    self.line(format!(
+                        "store {} {}, ptr %function_return",
+                        value.ty.llvm(),
+                        value.operand
+                    ));
+                }
                 self.jump(&self.return_exit.clone());
             }
             Completion::Jump { label, .. } => self.jump(&label),
@@ -1865,15 +1867,14 @@ impl Emitter<'_, '_> {
             self.line("store ptr null, ptr %directory_frame");
         }
         let allocas_at = self.code.len();
-        self.line(format!(
-            "%function_return = alloca {}",
-            function.returns.llvm()
-        ));
-        self.line(format!(
-            "store {} {}, ptr %function_return",
-            function.returns.llvm(),
-            function.returns.initial()
-        ));
+        if function.returns != Type::None {
+            let ty = function.returns.llvm();
+            self.line(format!("%function_return = alloca {ty}"));
+            self.line(format!(
+                "store {ty} {}, ptr %function_return",
+                function.returns.initial()
+            ));
+        }
         for (slot, &ty) in function.locals.iter().enumerate() {
             self.line(format!("%local{slot} = alloca {}", ty.llvm()));
             // Parameters initialize exactly once below. ASan can relocate their
@@ -2038,6 +2039,8 @@ impl Emitter<'_, '_> {
             self.start(&report);
             let status = self.instruction("call i32 @imre_error_unhandled()");
             self.line(format!("ret i32 {status}"));
+        } else if function.returns == Type::None {
+            self.line("ret i8 0");
         } else {
             let value = self.instruction(format!(
                 "load {}, ptr %function_return",
