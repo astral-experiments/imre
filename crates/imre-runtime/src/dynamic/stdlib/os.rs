@@ -692,6 +692,9 @@ pub(super) fn descriptor(
     if name == "symlink" {
         return links::symlink(ctx, args, kwargs);
     }
+    if matches!(name, "chown" | "fchown" | "lchown") {
+        return chown::call(ctx, name, args, kwargs);
+    }
     if name == "link" {
         return links::link(ctx, args, kwargs);
     }
@@ -706,9 +709,6 @@ pub(super) fn descriptor(
     }
     if name == "chdir" {
         return chdir(ctx, args, kwargs);
-    }
-    if matches!(name, "chown" | "fchown" | "lchown") {
-        return chown::call(ctx, name, args, kwargs);
     }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
