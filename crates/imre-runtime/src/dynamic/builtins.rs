@@ -488,7 +488,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             ..
         } if attr == "__reduce__" => super::stdlib::os::stat::CLASS,
         Value::Property(_) if super::property::METHODS.contains(&attr) => "property",
-        Value::ClassMethod(_) if attr == "__get__" => "classmethod",
+        Value::ClassMethod { .. } if attr == "__get__" => "classmethod",
         Value::StaticMethod { .. } if attr == "__get__" => "staticmethod",
         Value::Generator { .. } if super::generator_protocol::generator_method(attr) => "generator",
         Value::Coroutine(_) if super::generator_protocol::coroutine_method("coroutine", attr) => {
@@ -1844,7 +1844,7 @@ pub(super) fn call(
         "classmethod" => {
             positional(name, kwargs)?;
             arity(name, args, 1, 1)?;
-            Ok(ctx.alloc(Value::ClassMethod(args[0])))
+            super::method_decorator::class_method(ctx, args[0])
         }
         "staticmethod" => {
             if !kwargs.is_empty() {
@@ -1856,7 +1856,7 @@ pub(super) fn call(
                     args.len()
                 )));
             };
-            super::static_method::construct(ctx, *callable)
+            super::method_decorator::static_method(ctx, *callable)
         }
         "property" => super::property::construct(ctx, args, kwargs),
         "open" => super::stdlib::io::open(ctx, args, kwargs),
