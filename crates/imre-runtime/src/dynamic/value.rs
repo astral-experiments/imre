@@ -775,6 +775,7 @@ pub(super) enum Value {
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
         weak_reference: Option<Box<super::weakref::Reference>>,
+        cycle: Option<Box<super::stdlib::itertools::Cycle>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -1285,6 +1286,7 @@ impl Value {
                 dictionary,
                 scalar,
                 weak_reference,
+                cycle,
                 memory_stream,
                 property,
             } => {
@@ -1293,6 +1295,9 @@ impl Value {
                 }
                 if let Some(reference) = weak_reference {
                     visit.push(reference.callback);
+                }
+                if let Some(cycle) = cycle {
+                    cycle.children(visit);
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {

@@ -263,6 +263,7 @@ fn instance(ctx: &mut Context, type_name: &str, fields: &[(&str, Id)]) -> Id {
         scalar: None,
         property: None,
         weak_reference: None,
+        cycle: None,
         memory_stream: None,
         fields: fields
             .iter()
@@ -435,6 +436,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("types", "CodeType") => ctx.builtin("code"),
         ("itertools", "count") => ctx.builtin("itertools.count"),
         ("itertools", "repeat") => ctx.builtin("itertools.repeat"),
+        ("itertools", "_cycle_allocate" | "_cycle_next") => {
+            ctx.builtin(&format!("itertools.{name}"))
+        }
         ("itertools", "_chain_allocate") => ctx.builtin("itertools._chain_allocate"),
         ("itertools", "_chain_get" | "_chain_set") => ctx.builtin(&format!("itertools.{name}")),
         (
@@ -1309,6 +1313,12 @@ pub(super) fn call(
     }
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
+    }
+    if name == "itertools._cycle_allocate" {
+        return itertools::cycle_allocate(ctx, args, kwargs);
+    }
+    if name == "itertools._cycle_next" {
+        return itertools::cycle_next(ctx, args, kwargs);
     }
     if name == "itertools._chain_allocate" {
         let [base, class, source] = args else {
