@@ -443,58 +443,7 @@ fn bound_accumulator(body: &mut [Statement], accumulator: usize, bounds: IntRang
 
 /// Counts every replacement and cleanup, including expression-owned regions.
 pub(crate) fn count_writes(body: &[Statement], writes: &mut [usize]) {
-    statement_writes(body, writes);
-    walk_expressions(body, &mut |value| match &value.kind {
-        ExprKind::Scope { body, clear, .. } => {
-            statement_writes(body, writes);
-            for &slot in clear {
-                writes[slot] += 1;
-            }
-        }
-        ExprKind::Bind(slot, _) => writes[*slot] += 1,
-        _ => {}
-    });
-}
-
-fn statement_writes(body: &[Statement], writes: &mut [usize]) {
-    crate::ir::walk_block(body, &mut |statement| match statement {
-        Statement::Assign(slot, _) | Statement::Clear(slot) => writes[*slot] += 1,
-        Statement::Move(target, source) => {
-            writes[*target] += 1;
-            writes[*source] += 1;
-        }
-        Statement::Scope { clear, .. } => {
-            for &slot in clear {
-                writes[slot] += 1;
-            }
-        }
-        Statement::For {
-            target,
-            cursor,
-            stop,
-            step,
-            ..
-        } => {
-            for &slot in [target, cursor, stop, step] {
-                writes[slot] += 1;
-            }
-        }
-        Statement::Try { handlers, .. } => {
-            for handler in handlers {
-                if let Some(slot) = handler.name {
-                    writes[slot] += 1;
-                }
-            }
-        }
-        Statement::IterNext {
-            key, value, ready, ..
-        } => {
-            for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
-                writes[slot] += 1;
-            }
-        }
-        _ => {}
-    });
+    crate::ir::walk_writes(body, |slot, _| writes[slot] += 1);
 }
 
 pub(crate) fn contains_continue(body: &[Statement]) -> bool {
