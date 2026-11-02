@@ -1,0 +1,22 @@
+66 test.test_re.ReTests.test_bug_gh100061, occurrence 1
+CPython 5607950ef232dad16d75c0cf53101d9649d89115 test_re.py SHA-256 879c8b562a5bddb413e73ad6d026a6199785bd08fa1c2c5db1ef831b4e1c47e2.
+Original definition lines 2623-2641 bytes [130247,131520): d2ff910f34ecb0828dfb9fd8d509c3bafaed027e62432bb9b19e61a148959671.
+Indented suite bytes [130280,131520): bf3146279750a16911d553379b0a0913b50159c3e239bd10b174fd02fc404872.
+
+companion-stock-five-entry 5607950ef232dad16d75c0cf53101d9649d89115 CPython 3.14.5 Linux / reference. Parent passed. Whole process exit 0, timeout false, RAN 5.
+raw/companion-stock-five-entry/run.stdout, SHA-256 1f6d2e87224d48ebee6cb96b895f244e5599297a674834191a88691e5dec3933. Raw byte spans are half-open.
+6 [252,308)	EVENT	START	'test.test_re.ReTests.test_bug_gh100061'	''
+7 [308,361)	EVENT	OK	'test.test_re.ReTests.test_bug_gh100061'	''
+8 [361,416)	EVENT	STOP	'test.test_re.ReTests.test_bug_gh100061'	''
+
+companion-intactf45prod-O0 f45a52ca1ba9a4050bc2d8973a7a7afd6541a3d8 release-debug0 / O0. Parent passed. Whole process exit 0, timeout false, RAN 5.
+raw/companion-intactf45prod-O0/run.stdout, SHA-256 1f6d2e87224d48ebee6cb96b895f244e5599297a674834191a88691e5dec3933. Raw byte spans are half-open.
+6 [252,308)	EVENT	START	'test.test_re.ReTests.test_bug_gh100061'	''
+7 [308,361)	EVENT	OK	'test.test_re.ReTests.test_bug_gh100061'	''
+8 [361,416)	EVENT	STOP	'test.test_re.ReTests.test_bug_gh100061'	''
+
+companion-intactf45prod-O3 f45a52ca1ba9a4050bc2d8973a7a7afd6541a3d8 release-debug0 / O3. Parent passed. Whole process exit 0, timeout false, RAN 5.
+raw/companion-intactf45prod-O3/run.stdout, SHA-256 1f6d2e87224d48ebee6cb96b895f244e5599297a674834191a88691e5dec3933. Raw byte spans are half-open.
+6 [252,308)	EVENT	START	'test.test_re.ReTests.test_bug_gh100061'	''
+7 [308,361)	EVENT	OK	'test.test_re.ReTests.test_bug_gh100061'	''
+8 [361,416)	EVENT	STOP	'test.test_re.ReTests.test_bug_gh100061'	''
