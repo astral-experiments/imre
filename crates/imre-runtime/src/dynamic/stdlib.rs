@@ -421,7 +421,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_mock", "is_call_list" | "mark_call_list")
         | (
             "_imre_dataclasses",
-            "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata" | "slotted_type" | "retarget_class_cell",
+            "field_identifier" | "make_type" | "is_defaultdict" | "load_global" | "loaded_module" | "members" | "metadata" | "slotted_type" | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_imre_thread", "start" | "join" | "alive" | "threads" | "current") => {
             ctx.builtin(&format!("{module}.{name}"))
@@ -1603,6 +1603,16 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
+            ("field_identifier", [_], []) => {
+                return inspect::call(ctx, "_signature_identifier", args, kwargs);
+            }
+            ("make_type", [name, members], []) => {
+                let name = ctx.str_value(*name)?.to_owned();
+                if name.contains('\0') {
+                    return Err(Error::new("ValueError", "type name must not contain null characters"));
+                }
+                return ctx.dataclass_from_namespace(name, *members, "types", false, true);
+            }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
                 return Ok(if ctx.defaultdict_factory(*obj).is_some() {

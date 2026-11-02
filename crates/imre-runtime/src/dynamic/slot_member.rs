@@ -26,36 +26,55 @@ impl Context {
             ));
         }
         let name = self.class_name(old).to_owned();
-        let source = self.scope_data(original);
-        let module = source.module.clone();
+        let module = self.scope_data(original).module.clone();
+        let provider_annotations = self.has_class_annotation_provider(original);
+        let class = self.dataclass_from_namespace(
+            name.clone(),
+            namespace,
+            &module,
+            true,
+            provider_annotations,
+        )?;
+        if self.classes.get(&name) == Some(&old) {
+            // This object-root type does not participate in exception-name dispatch.
+            self.classes.remove(&name);
+            self.heap.weak_edge_removed(old);
+        }
+        Ok(class)
+    }
+
+    /// Build a fresh object-root type and initialize its member descriptors.
+    pub(super) fn dataclass_from_namespace(
+        &mut self,
+        name: String,
+        namespace: Id,
+        module: &str,
+        member_slots: bool,
+        provider_annotations: bool,
+    ) -> Result<Id> {
+        let object = self.builtin("object");
         let entries = self
             .dict_entries(namespace)
             .ok_or_else(|| Error::new("TypeError", "expected a class namespace dictionary"))?
             .to_vec();
-        let scope = self.scope(&module, None);
+        let scope = self.scope(module, None);
         let cell = self.alloc(Value::ClassCell(None));
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         frame.class_body = Some(Vec::new());
         frame.class_cell = Some(cell);
-        frame
-            .class_namespace
-            .get_or_insert_with(Default::default)
-            .member_slots = true;
+        let layout = frame.class_namespace.get_or_insert_with(Default::default);
+        layout.member_slots = member_slots;
+        layout.provider_annotations = provider_annotations;
         for (key, value) in entries {
             let key = self.str_value(key)?.to_owned();
             self.bind_local(scope, &key, value);
         }
-        let class = self.allocate_class(name.clone(), scope, vec![object])?;
+        let class = self.allocate_class(name, scope, vec![object])?;
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         self.install_weakref_descriptor(class, scope);
         self.initialize_class_members(class, scope)?;
-        if self.classes.get(&name) == Some(&old) {
-            // This object-root type does not participate in exception-name dispatch.
-            self.classes.remove(&name);
-            self.heap.weak_edge_removed(old);
-        }
         Ok(class)
     }
 

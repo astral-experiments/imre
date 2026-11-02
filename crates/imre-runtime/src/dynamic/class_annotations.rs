@@ -1,4 +1,4 @@
-//! Class-wide annotation providers used by TypedDict, following CPython's type descriptors.
+//! Class-wide annotation providers, following CPython's type descriptors.
 use super::{Context, Error, Id, NONE, Result, Value};
 
 impl Context {
@@ -103,11 +103,21 @@ impl Context {
             }
             return Ok(());
         }
-        let key = self.heap.code_name("__annotations_cache__");
+        let explicit = self.scope_name(scope, name).is_some();
+        let storage = if explicit {
+            name
+        } else {
+            "__annotations_cache__"
+        };
+        let key = self.text(storage);
         if let Some(value) = value {
-            self.bind_local(scope, "__annotations_cache__", value);
-        } else if !self.remove_binding(scope, "__annotations_cache__", key)? {
+            self.bind_local(scope, storage, value);
+        } else if !self.remove_binding(scope, storage, key)? {
             return Err(Error::new("AttributeError", "__annotations__"));
+        }
+        if explicit {
+            let key = self.text("__annotations_cache__");
+            self.remove_binding(scope, "__annotations_cache__", key)?;
         }
         for name in ["__annotate__", "__annotate_func__"] {
             let key = self.heap.code_name(name);

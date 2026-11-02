@@ -1703,6 +1703,7 @@ def report(text):
             "boxed_re_escape.py",
             "boxed_datetime.py",
             "boxed_dataclasses.py",
+            "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
             "boxed_dataclass_classvars.py",
