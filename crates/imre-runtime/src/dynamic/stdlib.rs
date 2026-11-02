@@ -2607,8 +2607,8 @@ pub(super) fn call(
                 regex::match_groups(ctx, receiver, default)
             };
         }
-        name if name.starts_with("pattern.") || name.starts_with("match.") => {
-            return regex::call(ctx, name, args);
+        "match.group" | "match.start" | "match.end" | "match.span" => {
+            return regex::match_method(ctx, name, args);
         }
         _ => {
             return Err(Error::new(
