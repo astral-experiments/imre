@@ -47,6 +47,8 @@ const MEMBERS: &[Member] = &[
         "($self, /, *args, **kwargs)",
     ),
     Member::new("__len__", "Return len(self).", "($self, /)"),
+    Member::new("__mul__", "Return self*value.", "($self, value, /)"),
+    Member::new("__rmul__", "Return value*self.", "($self, value, /)"),
     Member::new("__getitem__", "Return self[key].", "($self, key, /)"),
     Member::new(
         "__setitem__",
@@ -60,6 +62,7 @@ const MEMBERS: &[Member] = &[
         "($self, key, /)",
     ),
     Member::new("__iadd__", "Implement self+=value.", "($self, value, /)"),
+    Member::new("__imul__", "Implement self*=value.", "($self, value, /)"),
     Member::new(
         "append",
         "Add an element to the right side of the deque.",
@@ -341,6 +344,94 @@ fn initialize(ctx: &mut Context, queue: Id, args: &[Id], kwargs: &[(String, Id)]
         extend(ctx, queue, source, false)?;
     }
     Ok(())
+}
+
+pub(super) fn copy(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let storage = ctx.scalar_value(receiver);
+    let Value::Deque(ring) = ctx.heap.get(storage) else {
+        unreachable!()
+    };
+    if storage == receiver {
+        let copy = ring.shallow_copy()?;
+        return Ok(ctx.alloc(Value::Deque(Box::new(copy))));
+    }
+    let bound = ring.maxlen;
+    let class = ctx.exact_type(receiver)?;
+    let mut args = vec![receiver];
+    if let Some(n) = bound {
+        args.push(ctx.int(n as i64));
+    }
+    let result = ctx.call(class, args, Vec::new())?;
+    if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Deque(_)) {
+        return Err(Error::new(
+            "TypeError",
+            format!("{}() must return a deque, not {}", ctx.type_name(receiver), ctx.type_name(result)),
+        ));
+    }
+    Ok(result)
+}
+
+/// A subtype's iterator can mutate its ring while the repetition takes its snapshot.
+pub(super) fn repeat(ctx: &mut Context, receiver: Id, count: isize, inplace: bool) -> Result<Id> {
+    let owner = if inplace { receiver } else { copy(ctx, receiver)? };
+    let storage = ctx.scalar_value(owner);
+    let Value::Deque(ring) = ctx.heap.get_mut(storage) else { unreachable!() };
+    let size = ring.items.len();
+    if size == 0 || count == 1 {
+        return Ok(owner);
+    }
+    if count <= 0 {
+        builtins::clear_container(ctx, storage);
+        return Ok(owner);
+    }
+    let count = count as usize;
+    let memory = || Error::new("MemoryError", "");
+    if size == 1 {
+        let length = count.min(ring.maxlen.unwrap_or(count));
+        ring.items.try_reserve(length - 1).map_err(|_| memory())?;
+        ring.items.resize(length, ring.items[0]);
+        ring.state = ring.state.wrapping_add(1);
+        return Ok(owner);
+    }
+    if count > isize::MAX as usize / size {
+        return Err(memory());
+    }
+    if owner == storage {
+        // All original references survive. Rotate to the first retained element,
+        // then fill from that period without building a second repeated sequence.
+        let total = count * size;
+        let length = total.min(ring.maxlen.unwrap_or(total));
+        if length > size {
+            ring.items.try_reserve(length - size).map_err(|_| memory())?;
+            ring.items.rotate_left((total - length) % size);
+            for i in size..length {
+                ring.items.push_back(ring.items[i % size]);
+            }
+            ring.state = ring.state.wrapping_add(1);
+        }
+        return Ok(owner);
+    }
+
+    // PySequence_List observes __iter__ followed by __len__, even if the bound is full.
+    let snapshot = ctx.alloc(Value::List(Vec::new()));
+    builtins::list_extend(ctx, snapshot, owner)?;
+    let Value::List(items) = ctx.heap.get(snapshot) else { unreachable!() };
+    let chunk = items.len();
+    let Value::Deque(ring) = ctx.heap.get_mut(storage) else { unreachable!() };
+    let times = ring.maxlen.map_or(count, |bound| count.min(bound.div_ceil(size))).saturating_sub(1);
+    if times != 0 && chunk != 0 {
+        let extra = chunk.saturating_mul(times).min(
+            ring.maxlen.unwrap_or(usize::MAX).saturating_sub(ring.items.len())
+        );
+        ring.items.try_reserve(extra).map_err(|_| memory())?;
+        let roots = ctx.heap.temporary_mark();
+        for _ in 0..times {
+            let result = extend(ctx, owner, snapshot, false);
+            ctx.heap.release_temporaries_since(roots);
+            result?;
+        }
+    }
+    Ok(owner)
 }
 
 /// Consume a live Python iterator one item at a time, retaining any successful prefix.
@@ -789,7 +880,7 @@ pub(super) fn method(
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            if matches!(name, "__iadd__" | "__contains__" | "__repr__") {
+            if matches!(name, "__iadd__" | "__contains__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__") {
                 format!("wrapper {name}() takes no keyword arguments")
             } else {
                 format!("deque.{name}() takes no keyword arguments")
@@ -841,6 +932,13 @@ pub(super) fn method(
             }
             let op = if name == "__eq__" { "==" } else { "!=" };
             return compare(ctx, op, receiver, *other).map(builtins::boolean);
+        }
+        ("__mul__" | "__rmul__" | "__imul__", [item]) => {
+            let n = ctx.sequence_multiplier(*item, true)?;
+            return repeat(ctx, receiver, n, name == "__imul__");
+        }
+        ("__mul__" | "__rmul__" | "__imul__", _) => {
+            return Err(Error::new("TypeError", format!("expected 1 argument, got {}", rest.len())));
         }
         ("__contains__", [item]) => return ctx.contains(*item, storage).map(builtins::boolean),
         ("__getitem__", [index]) => return IndexOp::Get.apply(ctx, storage, *index, true),
@@ -907,30 +1005,7 @@ pub(super) fn method(
             let bound = ring.maxlen;
             Ok(bound.map_or(NONE, |n| ctx.int(n as i64)))
         }
-        "copy" | "__copy__" if receiver != storage => {
-            let bound = ring.maxlen;
-            let class = ctx.exact_type(receiver)?;
-            let mut args = vec![receiver];
-            if let Some(n) = bound {
-                args.push(ctx.int(n as i64));
-            }
-            let result = ctx.call(class, args, Vec::new())?;
-            if !matches!(ctx.heap.get(ctx.scalar_value(result)), Value::Deque(_)) {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "{}() must return a deque, not {}",
-                        ctx.type_name(receiver),
-                        ctx.type_name(result)
-                    ),
-                ));
-            }
-            Ok(result)
-        }
-        "copy" | "__copy__" => {
-            let copy = ring.shallow_copy()?;
-            Ok(ctx.alloc(Value::Deque(Box::new(copy))))
-        }
+        "copy" | "__copy__" => copy(ctx, receiver),
         "reverse" => {
             ring.reverse();
             Ok(NONE)

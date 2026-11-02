@@ -6142,6 +6142,9 @@ impl<'a> Checker<'a> {
             return Ok((op, Type::Int));
         }
         if op == ast::Operator::Mult {
+            if matches!(left, Type::Deque(_)) || matches!(right, Type::Deque(_)) {
+                return Err(self.object_builtin_error("collections.deque repetition", node));
+            }
             if (self.types.element(left).is_some() || matches!(left, Type::Bytes | Type::Str))
                 && right == Type::Int
             {
@@ -7727,8 +7730,10 @@ impl<'a> Checker<'a> {
                 return self.task_await(value, false, awaited);
             }
             ast::Expr::Attribute(attribute) => {
-                if self.deque_repr_descriptor(attribute) {
-                    return Err(self.scoped_builtin_error("collections.deque.__repr__", attribute));
+                if self.boxed_deque_descriptor(attribute) {
+                    return Err(self.scoped_builtin_error(
+                        &format!("collections.deque.{}", attribute.attr.as_str()), attribute,
+                    ));
                 }
                 if attribute.attr.as_str() == "MISSING"
                     && self.resolve(&attribute.value)
@@ -8884,9 +8889,9 @@ impl<'a> Checker<'a> {
             return self.counter_elements(call, None);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
-            && self.deque_repr_descriptor(attribute)
+            && self.boxed_deque_descriptor(attribute)
         {
-            return self.boxed_deque_repr_call(call);
+            return self.boxed_deque_call(attribute.attr.as_str(), call);
         }
         if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "reverse"
