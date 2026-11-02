@@ -1262,13 +1262,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
     }
     let attr = match ctx.heap.get(value) {
         Value::Native(class)
-            if name == "__iter__"
-                && matches!(
-                    class.as_str(),
-                    "typing._LiteralGenericAlias"
-                        | "typing._ConcatenateGenericAlias"
-                        | "typing._UnpackGenericAlias"
-                ) =>
+            if name == "__iter__" && Context::native_base(class) == Some("typing._GenericAlias") =>
         {
             let base = ctx.builtin("typing._GenericAlias");
             ctx.own_class_attr(base, name)?
@@ -2422,10 +2416,17 @@ pub(super) fn call(
         // Keep the source method (and its defining globals) on the native alias class.
         ("_install_generic_alias_iter", [methods]) => {
             let class = ctx.builtin("typing._GenericAlias");
-            let method = ctx.lookup_attr(*methods, "__iter__")?;
-            let key = ctx.text("__iter__");
-            let dictionary = ctx.native_type_dicts[&class];
-            ctx.put_item(dictionary, key, method)?;
+            let dictionary = *ctx.native_type_dicts.get(&class).ok_or_else(|| {
+                Error::new(
+                    "RuntimeError",
+                    "missing native typing._GenericAlias dictionary",
+                )
+            })?;
+            if ctx.dict_named_item(dictionary, "__iter__").is_none() {
+                let method = ctx.lookup_attr(*methods, "__iter__")?;
+                let key = ctx.text("__iter__");
+                ctx.put_item(dictionary, key, method)?;
+            }
             Ok(class)
         }
         ("_get_alias_kind", [value]) => Ok(match ctx.heap.get(*value) {
