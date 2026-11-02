@@ -1429,12 +1429,7 @@ pub(super) fn method(
                 args.len()
             )));
         }
-        let invalid_needle = match (owner, name) {
-            ("str", "count" | "index") => ctx.string_storage(needle).is_none(),
-            ("str", _) => ctx.str_value(needle).is_err(),
-            _ => false,
-        };
-        if invalid_needle {
+        if owner == "str" && ctx.string_storage(needle).is_none() {
             let kind = if needle == NONE {
                 "None"
             } else {
@@ -1532,16 +1527,16 @@ pub(super) fn method(
             };
             return Ok(ctx.alloc(Value::Int(value)));
         }
-        let found = if name == "index"
-            && [receiver, needle]
-                .iter()
-                .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
+        let found = if [receiver, needle]
+            .iter()
+            .any(|&id| matches!(ctx.heap.get(ctx.scalar_value(id)), Value::SurrogateStr(_)))
         {
             crate::objects::find_codepoints(
                 &ctx.string_codepoints(receiver)?,
                 &ctx.string_codepoints(needle)?,
                 start.as_ref(),
                 end.as_ref(),
+                name == "rfind",
             )
         } else {
             crate::objects::find_text(
