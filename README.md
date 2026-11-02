@@ -111,7 +111,7 @@ branches. Skipped tests count toward the suite size only.
 
 | Module | Paired passes | Upstream tests | How the tests ran |
 | --- | ---: | ---: | --- |
-| `argparse` | 1,539 | 1,893 | The intact baseline passed 1,397 cases. Focused runs added 142 distinct originals with clean teardown. |
+| `argparse` | 1,593 | 1,893 | An intact run passed 1,397 originals. Selected runs added 196 distinct registrations across builds, including 54 more help cases with clean teardown and inverted assertions. |
 | `collections` | 517 | 659 | The count combines distinct original methods and doctests across builds, including twelve additional UserString methods. |
 | `csv` | 122 | 128 | Complete suite on `main`, 122 passed and six matched upstream skips. |
 | `dataclasses` | 234 | 276 | An intact development suite passed 207 of 276. Other distinct cases passed on separate builds. |
@@ -122,7 +122,7 @@ branches. Skipped tests count toward the suite size only.
 | `importlib` | 16 | 1,346 | Sixteen original registrations passed in focused runs, including a public importlib.resources case with an entirely native fixture. |
 | `io` | 112 | 1,038 | 110 selected originals and two protocol tests passed. A 667-case IO submodule compiled in all four modes and stopped during import. |
 | `itertools` | 108 | 138 | Source-preserving selections passed across builds, including the CPU-enabled long-chain test. The intact module stops before registration. |
-| `json` | 133 | 216 | Four partial intact runs timed out. An encoder selection on public main passed 29 of 36. The count combines distinct IDs across builds. |
+| `json` | 134 | 216 | The public encoder passed 33 of 36 selected originals at both levels. Three earlier encoder failures already had passing evidence elsewhere. The list-recursion case adds one to the campaign total. Intact package discovery still stops at sys.monitoring. |
 | `logging` | 30 | 272 | Thirty source-isolated originals ran together with native fixtures. Package-wide discovery stopped during import. |
 | `os` | 38 | 579 | An earlier genericpath run passed 25. Another 13 selected OS cases passed before module teardown errored. A later public genericpath run passed 22 of 25. |
 | `pathlib` | 233 | 1,369 | Both intact development runs finished all 1,369 cases and passed the same 233. |
@@ -136,7 +136,7 @@ branches. Skipped tests count toward the suite size only.
 | `typing` | 107 | 712 | Selected original registrations passed across builds. The count includes only IDs with verified overlap. |
 | `unittest` | 160 | 1,090 | An intact package run discovered 244 originals, started 213 and passed 160 at both levels. |
 | `urllib` | 97 | 178 | The intact public parser matched CPython on 51 of 77 cases across eight native configurations. Its 101-case companion stopped during import. |
-| **Total** | **4,683** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **4,738** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
