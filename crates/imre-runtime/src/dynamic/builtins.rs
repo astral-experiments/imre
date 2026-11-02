@@ -215,7 +215,8 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     (matches!(
         owner,
         "object" | "dict" | "float" | "function" | "int" | "str" | super::thread_local::CLASS
-    ) || is_exception(owner)
+    ) || super::stdlib::itertools::cursor_type(owner).is_some()
+        || is_exception(owner)
         || crate::objects::HashState::is_provider_class(owner))
     .then_some(owner)
 }

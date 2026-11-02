@@ -147,6 +147,7 @@ pub(crate) struct Context {
     // Python wrappers retain their registered logger for the lifetime of this heap.
     logger_wrappers: HashMap<*const crate::objects::logging::Logger, Id>,
     builtins: HashMap<String, Id>,
+    native_type_dicts: HashMap<Id, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
     call_depth: usize,
     deque_comparison_repeats: usize,
@@ -1912,6 +1913,9 @@ impl Context {
         }
         let value = self.alloc(Value::Native(name.to_owned()));
         self.builtins.insert(name.to_owned(), value);
+        if let Some(owner) = stdlib::itertools::cursor_type(name) {
+            stdlib::itertools::install_namespace(self, value, owner);
+        }
         if builtins::is_enum_base(name) {
             self.install_enum_base(value, name);
         }

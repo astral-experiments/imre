@@ -1700,11 +1700,10 @@ pub(super) fn call(
     if name == "itertools.repeat" {
         return itertools::repeat(ctx, args, kwargs);
     }
-    if let Some(method) = name
-        .strip_prefix("itertools.count.")
-        .or_else(|| name.strip_prefix("itertools.repeat."))
+    if let Some((owner, method)) = name.rsplit_once('.')
+        && let Some(owner) = itertools::cursor_type(owner)
     {
-        return itertools::method(ctx, method, args, kwargs);
+        return itertools::method(ctx, owner, method, args, kwargs);
     }
     if name == "types.coroutine" {
         let func = single_argument("coroutine", "func", args, kwargs)?;
