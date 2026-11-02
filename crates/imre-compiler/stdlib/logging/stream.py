@@ -103,9 +103,7 @@ class StreamHandler(Handler):
 
     def flush(self) -> None:
         with self.lock:
-            stream = self.stream
-            if stream is not None:
-                stream.flush()
+            _flush_handler_stream(self)
 
     def emit(self, record: LogRecord | None) -> None:
         if record is None:
