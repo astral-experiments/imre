@@ -49,6 +49,9 @@ def current():
     assert type(cursor) is Constructor and list(cursor) == [3, 4]
 
     import itertools
+    for name in ("_cycle_allocate", "_cycle_next", "_filterfalse_allocate", "_filterfalse_state",
+                 "_chain_allocate", "_chain_get", "_chain_set"):
+        assert name not in vars(itertools) and not hasattr(itertools, name)
     itertools._chain_get = None
     itertools._chain_set = None
     itertools._chain_allocate = None

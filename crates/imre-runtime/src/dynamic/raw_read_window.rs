@@ -28,6 +28,7 @@ impl Context {
         backing: Id,
         start: usize,
         len: usize,
+        readonly: bool,
     ) -> Result<Id> {
         let backing_len = self
             .mutable_storage_len(backing)
@@ -45,7 +46,7 @@ impl Context {
             owner: Some(owner),
             anonymous: true,
             layout: None,
-            readonly: false,
+            readonly,
             hash: None,
         }))
     }
@@ -153,12 +154,7 @@ impl Context {
         if let Value::Slice(parts) = *self.heap.get(key) {
             let range = self.raw_view_slice(id, parts)?;
             let w = self.checked_window(id)?;
-            let readonly = self.view_is_readonly(id)?;
-            let child = self.ownerless_byte_view(w.backing, w.start + range.start, range.len())?;
-            if let Value::MemoryView { readonly: flag, .. } = self.heap.get_mut(child) {
-                *flag = readonly;
-            }
-            return Ok(child);
+            return self.ownerless_byte_view(w.backing, w.start + range.start, range.len(), false);
         }
         let pos = self.raw_view_index(id, key)?;
         let byte = self.window_bytes(self.checked_window(id)?)?[pos];

@@ -73,3 +73,67 @@ def current():
             print(exc)
         else:
             raise AssertionError("invalid handler arguments accepted")
+
+
+def check_handlers():
+    import faulthandler
+    import gc
+    import os
+
+    seen = []
+
+    def first(number, frame):
+        seen.append((number, frame.f_code.co_name))
+
+    def second(number, frame):
+        raise RuntimeError("from second handler")
+
+    if not faulthandler.is_enabled():
+        previous = signal.signal(signal.SIGABRT, first)
+        try:
+            faulthandler.enable()
+            assert signal.getsignal(signal.SIGABRT) is first
+            assert signal.signal(signal.SIGABRT, second) is first
+            faulthandler.disable()
+            assert signal.getsignal(signal.SIGABRT) is second
+        finally:
+            faulthandler.disable()
+            signal.signal(signal.SIGABRT, previous)
+
+    sig = signal.SIGUSR1
+    original = signal.getsignal(sig)
+    try:
+        assert signal.signal(sig, first) is original
+        gc.collect()
+        assert signal.getsignal(sig) is first
+        os.kill(os.getpid(), sig)
+        assert seen == [(sig, "check_handlers")]
+        assert signal.signal(sig, second) is first
+        try:
+            os.kill(os.getpid(), sig)
+        except RuntimeError as exc:
+            assert str(exc) == "from second handler"
+        else:
+            raise AssertionError("the handler exception did not reach the caller")
+        assert signal.signal(sig, signal.SIG_IGN) is second
+        os.kill(os.getpid(), sig)
+        assert signal.getsignal(sig) is signal.SIG_IGN
+        assert _signal.getsignal(sig) is _signal.SIG_IGN
+        assert seen == [(sig, "check_handlers")]
+        assert _signal.signal(sig, first) is _signal.SIG_IGN
+        os.kill(os.getpid(), sig)
+        assert seen == [(sig, "check_handlers"), (sig, "check_handlers")]
+    finally:
+        signal.signal(sig, original)
+    assert signal.getsignal(sig) is original
+    assert signal.getsignal(signal.SIGKILL) is signal.SIG_DFL
+    assert _signal.getsignal(signal.SIGKILL) is _signal.SIG_DFL
+    try:
+        signal.signal(signal.SIGKILL, first)
+    except OSError:
+        pass
+    else:
+        raise AssertionError("SIGKILL cannot be caught")
+
+
+check_handlers()

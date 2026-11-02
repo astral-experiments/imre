@@ -138,6 +138,7 @@ impl Emitter<'_, '_> {
         self.start(&cycle);
         self.periodic_struct_sum(&plan, body, &view.length.operand, &index_mask, ordinary);
         self.start(&condition);
+        self.check_interrupt();
         let more = self.while_condition(test, false);
         self.branch(&more, &visit, exhausted);
         self.start(&visit);
@@ -157,6 +158,16 @@ impl Emitter<'_, '_> {
 
         let sum = self.borrow_slot(plan.accumulator);
         let term = self.expr(plan.term);
+        // The exact bulk path is constant time. Bound only the scalar fallback
+        // so a long uniform run returns regularly to a Python loop checkpoint.
+        let exact = self.instruction(format!(
+            "call i1 @imre_exact_fadd_bound(double {}, double {}, i64 {count})",
+            sum.operand, term.operand
+        ));
+        let short = self.instruction(format!("icmp ule i64 {count}, 65536"));
+        let whole = self.instruction(format!("or i1 {exact}, {short}"));
+        let count = self.instruction(format!("select i1 {whole}, i64 {count}, i64 65536"));
+        let end = self.instruction(format!("add i64 {at}, {count}"));
         let result = self.instruction(format!(
             "call double @imre_repeat_fadd(double {}, double {}, i64 {count})",
             sum.operand, term.operand
@@ -204,6 +215,7 @@ impl Emitter<'_, '_> {
         self.line(format!("store i1 true, ptr {exact}"));
         self.jump(&visit);
         self.start(&visit);
+        self.check_interrupt();
         self.block(&body[..2]);
         let sum = self.borrow_slot(plan.accumulator);
         let term = self.expr(plan.term);
@@ -291,6 +303,6 @@ print(fallible(rows))
         let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
         assert_eq!(llvm.matches("call double @imre_repeat_fadd(").count(), 1);
         // One bound check belongs to the uniform helper and one to the eligible cyclic loop.
-        assert_eq!(llvm.matches("call i1 @imre_exact_fadd_bound(").count(), 2);
+        assert_eq!(llvm.matches("call i1 @imre_exact_fadd_bound(").count(), 3);
     }
 }

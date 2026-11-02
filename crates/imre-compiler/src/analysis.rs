@@ -992,7 +992,7 @@ fn contextmanager_annotation(db: &dyn Db, file: File, range: TextRange) -> bool 
     let index = ty_python_core::semantic_index(db, program);
     index
         .node_scope(NodeWithScopeRef::Function(function))
-        .is_generator_function(&index)
+        .is_generator_function(index)
         && resolves_to_stdlib_function(
             &SemanticModel::new(db, program),
             &decorator.expression,
