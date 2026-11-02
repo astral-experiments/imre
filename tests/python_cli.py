@@ -1458,6 +1458,19 @@ def main():
                 "os", "posix",
             )
 
+            compare(
+                "-Xwarn_default_encoding", "-c",
+                "from subprocess import *\n"
+                "import warnings\n"
+                "with warnings.catch_warnings(record=True) as caught:\n"
+                "    Popen(['/bin/true'], text=True).wait()\n"
+                "    run(['/bin/true'], text=True)\n"
+                "    check_output(['/bin/true'], text=True)\n"
+                "    run(['/bin/true'], encoding='ascii')\n"
+                "    run(['/bin/true'])\n"
+                "for w in caught: print(w.filename, w.lineno, w.category.__name__, str(w.message))",
+            )
+
         for mode in ("0", "1"):
             compare(
                 "-I", "-X", f"utf8={mode}", "-c",
