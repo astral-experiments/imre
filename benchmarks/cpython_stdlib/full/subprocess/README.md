@@ -89,8 +89,8 @@ change the results of the default reference command.
 
 ## Pipes and communication
 
-The same native-body command now executes 11 unchanged methods (the keys
-under `native_body_host_fixtures` in its result) at both levels. It covers stdin writes,
+The earlier native-body run executed 11 unchanged methods (the keys
+under `native_body_host_fixtures` in its result) at both levels. It covered stdin writes,
 stdout/stderr reads, merged output, EOF/closed state, and `communicate` with
 zero or one pipe. `ProcessTestCase.test_communicate_stdout` and
 `test_communicate_stderr` now have native-parent evidence as well as the older
@@ -98,6 +98,13 @@ child-only observation. The native body of
 `test_post_timeout_communicate_sends_input` is attempted and reported under
 `blocked`: the compiler does not infer that its exception handler calling
 `self.fail()` cannot return. The original body is not rewritten.
+
+To run the default-poll timeout original alone, add
+`--case test.test_subprocess.ProcessTestCase.test_communicate_timeout_large_output`
+to the native-body command above. The compiled `unittest.TestCase` checks that
+the first `communicate()` raises `TimeoutExpired` and that a second call on the
+same child returns all 262,144 stdout bytes. Pinned CPython supplies the
+original fixtures and runs the literal child program.
 
 The differential `tests/fixtures/processes/popen_pipes.py` fixture also checks
 a 200,000-byte exchange on all three pipes, recovery after a zero deadline,
