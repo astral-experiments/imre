@@ -56,6 +56,7 @@ const EMPTY_TUPLE: Id = 5;
 
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
+pub(super) const REGEX_COPY_METHODS: &[&str] = &["__copy__", "__deepcopy__"];
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
 pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";

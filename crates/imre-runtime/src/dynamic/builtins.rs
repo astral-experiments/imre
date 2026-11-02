@@ -736,6 +736,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "file"
         }
+        Value::RegexPattern(_) | Value::RegexMatch(_)
+            if value::REGEX_COPY_METHODS.contains(&attr) =>
+        {
+            value.intrinsic_type_name()?
+        }
         Value::RegexPattern(_)
             if matches!(
                 attr,
@@ -1093,16 +1098,17 @@ impl Context {
 }
 
 /// Validate the receiver and keywords of a positional-only native method.
-fn method_receiver_args<'a>(
+pub(super) fn method_receiver_args<'a>(
     ctx: &Context,
     owner: &str,
     method: &str,
     args: &'a [Id],
     kwargs: &[(String, Id)],
 ) -> Result<(Id, &'a [Id])> {
+    let short = owner.rsplit('.').next().unwrap_or(owner);
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(type_error(format!(
-            "unbound method {owner}.{method}() needs an argument"
+            "unbound method {short}.{method}() needs an argument"
         )));
     };
     if !ctx.builtin_slot_accepts(receiver, owner) {
@@ -1115,7 +1121,7 @@ fn method_receiver_args<'a>(
     }
     if !kwargs.is_empty() {
         return Err(type_error(format!(
-            "{owner}.{method}() takes no keyword arguments"
+            "{short}.{method}() takes no keyword arguments"
         )));
     }
     Ok((receiver, rest))

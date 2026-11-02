@@ -2996,8 +2996,10 @@ impl Context {
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
                         return Ok(NONE);
                     }
-                    _ if class == KEY_WRAPPER
-                        && BuiltinDescriptor::lookup(&format!("{class}.{name}")).is_some() =>
+                    _ if matches!(
+                        class.as_str(),
+                        KEY_WRAPPER | value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE
+                    ) && BuiltinDescriptor::lookup(&format!("{class}.{name}")).is_some() =>
                     {
                         return Ok(self.builtin(&format!("{class}.{name}")));
                     }

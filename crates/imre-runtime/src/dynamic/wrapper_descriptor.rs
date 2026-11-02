@@ -91,6 +91,12 @@ impl BuiltinDescriptor {
             Some((owner, attr)) if let Some(class) = DictIterator::class(owner) => {
                 Some((class, attr, DictIterator::methods(class)))
             }
+            Some((value::REGEX_PATTERN_TYPE, attr)) => {
+                Some((value::REGEX_PATTERN_TYPE, attr, value::REGEX_COPY_METHODS))
+            }
+            Some((value::REGEX_MATCH_TYPE, attr)) => {
+                Some((value::REGEX_MATCH_TYPE, attr, value::REGEX_COPY_METHODS))
+            }
             Some((defaultdict::CLASS, attr)) => {
                 Some((defaultdict::CLASS, attr, defaultdict::METHODS))
             }
@@ -163,10 +169,12 @@ impl BuiltinDescriptor {
                 method: !name.starts_with("__")
                     || (deque::iterator_class(owner).is_some() && name == "__length_hint__")
                     || (owner == "list" && name == "__getitem__")
-                    || (owner == defaultdict::CLASS && matches!(name, "__copy__" | "__missing__"))
+                    || (owner == defaultdict::CLASS && name == "__missing__")
                     || matches!(
                         name,
-                        "__reversed__"
+                        "__copy__"
+                            | "__deepcopy__"
+                            | "__reversed__"
                             | "__round__"
                             | "__trunc__"
                             | "__getinitargs__"
@@ -423,6 +431,7 @@ impl BuiltinDescriptor {
                 {
                     match ctx.heap.get(receiver) {
                         _ if self.owner == "type" => ctx.class_qualname(receiver),
+                        _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE) => self.owner.rsplit('.').next()?,
                         Value::Deque(_) if self.owner == deque::CLASS => "deque",
                         Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",
                         Value::NamedTuple { class: Some(owner), .. } if let Some(layout) = stdlib::os::stat::layout(owner) => layout.name(),
@@ -439,6 +448,9 @@ impl BuiltinDescriptor {
             }
             "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
             "__module__" if receiver.is_some() && self.method => NONE,
+            "__text_signature__" if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE) => {
+                ctx.text(if self.name == "__copy__" { "($self, /)" } else { "($self, memo, /)" })
+            }
             "__doc__" | "__text_signature__"
                 if self.name == "__len__" && matches!(self.owner, "list" | "tuple") =>
             {
