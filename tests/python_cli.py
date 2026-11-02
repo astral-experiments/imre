@@ -1934,6 +1934,7 @@ def report(text):
             "boxed_code_objects.py",
             "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",
+            "boxed_bound_method_repr.py",
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
             "boxed_namedtuple_factory.py",
