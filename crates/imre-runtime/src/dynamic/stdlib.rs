@@ -50,6 +50,8 @@ mod ordered_dict;
 pub(super) mod os;
 pub(super) mod pickle;
 mod pkgutil;
+#[cfg(target_os = "linux")]
+pub(super) mod posix_spawn;
 mod posixpath;
 mod random;
 pub(super) mod readiness;
@@ -1730,6 +1732,10 @@ pub(super) fn call(
     #[cfg(target_os = "linux")]
     if let Some(op @ ("eventfd" | "eventfd_read" | "eventfd_write")) = name.strip_prefix("posix.") {
         return os::eventfd::call(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("posix_spawn" | "posix_spawnp")) = name.strip_prefix("posix.") {
+        return posix_spawn::call(ctx, op, args, kwargs);
     }
     if name == "posix.strerror" {
         if !kwargs.is_empty() {
