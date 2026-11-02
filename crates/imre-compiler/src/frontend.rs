@@ -142,7 +142,7 @@ pub(crate) use calls::scalar_literal;
 use calls::{Parameter, ParameterKind, parameter};
 use comprehensions::Helpers;
 pub(crate) use comprehensions::target_names;
-pub(crate) use function_text::{docstring, docstring_literal};
+pub(crate) use function_text::docstring;
 use module_values::{Initialization, ModuleValues};
 
 #[derive(Clone)]

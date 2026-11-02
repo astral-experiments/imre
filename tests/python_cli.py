@@ -1354,11 +1354,21 @@ sys.path.append("unused")""",
         )
         (root / "surrogate_module.py").write_text(r'value = f"\udfff{3}"')
         compare("-c", "import sys, surrogate_module; sys.path.append('unused'); print(repr(surrogate_module.value))")
-        rejected = run(imre, "-c", r"""import sys
+        compare("-c", r"""import sys, ast
 sys.path.append("unused")
-compile(r"value = '\ud800'", "<literal>", "exec")""")
-        assert rejected.returncode == 1 and not rejected.stdout, rejected
-        assert b"NotImplementedError: runtime source: surrogate string escapes" in rejected.stderr, rejected.stderr
+scope = {}
+exec(compile(r"x = ('\ud800', '\ufffd' r'\udfff' '\udfff')", "<literal>", "exec"), scope)
+print(ascii(scope["x"]))
+print(ascii(ast.literal_eval(r"'\ud800' '�' '\udfff'")))
+try:
+    compile(r"'\t\udfff'", "<docstring>", "exec")
+except UnicodeEncodeError as exc:
+    print(ascii(exc.args))""")
+        compare("-OO", "-c", r"""import sys
+sys.path.append("unused")
+scope = {}
+exec(compile("class C:\n " + r"'\udfff'" + "\n def f(self):\n  " + r"'\ud800'", "<doc>", "exec"), scope)
+print(scope["C"].__doc__, scope["C"].f.__doc__)""")
         assert run(imre, "-c").returncode == 2
         assert run(imre, "-I", "missing.py").returncode == 2
 

@@ -62,7 +62,7 @@ pub(crate) fn docstring(body: &[ast::Stmt]) -> Option<String> {
     Some(clean_doc(docstring_literal(body)?.value.to_str()))
 }
 
-pub(crate) fn docstring_literal(body: &[ast::Stmt]) -> Option<&ast::ExprStringLiteral> {
+fn docstring_literal(body: &[ast::Stmt]) -> Option<&ast::ExprStringLiteral> {
     let ast::Stmt::Expr(stmt) = body.first()? else {
         return None;
     };

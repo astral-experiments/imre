@@ -18,6 +18,7 @@ pub(super) struct Program {
     class_cell: bool,
     class_nonlocal: bool,
     doc: Option<ruff_text_size::TextRange>,
+    strip_docstrings: bool,
     literals: HashMap<ruff_text_size::TextRange, Id>,
     pub(super) string_roots: Id,
     first_line: u32,
@@ -346,7 +347,7 @@ impl<'a> TemplateSegment<'a> {
     fn push(
         &mut self,
         lit: &'a ast::InterpolatedStringLiteralElement,
-        spellings: &TemplateReplacements,
+        spellings: &StringReplacements,
     ) {
         self.text += &*lit.value;
         // Escaped braces can join several middle tokens into one AST element.
@@ -362,7 +363,7 @@ impl<'a> TemplateSegment<'a> {
 struct CompiledStrings<'a, 'ctx> {
     heap: &'ctx mut value::Heap,
     shared: &'ctx mut SharedConstants<'a>,
-    spellings: &'ctx TemplateReplacements,
+    spellings: &'ctx StringReplacements,
     constants: &'ctx mut HashMap<ruff_text_size::TextRange, Id>,
     roots: Vec<Id>,
     pending: Vec<&'a ast::Expr>,
@@ -443,26 +444,26 @@ impl<'a> CompiledStrings<'a, '_> {
 
     /// Pool template text by its original Python code points.
     fn template_text(&mut self, segment: TemplateSegment<'a>) -> Result<Id> {
-        if !segment.replacements.iter().any(|&p| p != 0xfffd) {
-            return self.text(segment.text);
-        }
-        let mut replacements = segment.replacements.into_iter();
-        let mut points = Vec::new();
-        points
-            .try_reserve_exact(segment.text.chars().count())
-            .map_err(|_| crate::Error::allocation())?;
-        for ch in segment.text.chars() {
-            points.push(if ch == char::REPLACEMENT_CHARACTER {
-                replacements
-                    .next()
-                    .ok_or_else(|| unsupported("t-string escape spelling"))?
-            } else {
-                u32::from(ch)
-            });
-        }
-        if replacements.next().is_some() {
-            return Err(unsupported("t-string escape spelling"));
-        }
+        self.decoded_text(segment.text, segment.replacements.iter().copied())
+    }
+
+    fn literal_text(&mut self, literal: &'a ast::ExprStringLiteral) -> Result<Id> {
+        self.decoded_text(
+            literal.value.to_str().into(),
+            self.spellings
+                .range(literal.start()..literal.end())
+                .flat_map(|(_, points)| points.iter().copied()),
+        )
+    }
+
+    fn decoded_text(
+        &mut self,
+        text: Cow<'a, str>,
+        replacements: impl Iterator<Item = u32> + Clone,
+    ) -> Result<Id> {
+        let Some(points) = original_points(&text, replacements)? else {
+            return self.text(text);
+        };
         if let Some(&id) = self.shared.surrogate_text.get(&points) {
             return Ok(id);
         }
@@ -591,7 +592,7 @@ impl<'a> CompiledStrings<'a, '_> {
                     continue;
                 }
                 ast::Expr::StringLiteral(literal) => {
-                    let id = self.text(literal.value.to_str().into())?;
+                    let id = self.literal_text(literal)?;
                     self.constant(literal.range(), id)?;
                 }
                 ast::Expr::TString(template) => self.template_strings(template)?,
@@ -608,7 +609,7 @@ impl<'a> CompiledStrings<'a, '_> {
                         .iter()
                         .filter_map(ast::Expr::as_string_literal_expr)
                     {
-                        items.push(self.text(literal.value.to_str().into())?);
+                        items.push(self.literal_text(literal)?);
                     }
                     self.string_tuple(tuple.range(), items)?;
                     continue;
@@ -638,37 +639,58 @@ impl<'a> CompiledStrings<'a, '_> {
     }
 }
 
-type TemplateReplacements = BTreeMap<ruff_text_size::TextSize, Vec<u32>>;
+type StringReplacements = BTreeMap<ruff_text_size::TextSize, Vec<u32>>;
 
-/// Preserve template middle tokens' original code points. Other runtime source
-/// string constants still have scalar-only storage.
-pub(super) fn check_runtime_strings(
-    source: &str,
-    tokens: &ast::token::Tokens,
-) -> Result<TemplateReplacements> {
-    let mut template = BTreeMap::new();
+/// Collect the original Python code points that Ruff represents as U+FFFD.
+pub(super) fn string_replacements(source: &str, tokens: &ast::token::Tokens) -> StringReplacements {
+    let mut entries = BTreeMap::new();
     for token in tokens {
-        let cooked = imre_ast::strings::cooked_content(token);
-        if token.kind() == ast::token::TokenKind::TStringMiddle {
-            let points: Vec<_> = match cooked {
-                Some(range) => imre_ast::strings::replacements(&source[range]).collect(),
-                None => source[token.range()]
-                    .matches(char::REPLACEMENT_CHARACTER)
-                    .map(|_| 0xfffd)
-                    .collect(),
-            };
-            if !points.is_empty() {
-                template.insert(token.start(), points);
-            }
-        } else if let Some(range) = cooked
-            && imre_ast::strings::replacements(&source[range]).any(|p| p != 0xfffd)
-        {
-            return Err(unsupported(
-                "surrogate string escapes in runtime-compiled source",
-            ));
+        if !matches!(
+            token.kind(),
+            ast::token::TokenKind::String | ast::token::TokenKind::TStringMiddle
+        ) {
+            continue;
+        }
+        let points: Vec<_> = match imre_ast::strings::cooked_content(token) {
+            Some(range) => imre_ast::strings::replacements(&source[range]).collect(),
+            None => source[token.range()]
+                .matches(char::REPLACEMENT_CHARACTER)
+                .map(|_| 0xfffd)
+                .collect(),
+        };
+        if !points.is_empty() {
+            entries.insert(token.start(), points);
         }
     }
-    Ok(template)
+    entries
+}
+
+/// Leave scalar strings on the UTF-8 path. Restore the spelling of every
+/// replacement character when a literal includes at least one lone surrogate.
+pub(super) fn original_points(
+    text: &str,
+    mut replacements: impl Iterator<Item = u32> + Clone,
+) -> Result<Option<Vec<u32>>> {
+    if !replacements.clone().any(|point| point != 0xfffd) {
+        return Ok(None);
+    }
+    let mut points = Vec::new();
+    points
+        .try_reserve_exact(text.chars().count())
+        .map_err(|_| crate::Error::allocation())?;
+    for ch in text.chars() {
+        points.push(if ch == char::REPLACEMENT_CHARACTER {
+            replacements
+                .next()
+                .ok_or_else(|| unsupported("string escape spelling"))?
+        } else {
+            u32::from(ch)
+        });
+    }
+    if replacements.next().is_some() {
+        return Err(unsupported("string escape spelling"));
+    }
+    Ok(Some(points))
 }
 
 /// Collect source line offsets before constructing code or AST nodes.
@@ -688,7 +710,7 @@ impl Program {
         &'a mut self,
         heap: &mut value::Heap,
         shared: &mut SharedConstants<'a>,
-        spellings: &TemplateReplacements,
+        spellings: &StringReplacements,
         line_at: &impl Fn(usize) -> u32,
     ) -> Result<(Id, &'a BTreeSet<String>)> {
         use ast::visitor::Visitor;
@@ -833,7 +855,7 @@ impl Program {
             } else {
                 "<genexpr>"
             };
-            let mut child = Self::new(self.filename.clone(), name);
+            let mut child = Self::new(self.filename.clone(), name, self.strip_docstrings);
             child.qualname =
                 Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
             child.method_imports = self.method_imports.clone();
@@ -1044,7 +1066,7 @@ impl Program {
         Ok(())
     }
 
-    fn new(filename: Rc<str>, name: &str) -> Self {
+    fn new(filename: Rc<str>, name: &str, strip_docstrings: bool) -> Self {
         Self {
             filename,
             name: name.to_owned(),
@@ -1053,6 +1075,7 @@ impl Program {
             class_cell: false,
             class_nonlocal: false,
             doc: None,
+            strip_docstrings,
             literals: HashMap::new(),
             string_roots: NONE,
             first_line: 1,
@@ -1117,7 +1140,7 @@ impl Program {
             .private_names
             .as_ref()
             .map_or(name.as_str(), |p| p.definition(name));
-        let mut child = Self::new(self.filename.clone(), original);
+        let mut child = Self::new(self.filename.clone(), original, self.strip_docstrings);
         child.qualname =
             Self::qualified_name(&self.qualname, self.class_attributes.is_some(), original);
         child.method_imports = self.method_imports.clone();
@@ -1127,6 +1150,24 @@ impl Program {
             lines.partition_point(|n| *n <= d.start().to_usize()) as u32
         });
         child
+    }
+
+    fn lower_namespace(
+        &mut self,
+        mut body: ast::Suite,
+        lines: &[usize],
+        function: bool,
+    ) -> Result<()> {
+        if let Some(ast::Stmt::Expr(first)) = body.first()
+            && let ast::Expr::StringLiteral(doc) = first.value.as_ref()
+        {
+            if self.strip_docstrings {
+                body.remove(0);
+            } else if function || self.class_attributes.is_some() {
+                self.doc = Some(doc.range());
+            }
+        }
+        self.lower(body, lines, function, None)
     }
 
     fn lower(
@@ -1149,12 +1190,6 @@ impl Program {
         mut active: Option<&mut LoopJumps>,
     ) -> Result<()> {
         use ast::Stmt;
-        if function
-            && let Some(Stmt::Expr(statement)) = body.first()
-            && let ast::Expr::StringLiteral(value) = &*statement.value
-        {
-            self.doc = Some(value.range());
-        }
         for stmt in body {
             let line = lines.partition_point(|n| *n <= stmt.start().to_usize()) as u32;
             let op = match stmt {
@@ -1289,7 +1324,7 @@ impl Program {
                         }
                         child.kind = FunctionKind::Coroutine;
                     }
-                    child.lower(s.body, lines, true, None)?;
+                    child.lower_namespace(s.body, lines, true)?;
                     for param in s.parameters.iter() {
                         let name = param.name().as_str();
                         if let Some((kind, _)) = child.directives.get(name) {
@@ -1324,13 +1359,8 @@ impl Program {
                         Rc::new(imre_ast::lower_in(&mut s.body, &child.name, false))
                     });
                     child.class_attributes = Some(class_attributes(&s.body, spellings));
-                    if let Some(Stmt::Expr(e)) = s.body.first()
-                        && let ast::Expr::StringLiteral(doc) = e.value.as_ref()
-                    {
-                        child.doc = Some(doc.range());
-                    }
                     child.instructions.push((line, Instruction::ClassStart));
-                    child.lower(s.body, lines, false, None)?;
+                    child.lower_namespace(s.body, lines, false)?;
                     child.instructions.push((line, Instruction::ClassEnd));
                     self.locals.insert(s.name.to_string());
                     Instruction::Define(Definition {
@@ -1708,16 +1738,41 @@ impl Context {
         let filename = filename_text;
         let parsed = ruff_python_parser::parse_module(&source)
             .map_err(|error| Error::new("SyntaxError", format!("{filename}: {error}")))?;
-        let spellings = check_runtime_strings(&source, parsed.tokens())?;
+        let spellings = string_replacements(&source, parsed.tokens());
+        let strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
+        if !strip_docstrings
+            && !spellings.is_empty()
+            && let Some(doc) = imre_ast::strings::find_docstring(&parsed.syntax().body, |doc| {
+                spellings
+                    .range(doc.start()..doc.end())
+                    .any(|(_, points)| points.iter().any(|&p| p != 0xfffd))
+                    .then_some(doc)
+            })
+        {
+            // CPython cleans docstrings by expanding tabs and requesting UTF-8.
+            let text = doc.value.to_str();
+            let expanded = crate::objects::expand_tabs(text, 8)?;
+            let points = original_points(
+                expanded.as_ref().map_or(text, |s| s.as_str()),
+                spellings
+                    .range(doc.start()..doc.end())
+                    .flat_map(|(_, points)| points.iter().copied()),
+            )?
+            .expect("docstring contains a surrogate");
+            let id = self.text_codepoints(points);
+            return Err(self
+                .encode_utf8_codepoints(id, false, "strict")
+                .expect_err("surrogates cannot encode as UTF-8"));
+        }
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        let mut code = Program::new(Rc::from(filename), "<module>");
+        let mut code = Program::new(Rc::from(filename), "<module>", strip_docstrings);
         code.method_imports = Rc::new(imre_ast::module_imports(&parsed.syntax().body));
         code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
             &source,
             parsed.tokens(),
             parsed.syntax(),
         ));
-        code.lower(parsed.into_syntax().body, &lines, false, None)?;
+        code.lower_namespace(parsed.into_syntax().body, &lines, false)?;
         let mut module_globals = HashSet::new();
         code.resolve_directives(&|_| None, &mut module_globals)?;
         // A global declared by a nested block makes module assignments use the globals dictionary.
@@ -2055,7 +2110,7 @@ impl Context {
                 format!("Forward reference must be an expression -- got {source:?}"),
             )
         })?;
-        let spellings = check_runtime_strings(source, parsed.tokens())?;
+        let spellings = string_replacements(source, parsed.tokens());
         if let ast::Expr::Name(ident) = parsed.syntax().body.as_ref()
             && usize::from(ident.range().len()) == source.len()
         {
@@ -2069,7 +2124,7 @@ impl Context {
             return Err(Self::undefined_source_name(self.str_value(text)?, text));
         }
         let lines = line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?;
-        let mut program = Program::new(Rc::from("<string>"), "<module>");
+        let mut program = Program::new(Rc::from("<string>"), "<module>", false);
         program.template_expressions = Rc::new(imre_ast::strings::template_expressions(
             source,
             parsed.tokens(),
@@ -2260,7 +2315,7 @@ impl Context {
         let body_line = *body_line;
         let parsed = ruff_python_parser::parse_module(source)
             .map_err(|err| Error::new("SyntaxError", err.to_string()))?;
-        let spellings = check_runtime_strings(source, parsed.tokens())?;
+        let spellings = string_replacements(source, parsed.tokens());
         let template_expressions =
             imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
         let mut syntax = parsed.into_syntax();
@@ -2283,13 +2338,14 @@ impl Context {
         let mut program = Program::new(
             self.str_value(code.filename)?.into(),
             self.str_value(code.name)?,
+            self.config["optimize"].as_i64().unwrap_or(0) >= 2,
         );
         program.method_imports = Rc::new(signature.method_imports);
         program.template_expressions = Rc::new(template_expressions);
         program.private_names = private_names;
         program.first_line = code.first_line;
         program.kind = FunctionKind::Generator;
-        program.lower(std::mem::take(&mut def.body), &lines, true, None)?;
+        program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }
