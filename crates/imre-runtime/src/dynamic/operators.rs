@@ -4960,6 +4960,15 @@ impl Context {
         self.binary_operation(op, a, b, true)
     }
 
+    pub(super) fn finalize_removed_dict_value(&mut self, removed: Id) {
+        if self.heap.tracks_finalizers()
+            && self.heap.could_own_finalizer(removed, true)
+            && self.heap.has_unbound_finalizer(NONE)
+        {
+            self.collect_unreachable();
+        }
+    }
+
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
@@ -4980,12 +4989,7 @@ impl Context {
         if let Some(dict) = self.dict_storage(obj) {
             let removed = builtins::remove_dict_item(self, dict, key)?
                 .ok_or_else(|| self.lookup_error("KeyError", key))?;
-            if self.heap.tracks_finalizers()
-                && self.heap.could_own_finalizer(removed, true)
-                && self.heap.has_unbound_finalizer(NONE)
-            {
-                self.collect_unreachable();
-            }
+            self.finalize_removed_dict_value(removed);
             return Ok(());
         }
         match self.heap.get(obj) {
