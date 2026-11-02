@@ -54,6 +54,9 @@ data.__file__ = 'wrong/__init__.py'
 assert resources.read_text('data', 'nested/message.txt') == 'hello\n'
 assert resources.read_binary(data, 'nested', 'message.txt') == b'hello\n'
 assert resources.read_binary('data', 'nested/message.txt') == b'hello\n'
+with resources.path('data', 'nested', 'message.txt') as existing:
+    assert existing.read_bytes() == b'hello\n'
+assert existing.is_file()
 assert not (root / 'absent').is_file()
 try:
     (root / 'absent').open('rb')
@@ -100,6 +103,9 @@ message = root / 'message.txt'
 assert message.is_file() and not list(message.iterdir())
 assert message.read_bytes() == b'caf\xc3\xa9\n'
 assert resources.read_binary(data, 'message.txt') == b'caf\xc3\xa9\n'
+with resources.path(data, 'message.txt') as temporary:
+    assert temporary.read_bytes() == b'caf\xc3\xa9\n'
+assert not temporary.exists()
 assert message.read_text(encoding='utf-8') == 'café\n'
 try:
     (root / 'absent').read_bytes()
