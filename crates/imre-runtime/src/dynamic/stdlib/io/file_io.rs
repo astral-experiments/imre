@@ -1,14 +1,14 @@
 //! Unbuffered filesystem streams for runtime-loaded Python code.
 
-use std::cell::Cell;
-use std::io::ErrorKind;
+use std::cell::{Cell, RefCell};
+use std::io::{ErrorKind, Seek};
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 use super::super::{builtins, files, os_error};
 use super::{Context, Error, Id, MemoryStream, NONE, Result, Value};
-use crate::objects::{BoxedPipe, os};
+use crate::objects::{BoxedPipe, FileState, os};
 
 pub(super) const METHODS: &[&str] = &[
     "__init__", "__repr__", "closed", "mode", "closefd", "_blksize", "close", "fileno", "read",
@@ -277,6 +277,9 @@ pub(in crate::dynamic) fn open(
             }
         }
     }
+    let update =
+        (!binary && buffering < 0 && mode_text.contains('+') && mode_text.contains(['r', 'w']))
+            .then(|| u32::from(mode_text.contains('w')));
     if buffering == 0 {
         let raw_mode = mode_text.replace('t', "");
         return open_raw(ctx, raw_arg, raw_mode, binary, owns);
@@ -326,25 +329,7 @@ pub(in crate::dynamic) fn open(
         if binary {
             return Ok(buffer);
         }
-        let wrapper = ctx.builtins["_io.TextIOWrapper"];
-        let result = ctx
-            .call(
-                wrapper,
-                vec![
-                    buffer,
-                    encoding.unwrap_or(NONE),
-                    errors.unwrap_or(NONE),
-                    newline.unwrap_or(NONE),
-                ],
-                Vec::new(),
-            )
-            .and_then(|stream| {
-                let mode = mode
-                    .map(|id| ctx.scalar_value(id))
-                    .unwrap_or_else(|| ctx.text("r"));
-                ctx.set_attr(stream, "mode", mode)?;
-                Ok(stream)
-            });
+        let result = wrap_text(ctx, buffer, mode, encoding, errors, newline);
         if result.is_err() {
             let _ = state(ctx, raw).expect("initialized FileIO").close();
         }
@@ -355,11 +340,41 @@ pub(in crate::dynamic) fn open(
     } else {
         raw_arg
     };
+    let update_path = if let Some(access) = update {
+        Some((
+            access,
+            super::super::os::c_path(ctx, filename, "embedded null byte")?,
+        ))
+    } else {
+        None
+    };
     if !owns {
         return Err(Error::new(
             "ValueError",
             "Cannot use closefd=False with file name",
         ));
+    }
+    if let Some((access, path)) = update_path {
+        ctx.module("io")?;
+        let (mut file, _) = match crate::objects::open_raw_file(path.as_bytes(), access, true) {
+            Ok(file) => file,
+            Err(error) => return Err(ctx.with_errno_filename(error.into(), raw_arg)?),
+        };
+        if file.stream_position().is_err() {
+            return Err(Error::new(
+                "UnsupportedOperation",
+                "File or stream is not seekable.",
+            ));
+        }
+        let file = FileState::buffered_random(file)?;
+        let owner =
+            crate::Shared::try_new(RefCell::new(file)).map_err(|_| crate::Error::allocation())?;
+        let buffer = ctx.alloc(Value::BufferedRandom(owner.clone(), raw_arg));
+        let result = wrap_text(ctx, buffer, mode, encoding, errors, newline);
+        if result.is_err() {
+            let _ = owner.borrow_mut().close();
+        }
+        return result;
     }
     let mode = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
     let writer_capacity = match (buffering, mode) {
@@ -409,6 +424,33 @@ pub(in crate::dynamic) fn open(
         Ok(file) => Ok(ctx.alloc(file)),
         Err(error) => Err(ctx.with_open_filename(error, raw_arg)?),
     }
+}
+
+/// Complete a buffered open with the public text wrapper and preserve its requested mode.
+fn wrap_text(
+    ctx: &mut Context,
+    buffer: Id,
+    mode: Option<Id>,
+    encoding: Option<Id>,
+    errors: Option<Id>,
+    newline: Option<Id>,
+) -> Result<Id> {
+    let wrapper = ctx.builtins["_io.TextIOWrapper"];
+    let stream = ctx.call(
+        wrapper,
+        vec![
+            buffer,
+            encoding.unwrap_or(NONE),
+            errors.unwrap_or(NONE),
+            newline.unwrap_or(NONE),
+        ],
+        Vec::new(),
+    )?;
+    let mode = mode
+        .map(|id| ctx.scalar_value(id))
+        .unwrap_or_else(|| ctx.text("r"));
+    ctx.set_attr(stream, "mode", mode)?;
+    Ok(stream)
 }
 
 fn open_raw(

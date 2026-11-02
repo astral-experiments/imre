@@ -319,6 +319,24 @@ def current():
     finally:
         os.unlink(path)
 
+    path = Path("buffered-update-text")
+    try:
+        with open(path, "w+t", encoding="latin-1", newline="\r\n") as stream:
+            buffer = stream.buffer
+            assert stream.mode == "w+t" and stream.name == "buffered-update-text"
+            assert stream.write("é\n") == 2
+            stream.seek(0)
+            assert stream.read() == "é\r\n"
+        assert buffer.closed and stream.closed
+        with open(path, "r+", encoding="latin-1") as stream:
+            assert stream.read() == "é\n"
+            stream.seek(0)
+            stream.write("A")
+        with open(path, "rb") as stream:
+            assert stream.read() == b"A\r\n"
+    finally:
+        os.unlink(path)
+
     # Conversion runs before incompatible binary options are rejected.
     try:
         open(Raises(), "rb", -1, None, "replace", None)
