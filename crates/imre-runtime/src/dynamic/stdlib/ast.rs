@@ -258,6 +258,7 @@ fn parsed_instance(
         scalar: None,
         property: None,
         weak_reference: None,
+        cycle: None,
         memory_stream: None,
     })
 }
