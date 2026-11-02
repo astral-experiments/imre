@@ -108,6 +108,7 @@ pub(super) fn is_module(name: &str) -> bool {
         "_blake2"
             | "_sha3"
             | "_datetime"
+            | "_imre_itertools"
             | "_imre_ordered_dict"
             | "_opcode"
             | "atexit"
@@ -1609,19 +1610,19 @@ pub(super) fn call(
     if name == "itertools.count" {
         return itertools::count(ctx, args, kwargs);
     }
-    if name == "itertools._cycle_allocate" {
+    if name == "_imre_itertools._cycle_allocate" {
         return itertools::cycle_allocate(ctx, args, kwargs);
     }
-    if name == "itertools._cycle_next" {
+    if name == "_imre_itertools._cycle_next" {
         return itertools::cycle_next(ctx, args, kwargs);
     }
-    if name == "itertools._filterfalse_allocate" {
+    if name == "_imre_itertools._filterfalse_allocate" {
         return itertools::filterfalse_allocate(ctx, args, kwargs);
     }
-    if name == "itertools._filterfalse_state" {
+    if name == "_imre_itertools._filterfalse_state" {
         return itertools::filterfalse_state(ctx, args, kwargs);
     }
-    if name == "itertools._chain_allocate" {
+    if name == "_imre_itertools._chain_allocate" {
         let [base, class, source] = args else {
             return Err(Error::new(
                 "TypeError",
@@ -1646,7 +1647,7 @@ pub(super) fn call(
         }
         return Ok(result);
     }
-    if name == "itertools._chain_get" || name == "itertools._chain_set" {
+    if name == "_imre_itertools._chain_get" || name == "_imre_itertools._chain_set" {
         if !kwargs.is_empty()
             || (name.ends_with("_get") && args.len() != 2)
             || (name.ends_with("_set") && args.len() != 3)
