@@ -1734,6 +1734,10 @@ def report(text):
         (helpers / "uuid.py").write_text("marker = 'explicit search path'\n")
         compare("-IB", "-c", uuid_import + "print(uuid.marker)")
 
+        (helpers / "pprint.py").write_text("def incomplete(:\n")
+        compare("-IB", "-c", f"import sys\nsys.path.insert(0, {str(helpers)!r})\nprint(__import__('sys').__name__)")
+        (helpers / "pprint.py").unlink()
+
         (root / "legacy.py").write_text(args_code)
         legacy = run(imre, "run", "legacy.py", "--quiet", "--", "--opt-level", "2")
         assert (
@@ -1949,6 +1953,7 @@ def report(text):
             "boxed_typing_type.py",
             "boxed_typing_mapping.py",
             "boxed_typing_regex_aliases.py",
+            "boxed_pprint.py",
             "boxed_formatter.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
