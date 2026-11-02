@@ -1580,6 +1580,7 @@ impl IntrinsicModule {
             (Self::Typing, "get_protocol_members") => {
                 Intrinsic::ObjectRuntimeExport("typing.get_protocol_members")
             }
+            (Self::Typing, "override") => Intrinsic::ObjectRuntimeExport("typing.override"),
             (Self::Typing, "is_protocol") => Intrinsic::ObjectRuntimeExport("typing.is_protocol"),
             (Self::Typing, "Annotated") => Intrinsic::ObjectRuntimeExport("typing.Annotated"),
             (Self::Typing, "ForwardRef") => Intrinsic::ObjectRuntimeExport("typing.ForwardRef"),
