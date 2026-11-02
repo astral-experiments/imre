@@ -370,6 +370,12 @@ fn run() -> Result<ExitCode, String> {
         input_paths
             .iter()
             .chain(&extension_archives)
+            .chain(
+                options
+                    .bundled_provider_archive
+                    .as_ref()
+                    .filter(|archive| !extension_archives.contains(archive)),
+            )
             .chain(&library_manifests)
             .map(PathBuf::as_path),
         &runtime,
