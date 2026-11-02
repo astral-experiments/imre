@@ -69,6 +69,8 @@ REJECTED = {
     "nested_class_after_invalid_class": "class Bad:\n    x: int\n    x: str\nclass Outer:\n    class Inner: pass\n",
     **INVALID_OBJECT_BASES,
     "weak_proxy_callback": "import weakref\nclass Target:\n    pass\ndef callback(proxy: Target) -> None:\n    pass\ntarget = Target()\nweakref.proxy(target, callback)\n",
+    "constructor_uninitialized_container": "class C:\n    data: dict[int, int]\n    def __init__(self):\n        self.data[0] = 1\n        self.data = {}\n",
+    "constructor_uninitialized_index": "class C:\n    data: dict[int, int]\n    key: int\n    def __init__(self):\n        self.data = {}\n        self.data[self.key] = 1\n        self.key = 0\n",
     "inferred_field_reads_itself": FORMAT_INIT.replace("v=1", "v=self.path"),
     "inferred_field_invalid_format_arg": FORMAT_INIT.replace("v=1", "v=[1]"),
     "inferred_field_type_is_shadowed": "class str: pass\n" + FORMAT_INIT,
@@ -84,6 +86,16 @@ REJECTED = {
     "frozen_inherited_class_data": 'from dataclasses import dataclass\nclass Base:\n    items = [1]\n@dataclass(frozen=True)\nclass Child(Base):\n    n: int\nChild(1).items = [2]\n',
     "sibling_guard_field": SUBCLASS_LAYOUT + "def f(x: Base) -> str:\n    if isinstance(x, (A, B)): return x.label\n    return 'other'\n",
     "reassigned_subclass_field": SUBCLASS_LAYOUT + "def f(x: Base, replacement: Base) -> str:\n    if isinstance(x, A):\n        x = replacement\n        return x.label\n    return 'other'\n",
+    "init_hook_value_reads_uninitialized": """class Base:
+    value: int
+    def __init__(self) -> None:
+        self.value = self.make()
+    def make(self) -> int:
+        return 1
+class Child(Base):
+    def make(self) -> int:
+        return self.value
+""",
     "init_hook_skips_field": HOOK + "class Child(Build):\n    def prepare(self) -> None: pass\n",
     "init_hook_reads_before_write": HOOK + "class Child(Build):\n    def prepare(self) -> None: self.value = self.value + 1\n",
     "init_hook_leaks_receiver": HOOK + "def observe(value: Build) -> int: return value.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = observe(self)\n",
