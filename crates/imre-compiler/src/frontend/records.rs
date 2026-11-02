@@ -1010,6 +1010,9 @@ impl Checker<'_> {
         {
             return self.object_runtime_export(name, node);
         }
+        if self.native_mock(class) && !name.starts_with('_') {
+            return self.object_runtime_export("live unittest.mock.Mock attributes", node);
+        }
         if matches!(name, "loadTestsFromName" | "loadTestsFromNames")
             && self.unittest_subclass(class, "TestLoader")
         {

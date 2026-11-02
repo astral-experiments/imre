@@ -1907,6 +1907,7 @@ def report(text):
             "boxed_unittest_assert_regex.py",
             "boxed_unittest_identity.py",
             "boxed_unittest_skip.py",
+            "boxed_unittest_seal.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
             "boxed_recursion.py",
