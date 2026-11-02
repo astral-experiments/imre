@@ -33,6 +33,7 @@ enum Instruction {
     AugAssign(ast::StmtAugAssign),
     DeleteName(String),
     DeleteItem(ast::ExprSubscript),
+    DeleteAttr(ast::ExprAttribute),
     Assign(Vec<ast::Expr>, ast::Expr),
     Import {
         module: String,
@@ -405,6 +406,10 @@ impl Program {
                     strings.visit_expr(&item.value);
                     strings.visit_expr(&item.slice);
                 }
+                Instruction::DeleteAttr(attr) => {
+                    strings.visit_expr(&attr.value);
+                    strings.heap.code_name(attr.attr.as_str());
+                }
                 Instruction::Assert(stmt) => {
                     strings.visit_expr(&stmt.test);
                     if let Some(message) = &stmt.msg {
@@ -640,6 +645,10 @@ impl Program {
                             {
                                 self.instructions
                                     .push((line, Instruction::DeleteItem(item)));
+                            }
+                            ast::Expr::Attribute(attr) => {
+                                self.instructions
+                                    .push((line, Instruction::DeleteAttr(attr)));
                             }
                             _ => return Err(unsupported("deletion target")),
                         }
@@ -2229,6 +2238,10 @@ impl Context {
                 let object = eval(self, &item.value)?;
                 let key = eval(self, &item.slice)?;
                 self.delete_item(object, key)?;
+            }
+            Instruction::DeleteAttr(attr) => {
+                let object = eval(self, &attr.value)?;
+                self.delete_attr(object, attr.attr.as_str())?;
             }
             Instruction::AugAssign(stmt) => {
                 let update = |ctx: &mut Self, left: Id| -> Result<Id> {
