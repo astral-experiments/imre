@@ -4,6 +4,8 @@ use super::{Codec, Context, Id, Result, StreamCodec};
 pub(super) struct Reader {
     text: String,
     cursor: usize,
+    // CPython distinguishes no decoded chunk from an empty chunk at sized-read EOF.
+    pub(super) decoded_chunk_nonempty: Option<bool>,
     pub(super) tail: Vec<u8>,
     cr: bool,
     pub(super) beginning: bool,
@@ -48,6 +50,7 @@ impl Reader {
         Self {
             text: String::new(),
             cursor: 0,
+            decoded_chunk_nonempty: None,
             tail: Vec::new(),
             cr: false,
             beginning,
@@ -60,7 +63,33 @@ impl Reader {
             snapshot: Snapshot::None,
         }
     }
+    pub(super) fn final_chunk_has_text(&self) -> bool {
+        self.text.len() > self.chunk_start
+    }
+    pub(super) fn reset_decoder(&mut self) {
+        self.tail.clear();
+        self.cr = false;
+        self.seen = 0;
+        self.order = 0;
+        self.beginning = true;
+    }
+    pub(super) fn after_read_all(&mut self) {
+        // CPython clears decoded_chars on a full read or write only with a saved snapshot.
+        let retained = matches!(self.snapshot, Snapshot::None)
+            .then_some(self.decoded_chunk_nonempty)
+            .flatten();
+        self.discard();
+        self.decoded_chunk_nonempty = retained;
+    }
+    pub(super) fn after_write(&mut self) {
+        // An unseekable stream can still have unread decoded characters after a write.
+        if !matches!(self.snapshot, Snapshot::None) {
+            self.discard();
+        }
+        self.reset_decoder();
+    }
     pub(super) fn discard(&mut self) {
+        self.decoded_chunk_nonempty = None;
         self.text.clear();
         self.cursor = 0;
         self.tail.clear();
