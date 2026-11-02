@@ -30,6 +30,7 @@ pub(super) struct Program {
 enum Instruction {
     Eval(ast::Expr),
     AugAssign(ast::StmtAugAssign),
+    DeleteName(String),
     DeleteItem(ast::ExprSubscript),
     Assign(Vec<ast::Expr>, ast::Expr),
     Import {
@@ -390,6 +391,9 @@ impl Program {
                         strings.visit_expr(target);
                     }
                 }
+                Instruction::DeleteName(name) => {
+                    strings.heap.code_name(name);
+                }
                 Instruction::DeleteItem(item) => {
                     strings.visit_expr(&item.value);
                     strings.visit_expr(&item.slice);
@@ -608,6 +612,12 @@ impl Program {
                 Stmt::Delete(s) => {
                     for target in s.targets {
                         match target {
+                            ast::Expr::Name(name) => {
+                                let name = name.id.to_string();
+                                self.locals.insert(name.clone());
+                                self.instructions
+                                    .push((line, Instruction::DeleteName(name)));
+                            }
                             ast::Expr::Subscript(item)
                                 if !matches!(*item.slice, ast::Expr::Slice(_)) =>
                             {
@@ -2188,6 +2198,11 @@ impl Context {
                     self.bind_target(code, scope, target, value)?;
                 }
             }
+            Instruction::DeleteName(name) => {
+                self.check_source_local(code, scope, name)?;
+                let key = self.heap.code_name(name);
+                self.op("delname", scope, key, NONE)?;
+            }
             Instruction::DeleteItem(item) => {
                 let object = eval(self, &item.value)?;
                 let key = eval(self, &item.slice)?;
@@ -2588,6 +2603,23 @@ impl Context {
         Ok(truth)
     }
 
+    /// A function-local read or deletion must not fall back to a same-named global.
+    fn check_source_local(&self, code: &Program, scope: Id, name: &str) -> Result<()> {
+        if code.class_attributes.is_none()
+            && code.name != "<module>"
+            && code.locals.contains(name)
+            && self.scope_name(scope, name).is_none()
+        {
+            return Err(Error::new(
+                "UnboundLocalError",
+                format!(
+                    "cannot access local variable '{name}' where it is not associated with a value"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
         use ast::Expr;
         let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
@@ -2600,18 +2632,7 @@ impl Context {
                 {
                     return self.lookup(self.root_scope(scope), name);
                 }
-                if code.class_attributes.is_none()
-                    && code.name != "<module>"
-                    && code.locals.contains(name)
-                    && self.scope_name(scope, name).is_none()
-                {
-                    return Err(Error::new(
-                        "UnboundLocalError",
-                        format!(
-                            "cannot access local variable '{name}' where it is not associated with a value"
-                        ),
-                    ));
-                }
+                self.check_source_local(code, scope, name)?;
                 self.lookup(scope, name)
             }
             Expr::StringLiteral(_) | Expr::BytesLiteral(_) => Ok(code.literals[&expr.range()]),
