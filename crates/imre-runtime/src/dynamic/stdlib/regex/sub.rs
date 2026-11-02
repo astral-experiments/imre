@@ -1,4 +1,5 @@
 use super::*;
+use imre_regex::{ReplacementError, ReplacementPart};
 
 /// Substitute matches in order, retaining the allocation-free match path for literal replacements.
 pub(in crate::dynamic::stdlib) fn pattern_sub(
@@ -36,7 +37,10 @@ pub(in crate::dynamic::stdlib) fn pattern_sub(
     let pattern = Rc::clone(pattern);
     if ctx.callable(repl) {
         return ctx.with_buffer_export(string, |ctx| {
-            callable_sub(ctx, &pattern, receiver, string, repl, limit)
+            expanded_sub(ctx, &pattern, receiver, string, limit, |ctx, m| {
+                let matched = ctx.alloc(Value::RegexMatch(Rc::new(m)));
+                ctx.call(repl, vec![matched], Vec::new())
+            })
         });
     }
     let (replacement, replacement_is_bytes) = match ctx.heap.get(ctx.scalar_value(repl)) {
@@ -63,10 +67,15 @@ pub(in crate::dynamic::stdlib) fn pattern_sub(
         }
     };
     if replacement.contains(&b'\\') {
-        return Err(Error::new(
-            "NotImplementedError",
-            "boxed regex replacement templates are unsupported",
-        ));
+        return template_sub(
+            ctx,
+            &pattern,
+            receiver,
+            repl,
+            string,
+            limit,
+            replacement_is_bytes,
+        );
     }
     let text = subject_bytes(ctx, string, pattern.bytes)?;
     let mut output = Vec::new();
@@ -122,15 +131,133 @@ pub(in crate::dynamic::stdlib) fn pattern_sub(
     })
 }
 
+/// Parse the template before searching; unmatched captures contribute no text to the expansion.
+fn template_sub(
+    ctx: &mut Context,
+    pattern: &Pattern,
+    receiver: Id,
+    repl: Id,
+    string: Id,
+    limit: isize,
+    replacement_is_bytes: bool,
+) -> Result<Id> {
+    // CPython's template cache retries unhashable buffers, but propagates invalid memoryview hashes.
+    if matches!(ctx.heap.get(repl), Value::MemoryView { .. })
+        && let Err(error) = ctx.dictionary_hash(repl)
+    {
+        let ty = ctx.builtin("TypeError");
+        if !ctx.raised_error_matches(&error, ty) {
+            return Err(error);
+        }
+    }
+    if ctx.scalar_value(repl) != repl {
+        return Err(Error::new(
+            "NotImplementedError",
+            "boxed regex replacement templates with custom scalar subclasses are unsupported",
+        ));
+    }
+    let source = if replacement_is_bytes {
+        ctx.bytes_like(repl)?
+            .iter()
+            .map(|&b| char::from(b))
+            .collect()
+    } else {
+        ctx.str_value(ctx.scalar_value(repl))?.to_owned()
+    };
+    let info = pattern.regex.group_info();
+    let limit_digits = crate::integer_text::decimal_digit_limit();
+    let parts =
+        imre_regex::parse_replacement(&source, pattern.group_count() + 1, limit_digits, |name| {
+            group_names::valid(name, replacement_is_bytes)
+                .then(|| info.to_index(PatternID::ZERO, name))
+                .flatten()
+        });
+    let parts = match parts {
+        Ok(parts) => parts,
+        Err(err) => {
+            let (message, position) = match err {
+                ReplacementError::DigitLimit { count } => {
+                    return Err(Error::new(
+                        "ValueError",
+                        format!(
+                            "Exceeds the limit ({limit_digits} digits) for integer string conversion: value has {count} digits; use sys.set_int_max_str_digits() to increase the limit"
+                        ),
+                    ));
+                }
+                ReplacementError::Syntax {
+                    message, position, ..
+                } => (message, position),
+                ReplacementError::GroupName { name, position } => {
+                    if group_names::valid(&name, replacement_is_bytes) {
+                        return Err(Error::new(
+                            "IndexError",
+                            format!(
+                                "unknown group name {}",
+                                crate::objects::exceptions::string_repr(&name)
+                            ),
+                        ));
+                    }
+                    (group_names::bad_name(&name, replacement_is_bytes), position)
+                }
+            };
+            let source = if replacement_is_bytes && !matches!(ctx.heap.get(repl), Value::Bytes(_)) {
+                ctx.alloc(Value::Bytes(ctx.bytes_like(repl)?.to_vec()))
+            } else {
+                repl
+            };
+            return Err(pattern_error_at(ctx, source, message, Some(position)));
+        }
+    };
+    let parts: Vec<ReplacementPart<Id>> = parts
+        .into_iter()
+        .map(|part| match part {
+            ReplacementPart::Group(index) => ReplacementPart::Group(index),
+            ReplacementPart::Literal(text) => {
+                let value = if replacement_is_bytes {
+                    ctx.alloc(Value::Bytes(text.chars().map(|ch| ch as u8).collect()))
+                } else {
+                    ctx.text(text)
+                };
+                ReplacementPart::Literal(value)
+            }
+        })
+        .collect();
+    let empty = if replacement_is_bytes {
+        ctx.alloc(Value::Bytes(Vec::new()))
+    } else {
+        ctx.text("")
+    };
+    let join = ctx.lookup_attr(empty, "join")?;
+    let expand = |ctx: &mut Context, m: Match| {
+        let mut pieces = Vec::new();
+        for part in &parts {
+            match *part {
+                ReplacementPart::Literal(id) => pieces.push(id),
+                ReplacementPart::Group(index) => {
+                    let item = m.group(ctx, index, NONE)?;
+                    if item != NONE {
+                        pieces.push(item);
+                    }
+                }
+            }
+        }
+        let pieces = ctx.alloc(Value::List(pieces));
+        ctx.call(join, vec![pieces], Vec::new())
+    };
+    ctx.with_buffer_export(string, |ctx| {
+        expanded_sub(ctx, pattern, receiver, string, limit, expand)
+    })
+}
+
 /// Capture each intervening slice before the callback can change the subject. Keep
 /// the returned objects themselves until every callback has run, as CPython joins last.
-fn callable_sub(
+fn expanded_sub(
     ctx: &mut Context,
     pattern: &Pattern,
     receiver: Id,
     string: Id,
-    repl: Id,
     limit: isize,
+    mut expand: impl FnMut(&mut Context, Match) -> Result<Id>,
 ) -> Result<Id> {
     let length = subject_bytes(ctx, string, pattern.bytes)?.len();
     let mut pieces = Vec::new();
@@ -157,12 +284,12 @@ fn callable_sub(
             add(ctx.alloc(gap))?;
         }
         let mark = ctx.heap.temporary_mark();
-        let matched = ctx.alloc(Value::RegexMatch(Rc::new(Match {
+        let matched = Match {
             pattern: receiver,
             subject: string,
             spans: group_spans(&caps).collect(),
-        })));
-        let item = ctx.call(repl, vec![matched], Vec::new())?;
+        };
+        let item = expand(ctx, matched)?;
         ctx.heap.release_temporaries_since(mark);
         if item != NONE {
             ctx.heap.keep(item);
