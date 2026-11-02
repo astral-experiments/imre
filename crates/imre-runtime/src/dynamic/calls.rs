@@ -2671,6 +2671,12 @@ impl Context {
                     if let Value::Native(method) = self.heap.get(callable) {
                         let module_bound = matches!(self.heap.get(receiver), Value::Module { .. });
                         let value = match name {
+                            "__doc__" if method == "posix.sysconf" => {
+                                Some("Return an integer-valued system configuration variable.")
+                            }
+                            "__text_signature__" if method == "posix.sysconf" => {
+                                Some("($module, name, /)")
+                            }
                             "__qualname__" if module_bound => method.rsplit('.').next(),
                             "__module__" if module_bound => {
                                 method.rsplit_once('.').map(|(module, _)| module)
