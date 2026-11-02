@@ -1,4 +1,12 @@
 """Default lowercasing includes expansions and the context-sensitive final sigma."""
+
+from enum import StrEnum
+
+
+class CaseMember(StrEnum):
+    MEMBER = "ǳẞ"
+
+
 for word in ["", "CPython-3.14_", "already lower", "İ", "ẞ", "𐐧𐐧",
              "Σ", "ΟΣ", "ΟΣΑ", "Ο\u0301Σ", "ΟΣ\u0301Α", "ΟΣ\u0301.",
              "A'Σ", "AΣ'A", "AΣ\u0345.", "AΣ\u0345A", "\0Σ", "Σ\0"]:
@@ -33,11 +41,6 @@ try:
     str.swapcase("x", extra=1)
 except TypeError as error:
     print(error)
-
-
-from enum import StrEnum
-class CaseMember(StrEnum):
-    MEMBER = "ǳẞ"
 
 assert str.title(CaseMember.MEMBER) == "ǲß"
 assert str.swapcase(CaseMember.MEMBER) == "Ǳß"
