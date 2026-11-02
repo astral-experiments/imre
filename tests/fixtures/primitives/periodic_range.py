@@ -19,3 +19,6 @@ for size in [0, 1, 1022, 1023, 1024, 2046]:
     print(fold(3, 3 + size, -7))
 print(fold(-2000, 3000, 1 << 62))
 print(fold(0, 4096, (1 << 62) - 10))
+# A later block crosses the tagged-sum limit or the ordinal bound.
+print(fold(0, 4096, (1 << 62) - 13_000_000))
+print(fold((1 << 31) - 3000, (1 << 31) + 5, 7))

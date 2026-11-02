@@ -288,7 +288,7 @@ impl Reduction<'_> {
 }
 
 impl Emitter<'_, '_> {
-    /// Skip a bounded prefix, then execute its last iteration normally to publish every live local.
+    /// Combine complete periods between interrupt polls, then publish live locals in the scalar body.
     pub(super) fn advance_affine(
         &mut self,
         body: &[Statement],
@@ -380,25 +380,25 @@ impl Emitter<'_, '_> {
 }
 
 const AFFINE_FIXED_PREFIX: &str = r"
-; Skip complete periods (at most 1,023 iterations) and publish locals in the ordinary body.
+; Each block spans at most 1,023 iterations. The scalar body publishes the final ordinal.
 ; Nonnegative i32 ordinals and coefficients keep each scalar expression small.
 ; The chunk subtotal is computed in i128 before narrowing to a tagged integer.
 ; Keep the usual fixed extent constant when this module also emits shorter periods.
-define internal {i64,i64} @imre_affine_fixed_prefix(i64 %at, i64 %end, i64 %total, i64 %scale, i64 %offset) noinline nounwind memory(none) {
+define internal {i64,i64} @imre_affine_fixed_prefix(i64 %at, i64 %end, i64 %total, i64 %scale, i64 %offset) noinline nounwind {
   %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 1023, i64 %scale, i64 %offset)
   ret {i64,i64} %result
 }
 ";
 
 const AFFINE_RANGE_PREFIX: &str = r"
-define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset) noinline nounwind memory(none) {
+define internal {i64,i64} @imre_affine_range_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset) noinline nounwind {
   %result = call {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset)
   ret {i64,i64} %result
 }
 ";
 
 const AFFINE_CHECKED_PREFIX: &str = r"
-define internal {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset) alwaysinline nounwind memory(none) {
+define internal {i64,i64} @imre_affine_checked_prefix(i64 %at, i64 %end, i64 %total, i64 %count, i64 %scale, i64 %offset) alwaysinline nounwind {
   %tags0 = and i64 %at, %end
   %tags = and i64 %tags0, %total
   %small = trunc i64 %tags to i1
@@ -420,11 +420,33 @@ check_sum:
   %initial = sext i64 %sum to i128
   %partial = add i128 %initial, %delta
   %fits = icmp sle i128 %partial, 4611686018427387903
-  br i1 %fits, label %success, label %fallback
+  %extent = zext i64 %count to i128
+  %difference = mul i128 %a, %extent
+  br i1 %fits, label %chunks, label %fallback
+; Adjacent blocks have subtotals that differ by count * scale. Keep the last
+; representable prefix so overflow resumes at the first uncommitted block.
+chunks:
+  %ordinal = phi i64 [ %last, %check_sum ], [ %next, %poll ]
+  %subtotal = phi i128 [ %partial, %check_sum ], [ %next_total, %poll ]
+  %contribution = phi i128 [ %delta, %check_sum ], [ %next_delta, %poll ]
+  %next = add i64 %ordinal, %count
+  %in_range = icmp slt i64 %next, %stop
+  %in_bounds = icmp ule i64 %next, 2147483647
+  %next_delta = add i128 %contribution, %difference
+  %next_total = add i128 %subtotal, %next_delta
+  %in_tag = icmp sle i128 %next_total, 4611686018427387903
+  %room = and i1 %in_bounds, %in_range
+  %can_advance = and i1 %room, %in_tag
+  br i1 %can_advance, label %poll, label %success
+; Leave signal dispatch to the loop header after the scalar body publishes its locals.
+poll:
+  %tripped = load atomic volatile i8, ptr @imre_signal_tripped monotonic, align 1
+  %clear = icmp eq i8 %tripped, 0
+  br i1 %clear, label %chunks, label %success
 success:
-  %advance = shl i64 %count, 1
-  %new_at = add i64 %at, %advance
-  %n = trunc i128 %partial to i64
+  %tag = shl i64 %ordinal, 1
+  %new_at = or i64 %tag, 1
+  %n = trunc i128 %subtotal to i64
   %shift = shl i64 %n, 1
   %new_total = or i64 %shift, 1
   %r0 = insertvalue {i64,i64} zeroinitializer, i64 %new_at, 0
