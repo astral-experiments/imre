@@ -2405,6 +2405,15 @@ impl Context {
             }
             "abc" => {
                 let meta = self.abc_meta();
+                // ABCMeta.__new__ supplies type.__new__'s caller globals even after
+                // sys.modules is replaced. Keep the metaclass's defining module alive.
+                let Value::Class { scope: meta_scope, .. } = *self.heap.get(meta) else {
+                    unreachable!()
+                };
+                let Value::Scope(frame) = self.heap.get_mut(meta_scope) else {
+                    unreachable!()
+                };
+                frame.parent.get_or_insert(scope);
                 self.bind(scope, "ABCMeta", meta);
                 let token = self.builtin("abc.get_cache_token");
                 self.bind(scope, "get_cache_token", token);

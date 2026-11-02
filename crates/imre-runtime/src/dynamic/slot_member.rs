@@ -328,9 +328,13 @@ impl Context {
             self.heap.keep(key);
             self.heap.keep(value);
         }
-        let globals = self.module_globals(self.heap.current_scope())?;
+        let creator_scope = match metaclass.map(|meta| self.heap.get(meta)) {
+            Some(Value::Class { scope, .. }) => *scope,
+            _ => self.heap.current_scope(),
+        };
+        let globals = self.module_globals(creator_scope)?;
         let module = self.dict_named_item(globals, "__name__");
-        let module_text = self.scope_data(self.heap.current_scope()).module.clone();
+        let module_text = self.scope_data(creator_scope).module.clone();
         let cell = match self.type_namespace_cell(namespace, "__classcell__")? {
             Some(cell) => cell,
             None => self.alloc(Value::Cell(None)),
