@@ -5,6 +5,7 @@ import functools
 import typing as _typing
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from collections import defaultdict as _defaultdict
+from annotationlib import ForwardRef
 from functools import lru_cache
 from typing import Any, Callable, Generic, Protocol, TypeVar
 
@@ -97,29 +98,28 @@ def _typeddict_qualifiers(tp):
     return qualifiers
 
 
-def _typeddict_annotation_strings(annotations):
-    # The VALUE fallback has no source expression. Match annotationlib.type_repr.
+def _annotation_type_repr(value):
+    # Equivalent to annotationlib.type_repr for the supported runtime values.
     from types import BuiltinFunctionType, FunctionType
 
-    result = {}
-    for name, value in annotations.items():
-        if isinstance(value, str):
-            result[name] = value
-        elif value is None:
-            result[name] = "None"
-        elif value is type(None):
-            result[name] = "NoneType"
-        elif isinstance(value, (type, FunctionType, BuiltinFunctionType)):
-            result[name] = (value.__qualname__ if value.__module__ == "builtins" else
-                            f"{value.__module__}.{value.__qualname__}")
-        elif value is ...:
-            result[name] = "..."
-        else:
-            from string.templatelib import Template
-            if isinstance(value, Template):
-                raise NotImplementedError("template annotation strings require AST unparsing")
-            result[name] = repr(value)
-    return result
+    if value is None:
+        return "None"
+    if value is type(None):
+        return "NoneType"
+    if isinstance(value, (type, FunctionType, BuiltinFunctionType)):
+        return (value.__qualname__ if value.__module__ == "builtins" else
+                f"{value.__module__}.{value.__qualname__}")
+    if value is ...:
+        return "..."
+    from string.templatelib import Template
+    if isinstance(value, Template):
+        raise NotImplementedError("template annotation strings require AST unparsing")
+    return repr(value)
+
+
+def _typeddict_annotation_strings(annotations):
+    return {name: value if isinstance(value, str) else _annotation_type_repr(value)
+            for name, value in annotations.items()}
 
 
 def _typeddict_base_annotations(annotate, format):
@@ -977,6 +977,8 @@ def _specialize_generic_alias_uncached(alias, args):
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
     args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
+    if isinstance(alias, _AnnotatedAlias):
+        return alias.copy_with(args)
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
@@ -1005,6 +1007,77 @@ class _TypedCacheSpecialForm(_SpecialForm):
             return self._typed_getitem(parameters, tuple(type(p) for p in parameters))
         except TypeError:
             return self._getitem(self, *parameters)
+
+
+# PEP 593 stores metadata separately from the wrapped type's generic arguments.
+class _AnnotatedAlias(_NotIterable):
+    __module__ = __name__
+    _name = "Annotated"
+    _inst = True
+    __getattr__ = _SpecialGenericAlias.__getattr__
+    __setattr__ = _SpecialGenericAlias.__setattr__
+    __call__ = _SpecialGenericAlias.__call__
+    __or__ = _SpecialGenericAlias.__or__
+    __ror__ = _SpecialGenericAlias.__ror__
+
+    def __init__(self, origin, metadata):
+        if isinstance(origin, _AnnotatedAlias):
+            metadata = origin.__metadata__ + metadata
+            origin = origin.__origin__
+        self.__origin__ = origin
+        self.__args__ = (origin,)
+        self.__metadata__ = metadata
+        if isinstance(origin, (TypeVar, _typing.TypeVarTuple)):
+            self.__parameters__ = (origin,)
+        else:
+            self.__parameters__ = () if isinstance(origin, type) else getattr(origin, "__parameters__", ())
+
+    def __repr__(self):
+        origin = _annotation_type_repr(self.__origin__)
+        return f"typing.Annotated[{origin}, {', '.join(repr(item) for item in self.__metadata__)}]"
+
+    def __eq__(self, other):
+        if not isinstance(other, _AnnotatedAlias):
+            return NotImplemented
+        return self.__origin__ == other.__origin__ and self.__metadata__ == other.__metadata__
+
+    def __hash__(self):
+        return hash((self.__origin__, self.__metadata__))
+
+    def copy_with(self, params):
+        assert len(params) == 1
+        return _AnnotatedAlias(params[0], self.__metadata__)
+
+    def __reduce__(self):
+        from operator import getitem
+        return getitem, (Annotated, (self.__origin__,) + self.__metadata__)
+
+    def __getitem__(self, parameters):
+        if isinstance(self.__origin__, _typing.TypeVarTuple):
+            raise TypeError("Substitution of bare TypeVarTuple is not supported")
+        return _specialize_generic_alias(self, parameters)
+
+    def __mro_entries__(self, bases):
+        return (self.__origin__,)
+
+    def __subclasscheck__(self, cls):
+        raise TypeError("Subscripted generics cannot be used with class and instance checks")
+
+    __instancecheck__ = __subclasscheck__
+
+
+@_TypedCacheSpecialForm
+def Annotated(self, *parameters):
+    """Attach ordered metadata to a type without changing its underlying type."""
+    if len(parameters) < 2:
+        raise TypeError("Annotated[...] should be used with at least two arguments (a type and an annotation).")
+    origin = parameters[0]
+    if not isinstance(origin, type) and getattr(origin, "__typing_is_unpacked_typevartuple__", False) is True:
+        raise TypeError("Annotated[...] should not be used with an unpacked TypeVarTuple")
+    origin = _type_check(origin, "Annotated[t, ...]: t must be a type.", allow_special_forms=True)
+    if isinstance(origin, str):
+        origin = _typeddict_forward_ref(origin, is_class=True)
+    return _AnnotatedAlias(type(None) if origin is None else origin, parameters[1:])
 
 
 @_TypedCacheSpecialForm

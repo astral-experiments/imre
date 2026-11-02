@@ -1415,6 +1415,8 @@ impl IntrinsicModule {
             (Self::Typing, "MutableMapping") => {
                 Intrinsic::ObjectRuntimeExport("typing.MutableMapping")
             }
+            (Self::Typing, "get_args") => Intrinsic::ObjectRuntimeExport("typing.get_args"),
+            (Self::Typing, "get_origin") => Intrinsic::ObjectRuntimeExport("typing.get_origin"),
             (Self::Typing, "get_type_hints") => {
                 Intrinsic::ObjectRuntimeExport("typing.get_type_hints")
             }
@@ -1427,6 +1429,8 @@ impl IntrinsicModule {
             }
             (Self::Typing, "final") => Intrinsic::ObjectRuntimeExport("typing.final"),
             (Self::Typing, "is_protocol") => Intrinsic::ObjectRuntimeExport("typing.is_protocol"),
+            (Self::Typing, "Annotated") => Intrinsic::ObjectRuntimeExport("typing.Annotated"),
+            (Self::Typing, "ForwardRef") => Intrinsic::ObjectRuntimeExport("typing.ForwardRef"),
             (Self::Typing, "Required") => Intrinsic::ObjectRuntimeExport("typing.Required"),
             (Self::Typing, "NotRequired") => Intrinsic::ObjectRuntimeExport("typing.NotRequired"),
             (Self::Typing, "ReadOnly") => Intrinsic::ObjectRuntimeExport("typing.ReadOnly"),
