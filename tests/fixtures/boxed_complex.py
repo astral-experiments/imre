@@ -4,6 +4,17 @@ def current():
     events = []
     saved = complex(1, 2)
 
+    class Child(complex):
+        pass
+
+    assert saved.__complex__() is saved and complex.__complex__.__objclass__ is complex
+    assert complex.__complex__.__doc__ == "Convert this value to exact type complex."
+    assert complex.__complex__.__text_signature__ == "($self, /)"
+    child = Child(saved)
+    converted = complex.__complex__(child)
+    assert type(converted) is complex and converted == saved
+    assert converted is not complex.__complex__(child)
+
     namespace = {}
     exec(compile("z = 2 + 1j; scaled = 2.5e1J", "<complex>", "exec"), namespace)
     assert namespace["z"] == complex(2, 1)

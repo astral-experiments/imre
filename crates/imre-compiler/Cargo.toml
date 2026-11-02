@@ -35,6 +35,7 @@ salsa-macro-rules.workspace = true
 fancy-regex.workspace = true
 regex.workspace = true
 tempfile = "=3.23.0"
+zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.190"

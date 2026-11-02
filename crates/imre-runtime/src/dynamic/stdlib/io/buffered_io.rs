@@ -4,6 +4,14 @@ use super::{Context, Error, Id, NONE, Result, Value};
 
 pub(super) const METHODS: &[&str] = &["read", "read1", "readinto", "readinto1", "write", "detach"];
 
+pub(super) fn getstate(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let class = ctx.exact_type(receiver)?;
+    Err(Error::new(
+        "TypeError",
+        format!("cannot pickle '{}' instances", ctx.class_name(class)),
+    ))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     receiver: Id,

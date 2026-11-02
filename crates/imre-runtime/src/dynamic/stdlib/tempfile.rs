@@ -1,10 +1,9 @@
 //! Filesystem primitives for the runtime-loaded tempfile module.
 
 use std::cell::RefCell;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use super::{Context, Error, Id, NONE, Result, Value, argument};
@@ -40,100 +39,6 @@ fn filesystem_text(ctx: &mut Context, path: PathBuf) -> Id {
     }
 }
 
-/// The wrapper and any saved wrapper methods own cleanup independently of the raw stream.
-pub(in crate::dynamic) struct NamedCloser {
-    file: crate::Shared<RefCell<FileState>>,
-    unlink: Option<PathBuf>,
-    on_close: bool,
-}
-
-impl NamedCloser {
-    pub(in crate::dynamic) fn needs_cleanup(&self) -> bool {
-        self.unlink.is_some() || !self.file.borrow().closed()
-    }
-
-    fn unlink(&mut self) -> std::io::Result<()> {
-        if let Some(path) = self.unlink.take() {
-            match std::fs::remove_file(path) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                result => return result,
-            }
-        }
-        Ok(())
-    }
-}
-
-impl Drop for NamedCloser {
-    fn drop(&mut self) {
-        if !self.file.borrow().random_truncating() {
-            let _ = self.file.borrow_mut().close();
-        }
-        let _ = self.unlink();
-    }
-}
-
-fn open_named(ctx: &mut Context, name: Id, on_close: Id, write_only: bool) -> Result<Id> {
-    let bytes = match ctx.heap.get(ctx.scalar_value(name)) {
-        Value::Bytes(bytes) => bytes.clone(),
-        _ => ctx.encode_filesystem_string(name)?,
-    };
-    if bytes.contains(&0) {
-        return Err(Error::new("ValueError", "embedded null byte"));
-    }
-    let path = PathBuf::from(OsString::from_vec(bytes));
-    let on_close = !write_only && ctx.truth(on_close)?;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path);
-    let file = match file {
-        Ok(file) => file,
-        Err(error) => return Err(ctx.with_errno_filename(errno_error(error).into(), name)?),
-    };
-    if write_only {
-        let writer = ctx.temporary_writer(file, name);
-        if writer.is_err() {
-            let _ = std::fs::remove_file(path);
-        }
-        return writer;
-    }
-    let owners = (|| -> Result<_> {
-        let file = FileState::buffered_random(file)?;
-        let owner =
-            crate::Shared::try_new(RefCell::new(file)).map_err(|_| crate::Error::allocation())?;
-        let closer = NamedCloser {
-            file: owner.clone(),
-            unlink: None,
-            on_close,
-        };
-        let closer =
-            crate::Shared::try_new(RefCell::new(closer)).map_err(|_| crate::Error::allocation())?;
-        Ok((owner, closer))
-    })();
-    let (owner, closer) = match owners {
-        Ok(owners) => owners,
-        Err(error) => {
-            let _ = std::fs::remove_file(&path);
-            return Err(error);
-        }
-    };
-    let guard = match ctx
-        .heap
-        .alloc_file_writer(Value::NamedFileCloser(closer.clone()))
-    {
-        Ok(guard) => guard,
-        Err(error) => {
-            let _ = std::fs::remove_file(&path);
-            return Err(error);
-        }
-    };
-    closer.borrow_mut().unlink = Some(path);
-    let file = ctx.alloc(Value::BufferedRandom(owner, name));
-    Ok(ctx.alloc(Value::Tuple(vec![file, guard])))
-}
-
 /// Keep native path bytes intact when the caller requests a bytes filename.
 pub(super) fn path_operation(
     ctx: &mut Context,
@@ -149,47 +54,21 @@ pub(super) fn path_operation(
         ));
     }
     match (name, args) {
-        ("check_text_options", &[encoding, errors, newline]) => {
-            super::io::check_text_options(ctx, Some(encoding), Some(errors), Some(newline))?;
-            Ok(NONE)
-        }
-        ("open_named", &[name, on_close]) => open_named(ctx, name, on_close, false),
-        ("open_named", &[name, on_close, writer]) => {
-            let write_only = ctx.truth(writer)?;
-            open_named(ctx, name, on_close, write_only)
-        }
-        ("keep_named", &[guard]) => {
-            let Value::NamedFileCloser(closer) = ctx.heap.get(guard) else {
+        ("finalize_at_shutdown", &[class]) => {
+            let Value::Class { scope, .. } = *ctx.heap.get(class) else {
                 return Err(Error::new(
                     "TypeError",
-                    "expected a named temporary file closer",
+                    "expected a temporary file closer class",
                 ));
             };
-            closer.borrow_mut().unlink = None;
-            Ok(NONE)
-        }
-        ("finish_named", &[guard, name, exiting]) => {
-            let exiting = ctx.truth(exiting)?;
-            let Value::NamedFileCloser(closer) = ctx.heap.get(guard).clone() else {
-                return Err(Error::new(
-                    "TypeError",
-                    "expected a named temporary file closer",
-                ));
+            let Value::Scope(fields) = ctx.heap.get_mut(scope) else {
+                unreachable!();
             };
-            let mut closer = closer.borrow_mut();
-            let closed = {
-                let mut file = closer.file.borrow_mut();
-                file.check_random_reentry()
-                    .and_then(|()| file.close().map_err(errno_error))
-            };
-            if (exiting || closer.on_close)
-                && let Err(error) = closer.unlink()
-            {
-                drop(closer);
-                return Err(ctx.with_errno_filename(errno_error(error).into(), name)?);
-            }
-            closed?;
-            Ok(NONE)
+            fields
+                .class_namespace
+                .get_or_insert_with(Default::default)
+                .finalize_at_shutdown = true;
+            Ok(class)
         }
         ("random_name", []) => Ok(ctx.text(tempdirs::random_name().map_err(errno_error)?)),
         ("abspath" | "mkdir" | "cleanup_directory", &[arg]) => {

@@ -67,6 +67,66 @@ def current():
         y: list
 
     assert Reentrant.__annotations__ == {"x": int, "y": list}
+    class ManualProvider:
+        def __annotate__(format):
+            return {"field": format}
+
+    class Child(ManualProvider):
+        pass
+
+    assert "__annotations__" not in vars(Child)
+    assert "__annotate_func__" not in vars(Child)
+    assert Child.__annotate__ is None
+    assert Child.__annotations__ == {}
+    assert ManualProvider.__annotations__ == {"field": 1}
+    del ManualProvider.__annotations__
+    assert ManualProvider.__annotate__ is None
+
+    class Meta(type):
+        def __annotate__(cls, format):
+            return {"owner": cls}
+
+    class Custom(metaclass=Meta):
+        pass
+
+    assert Custom.__annotations__ == {"owner": Custom}
+    Custom.__annotate__ = 42
+    assert vars(Custom)["__annotate__"] == 42
+    del Custom.__annotate__
+    assert Custom.__annotate__(1) == {"owner": Custom}
+    try:
+        del Custom.__annotate__
+    except AttributeError as exc:
+        assert str(exc) == "type object 'Custom' has no attribute '__annotate__'"
+    else:
+        raise AssertionError("deleted the metaclass provider")
+
+    ns = {"Parent": ManualProvider, "__name__": "class_sites"}
+    exec("from __future__ import annotations\nclass Empty(Parent): pass\nclass Strings(Parent): x: Missing", ns)
+    assert ns["Empty"].__annotate__ is None
+    assert ns["Empty"].__annotations__ == {}
+    assert ns["Strings"].__annotations__ == {"x": "Missing"}
+
+    class NewMeta(type):
+        def __new__(mcls, name, bases, namespace):
+            if name == "Unreached":
+                assert namespace["__annotations__"] == {}
+            return super().__new__(mcls, name, bases, namespace)
+
+    class CustomParent(metaclass=NewMeta):
+        def __annotate__(format):
+            return {"value": int}
+
+    class CustomChild(CustomParent):
+        pass
+
+    assert CustomParent.__annotations__ == {"value": int}
+    assert CustomChild.__annotate__ is None
+    assert CustomChild.__annotations__ == {}
+    ns = {"NewMeta": NewMeta}
+    exec("from __future__ import annotations\nclass Unreached(metaclass=NewMeta):\n if False: field: int", ns)
+    assert ns["Unreached"].__annotations__ == {}
+
     print("class annotation sites")
 
     from types import FunctionType

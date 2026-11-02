@@ -96,6 +96,24 @@ With only the SHAKE files cached, seven additional cases passed in all four Imre
 
 Row 75, `test_threaded_hashing`, reported `NotImplementedError: this thread target cannot run independently of the boxed Python heap` in the profiles marked `ERROR`.
 
+## Built-in MD5 constructor
+
+The Linux ledger compares CPython 3.14.5 `5607950ef232dad16d75c0cf53101d9649d89115` with Imre at the first parent `a450eefcc06211bb2f9343c713414e54014c683d` and the public squash `d46c2bb06c872c8855cc9c44823ff71dcc039743`. It records the verdict or skip reason and the first exception for each of the 82 original tests. The full Imre suites used ordinary imports at O0 and O3. The reviewed change was `64b8ff2cb50e7fd5d5cde2d45d6e4d9713941f32` on `1bc43499c6805efd1eafad2cbce6c29df1b596ee`. [Constructor ledger](hashlib-constructors-82.tsv)
+
+| Runner | Stock, empty cache | Direct unittest, empty cache |
+| --- | --- | --- |
+| CPython 3.14.5 | 69 passed, 13 skipped | 72 passed, 10 skipped |
+| Imre squash parent, O0 and O3 | 66 passed, 1 error, 15 skipped | 69 passed, 1 error, 12 skipped |
+| Imre public squash, O0 and O3 | 67 passed, 1 error, 14 skipped | 70 passed, 1 error, 11 skipped |
+
+Stock CPython ran `-m test` with its default resources. The stock Imre adapter disabled the same resources before loading the tests. Both direct loaders left `test.support.use_resources` unset. With the caches empty, stock skipped all eight vector files at the URL-resource guard and direct runs skipped them after retrieval failed. The three CPU-gated 4-GiB streaming cases (rows 3, 73 and 74) passed in direct runs. Both profiles skipped rows 20 and 21 at their separate 4.0-GiB memory requirement.
+
+Row 59, `test_get_builtin_constructor`, skipped on the parent because it could not import `_md5`. On the squash it rejected a masked module with an empty cache, restored the module, returned the exact `_md5.md5` factory and populated both `MD5` and `md5` cache keys. Changing the expected uppercase key to `MD4` failed the original assertion. Row 59 was the only verdict that changed between these two commits in either profile at O0 and O3. A separate digest control updated a private MD5 copy to hash `abc`, obtaining `900150983cd24fb0d6963f7d28e17f72`. Changing the final digit to `3` failed that digest comparison.
+
+Row 57, `test_disallow_instantiation`, passed on CPython and skipped at its CPython-only guard on Imre. A separate probe called the registered result types and their `__new__` methods directly. At the squash, 36 of 36 calls produced the expected `TypeError` and message. Row 63, `test_hash_disallow_instantiation`, already passed on the parent and continued to pass for `_hashlib.HASH`. Imre did not expose the optional `_hashlib.HASHXOF` on this run.
+
+Row 75, `test_threaded_hashing`, passed on CPython. Imre raised `NotImplementedError: this thread target cannot run independently of the boxed Python heap` at `thread.start()` in the original test (line 1065). Five native threads using a bound `hash.update` target completed and produced the expected SHA-1 digest in a separate probe. The original target is a Python closure that repeatedly reads the shared hash and input bytes.
+
 ## Key derivation
 
 The complete, unchanged CPython 3.14.5 `KDFTests` class passed all four tests on Linux with OpenSSL 3.5.6 and FIPS disabled. On public Imre `5472a33`, `test_file_digest` and `test_normalized_name` passed, while `test_pbkdf2_hmac_c` and `test_scrypt` skipped because Imre lacked the extension. At `6c0cab3`, all four passed in ordinary and runtime-import builds at O0 and O3 with system OpenSSL 3.5.7. Rows 81 and 82 add two distinct paired passes.

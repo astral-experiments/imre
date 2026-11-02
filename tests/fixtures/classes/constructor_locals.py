@@ -30,6 +30,16 @@ class Shadow:
         self.value = super
 
 
+class MappingFixture:
+    reference: dict[str, str]
+    key: str
+
+    def __init__(self, key: str, value: str):
+        self.reference = {}
+        self.key = key
+        self.reference[self.key] = value
+
+
 events: list[str] = []
 print(Child("one", events).label)
 try:
@@ -39,3 +49,4 @@ except AssertionError as error:
 for event in events:
     print(event)
 print(Shadow(42).value)
+print(MappingFixture("key", "value").reference["key"])

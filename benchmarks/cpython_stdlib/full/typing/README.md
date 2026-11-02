@@ -79,3 +79,45 @@ python3.14 -B "$stage/$profile/literal_runner.py"
 ```
 
 For the independent controls, copy `literal_dir_control.py` or `literal_repr_control.py` into an empty module root and use it as the entry point in the commands above. Run the same program again with the argument `wrong`. Stock CPython prints the observed value on both runs, exits 0 with the original expectation, and raises `AssertionError` with the altered expectation. [Directory control](literal_dir_control.py) · [Representation control](literal_repr_control.py)
+
+## Annotated aliases and type-hint clients
+
+Of 47 named CPython 3.14.5 originals, **46 passed on stock and at both native optimization levels**. The accepted 15 `LiteralTests` use public Imre `e3ff3e59`. On public `fbfad397`, 27 of 28 `AnnotatedTests` and all four selected `GetTypeHintsTests` clients passed. The 28-method class registered and ran in full, all 82 of its subtests passed at O0 and O3, and the process exited 1 at each level. `test_forwardref_partial_evaluation` (suite ordinal 16, occurrence 1) still errors on the call to `annotationlib.get_annotations`. Stock passed all 28 parents and four clients on both whole-module and isolated routes. [47 original IDs and stock/O0/O3 output lines](named-cohorts-linux.tsv) · [Subtest observations](annotated-subtests-linux.tsv)
+
+| Public revision | `AnnotatedTests` paired passes | Four Annotated clients | `test_pickle` subtests at each level |
+| --- | ---: | ---: | --- |
+| `91cea5c9` | 23/28 | 4/4 | 30 errors |
+| `16be958b` | 26/28 | 4/4 | 30 errors |
+| `fbfad397` | 27/28 | 4/4 | 30 passed |
+
+The intermediate revision includes `typing.Counter` and nested type-parameter substitution. The final revision also reconstructs typing aliases and globals during pickling. The ledger keeps suite ordinals and per-ID occurrences for each revision. The separately run bad-module method (ordinal 231) exercises plain annotations. The historical 107/712 total lacks a case inventory for deduplication. [Earlier method outcomes](annotated-history-linux.tsv) · [Counter](https://github.com/astral-experiments/imre/pull/4050) · [Nested parameter substitution](https://github.com/astral-experiments/imre/pull/4061) · [Alias reduction and reconstruction](https://github.com/astral-experiments/imre/pull/4094)
+
+At baseline, both full-module native builds succeeded and their class commands exited 1 during import of `typing.reveal_type`, before registration. On `fbfad397`, the shared whole-module build succeeded at each level, and all four class commands exited 1 at `test_typing.py` line 43 during import of `typing.Concatenate`. The process ledger distinguishes builds, enumeration, selected methods, complete class runs and independent controls. [Process outcomes](annotated-terminals-linux.tsv)
+
+The raw snapshot `imre-typing-annotated-named-fbfad397.tar.gz` (956854 bytes, SHA-256 `b8ae9fa110e79237c70cc313590b5448249e8eb3defe4cef92d62f57982fcc80`) contains `SHA256SUMS`, the runners and fixtures, the full phase history and the process logs. After extraction, `annotated-work/` paths resolve relative to its top directory. For the `literal-archive/` anchors, extract `literal-archive/imre-typing-LiteralTests-coordinator-e3ff3e59.tar.gz` into `literal-archive/`. The suffix `#L` identifies the one-based line in the named output file. Run `sha256sum -c SHA256SUMS` from the snapshot root to verify the archive members and the nested Literal archive.
+
+### Reproduce the Annotated runs
+
+From the repository root, choose a staging route. `isolated` runs the complete `AnnotatedTests` class, and `clients` runs the four methods selected from the complete `GetTypeHintsTests` class. `intact` and `clients-intact` use the same respective drivers with the full upstream module. The `intact-both` route stages both tested drivers beside a single dispatcher. The staging helper reads the vendored CPython fixtures and copies the original class, base and helper bodies byte for byte.
+
+```sh
+suite=benchmarks/cpython_stdlib/full/typing
+route=isolated
+stage=$(mktemp -d)/module
+python3 "$suite/stage_annotated.py" "$route" "$stage"
+case "$route" in clients*) runner=client_runner.py ;; *) runner=annotated_runner.py ;; esac
+(cd "$stage" && python3.14 -B "$runner" class)
+```
+
+Set `IMRE`, `RUNTIME` and `CLANG` to absolute paths for the revision under test. Repeat with `level=3` for the optimized run.
+
+```sh
+level=0
+"$IMRE" build "$stage/$runner" --module-root "$stage" --runtime-imports --no-cache \
+    --opt-level "$level" --runtime "$RUNTIME" --clang "$CLANG" -o "$stage/suite-O$level"
+(cd "$stage" && "./suite-O$level" class)
+```
+
+Use `enumerate` to record registered IDs, or `selected` followed by method names to run selected originals. The two client routes also accept `diagnostic` for the ordinary-annotation comparison. The `control` and `wrong` arguments run the independent nested-metadata probe with the expected and reversed orders. Stock and all three measured public revisions report `('inner', 'outer')` and exit 0 and 1 respectively for these expectations.
+
+For the shared full-module measurement, pass `intact-both` to the staging helper, use `runner=full_entry.py`, and build one ELF per optimization level. Run `./suite-O0 class` for `AnnotatedTests` and `./suite-O0 clients class` for the four clients. The same `clients` prefix selects the client driver on stock. The process table records its shared physical build once and distinguishes which driver was actually invoked. The `registered` and `ran` columns are empty when their runner markers were absent.

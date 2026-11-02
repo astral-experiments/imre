@@ -1,5 +1,6 @@
 import io
 import gc
+import pickle
 from _io import BufferedReader as NativeReader
 
 
@@ -30,6 +31,30 @@ for cls in (NativeReader, PublicReader):
         assert reader.read(1) == b"i"
         reader.close()
         assert raw.closed
+
+
+class StatefulReader(NativeReader):
+    def __getstate__(self):
+        return self.raw.getvalue()
+
+    def __setstate__(self, data):
+        self.__init__(io.BytesIO(data))
+
+
+for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+    with StatefulReader(io.BytesIO(b"state")) as source:
+        wire = pickle.dumps(source, protocol)
+    with pickle.loads(wire) as restored:
+        assert type(restored) is StatefulReader and restored.read() == b"state"
+    for cls in (NativeReader, PublicReader):
+        with cls(io.BytesIO()) as stream:
+            try:
+                pickle.dumps(stream, protocol)
+            except TypeError as error:
+                assert str(error) == f"cannot pickle '{cls.__name__}' instances"
+            else:
+                raise AssertionError("reader without custom state was pickled")
+
 
 assert ReaderCase.tp is NativeReader
 with io.open(__file__, "rb") as source:

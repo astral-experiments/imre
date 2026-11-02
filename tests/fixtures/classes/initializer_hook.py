@@ -46,6 +46,21 @@ class Reject(Owner):
         self.items = reject()
 
 
+class Mapping:
+    reference: dict[str, str]
+
+    def __init__(self):
+        self.reference = self._reference().copy()
+
+    def _reference(self):
+        return {"kind": "base"}
+
+
+class DerivedMapping(Mapping):
+    def _reference(self):
+        return {"kind": "derived"}
+
+
 show(Owner("first"))
 derived = Derived()
 show(derived)
@@ -55,3 +70,7 @@ try:
     Reject("unused")
 except ValueError as error:
     print(str(error))
+
+
+assert Mapping().reference["kind"] == "base"
+assert DerivedMapping().reference["kind"] == "derived"

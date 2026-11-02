@@ -8,6 +8,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 
@@ -1280,6 +1281,23 @@ def main():
         assert text_close.returncode == 0, text_close.stderr
         assert (text_close.stdout, text_close.stderr) == (expected.stdout, expected.stderr)
 
+        chained = root / "chained.py"
+        chained.write_text(
+            "import sys\n"
+            "sys.tracebacklimit = 0\n"
+            "try:\n"
+            "    try:\n"
+            "        raise ValueError('inner')\n"
+            "    except ValueError:\n"
+            "        raise RuntimeError('middle')\n"
+            "except RuntimeError as exc:\n"
+            "    raise OSError(28, 'outer') from exc\n"
+        )
+        expected = run(sys.executable, "-B", chained)
+        actual = run(imre, "run", chained, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 1
+        assert actual.stderr == expected.stderr, (actual.stderr, expected.stderr)
+
         string_io = root / "string_io.py"
         string_io.write_bytes((Path(__file__).with_name("fixtures") / "boxed_string_io.py").read_bytes())
         expected = run(sys.executable, "-B", string_io)
@@ -1385,6 +1403,14 @@ def main():
             message = f"can't find '__main__' module in '{root / 'empty_entry'}'"
             assert missing.returncode == 1 and missing.stderr.decode().rstrip().endswith(message)
 
+        archive = root / "application"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as app:
+            for prefix in ("", "sub/"):
+                app.writestr(prefix + "__main__.py", (entry / "__main__.py").read_text())
+                app.writestr(prefix + "sibling.py", f"marker = {prefix!r}\n")
+        compare("application", "tail")
+        compare("-I", "./application/sub", "-h")
+
         # An ordinary module under the first root wins over a package in a later root.
         (root / "preferred.py").write_text("print('file wins')\n")
         (root / "preferred").mkdir()
@@ -1403,6 +1429,16 @@ def main():
             "print(request.Request('data:,ok').type, spec.name)\n"
         )
         compare("-B", request_script)
+
+        parser_script = root / "parser_entry.py"
+        parser_script.write_text(
+            "from argparse import ArgumentParser\n"
+            "parser = ArgumentParser()\n"
+            "parser.add_argument('value', type=int)\n"
+            "print(parser.parse_args().value + 1)\n"
+        )
+        compare("-I", parser_script, "-h")
+        compare("-B", parser_script, "41")
 
         ftp_script = root / "ftp_entry.py"
         ftp_script.write_text("import ftplib\nprint(ftplib.FTP().encoding, ftplib.parse257('257 \"home\"'))\n")
@@ -1491,6 +1527,27 @@ def main():
                 "    run(['/bin/true'])\n"
                 "for w in caught: print(w.filename, w.lineno, w.category.__name__, str(w.message))",
             )
+
+            for statement, connect in (
+                ("import socket as net", "net.create_connection"),
+                ("from socket import create_connection as dial", "dial"),
+            ):
+                compare(
+                    "-c", f"{statement}\n"
+                    "import socket\n"
+                    "with socket.socket() as listener:\n"
+                    "    listener.bind(('127.0.0.1', 0))\n"
+                    "    address = listener.getsockname()\n"
+                    f"    try: {connect}(address, timeout=2)\n"
+                    "    except ConnectionRefusedError: pass\n"
+                    "    else: raise AssertionError('unopened listener accepted a connection')\n"
+                    "    listener.listen()\n"
+                    f"    with {connect}(address, timeout=2) as client:\n"
+                    "        peer, _ = listener.accept()\n"
+                    "        with peer:\n"
+                    "            client.sendall(b'x')\n"
+                    "            assert peer.recv(1) == b'x'\n",
+                )
 
         for mode in ("0", "1"):
             compare(
@@ -2192,6 +2249,8 @@ def report(text):
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
+        metaclass_new = fixtures / "ordinary_metaclass_new.py"
+        compare("-IB", metaclass_new, native_args=("run", metaclass_new, "--runtime-imports", "--quiet"))
         class_locals = fixtures / "boxed_class_locals.py"
         compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
         generic = fixtures / "module_generic_function.py"
@@ -2205,6 +2264,9 @@ def report(text):
             assert (result.returncode, result.stdout, result.stderr) == (
                 0, b"", b"Runtime type is 'Marker'\nRuntime type is 'type'\n",
             ), result
+        introspection = fixtures / "typing_introspection_functions.py"
+        compare("-IB", introspection, native_args=("run", introspection, "--quiet"))
+        compare("-IB", introspection, native_args=("run", introspection, "--runtime-imports", "--quiet"))
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
         compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
         if sys.platform == "linux":
@@ -2297,6 +2359,7 @@ def report(text):
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_inspect_getmodule.py",
+            "boxed_inspect_unwrap.py",
             "boxed_inspect_isroutine.py",
             "boxed_numeric_repr.py",
             "boxed_recursive_repr.py",

@@ -42,6 +42,18 @@ def current():
     assert type(first) is str and first == plain and first is not saved(0)
     assert plain.zfill(0) is plain
 
+    width = Width(5)
+    assert str.center.__get__(Text("éx"))(width, "*") == "**éx*" and width.calls == 1
+    assert "\ud800".ljust(3, "𝄞") == "\ud800𝄞𝄞"
+    assert "a".rjust(2, "\udfff") == "\udfffa"
+    assert plain.center(0) is plain
+    try:
+        plain.ljust(0, "xx")
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("expected a single fill character")
+
     class Overridden(Text):
         def zfill(self, width):
             return "override"

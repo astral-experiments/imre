@@ -373,12 +373,12 @@ pub(crate) fn open(family: i32, ty: i32, proto: i32) -> Result<crate::ObjectOwne
     let family = if family == -1 { libc::AF_INET } else { family };
     let ty = if ty == -1 { libc::SOCK_STREAM } else { ty };
     let proto = if proto == -1 { 0 } else { proto };
-    if !matches!(family, libc::AF_INET | libc::AF_INET6)
+    if !matches!(family, libc::AF_INET | libc::AF_INET6 | libc::AF_UNIX)
         || !matches!(ty, libc::SOCK_STREAM | libc::SOCK_DGRAM)
     {
         return Err(Error::new(
             Kind::NotImplementedError,
-            "only Internet stream and datagram sockets are supported",
+            "only Internet and Unix stream and datagram sockets are supported",
         ));
     }
     let kind = ty;
@@ -419,7 +419,7 @@ pub extern "C" fn imre_socket_new(family: usize, ty: usize, proto: usize) -> *co
     finish(
         (|| {
             let family = c_int(family)?;
-            if family == libc::AF_INET6 {
+            if matches!(family, libc::AF_INET6 | libc::AF_UNIX) {
                 return Err(Error::new(
                     Kind::NotImplementedError,
                     "typed socket addresses require AF_INET",
@@ -1012,6 +1012,39 @@ fn port_error(name: &str) -> Error {
     )
 }
 
+/// An address passed to bind, connect or sendto, including the exact Unix address length.
+pub(crate) enum SocketAddress {
+    Internet(InternetAddress),
+    Unix(libc::sockaddr_un, libc::socklen_t),
+}
+
+impl SocketAddress {
+    pub(crate) fn unix(path: &[u8]) -> Result<Self> {
+        // SAFETY: sockaddr_un consists of integers and a byte array, including on BSD.
+        let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+        addr.sun_family = libc::AF_UNIX as _;
+        // On Linux, empty input requests an autobound address and abstract names are binary.
+        let terminated = !(cfg!(target_os = "linux") && (path.is_empty() || path[0] == 0));
+        if path.len() > addr.sun_path.len() - usize::from(terminated) {
+            return Err(Error::new(Kind::OSError, "AF_UNIX path too long"));
+        }
+        for (dest, byte) in addr.sun_path.iter_mut().zip(path) {
+            *dest = *byte as _;
+        }
+        let len = std::mem::offset_of!(libc::sockaddr_un, sun_path)
+            + path.len()
+            + usize::from(terminated);
+        Ok(Self::Unix(addr, len as _))
+    }
+
+    fn raw_parts(&self) -> (*const libc::sockaddr, libc::socklen_t) {
+        match self {
+            Self::Internet(addr) => addr.raw_parts(),
+            Self::Unix(addr, len) => ((addr as *const libc::sockaddr_un).cast(), *len),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum InternetAddress {
     V4(libc::sockaddr_in),
@@ -1157,7 +1190,7 @@ unsafe fn unpack(pair: *const usize, name: &str) -> Result<libc::sockaddr_in> {
     }
 }
 
-pub(crate) fn bind(s: &Object, addr: &InternetAddress) -> Result<()> {
+pub(crate) fn bind(s: &Object, addr: &SocketAddress) -> Result<()> {
     let (ptr, len) = addr.raw_parts();
     // SAFETY: addr owns the complete socket address through the syscall.
     checked(unsafe { libc::bind(fd(s), ptr, len) })
@@ -1171,7 +1204,8 @@ pub(crate) fn bind(s: &Object, addr: &InternetAddress) -> Result<()> {
 pub unsafe extern "C" fn imre_socket_bind(s: &Object, pair: *const usize) {
     // SAFETY: unpack borrows the declared fields.
     finish(
-        unsafe { unpack(pair, "bind") }.and_then(|addr| bind(s, &InternetAddress::V4(addr))),
+        unsafe { unpack(pair, "bind") }
+            .and_then(|addr| bind(s, &SocketAddress::Internet(InternetAddress::V4(addr)))),
         (),
     );
 }
@@ -1200,7 +1234,7 @@ pub extern "C" fn imre_socket_shutdown(s: &Object, how: usize) {
     finish(c_int(how).and_then(|n| shutdown(s, n)), ());
 }
 
-fn connect(socket: &Object, addr: &InternetAddress) -> io::Result<()> {
+fn connect(socket: &Object, addr: &SocketAddress) -> io::Result<()> {
     let fd = fd(socket);
     let until = deadline(socket);
     let (ptr, len) = addr.raw_parts();
@@ -1244,13 +1278,14 @@ fn connect(socket: &Object, addr: &InternetAddress) -> io::Result<()> {
 pub unsafe extern "C" fn imre_socket_connect(s: &Object, pair: *const usize) {
     // SAFETY: the call retains the exact address tuple.
     finish(
-        unsafe { unpack(pair, "connect") }
-            .and_then(|addr| connect_address(s, &InternetAddress::V4(addr))),
+        unsafe { unpack(pair, "connect") }.and_then(|addr| {
+            connect_address(s, &SocketAddress::Internet(InternetAddress::V4(addr)))
+        }),
         (),
     );
 }
 
-pub(crate) fn connect_address(s: &Object, addr: &InternetAddress) -> Result<()> {
+pub(crate) fn connect_address(s: &Object, addr: &SocketAddress) -> Result<()> {
     connect(s, addr).map_err(errno_error)
 }
 
@@ -1281,8 +1316,17 @@ fn peer_call(
 
 pub(crate) enum SocketName {
     Internet(InternetAddress),
-    UnnamedUnix,
+    Unix(Vec<u8>),
     NoAddress,
+}
+
+impl SocketName {
+    fn ipv4(self) -> Result<libc::sockaddr_in> {
+        match self {
+            Self::Internet(addr) => addr.ipv4(),
+            _ => Err(Error::new(Kind::TypeError, "expected IPv4 address")),
+        }
+    }
 }
 
 pub(crate) fn socket_name(s: &Object, peer: bool) -> Result<SocketName> {
@@ -1305,21 +1349,18 @@ fn unpack_socket_name(addr: &libc::sockaddr_storage, len: libc::socklen_t) -> Re
         return Ok(SocketName::NoAddress);
     }
     if i32::from(addr.ss_family) == libc::AF_UNIX {
-        let path_offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
-        if len as usize == path_offset {
-            return Ok(SocketName::UnnamedUnix);
-        }
-        // Darwin returns an empty NUL-terminated path. On Linux a leading NUL
-        // with any path bytes denotes an abstract address, not an unnamed one.
-        #[cfg(target_vendor = "apple")]
-        if len as usize > path_offset {
-            // SAFETY: the initialized storage includes at least the first Unix path byte.
-            let unix =
-                unsafe { &*(addr as *const libc::sockaddr_storage).cast::<libc::sockaddr_un>() };
-            if unix.sun_path[0] == 0 {
-                return Ok(SocketName::UnnamedUnix);
-            }
-        }
+        // SAFETY: the initialized sockaddr_storage is aligned and large enough for sockaddr_un.
+        let unix = unsafe { &*(addr as *const libc::sockaddr_storage).cast::<libc::sockaddr_un>() };
+        let n = (len as usize).saturating_sub(std::mem::offset_of!(libc::sockaddr_un, sun_path));
+        let path = &unix.sun_path[..n.min(unix.sun_path.len())];
+        let path = if cfg!(target_os = "linux") && path.first() == Some(&0) {
+            path
+        } else {
+            path.split(|&byte| byte == 0).next().unwrap_or_default()
+        };
+        return Ok(SocketName::Unix(
+            path.iter().map(|&byte| byte as u8).collect(),
+        ));
     }
     // SAFETY: the kernel initialized addr, and read validates its family and length.
     unsafe { InternetAddress::read((addr as *const libc::sockaddr_storage).cast(), len) }
@@ -1343,16 +1384,13 @@ pub unsafe extern "C" fn imre_socket_sockname(
     // SAFETY: the caller supplied the exact tuple layout.
     finish(
         socket_name(s, false)
-            .and_then(|name| match name {
-                SocketName::Internet(addr) => addr.ipv4(),
-                _ => Err(Error::new(Kind::TypeError, "expected IPv4 address")),
-            })
+            .and_then(SocketName::ipv4)
             .map(|addr| unsafe { addr_tuple(layout, addr) }),
         ptr::null_mut(),
     )
 }
 
-pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, InternetAddress)> {
+pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, SocketName)> {
     let raw = fd(s);
     let (child, addr, len) = socket_call(raw, libc::POLLIN, deadline(s), || {
         peer_call(|a, n| {
@@ -1375,8 +1413,7 @@ pub(crate) fn accept(s: &Object) -> Result<(crate::ObjectOwner, InternetAddress)
         // The accepted fd may inherit O_NONBLOCK on BSD, but its Python timeout defaults to None.
         set_blocking(fd(&child), true).map_err(errno_error)?;
     }
-    // SAFETY: the kernel filled the supplied storage, and child owns its fd on errors.
-    let addr = unsafe { InternetAddress::read((&raw const addr).cast(), len) }?;
+    let addr = unpack_socket_name(&addr, len)?;
     Ok((child, addr))
 }
 
@@ -1534,12 +1571,12 @@ pub(crate) fn send(socket: &Object, bytes: &[u8], flags: i32) -> Result<usize> {
     send_until(fd(socket), bytes, flags, deadline(socket))
 }
 
-/// Send one message to an Internet endpoint using the socket's existing timeout policy.
+/// Send one message to a socket address using the socket's existing timeout policy.
 pub(crate) fn send_to(
     s: &Object,
     bytes: &[u8],
     flags: i32,
-    address: &InternetAddress,
+    address: &SocketAddress,
 ) -> Result<usize> {
     #[cfg(not(target_vendor = "apple"))]
     let flags = flags | libc::MSG_NOSIGNAL;

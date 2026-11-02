@@ -15,8 +15,15 @@ pub(super) enum ClassLayout {
 /// Statements retain a callable evaluator. The constructor receives an already evaluated value.
 #[derive(Clone, Copy)]
 pub(super) enum AliasDefinition {
-    Lazy { evaluator: Id, cached: Option<Id> },
-    Eager { value: Id, module: Id },
+    Lazy {
+        parameters: Id,
+        evaluator: Id,
+        cached: Option<Id>,
+    },
+    Eager {
+        value: Id,
+        module: Id,
+    },
 }
 
 #[derive(Clone)]
@@ -136,7 +143,7 @@ impl Alias {
 
     /// Literal compares its type-sensitive members without regard to argument order.
     pub(super) fn comparison_parts(&self, other: &Self) -> Option<(Id, Id)> {
-        if self.origin != other.origin {
+        if self.origin != other.origin || self.unpacked != other.unpacked {
             return None;
         }
         match (self.kind, other.kind) {
@@ -155,9 +162,24 @@ pub(super) struct Alias {
     pub kind: AliasKind,
     pub name: Option<Id>,
     pub instantiable: bool,
+    pub unpacked: bool,
 }
 
 impl Alias {
+    pub(super) fn is_builtin_alias(&self) -> bool {
+        matches!(self.kind, AliasKind::Builtin | AliasKind::AbcCallable)
+    }
+
+    /// GenericAlias iteration yields a new base GenericAlias, including for an already-starred alias.
+    pub(super) fn unpacked_copy(&self) -> Self {
+        Self {
+            kind: AliasKind::Builtin,
+            unpacked: true,
+            name: None,
+            ..self.clone()
+        }
+    }
+
     /// Instance fields stored by the boxed Literal alias.
     pub(super) fn literal_fields(&self) -> [(&'static str, Id); 5] {
         [
@@ -283,6 +305,10 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
                 std::slice::from_ref(&arg)
             }
             Value::GenericAlias(Alias { parameters, .. })
+            | Value::TypeAlias {
+                definition: AliasDefinition::Lazy { parameters, .. },
+                ..
+            }
             | Value::Union(super::union::Union { parameters, .. }) => {
                 match ctx.heap.get(*parameters) {
                     Value::Tuple(members) => members.as_slice(),
@@ -357,6 +383,7 @@ fn allocate_alias(
         kind,
         name,
         instantiable,
+        unpacked: false,
     }))
 }
 
@@ -499,11 +526,23 @@ fn helper_method(ctx: &mut Context, receiver: Id, helper: &str) -> Option<Id> {
 /// Apply the subscription protocol for a supported type. Ordinary instance indexing
 /// continues through the object runtime.
 pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Result<Id>> {
-    if matches!(ctx.heap.get(target), Value::TypeAlias { .. }) {
+    if let Value::TypeAlias { definition, .. } = ctx.heap.get(target) {
+        if let AliasDefinition::Lazy { parameters, .. } = definition
+            && matches!(ctx.heap.get(*parameters), Value::Tuple(items) if !items.is_empty())
+        {
+            return Some(Ok(builtin_alias(ctx, target, index)));
+        }
         return Some(Err(Error::new(
             "TypeError",
             "Only generic type aliases are subscriptable",
         )));
+    }
+    if let Value::GenericAlias(alias) = ctx.heap.get(target)
+        && alias.kind == AliasKind::Builtin
+    {
+        return Some(ctx.module("typing").and_then(|_| {
+            ctx.call_typing_helper("_specialize_generic_alias_uncached", vec![target, index])
+        }));
     }
     if is_unpacked_pack(ctx, target) {
         return Some(Ok(index));
@@ -658,7 +697,7 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                     ));
                 }
             };
-            let origin = named_class(ctx, "collections.abc", "Callable");
+            let origin = super::mapping_abc::class(ctx, "Callable")?;
             return alias(ctx, kind, origin, actual);
         }
         alias(ctx, kind, target, args)
@@ -717,7 +756,7 @@ fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
     if matches!(ctx.heap.get(id), Value::Native(name) if name == "typing.Callable") {
         let base_tuple = bases;
         let bases = ctx.items(base_tuple)?;
-        let callable = named_class(ctx, "collections.abc", "Callable");
+        let callable = super::mapping_abc::class(ctx, "Callable")?;
         let generic = named_class(ctx, "typing", "Generic");
         let mut result = Vec::new();
         let mut has_callable = false;
@@ -904,8 +943,94 @@ pub(super) fn bind_generic_parameters(
 pub(super) const VARIANCE_FIELDS: [&str; 3] =
     ["__covariant__", "__contravariant__", "__infer_variance__"];
 
+/// Metadata for implemented class-owned methods and read-only fields of native type parameters.
+pub(super) struct ParameterClass {
+    pub(super) owner: &'static str,
+    pub(super) methods: &'static [&'static str],
+    fields: &'static [&'static str],
+    doc: &'static str,
+}
+
+impl ParameterClass {
+    pub(super) fn lookup(name: &str) -> Option<Self> {
+        let (owner, methods, fields, doc): (_, &[_], &[_], _) = match name {
+            "typing.TypeVar" => (
+                "typing.TypeVar",
+                &["has_default"],
+                &VARIANCE_FIELDS[..],
+                include_str!("../../native/typing-TypeVar-doc.txt"),
+            ),
+            "typing.TypeVarTuple" => (
+                "typing.TypeVarTuple",
+                &["__iter__", "__reduce__", "has_default"],
+                &["__name__"],
+                include_str!("../../native/typing-TypeVarTuple-doc.txt"),
+            ),
+            "typing.ParamSpec" => (
+                "typing.ParamSpec",
+                &[
+                    "__typing_subst__",
+                    "__typing_prepare_subst__",
+                    "has_default",
+                    "__reduce__",
+                ],
+                &[
+                    "__name__",
+                    "__bound__",
+                    "__covariant__",
+                    "__contravariant__",
+                    "__infer_variance__",
+                ],
+                include_str!("../../native/typing-ParamSpec-doc.txt"),
+            ),
+            "typing.ParamSpecArgs" => (
+                "typing.ParamSpecArgs",
+                &["__eq__", "__ne__"],
+                &["__origin__"],
+                include_str!("../../native/typing-ParamSpecArgs-doc.txt"),
+            ),
+            "typing.ParamSpecKwargs" => (
+                "typing.ParamSpecKwargs",
+                &["__eq__", "__ne__"],
+                &["__origin__"],
+                include_str!("../../native/typing-ParamSpecKwargs-doc.txt"),
+            ),
+            _ => return None,
+        };
+        Some(Self {
+            owner,
+            methods,
+            fields,
+            doc,
+        })
+    }
+
+    pub(super) fn install(&self, ctx: &mut Context, class: Id) {
+        let mut entries = Vec::new();
+        for &name in self.methods {
+            let method = ctx.builtin(&format!("{}.{name}", self.owner));
+            entries.push((ctx.text(name), method));
+        }
+        for &name in self.fields {
+            let member = ctx.readonly_member(self.owner, name);
+            entries.push((ctx.text(name), member));
+        }
+        if matches!(
+            self.owner,
+            "typing.ParamSpecArgs" | "typing.ParamSpecKwargs"
+        ) {
+            entries.push((ctx.text("__hash__"), NONE));
+        }
+        entries.push((ctx.text("__doc__"), ctx.text(self.doc)));
+        entries.push((ctx.text("__module__"), ctx.text("typing")));
+        let dictionary = ctx.dict(entries);
+        ctx.native_type_dicts.insert(class, dictionary);
+    }
+}
+
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
-    if matches!(ctx.heap.get(value), Value::Native(class) if class == "typing.TypeVar")
+    if name != "__name__"
+        && matches!(ctx.heap.get(value), Value::Native(class) if class.starts_with("typing.") && ctx.native_type_dicts.contains_key(&value))
         && let Some(member) = ctx.own_class_attr(value, name)
     {
         return Some(Ok(member));
@@ -1021,7 +1146,12 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             definition,
         } => match (name, *definition) {
             ("__name__", _) => *label,
-            ("__parameters__" | "__type_params__", _) => ctx.heap.packed_tuple(Vec::new(), false),
+            ("__parameters__" | "__type_params__", AliasDefinition::Lazy { parameters, .. }) => {
+                parameters
+            }
+            ("__parameters__" | "__type_params__", AliasDefinition::Eager { .. }) => {
+                ctx.heap.packed_tuple(Vec::new(), false)
+            }
             ("__module__", AliasDefinition::Eager { module, .. }) => module,
             ("__module__", AliasDefinition::Lazy { evaluator, .. }) => {
                 return Some(ctx.lookup_attr(evaluator, "__module__"));
@@ -1113,6 +1243,20 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             }
         }
         Value::GenericAlias(a) => match name {
+            "__unpacked__" if a.is_builtin_alias() => {
+                if a.unpacked {
+                    TRUE
+                } else {
+                    FALSE
+                }
+            }
+            "__typing_unpacked_tuple_args__" if a.is_builtin_alias() => {
+                if a.unpacked && ctx.builtins.get("tuple") == Some(&a.origin) {
+                    a.args
+                } else {
+                    NONE
+                }
+            }
             "__typing_is_unpacked_typevartuple__" if a.kind == AliasKind::Unpack => {
                 if is_unpacked_pack(ctx, value) {
                     TRUE
@@ -1184,7 +1328,7 @@ pub(super) fn declared_pack(ctx: &mut Context, name: Id) -> Id {
     })
 }
 
-/// Create the lexical scope for a type parameter list at a class or function definition.
+/// Create the lexical scope for a declaration's type parameters.
 pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bool) -> Result<Id> {
     let enclosing = ctx.scope_data(outer);
     let parent = if enclosing.class_body.is_some() {
@@ -1891,7 +2035,7 @@ pub(super) fn call(
             Value::Union(_) => super::union::class(ctx),
             Value::Class { .. } if ctx.classes.get("typing.Generic") == Some(v) => *v,
             Value::Native(name) if name == "typing.Callable" => {
-                named_class(ctx, "collections.abc", "Callable")
+                super::mapping_abc::class(ctx, "Callable")?
             }
             _ => NONE,
         }),
@@ -2075,7 +2219,10 @@ impl Context {
                 "TypeError",
                 "typing.Any cannot be used with isinstance()",
             )),
-            Value::Native(name) if name == "typing.Callable" => Ok(self.callable(value)),
+            Value::Native(name) if name == "typing.Callable" => {
+                let origin = super::mapping_abc::class(self, "Callable")?;
+                self.python_instance_check(value, origin)
+            }
             _ => {
                 // An exact instance wins before the class's metaclass can intercept the check.
                 if self.heap.get(value).instance_class() == Some(class) {
@@ -2133,7 +2280,19 @@ impl Context {
     /// ABCMeta checks the instance's reported class first, then its actual type if different.
     pub(super) fn abc_meta_instance_check(&mut self, value: Id, class: Id) -> Result<Id> {
         super::mapping_abc::check_impl(self, class)?;
-        let reported = self.lookup_attr(value, "__class__")?;
+        let reported = match self.lookup_attr(value, "__class__") {
+            Ok(reported) => reported,
+            // A few native values can be called before the runtime can expose their type.
+            Err(error)
+                if error.kind == "NotImplementedError"
+                    && self.classes.get("collections.abc.Callable") == Some(&class)
+                    && self.heap.get(value).instance_class().is_none()
+                    && self.builtin_type_name(value).is_none() =>
+            {
+                return Ok(if self.callable(value) { TRUE } else { FALSE });
+            }
+            Err(error) => return Err(error),
+        };
         self.heap.keep(reported);
         let actual = self.exact_type(value)?;
         let check = |ctx: &mut Self, child| {

@@ -1,5 +1,8 @@
 //! Buffered input over a Python raw reader. No raw callback runs with a buffer borrow held.
 
+mod update;
+use update::Update;
+
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -16,6 +19,7 @@ pub(in crate::dynamic) struct Reader {
     pos: Cell<usize>,
     absolute: Cell<Option<i64>>,
     locked: Cell<bool>,
+    update: Option<Update>,
 }
 
 pub(super) fn has_state(ctx: &Context, receiver: Id) -> bool {
@@ -76,6 +80,16 @@ pub(super) fn initialize(ctx: &mut Context, receiver: Id, raw: Id, size: i64) ->
             "buffer size must be strictly positive",
         ));
     }
+    install(ctx, receiver, raw, size, false)
+}
+
+pub(super) fn install(
+    ctx: &mut Context,
+    receiver: Id,
+    raw: Id,
+    size: i64,
+    update: bool,
+) -> Result<Id> {
     let buffer = ctx.alloc(Value::ByteArray(super::zeroed_bytes(size)?));
     let absolute = invoke(ctx, raw, "tell", vec![])
         .and_then(|n| index(ctx, n))
@@ -89,6 +103,7 @@ pub(super) fn initialize(ctx: &mut Context, receiver: Id, raw: Id, size: i64) ->
         pos: Cell::new(0),
         absolute: Cell::new(absolute),
         locked: Cell::new(false),
+        update: update.then(Update::default),
     };
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         unreachable!()
@@ -125,7 +140,7 @@ impl Reader {
     }
 
     fn unread(&self) -> usize {
-        self.end.get() - self.pos.get()
+        self.end.get().saturating_sub(self.pos.get())
     }
 
     fn consume(&self, ctx: &Context, out: &mut Vec<u8>, limit: usize, line: bool) -> Result<()> {
@@ -144,6 +159,10 @@ impl Reader {
     }
 
     fn reset(&self) {
+        if let Some(update) = &self.update {
+            update.raw_offset.set(0);
+            update.outside.set(None);
+        }
         self.end.set(0);
         self.pos.set(0);
     }
@@ -157,6 +176,17 @@ impl Reader {
     }
 
     fn check_open(&self, ctx: &mut Context, message: &str) -> Result<()> {
+        if self
+            .update
+            .as_ref()
+            .is_some_and(|update| update.retired.get())
+        {
+            return Err(Error::new("ValueError", message));
+        }
+        self.check_raw_open(ctx, message)
+    }
+
+    fn check_raw_open(&self, ctx: &mut Context, message: &str) -> Result<()> {
         let closed = ctx.lookup_attr(self.raw()?, "closed")?;
         if ctx.truth(closed)? {
             Err(Error::new("ValueError", message))
@@ -250,6 +280,9 @@ impl Reader {
         self.pos.set(start);
         let count = self.raw_into(ctx, self.buffer, start, self.size - start)?;
         self.end.set(start + count.unwrap_or(0));
+        if let Some(update) = &self.update {
+            update.raw_offset.set(self.end.get() as i64);
+        }
         Ok(count.is_some())
     }
 
@@ -279,8 +312,12 @@ impl Reader {
         let size = range.len();
         self.check_open(ctx, "readinto of closed file")?;
         self.with_lock(|| {
+            if size == 0 && self.unread() == 0 {
+                self.sync_update(ctx)?;
+            }
             let mut written = 0;
             let mut continuing = false;
+            let mut rewind = true;
             loop {
                 let n = (size - written).min(self.unread());
                 if n != 0 {
@@ -306,6 +343,10 @@ impl Reader {
                 let remaining = size - written;
                 if remaining == 0 {
                     break;
+                }
+                if rewind {
+                    self.sync_update(ctx)?;
+                    rewind = false;
                 }
                 if remaining > self.size {
                     self.reset();
@@ -340,6 +381,7 @@ impl Reader {
         let mut out = Vec::new();
         match name {
             "peek" => {
+                self.sync_update(ctx)?;
                 if self.unread() == 0 {
                     self.fill(ctx, false)?;
                 }
@@ -349,16 +391,22 @@ impl Reader {
                 )?;
             }
             "read1" if self.unread() == 0 && n != 0 => {
+                self.sync_update(ctx)?;
                 out = self.read_raw(ctx, n)?.unwrap_or_default();
             }
             _ => {
                 let line = name == "readline";
                 let mut continuing = false;
+                let mut rewind = true;
                 loop {
                     let remaining = n - out.len();
                     self.consume(ctx, &mut out, remaining, line)?;
                     if out.len() == n || name == "read1" || line && out.last() == Some(&b'\n') {
                         break;
+                    }
+                    if rewind {
+                        self.sync_update(ctx)?;
+                        rewind = false;
                     }
                     let remaining = n - out.len();
                     if !line && remaining >= self.size {
@@ -388,6 +436,7 @@ impl Reader {
     fn read_all(&self, ctx: &mut Context) -> Result<Id> {
         let mut data = Vec::new();
         self.consume(ctx, &mut data, usize::MAX, false)?;
+        self.sync_update(ctx)?;
         self.reset();
         let raw = self.raw()?;
         let readall = match ctx.lookup_attr(raw, "readall") {
@@ -432,31 +481,34 @@ impl Reader {
     }
 
     fn seek(&self, ctx: &mut Context, offset: i64, whence: i32) -> Result<Id> {
-        let unread = self.unread() as i64;
-        if let Some(end) = self.absolute.get() {
+        let pos = self.logical_pos();
+        if let Some(absolute) = self.absolute.get() {
+            let start = absolute - self.raw_offset();
             let target = match whence {
                 0 => Some(offset),
-                1 => (end - unread).checked_add(offset),
+                1 => start
+                    .checked_add(pos)
+                    .and_then(|logical| logical.checked_add(offset)),
                 _ => None,
             };
-            let start = end - self.end.get() as i64;
             if let Some(target) = target
-                && (start..=end).contains(&target)
-                && unread > 0
+                && let Some(within) = target.checked_sub(start)
+                && (0..=self.end.get() as i64).contains(&within)
+                && self.unread() > 0
             {
-                self.pos.set((target - start) as usize);
-                // Character devices can report the same raw position after a read.
+                self.pos.set(within as usize);
                 return Ok(ctx.int(target.max(0)));
             }
         }
-        let offset = if whence == 1 {
-            offset
-                .checked_sub(unread)
-                .ok_or_else(|| Error::new("OverflowError", "seek offset out of range"))?
-        } else {
-            offset
-        };
         self.with_lock(|| {
+            self.write_back(ctx)?;
+            let offset = if whence == 1 {
+                offset
+                    .checked_add(self.logical_pos() - self.raw_offset())
+                    .ok_or_else(|| Error::new("OverflowError", "seek offset out of range"))?
+            } else {
+                offset
+            };
             let (off, whence) = (ctx.int(offset), ctx.int(i64::from(whence)));
             let value = invoke(ctx, self.raw()?, "seek", vec![off, whence])?;
             let pos = index(ctx, value)?;
@@ -473,6 +525,12 @@ impl Reader {
     }
 }
 
+pub(super) fn pending_update(ctx: &Context, receiver: Id) -> Option<Id> {
+    let reader = Reader::get(ctx, receiver).ok()?;
+    reader.update.as_ref()?.dirty.get()?;
+    reader.raw.get()
+}
+
 pub(super) fn initialized_raw(ctx: &Context, receiver: Id) -> Option<Id> {
     Reader::get(ctx, receiver).ok()?.raw.get()
 }
@@ -480,8 +538,20 @@ pub(super) fn initialized_raw(ctx: &Context, receiver: Id) -> Option<Id> {
 pub(super) fn close_raw(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let reader = Reader::get(ctx, receiver)?;
     let raw = reader.raw()?;
-    let result = reader.with_lock(|| invoke(ctx, raw, "close", vec![]));
-    reader.reset();
+    let result = reader.with_lock(|| {
+        let result = invoke(ctx, raw, "close", vec![]);
+        if let Some(update) = &reader.update {
+            // Retire the backing on which raw.close was called, even when it refuses.
+            // The raw remains attached and determines the public closed property.
+            update.retired.set(true);
+            update.dirty.set(None);
+            reader.reset();
+        }
+        result
+    });
+    if reader.update.is_none() {
+        reader.reset();
+    }
     result
 }
 
@@ -510,13 +580,18 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
     match name {
         "readinto" | "readinto1" => reader.read_into(ctx, args[0], name == "readinto1"),
         "closed" | "name" | "mode" => ctx.lookup_attr(raw, name),
-        "readable" | "seekable" | "fileno" | "isatty" | "flush" => invoke(ctx, raw, name, vec![]),
+        "write" | "flush" | "truncate" if reader.update.is_some() => {
+            reader.update_call(ctx, name, args)
+        }
+        "readable" | "writable" | "seekable" | "fileno" | "isatty" | "flush" => {
+            invoke(ctx, raw, name, vec![])
+        }
         "truncate" => {
             reader.check_open(ctx, "truncate of closed file")?;
             Err(Error::new("UnsupportedOperation", "truncate"))
         }
         "__enter__" => {
-            reader.check_open(ctx, "I/O operation on closed file.")?;
+            reader.check_raw_open(ctx, "I/O operation on closed file.")?;
             Ok(receiver)
         }
         "__exit__" => invoke(ctx, receiver, "close", vec![]),
@@ -558,7 +633,8 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
                 ));
             }
             reader.absolute.set(Some(end));
-            Ok(ctx.int((end - reader.unread() as i64).max(0)))
+            let logical = end.saturating_add(reader.logical_pos() - reader.raw_offset());
+            Ok(ctx.int(logical.max(0)))
         }
         "seek" => {
             files::check_buffered_whence(whence)?;

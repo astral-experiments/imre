@@ -2,9 +2,10 @@
 
 use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct Hook {
     pub(super) initialized: HashSet<String>,
+    /// Empty for a value-producing hook that never observes the receiver.
     pub(super) writes: Vec<String>,
 }
 
@@ -15,14 +16,46 @@ pub(super) fn called_method<'a>(statement: &'a ast::Stmt, receiver: &str) -> Opt
     let ast::Stmt::Expr(stmt) = statement else {
         return None;
     };
-    let ast::Expr::Call(call) = &*stmt.value else {
+    receiver_call(&stmt.value, receiver, false)
+}
+
+/// An argument-free chain can consume a freshly returned value without sharing the receiver.
+pub(super) fn receiver_call<'a>(
+    expression: &'a ast::Expr,
+    receiver: &str,
+    allow_chain: bool,
+) -> Option<&'a str> {
+    let ast::Expr::Call(call) = expression else {
         return None;
     };
     let ast::Expr::Attribute(attr) = &*call.func else {
         return None;
     };
-    (call.arguments.is_empty() && matches!(&*attr.value, ast::Expr::Name(n) if n.id == receiver))
-        .then(|| attr.attr.as_str())
+    if !call.arguments.is_empty() {
+        return None;
+    }
+    if matches!(&*attr.value, ast::Expr::Name(name) if name.id == receiver) {
+        Some(attr.attr.as_str())
+    } else if allow_chain {
+        receiver_call(&attr.value, receiver, true)
+    } else {
+        None
+    }
+}
+
+/// Literal factories cannot observe partial fields, publish self or invoke another override.
+fn returns_literal(method: &ast::StmtFunctionDef) -> bool {
+    let [prefix @ .., ast::Stmt::Return(ret)] = method.body.as_slice() else {
+        return false;
+    };
+    prefix.iter().all(|stmt| {
+        matches!(stmt, ast::Stmt::Pass(_))
+            || matches!(stmt, ast::Stmt::Expr(expr) if matches!(&*expr.value, ast::Expr::StringLiteral(_)))
+    }) && ret.value.as_ref().is_some_and(|value| {
+        !ast::helpers::any_over_expr(value, |expr| {
+            !expr.is_literal_expr() && !matches!(expr, ast::Expr::Dict(_) | ast::Expr::List(_) | ast::Expr::Tuple(_) | ast::Expr::Set(_))
+        })
+    })
 }
 
 /// Check the fields an initializer hook writes on a normal return.
@@ -43,6 +76,15 @@ fn writes(
         return Err(module.error(
             method,
             "an initializer hook must be an ordinary receiver-only method",
+        ));
+    }
+    if returns_literal(method) {
+        return Ok(Vec::new());
+    }
+    if inherited.is_some_and(|hook| hook.writes.is_empty()) {
+        return Err(module.error(
+            method,
+            "an initializer value hook must return a literal without observing self",
         ));
     }
     let receiver = parameter.name().as_str();

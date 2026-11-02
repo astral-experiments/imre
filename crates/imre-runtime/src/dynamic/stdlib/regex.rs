@@ -95,6 +95,7 @@ pub(in crate::dynamic) struct Pattern {
     regex: Matcher,
     assertions: Vec<(String, Guard)>,
     full: OnceCell<std::result::Result<Matcher, String>>,
+    close_order: OnceCell<Option<Vec<usize>>>,
     split_retry: OnceCell<std::result::Result<regex_automata::nfa::thompson::NFA, String>>,
 }
 
@@ -147,6 +148,34 @@ impl Pattern {
         }
         let mapping = ctx.dict(fields);
         ctx.mapping_proxy(mapping)
+    }
+
+    fn last_capture(&self, text: &[u8], caps: &Captures) -> LastCapture {
+        let mut groups = (1..=self.group_count()).filter(|&i| caps.get_group(i).is_some());
+        let first = groups.next();
+        if groups.next().is_none() {
+            return LastCapture::Known(first);
+        }
+        let order = self.close_order.get_or_init(|| match &self.regex {
+            Matcher::Lookahead(matcher) => matcher.close_order(),
+            Matcher::Asserted(_) => None, // The NFA maps assertion slots to public groups.
+            _ => split::single_visit_order(self),
+        });
+        let winner = if let Some(order) = order {
+            order
+                .iter()
+                .rev()
+                .copied()
+                .find(|&i| caps.get_group(i).is_some())
+        } else if matches!(&self.regex, Matcher::Lookahead(_)) {
+            None
+        } else {
+            split::last_close(self, text, caps)
+        };
+        match winner {
+            Some(index) => LastCapture::Known(Some(index)),
+            None => LastCapture::Unavailable,
+        }
     }
 
     fn match_error(&self, ctx: &mut Context, message: String) -> Error {
@@ -322,6 +351,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
             if c == '(' && !in_class && chars.peek() == Some(&'?') {
                 let mut group = chars.clone();
                 group.next();
+                prefer_translation |= group.peek() == Some(&'#');
                 let mut prefer_python_flags = false;
                 while let Some(flag) = group.next_if(|c| "aiLmsux-".contains(*c)) {
                     prefer_python_flags |= matches!(flag, 'a' | 'u' | 'i' | 'x');
@@ -426,6 +456,9 @@ fn syntax_diagnostic(ctx: &Context, source: Id, flags: i64) -> Option<(String, u
         &parsed,
     ) {
         return Some(error);
+    }
+    if let Some((msg, at)) = imre_regex::repeat_diagnostic(&text, flags & VERBOSE != 0) {
+        return Some((msg.to_owned(), text[..at].chars().count()));
     }
     let error = parsed.err()?;
     let message = match error.kind() {
@@ -565,6 +598,26 @@ fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
     }
 }
 
+/// Consume complete leading global matching flags before choosing the matcher and lowering anchors.
+fn leading_match_flags(mut pattern: &[u8], mut flags: i64) -> (&[u8], i64) {
+    while let Some(rest) = pattern.strip_prefix(b"(?") {
+        let mut added = 0;
+        let mut chars = rest.iter();
+        loop {
+            match chars.next() {
+                Some(b'i') => added |= IGNORECASE,
+                Some(b'm') => added |= MULTILINE,
+                Some(b's') => added |= DOTALL,
+                Some(b')') if added != 0 => break,
+                _ => return (pattern, flags),
+            }
+        }
+        flags |= added;
+        pattern = chars.as_slice();
+    }
+    (pattern, flags)
+}
+
 fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let flags = flags
         .map(|value| ctx.as_integer(value))
@@ -614,6 +667,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         Value::Bytes(value) => value.as_slice(),
         _ => ctx.str_value(id)?.as_bytes(),
     };
+    let (spelling, flags) = leading_match_flags(spelling, flags);
     let repeated = repeated_literal_capture(spelling, flags, bytes);
     let spelling = repeated.as_deref().unwrap_or(spelling);
     let source = if bytes {
@@ -643,9 +697,12 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         Ok((source, matcher))
     };
     let backtrack = |error| lookahead::compile(&source, flags, bytes, error);
-    let global_verbose = source.starts_with("(?x)");
+    let global_verbose = imre_regex::leading_verbose(&source);
     let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
         let original = || {
+            if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, false) {
+                return Err(msg.to_owned());
+            }
             let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
             if flags & IGNORECASE != 0 && !bytes {
                 build(imre_regex::expand_case(&raw, ascii)?)
@@ -800,6 +857,7 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         regex,
         assertions,
         full: OnceCell::new(),
+        close_order: OnceCell::new(),
         split_retry: OnceCell::new(),
     }))))
 }
@@ -862,7 +920,13 @@ fn group_spans(caps: &Captures) -> impl Iterator<Item = Option<Span>> + '_ {
     })
 }
 
+enum LastCapture {
+    Known(Option<usize>),
+    Unavailable,
+}
+
 pub(in crate::dynamic) struct Match {
+    last: LastCapture,
     pub(in crate::dynamic) pattern: Id,
     pub(in crate::dynamic) subject: Id,
     spans: Vec<Option<Span>>,
@@ -876,15 +940,28 @@ impl Match {
         pattern
     }
 
-    /// A Scanner lexicon has exactly one participating token group in each match.
-    pub(in crate::dynamic) fn lexicon_branch(&self, ctx: &Context) -> Option<usize> {
-        if self.pattern(ctx).source != NONE {
-            return None;
+    pub(in crate::dynamic) fn last_attribute(&self, ctx: &mut Context, named: bool) -> Result<Id> {
+        let index = match self.last {
+            LastCapture::Known(index) => index,
+            LastCapture::Unavailable => {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "capture close order is unavailable for this regular expression",
+                ));
+            }
+        };
+        let Some(index) = index else { return Ok(NONE) };
+        if named {
+            let name = self
+                .pattern(ctx)
+                .regex
+                .group_info()
+                .to_name(PatternID::ZERO, index)
+                .map(str::to_owned);
+            Ok(name.map_or(NONE, |name| ctx.text(name)))
+        } else {
+            Ok(ctx.int(index as i64))
         }
-        self.spans[1..]
-            .iter()
-            .position(Option::is_some)
-            .map(|i| i + 1)
     }
 
     fn group_index(&self, ctx: &mut Context, group: Id) -> Result<usize> {
@@ -915,12 +992,36 @@ impl Match {
             let value = crate::dynamic::copy_ids(&points[span.range()])?;
             return Ok(ctx.text_codepoints(value));
         }
-        let bytes = self.pattern(ctx).bytes;
-        let text = subject_bytes(ctx, self.subject, bytes)?;
-        // A bytearray may have changed size since the search.
-        let data = &text[span.start.min(text.len())..span.end.min(text.len())];
-        let value = group_value(data, bytes);
+        let value = group_value(self.captured_bytes(ctx, span)?, self.pattern(ctx).bytes);
         Ok(ctx.alloc(value))
+    }
+
+    fn captured_bytes<'a>(&self, ctx: &'a Context, span: Span) -> Result<&'a [u8]> {
+        let text = subject_bytes(ctx, self.subject, self.pattern(ctx).bytes)?;
+        // A bytearray may have changed size since the search.
+        Ok(&text[span.start.min(text.len())..span.end.min(text.len())])
+    }
+
+    pub(in crate::dynamic) fn repr(&self, ctx: &Context) -> Result<String> {
+        let span = self.spans[0].expect("a match owns group zero");
+        let quoted =
+            if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(self.subject)) {
+                super::super::operators::surrogate_repr(&points[span.range()])
+            } else {
+                let data = self.captured_bytes(ctx, span)?;
+                if self.pattern(ctx).bytes {
+                    let mut quoted = String::new();
+                    crate::objects::write_bytes_repr(&mut quoted, data);
+                    quoted
+                } else {
+                    let text = std::str::from_utf8(data).expect("capture is UTF-8");
+                    crate::objects::exceptions::string_repr(text).into_string()
+                }
+            };
+        let (start, end) = self.bounds(ctx, 0)?;
+        Ok(format!(
+            "<re.Match object; span=({start}, {end}), match={quoted:.50}>"
+        ))
     }
 
     fn bounds(&self, ctx: &Context, index: usize) -> Result<(i64, i64)> {
@@ -991,9 +1092,12 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
         ctx.check_buffer_exporter(id)?;
     }
     match value {
-        Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { owner: Some(_), .. } => {
+        Value::Bytes(_)
+        | Value::ByteArray(_)
+        | Value::Array(_)
+        | Value::MemoryView { owner: Some(_), .. } => {
             if bytes {
-                return ctx.bytes_like(id);
+                return ctx.native_buffer_bytes(id);
             }
             Err(Error::new(
                 "TypeError",
@@ -1096,7 +1200,7 @@ pub(super) fn search(
     if matches!(method, "scanner" | "finditer") {
         let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
             // Keep the export alive for the scanner's lifetime. A Match keeps only the subject.
-            Value::ByteArray(_) => Some(ctx.new_memoryview(string)?),
+            Value::ByteArray(_) | Value::Array(_) => Some(ctx.new_memoryview(string)?),
             Value::MemoryView { .. } => {
                 return Err(Error::new(
                     "NotImplementedError",
@@ -1144,10 +1248,12 @@ pub(super) fn search(
     if !captures.is_match() {
         return Ok(NONE);
     }
+    let last = pattern.last_capture(&text[..end], &captures);
     let spans = group_spans(&captures)
         .map(|span| span.map(|s| projection.as_ref().map_or(s, |p| p.original(s))))
         .collect();
     Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
+        last,
         pattern: receiver,
         subject: string,
         spans,

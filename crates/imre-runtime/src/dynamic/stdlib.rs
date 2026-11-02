@@ -438,8 +438,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         }
         (
             "_imre_tempfile",
-            "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "check_text_options"
-            | "open_named" | "finish_named" | "keep_named",
+            "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "finalize_at_shutdown",
         ) => ctx.builtin(&format!("{module}.{name}")),
         ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
@@ -539,6 +538,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("collections" | "_collections", "_tuplegetter") => ctx.builtin(super::namedtuple::GETTER),
         ("collections", "defaultdict") => ctx.builtin("collections.defaultdict"),
         ("types", "GenericAlias") => ctx.builtin("types.GenericAlias"),
+        ("_typing", "_get_args") => ctx.builtin("typing.get_args"),
+        ("_typing", "_get_origin") => ctx.builtin("typing.get_origin"),
         ("_typing", "_idfunc") => ctx.builtin("_typing._idfunc"),
         ("typing", "NoDefault") => super::typing::no_default(ctx),
         ("typing", "TYPE_CHECKING") => FALSE,
@@ -549,9 +550,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             super::mapping_abc::class(ctx, abc)?
         }
         ("_collections_abc", "_check_methods") => ctx.builtin("_collections_abc._check_methods"),
-        ("_collections_abc", "Callable") => {
-            super::typing::named_class(ctx, "collections.abc", "Callable")
-        }
         (
             "typing",
             "TypeVar"
@@ -575,8 +573,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_overloads"
             | "clear_overloads"
             | "_overload_dummy"
-            | "get_args"
-            | "get_origin"
             | "_GenericAlias"
             | "_CallableGenericAlias"
             | "_LiteralGenericAlias",
@@ -703,7 +699,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin("posix._path_splitroot_ex")
         }
         ("posix", "environ") => os::environment(ctx),
-        ("posix", "_create_environ" | "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
+        ("posix", "_create_environ" | "putenv" | "unsetenv") => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -1677,28 +1675,23 @@ pub(super) fn call(
         }
         return Ok(result);
     }
-    if name == "_imre_itertools._chain_get" || name == "_imre_itertools._chain_set" {
-        if !kwargs.is_empty()
-            || (name.ends_with("_get") && args.len() != 2)
-            || (name.ends_with("_set") && args.len() != 3)
+    if name == "_imre_itertools._chain_next" {
+        return itertools::chain_next(ctx, args, kwargs);
+    }
+    if name == "_imre_itertools._chain_set" {
+        if let [receiver, active, value] = args
+            && kwargs.is_empty()
+            && let Value::Instance { fields, .. } = ctx.heap.get_mut(*receiver)
         {
-            return Err(Error::new("TypeError", "invalid chain state arguments"));
+            let key = if *active == TRUE {
+                "_active"
+            } else {
+                "_sources"
+            };
+            fields.insert(key.to_owned(), *value);
+            return Ok(NONE);
         }
-        let key = if args[1] == TRUE {
-            "_active"
-        } else {
-            "_sources"
-        };
-        if let Value::Instance { fields, .. } = ctx.heap.get_mut(args[0]) {
-            if name.ends_with("_set") {
-                fields.insert(key.to_owned(), args[2]);
-                return Ok(NONE);
-            }
-            if let Some(&value) = fields.get(key) {
-                return Ok(value);
-            }
-        }
-        return Err(Error::new("TypeError", "invalid chain state receiver"));
+        return Err(Error::new("TypeError", "invalid chain state arguments"));
     }
     if name == super::deque::CLASS {
         return super::deque::construct(ctx, args, kwargs);

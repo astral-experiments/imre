@@ -1,12 +1,21 @@
 import gc
 import io
 import os
+import pickle
 import tempfile
 from _io import BufferedWriter as NativeWriter
 
 
 class Writer(io.BufferedWriter):
     pass
+
+
+class StatefulWriter(NativeWriter):
+    def __getstate__(self):
+        return self.raw.getvalue()
+
+    def __setstate__(self, data):
+        self.__init__(io.BytesIO(data))
 
 
 class KeepsRawOpen(io.BufferedWriter):
@@ -29,6 +38,20 @@ assert not issubclass(Writer, io.RawIOBase)
 assert not issubclass(Writer, io.TextIOBase)
 raises(TypeError, NativeWriter.write, object(), b"x")
 raises(TypeError, NativeWriter.__init__, object())
+
+for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+    for cls in (NativeWriter, Writer):
+        with cls(io.BytesIO()) as writer:
+            try:
+                pickle.dumps(writer, protocol)
+            except TypeError as error:
+                assert str(error) == f"cannot pickle '{cls.__name__}' instances"
+            else:
+                raise AssertionError("pickled a writer without custom state")
+    with StatefulWriter(io.BytesIO(b"state")) as writer:
+        wire = pickle.dumps(writer, protocol)
+    with pickle.loads(wire) as restored:
+        assert type(restored) is StatefulWriter and restored.raw.getvalue() == b"state"
 
 fd, path = tempfile.mkstemp()
 try:

@@ -36,6 +36,21 @@ class Mapping:
 
 
 def current():
+    class Child(bytes):
+        pass
+
+    value = b"content"
+    assert value.__bytes__() is value and bytes.__bytes__.__objclass__ is bytes
+    assert bytes.__bytes__.__doc__ == "Convert this value to exact type bytes."
+    assert bytes.__bytes__.__text_signature__ == "($self, /)"
+    for short in (b"", b"x"):
+        item = Child(short)
+        assert item.__bytes__() is item.__bytes__()
+    child = Child(value)
+    result = bytes.__bytes__(child)
+    assert type(result) is bytes and result == value
+    assert result is not bytes.__bytes__(child)
+
     class Payload(bytes):
         def rstrip(self):
             return "override"

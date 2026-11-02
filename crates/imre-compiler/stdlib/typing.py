@@ -1,18 +1,22 @@
 """Stream annotations and special forms for the runtime typing module."""
 
+import _typing as _typing_runtime
 import builtins as _builtins
 import functools
 import sys as _sys
 import typing as _typing
 from _collections_abc import Generator as _Generator, Iterable as _Iterable
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
+from _collections_abc import Reversible as _Reversible, Sized as _Sized
 from collections import Counter as _Counter, defaultdict as _defaultdict
+from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
 from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
 from _typing import _idfunc
-from typing import Any, Callable, Generic, Protocol, TypeVar
+from typing import Any, Callable, Generic, Protocol, TypeVar, Union
+from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
 # From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
@@ -977,6 +981,44 @@ _TypedDict = _typing._new_typeddict("TypedDict", True)
 TypedDict.__mro_entries__ = lambda bases: (_TypedDict,)
 
 
+def get_origin(tp):
+    """Get the unsubscripted version of a type.
+
+    This supports generic types, Callable, Tuple, Union, Literal, Final, ClassVar,
+    Annotated, and others. Return None for unsupported types.
+
+    Examples::
+
+        >>> P = ParamSpec('P')
+        >>> assert get_origin(Literal[42]) is Literal
+        >>> assert get_origin(int) is None
+        >>> assert get_origin(ClassVar[int]) is ClassVar
+        >>> assert get_origin(Generic) is Generic
+        >>> assert get_origin(Generic[T]) is Generic
+        >>> assert get_origin(Union[T, int]) is Union
+        >>> assert get_origin(List[Tuple[T, T]][int]) is list
+        >>> assert get_origin(P.args) is P
+    """
+    return _typing_runtime._get_origin(tp)
+
+
+def get_args(tp):
+    """Get type arguments with all substitutions performed.
+
+    For unions, basic simplifications used by Union constructor are performed.
+
+    Examples::
+
+        >>> T = TypeVar('T')
+        >>> assert get_args(Dict[str, int]) == (str, int)
+        >>> assert get_args(int) == ()
+        >>> assert get_args(Union[int, Union[T, int], str][int]) == (int, str)
+        >>> assert get_args(Union[int, Tuple[T, int]][str]) == (int, Tuple[str, int])
+        >>> assert get_args(Callable[[], T][int]) == ([], int)
+    """
+    return _typing_runtime._get_args(tp)
+
+
 def is_typeddict(tp):
     """Check if an annotation is a TypedDict class.
 
@@ -1628,6 +1670,30 @@ def _is_param_expr(arg):
     return arg is ... or isinstance(arg, (tuple, list, _typing.ParamSpec, _typing._ConcatenateGenericAlias))
 
 
+def _should_unflatten_callable_args(typ, args):
+    """Internal helper for munging collections.abc.Callable's __args__.
+
+    The canonical representation for a Callable's __args__ flattens the
+    argument types, see https://github.com/python/cpython/issues/86361.
+
+    For example::
+
+        >>> import collections.abc
+        >>> P = ParamSpec('P')
+        >>> collections.abc.Callable[[int, int], str].__args__ == (int, int, str)
+        True
+        >>> collections.abc.Callable[P, str].__args__ == (P, str)
+        True
+
+    As a result, if we need to reconstruct the Callable from its __args__,
+    we need to unflatten it.
+    """
+    return (
+        typ.__origin__ is _ABCCallable
+        and not (len(args) == 2 and _is_param_expr(args[0]))
+    )
+
+
 def _paramspec_subst(self, arg):
     if isinstance(arg, (list, tuple)):
         arg = tuple(_type_check(a, "Expected a type.") for a in arg)
@@ -1768,6 +1834,8 @@ class _SpecialGenericAlias(_NotIterable):
         if 0 < missing <= len(self._defaults):
             args += self._defaults[-missing:]
         elif missing:
+            if not self._nparams:
+                raise TypeError(f"{self} is not a generic class")
             expected = f"at least {self._nparams - len(self._defaults)}" if self._defaults else self._nparams
             count = "many" if len(args) > self._nparams else "few"
             raise TypeError(f"Too {count} arguments for {self}; actual {len(args)}, expected {expected}")
@@ -1867,6 +1935,8 @@ Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
+Reversible = _SpecialGenericAlias(_Reversible, 1)
+Sized = _SpecialGenericAlias(_Sized, 0)
 
 
 # Reconstruction callables and arguments used by CPython's typing alias reducers.
@@ -1882,9 +1952,15 @@ def _reduce_generic_alias(alias):
 def _reduce_callable_alias(alias):
     from operator import getitem
     args = alias.__args__
-    if not (len(args) == 2 and (args[0] is ... or isinstance(args[0], (list, tuple, _typing.ParamSpec)))):
+    if _should_unflatten_callable_args(alias, args):
         args = list(args[:-1]), args[-1]
     return getitem, (Callable, args)
+
+
+def _rebuild_builtin_alias(alias, args):
+    from types import GenericAlias
+    result = GenericAlias(alias.__origin__, args)
+    return next(iter(result)) if alias.__unpacked__ else result
 
 
 def _substitute_alias_arguments(args, replacements):
@@ -1910,7 +1986,7 @@ def _substitute_alias_argument(arg, replacements):
         return arg
     from types import GenericAlias
     if type(arg) is GenericAlias:
-        return GenericAlias(arg.__origin__, _substitute_alias_arguments(arg.__args__, replacements))
+        return _rebuild_builtin_alias(arg, _substitute_alias_arguments(arg.__args__, replacements))
     if _typing.get_origin(arg) is _typing.Union:
         return _typing.Union[_substitute_alias_arguments(arg.__args__, replacements)]
     subargs = []
@@ -1963,14 +2039,17 @@ def _prepare_typevartuple(pack, alias, args):
 
 
 def _specialize_generic_alias_uncached(alias, args):
-    if alias.__origin__ is Generic or alias.__origin__ is Protocol:
+    from types import GenericAlias
+    if type(alias) is not GenericAlias and (alias.__origin__ is Generic or alias.__origin__ is Protocol):
         raise TypeError(f"Cannot subscript already-subscripted {alias}")
     parameters = alias.__parameters__
     if not parameters:
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
-    expanded = _unpack_alias_args(_type_convert(arg) for arg in args)
+    if type(alias) is not GenericAlias:
+        args = tuple(_type_convert(arg) for arg in args)
+    expanded = _unpack_alias_args(args)
     for parameter in parameters:
         if isinstance(parameter, _typing.TypeVarTuple):
             expanded = _prepare_typevartuple(parameter, alias, expanded)
@@ -1993,6 +2072,8 @@ def _specialize_generic_alias_uncached(alias, args):
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
     args = _substitute_alias_arguments(alias.__args__, replacements)
+    if type(alias) is GenericAlias:
+        return _rebuild_builtin_alias(alias, args)
     if isinstance(alias, _typing.Union):
         return _typing.Union[args]
     if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):

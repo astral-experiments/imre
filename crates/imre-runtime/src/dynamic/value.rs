@@ -474,7 +474,6 @@ impl Context {
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
             Value::Struct { .. } => "Struct",
-            Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(..) => "_io.BufferedRandom",
             Value::NamedTuple {
                 class: Some(class), ..
@@ -679,6 +678,8 @@ pub(super) struct ClassNamespace {
     pub annotation_sites: Option<std::collections::BTreeMap<u32, (Id, Id)>>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
+    /// Run pending instance finalizers after user exit callbacks, while the heap is live.
+    pub finalize_at_shutdown: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
     pub slot_names: Option<std::rc::Rc<[String]>>,
     /// Dynamic classes install real descriptors instead of using inline fields by spelling.
@@ -825,6 +826,7 @@ pub(super) enum Value {
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
     Deque(Box<crate::objects::DequeRing<Id>>),
+    GenericAliasIterator(Option<Id>),
     SequenceIterator {
         source: Option<Id>,
         index: i64,
@@ -1102,7 +1104,6 @@ pub(super) enum Value {
         retry: bool,
     },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
-    NamedFileCloser(crate::Shared<std::cell::RefCell<super::stdlib::tempfile::NamedCloser>>),
     BufferedRandom(
         crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
         Id,
@@ -1188,6 +1189,7 @@ impl Value {
             Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
+            Self::GenericAliasIterator(_) => "generic_alias_iterator",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
             Self::Deque(_) => super::deque::CLASS,
@@ -1323,9 +1325,9 @@ impl Value {
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
             Self::Deque(ring) => visit.extend(&ring.items),
-            Self::SequenceIterator { source, .. } | Self::ReverseSequence { source, .. } => {
-                visit.extend(*source)
-            }
+            Self::SequenceIterator { source, .. }
+            | Self::ReverseSequence { source, .. }
+            | Self::GenericAliasIterator(source) => visit.extend(*source),
             Self::DequeIterator { deque, .. } => visit.push(*deque),
             Self::List(v) | Self::Tuple(v) => visit.extend(v.iter().rev()),
             Self::Set { entries, .. } => visit.extend(entries.iter().map(|&(key, _)| key)),
@@ -1550,8 +1552,12 @@ impl Value {
             Self::TypeAlias { name, definition } => {
                 visit.push(*name);
                 match *definition {
-                    super::typing::AliasDefinition::Lazy { evaluator, cached } => {
-                        visit.push(evaluator);
+                    super::typing::AliasDefinition::Lazy {
+                        parameters,
+                        evaluator,
+                        cached,
+                    } => {
+                        visit.extend([parameters, evaluator]);
                         visit.extend(cached);
                     }
                     super::typing::AliasDefinition::Eager { value, module } => {
@@ -1743,8 +1749,7 @@ impl Value {
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
-            | Self::ProcessHandle(_)
-            | Self::NamedFileCloser(_) => {}
+            | Self::ProcessHandle(_) => {}
             Self::TextFile(file) => visit.extend(file.buffer),
             Self::BufferedRandom(_, name) => visit.push(*name),
         }
@@ -3129,6 +3134,10 @@ impl Heap {
         }
     }
 
+    pub(super) fn is_pending_finalizer(&self, id: Id) -> bool {
+        self.slots[id as usize].finalization == Finalization::Pending
+    }
+
     pub(super) fn pending_finalizers(&self) -> &[Id] {
         &self.ordinary_finalizers
     }
@@ -3775,7 +3784,6 @@ impl Heap {
             let slot = &self.slots[id as usize];
             slot.marked()
                 && match &slot.value {
-                    Some(Value::NamedFileCloser(closer)) => closer.borrow().needs_cleanup(),
                     Some(Value::TextFile(file)) => !file.closed(),
                     Some(Value::File(file)) => !file.closed(),
                     _ => false,

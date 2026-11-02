@@ -8,6 +8,7 @@ use files::{BinaryFile, ReadSource};
 pub(super) const METHODS: &[&str] = &[
     "__init__",
     "__repr__",
+    "__getstate__",
     "_dealloc_warn",
     "raw",
     "closed",
@@ -151,12 +152,15 @@ pub(super) fn call(
     if name == "__repr__" {
         return repr(ctx, receiver);
     }
+    if name == "__getstate__" {
+        return super::buffered_io::getstate(ctx, receiver);
+    }
     if name == "peek"
         && let Some(&size) = args.first()
     {
         ssize(ctx, size)?;
     }
-    if name == "writable" {
+    if name == "writable" && owner == "BufferedReader" {
         return Ok(FALSE);
     }
     if name == "_dealloc_warn" {
