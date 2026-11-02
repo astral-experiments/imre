@@ -1,31 +1,50 @@
-use super::{Context, Id, Result, Value};
+use super::{Context, Error, Id, Result, Value};
 
 impl Context {
-    /// Run retained resource finalizers after the last user exit callback. A finalizer
-    /// can drop another owner or create a new one, so look up the next owner after it runs.
-    pub(super) fn finalize_shutdown_resources(&mut self) {
-        while let Some(owner) = self
-            .heap
-            .pending_finalizers()
-            .iter()
-            .rev()
-            .find_map(|&owner| {
-                let Value::Instance { class, .. } = self.heap.get(owner) else {
-                    return None;
-                };
-                self.find_in_mro(*class, |base| {
-                    let Value::Class { scope, .. } = self.heap.get(base) else {
-                        return None;
-                    };
-                    self.scope_data(*scope)
-                        .class_namespace
-                        .as_ref()?
-                        .finalize_at_shutdown
-                        .then_some(owner)
-                })
-            })
-        {
-            self.dispatch_finalizer(owner);
+    fn is_shutdown_resource(&self, owner: Id) -> bool {
+        let Value::Instance { class, .. } = self.heap.get(owner) else {
+            return false;
+        };
+        self.find_in_mro(*class, |base| {
+            let Value::Class { scope, .. } = self.heap.get(base) else {
+                return None;
+            };
+            self.scope_data(*scope)
+                .class_namespace
+                .as_ref()?
+                .finalize_at_shutdown
+                .then_some(())
+        })
+        .is_some()
+    }
+
+    /// Finish the current owners before dispatching closers created by their callbacks.
+    pub(super) fn finalize_shutdown_resources(&mut self) -> Result<()> {
+        let mut owners = Vec::new();
+        loop {
+            for &owner in self.heap.pending_finalizers() {
+                if self.is_shutdown_resource(owner) {
+                    owners
+                        .try_reserve(1)
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                    owners.push(owner);
+                }
+            }
+            if owners.is_empty() {
+                return Ok(());
+            }
+            // Running Python can collect or finalize another owner in this group.
+            let mark = self.heap.temporary_mark();
+            self.heap.reserve_temporaries(owners.len())?;
+            for &owner in &owners {
+                self.heap.keep(owner);
+            }
+            for owner in owners.drain(..).rev() {
+                if self.heap.is_pending_finalizer(owner) {
+                    self.dispatch_finalizer(owner);
+                }
+            }
+            self.heap.release_temporaries_since(mark);
         }
     }
 

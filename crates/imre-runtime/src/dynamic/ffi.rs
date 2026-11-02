@@ -852,7 +852,15 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     };
     ctx.workers.join_before_exit_callbacks();
     atexit::run(&mut ctx);
-    ctx.finalize_shutdown_resources();
+    if let Err(error) = ctx.finalize_shutdown_resources() {
+        super::unraisable::report(
+            &mut ctx,
+            error,
+            false,
+            None,
+            "Exception ignored during resource cleanup",
+        );
+    }
     stdlib::io::prepare_writer_shutdown(&ctx);
     crate::fault_handler::disable();
     if status == 0 && stdlib::io::has_pending_callback_write(&ctx) {

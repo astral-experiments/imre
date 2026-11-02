@@ -3133,6 +3133,10 @@ impl Heap {
         }
     }
 
+    pub(super) fn is_pending_finalizer(&self, id: Id) -> bool {
+        self.slots[id as usize].finalization == Finalization::Pending
+    }
+
     pub(super) fn pending_finalizers(&self) -> &[Id] {
         &self.ordinary_finalizers
     }
