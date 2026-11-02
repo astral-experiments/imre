@@ -246,7 +246,12 @@ pub(super) fn lookup(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
         ctx.codec_entries.functions.insert(codec.name(), id);
         id
     };
-    let id = ctx.alloc(Value::CodecInfo { entry, decode });
+    let id = ctx.alloc(Value::CodecInfo {
+        entry,
+        decode,
+        // All codecs in the native lookup registry inherit CodecInfo's True default.
+        text_encoding_override: None,
+    });
     ctx.codec_entries.entries.insert(key, id);
     Ok(id)
 }
