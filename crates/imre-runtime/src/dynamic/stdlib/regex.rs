@@ -558,6 +558,12 @@ impl Match {
             .ok_or_else(|| Error::new("IndexError", "no such group"))
     }
 
+    /// Resolve a capture by its integer index or name, including nonparticipating groups.
+    pub(in crate::dynamic) fn group_item(&self, ctx: &mut Context, key: Id) -> Result<Id> {
+        let index = self.group_index(ctx, key)?;
+        self.group(ctx, index, NONE)
+    }
+
     fn group(&self, ctx: &mut Context, index: usize, default: Id) -> Result<Id> {
         let Some(span) = self.spans[index] else {
             return Ok(default);
@@ -797,8 +803,7 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
             }
             let mut values = Vec::with_capacity(args.len() - 1);
             for &group in &args[1..] {
-                let index = m.group_index(ctx, group)?;
-                values.push(m.group(ctx, index, NONE)?);
+                values.push(m.group_item(ctx, group)?);
             }
             return Ok(if values.len() == 1 {
                 values[0]
