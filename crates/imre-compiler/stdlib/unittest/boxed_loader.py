@@ -163,4 +163,5 @@ def main():
 import unittest.case as case
 from unittest.case import addModuleCleanup, doModuleCleanups, enterModuleContext
 
-from unittest import loader, util
+from unittest import loader, signals, util
+from unittest.signals import registerResult, removeResult
