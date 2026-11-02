@@ -378,7 +378,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
     if name == "_exit" {
         return cfg!(unix);
     }
-    if matches!(name, "pread" | "readinto") {
+    if matches!(name, "pread" | "pwrite" | "readinto") {
         return cfg!(unix);
     }
     matches!(
@@ -491,6 +491,28 @@ fn file_offset(ctx: &mut Context, value: Id) -> Result<i64> {
     ctx.index_integer(value)?
         .to_i64()
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C long"))
+}
+
+/// Hold the buffer export over offset conversion and interrupted write retries.
+fn write_fd(ctx: &mut Context, fd: i32, data: Id, offset: Option<Id>) -> Result<Id> {
+    ctx.with_buffer_export(data, |ctx| {
+        let offset = if let Some(offset) = offset {
+            // PyBUF_SIMPLE acquisition precedes the offset's __index__ call.
+            ctx.check_buffer_exporter(data)?;
+            ctx.native_buffer_bytes(data)?;
+            Some(file_offset(ctx, offset)?)
+        } else {
+            None
+        };
+        loop {
+            // Conversion or signal handlers can change bytes without resizing.
+            let bytes = ctx.native_buffer_bytes(data)?;
+            if let Some(count) = native::try_write(fd, bytes, offset)? {
+                return Ok(ctx.int(count as i64));
+            }
+            ctx.dispatch_signals()?;
+        }
+    })
 }
 
 enum PathArg {
@@ -1037,15 +1059,18 @@ pub(super) fn descriptor(
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
     }
-    if name == "pread" {
-        let [fd, length, offset] = args else {
+    if matches!(name, "pread" | "pwrite") {
+        let [fd, data, offset] = args else {
             return Err(Error::new(
                 "TypeError",
-                format!("pread expected 3 arguments, got {}", args.len()),
+                format!("{name} expected 3 arguments, got {}", args.len()),
             ));
         };
         let fd = c_int(ctx, *fd)?;
-        let length = ssize_t(ctx, *length)?;
+        if name == "pwrite" {
+            return write_fd(ctx, fd, *data, Some(*offset));
+        }
+        let length = ssize_t(ctx, *data)?;
         let offset = file_offset(ctx, *offset)?;
         let bytes = native::read(fd, length, Some(offset), || ctx.dispatch_signals())?;
         return Ok(ctx.alloc(Value::Bytes(bytes)));
@@ -1065,20 +1090,7 @@ pub(super) fn descriptor(
         } else if name == "readinto" {
             readinto(ctx, fd, *data)
         } else {
-            // Keep the exporter alive and its size fixed while a handler runs.
-            // Reborrow on retry so in-place changes made by the handler are visible.
-            ctx.with_buffer_export(*data, |ctx| {
-                loop {
-                    let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
-                        Value::Array(array) => array.as_bytes(),
-                        _ => ctx.bytes_like(*data)?,
-                    };
-                    if let Some(count) = native::try_write(fd, bytes)? {
-                        return Ok(ctx.int(count as i64));
-                    }
-                    ctx.dispatch_signals()?;
-                }
-            })
+            write_fd(ctx, fd, *data, None)
         };
     }
     if name == "closerange" {

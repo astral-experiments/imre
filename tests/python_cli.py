@@ -2661,6 +2661,7 @@ def report(text):
             "boxed_os_descriptor_io.py",
             "boxed_os_ftruncate.py",
             "boxed_os_pread.py",
+            "boxed_os_pwrite.py",
             "boxed_os_readinto.py",
             "boxed_os_waitpid.py",
             "boxed_os_process_signal.py",
