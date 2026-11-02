@@ -96,6 +96,35 @@ def current():
     assert starred[int, str] == next(iter(tuple[int, str]))
     assert starred["Target", None].__args__ == ("Target", None)
 
+    from typing import Generic
+    class Pack(Generic[*ts]): pass
+    u = TypeVar("U")
+    class Mixed(Generic[t, *ts, u]): pass
+    class Fixed(Generic[t, u]): pass
+    defaulted = TypeVarTuple("Defaulted", default=Unpack[tuple[str, int]])
+    class Defaulted(Generic[*defaulted]): pass
+    other = TypeVarTuple("Other")
+    class TwoPacks(Generic[*ts, *other]): pass
+
+    assert Pack[()].__args__ == ()
+    assert Pack[int] is Pack[int]
+    assert Pack[int] == Pack[(int,)] and Pack[int] is not Pack[(int,)]
+    assert Pack[None] == Pack[type(None)] and Pack[None] is not Pack[type(None)]
+    value = []
+    assert Pack[value].__args__[0] is value and Pack[value] is not Pack[value]
+    assert Mixed[int, str].__args__ == (int, str)
+    assert Mixed[int, bytes, float, str].__args__ == (int, bytes, float, str)
+    assert Mixed[*tuple[int, ...]].__args__ == (int, *tuple[int, ...], int)
+    assert Defaulted[()].__args__ == (str, int) and Defaulted[bool].__args__ == (bool,)
+    for invalid in (lambda: Mixed[int], lambda: Fixed[int], lambda: Fixed[int, str, bytes],
+                    lambda: TwoPacks[int], lambda: Mixed[*tuple[int, ...], *tuple[str, ...]]):
+        try:
+            invalid()
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invalid generic specialization succeeded")
+
     marker = List[Annotated[t, ts]]
     assert marker.__parameters__ == (t,)
     assert marker[int] == List[Annotated[int, ts]]
