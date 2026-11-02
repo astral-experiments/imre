@@ -61,18 +61,23 @@ Each of the other CLI workloads ran in 12 alternating pairs. Ratios below 1 indi
 
 ## Reproduce on Linux x86-64
 
-Use CPython 3.14.5, Bun 1.4.4, a Rust release toolchain and clang 18. To reproduce the published timings, build the compiler and runtime at `8596d21f` into the same release directory. The tracked uv index and conformance capture ship with the repository. The runner checks the Ruff corpus, pip wheel and uncompressed road graph by SHA-256. [Earlier CLI run using the published Imre 0.1.5 release](../results/applications-release-0.1.5.json)
+Use CPython 3.14.5, Bun 1.4.4, a Rust release toolchain and clang 18. The commands below build the same source tree used for the four-runtime chart (originally measured at `8596d21f`). The tracked uv index and conformance capture ship with the repository. The runner checks the Ruff corpus, pip wheel and uncompressed road graph by SHA-256. [Earlier CLI run using the published Imre 0.1.5 release](../results/applications-release-0.1.5.json)
+
+The wheel verifier also exposes a regression on the newer main base `0ed3dea0` and the integrated compiler `cb3dd64e`. Both select the object runtime for installer’s `hashlib.new(name)` and fail to import `zipfile` on the valid pip wheel. The other five CLI cases passed their output checks on the integrated compiler. [Hash dispatch change](https://github.com/astral-experiments/imre/pull/4030)
 
 ```sh
 # From the repository root, with these executables and an available CPU.
 python=/path/to/cpython-3.14.5/bin/python3
-export CARGO_TARGET_DIR="$PWD/benchmarks/local/applications/compiler-target"
-cargo +ohm -Zohm-defaults=no build --locked --release -p imre-compiler -p imre-runtime
+dir="$PWD/benchmarks/local/applications"
+revision=e0d9d3ca8039da676b7f36ca28b277d19bd364c3
+src="$dir/compiler-$revision"
+mkdir -p "$src"
+git archive "$revision" | tar -x -C "$src"
+export CARGO_TARGET_DIR="$dir/compiler-target"
+cargo +ohm -Zohm-defaults=no build --manifest-path "$src/Cargo.toml" --locked --release -p imre-compiler -p imre-runtime
 imre="$CARGO_TARGET_DIR/release"
 bun=/path/to/bun
 cpu=13
-dir="$PWD/benchmarks/local/applications"
-mkdir -p "$dir"
 ruff=370f735ce20e5c79777e773249753e006cb2e04e
 curl -fL "https://codeload.github.com/astral-sh/ruff/tar.gz/$ruff" -o "$dir/ruff.tar.gz"
 curl -fL 'https://raw.githubusercontent.com/Sanzo00/Bellman-Ford/c6ef5b7be469e0bea411bf78246474ab7fd997b7/data/USA-road-d.NY.gr' -o "$dir/NY.gr"
