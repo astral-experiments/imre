@@ -1237,7 +1237,8 @@ pub(super) fn builtin_slot(
     if !ctx.builtin_slot_accepts(object, owner) {
         return Err(type_error(format!(
             "descriptor '{method}' requires a '{owner}' object but received a '{}'",
-            ctx.type_name(object)
+            ctx.builtin_type_name(object)
+                .unwrap_or_else(|| ctx.type_name(object))
         )));
     }
     let storage = ctx.scalar_value(object);
@@ -1253,6 +1254,9 @@ pub(super) fn builtin_slot(
                 rest.len()
             )));
         };
+        if owner == "int" {
+            return integer::add(ctx, storage, *value);
+        }
         if method == "__add__" {
             return ctx.concat_list(storage, *value);
         }

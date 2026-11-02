@@ -83,6 +83,7 @@ impl BuiltinDescriptor {
         let (owner, name) = match symbol {
             "object.__format__" => ("object", "__format__"),
             "object.__reduce_ex__" => ("object", "__reduce_ex__"),
+            "int.__add__" => ("int", "__add__"),
             "int.__format__" => ("int", "__format__"),
             "str.__format__" => ("str", "__format__"),
             "str.isascii" => ("str", "isascii"),
@@ -152,6 +153,16 @@ impl BuiltinDescriptor {
             "slot wrapper"
         };
         format!("<{kind} '{}' of '{}' objects>", self.name, self.owner)
+    }
+
+    pub(super) fn bound_repr(self, ctx: &Context, receiver: Id) -> String {
+        let kind = ctx
+            .builtin_type_name(receiver)
+            .unwrap_or_else(|| ctx.type_name(receiver));
+        format!(
+            "<method-wrapper '{}' of {kind} object at {receiver:#x}>",
+            self.name
+        )
     }
 
     pub(super) fn bind(self, ctx: &mut Context, descriptor: Id, receiver: Id) -> Result<Id> {
