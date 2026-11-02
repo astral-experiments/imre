@@ -28,7 +28,7 @@ mod hashlib;
 mod hmac;
 mod inspect;
 pub(super) mod itertools;
-mod locale;
+pub(super) mod locale;
 pub(super) mod tempfile;
 mod time;
 mod tokenize;
@@ -440,7 +440,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             "abspath" | "mkdir" | "cleanup_directory" | "random_name" | "default_directory"
             | "open_named" | "finish_named" | "keep_named",
         ) => ctx.builtin(&format!("{module}.{name}")),
-        ("_locale", "getencoding" | "setlocale") => ctx.builtin(&format!("_locale.{name}")),
+        ("_locale", "getencoding") => ctx.builtin("_locale.getencoding"),
         ("_locale", "LC_ALL") => ctx.int(libc::LC_ALL.into()),
         ("_locale", "LC_COLLATE") => ctx.int(libc::LC_COLLATE.into()),
         ("_locale", "LC_CTYPE") => ctx.int(libc::LC_CTYPE.into()),
