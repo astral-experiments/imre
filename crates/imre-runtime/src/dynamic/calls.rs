@@ -1011,7 +1011,9 @@ impl Context {
             "datetime.timezone" => stdlib::datetime::TZINFO,
             stdlib::flags::TYPE | stdlib::os::stat::CLASS | stdlib::os::stat::VFS_CLASS => "tuple",
             class if stdlib::fixed_structseq::fixed_type(class).is_some() => "tuple",
-            "typing._UnpackGenericAlias" => "typing._GenericAlias",
+            "typing._UnpackGenericAlias" | "typing._ConcatenateGenericAlias" => {
+                "typing._GenericAlias"
+            }
             HashState::XOF_CLASS => HashState::CLASS,
             "collections.defaultdict" => "dict",
             "odict_keys" => "dict_keys",
@@ -1204,6 +1206,7 @@ impl Context {
                             | "typing.ParamSpecKwargs"
                             | "constevaluator"
                             | "typing.TypeVarTuple"
+                            | "typing._ConcatenateGenericAlias"
                             | "typing._UnpackGenericAlias"
                             | "NoDefaultType"
                             | "typing._GenericAlias"
@@ -1422,7 +1425,10 @@ impl Context {
                 qualified.strip_prefix("urllib.parse.") == Some(*name)
             }
             ("typing._GenericAlias", Value::GenericAlias(alias))
-                if alias.kind == super::typing::AliasKind::Unpack =>
+                if matches!(
+                    alias.kind,
+                    super::typing::AliasKind::Unpack | super::typing::AliasKind::Concatenate
+                ) =>
             {
                 true
             }

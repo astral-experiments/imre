@@ -36,6 +36,22 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut names = BTreeSet::new();
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
+        Value::GenericAlias(alias)
+            if alias.kind == super::super::typing::AliasKind::Concatenate =>
+        {
+            let origin = alias.origin;
+            names.extend(alias.metadata().map(|(name, _)| name.to_owned()));
+            names.extend(["_inst", "_name", "copy_with", "__mro_entries__"].map(str::to_owned));
+            // _BaseGenericAlias.__dir__ also publishes non-dunder names supplied by its origin.
+            let origin_names = call(ctx, &[origin], &[])?;
+            for item in ctx.items(origin_names)? {
+                let name = ctx.str_value(item)?;
+                if !(name.starts_with("__") && name.ends_with("__")) {
+                    names.insert(name.to_owned());
+                }
+            }
+            ctx.builtin("object")
+        }
         Value::ParamSpec(_) => {
             names.extend(super::super::paramspec::names().map(str::to_owned));
             ctx.builtin("object")

@@ -1744,6 +1744,7 @@ impl IntrinsicModule {
                 Intrinsic::ObjectRuntimeExport("typing.ParamSpecKwargs")
             }
             (Self::Typing, "TypeVarTuple") => Intrinsic::ObjectRuntimeExport("typing.TypeVarTuple"),
+            (Self::Typing, "Concatenate") => Intrinsic::ObjectRuntimeExport("typing.Concatenate"),
             (Self::Typing, "Unpack") => Intrinsic::ObjectRuntimeExport("typing.Unpack"),
             (Self::Typing, "NoDefault") => Intrinsic::ObjectRuntimeExport("typing.NoDefault"),
             (Self::Typing, "T") => Intrinsic::ObjectRuntimeExport("typing.T"),

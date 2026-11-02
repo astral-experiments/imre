@@ -1151,6 +1151,70 @@ def Final(self, parameters):
 
 
 @_SpecialForm
+def Concatenate(self, parameters):
+    """Special form for annotating higher-order functions.
+
+    ``Concatenate`` can be used in conjunction with ``ParamSpec`` and
+    ``Callable`` to represent a higher-order function which adds, removes or
+    transforms the parameters of a callable.
+
+    For example::
+
+        Callable[Concatenate[int, P], int]
+
+    See PEP 612 for detailed information.
+    """
+    if parameters == ():
+        raise TypeError("Cannot take a Concatenate of no types.")
+    if not isinstance(parameters, tuple):
+        parameters = (parameters,)
+    if not (parameters[-1] is ... or isinstance(parameters[-1], _typing.ParamSpec)):
+        raise TypeError("The last parameter to Concatenate should be a "
+                        "ParamSpec variable or ellipsis.")
+    msg = "Concatenate[arg, ...]: each arg must be a type."
+    parameters = (*(_type_check(p, msg) for p in parameters[:-1]), parameters[-1])
+    return _typing._ConcatenateGenericAlias(self, parameters)
+
+
+def _is_param_expr(arg):
+    return arg is ... or isinstance(arg, (tuple, list, _typing.ParamSpec, _typing._ConcatenateGenericAlias))
+
+
+def _paramspec_subst(self, arg):
+    if isinstance(arg, (list, tuple)):
+        arg = tuple(_type_check(a, "Expected a type.") for a in arg)
+    elif not _is_param_expr(arg):
+        raise TypeError(f"Expected a list of types, an ellipsis, "
+                        f"ParamSpec, or Concatenate. Got {arg}")
+    return arg
+
+
+def _paramspec_prepare_subst(self, alias, args):
+    params = alias.__parameters__
+    i = params.index(self)
+    if i == len(args) and self.has_default():
+        args = (*args, self.__default__)
+    if i >= len(args):
+        raise TypeError(f"Too few arguments for {alias}")
+    # Special case where Z[[int, str, bool]] == Z[int, str, bool] in PEP 612.
+    if len(params) == 1 and not _is_param_expr(args[0]):
+        assert i == 0
+        args = (args,)
+    # Convert lists to tuples to help other libraries cache the results.
+    elif isinstance(args[i], list):
+        args = (*args[:i], tuple(args[i]), *args[i+1:])
+    return args
+
+
+def _concatenate_copy_with(self, params):
+    if isinstance(params[-1], (list, tuple)):
+        return (*params[:-1], *params[-1])
+    if isinstance(params[-1], _typing._ConcatenateGenericAlias):
+        params = (*params[:-1], *params[-1].__args__)
+    return type(self)(self.__origin__, params, name=self._name, inst=self._inst)
+
+
+@_SpecialForm
 def Unpack(self, parameters):
     """Unpack the types in a tuple or a variadic type parameter."""
     item = _type_check(parameters, f"{self} accepts only single type.")
@@ -1383,19 +1447,31 @@ def _specialize_generic_alias_uncached(alias, args):
             expanded.extend(unpacked)
         else:
             expanded.append(arg)
+    expanded = tuple(expanded)
+    for parameter in parameters:
+        if isinstance(parameter, _typing.ParamSpec):
+            expanded = parameter.__typing_prepare_subst__(alias, expanded)
     if len(expanded) != len(parameters):
         which = "few" if len(expanded) < len(parameters) else "many"
         expected = f"at least {len(expanded) + 1}" if which == "few" else str(len(parameters))
         raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
     replacements = {}
     for parameter, arg in zip(parameters, expanded):
+        if isinstance(parameter, _typing.ParamSpec):
+            replacements[parameter] = parameter.__typing_subst__(arg)
+            continue
         arg = _alias_type_arg(arg)
         if _typing.get_origin(arg) is Unpack:
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
     args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
-    if isinstance(alias, _AnnotatedAlias):
+    if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):
         return alias.copy_with(args)
+    if alias.__origin__ is _typing.get_origin(Callable):
+        callable_form = Callable if type(alias) is _typing._CallableGenericAlias else alias.__origin__
+        original = alias.__args__
+        params = args[0] if len(original) == 2 and _is_param_expr(original[0]) else args[:-1]
+        return callable_form[params, args[-1]]
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
