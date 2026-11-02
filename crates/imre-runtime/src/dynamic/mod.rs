@@ -2023,6 +2023,10 @@ impl Context {
             self.bind(scope, "RLock", rlock);
         }
         match name {
+            "abc" => {
+                let meta = self.abc_meta();
+                self.bind(scope, "ABCMeta", meta);
+            }
             #[cfg(target_os = "linux")]
             "_signal" if source.is_none() => stdlib::signal::initialize(self, scope),
             #[cfg(target_os = "linux")]
