@@ -1493,6 +1493,10 @@ runtime, and native link inputs are still current. Program arguments and the out
 path can change between invocations.
 
 The Linux releases use the private Clang and LLD 18 in `imre-toolchain/bin`.
+With that toolchain beside a source-built compiler,
+`python3 scripts/build-bundled-providers.py PATH/TO/imre` builds the O0 and O3
+stdlib archives used for matching boxed modules, with source compilation as the
+fallback.
 Imre passes the bundled startup objects and libraries to Clang when linking for
 the host. Executables use the host's glibc. On x86-64 Debian and Ubuntu, a source
 build checks for `/usr/bin/ld.lld-18` and otherwise uses the system GNU linker.
