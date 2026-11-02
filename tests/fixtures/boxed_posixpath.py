@@ -41,6 +41,20 @@ class Raises:
 
 
 def current():
+    assert posixpath.expanduser is os.path.expanduser
+    saved_home = os.environ.get("HOME")
+    try:
+        os.environ["HOME"] = "/test/home///"
+        assert os.path.expanduser(path=Path(b"~/child/")) == b"/test/home/child/"
+        assert os.path.expanduser("dir/~/file") == "dir/~/file"
+        os.environ["HOME"] = ""
+        assert os.path.expanduser("~") == "/"
+    finally:
+        if saved_home is None:
+            del os.environ["HOME"]
+        else:
+            os.environ["HOME"] = saved_home
+
     assert normpath is os.path.normpath is posix._path_normpath
     assert normpath.__name__ == "_path_normpath" and normpath.__self__ is posix
     for value, expected in (
