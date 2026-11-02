@@ -136,3 +136,10 @@ def current():
         assert str(error) == "descriptor 'title' for 'str' objects doesn't apply to a 'Alias' object"
     else:
         raise AssertionError("accepted a non-string descriptor receiver")
+
+    # Match whole Python code points, including empty boundaries on either side of a surrogate.
+    pair = high + low
+    assert pair.replace(high, "x") == "x" + low
+    assert "aba".replace("a", high, count=1) == high + "ba"
+    assert pair.replace("", low) == low + high + low + low + low
+    assert pair.replace("missing", "x") is pair
