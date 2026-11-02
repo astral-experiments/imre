@@ -127,6 +127,7 @@ pub(super) fn is_module(name: &str) -> bool {
             | "errno"
             | "faulthandler"
             | "genericpath"
+            | "hmac"
             | "urllib.parse"
             | "io"
             | "itertools"
@@ -203,7 +204,6 @@ pub(super) fn has_lazy_attributes(name: &str) -> bool {
             | "random"
             | "secrets"
             | "hashlib"
-            | "hmac"
             | "re"
             | "importlib"
             | "importlib.machinery"
@@ -2452,6 +2452,7 @@ pub(super) fn call(
         "_imre_json.surrogate_text" => (1, &[]),
         "_imre_json.is_constants_lookup" => (2, &[]),
         "_imre_json.scan_once" => (3, &[]),
+        "hmac._digest_native" => (3, &[]),
         "hmac.new" | "hmac.HMAC" => (3, &["key", "msg", "digestmod"]),
         "hmac.HMAC.update" => (2, &[]),
         "hmac.HMAC.digest" | "hmac.HMAC.hexdigest" | "hmac.HMAC.copy" => (1, &[]),
@@ -2578,6 +2579,7 @@ pub(super) fn call(
             };
             ctx.alloc(Value::Bytes(result))
         }
+        "hmac._digest_native" => return hmac::digest_native(ctx, args),
         "hmac.new" | "hmac.HMAC" => return hmac::new(ctx, args, kwargs),
         method if method.starts_with("hmac.HMAC.") => return hmac::method(ctx, method, args),
         "hash.update" | "hash.copy" => {

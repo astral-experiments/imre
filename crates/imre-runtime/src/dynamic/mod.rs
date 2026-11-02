@@ -2945,7 +2945,14 @@ impl Context {
             "_hashlib" if source.is_none() => {
                 stdlib::hashlib::install_openssl(self, module, scope)?
             }
-            "hmac" if source.is_none() => {
+            "hmac"
+                if source.is_none()
+                    || source.as_ref().is_some_and(|(path, _, _)| {
+                        self.config["bundled_root"].as_str().is_some_and(|root| {
+                            path == &std::path::Path::new(root).join("hmac.py")
+                        })
+                    }) =>
+            {
                 let provider = match self.find_module("_hashlib") {
                     Err(err) if self.is_builtin_error(&err, "ImportError") => None,
                     result => result?,
@@ -2960,6 +2967,12 @@ impl Context {
                 };
                 let compare = self.lookup_attr(module, attr)?;
                 self.bind(scope, "compare_digest", compare);
+                for member in ["new", "HMAC"] {
+                    let value = stdlib::attribute(self, name, member)?;
+                    self.bind(scope, member, value);
+                }
+                let digest = self.builtin("hmac._digest_native");
+                self.bind(scope, "_digest_native", digest);
             }
             "hashlib" => {
                 let native_new = self.builtin("hashlib.new");

@@ -187,6 +187,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             },
         )),
         "hashlib" => Some(("hashlib.py", include_str!("../../stdlib/hashlib.py"))),
+        "hmac" => Some(("hmac.py", include_str!("../../stdlib/hmac.py"))),
         // CPython 3.14.5 pathlib and its glob and NT path dependencies. See stdlib/docstrings/LICENSE.
         "pathlib" => Some((
             "pathlib/__init__.py",
