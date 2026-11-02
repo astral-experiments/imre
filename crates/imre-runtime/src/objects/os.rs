@@ -4,7 +4,9 @@
 #[cfg(target_os = "linux")]
 mod copy_range;
 mod credentials;
-pub(crate) use credentials::{credential_id, geteuid, getgid, getgroups, getuid};
+pub(crate) use credentials::{credential_id, getegid, geteuid, getgid, getgroups, getuid};
+#[cfg(target_os = "linux")]
+pub(crate) use credentials::{getresgid, getresuid};
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
