@@ -22,6 +22,19 @@ def current():
             pass
         else:
             raise AssertionError(bad)
+    for expr, text, expected in (
+        (r"(?P<outer>(a)|b)*+", "ab", (1, "outer")),
+        (r"(?P<outer>(a)|b)*+", "a", (1, "outer")),
+        (r"(?:(?P<x>x)|(?P<y>y))++", "xy", (2, "y")),
+        (r"(?:(?P<x>x)|(?P<y>y))++", "yx", (1, "x")),
+        (r"(?:(?>(a|ab))c|a(b)c)", "abc", (2, None)),
+        (r"(?:(?P<a>a)|(?P<b>)b)++", "ab", (2, "b")),
+        (r"(?>(a))(b)", "ab", (2, None)),
+    ):
+        m = re.fullmatch(expr, text)
+        assert (m.lastindex, m.lastgroup) == expected, (expr, text)
+    # Even with captured operands the committed choice cannot retreat for the suffix.
+    assert re.fullmatch(r"(?P<outer>(a)|b)++a", "aba") is None
     for flags in (0, re.L):
         ahead = re.compile(b"a(?!b).", flags)
         assert ahead.search(b"abad").span() == (2, 4)

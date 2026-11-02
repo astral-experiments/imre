@@ -335,7 +335,7 @@ fn raw_unicode_compatible(source: &str, ascii: bool, boundaries: &[usize]) -> bo
 // Python uses str.isalnum() plus "_" for \w and includes four additional
 // ASCII separators in Unicode whitespace. The nested classes also work
 // when these escapes occur inside a bracketed class in the input.
-fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)> {
+fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool, bool)> {
     if flags & VERBOSE != 0 {
         return None;
     }
@@ -343,6 +343,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
         pattern.contains("(?") && pattern.contains('u') && (ascii || pattern.contains('-'));
     let mut boundaries = Vec::new();
     let mut prefer_translation = false;
+    let mut possessive = false;
     let mut result = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
     let mut in_class = false;
@@ -361,10 +362,8 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
                 }
             }
             // The regular backend reads a possessive modifier as another repetition.
-            // Let the Python tokenizer bind it to its operand before compiling.
-            if !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+') {
-                return None;
-            }
+            // Ask the Python tokenizer to bind it to its operand.
+            possessive |= !in_class && matches!(c, '*' | '+' | '?') && chars.peek() == Some(&'+');
             if c == '{' && !in_class {
                 if !imre_regex::starts_counted_repeat(chars.clone()) {
                     prefer_translation = true;
@@ -372,9 +371,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
                     let mut suffix = chars
                         .clone()
                         .skip_while(|c| c.is_ascii_digit() || *c == ',');
-                    if suffix.next() == Some('}') && suffix.next() == Some('+') {
-                        return None;
-                    }
+                    possessive |= suffix.next() == Some('}') && suffix.next() == Some('+');
                     if chars.peek() == Some(&',') {
                         // Python treats an omitted lower bound as zero, including in {,}.
                         result.push_str("{0");
@@ -447,7 +444,7 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
     if check_unicode && !raw_unicode_compatible(&result, ascii, &boundaries) {
         return None;
     }
-    Some((result, prefer_translation))
+    Some((result, prefer_translation, possessive))
 }
 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
@@ -711,31 +708,48 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     };
     let backtrack = |error| lookahead::compile(&source, flags, bytes, error);
     let global_verbose = imre_regex::leading_verbose(&source);
-    let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
-        let original = || {
-            if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, false) {
-                return Err(msg.to_owned());
+    let prepared =
+        if let Some((raw, prefer_translation, possessive)) = raw_pattern(&source, ascii, flags) {
+            let original = || {
+                if let Some((msg, _)) = imre_regex::repeat_diagnostic(&source, false) {
+                    return Err(msg.to_owned());
+                }
+                let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
+                if flags & IGNORECASE != 0 && !bytes {
+                    build(imre_regex::expand_case(&raw, ascii)?)
+                } else {
+                    build(raw)
+                }
+            };
+            let committed = possessive.then(|| backtrack(String::new()).ok()).flatten();
+            match committed {
+                Some((source, Matcher::Lookahead(matcher))) if matcher.total_close_order() => {
+                    Ok((source, Matcher::Lookahead(matcher)))
+                }
+                fallback => {
+                    // Preserve the regular matcher's winning close trace when a repeated
+                    // capture has no fixed syntax order. The committed VM can still
+                    // handle such a pattern when the regular engine cannot compile it.
+                    let regular = if prefer_translation || global_verbose {
+                        translate(&source)
+                            .and_then(build)
+                            .or_else(|err| {
+                                if fallback.is_some() {
+                                    Err(err)
+                                } else {
+                                    backtrack(err)
+                                }
+                            })
+                            .or_else(|_| original())
+                    } else {
+                        original()
+                    };
+                    regular.or_else(|err| fallback.ok_or(err))
+                }
             }
-            let raw = imre_regex::preserve_zero_repeat_groups(raw)?;
-            if flags & IGNORECASE != 0 && !bytes {
-                build(imre_regex::expand_case(&raw, ascii)?)
-            } else {
-                build(raw)
-            }
-        };
-        if prefer_translation || global_verbose {
-            // Python has its own verbose layout and literal-brace rules. Keep the
-            // direct parser for features outside the subset translator.
-            translate(&source)
-                .and_then(build)
-                .or_else(backtrack)
-                .or_else(|_| original())
         } else {
-            original()
-        }
-    } else {
-        translate(&source).and_then(build)
-    };
+            translate(&source).and_then(build)
+        };
     let prepared = match prepared {
         Err(original)
             if !bytes
