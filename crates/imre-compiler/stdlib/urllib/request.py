@@ -35,8 +35,7 @@ def urlopen(url, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
     """Open a URL or Request through the installed or default opener."""
     global _opener
     if context:
-        # The context selects a fresh opener. Only an HTTPS handler consumes it.
-        opener = build_opener()
+        opener = build_opener(HTTPSHandler(context=context))
     elif _opener is None:
         _opener = opener = build_opener()
     else:
@@ -404,6 +403,8 @@ def build_opener(*handlers):
     opener = OpenerDirector()
     default_classes = [ProxyHandler, UnknownHandler, HTTPHandler, HTTPDefaultErrorHandler, HTTPRedirectHandler, FileHandler,
                        HTTPErrorProcessor, DataHandler]
+    if hasattr(http.client, "HTTPSConnection"):
+        default_classes.append(HTTPSHandler)
     skip = set()
     for klass in default_classes:
         for check in handlers:
@@ -782,6 +783,28 @@ class HTTPHandler(AbstractHTTPHandler):
     http_request = AbstractHTTPHandler.do_request_
 
 
+if hasattr(http.client, 'HTTPSConnection'):
+
+    class HTTPSHandler(AbstractHTTPHandler):
+
+        def __init__(self, debuglevel=None, context=None, check_hostname=None):
+            debuglevel = debuglevel if debuglevel is not None else http.client.HTTPSConnection.debuglevel
+            AbstractHTTPHandler.__init__(self, debuglevel)
+            if context is None:
+                http_version = http.client.HTTPSConnection._http_vsn
+                context = http.client._create_https_context(http_version)
+            if check_hostname is not None:
+                context.check_hostname = check_hostname
+            self._context = context
+
+        def https_open(self, req):
+            return self.do_open(http.client.HTTPSConnection, req,
+                                context=self._context)
+
+        https_request = AbstractHTTPHandler.do_request_
+
+    __all__.append('HTTPSHandler')
+
 
 class UnknownHandler(BaseHandler):
     def unknown_open(self, req):
@@ -790,7 +813,7 @@ class UnknownHandler(BaseHandler):
 
 class _DefaultUnknownHandler(UnknownHandler):
     def unknown_open(self, req):
-        if req.type in ("https", "ftp"):
+        if req.type == "ftp":
             raise NotImplementedError("urllib.request has no default %s handler" % req.type)
         return super().unknown_open(req)
 
