@@ -183,6 +183,21 @@ def test_time_strptime():
         raise AssertionError("invalid hour")
 
 
+def test_date_strptime():
+    class Day(date):
+        pass
+
+    class Parts(date):
+        def __new__(cls, *fields):
+            return fields
+
+    text = "2024-02-29 07:15 -0330"
+    form = "%Y-%m-%d %H:%M %z"
+    day = Day(2000, 1, 1).strptime(text, form)
+    assert type(day) is Day and day == date(2024, 2, 29)
+    assert Parts.strptime(text, form) == (2024, 2, 29)
+
+
 def test_datetime_strptime():
     class Stamp(dt):
         pass
@@ -930,6 +945,7 @@ def current():
     test_now()
     test_time_fromisoformat()
     test_time_strptime()
+    test_date_strptime()
     test_datetime_strptime()
     test_time_of_day()
     test_http_date()

@@ -55,6 +55,7 @@ pub(in crate::dynamic) fn clock_classmethod(symbol: &str) -> bool {
             | "datetime.datetime.fromisoformat"
             | "datetime.datetime.combine"
             | "datetime.datetime.strptime"
+            | "datetime.date.strptime"
             | "datetime.date.today"
             | "datetime.date.fromtimestamp"
             | "datetime.date.fromordinal"
@@ -110,6 +111,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
                 "weekday",
                 "timetuple",
                 "strftime",
+                "strptime",
                 "fromordinal",
                 "fromisocalendar",
                 "fromtimestamp",
@@ -923,7 +925,7 @@ pub(super) fn call(
         "time" => time(ctx, args, kwargs),
         "time.fromisoformat" => time_fromisoformat(ctx, args, kwargs),
         "time.strptime" => time_strptime(ctx, args, kwargs),
-        "datetime.strptime" => datetime_strptime(ctx, args, kwargs),
+        "date.strptime" | "datetime.strptime" => date_strptime(ctx, method, args, kwargs),
         "datetime.date"
         | "datetime.time"
         | "datetime.timetz"
@@ -1453,17 +1455,25 @@ fn strptime_args(
     Ok((class, text, format))
 }
 
-fn datetime_strptime(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let (class, text, format) = strptime_args(ctx, "datetime.datetime", args, kwargs)?;
+fn date_strptime(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let (owner, helper) = if method == "date.strptime" {
+        ("datetime.date", "_strptime_datetime_date")
+    } else {
+        ("datetime.datetime", "_strptime_datetime_datetime")
+    };
+    let (class, text, format) = strptime_args(ctx, owner, args, kwargs)?;
     let module_mark = ctx.heap.temporary_mark();
     let module = ctx.import_with_builtins("_strptime")?;
     let parser_mark = ctx.heap.temporary_mark();
-    let result = ctx
-        .lookup_attr(module, "_strptime_datetime_datetime")
-        .and_then(|parser| {
-            ctx.heap.keep(parser);
-            ctx.call(parser, vec![class, text, format], vec![])
-        });
+    let result = ctx.lookup_attr(module, helper).and_then(|parser| {
+        ctx.heap.keep(parser);
+        ctx.call(parser, vec![class, text, format], vec![])
+    });
     // Release the callable before its module, preserving the result or exception across finalizers.
     for mark in [parser_mark, module_mark] {
         let collect = ctx.heap.discard_truth_operands(mark, ctx.modules);
