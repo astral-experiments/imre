@@ -18,7 +18,8 @@ pub(in crate::dynamic) fn install_capabilities(
         (
             "supports_dir_fd",
             &[
-                "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "unlink", "utime",
+                "chmod", "lstat", "mkdir", "open", "readlink", "rmdir", "stat", "symlink", "unlink",
+                "utime",
             ][..],
         ),
         (
@@ -320,6 +321,7 @@ pub(super) fn change_environment(
 }
 
 mod chmod;
+mod symlink;
 mod unlink;
 mod utime;
 
@@ -348,6 +350,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_blocking"
             | "get_inheritable"
             | "set_inheritable"
+            | "symlink"
     )
 }
 
@@ -545,6 +548,9 @@ pub(super) fn descriptor(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "symlink" {
+        return symlink::call(ctx, args, kwargs);
+    }
     if name == "scandir" {
         return scandir::open(ctx, args, kwargs);
     }

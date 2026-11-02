@@ -1909,7 +1909,9 @@ fn annotation_with_aliases(
         ast::Expr::Subscript(subscript)
             if matches!(
                 graph.resolve_type(module, &subscript.value),
-                Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+                Some(Binding::Intrinsic(
+                    Intrinsic::Mapping | Intrinsic::TYPING_MAPPING
+                ))
             ) =>
         {
             if let ast::Expr::Tuple(types) = &*subscript.slice
@@ -7703,9 +7705,9 @@ impl<'a> Checker<'a> {
                 if matches!(
                     receiver.ty,
                     Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
-                ) && ir::StrDescriptor::named(attribute.attr.as_str())
-                    .is_some_and(ir::StrDescriptor::is_predicate)
-                {
+                ) && ir::StrDescriptor::named(attribute.attr.as_str()).is_some_and(|method| {
+                    method.is_predicate() || method == ir::StrDescriptor::ZFill
+                }) {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),
                         attribute,
@@ -9568,6 +9570,15 @@ impl<'a> Checker<'a> {
             {
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
+            if attribute.attr.as_str() == "zfill"
+                && matches!(
+                    receiver.ty,
+                    Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
+                )
+            {
+                let copy = matches!(receiver.ty, Type::StrEnum(_));
+                return self.zfill(Self::string_value(receiver), call, copy);
+            }
             let receiver = Self::enum_text(receiver);
             if matches!(receiver.ty, Type::Document(_)) {
                 return self.document_method(call, attribute, receiver);
@@ -9682,6 +9693,7 @@ impl<'a> Checker<'a> {
                     | "isdigit"
                     | "isspace"
                     | "islower"
+                    | "istitle"
                     | "isupper"
             ) && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
@@ -10989,6 +11001,14 @@ mod tests {
         assert_eq!(super::recursive_call_root(&graph), None);
         graph.last_mut().unwrap().insert(0);
         assert_eq!(super::recursive_call_root(&graph), Some(0));
+    }
+
+    #[test]
+    fn typing_mapping_alias_checks_without_boxed_lowering() {
+        crate::check(include_str!(
+            "../../../tests/fixtures/classes/mapping_alias.py"
+        ))
+        .unwrap();
     }
 
     #[test]

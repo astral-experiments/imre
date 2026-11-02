@@ -564,6 +564,7 @@ impl Context {
                 | Value::TupleGetter { .. }
                 | Value::TupleGetterDoc
                 | Value::ReadOnlyMember(_, _)
+                | Value::SlotMember { .. }
                 | Value::GetSetDescriptor { .. }
                 | Value::WeakrefDescriptor(_)
         )
@@ -622,6 +623,7 @@ impl Context {
         }
         if receiver != NONE {
             let method = match self.heap.get(value) {
+                Value::SlotMember { .. } => return self.read_slot_member(value, receiver),
                 Value::TupleGetterDoc => return super::namedtuple::document(self, receiver),
                 Value::ReadOnlyMember(owner, field) => {
                     return self.read_member(owner, field, receiver);
@@ -1165,7 +1167,7 @@ impl Context {
             | ("_contextvars.Token", Value::ContextToken { .. })
             | ("operator.attrgetter", Value::AttrGetter(_))
             | (super::namedtuple::GETTER, Value::TupleGetter { .. })
-            | ("member_descriptor", Value::TupleGetterDoc | Value::ReadOnlyMember(_, _))
+            | ("member_descriptor", Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. })
             | ("operator.itemgetter", Value::ItemGetter(_))
             | ("itertools.count", Value::Count { .. })
             | (super::deque::CLASS, Value::Deque(_))
@@ -1794,6 +1796,16 @@ impl Context {
                 "__init__" | "__new__" => return Ok(self.builtin(&format!("module.{name}"))),
                 "__name__" | "__qualname__" => return Ok(self.text("module")),
                 "__module__" => return Ok(self.text("builtins")),
+                _ => {}
+            },
+            Value::SlotMember { owner, name: field } => match name {
+                "__name__" => return Ok(field),
+                "__objclass__" => return Ok(owner),
+                "__doc__" => return Ok(NONE),
+                "__qualname__" => {
+                    let qualname = self.lookup_attr(owner, "__qualname__")?;
+                    return Ok(self.text(format!("{}.{}", self.str_value(qualname)?, self.str_value(field)?)));
+                }
                 _ => {}
             },
             Value::ReadOnlyMember(owner, field) => match name {
@@ -2684,17 +2696,20 @@ impl Context {
                 }
             }
             Value::Native(ref builtin)
-                if matches!(builtin.as_str(), "binascii.Error" | "binascii.Incomplete") =>
+                if matches!(
+                    builtin.as_str(),
+                    "binascii.Error" | "binascii.Incomplete" | "socket.gaierror"
+                ) =>
             {
-                let short = builtin.rsplit('.').next().unwrap();
+                let (module, short) = builtin.split_once('.').unwrap();
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(short.to_owned())),
-                    "__module__" => return Ok(self.text("binascii")),
+                    "__module__" => return Ok(self.text(module.to_owned())),
                     "__base__" | "__bases__" => {
-                        let base = self.builtin(if short == "Error" {
-                            "ValueError"
-                        } else {
-                            "Exception"
+                        let base = self.builtin(match short {
+                            "gaierror" => "OSError",
+                            "Error" => "ValueError",
+                            _ => "Exception",
                         });
                         return Ok(if name == "__base__" {
                             base
@@ -3156,6 +3171,7 @@ impl Context {
             && self.data_descriptor(descriptor)
         {
             match *self.heap.get(descriptor) {
+                Value::SlotMember { .. } => return self.write_slot_member(descriptor, obj, None),
                 Value::TupleGetterDoc => {
                     return super::namedtuple::set_document(self, obj, None).map(|_| ());
                 }
@@ -3425,7 +3441,8 @@ impl Context {
                         };
                         if matches {
                             layout.declared_slot = true;
-                            layout.active_slot |= !shadowed;
+                            layout.active_slot |= !shadowed
+                                && !frame.class_namespace.as_ref().is_some_and(|ns| ns.member_slots);
                         }
                     }
                 }
@@ -3802,6 +3819,9 @@ impl Context {
                     format!("attribute '{name}' of '{owner}' objects is not writable"),
                 ));
             }
+            if matches!(self.heap.get(descriptor), Value::SlotMember { .. }) {
+                return self.write_slot_member(descriptor, obj, Some(value));
+            }
             if matches!(self.heap.get(descriptor), Value::ReadOnlyMember(_, _)) {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
@@ -4056,6 +4076,7 @@ impl Context {
             property,
             weak_reference: None,
             cycle: None,
+            member_values: None,
             memory_stream: None,
             fields: Default::default(),
             scalar: None,
@@ -4183,6 +4204,7 @@ impl Context {
             property: None,
             weak_reference: None,
             cycle: None,
+            member_values: None,
             memory_stream: None,
         }))
     }
@@ -4230,6 +4252,7 @@ impl Context {
             property: None,
             weak_reference: None,
             cycle: None,
+            member_values: None,
             memory_stream: None,
         }))
     }
@@ -5082,6 +5105,35 @@ impl Context {
         }
     }
 
+    /// Initialize descriptor names in class body insertion order, before subclass hooks run.
+    pub(super) fn initialize_class_members(&mut self, class: Id, scope: Id) -> Result<()> {
+        let Value::Scope(class_scope) = self.heap.get_mut(scope) else { unreachable!() };
+        let members = class_scope
+            .class_body
+            .take()
+            .unwrap()
+            .into_iter()
+            .map(|name| (class_scope.names[&name], name))
+            .collect::<Vec<_>>();
+        // A hook may replace an attribute and execute code that triggers collection.
+        for &(value, _) in &members {
+            self.heap.keep(value);
+        }
+        for (value, name) in members {
+            if matches!(self.heap.get(value), Value::Property(_)) {
+                let name = self.text(name);
+                let Value::Property(property) = self.heap.get_mut(value) else {
+                    unreachable!()
+                };
+                property.name = Some(name);
+            } else if let Some(set_name) = self.slot(value, "__set_name__") {
+                let name = self.text(name);
+                self.call(set_name, vec![value, class, name], Vec::new())?;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn class(
         &mut self,
         bases: Id,
@@ -5284,29 +5336,7 @@ impl Context {
                 .entry("__doc__".to_owned())
                 .or_insert(NONE);
         }
-        let members = class_scope
-            .class_body
-            .take()
-            .unwrap()
-            .into_iter()
-            .map(|name| (class_scope.names[&name], name))
-            .collect::<Vec<_>>();
-        // A hook may replace an attribute and execute code that triggers collection.
-        for &(value, _) in &members {
-            self.heap.keep(value);
-        }
-        for (value, name) in members {
-            if matches!(self.heap.get(value), Value::Property(_)) {
-                let name = self.text(name);
-                let Value::Property(property) = self.heap.get_mut(value) else {
-                    unreachable!()
-                };
-                property.name = Some(name);
-            } else if let Some(set_name) = self.slot(value, "__set_name__") {
-                let name = self.text(name);
-                self.call(set_name, vec![value, class, name], Vec::new())?;
-            }
-        }
+        self.initialize_class_members(class, scope)?;
         if let Some(kind) = enum_kind {
             let scalar = kind.scalar_base().map(|base| self.builtin(base));
             self.populate_enum(class, scalar)?;

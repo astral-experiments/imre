@@ -31,6 +31,16 @@ def _get_candidate_names():
     return _name_sequence
 
 
+# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+def _exists(fn):
+    try:
+        _os.lstat(fn)
+    except OSError:
+        return False
+    else:
+        return True
+
+
 def _fsencode(path):
     path = _os.fspath(path)
     if isinstance(path, str):
@@ -220,6 +230,39 @@ def mkdtemp(suffix=None, prefix=None, dir=None):
             continue
         return _abspath(path)
     raise FileExistsError(_errno.EEXIST, "No usable temporary directory name found")
+
+
+# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+def mktemp(suffix="", prefix=template, dir=None):
+    """User-callable function to return a unique temporary file name.  The
+    file is not created.
+
+    Arguments are similar to mkstemp, except that the 'text' argument is
+    not accepted, and suffix=None, prefix=None and bytes file names are not
+    supported.
+
+    THIS FUNCTION IS UNSAFE AND SHOULD NOT BE USED.  The file name may
+    refer to a file that did not exist at some point, but by the time
+    you get around to creating it, someone else may have beaten you to
+    the punch.
+    """
+
+##    from warnings import warn as _warn
+##    _warn("mktemp is a potential security risk to your program",
+##          RuntimeWarning, stacklevel=2)
+
+    if dir is None:
+        dir = gettempdir()
+
+    names = _get_candidate_names()
+    for seq in range(TMP_MAX):
+        name = next(names)
+        file = _os.path.join(dir, prefix + name + suffix)
+        if not _exists(file):
+            return file
+
+    raise FileExistsError(_errno.EEXIST,
+                          "No usable temporary filename found")
 
 
 class _TemporaryFileWrapper:

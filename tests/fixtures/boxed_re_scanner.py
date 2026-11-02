@@ -3,6 +3,16 @@ import re
 
 def current():
     pattern = re.compile(r".*?")
+    matches = pattern.finditer(string="xαβy", pos=1, endpos=3)
+    assert iter(matches) is matches
+    first = next(matches)
+    second = next(matches)
+    assert first is not second and first.re is pattern
+    assert first.span() == (1, 1) and second.span() == (1, 2)
+    assert [m.span() for m in matches] == [(2, 2), (2, 3), (3, 3)]
+    assert next(matches, None) is None
+    assert [m.group() for m in re.finditer(pattern=b"a", string=b"Aa", flags=re.I)] == [b"A", b"a"]
+
     cursor = pattern.scanner(string="xαβy", pos=1, endpos=3)
     print(cursor.pattern is pattern)
     for advance in (cursor.search, cursor.match, cursor.match, cursor.search,

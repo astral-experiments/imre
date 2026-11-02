@@ -21,26 +21,11 @@ PANEL_TITLES = {
     "Inventory (distinct)": "Inventory · distinct",
     "Conformance report": "Offline conformance report",
 }
-# Galaxy, Lunar and Radiate: https://astral.sh
-# Light-mode purple: https://github.com/astral-sh/uv/blob/main/assets/svg/Benchmark-Light.svg
-INK, MUTED = "#261230", "#6f5d6f"
-RULE, SURFACE = "#e2d5e8", "#fbf2fc"
-BAR, ACCENT = "#c9c1f4", "#6340ac"
-PALETTE = {
-    "ink": (INK, "#f7eff8"),
-    "muted": (MUTED, "#b8a5c3"),
-    "rule": (RULE, "#493554"),
-    "surface": (SURFACE, "#261230"),
-    "bar": (BAR, "#c9c1f4"),
-    "accent": (ACCENT, "#d7ff64"),
-}
-
-
-def canvas(width, height):
-    fig = plt.figure(figsize=(width / 96, height / 96), dpi=96)
-    ax = fig.add_axes((0, 0, 1, 1), xlim=(0, width), ylim=(height, 0))
-    ax.set_axis_off()
-    return fig, ax
+# Match the benchmark cards in astral-experiments/serc.
+SURFACE, BORDER, RULE = "#261230", "#503d60", "#453250"
+INK, MUTED = "#fbf2fc", "#c4b6d3"
+BAR, ACCENT = "#cdcbfb", "#de5fe9"
+WIDTH = 920
 
 
 def label(ax, x, y, text, size, *, color=INK, align="left", mono=False):
@@ -56,22 +41,42 @@ def label(ax, x, y, text, size, *, color=INK, align="left", mono=False):
     )
 
 
-def surface(ax, width, height):
+def benchmark_card(height, title, metadata):
+    fig = plt.figure(figsize=(WIDTH / 96, height / 96), dpi=96)
+    ax = fig.add_axes((0, 0, 1, 1), xlim=(0, WIDTH), ylim=(height, 0))
+    ax.set_axis_off()
     ax.add_patch(
         FancyBboxPatch(
-            (0, 0),
-            width,
-            height,
-            boxstyle="round,pad=0,rounding_size=12",
+            (9, 15),
+            WIDTH - 18,
+            height - 28,
+            boxstyle="round,pad=0,rounding_size=19",
             facecolor=SURFACE,
-            edgecolor="none",
+            edgecolor=BORDER,
+            linewidth=1.2,
             zorder=-1,
         )
     )
+    ax.add_patch(
+        FancyBboxPatch(
+            (48, 41),
+            31,
+            31,
+            boxstyle="round,pad=0,rounding_size=7",
+            facecolor=BAR,
+            edgecolor="none",
+        )
+    )
+    for i, width in enumerate((17, 12, 7)):
+        ax.add_patch(Rectangle((55, 49 + 5 * i), width, 3, color=SURFACE, linewidth=0))
+    label(ax, 91, 57, "IMRE / BENCHMARKS", 13, color=MUTED, mono=True)
+    label(ax, 872, 57, metadata, 13, color=MUTED, align="right", mono=True)
+    label(ax, 46, 114, title, 32)
+    return fig, ax
 
 
 def rule(ax, x0, y0, x1, y1):
-    ax.plot((x0, x1), (y0, y1), color=RULE, linewidth=0.6, zorder=0)
+    ax.plot((x0, x1), (y0, y1), color=RULE, linewidth=0.8, zorder=0)
 
 
 def save(fig, path, title):
@@ -89,42 +94,36 @@ def save(fig, path, title):
         "'DejaVu Sans Mono'",
         "ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace",
     )
-    svg = svg.replace("'DejaVu Sans'", "Arial, Helvetica, sans-serif")
-    for name, (light, _) in PALETTE.items():
-        svg = svg.replace(light, f"var(--{name})")
-    light = "; ".join(f"--{name}: {colors[0]}" for name, colors in PALETTE.items())
-    dark = "; ".join(f"--{name}: {colors[1]}" for name, colors in PALETTE.items())
-    style = f"""<style>
-    :root {{{light}}}
-    text {{
-      font-variant-numeric: tabular-nums;
-    }}
-    @media (prefers-color-scheme: dark) {{:root {{{dark}}}}}
-  </style>"""
-    path.write_text(svg.replace("<defs>", f"<defs>\n  {style}", 1))
+    path.write_text(svg.replace("'DejaVu Sans'", "Arial, Helvetica, sans-serif"))
 
 
 def bars(
-    ax, medians, x, y, width, *, engines=ENGINES, label_width=68, value_format=".2f"
+    ax,
+    medians,
+    x,
+    y,
+    width,
+    *,
+    engines=ENGINES,
+    label_width=83,
+    value_format="{:.2f} ms",
 ):
-    value_width = 60
-    row_step, bar_height = 40, 14
-    font_size = 13
+    row_step, bar_height = 29, 10
     plot_x = x + label_width
-    plot_width = width - label_width - value_width
+    plot_width = width - label_width - 99
     ticks = MaxNLocator(nbins=3, steps=(1, 2, 2.5, 5, 10), integer=True).tick_values(
         0, max(medians.values())
     )
     last_y = y + row_step * (len(engines) - 1)
     for tick in ticks:
         tick_x = plot_x + plot_width * tick / ticks[-1]
-        rule(ax, tick_x, y - 20, tick_x, last_y + 20)
+        rule(ax, tick_x, y - 6, tick_x, last_y + 6)
         label(
             ax,
             tick_x,
-            last_y + 36,
-            f"{tick:g}",
-            11,
+            last_y + 24,
+            f"{tick:,g}",
+            12,
             color=MUTED,
             align="center",
             mono=True,
@@ -132,56 +131,53 @@ def bars(
     for i, (engine, name) in enumerate(engines.items()):
         row_y = y + row_step * i
         value = medians[engine]
-        highlight = engine == "imre"
-        color = ACCENT if highlight else INK
-        bar_width = plot_width * value / ticks[-1]
-        label(ax, x, row_y, name, font_size, color=color)
+        color = ACCENT if engine == "imre" else BAR
+        label(ax, x, row_y, name, 14, color=MUTED)
         ax.add_patch(
             Rectangle(
                 (plot_x, row_y - bar_height / 2),
-                bar_width,
+                plot_width * value / ticks[-1],
                 bar_height,
-                facecolor=ACCENT if highlight else BAR,
+                facecolor=color,
                 edgecolor="none",
                 zorder=2,
             )
         )
         label(
             ax,
-            plot_x + bar_width + 9,
+            x + width,
             row_y,
-            format(value, value_format),
-            font_size,
+            value_format.format(value),
+            15,
             color=color,
+            align="right",
             mono=True,
         )
 
 
 def workload_panels(rows, path):
     row_count = (len(rows) + 1) // 2
-    height = 148 + 252 * row_count + 36
-    fig, ax = canvas(800, height)
-    surface(ax, 800, height)
-    label(ax, 32, 30, "IMRE / RUNTIME BENCHMARKS", 11, color=MUTED, mono=True)
-    label(ax, 32, 68, "RUNTIME BY WORKLOAD", 26)
-    label(ax, 32, 98, "Rust, CPython and Imre on six workloads.", 14, color=MUTED)
-    rule(ax, 32, 122, 768, 122)
-    for i, (case, medians) in enumerate(rows):
-        x, y = 32 + i % 2 * 384, 158 + i // 2 * 252
-        label(ax, x, y, PANEL_TITLES.get(case["name"], case["name"]), 20)
-        label(ax, x, y + 28, case["input"], 12, color=MUTED)
-        bars(ax, medians, x, y + 75, 352)
-        if i % 2 == 0 and i // 2 < row_count - 1:
-            rule(ax, 32, y + 216, 768, y + 216)
+    panel_top = 144
+    height = panel_top + 180 * row_count + 27
     runs = len(rows[0][0]["samples_ns"])
-    label(
-        ax,
-        32,
-        height - 26,
-        f"Median elapsed time (ms) · {runs} runs · Lower is faster · Independent scales",
-        12,
-        color=MUTED,
+    fig, ax = benchmark_card(
+        height,
+        "Comparing Imre, Rust, and CPython",
+        f"{runs} runs per engine",
     )
+    for i, (case, medians) in enumerate(rows):
+        x, y = 48 + i % 2 * 423, panel_top + i // 2 * 180
+        if i >= 2:
+            rule(ax, x, y, x + 401, y)
+        label(
+            ax,
+            x + 4,
+            y + 23,
+            PANEL_TITLES.get(case["name"], case["name"]),
+            17,
+        )
+        label(ax, x + 4, y + 47, case["input"], 13, color=MUTED)
+        bars(ax, medians, x + 4, y + 74, 393)
     save(fig, path, "Median runtime by workload")
 
 
@@ -209,30 +205,31 @@ def frozen_flask_panel(report, path):
             raise ValueError(f"Incomplete mixed HTTP trials for {engine}")
         medians[engine] = statistics.median(row["RPS"] for row in trials)
 
-    fig, ax = canvas(800, 352)
-    surface(ax, 800, 352)
-    label(ax, 32, 30, "IMRE / HTTP BENCHMARKS", 11, color=MUTED, mono=True)
-    label(ax, 32, 68, "FROZEN FLASK THROUGHPUT", 26)
+    fig, ax = benchmark_card(
+        408,
+        "Frozen Flask throughput",
+        f"{rounds} rounds · {concurrency} clients",
+    )
     label(
         ax,
-        32,
-        98,
-        "Health checks, escaped HTML greetings and JSON sums.",
-        14,
+        48,
+        158,
+        f"{settings['requests']:,} requests per round, split across health checks, HTML greetings and JSON sums.",
+        16,
         color=MUTED,
     )
-    rule(ax, 32, 122, 768, 122)
+    rule(ax, 48, 192, 872, 192)
+    label(ax, 52, 217, "Median requests per second", 17)
+    label(ax, 868, 217, "Higher is faster", 13, color=MUTED, align="right")
     bars(
-        ax, medians, 32, 155, 736, engines=engines, label_width=148, value_format=",.0f"
-    )
-    label(
         ax,
-        32,
-        330,
-        f"Median requests/s · {rounds} rounds of {settings['requests']:,} requests · "
-        f"{concurrency} clients · Higher is faster",
-        12,
-        color=MUTED,
+        medians,
+        52,
+        251,
+        816,
+        engines=engines,
+        label_width=180,
+        value_format="{:,.0f}",
     )
     save(fig, path, "Frozen Flask mixed HTTP throughput")
 

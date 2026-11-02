@@ -14,6 +14,14 @@ def current():
     assert removeResult(first) is True
     assert removeResult(first) is False
 
+    seen = []
+    unittest.runner.registerResult = seen.append
+    try:
+        observed = unittest.TextTestRunner(stream=io.StringIO()).run(unittest.TestSuite())
+        assert seen == [observed]
+    finally:
+        unittest.runner.registerResult = registerResult
+
     result = unittest.TextTestRunner(stream=io.StringIO()).run(unittest.TestSuite())
     assert result in signals._results
     ref = weakref.ref(result)

@@ -1,6 +1,7 @@
 """Stream annotations and special forms for the runtime typing module."""
 
 import builtins as _builtins
+import functools
 import typing as _typing
 from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
 from collections import defaultdict as _defaultdict
@@ -403,6 +404,23 @@ def no_type_check(arg):
     except TypeError:  # built-in classes
         pass
     return arg
+
+
+def no_type_check_decorator(decorator):
+    """Decorator to give another decorator the @no_type_check effect.
+
+    This wraps the decorator with something that wraps the decorated
+    function in @no_type_check.
+    """
+    import warnings
+    warnings._deprecated("typing.no_type_check_decorator", remove=(3, 15))
+    @functools.wraps(decorator)
+    def wrapped_decorator(*args, **kwds):
+        func = decorator(*args, **kwds)
+        func = no_type_check(func)
+        return func
+
+    return wrapped_decorator
 
 
 # Optional and the special form protocol from CPython 3.14.5 Lib/typing.py.

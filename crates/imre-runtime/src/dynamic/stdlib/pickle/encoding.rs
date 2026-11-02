@@ -42,6 +42,17 @@ pub(super) fn int(out: &mut Vec<u8>, protocol: u8, number: &crate::Int) -> Resul
     Ok(())
 }
 
+pub(super) fn float(out: &mut Vec<u8>, protocol: u8, value: f64) {
+    if protocol == 0 {
+        out.push(b'F'); // FLOAT
+        out.extend_from_slice(crate::floats::render(value).as_bytes());
+        out.push(b'\n');
+    } else {
+        out.push(b'G'); // BINFLOAT
+        out.extend_from_slice(&value.to_be_bytes());
+    }
+}
+
 pub(super) fn boolean(out: &mut Vec<u8>, protocol: u8, value: bool) {
     if protocol < 2 {
         out.extend_from_slice(if value { b"I01\n" } else { b"I00\n" });
@@ -95,6 +106,17 @@ pub(super) fn tuple_end(out: &mut Vec<u8>, protocol: u8, len: usize) {
         (2.., 1..=3) => 0x84 + len as u8, // TUPLE1, TUPLE2, TUPLE3
         _ => b't',                        // TUPLE
     });
+}
+
+/// Replace the in-progress elements with a tuple that a recursive child memoized.
+pub(super) fn recursive_tuple(out: &mut Vec<u8>, protocol: u8, len: usize, index: u32) {
+    if protocol == 0 || (protocol >= 2 && len <= 3) {
+        // The text protocol also needs a POP for its MARK.
+        out.extend(std::iter::repeat_n(b'0', len + usize::from(protocol == 0)));
+    } else {
+        out.push(b'1'); // POP_MARK
+    }
+    memo_get(out, protocol, index);
 }
 
 pub(super) fn memo_put(out: &mut Vec<u8>, protocol: u8, id: u32) {

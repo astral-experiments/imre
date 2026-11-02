@@ -1,3 +1,4 @@
+from io import BytesIO
 from importlib import resources
 from importlib.resources.abc import ResourceReader, TraversableResources
 import data
@@ -15,6 +16,23 @@ class Loader:
 class Reader(TraversableResources):
     def files(self):
         return root
+
+
+class LegacyReader:
+    def get_resource_reader(self, name):
+        assert name == 'data'
+        return self
+
+    def contents(self):
+        return ('message.txt', 'dir')
+
+    def is_resource(self, name):
+        return name == 'message.txt'
+
+    def open_resource(self, name):
+        if name != 'message.txt':
+            raise FileNotFoundError(name)
+        return BytesIO(b'caf\xc3\xa9\n')
 
 
 root = resources.files(data)
@@ -60,24 +78,6 @@ else:
 sentinel = object()
 data.__spec__.loader = Loader()
 assert resources.files(data) is sentinel
-
-
-class LegacyReader:
-    def get_resource_reader(self, name):
-        assert name == 'data'
-        return self
-
-    def contents(self):
-        return ('message.txt', 'dir')
-
-    def is_resource(self, name):
-        return name == 'message.txt'
-
-    def open_resource(self, name):
-        from io import BytesIO
-        if name != 'message.txt':
-            raise FileNotFoundError(name)
-        return BytesIO(b'caf\xc3\xa9\n')
 
 
 data.__spec__.loader = LegacyReader()

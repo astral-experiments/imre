@@ -25,6 +25,7 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
     use crate::objects::exceptions::Kind;
     match name {
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+        "socket.gaierror" => Some(Kind::GaiError),
         "binascii.Error" => Some(Kind::BinasciiError),
         "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
         _ => imre_ast::exceptions::boxed_builtin_kind(name),
@@ -270,6 +271,7 @@ pub(super) const DICT_METHODS: &[&str] = &[
     "items",
     "keys",
     "pop",
+    "popitem",
     "setdefault",
     "update",
     "values",
@@ -319,6 +321,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "isdigit",
     "islower",
     "isspace",
+    "istitle",
     "isupper",
     "join",
     "lower",
@@ -337,6 +340,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "strip",
     "translate",
     "upper",
+    "zfill",
 ];
 
 /// Select the builtin formatting implementation inherited by this native value or type.
@@ -371,7 +375,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             iter.kind
         }
         Value::Slice(_) if super::slice::METHODS.contains(&attr) => "slice",
-        Value::TupleGetterDoc | Value::ReadOnlyMember(_, _)
+        Value::TupleGetterDoc | Value::ReadOnlyMember(_, _) | Value::SlotMember { .. }
             if super::namedtuple::GETTER_METHODS.contains(&attr) =>
         {
             "member_descriptor"
@@ -547,13 +551,18 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_)
             if matches!(
                 attr,
-                "findall" | "match" | "fullmatch" | "search" | "split" | "scanner"
+                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "scanner"
             ) =>
         {
             "pattern"
         }
         Value::RegexScanner { .. } if matches!(attr, "match" | "search") => "scanner",
-        Value::RegexMatch(_) if matches!(attr, "group" | "groups" | "start" | "end" | "span") => {
+        Value::RegexMatch(_)
+            if matches!(
+                attr,
+                "group" | "groups" | "groupdict" | "start" | "end" | "span"
+            ) =>
+        {
             "match"
         }
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
@@ -718,6 +727,9 @@ pub(super) fn bind_builtin_arguments<const N: usize>(
             .iter()
             .find(|(key, _)| !names.contains(&key.as_str()))
             && let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, &names)
+            && !names[..args.len()]
+                .iter()
+                .any(|name| kwargs.iter().any(|(key, _)| *name == key))
         {
             return Err(type_error(format!(
                 "{builtin}() got an unexpected keyword argument '{key}'. Did you mean '{hint}'?"

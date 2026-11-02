@@ -1,6 +1,26 @@
 import _thread
 import threading
+import warnings
 from time import monotonic
+
+
+def factory():
+    assert "RLock" in threading.__all__
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert type(threading.RLock()) is _thread.RLock
+        assert not caught
+        assert type(threading.RLock(1, tag=2)) is _thread.RLock
+        assert len(caught) == 1 and caught[0].category is DeprecationWarning
+        assert caught[0].filename == __file__
+        assert str(caught[0].message) == "Passing arguments to RLock is deprecated and will be removed in 3.15"
+
+    native = threading._CRLock
+    try:
+        threading._CRLock = None
+        assert type(threading.RLock()) is threading._PyRLock
+    finally:
+        threading._CRLock = native
 
 
 def hold_block(block, ready, start, entered, proceed, done):
@@ -91,5 +111,6 @@ def contended():
     lock.release()
 
 
+factory()
 recursive()
 contended()

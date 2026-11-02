@@ -1479,10 +1479,16 @@ impl Context {
             bases.push(self.builtin("object"));
         }
         let ancestors = self.linearized_bases(&bases)?;
+        self.check_member_slot_bases(&bases, &ancestors)?;
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
         mro.extend_from_slice(&ancestors);
         let slot_names = self.declared_slot_names(scope)?;
+        let members = if self.scope_data(scope).class_namespace.as_ref().is_some_and(|ns| ns.member_slots) {
+            self.prepare_slot_members(&name, scope, &bases, slot_names.as_deref().unwrap_or_default())?
+        } else {
+            Vec::new()
+        };
         let namedtuple_fields = self.namedtuple_layout(&name, &bases, &ancestors, scope)?;
         let class = self.alloc(Value::Class {
             metaclass: None,
@@ -1505,6 +1511,11 @@ impl Context {
         namespace.slot_names = slot_names;
         namespace.bases = bases;
         namespace.mro = mro;
+        for field in members {
+            let name = self.text(&field);
+            let descriptor = self.alloc(Value::SlotMember { owner: class, name });
+            self.bind_local(scope, &field, descriptor);
+        }
         Ok(class)
     }
 
