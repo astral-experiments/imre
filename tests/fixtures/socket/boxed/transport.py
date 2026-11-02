@@ -13,6 +13,8 @@ def check_bind_error(server):
             raise AssertionError("second socket bound the live listening port")
 
 def run():
+    assert socket.has_ipv6 is True
+    assert socket.AF_INET6 != socket.AF_INET
     try:
         socket.getaddrinfo("127.0.0.1", 0, socket.AF_INET, 77777)
     except socket.gaierror as exc:
