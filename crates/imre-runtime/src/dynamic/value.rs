@@ -866,7 +866,10 @@ pub(super) enum Value {
     /// The writable document member of the native tuple descriptor type.
     TupleGetterDoc,
     ReadOnlyMember(&'static str, &'static str),
-    SlotMember { owner: Id, name: Id },
+    SlotMember {
+        owner: Id,
+        name: Id,
+    },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
     ThreadLocal(super::thread_local::Dictionaries),
@@ -1095,7 +1098,9 @@ impl Value {
             Self::Dict(_) => "dict",
             Self::MappingProxy(_) => "mappingproxy",
             Self::Function { .. } => "function",
-            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => "member_descriptor",
+            Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => {
+                "member_descriptor"
+            }
             Self::ItemGetter(_) => "operator.itemgetter",
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
