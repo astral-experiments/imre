@@ -1700,6 +1700,7 @@ impl Context {
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
             self.builtin(builtins::exception_initializer(name));
+            self.builtin("BaseException.add_note");
             self.builtin("BaseException.with_traceback");
         }
         let methods = match name {

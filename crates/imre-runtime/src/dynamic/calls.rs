@@ -132,6 +132,14 @@ fn non_callable_error(name: &str) -> Error {
 
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
+        if let Some(symbol) = builtins::base_exception_method(name) {
+            if matches!(self.heap.get(class), Value::Native(kind) if builtins::is_exception(kind)) {
+                return self.builtins.get(symbol).copied();
+            }
+            if let Some(mro) = self.published_mro(class) {
+                return mro.iter().find_map(|&base| self.own_class_attr(base, name));
+            }
+        }
         if name == "__hash__" {
             if matches!(self.heap.get(class), Value::Native(_)) {
                 return self.own_class_attr(class, name);
@@ -199,7 +207,11 @@ impl Context {
                 Some(NONE)
             }
             Value::Native(kind) if builtins::is_exception(kind) => match name {
-                "with_traceback" => self.builtins.get("BaseException.with_traceback").copied(),
+                name if kind == "BaseException"
+                    && let Some(symbol) = builtins::base_exception_method(name) =>
+                {
+                    self.builtins.get(symbol).copied()
+                }
                 "__new__" => self
                     .builtins
                     .get(&format!("{}.__new__", builtins::exception_new_owner(kind)))
@@ -1472,6 +1484,7 @@ impl Context {
                 constructor: Some(class),
                 ..
             } => class,
+            Value::Raised(ref error) if let Some(class) = error.class() => class,
             Value::Module { scope, .. } => {
                 return self.module_get_attribute(obj, scope, name, original);
             }
@@ -1665,7 +1678,7 @@ impl Context {
             if let Some(class) = error.class()
                 && let Some(member) = self.class_attr(class, name)
             {
-                let field = if self.data_descriptor(member) {
+                let field = if self.readable_data_descriptor(member) {
                     None
                 } else {
                     self.dictionary_field(dictionary, name)?
@@ -2917,7 +2930,10 @@ impl Context {
                     || (matches!(name, "__repr__" | "issubset")
                         && matches!(class.as_str(), "set" | "frozenset"))
                     || (builtins::is_exception(class)
-                        && matches!(name, "__new__" | "__init__" | "with_traceback"))
+                        && matches!(
+                            name,
+                            "__new__" | "__init__" | "add_note" | "with_traceback"
+                        ))
                     || (class == "memoryview" && builtins::MEMORYVIEW_METHODS.contains(&name))
                     || (class == "bytes" && builtins::BYTES_METHODS.contains(&name))
                     || (class == "bytearray" && builtins::BYTEARRAY_METHODS.contains(&name))
@@ -2926,7 +2942,7 @@ impl Context {
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
-                if let Some(method) = self.own_class_attr(obj, name) {
+                if let Some(method) = self.class_attr(obj, name) {
                     return Ok(method);
                 }
             }
@@ -3143,6 +3159,10 @@ impl Context {
             let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
             if let Some(field) = self.dictionary_field(dictionary, name)? {
                 return Ok(field);
+            }
+            if name == "add_note" {
+                let class = self.exact_type(obj)?;
+                return self.instance_attribute(obj, class, None, name);
             }
         }
         self.builtin_attribute(obj, name)
@@ -4546,6 +4566,7 @@ impl Context {
                     || matches!(
                         name.as_str(),
                         "BaseException.__init__"
+                            | "BaseException.add_note"
                             | "ImportError.__init__"
                             | "OSError.__init__"
                             | "StopIteration.__init__"
