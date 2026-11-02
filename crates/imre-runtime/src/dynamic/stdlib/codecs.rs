@@ -8,7 +8,7 @@ mod surrogate_utf8;
 mod utf16;
 mod wide_unicode;
 pub(super) use utf16::extended as utf16_extended;
-pub(super) use wide_unicode::utf32_chunk;
+pub(super) use wide_unicode::decode_chunk as decode_wide_chunk;
 
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{Codec, CodecInfo, DecodeIssue, FixedUnicode, Object, StrEncoder, Utf16Order};

@@ -2142,7 +2142,10 @@ impl Context {
             }
             Value::Native(ref class)
                 if ((builtins::is_builtin_type(class) && !class.contains('.'))
-                    || matches!(class.as_str(), "traceback" | "frame" | "mappingproxy"))
+                    || matches!(
+                        class.as_str(),
+                        "function" | "traceback" | "frame" | "mappingproxy"
+                    ))
                     && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {

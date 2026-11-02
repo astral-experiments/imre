@@ -310,9 +310,12 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
                 ..
             }
             | Value::Union(super::union::Union { parameters, .. }) => {
-                match ctx.heap.get(*parameters) {
-                    Value::Tuple(members) => members.as_slice(),
-                    _ => unreachable!(),
+                // Like _Py_make_parameters, ignore non-tuple metadata supplied by Python.
+                match ctx.heap.get(ctx.scalar_value(*parameters)) {
+                    Value::Tuple(members) | Value::NamedTuple { values: members, .. } => {
+                        members.as_slice()
+                    }
+                    _ => continue,
                 }
             }
             Value::Instance { class, .. }
@@ -337,13 +340,42 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
     vars
 }
 
+/// CPython's typing aliases and Generic subclasses share the source typing collector.
+fn collect_type_parameters(ctx: &mut Context, args: Id, enforce_order: bool) -> Result<Id> {
+    if let Some(collector) = ctx.module_value("typing", "_collect_type_parameters") {
+        return ctx.call(
+            collector,
+            vec![args],
+            vec![(
+                "enforce_default_ordering".into(),
+                super::builtins::boolean(enforce_order),
+            )],
+        );
+    }
+    // Native bootstrap can create aliases before loading the source typing module.
+    Ok(native_parameters(ctx, args))
+}
+
+fn native_parameters(ctx: &mut Context, args: Id) -> Id {
+    let Value::Tuple(items) = ctx.heap.get(args) else {
+        unreachable!()
+    };
+    let parameters = variables(ctx, items);
+    ctx.alloc(Value::Tuple(parameters))
+}
+
 /// Typing retries the constructor without caching when building or comparing its key raises TypeError.
 fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Result<Id> {
     let args = ctx.alloc(Value::Tuple(args));
     let (index, constructor) = match kind {
         AliasKind::Generic => (0, "typing._GenericAlias"),
         AliasKind::Callable => (1, "typing._CallableGenericAlias"),
-        _ => return Ok(allocate_alias(ctx, kind, origin, args, None, true)),
+        _ => {
+            let parameters = native_parameters(ctx, args);
+            return Ok(allocate_alias(
+                ctx, kind, origin, args, parameters, None, true,
+            ));
+        }
     };
     let cached = if let Some(id) = ctx.typing.alias_caches[index] {
         id
@@ -353,16 +385,16 @@ fn alias(ctx: &mut Context, kind: AliasKind, origin: Id, args: Vec<Id>) -> Resul
         ctx.typing.alias_caches[index] = Some(cache);
         cache
     };
-    let name = (kind == AliasKind::Callable).then(|| ctx.text("Callable"));
-    let kwargs = name
-        .map(|name| ("name".to_owned(), name))
+    let kwargs: Vec<_> = (kind == AliasKind::Callable)
+        .then(|| ("name".to_owned(), ctx.text("Callable")))
         .into_iter()
         .collect();
-    let result = ctx.call(cached, vec![origin, args], kwargs);
+    let result = ctx.call(cached, vec![origin, args], kwargs.clone());
     if let Err(error) = &result {
         let type_error = ctx.builtin("TypeError");
         if ctx.raised_error_matches(error, type_error) {
-            return Ok(allocate_alias(ctx, kind, origin, args, name, true));
+            let function = ctx.builtin(constructor);
+            return ctx.call(function, vec![origin, args], kwargs);
         }
     }
     result
@@ -373,14 +405,10 @@ fn allocate_alias(
     kind: AliasKind,
     origin: Id,
     args: Id,
+    parameters: Id,
     name: Option<Id>,
     instantiable: bool,
 ) -> Id {
-    let Value::Tuple(items) = ctx.heap.get(args) else {
-        unreachable!()
-    };
-    let params = variables(ctx, items);
-    let parameters = ctx.alloc(Value::Tuple(params));
     ctx.alloc(Value::GenericAlias(Alias {
         origin,
         args,
@@ -495,11 +523,13 @@ fn literal_alias(ctx: &mut Context, origin: Id, parameters: Id) -> Result<Id> {
         Err(error) => return Err(error),
     };
     let args = ctx.alloc(Value::Tuple(flat));
+    let variables = native_parameters(ctx, args);
     Ok(allocate_alias(
         ctx,
         AliasKind::Literal(members),
         origin,
         args,
+        variables,
         None,
         true,
     ))
@@ -512,7 +542,16 @@ pub(super) fn builtin_alias(ctx: &mut Context, origin: Id, args: Id) -> Id {
     } else {
         ctx.alloc(Value::Tuple(vec![args]))
     };
-    allocate_alias(ctx, AliasKind::Builtin, origin, args, None, true)
+    let parameters = native_parameters(ctx, args);
+    allocate_alias(
+        ctx,
+        AliasKind::Builtin,
+        origin,
+        args,
+        parameters,
+        None,
+        true,
+    )
 }
 
 fn typing_alias_helper(ctx: &mut Context, name: &str, args: Vec<Id>) -> Result<Id> {
@@ -662,10 +701,10 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
                         format!("Parameter list to {name}[...] cannot be empty"),
                     ));
                 }
-                if args
-                    .iter()
-                    .any(|&id| !matches!(ctx.heap.get(id), Value::TypeVar(_)))
-                {
+                if args.iter().any(|&id| {
+                    !matches!(ctx.heap.get(id), Value::TypeVar(_) | Value::ParamSpec(_))
+                        && !is_unpacked_pack(ctx, id)
+                }) {
                     return Err(Error::new(
                         "TypeError",
                         format!(
@@ -919,7 +958,8 @@ pub(super) fn bind_generic_parameters(
     if raw.contains(&generic) {
         return Err(Error::new("TypeError", "Cannot inherit from plain Generic"));
     }
-    let vars = variables(ctx, raw);
+    let bases = ctx.alloc(Value::Tuple(raw.to_vec()));
+    let parameters = collect_type_parameters(ctx, bases, true)?;
     let mut explicit = None;
     for &id in raw {
         if let Value::GenericAlias(a) = ctx.heap.get(id)
@@ -934,7 +974,8 @@ pub(super) fn bind_generic_parameters(
     }
     let params = if let Some(params) = explicit {
         let declared = ctx.items(params)?;
-        let missing = vars
+        let missing = ctx
+            .items(parameters)?
             .iter()
             .filter(|v| !declared.contains(v))
             .map(|&v| ctx.display(v))
@@ -952,7 +993,7 @@ pub(super) fn bind_generic_parameters(
         }
         params
     } else {
-        ctx.alloc(Value::Tuple(vars))
+        parameters
     };
     ctx.bind(scope, "__parameters__", params);
     Ok(())
@@ -1971,7 +2012,19 @@ pub(super) fn call(
             "_ConcatenateGenericAlias" => AliasKind::Concatenate,
             _ => AliasKind::Generic,
         };
-        return Ok(allocate_alias(ctx, kind, origin, args, name, instantiable));
+        let enforce_order = ["typing.Generic", "typing.Protocol"]
+            .iter()
+            .any(|key| ctx.classes.get(*key) == Some(&origin));
+        let parameters = collect_type_parameters(ctx, args, enforce_order)?;
+        return Ok(allocate_alias(
+            ctx,
+            kind,
+            origin,
+            args,
+            parameters,
+            name,
+            instantiable,
+        ));
     }
     if operation == "TypeAliasType" {
         let [name, value, params] = super::builtins::bind_method_arguments(
@@ -2154,11 +2207,13 @@ pub(super) fn call(
             if !matches!(ctx.heap.get(*args), Value::Tuple(items) if items.len() == 1) {
                 return Err(Error::new("TypeError", "Unpack requires one argument"));
             }
+            let parameters = collect_type_parameters(ctx, *args, false)?;
             Ok(allocate_alias(
                 ctx,
                 AliasKind::Unpack,
                 *origin,
                 *args,
+                parameters,
                 None,
                 true,
             ))
