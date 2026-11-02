@@ -2491,6 +2491,26 @@ impl Context {
                     "__text_signature__" if symbol == "_io.text_encoding" => {
                         return Ok(self.text("($module, encoding, stacklevel=2, /)"));
                     }
+                    "__doc__" if symbol == "posix.sched_get_priority_min" => {
+                        return Ok(self.text("Get the minimum scheduling priority for policy."));
+                    }
+                    "__doc__" if symbol == "posix.sched_get_priority_max" => {
+                        return Ok(self.text("Get the maximum scheduling priority for policy."));
+                    }
+                    "__text_signature__"
+                        if matches!(
+                            symbol.as_str(),
+                            "posix.sched_get_priority_min" | "posix.sched_get_priority_max"
+                        ) =>
+                    {
+                        return Ok(self.text("($module, /, policy)"));
+                    }
+                    "__doc__" if symbol == "posix.sched_yield" => {
+                        return Ok(self.text("Voluntarily relinquish the CPU."));
+                    }
+                    "__text_signature__" if symbol == "posix.sched_yield" => {
+                        return Ok(self.text("($module, /)"));
+                    }
                     "__doc__" if symbol == "posix.sched_getscheduler" => {
                         return Ok(self.text(concat!(
                             "Get the scheduling policy for the process identified by pid.\n\n",
@@ -2558,6 +2578,9 @@ impl Context {
                     "__doc__" if symbol == "posix.abort" => {
                         return Ok(self.text("Abort the interpreter immediately.\n\nThis function 'dumps core' or otherwise fails in the hardest way possible\non the hosting operating system.  This function never returns."));
                     }
+                    "__doc__" if symbol == "posix.getpgrp" => {
+                        return Ok(self.text("Return the current process group id."));
+                    }
                     "__doc__" if symbol == "posix.getpgid" => {
                         return Ok(
                             self.text("Call the system call getpgid(), and return the result.")
@@ -2608,6 +2631,7 @@ impl Context {
                                 | "posix.getpid"
                                 | "posix.cpu_count"
                                 | "posix.getppid"
+                                | "posix.getpgrp"
                                 | "gc.enable"
                                 | "gc.disable"
                                 | "gc.isenabled"

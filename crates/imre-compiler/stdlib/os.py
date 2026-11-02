@@ -14,6 +14,11 @@ from types import GenericAlias
 from posix import O_NONBLOCK, O_RDONLY, chdir, close, closerange, open, rmdir, stat, truncate
 
 try:
+    from posix import getpgrp
+except ImportError:
+    pass
+
+try:
     from posix import waitstatus_to_exitcode
 except ImportError:
     pass
@@ -26,7 +31,9 @@ if sys.platform == "linux":
     import posix as _posix
     from posix import O_NOCTTY, get_terminal_size, pipe2, ptsname, readv, writev
     for _name in vars(_posix):
-        if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in ("posix_spawn", "posix_spawnp"):
+        if _name.startswith("RTLD_") or _name.startswith("POSIX_SPAWN_") or _name in (
+            "posix_spawn", "posix_spawnp", "sched_get_priority_min", "sched_get_priority_max", "sched_yield",
+        ):
             globals()[_name] = getattr(_posix, _name)
     del _name, _posix
     from posix import O_PATH, O_TMPFILE, cpu_count, fstatvfs, statvfs, statvfs_result, sysconf, sysconf_names

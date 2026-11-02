@@ -1748,13 +1748,25 @@ pub(super) fn call(
         return os::spawn_exec(ctx, args, kwargs);
     }
     if let Some(op) = name.strip_prefix("posix.")
-        && (os::is_descriptor_function(op) || os::is_process_function(op))
+        && (os::is_descriptor_function(op)
+            || os::is_process_function(op)
+            || (cfg!(unix) && op == "getpgrp"))
     {
         return os::descriptor(ctx, op, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix.sysconf" {
         return os::sysconf::call(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(op @ ("sched_get_priority_min" | "sched_get_priority_max")) =
+        name.strip_prefix("posix.")
+    {
+        return os::scheduler::priority_bound(ctx, op, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "posix.sched_yield" {
+        return os::scheduler::yield_cpu(args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "posix.sched_getscheduler" {
