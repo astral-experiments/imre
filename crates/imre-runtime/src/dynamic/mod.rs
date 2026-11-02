@@ -72,6 +72,7 @@ use value::{
 struct SourceModule {
     path: PathBuf,
     code: Code,
+    bundled_text: Option<&'static [u8]>,
 }
 
 enum IteratorSlice<'a> {

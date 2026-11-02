@@ -820,14 +820,32 @@ pub(super) unsafe extern "C" fn imre_dyn_register(
     file: *const c_char,
     code: Code,
 ) {
-    // SAFETY: all inputs come from generated module definitions in the same binary.
+    // SAFETY: earlier native code supplies the same static names and initializer, without text.
+    unsafe { imre_dyn_register_source(ctx, name, file, std::ptr::null(), 0, code) }
+}
+
+/// Register a compiled initializer and the exact Python text of a bundled provider.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    code: Code,
+) {
+    // SAFETY: module names and filenames are static compiler-emitted strings.
     let (ctx, name, file) = unsafe { (&mut *ctx, cstr(name), cstr(file)) };
+    // SAFETY: non-null text points to a static source constant with exactly len bytes.
+    let bundled_text =
+        (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
     ctx.sources
         .entry(name.to_owned())
         .or_default()
         .push(SourceModule {
             path: file.into(),
             code,
+            bundled_text,
         });
 }
 
