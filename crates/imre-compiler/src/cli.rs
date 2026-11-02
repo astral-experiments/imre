@@ -72,7 +72,7 @@ impl BuildOptions {
         use crate::python_command::Invocation;
         let flags = match &invocation {
             Invocation::Command(command) => &command.flags,
-            Invocation::Script { flags, .. } => flags,
+            Invocation::Module { flags, .. } | Invocation::Script { flags, .. } => flags,
         };
         let mut options = Self::initial();
         if !flags.isolated {
@@ -107,6 +107,15 @@ impl BuildOptions {
             Invocation::Command(command) => {
                 options.source_path = Some("-c".into());
                 options.compile.command = Some(command);
+            }
+            Invocation::Module {
+                name,
+                flags,
+                executable,
+            } => {
+                options.source_path = Some("-m".into());
+                options.compile.module_entry = Some(name);
+                options.compile.script_startup = Some((flags, executable));
             }
             Invocation::Script {
                 path,

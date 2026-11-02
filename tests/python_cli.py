@@ -1203,6 +1203,35 @@ def main():
                 expected.stderr,
             )
 
+        module_pkg = root / "module_pkg"
+        module_pkg.mkdir()
+        (module_pkg / "__init__.py").write_text("import sys\nassert sys.argv[0] == '-m'\n")
+        (module_pkg / "child.py").write_text(
+            "import os, sys\n"
+            "from . import __path__\n"
+            "assert __package__ == 'module_pkg' and __spec__.name == 'module_pkg.child'\n"
+            "assert __file__ == sys.argv[0] == __spec__.origin and __loader__ is __spec__.loader\n"
+            "assert sys.path[0] == os.getcwd() and __spec__.name not in sys.modules\n"
+            "assert sys.modules['__main__'].__dict__ is globals()\n"
+            "print(sys.argv[1:], sys.orig_argv[1:])\n"
+        )
+        (module_pkg / "__main__.py").write_text(
+            "import sys\nassert __spec__.name == 'module_pkg.__main__'\n"
+            "assert __name__ == '__main__' and __file__ == sys.argv[0]\n"
+            "print(__package__, sys.argv[1:])\n"
+        )
+        compare("-Bm", "module_pkg.child", "-m", "tail")
+        compare("-B", "-mmodule_pkg", "tail")
+        # An ordinary module under the first root wins over a package in a later root.
+        (root / "preferred.py").write_text("print('file wins')\n")
+        (root / "preferred").mkdir()
+        (root / "preferred" / "__main__.py").write_text("invalid syntax!\n")
+        later = root / "later" / "preferred"
+        later.mkdir(parents=True)
+        (later / "__init__.py").write_text("invalid syntax!\n")
+        compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
+
+
         locale_script = root / "get_locale.py"
         locale_script.write_text(
             "from _locale import LC_ALL, setlocale\n"
