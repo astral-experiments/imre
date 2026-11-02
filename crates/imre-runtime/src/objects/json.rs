@@ -19,8 +19,7 @@ use super::records::{RecordBatch, RecordDescriptor, imre_record_new};
 use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
-pub(crate) use binary::decode as decode_json_bytes;
-pub(crate) use readonly::{DecodedJson, JsonNumber, decode_json_tokens, json_bom_error};
+pub(crate) use readonly::{DecodedJson, JsonNumber, JsonTokenError, decode_json_tokens_at};
 mod binary;
 mod decoder;
 mod encode;
