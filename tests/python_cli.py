@@ -2485,6 +2485,7 @@ def report(text):
             "boxed_typing_type.py",
             "boxed_type_alias_statements.py",
             "boxed_typing_mapping.py",
+            "boxed_typing_concrete_collections.py",
             "boxed_typing_iterable.py",
             "boxed_typing_regex_aliases.py",
             "boxed_pprint.py",
