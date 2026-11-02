@@ -254,6 +254,10 @@ impl Context {
         }
         match self.heap.get(class) {
             Value::Class { scope, .. } => self.namespace_binding(self.scope_data(*scope), name),
+            // The native generic alias inherits the same subclass hook as source special forms.
+            Value::Native(kind) if kind == "typing._GenericAlias" && name == "__init_subclass__" => {
+                self.classes.get("typing._Final").and_then(|&base| self.own_class_attr(base, name))
+            }
             Value::Native(kind) if kind == "type" && name == "mro" => {
                 self.builtins.get("type.mro").copied()
             }
@@ -3796,7 +3800,9 @@ impl Context {
             } else {
                 self.exact_type(obj)?
             };
-            let hook = self.builtin("object.__init_subclass__");
+            let hook = self
+                .own_class_attr(class, name)
+                .unwrap_or_else(|| self.builtin("object.__init_subclass__"));
             return self.bind_attribute(hook, NONE, class);
         }
         if name == "__init__" {
@@ -6921,6 +6927,9 @@ impl Context {
                 vec![class, fields, total, annotate, parents],
                 Vec::new(),
             )?;
+        }
+        if module == "typing" && name == "_Final" {
+            self.classes.insert("typing._Final".into(), class);
         }
         self.classes.insert(name, class);
         Ok(class)

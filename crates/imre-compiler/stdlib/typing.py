@@ -1092,6 +1092,10 @@ class _Final:
     __module__ = __name__
     __slots__ = ("__weakref__",)
 
+    def __init_subclass__(cls, /, *args, **kwds):
+        if '_root' not in kwds:
+            raise TypeError("Cannot subclass special typing classes")
+
 
 class _NotIterable:
     __module__ = __name__
@@ -1099,7 +1103,7 @@ class _NotIterable:
     __iter__ = None
 
 
-class _SpecialForm(_Final, _NotIterable):
+class _SpecialForm(_Final, _NotIterable, _root=True):
     __module__ = __name__
     __slots__ = ("_name", "__doc__", "_getitem")
 
@@ -1755,7 +1759,7 @@ def _specialize_generic_alias(alias, args):
         return _specialize_generic_alias_uncached(alias, args)
 
 
-class _TypedCacheSpecialForm(_SpecialForm):
+class _TypedCacheSpecialForm(_SpecialForm, _root=True):
     __module__ = __name__
 
     @lru_cache
