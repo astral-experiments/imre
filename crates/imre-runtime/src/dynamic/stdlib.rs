@@ -549,9 +549,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             super::mapping_abc::class(ctx, abc)?
         }
         ("_collections_abc", "_check_methods") => ctx.builtin("_collections_abc._check_methods"),
-        ("_collections_abc", "Callable") => {
-            super::typing::named_class(ctx, "collections.abc", "Callable")
-        }
         (
             "typing",
             "TypeVar"
