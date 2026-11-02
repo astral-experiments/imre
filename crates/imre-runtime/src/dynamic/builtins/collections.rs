@@ -583,9 +583,10 @@ pub(super) fn construct(
     match name {
         "list" => Ok(ctx.alloc(Value::List(items))),
         "tuple"
-            if args
-                .first()
-                .is_some_and(|&id| matches!(ctx.heap.get(id), Value::List(_))) =>
+            if items.is_empty()
+                || args
+                    .first()
+                    .is_some_and(|&id| matches!(ctx.heap.get(id), Value::List(_))) =>
         {
             Ok(ctx.heap.packed_tuple(items, false))
         }

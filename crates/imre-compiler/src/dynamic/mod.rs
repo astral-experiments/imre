@@ -112,6 +112,7 @@ impl Imports {
                     | "importlib.machinery"
                     | "traceback"
                     | "unittest.case"
+                    | "string.templatelib"
             )
         {
             self.runtime_imports = true;
@@ -239,7 +240,8 @@ impl<'a> Visitor<'a> for Imports {
                     }
                     if imp.level == 0
                         && ((name == "operator" && boxed_operator(suffix))
-                            || (name == "sys" && boxed_sys_export(suffix)))
+                            || (name == "sys" && boxed_sys_export(suffix))
+                            || (name == "string" && suffix == "templatelib"))
                     {
                         self.runtime_imports = true;
                     }
@@ -411,6 +413,7 @@ pub(crate) fn compile(
             "unittest",
             "SystemExit",
             "__import__",
+            "templatelib",
         ]
         .iter()
         .any(|name| src.contains(name))
@@ -630,6 +633,8 @@ pub(crate) fn compile(
         "re",
         "signal",
         "stat",
+        "string",
+        "string.templatelib",
         "zipimport",
     ] {
         if !seen.contains(name)
