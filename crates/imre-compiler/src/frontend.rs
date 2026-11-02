@@ -1909,7 +1909,9 @@ fn annotation_with_aliases(
         ast::Expr::Subscript(subscript)
             if matches!(
                 graph.resolve_type(module, &subscript.value),
-                Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+                Some(Binding::Intrinsic(
+                    Intrinsic::Mapping | Intrinsic::TYPING_MAPPING
+                ))
             ) =>
         {
             if let ast::Expr::Tuple(types) = &*subscript.slice
@@ -10998,6 +11000,14 @@ mod tests {
         assert_eq!(super::recursive_call_root(&graph), None);
         graph.last_mut().unwrap().insert(0);
         assert_eq!(super::recursive_call_root(&graph), Some(0));
+    }
+
+    #[test]
+    fn typing_mapping_alias_checks_without_boxed_lowering() {
+        crate::check(include_str!(
+            "../../../tests/fixtures/classes/mapping_alias.py"
+        ))
+        .unwrap();
     }
 
     #[test]

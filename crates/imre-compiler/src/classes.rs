@@ -277,7 +277,9 @@ pub(crate) fn mapping_base(graph: &SourceGraph, module: usize, expression: &ast:
     };
     matches!(
         graph.resolve(module, origin),
-        Some(Binding::Intrinsic(Intrinsic::Mapping { .. }))
+        Some(Binding::Intrinsic(
+            Intrinsic::Mapping | Intrinsic::TYPING_MAPPING
+        ))
     )
 }
 
