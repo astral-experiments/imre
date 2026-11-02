@@ -696,6 +696,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             );
             ctx.alloc(Value::List(vec![suffix]))
         }
+        ("operator", "__pow__") => ctx.builtin("operator.pow"),
         ("operator", name)
             if matches!(name, "attrgetter" | "itemgetter")
                 || operator::Operation::named(name).is_some() =>

@@ -185,6 +185,7 @@ impl Operation {
             "truediv" => Binary("/"),
             "floordiv" => Binary("//"),
             "mod" => Binary("%"),
+            "pow" => Binary("**"),
             "lshift" => Binary("<<"),
             "rshift" => Binary(">>"),
             "and_" => Binary("&"),
