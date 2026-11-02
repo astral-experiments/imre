@@ -22,6 +22,8 @@ def current():
         warnings.simplefilter("always")
         assert bless({"__loader__": loader}) is loader
         assert bless({"__loader__": loader, "__spec__": SimpleNamespace(loader=object())}) is loader
+        assert [warning.lineno for warning in seen] == [663, 670]
+        assert all(warning.filename == "<frozen importlib._bootstrap_external>" for warning in seen)
         assert [warning.category for warning in seen] == [DeprecationWarning, DeprecationWarning]
         assert [str(warning.message) for warning in seen] == [
             "Module globals is missing a __spec__.loader",
@@ -29,7 +31,8 @@ def current():
         ]
 
     with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
+        warnings.simplefilter("ignore")
+        warnings.filterwarnings("error", category=DeprecationWarning, module=r"^importlib\._bootstrap_external$", lineno=663)
         try:
             bless({"__loader__": loader})
         except DeprecationWarning:

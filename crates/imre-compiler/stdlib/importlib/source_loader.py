@@ -47,11 +47,11 @@ def _bless_my_loader(module_globals):
             if spec_loader is missing:
                 raise AttributeError("Module globals is missing a __spec__.loader")
             raise ValueError("Module globals is missing a __spec__.loader")
-        _warn_loader_deprecation("Module globals is missing a __spec__.loader")
+        _warn_loader_deprecation(globals(), False)
         spec_loader = loader
 
     if loader is not None and loader != spec_loader:
-        _warn_loader_deprecation("Module globals; __loader__ != __spec__.loader")
+        _warn_loader_deprecation(globals(), True)
         return loader
     return spec_loader
 

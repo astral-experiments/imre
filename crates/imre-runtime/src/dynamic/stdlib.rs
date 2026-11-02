@@ -1656,13 +1656,13 @@ pub(super) fn call(
                 let path = crate::objects::cache_paths::source_name(ctx.str_value(*path)?, prefix)?;
                 return Ok(ctx.text(path.to_string()));
             }
-            ("warn_loader_deprecation", [message], []) => {
-                let message = ctx.str_value(*message)?.to_owned();
-                ctx.emit_builtin_warning(
-                    crate::objects::exceptions::Kind::DeprecationWarning,
-                    &message,
-                    1,
-                )?;
+            ("warn_loader_deprecation", [globals, mismatch], []) => {
+                let (line, message) = if ctx.truth(*mismatch)? {
+                    (670, "Module globals; __loader__ != __spec__.loader")
+                } else {
+                    (663, "Module globals is missing a __spec__.loader")
+                };
+                ctx.warn_external_loader(*globals, line, message)?;
                 return Ok(NONE);
             }
             ("warn_debug_override", [], []) => {
