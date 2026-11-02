@@ -1,5 +1,6 @@
 import _codecs
 import codecs
+import copyreg
 import pickle
 
 
@@ -13,6 +14,26 @@ class WithProtocol:
 
     def __reduce__(self):
         raise AssertionError("called __reduce__ after __reduce_ex__")
+
+
+class InheritedProtocol(WithProtocol):
+    pass
+
+
+def registered_reducer(value):
+    return str, ("registered",)
+
+
+def check_registered_reducer(protocol):
+    copyreg.pickle(WithProtocol, registered_reducer)
+    try:
+        assert pickle.loads(pickle.dumps(WithProtocol(), protocol)) == "registered"
+        assert pickle.loads(pickle.dumps(InheritedProtocol(), protocol)) == ("rebuilt", protocol)
+    finally:
+        del copyreg.dispatch_table[WithProtocol]
+    assert pickle.loads(pickle.dumps(WithProtocol(), protocol)) == ("rebuilt", protocol)
+    for value in (Ellipsis, NotImplemented, type(None), type(Ellipsis), type(NotImplemented)):
+        assert pickle.loads(pickle.dumps(value, protocol)) is value
 
 
 class WithoutProtocol:
@@ -308,6 +329,7 @@ def produce():
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         check_global_names(protocol)
+        check_registered_reducer(protocol)
         check_reduction_state(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
