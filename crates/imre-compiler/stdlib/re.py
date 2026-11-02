@@ -1,4 +1,4 @@
-"""Regex exception and scanner loop from CPython 3.14.5 Lib/re (PSF-2.0)."""
+"""Regex helpers and scanner loop from CPython 3.14.5 Lib/re (PSF-2.0)."""
 
 class PatternError(Exception):
     """Exception raised for invalid regular expressions.
@@ -36,6 +36,24 @@ class PatternError(Exception):
 
 # Backward compatibility after renaming in 3.13
 error = PatternError
+
+
+# SPECIAL_CHARS
+# closing ')', '}' and ']'
+# '-' (a range in character set)
+# '&', '~', (extended character set operations)
+# '#' (comment) and WHITESPACE (ignored) in verbose mode
+_special_chars_map = {i: '\\' + chr(i) for i in b'()[]{}?*+-|^$\\.&~# \t\n\r\v\f'}
+
+def escape(pattern):
+    """
+    Escape special characters in a string.
+    """
+    if isinstance(pattern, str):
+        return pattern.translate(_special_chars_map)
+    else:
+        pattern = str(pattern, 'latin1')
+        return pattern.translate(_special_chars_map).encode('latin1')
 
 
 class Scanner:
