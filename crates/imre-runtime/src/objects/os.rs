@@ -95,9 +95,12 @@ pub(super) fn directory_entry_types(
 }
 
 macro_rules! descriptor_constants {
-    ($lookup:ident -> $ty:ty; $($name:ident = $flag:ident),* $(,)?) => {
+    ($($name:ident = $flag:ident),* $(,)?) => {
         $(#[unsafe(no_mangle)]
         pub static $name: usize = ((libc::$flag as usize) << 1) | 1;)*
+    };
+    ($lookup:ident -> $ty:ty; $($name:ident = $flag:ident),* $(,)?) => {
+        descriptor_constants! { $($name = $flag),* }
 
         /// Look up the platform constant exported by the corresponding boxed module.
         pub(crate) fn $lookup(name: &str) -> Option<$ty> {
@@ -118,6 +121,10 @@ descriptor_constants! { descriptor_constant -> i32;
     imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
     imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
 }
+// The Linux posix initializer installs this flag in the live module dictionary.
+#[cfg(target_os = "linux")]
+descriptor_constants! { imre_os_o_tmpfile = O_TMPFILE }
+
 descriptor_constants! { poll_constant -> i16;
     imre_os_pollin = POLLIN, imre_os_pollpri = POLLPRI, imre_os_pollout = POLLOUT,
     imre_os_pollerr = POLLERR, imre_os_pollhup = POLLHUP, imre_os_pollnval = POLLNVAL,

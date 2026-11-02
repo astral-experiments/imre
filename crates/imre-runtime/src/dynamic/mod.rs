@@ -2515,7 +2515,11 @@ impl Context {
                 self.bind(scope, "get_cache_token", token);
             }
             #[cfg(target_os = "linux")]
-            "posix" if source.is_none() => stdlib::os::scheduler::initialize(self, scope),
+            "posix" if source.is_none() => {
+                stdlib::os::scheduler::initialize(self, scope);
+                let tmpfile = self.int(i64::from(libc::O_TMPFILE));
+                self.bind(scope, "O_TMPFILE", tmpfile);
+            }
             #[cfg(unix)]
             "_signal" if source.is_none() => {
                 #[cfg(target_os = "linux")]
