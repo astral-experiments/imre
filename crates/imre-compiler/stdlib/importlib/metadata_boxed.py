@@ -230,15 +230,27 @@ def _get_toplevel_name(path):
     return getmodulename(path) or str(path)
 
 
+def _top_level_inferred(paths):
+    if paths is None:
+        return ()
+    if isinstance(paths, (str, bytes)):
+        paths = (paths,)
+    try:
+        files = iter(paths)
+    except TypeError:
+        # A custom distribution may supply just one PackagePath.
+        files = (paths,)
+    names = set(map(_get_toplevel_name, files))
+    return (name for name in names if '.' not in name)
+
+
 def packages_distributions():
     """Map top-level import names to the distributions providing them."""
     result = {}
     for dist in distributions():
         names = (dist.read_text('top_level.txt') or '').split()
         if not names:
-            paths = dist.files
-            inferred = set(map(_get_toplevel_name, () if paths is None else paths))
-            names = (name for name in inferred if '.' not in name)
+            names = _top_level_inferred(dist.files)
         for name in names:
             result.setdefault(name, []).append(dist.metadata['Name'])
     return result

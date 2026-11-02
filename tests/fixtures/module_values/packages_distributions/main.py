@@ -17,12 +17,13 @@ inferred.mkdir(parents=True)
 files = ['shared_ns/one.py', 'shared_ns/two.py', 'single-module.py', 'ignored.pth']
 (second / 'shared_ns').mkdir()
 for name in files:
-    (second / name).touch()
+    (second / name).write_bytes(b'')
 (inferred / 'RECORD').write_text(
     ''.join(name + ',,\n' for name in [*files, 'lost_module.py', 'file_list-2.dist-info/METADATA']),
     encoding='utf-8',
 )
-sys.path[:0] = [str(first), str(second)]
+sys.path.insert(0, str(second))
+sys.path.insert(0, str(first))
 mapping = packages_distributions()
 assert mapping['shared_ns'] == ['Declared-Owner', 'Declared-Owner', 'Inferred-Owner']
 assert mapping['declared.name'] == ['Declared-Owner']
