@@ -630,9 +630,12 @@ impl Function<'_, '_> {
             _ => closure_names.incomplete = true,
         }
         if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns)
-            && let Some(names) = worker::parameters(stmts, params)
+            && let Some((names, lock_only)) = worker::parameters(stmts, params)
         {
             signature["thread_parameters"] = json!(names);
+            if lock_only {
+                signature["thread_worker_locks"] = json!(names);
+            }
         }
         let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);

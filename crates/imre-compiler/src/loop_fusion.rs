@@ -1,6 +1,7 @@
 //! Forward values across equal counted loops when their intermediate lists are private.
 
 mod nullable;
+mod periodic;
 mod records;
 
 use std::collections::{HashMap, HashSet};
@@ -23,6 +24,7 @@ pub(crate) fn specialize(module: &mut Module) {
             }
         }
     }
+    periodic::specialize(module);
 }
 
 /// Both loops enumerate the ordinal used to append and read each element.

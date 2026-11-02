@@ -515,6 +515,15 @@ pub(crate) fn exception_kind(name: &str) -> Option<u32> {
         "Warning" => return Some(80),
         "RuntimeWarning" => return Some(81),
         "DeprecationWarning" => return Some(82),
+        "EncodingWarning" => return Some(83),
+        "UserWarning" => return Some(84),
+        "PendingDeprecationWarning" => return Some(85),
+        "SyntaxWarning" => return Some(86),
+        "FutureWarning" => return Some(87),
+        "ImportWarning" => return Some(88),
+        "UnicodeWarning" => return Some(89),
+        "BytesWarning" => return Some(90),
+        "ResourceWarning" => return Some(91),
         _ => {}
     }
     if name == "ImportError" {
@@ -1183,14 +1192,7 @@ pub(crate) fn lower_with_caller_cache(
     }
     Ok((
         ir::Module {
-            ignore_python_environment: graph
-                .command_startup
-                .as_ref()
-                .is_some_and(|(flags, _)| flags.isolated),
-            command_utf8_mode: graph
-                .command_startup
-                .as_ref()
-                .map(|(flags, _)| flags.utf8_mode),
+            command_flags: graph.command_startup.as_ref().map(|(flags, _)| *flags),
             types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,
@@ -6446,12 +6448,14 @@ impl<'a> Checker<'a> {
                 Intrinsic::SysExecutable
                 | Intrinsic::SysPlatform
                 | Intrinsic::OsName
+                | Intrinsic::OsLinesep
                 | Intrinsic::OsPathsep { posix: false } => {
                     let operation = match symbol {
                         Intrinsic::SysExecutable => {
                             Builtin::Process(ir::ProcessOperation::Executable)
                         }
                         Intrinsic::OsName => Builtin::OsName,
+                        Intrinsic::OsLinesep => Builtin::OsLinesep,
                         Intrinsic::OsPathsep { .. } => Builtin::OsPathsep,
                         _ => Builtin::SysPlatform,
                     };

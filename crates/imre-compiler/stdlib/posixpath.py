@@ -10,7 +10,7 @@ from _imre_posixpath import (
     realpath_notdir as _realpath_notdir,
 )
 from genericpath import (
-    ALLOW_MISSING, commonprefix, exists, getsize, isdir, isfile, islink, samefile, sameopenfile, samestat,
+    ALLOW_MISSING, commonprefix, exists, getsize, isdir, isfile, islink, lexists, samefile, sameopenfile, samestat,
 )
 
 

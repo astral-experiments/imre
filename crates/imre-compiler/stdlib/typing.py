@@ -1,6 +1,7 @@
 """Stream annotations and special forms for the runtime typing module."""
 
 import typing as _typing
+from _collections_abc import MutableMapping as _MutableMapping
 from functools import lru_cache
 from typing import Generic, TypeVar
 
@@ -33,6 +34,43 @@ def assert_never(arg, /):
     if len(value) > _ASSERT_NEVER_REPR_MAX_LENGTH:
         value = value[:_ASSERT_NEVER_REPR_MAX_LENGTH] + "..."
     raise AssertionError(f"Expected code to be unreachable, but got: {value}")
+
+
+# Runtime decorator from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def final(f):
+    """Decorator to indicate final methods and final classes.
+
+    Use this decorator to indicate to type checkers that the decorated
+    method cannot be overridden, and decorated class cannot be subclassed.
+
+    For example::
+
+        class Base:
+            @final
+            def done(self) -> None:
+                ...
+        class Sub(Base):
+            def done(self) -> None:  # Error reported by type checker
+                ...
+
+        @final
+        class Leaf:
+            ...
+        class Other(Leaf):  # Error reported by type checker
+            ...
+
+    There is no runtime checking of these properties. The decorator
+    attempts to set the ``__final__`` attribute to ``True`` on the decorated
+    object to allow runtime introspection.
+    """
+    try:
+        f.__final__ = True
+    except (AttributeError, TypeError):
+        # Skip the attribute silently if it is not writable.
+        # AttributeError happens if the object has __slots__ or a
+        # read-only property, TypeError if it's a builtin class.
+        pass
+    return f
 
 
 # Optional and the special form protocol from CPython 3.14.5 Lib/typing.py.
@@ -260,8 +298,8 @@ def Optional(self, parameters):
     return _typing.Union[arg, type(None)]
 
 
-def _alias_type_arg(arg):
-    arg = _type_check(arg, "Parameters to generic types must be types.")
+def _alias_type_arg(arg, message="Parameters to generic types must be types."):
+    arg = _type_check(arg, message)
     if isinstance(arg, str):
         raise NotImplementedError("string alias arguments require typing.ForwardRef")
     return type(None) if arg is None else arg
@@ -300,14 +338,15 @@ class _SpecialGenericAlias(_NotIterable):
     """A named typing alias for a builtin collection."""
     __module__ = __name__
 
-    def __init__(self, origin, nparams, *, name):
+    def __init__(self, origin, nparams, *, name, inst=True):
         self.__origin__ = origin
         self._name = name
         self.__qualname__ = name
-        self._inst = False
+        self._inst = inst
         self._nparams = nparams
         self.__slots__ = None
-        self.__doc__ = f"Deprecated alias to {origin.__qualname__}."
+        module = "" if origin.__module__ == "builtins" else origin.__module__ + "."
+        self.__doc__ = f"Deprecated alias to {module}{origin.__qualname__}."
 
     def __repr__(self):
         return "typing." + self._name
@@ -382,7 +421,33 @@ class _SpecialGenericAlias(_NotIterable):
         return _typing.Union[other, self]
 
 
-List = _SpecialGenericAlias(list, 1, name="List")
+class _TupleType(_SpecialGenericAlias):
+    __module__ = __name__
+
+    def _getitem(self, params):
+        if not isinstance(params, tuple):
+            params = (params,)
+        message = "Tuple[t0, t1, ...]: each t must be a type."
+        if len(params) >= 2 and params[-1] is ...:
+            message = "Tuple[t, ...]: t must be a type."
+        return self.copy_with(tuple(_alias_type_arg(p, message) for p in params))
+
+
+Tuple = _TupleType(tuple, -1, name="Tuple", inst=False)
+Tuple.__doc__ = \
+    """Deprecated alias to builtins.tuple.
+
+    Tuple[X, Y] is the cross-product type of X and Y.
+
+    Example: Tuple[T1, T2] is a tuple of two elements corresponding
+    to type variables T1 and T2.  Tuple[int, float, str] is a tuple
+    of an int, a float and a string.
+
+    To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
+    """
+List = _SpecialGenericAlias(list, 1, name="List", inst=False)
+Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
+MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
 
 def _substitute_alias_argument(arg, replacements):
@@ -406,6 +471,8 @@ def _specialize_named_alias_uncached(alias, args):
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
+    if alias._name == "Tuple" and any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
+        raise NotImplementedError("specializing a variadic typing.Tuple requires parameter-pack substitution")
     args = tuple(_alias_type_arg(arg) for arg in args)
     if len(args) != len(parameters):
         which = "few" if len(args) < len(parameters) else "many"
@@ -447,3 +514,109 @@ class _TypedCacheSpecialForm(_SpecialForm):
 def Literal(self, *parameters):
     """A type whose arguments are literal values."""
     return _typing._LiteralGenericAlias(self, parameters)
+
+
+# VALUE-format annotation resolution from CPython 3.14.5 Lib/typing.py.
+def _hint_scope(params, globalns, localns, is_class):
+    if params:
+        globalns = dict(globalns)
+        localns = dict(localns)
+        for param in params:
+            if not is_class or param.__name__ not in globalns:
+                globalns[param.__name__] = param
+                localns.pop(param.__name__, None)
+    return globalns, localns
+
+
+def _resolve_hint(value, globalns, localns, owner, seen, include_extras):
+    from annotationlib import ForwardRef
+    from types import GenericAlias
+    if isinstance(value, str):
+        value = ForwardRef(value, is_class=isinstance(owner, type))
+    if isinstance(value, ForwardRef):
+        expr = value.__forward_arg__
+        if expr in seen:
+            return value
+        if value.__forward_module__ is not None:
+            import sys
+            module = sys.modules.get(value.__forward_module__)
+            if module is not None:
+                globalns = module.__dict__
+        source = f'({expr},)[0]' if expr.lstrip().startswith('*') else expr
+        result = _typing._eval_type_expression(source, globalns, localns)
+        return _resolve_hint(result, globalns, localns, owner, seen + (expr,), include_extras)
+
+    origin = _typing.get_origin(value)
+    if origin is None or origin is Literal:
+        return value
+    args = getattr(value, '__args__', ())
+    resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras) for a in args)
+    if not include_extras:
+        for name in ('Required', 'NotRequired', 'ReadOnly'):
+            if origin is getattr(_typing, name, None):
+                return resolved[0]
+    if resolved == args:
+        return value
+    if origin is _typing.Union:
+        return _typing.Union[resolved]
+    if type(value) is GenericAlias:
+        return GenericAlias(origin, resolved)
+    if type(value) is _typing._GenericAlias:
+        name = getattr(value, '_name', None)
+        return _typing._GenericAlias(origin, resolved, name=name, inst=getattr(value, '_inst', True))
+    return type(value)(origin, resolved)
+
+
+def get_type_hints(obj, globalns=None, localns=None, include_extras=False, *, format=None):
+    """Resolve annotations in the defining namespace, including inherited class annotations."""
+    if getattr(obj, '__no_type_check__', None):
+        return {}
+    from annotationlib import Format, _get_value_annotations
+    if format is not None and format != Format.VALUE:
+        if format == Format.VALUE_WITH_FAKE_GLOBALS:
+            raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
+        if format not in (Format.STRING, Format.FORWARDREF):
+            raise ValueError(f"Unsupported format {format!r}")
+        raise NotImplementedError('only the VALUE annotation format is supported')
+    if isinstance(obj, type):
+        import sys
+        hints = {}
+        for base in reversed(getattr(obj, '__mro__', (obj,))):
+            ann = _get_value_annotations(base)
+            if not ann:
+                continue
+            base_globals = globalns
+            if base_globals is None:
+                module = sys.modules.get(base.__module__)
+                base_globals = getattr(module, '__dict__', {})
+            base_locals = dict(base.__dict__) if localns is None else localns
+            if localns is None and globalns is None:
+                base_globals, base_locals = base_locals, base_globals
+            base_globals, base_locals = _hint_scope(getattr(base, '__type_params__', ()),
+                                                    base_globals, base_locals, True)
+            for name, value in ann.items():
+                result = _resolve_hint(value, base_globals, base_locals, obj, (), include_extras)
+                hints[name] = type(None) if result is None else result
+        return hints
+
+    hints = _get_value_annotations(obj)
+    if globalns is None:
+        from types import ModuleType
+        if isinstance(obj, ModuleType):
+            globalns = obj.__dict__
+        else:
+            wrapped = obj
+            seen = {id(wrapped)}
+            while hasattr(wrapped, '__wrapped__'):
+                wrapped = wrapped.__wrapped__
+                if id(wrapped) in seen:
+                    raise ValueError(f'wrapper loop when unwrapping {obj!r}')
+                seen.add(id(wrapped))
+            globalns = getattr(wrapped, '__globals__', {})
+    if localns is None:
+        localns = globalns
+    globalns, localns = _hint_scope(getattr(obj, '__type_params__', ()), globalns, localns, False)
+    for name, value in hints.items():
+        result = _resolve_hint(value, globalns, localns, obj, (), include_extras)
+        hints[name] = type(None) if result is None else result
+    return hints

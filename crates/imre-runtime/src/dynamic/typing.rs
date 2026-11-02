@@ -1103,6 +1103,9 @@ pub(super) fn call(
             "TypeError",
             "_GenericAlias.__init__() requires an origin and arguments",
         )),
+        ("_eval_type_expression", [text, globals, locals]) => {
+            ctx.eval_type_expression(*text, *globals, *locals)
+        }
         ("get_origin", [v]) => Ok(match ctx.heap.get(*v) {
             Value::Instance { .. }
                 if ctx
@@ -1397,6 +1400,7 @@ impl Context {
                         "typing.TypeVar"
                             | "typing.TypeVarTuple"
                             | "NoDefaultType"
+                            | super::stdlib::flags::TYPE
                             | "slice"
                             | "NoneType"
                             | "NotImplementedType"

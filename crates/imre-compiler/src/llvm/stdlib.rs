@@ -10,13 +10,12 @@ impl Emitter<'_, '_> {
                 let callable = &args[1].value;
                 let element = self.module.types.element(list.ty).unwrap();
                 let (_, returns) = self.module.types.signature(callable.ty).unwrap();
-                let abi = match element.llvm() {
-                    "i8" => 0,
-                    "i1" => 1,
-                    "i64" => 2,
-                    "ptr" => 3,
-                    "double" => 7,
-                    _ => unreachable!("checked sort element"),
+                let abi = match element.llvm_type() {
+                    LlvmType::I8 => 0,
+                    LlvmType::I1 => 1,
+                    LlvmType::I64 => 2,
+                    LlvmType::Ptr => 3,
+                    LlvmType::Double => 7,
                 };
                 // Resource parameters take an owner, as in transfer_call_operands.
                 let abi = abi | (u32::from(self.resource_types.contains(&element)) << 8);
@@ -149,6 +148,16 @@ impl Emitter<'_, '_> {
                 "imre_str_join",
                 Type::Str,
                 &[&args[0].value, &args[1].value],
+            ),
+            Builtin::StringReplace if args.len() == 4 => self.call(
+                "imre_str_replace_count",
+                Type::Str,
+                &[
+                    &args[0].value,
+                    &args[1].value,
+                    &args[2].value,
+                    &args[3].value,
+                ],
             ),
             Builtin::StringReplace => self.call(
                 "imre_str_replace",

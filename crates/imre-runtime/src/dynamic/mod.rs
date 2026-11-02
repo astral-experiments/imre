@@ -34,6 +34,7 @@ mod super_object;
 mod thread_callback;
 mod thread_local;
 mod thread_lock;
+mod thread_worker;
 mod typing;
 mod union;
 mod value;
@@ -90,6 +91,7 @@ impl IteratorSlice<'_> {
 
 pub(crate) struct Context {
     threads: lowlevel_threads::Workers,
+    workers: thread_worker::Registry,
     heap: Heap,
     config: serde_json::Value,
     executable: PathBuf,
@@ -2025,6 +2027,8 @@ impl Context {
                     let value = self.lookup_attr(path, name)?;
                     self.bind(scope, name, value);
                 }
+                let linesep = self.text(crate::objects::os::LINE_SEPARATOR);
+                self.bind(scope, "linesep", linesep);
                 self.bind(scope, "path", path);
                 self.publish_module("os.path", path)?;
             }
@@ -2035,6 +2039,7 @@ impl Context {
                 self.bind(scope, "devnull", devnull);
             }
             "errno" => stdlib::install_errno(self, scope)?,
+            "_socket" => stdlib::install_lowlevel_socket(self, scope)?,
             "_opcode" => {
                 // Imre emits native code and has no adaptive bytecode interpreter.
                 let disabled = self.int(0);
@@ -2108,9 +2113,14 @@ impl Context {
             _ => {}
         }
         if name == "_thread" && source.is_none() {
-            for function in ["start_new_thread", "_count"] {
+            for function in ["start_new_thread", "_count", "get_ident"] {
                 let value = self.builtin(&format!("_thread.{function}"));
                 self.bind(scope, function, value);
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                let id = self.builtin("_thread.get_native_id");
+                self.bind(scope, "get_native_id", id);
             }
         }
         if let Some((path, body)) = source {
@@ -2159,6 +2169,17 @@ impl Context {
                 && let Some(class) = self.scope_name(scope, "PatternError")
             {
                 self.classes.insert("re.PatternError".into(), class);
+            }
+            if name == "threading"
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("threading.py"))
+                && let (Some(class), Some(main)) = (
+                    self.scope_name(scope, "Thread"),
+                    self.scope_name(scope, "_main_thread"),
+                )
+            {
+                self.register_thread_run(class, main);
             }
             if name == "decimal"
                 && self.config["bundled_root"]

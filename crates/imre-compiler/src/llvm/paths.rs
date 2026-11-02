@@ -328,7 +328,7 @@ impl Emitter<'_, '_> {
                         u32::from(recursive)
                     )
                 } else {
-                    format!("call ptr @imre_path_iter(ptr {path}, ptr null)")
+                    format!("call ptr @imre_path_iterdir(ptr {path})")
                 };
                 let operand = self.checked_instruction(call);
                 self.owned(Value {

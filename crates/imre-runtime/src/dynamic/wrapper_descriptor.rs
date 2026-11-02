@@ -70,6 +70,7 @@ impl BuiltinDescriptor {
             "str.islower" => ("str", "islower"),
             "float.__format__" => ("float", "__format__"),
             "object.__hash__" => ("object", "__hash__"),
+            "classmethod.__get__" => ("classmethod", "__get__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
@@ -123,6 +124,7 @@ impl BuiltinDescriptor {
                 ctx.type_name(receiver) == class
             }
             "object" => true,
+            "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => {
                 ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
@@ -226,20 +228,24 @@ pub(super) fn descriptor_get(
         ));
     };
     let slot = match ctx.heap.get(descriptor) {
-        Value::Native(symbol) => BuiltinDescriptor::lookup(symbol),
-        _ => None,
-    }
-    .filter(|slot| slot.class() == class)
-    .ok_or_else(|| {
-        Error::new(
-            "TypeError",
-            format!(
-                "descriptor '__get__' requires a '{class}' object but received a '{}'",
-                ctx.builtin_type_name(descriptor)
-                    .unwrap_or_else(|| ctx.type_name(descriptor))
-            ),
-        )
-    })?;
+        Value::ClassMethod(_) if class == "classmethod" => None,
+        Value::Native(symbol)
+            if let Some(slot) = BuiltinDescriptor::lookup(symbol)
+                && slot.class() == class =>
+        {
+            Some(slot)
+        }
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '__get__' requires a '{class}' object but received a '{}'",
+                    ctx.builtin_type_name(descriptor)
+                        .unwrap_or_else(|| ctx.type_name(descriptor))
+                ),
+            ));
+        }
+    };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -252,7 +258,16 @@ pub(super) fn descriptor_get(
             "__get__ expected at least 1 argument, got 0",
         )),
         [NONE] | [NONE, NONE] => Err(Error::new("TypeError", "__get__(None, None) is invalid")),
-        [receiver] | [receiver, _] => slot.bind(ctx, descriptor, receiver),
+        [receiver] | [receiver, _] => {
+            if let Some(slot) = slot {
+                return slot.bind(ctx, descriptor, receiver);
+            }
+            let owner = match arguments.get(1) {
+                None | Some(&NONE) => ctx.exact_type(receiver)?,
+                Some(&owner) => owner,
+            };
+            ctx.bind_attribute(descriptor, receiver, owner)
+        }
         _ => Err(Error::new(
             "TypeError",
             format!(
