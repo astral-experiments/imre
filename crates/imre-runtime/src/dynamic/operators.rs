@@ -40,6 +40,13 @@ pub(super) fn surrogate_repr(points: &[u32]) -> String {
     result
 }
 
+/// Leave CPython's two native-stack margins available for exception handling.
+pub(super) fn remaining_repr_words() -> Option<usize> {
+    const STACK_MARGIN_WORDS: usize = 2048;
+    stacker::remaining_stack()
+        .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS))
+}
+
 fn render_allocation(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "")
 }
@@ -1608,16 +1615,12 @@ impl Context {
         // A pinned x86-64 CPython deque also formats a temporary list; each
         // nested deque uses 832 bytes, including its ordinary sequence frame.
         const EXTRA_DEQUE_FRAME_WORDS: usize = 104 - SEQUENCE_FRAME_WORDS;
-        const STACK_MARGIN_WORDS: usize = 2048;
-        let stack_words = checked
-            .then(stacker::remaining_stack)
-            .flatten()
-            .map(|bytes| (bytes / size_of::<usize>()).saturating_sub(2 * STACK_MARGIN_WORDS));
+        let stack_words = checked.then(remaining_repr_words).flatten();
         let slice_budget = stack_words.map(|words| words / SLICE_FRAME_WORDS);
         // A Python callback may run on a new stack segment. Its renderer
         // still shares the logical space left by the suspended containers.
         let sequence_stack_words = if checked {
-            stack_words.into_iter().chain(ctx.repr_sequence_words).min()
+            ctx.repr_sequence_words.or(stack_words)
         } else {
             None
         };

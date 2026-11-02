@@ -664,7 +664,8 @@ pub(super) fn new_context<S: Into<String>>(
         buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
-        repr_sequence_words: None,
+        // Measure the execution thread before entering the native Python evaluator.
+        repr_sequence_words: super::operators::remaining_repr_words(),
         token_missing: NONE,
         native_code_objects: HashMap::new(),
         source_builtins: None,
