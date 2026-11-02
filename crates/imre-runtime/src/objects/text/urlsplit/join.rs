@@ -155,9 +155,8 @@ pub unsafe extern "C" fn imre_url_join(
                     "Cannot mix str and non-str arguments",
                 ));
             }
-            // SAFETY: Both nonempty operands now have identical layouts.
-            let base = unsafe { decoded(base, base_bytes)? };
-            let url = unsafe { decoded(url, url_bytes)? };
+            // SAFETY: Both nonempty operands have the validated string or bytes layout.
+            let (base, url) = unsafe { (decoded(base, base_bytes)?, decoded(url, url_bytes)?) };
             let result = join_reference(base, url, |option| -> Result<bool> {
                 Ok(match option {
                     JoinOption::AllowFragments => fragments != 0,
