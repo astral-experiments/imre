@@ -62,7 +62,8 @@ fn clean(value: &str, scheme: bool) -> Result<Cow<'_, str>> {
     }
 }
 
-fn check_netloc(netloc: &str) -> Result<()> {
+/// Validate an authority shared by the typed and boxed URL parsers.
+pub(crate) fn check_netloc(netloc: &str) -> Result<()> {
     match (netloc.contains('['), netloc.contains(']')) {
         (true, false) | (false, true) => return Err(invalid("Invalid IPv6 URL")),
         (true, true) => {

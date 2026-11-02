@@ -1700,6 +1700,15 @@ impl IntrinsicModule {
             (Self::EmailUtils, "formatdate") => Intrinsic::EmailFormatDate,
             (Self::UrllibParse, "urljoin") => Intrinsic::UrlJoin,
             (Self::UrllibParse, "parse_qsl") => Intrinsic::ParseQsl,
+            (Self::UrllibParse, "urldefrag") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.urldefrag")
+            }
+            (Self::UrllibParse, "DefragResult") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.DefragResult")
+            }
+            (Self::UrllibParse, "DefragResultBytes") => {
+                Intrinsic::ObjectRuntimeExport("urllib.parse.DefragResultBytes")
+            }
             (Self::UrllibParse, "urlsplit") => Intrinsic::UrlSplit,
             (Self::UrllibParse, "urlunsplit") => Intrinsic::UrlUnsplit,
             (Self::UrllibParse, "SplitResult") => Intrinsic::SplitResult { bytes: false },
