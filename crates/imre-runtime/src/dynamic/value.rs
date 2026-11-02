@@ -1863,6 +1863,8 @@ struct Slot {
     trace: Cell<usize>,
     // Next in collection order while occupied, or next free slot while vacant.
     gc_next: Cell<usize>,
+    // Previous in collection order while occupied.
+    gc_prev: Cell<usize>,
     untracked_tuple: Cell<bool>,
     may_have_buffer_views: bool,
     finalization: Finalization,
@@ -1874,6 +1876,7 @@ impl Slot {
             value: Some(value),
             trace: Cell::new(UNMARKED),
             gc_next: Cell::new(UNMARKED),
+            gc_prev: Cell::new(UNMARKED),
             untracked_tuple: Cell::new(false),
             may_have_buffer_views: false,
             finalization: Finalization::None,
@@ -1914,6 +1917,7 @@ impl GcOrder {
         } else {
             slots[self.tail].gc_next.set(id);
         }
+        slots[id].gc_prev.set(self.tail);
         self.tail = id;
         slots[id].gc_next.set(END);
     }
@@ -1923,11 +1927,24 @@ impl GcOrder {
         if id == END {
             return None;
         }
-        self.head = slots[id].gc_next.replace(UNMARKED);
-        if self.head == END {
-            self.tail = END;
-        }
+        self.remove(id, slots);
         Some(id)
+    }
+
+    /// Unlink an occupied slot while keeping survivors in collection order.
+    fn remove(&mut self, id: usize, slots: &[Slot]) {
+        let previous = slots[id].gc_prev.replace(UNMARKED);
+        let next = slots[id].gc_next.replace(UNMARKED);
+        if previous == END {
+            self.head = next;
+        } else {
+            slots[previous].gc_next.set(next);
+        }
+        if next == END {
+            self.tail = previous;
+        } else {
+            slots[next].gc_prev.set(previous);
+        }
     }
 }
 
@@ -3425,12 +3442,6 @@ impl Heap {
     }
 
     fn sweep(&mut self) -> Option<WeakCallbacks> {
-        let mut scan = std::mem::replace(&mut self.gc_order, GcOrder::EMPTY);
-        while let Some(id) = scan.pop(&self.slots) {
-            if self.slots[id].marked() {
-                self.gc_order.push(id, &self.slots);
-            }
-        }
         self.ordinary_finalizers
             .retain(|&id| self.slots[id as usize].marked());
         self.file_writers.retain(|&id| {
@@ -3456,11 +3467,13 @@ impl Heap {
         });
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
-        for (id, slot) in self.slots.iter_mut().enumerate() {
+        for id in 0..self.slots.len() {
+            let slot = &self.slots[id];
             if slot.trace.replace(UNMARKED) == UNMARKED && slot.value.is_some() {
+                self.gc_order.remove(id, &self.slots);
+                let slot = &mut self.slots[id];
                 slot.value = None;
                 self.immutable_hashes.remove(&(id as Id));
-                debug_assert_eq!(slot.gc_next.get(), UNMARKED);
                 slot.gc_next.set(self.free_head);
                 self.free_head = id;
                 self.free_count += 1;
@@ -3478,6 +3491,36 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removing_heap_slots_preserves_collection_order() {
+        let original = [4, 2, 0, 3, 1, 5];
+        for mask in 0u8..(1 << original.len()) {
+            let slots = original.map(|_| Slot::new(Value::None));
+            let mut order = GcOrder::EMPTY;
+            for id in original {
+                order.push(id, &slots);
+            }
+            // Sweeping retires slots by index, independent of collection order.
+            for id in 0..slots.len() {
+                if mask & (1 << id) == 0 {
+                    order.remove(id, &slots);
+                }
+            }
+            let kept: Vec<_> = original
+                .into_iter()
+                .filter(|&id| mask & (1 << id) != 0)
+                .collect();
+            assert_eq!(order.tail, kept.last().copied().unwrap_or(END));
+            let remaining: Vec<_> = std::iter::from_fn(|| order.pop(&slots)).collect();
+            assert_eq!(remaining, kept);
+            assert!(
+                slots.iter().all(|slot| {
+                    slot.gc_prev.get() == UNMARKED && slot.gc_next.get() == UNMARKED
+                })
+            );
+        }
+    }
 
     #[test]
     fn reuse_vacant_slots_without_disturbing_survivors() {
