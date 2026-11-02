@@ -270,7 +270,48 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_calendar_format():
+    class Day(date):
+        def __str__(self):
+            return "custom day"
+
+        def strftime(self, spec):
+            return "called " + spec
+
+    class Moment(dt):
+        pass
+
+    class Clock(time):
+        def strftime(self, spec):
+            return 37
+
+    day = Day(2024, 2, 29)
+    assert dt.__format__ is date.__format__
+    assert type(date.__format__).__name__ == type(time.__format__).__name__ == "method_descriptor"
+    assert type(day.__format__).__name__ == "builtin_function_or_method"
+    assert format(day) == "custom day" and day.__format__("%Y") == "called %Y"
+    moment = Moment(2024, 2, 29)
+    moment.strftime = lambda spec: "instance " + spec
+    assert format(moment, "%m") == "instance %m"
+    assert format(date(2024, 2, 29)) == "2024-02-29"
+    assert Clock().__format__("%H") == 37
+    try:
+        format(Clock(), "%H")
+    except TypeError as exc:
+        assert str(exc) == "__format__ must return a str, not int"
+    else:
+        raise AssertionError("format accepted a non-string result")
+    for value in (day, dt(2024, 2, 29), time()):
+        try:
+            value.__format__(123)
+        except TypeError as exc:
+            assert str(exc) == "__format__() argument 1 must be str, not int"
+        else:
+            raise AssertionError("non-string format specifier accepted")
+
+
 def current():
+    test_calendar_format()
     test_timedelta_negation()
     test_subclass_construction()
     test_now()

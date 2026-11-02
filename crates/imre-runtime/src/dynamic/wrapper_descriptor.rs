@@ -68,7 +68,7 @@ impl BuiltinDescriptor {
                 method: !name.starts_with("__")
                     || matches!(
                         name,
-                        "__reversed__" | "__reduce__" | "__fspath__" | "__enter__" | "__exit__"
+                        "__reversed__" | "__reduce__" | "__fspath__" | "__format__" | "__enter__" | "__exit__"
                     ),
             });
         }
