@@ -69,7 +69,11 @@ pub(super) fn call(
         return ctx.call(close, vec![], Vec::new());
     }
     if let Some(writer) = super::bytes_writer::state(ctx, receiver) {
-        return writer.call(ctx, receiver, name, args);
+        return if name == "write" {
+            ctx.with_buffer_export(args[0], |ctx| writer.call(ctx, receiver, name, args))
+        } else {
+            writer.call(ctx, receiver, name, args)
+        };
     }
     if name == "detach" {
         return Err(Error::new("UnsupportedOperation", "detach"));

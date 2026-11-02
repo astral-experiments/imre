@@ -778,6 +778,8 @@ pub(super) enum Value {
     /// A contiguous view retains its original exporter until release.
     MemoryView {
         owner: Option<Id>,
+        // An ownerless C buffer has private backing storage but exposes obj as None.
+        anonymous: bool,
         hash: Option<i64>,
     },
     ByteArray(Vec<u8>),

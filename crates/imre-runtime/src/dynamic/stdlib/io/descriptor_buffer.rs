@@ -151,10 +151,13 @@ pub(super) fn initialize(
             "buffer size must be strictly positive",
         ));
     }
-    if !reading && super::bytes_writer::is_bytes_io(ctx, raw) {
-        return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize);
-    }
-    let handle = native_raw(ctx, raw, methods, owner)?;
+    let handle = match native_raw(ctx, raw, methods, owner) {
+        Ok(handle) => handle,
+        Err(_) if !reading => {
+            return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize);
+        }
+        Err(error) => return Err(error),
+    };
     if backing(ctx, receiver).is_some() || super::bytes_writer::state(ctx, receiver).is_some() {
         return Err(Error::new(
             "NotImplementedError",
@@ -329,9 +332,13 @@ fn buffer_error(ctx: &mut Context, error: io::Error) -> Error {
     else {
         return os_error(error);
     };
-    let errno = ctx.int(i64::from(blocked.errno));
+    blocking_error(ctx, blocked.errno, blocked.accepted)
+}
+
+pub(super) fn blocking_error(ctx: &mut Context, errno: i32, accepted: usize) -> Error {
+    let errno = ctx.int(i64::from(errno));
     let message = ctx.text(BlockedWrite::DESCRIPTION);
-    let accepted = ctx.int(blocked.accepted as i64);
+    let accepted = ctx.int(accepted as i64);
     ctx.os_exception("BlockingIOError", None, &[errno, message, accepted], None)
         .unwrap_or_else(|error| error)
 }
