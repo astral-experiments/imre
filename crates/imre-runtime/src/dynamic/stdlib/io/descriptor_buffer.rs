@@ -581,7 +581,11 @@ impl BufferedFd {
     /// Python raw methods and signal handlers can call back into a currently active buffer.
     fn check_reentry(&self, ctx: &Context) -> Result<()> {
         if self.busy.get() {
-            let class = if self.writing { "BufferedRandom" } else { "BufferedReader" };
+            let class = if self.writing {
+                "BufferedRandom"
+            } else {
+                "BufferedReader"
+            };
             let name = ctx.raw_instance_field(self.raw, "name");
             let value = name.map_or_else(
                 || format!("<_io.{class}>"),

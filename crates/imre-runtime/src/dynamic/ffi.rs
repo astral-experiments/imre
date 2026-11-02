@@ -792,7 +792,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         }
     });
     #[cfg(unix)]
-    let interrupted = result.as_ref().is_err_and(|e| ctx.is_builtin_error(e, "KeyboardInterrupt"));
+    let interrupted = result
+        .as_ref()
+        .is_err_and(|e| ctx.is_builtin_error(e, "KeyboardInterrupt"));
     let status = match result {
         Ok(_) => 0,
         Err(error) if ctx.is_builtin_error(&error, "SystemExit") => {

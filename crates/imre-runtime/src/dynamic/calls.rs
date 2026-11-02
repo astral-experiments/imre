@@ -48,7 +48,9 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         #[cfg(unix)]
         "_signal" if function == "sigpending" => Some((module, function)),
         #[cfg(unix)]
-        "_signal" if matches!(function, "default_int_handler" | "getsignal" | "signal") => Some((module, function)),
+        "_signal" if matches!(function, "default_int_handler" | "getsignal" | "signal") => {
+            Some((module, function))
+        }
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
         #[cfg(target_os = "linux")]
@@ -2245,6 +2247,18 @@ impl Context {
                     "__doc__" if symbol == "_typing._idfunc" => return Ok(NONE),
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "_signal.signal" => {
+                        return Ok(self.text("Set the action for the given signal.\n\nThe action can be SIG_DFL, SIG_IGN, or a callable Python object.\nThe previous action is returned.  See getsignal() for possible return values.\n\n*** IMPORTANT NOTICE ***\nA signal handler function is called with two arguments:\nthe first is the signal number, the second is the interrupted stack frame."));
+                    }
+                    "__text_signature__" if symbol == "_signal.signal" => {
+                        return Ok(self.text("($module, signalnum, handler, /)"));
+                    }
+                    "__doc__" if symbol == "_signal.getsignal" => {
+                        return Ok(self.text("Return the current action for the given signal.\n\nThe return value can be:\n  SIG_IGN -- if the signal is being ignored\n  SIG_DFL -- if the default action for the signal is in effect\n  None    -- if an unknown handler is in effect\n  anything else -- the callable Python object used as a handler"));
+                    }
+                    "__text_signature__" if symbol == "_signal.getsignal" => {
+                        return Ok(self.text("($module, signalnum, /)"));
+                    }
                     "__doc__" if symbol == "_signal.default_int_handler" => {
                         return Ok(self.text("The default handler for SIGINT installed by Python.\n\nIt raises KeyboardInterrupt."));
                     }

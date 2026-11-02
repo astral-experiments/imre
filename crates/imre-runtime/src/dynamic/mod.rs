@@ -2609,9 +2609,11 @@ impl Context {
             #[cfg(unix)]
             "_signal" if source.is_none() => {
                 stdlib::signal::initialize(self, scope);
-                for (name, disposition) in [("SIG_DFL", libc::SIG_DFL), ("SIG_IGN", libc::SIG_IGN)]
-                {
-                    let value = self.int(disposition as i64);
+                for (name, key, value) in [
+                    ("SIG_DFL", "_signal.SIG_DFL", libc::SIG_DFL),
+                    ("SIG_IGN", "_signal.SIG_IGN", libc::SIG_IGN),
+                ] {
+                    let value = self.signal_sentinel(key, value);
                     self.bind(scope, name, value);
                 }
                 for name in ["signal", "getsignal"] {

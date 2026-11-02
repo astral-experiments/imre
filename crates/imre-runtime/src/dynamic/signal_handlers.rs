@@ -3,10 +3,19 @@ use super::{Context, Error, Id, NONE, Result, Value, stdlib};
 use crate::signals::{self, Disposition};
 
 impl Context {
+    pub(super) fn signal_sentinel(&mut self, key: &str, value: libc::sighandler_t) -> Id {
+        if let Some(&id) = self.builtins.get(key) {
+            return id;
+        }
+        let id = self.int(value as i64);
+        self.builtins.insert(key.to_owned(), id);
+        id
+    }
+
     fn signal_handler(&mut self, number: i32, disposition: Option<Disposition>) -> Id {
         match disposition {
-            Some(Disposition::Default) => self.int(libc::SIG_DFL as i64),
-            Some(Disposition::Ignore) => self.int(libc::SIG_IGN as i64),
+            Some(Disposition::Default) => self.signal_sentinel("_signal.SIG_DFL", libc::SIG_DFL),
+            Some(Disposition::Ignore) => self.signal_sentinel("_signal.SIG_IGN", libc::SIG_IGN),
             Some(Disposition::Python) => self.python_handler(number),
             None => NONE,
         }
@@ -23,9 +32,13 @@ impl Context {
     }
 
     pub(super) fn dispatch_signals(&mut self) -> Result<()> {
-        if !signals::begin_dispatch() { return Ok(()); }
+        if !signals::begin_dispatch() {
+            return Ok(());
+        }
         for number in 1..signals::nsig() {
-            if signals::take(number) && matches!(signals::disposition(number), Ok(Some(Disposition::Python))) {
+            if signals::take(number)
+                && matches!(signals::disposition(number), Ok(Some(Disposition::Python)))
+            {
                 let handler = self.python_handler(number);
                 if handler != NONE {
                     let result = self.call_signal_handler(number, handler);
@@ -47,22 +60,37 @@ impl Context {
         Ok(())
     }
 
-    pub(super) fn signal_call(&mut self, name: &str, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    pub(super) fn signal_call(
+        &mut self,
+        name: &str,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
         if !kwargs.is_empty() {
-            return Err(Error::new("TypeError", format!("{name}() takes no keyword arguments")));
+            return Err(Error::new(
+                "TypeError",
+                format!("{name}() takes no keyword arguments"),
+            ));
         }
-        let expected = if name == "_signal.signal" { 2 } else { 1 };
+        let registering = name == "_signal.signal";
+        let expected = if registering { 2 } else { 1 };
         if args.len() != expected {
-            return Err(Error::new("TypeError", format!("{name} expected {expected} arguments, got {}", args.len())));
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected {expected} arguments, got {}", args.len()),
+            ));
         }
         let number = stdlib::index_c_int(self, args[0])?;
-        if expected == 2 && !signals::is_main() {
-            return Err(Error::new("ValueError", "signal only works in main thread of the main interpreter"));
+        if registering && !signals::is_main() {
+            return Err(Error::new(
+                "ValueError",
+                "signal only works in main thread of the main interpreter",
+            ));
         }
         if !(1..signals::nsig()).contains(&number) {
             return Err(Error::new("ValueError", "signal number out of range"));
         }
-        if expected == 1 {
+        if !registering {
             let existing = match signals::disposition(number) {
                 Ok(existing) => existing,
                 // Reserved numbers inside NSIG have no Python disposition.
@@ -78,11 +106,18 @@ impl Context {
             match self.heap.get(handler) {
                 Value::Int(i) if i.to_i64() == Some(libc::SIG_DFL as i64) => Disposition::Default,
                 Value::Int(i) if i.to_i64() == Some(libc::SIG_IGN as i64) => Disposition::Ignore,
-                _ => return Err(Error::new("TypeError", "signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object")),
+                _ => {
+                    return Err(Error::new(
+                        "TypeError",
+                        "signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object",
+                    ));
+                }
             }
         };
         self.dispatch_signals()?;
-        self.signal_handlers.try_reserve(1).map_err(|_| Error::new("MemoryError", ""))?;
+        self.signal_handlers
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
         let old = signals::install(number, action).map_err(stdlib::os_error)?;
         let old = self.signal_handler(number, old);
         if action == Disposition::Python {

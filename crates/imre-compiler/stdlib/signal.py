@@ -1,7 +1,8 @@
 """POSIX signal numbers, handlers, and pending signals."""
 
 import _signal
-from _signal import alarm, default_int_handler
+from _signal import NSIG, alarm, default_int_handler
+from _imre_signal import make_signals as _make_signals
 from enum import IntEnum as _IntEnum
 
 
@@ -17,9 +18,6 @@ def _int_to_enum(value, enum_klass):
     except ValueError:
         return value
 
-
-from _imre_signal import make_signals as _make_signals
-from _signal import NSIG
 
 Signals = _make_signals()
 
@@ -56,3 +54,7 @@ def signal(signalnum, handler):
 
 def getsignal(signalnum):
     return _int_to_enum(_signal.getsignal(signalnum), Handlers)
+
+
+signal.__doc__ = _signal.signal.__doc__
+getsignal.__doc__ = _signal.getsignal.__doc__

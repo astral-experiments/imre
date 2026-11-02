@@ -3461,7 +3461,11 @@ impl Context {
                     }
                 }
                 #[cfg(unix)]
-                let interrupt = if inject { None } else { self.dispatch_signals().err() };
+                let interrupt = if inject {
+                    None
+                } else {
+                    self.dispatch_signals().err()
+                };
                 #[cfg(not(unix))]
                 let interrupt: Option<Error> = None;
                 let raised = if inject {

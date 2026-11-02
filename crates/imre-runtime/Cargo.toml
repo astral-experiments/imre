@@ -9,9 +9,6 @@ license.workspace = true
 [lib]
 crate-type = ["rlib", "staticlib"]
 
-[target.'cfg(unix)'.dependencies]
-errno = "=0.3.14"
-
 [dependencies]
 allocator-api2 = "=0.2.21"
 blake2b_simd = "=1.0.5"

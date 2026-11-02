@@ -10,46 +10,12 @@ use super::{
 };
 use std::ffi::CStr;
 use std::io;
-use std::os::fd::RawFd;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
-/// A readable signal pipe closes the race between checking pending handlers and
-/// entering the wait. Threads without a wake fd only wait for the timeout.
-fn wait_for_sleep(remaining: Duration, wake: Option<RawFd>) -> io::Result<()> {
-    let mut descriptor = libc::pollfd {
-        fd: wake.unwrap_or(-1),
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    #[cfg(target_os = "linux")]
-    let ready = {
-        let delay = libc::timespec {
-            tv_sec: remaining.as_secs().try_into().unwrap_or(libc::time_t::MAX),
-            tv_nsec: remaining.subsec_nanos().into(),
-        };
-        // SAFETY: the descriptor and timeout live through ppoll. A negative fd is ignored.
-        unsafe { libc::ppoll(&mut descriptor, 1, &delay, std::ptr::null()) }
-    };
-    #[cfg(not(target_os = "linux"))]
-    let ready = {
-        let millis = remaining.as_nanos().div_ceil(1_000_000);
-        let timeout = i32::try_from(millis).unwrap_or(i32::MAX);
-        // SAFETY: poll borrows one initialized descriptor and ignores a negative fd.
-        unsafe { libc::poll(&mut descriptor, 1, timeout) }
-    };
-    if ready < 0 {
-        Err(io::Error::last_os_error())
-    } else if descriptor.revents & libc::POLLNVAL != 0 {
-        Err(io::Error::from_raw_os_error(libc::EBADF))
-    } else {
-        Ok(())
-    }
-}
-
-/// Sleep against a monotonic deadline so time spent running returning Python
-/// handlers counts toward the caller's original timeout.
+/// A signal delivered to the sleeping thread interrupts the native wait. A
+/// returning handler resumes against the same deadline, including callback time.
 pub(crate) fn sleep_ns<E: From<Error>>(
     nanos: i64,
     mut dispatch: impl FnMut() -> Result<(), E>,
@@ -57,27 +23,49 @@ pub(crate) fn sleep_ns<E: From<Error>>(
     if nanos < 0 {
         return Err(Error::new(Kind::ValueError, "sleep length must be non-negative").into());
     }
-    if nanos == 0 {
-        std::thread::yield_now();
-        return dispatch();
-    }
-    let start = Instant::now();
-    let duration = Duration::from_nanos(nanos as u64);
-    let wake = crate::signals::sleep_wakeup().map_err(super::errno_error)?;
+    let deadline =
+        monotonic_time().map_err(super::errno_error)? + Duration::from_nanos(nanos as u64);
+    dispatch()?;
     loop {
-        if wake.is_some() {
-            crate::signals::drain_wakeup();
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let delay = deadline;
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let delay = deadline.saturating_sub(monotonic_time().map_err(super::errno_error)?);
+        let when = libc::timespec {
+            tv_sec: delay.as_secs().try_into().map_err(|_| {
+                Error::new(
+                    Kind::OverflowError,
+                    "timestamp out of range for platform time_t",
+                )
+            })?,
+            tv_nsec: delay.subsec_nanos().into(),
+        };
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        // SAFETY: clock_nanosleep reads this absolute CLOCK_MONOTONIC timestamp.
+        let status = unsafe {
+            libc::clock_nanosleep(
+                libc::CLOCK_MONOTONIC,
+                libc::TIMER_ABSTIME,
+                &when,
+                std::ptr::null_mut(),
+            )
+        };
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        // SAFETY: nanosleep reads this relative delay; no remaining-time result is needed.
+        let status = if unsafe { libc::nanosleep(&when, std::ptr::null_mut()) } < 0 {
+            io::Error::last_os_error()
+                .raw_os_error()
+                .expect("nanosleep sets errno")
+        } else {
+            0
+        };
+        if status == 0 {
+            return dispatch();
+        }
+        if status != libc::EINTR {
+            return Err(super::errno_error(io::Error::from_raw_os_error(status)).into());
         }
         dispatch()?;
-        let remaining = duration.saturating_sub(start.elapsed());
-        if remaining.is_zero() {
-            return Ok(());
-        }
-        if let Err(error) = wait_for_sleep(remaining, wake)
-            && error.kind() != io::ErrorKind::Interrupted
-        {
-            return Err(super::errno_error(error).into());
-        }
     }
 }
 

@@ -45,7 +45,13 @@ fn signal_numbers() -> &'static [(&'static str, i32)] {
             numbers.push(("SIGRTMIN", libc::SIGRTMIN()));
             numbers.push(("SIGRTMAX", libc::SIGRTMAX()));
         }
-        #[cfg(any(target_vendor = "apple", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))]
+        #[cfg(any(
+            target_vendor = "apple",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "dragonfly"
+        ))]
         numbers.extend(signals!(SIGINFO, SIGEMT));
         numbers.sort_unstable_by_key(|&(name, number)| (number, name));
         numbers
@@ -122,7 +128,7 @@ fn pending(ctx: &mut Context) -> Result<Id> {
         frozen: false,
     });
     for number in 1..crate::signals::nsig() {
-        // SAFETY: sigpending initialized mask, and the signal is in the Linux ABI range.
+        // SAFETY: sigpending initialized mask, and the signal is in the host ABI range.
         if unsafe { libc::sigismember(mask.as_ptr(), number) } == 1 {
             let value = ctx.int(i64::from(number));
             builtins::set_add(ctx, set, value)?;

@@ -875,15 +875,17 @@ pub(super) fn descriptor(
         } else {
             // Keep the exporter alive and its size fixed while a handler runs.
             // Reborrow on retry so in-place changes made by the handler are visible.
-            ctx.with_buffer_export(*data, |ctx| loop {
-                let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
-                    Value::Array(array) => array.as_bytes(),
-                    _ => ctx.bytes_like(*data)?,
-                };
-                if let Some(count) = native::try_write(fd, bytes)? {
-                    return Ok(ctx.int(count as i64));
+            ctx.with_buffer_export(*data, |ctx| {
+                loop {
+                    let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
+                        Value::Array(array) => array.as_bytes(),
+                        _ => ctx.bytes_like(*data)?,
+                    };
+                    if let Some(count) = native::try_write(fd, bytes)? {
+                        return Ok(ctx.int(count as i64));
+                    }
+                    ctx.dispatch_signals()?;
                 }
-                ctx.dispatch_signals()?;
             })
         };
     }

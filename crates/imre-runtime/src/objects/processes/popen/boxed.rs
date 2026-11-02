@@ -180,11 +180,14 @@ impl BoxedPopen {
         Ok(status.map(ReturnCode::kernel))
     }
 
-    pub(crate) fn wait(&self, seconds: Option<f64>) -> Result<Option<i32>> {
-        Ok(self
-            .0
-            .borrow()
-            .wait(seconds.map(Deadline::Float).as_ref())?
+    pub(crate) fn wait<E: From<Error>>(
+        &self,
+        seconds: Option<f64>,
+        check: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<Option<i32>, E> {
+        let control = self.0.borrow().control.clone();
+        Ok(control
+            .wait_with(seconds.map(Deadline::Float).as_ref(), check)?
             .map(ReturnCode::kernel))
     }
 

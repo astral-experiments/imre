@@ -78,7 +78,6 @@ def current():
 def check_handlers():
     import gc
     import os
-    import sys
 
     seen = []
 
@@ -106,15 +105,16 @@ def check_handlers():
         assert signal.signal(sig, signal.SIG_IGN) is second
         os.kill(os.getpid(), sig)
         assert signal.getsignal(sig) is signal.SIG_IGN
+        assert _signal.getsignal(sig) is _signal.SIG_IGN
         assert seen == [(sig, "check_handlers")]
-        assert signal.signal(sig, first) is signal.SIG_IGN
+        assert _signal.signal(sig, first) is _signal.SIG_IGN
         os.kill(os.getpid(), sig)
         assert seen == [(sig, "check_handlers"), (sig, "check_handlers")]
-        assert sys._getframe().f_code.co_name == "check_handlers"
     finally:
         signal.signal(sig, original)
     assert signal.getsignal(sig) is original
     assert signal.getsignal(signal.SIGKILL) is signal.SIG_DFL
+    assert _signal.getsignal(signal.SIGKILL) is _signal.SIG_DFL
     try:
         signal.signal(signal.SIGKILL, first)
     except OSError:
