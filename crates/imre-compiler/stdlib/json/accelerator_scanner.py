@@ -1,4 +1,5 @@
 from _json import scanstring as _scanner_scanstring
+from _imre_json import scan_once as _native_scan_once
 
 
 def _scanner_arguments(function, names, args, kwargs):
@@ -46,14 +47,26 @@ class Scanner:
         # Capture the parsers after validating context, including when _json was
         # imported directly before json. The C scanner ignores the context's parsers.
         from functools import partial
-        from json.decoder import JSONArray, JSONObject
-        from json.scanner import _make_scan_once, NUMBER_RE
-        parse_object = partial(JSONObject, _propagate_stop=True, _key_scanstring=_scanner_scanstring)
-        parse_array = partial(JSONArray, _propagate_stop=True)
-        parser = partial(_make_scan_once, parse_object, parse_array, _scanner_scanstring, NUMBER_RE.match,
-                         self.strict, self.parse_float, self.parse_int, self.parse_constant,
-                         self.object_hook, self.object_pairs_hook)
-        object.__setattr__(self, "_scan", parser)
+        from json.decoder import JSONArray, JSONObject, _CONSTANTS
+        constant = self.parse_constant
+        if (self.strict and self.object_hook is None and self.object_pairs_hook is None
+                and self.parse_float is float and self.parse_int is int
+                and type(_CONSTANTS) is dict and type(constant) is type(_CONSTANTS.__getitem__)
+                and constant.__name__ == '__getitem__' and constant.__self__ is _CONSTANTS):
+            scan = partial(_native_scan_once, constant)
+        else:
+            from json.scanner import _make_scan_once, NUMBER_RE
+            parse_object = partial(JSONObject, _propagate_stop=True, _key_scanstring=_scanner_scanstring)
+            parse_array = partial(JSONArray, _propagate_stop=True)
+            parser = partial(_make_scan_once, parse_object, parse_array, _scanner_scanstring, NUMBER_RE.match,
+                             self.strict, self.parse_float, self.parse_int, constant,
+                             self.object_hook, self.object_pairs_hook)
+
+            def scan(string, idx):
+                # Reentrant calls from hooks must intern keys in their own memo.
+                return parser({})(string, idx)
+
+        object.__setattr__(self, "_scan", scan)
         return self
 
     def __init__(self, /, *args, **kwargs):
@@ -84,8 +97,7 @@ class Scanner:
         if idx < 0:
             raise ValueError("idx cannot be negative")
 
-        # Reentrant calls from hooks must intern keys in their own memo.
-        scan = self._scan({})
+        scan = self._scan
         if type(string) is str:
             return scan(string, idx)
 

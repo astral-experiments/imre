@@ -21,7 +21,7 @@ mod bytes;
 pub(crate) use bytes::DecodeIssue;
 pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
-    bytes_contains, bytes_contains_int, concat_bytes, owned_input as owned_bytes_input,
+    bytes_contains, bytes_contains_int, concat_bytes,
     repeat_bytes, split_bytes, strip_bytes,
 };
 pub(crate) mod cache_paths;
@@ -63,7 +63,7 @@ mod join_buffer;
 mod joined_lines;
 mod json;
 pub(crate) use json::{
-    DecodedJson, Indent as JsonIndent, JsonNumber, decode_json_tokens, decode_json_bytes, json_bom_error,
+    DecodedJson, Indent as JsonIndent, JsonNumber, JsonTokenError, decode_json_tokens_at,
     string_end as json_string_end, write_codepoints as write_json_codepoints,
     write_fragment as write_json_fragment, write_string as write_json_string,
 };

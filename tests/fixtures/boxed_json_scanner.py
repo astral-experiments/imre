@@ -30,6 +30,17 @@ class Context:
 def current():
     make = _json.make_scanner
     assert json.scanner.make_scanner is json.scanner.c_make_scanner is make
+    default_scan = json.JSONDecoder().scan_once
+    document = 'é [NaN, NaN]  suffix'
+    values, end = default_scan(document, 2)
+    assert end == document.index(']') + 1
+    assert values[0] is values[1] is json.decoder._CONSTANTS['NaN']
+    try:
+        default_scan('é [ ?', 2)
+    except StopIteration as error:
+        assert error.value == 4
+    else:
+        raise AssertionError('scanner accepted missing array value')
     context = Context()
     scan = make(context=context)
     print(context.reads)
