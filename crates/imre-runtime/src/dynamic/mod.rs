@@ -1987,6 +1987,12 @@ impl Context {
         self.bind(scope, "__name__", name_id);
         if source.is_some() {
             self.bind(scope, "__doc__", NONE);
+        } else if let Some(doc) = self.config["module_docs"].get(name) {
+            let doc = doc
+                .as_str()
+                .map(str::to_owned)
+                .map_or(NONE, |text| self.text(text));
+            self.bind(scope, "__doc__", doc);
         }
         if !locations.is_empty() {
             let dirs = locations

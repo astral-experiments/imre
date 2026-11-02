@@ -1920,6 +1920,7 @@ def report(text):
             "boxed_sequence_repeat.py",
             "boxed_sequence_order.py",
             "boxed_json_containers.py",
+            "boxed_json_module_doc.py",
             "boxed_deque.py",
             "boxed_deque_deep_equal.py",
             "boxed_deque_cycle_callbacks.py",
@@ -1968,6 +1969,8 @@ def report(text):
                 check_slice_stack(imre, imports, root, env)
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_json_module_doc.py":
+                compare("-IOOB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_recursive_repr.py":
                 for limit in (640, 4300, 0):
                     compare(
