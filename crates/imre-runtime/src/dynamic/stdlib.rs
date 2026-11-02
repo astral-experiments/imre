@@ -726,7 +726,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin("posix._path_splitroot_ex")
         }
         ("posix", "environ") => os::environment(ctx),
-        ("posix", "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
+        ("posix", "_create_environ" | "putenv" | "unsetenv") => ctx.builtin(&format!("posix.{name}")),
         ("os" | "posix", "getpid" | "urandom") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -1354,6 +1354,7 @@ pub(super) fn call(
             | "sys._jit.is_active"
             | "posix.getcwd"
             | "posix.getcwdb"
+            | "posix._create_environ"
     ) {
         // Strip the implicit receiver of functions bound to their module.
         let args = if name.starts_with("sys._jit.") || name == "sys.get_int_max_str_digits" {
@@ -1376,6 +1377,7 @@ pub(super) fn call(
             ));
         }
         return Ok(match name {
+            "posix._create_environ" => os::environment(ctx),
             "posix.getcwd" | "posix.getcwdb" => os::getcwd(ctx, name == "posix.getcwdb")?,
             "sys.getfilesystemencoding" => ctx
                 .heap

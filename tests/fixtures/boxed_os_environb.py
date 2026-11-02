@@ -57,6 +57,23 @@ def current():
             else:
                 raise AssertionError("accepted invalid POSIX environment data")
         assert os.environb[raw] == b"from bytes"
+
+        text_view, bytes_view, data = os.environ, os.environb, posix.environ
+        os.putenv(raw, b"\xfe")
+        assert bytes_view[raw] == b"from bytes"
+        snapshot = posix._create_environ()
+        assert snapshot[raw] == b"\xfe"
+        snapshot[raw] = b"local"
+        assert os.reload_environ() is None
+        assert os.environ is text_view and os.environb is bytes_view
+        assert posix.environ is data and data[raw] == b"\xfe"
+        assert text_view[key].encode(encoding, "surrogateescape") == b"\xfe"
+        os.unsetenv(raw)
+        assert raw in bytes_view
+        os.reload_environ()
+        assert raw not in data and key not in text_view and raw not in bytes_view
+
+        os.environb[raw] = b"from bytes"
         del os.environ[key]
         assert raw not in posix.environ
         fallback = object()
