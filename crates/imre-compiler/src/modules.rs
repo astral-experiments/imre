@@ -1711,6 +1711,9 @@ impl IntrinsicModule {
             (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
             (Self::Subprocess, "CalledProcessError") => Intrinsic::CalledProcessError,
             (Self::Subprocess, "TimeoutExpired") => Intrinsic::TimeoutExpired,
+            (Self::Posix, "_path_splitroot_ex") | (Self::PosixPath, "splitroot") => {
+                Intrinsic::ObjectRuntimeExport("posix._path_splitroot_ex")
+            }
             (Self::Posix, name) => os::symbol(name)?,
             (Self::Os, "makedirs") if cfg!(unix) => Intrinsic::ObjectRuntimeExport("os.makedirs"),
             (Self::Os, "F_OK") => Intrinsic::AccessMode(0),
