@@ -11,18 +11,34 @@ fn bytes_op(op: Builtin, args: Vec<Expr>) -> Expr {
 
 impl Checker<'_> {
     /// Resolve the bytes buffer before invoking the seed's integer index protocol.
-    pub(super) fn adler32(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let one = Expr {
+    pub(super) fn checksum(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &'static str,
+    ) -> Result<Expr, String> {
+        let adler = name == "zlib.adler32";
+        if !adler
+            && (!call.arguments.keywords.is_empty()
+                || !(1..=2).contains(&call.arguments.args.len()))
+        {
+            return Err(self.object_runtime_export(name, call));
+        }
+        let default = Expr {
             ty: Type::Int,
-            kind: ExprKind::Int("1".into()),
+            kind: ExprKind::Int(if adler { "1" } else { "0" }.into()),
         };
         let params = [
             ParameterKind::PositionalOnly.parameter("data", Type::Bytes, None),
-            ParameterKind::PositionalOnly.parameter("value", Type::Int, Some(one)),
+            ParameterKind::PositionalOnly.parameter("value", Type::Int, Some(default)),
         ];
         let args = self.arguments_with(call, &params, None, |checker, _, node| {
             checker.evaluated_argument(node)
-        })?;
+        });
+        let args = match args {
+            Ok(args) => args,
+            Err(_) if !adler => return Err(self.object_runtime_export(name, call)),
+            Err(error) => return Err(error),
+        };
         let mut scope = calls::ArgumentScope::default();
         let values: Vec<_> = args
             .values
@@ -31,6 +47,9 @@ impl Checker<'_> {
             .collect();
         let data = values[args.order[0]].clone();
         if data.ty != Type::Bytes {
+            if !adler {
+                return Err(self.object_runtime_export(name, call));
+            }
             let name = self.known_nonbuffer_type(data.ty).ok_or_else(|| {
                 error(
                     self.source,
@@ -50,7 +69,14 @@ impl Checker<'_> {
         }
         Ok(scope.finish(Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Adler32, vec![data, seed]),
+            kind: ExprKind::Builtin(
+                if adler {
+                    Builtin::Adler32
+                } else {
+                    Builtin::Crc32
+                },
+                vec![data, seed],
+            ),
         }))
     }
 

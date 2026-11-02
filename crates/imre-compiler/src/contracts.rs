@@ -109,7 +109,7 @@ impl Builtin {
                 ),
                 PreservesOwners,
             ),
-            Self::Adler32 => Contract::new(false, PreservesLists),
+            Self::Adler32 | Self::Crc32 => Contract::new(false, PreservesLists),
             Self::HmacCompareDigest { text } => Contract::new(*text, PreservesLists),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),

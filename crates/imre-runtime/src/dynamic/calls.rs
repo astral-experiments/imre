@@ -35,7 +35,8 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
         "functools" if matches!(function, "cmp_to_key" | "reduce") => {
             Some(("_functools", function))
         }
-        "zlib" if function == "adler32" => Some((module, function)),
+        "zlib" if matches!(function, "adler32" | "crc32") => Some((module, function)),
+        "binascii" if function == "crc32" => Some((module, function)),
         "hashlib"
             if matches!(function, "new" | "file_digest")
                 || crate::objects::HashState::algorithms().any(|name| name == function) =>
@@ -1779,6 +1780,18 @@ impl Context {
                     "__module__" => return Ok(self.text(module.to_owned())),
                     "__doc__" if symbol == "posix.urandom" => {
                         return Ok(self.text("Return a bytes object containing random bytes suitable for cryptographic use."));
+                    }
+                    "__text_signature__" if symbol == "zlib.crc32" => {
+                        return Ok(self.text("($module, data, value=0, /)"));
+                    }
+                    "__text_signature__" if symbol == "binascii.crc32" => {
+                        return Ok(self.text("($module, data, crc=0, /)"));
+                    }
+                    "__doc__" if symbol == "zlib.crc32" => {
+                        return Ok(self.text("Compute a CRC-32 checksum of data.\n\n  value\n    Starting value of the checksum.\n\nThe returned checksum is an integer."));
+                    }
+                    "__doc__" if symbol == "binascii.crc32" => {
+                        return Ok(self.text("Compute CRC-32 incrementally."));
                     }
                     "__text_signature__" if symbol == "posix.urandom" => {
                         return Ok(self.text("($module, size, /)"));

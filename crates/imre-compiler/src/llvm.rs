@@ -5735,8 +5735,12 @@ impl Emitter<'_, '_> {
             Builtin::BinasciiAsciiInput => {
                 self.call("imre_binascii_ascii_input", Type::Bytes, &[&args[0].value])
             }
-            Builtin::Adler32 => self.call(
-                "imre_zlib_adler32",
+            Builtin::Adler32 | Builtin::Crc32 => self.call(
+                if matches!(builtin, Builtin::Adler32) {
+                    "imre_zlib_adler32"
+                } else {
+                    "imre_zlib_crc32"
+                },
                 Type::Int,
                 &[&args[0].value, &args[1].value],
             ),
@@ -9401,6 +9405,7 @@ declare ptr @imre_base64_translate(ptr, ptr, i1)
 declare ptr @imre_binascii_ascii_input(ptr)
 declare ptr @imre_binascii_decode(ptr, i1)
 declare i64 @imre_zlib_adler32(ptr, i64)
+declare i64 @imre_zlib_crc32(ptr, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
 declare ptr @imre_binascii_unhexlify(ptr)
 declare ptr @imre_sha1_hex(ptr)

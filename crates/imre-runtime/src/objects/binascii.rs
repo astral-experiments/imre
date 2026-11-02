@@ -19,9 +19,9 @@ pub unsafe extern "C" fn imre_zlib_adler32(data: *const Bytes, seed: usize) -> u
     crate::Int::from_usize(adler32(data, &seed) as usize).into_raw()
 }
 
-/// Compute zlib's unsigned Adler-32 over a borrowed buffer and an arbitrary Python integer seed.
-pub(crate) fn adler32(data: &[u8], seed: &crate::Int) -> u32 {
-    let seed = if let Some(small) = seed.as_small() {
+/// Keep the low 32 bits of a Python checksum seed, including negative integers.
+fn checksum_seed(seed: &crate::Int) -> u32 {
+    if let Some(small) = seed.as_small() {
         small as u32
     } else {
         let big = seed.big();
@@ -31,7 +31,26 @@ pub(crate) fn adler32(data: &[u8], seed: &crate::Int) -> u32 {
         } else {
             low
         }
-    };
+    }
+}
+
+/// Compute the unsigned IEEE CRC-32 shared by zlib.crc32 and binascii.crc32.
+pub(crate) fn crc32(data: &[u8], seed: &crate::Int) -> u32 {
+    zlib_rs::crc32::crc32(checksum_seed(seed), data)
+}
+
+/// # Safety
+/// The caller roots the immutable bytes and tagged integer for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_zlib_crc32(data: *const Bytes, seed: usize) -> usize {
+    // SAFETY: both operands stay rooted and immutable during the checksum.
+    let (data, seed) = unsafe { (&*data, crate::Int::borrow(seed)) };
+    crate::Int::from_usize(crc32(data, &seed) as usize).into_raw()
+}
+
+/// Compute zlib's unsigned Adler-32 over a borrowed buffer and an arbitrary Python integer seed.
+pub(crate) fn adler32(data: &[u8], seed: &crate::Int) -> u32 {
+    let seed = checksum_seed(seed);
     const BASE: u32 = 65_521;
     if data.len() == 1 {
         // Match zlib's observable one-byte fast path, including its single

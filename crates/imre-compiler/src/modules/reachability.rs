@@ -50,7 +50,7 @@ impl References<'_> {
                     _ => false,
                 };
             }
-            Some(Binding::Intrinsic(Intrinsic::Adler32)) => Some(2),
+            Some(Binding::Intrinsic(Intrinsic::Adler32 | Intrinsic::Crc32(_))) => Some(2),
             Some(Binding::Intrinsic(Intrinsic::Credential(name))) => {
                 Some(super::credential_arity(name))
             }

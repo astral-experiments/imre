@@ -485,7 +485,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("selectors", "EVENT_READ") => ctx.int(1),
         ("selectors", "EVENT_WRITE") => ctx.int(2),
         ("sys", "argv") => ctx.argv,
-        ("zlib", "adler32") => ctx.builtin("zlib.adler32"),
+        ("zlib", "adler32" | "crc32") | ("binascii", "crc32") => {
+            ctx.builtin(&format!("{module}.{name}"))
+        }
         (
             "binascii",
             "Error" | "Incomplete" | "a2b_base64" | "b2a_base64" | "a2b_hex" | "unhexlify",
@@ -1140,11 +1142,11 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("math.") {
         return math::round(ctx, operation, args, kwargs);
     }
+    if matches!(name, "zlib.adler32" | "zlib.crc32" | "binascii.crc32") {
+        return binascii::checksum(ctx, name, args, kwargs);
+    }
     if let Some(method) = name.strip_prefix("binascii.") {
         return binascii::call(ctx, method, args, kwargs);
-    }
-    if name == "zlib.adler32" {
-        return binascii::adler32(ctx, args, kwargs);
     }
     if let Some(method) = name.strip_prefix("struct.Struct.") {
         return structure::method(ctx, method, args, kwargs);

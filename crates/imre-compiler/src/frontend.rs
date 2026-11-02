@@ -6321,7 +6321,7 @@ impl<'a> Checker<'a> {
                 Intrinsic::TracebackFormatter(name) => {
                     return Err(self.object_export_error(name, expression));
                 }
-                Intrinsic::ObjectRuntimeExport(name) => {
+                Intrinsic::ObjectRuntimeExport(name) | Intrinsic::Crc32(name) => {
                     return Err(self.object_runtime_export(name, expression));
                 }
                 Intrinsic::RegisteredImport(name) => {
@@ -9212,7 +9212,10 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::BinasciiUnhexlify(name))) => {
                 return self.binascii_unhexlify(call, name);
             }
-            Some(Binding::Intrinsic(Intrinsic::Adler32)) => return self.adler32(call),
+            Some(Binding::Intrinsic(Intrinsic::Adler32)) => {
+                return self.checksum(call, "zlib.adler32");
+            }
+            Some(Binding::Intrinsic(Intrinsic::Crc32(name))) => return self.checksum(call, name),
             Some(Binding::Intrinsic(
                 op @ (Intrinsic::BinasciiDecode | Intrinsic::BinasciiEncode),
             )) => {

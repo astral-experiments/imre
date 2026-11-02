@@ -1,4 +1,4 @@
-//! Runtime-loaded callers share the typed backend's Base64 codecs and Adler-32 checksum.
+//! Runtime-loaded callers share the typed backend's Base64 codecs and 32-bit checksums.
 use super::{Context, Error, Id, Result, Value};
 
 fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
@@ -91,15 +91,22 @@ pub(super) fn call(
 }
 
 /// Apply zlib's positional argument and buffer conversions before the shared checksum.
-pub(super) fn adler32(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+pub(super) fn checksum(
+    ctx: &mut Context,
+    symbol: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let adler = symbol == "zlib.adler32";
+    let name = if adler { "adler32" } else { "crc32" };
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            "zlib.adler32() takes no keyword arguments",
+            format!("{symbol}() takes no keyword arguments"),
         ));
     }
     let (data, seed) = match args {
-        [data] => (*data, crate::Int::from_usize(1)),
+        [data] => (*data, crate::Int::from_usize(usize::from(adler))),
         [data, seed] => {
             ctx.bytes_like(*data)?;
             let seed = ctx.with_buffer_export(*data, |ctx| ctx.index_integer(*seed))?;
@@ -108,16 +115,21 @@ pub(super) fn adler32(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         [] => {
             return Err(Error::new(
                 "TypeError",
-                "adler32 expected at least 1 argument, got 0",
+                format!("{name} expected at least 1 argument, got 0"),
             ));
         }
         _ => {
             return Err(Error::new(
                 "TypeError",
-                format!("adler32 expected at most 2 arguments, got {}", args.len()),
+                format!("{name} expected at most 2 arguments, got {}", args.len()),
             ));
         }
     };
-    let checksum = crate::objects::adler32(ctx.bytes_like(data)?, &seed);
+    let data = ctx.bytes_like(data)?;
+    let checksum = if adler {
+        crate::objects::adler32(data, &seed)
+    } else {
+        crate::objects::crc32(data, &seed)
+    };
     Ok(ctx.int(i64::from(checksum)))
 }
