@@ -16,12 +16,14 @@ pub(super) struct Program {
     qualname: String,
     class_attributes: Option<BTreeSet<String>>,
     class_cell: bool,
+    class_nonlocal: bool,
     doc: Option<ruff_text_size::TextRange>,
     literals: HashMap<ruff_text_size::TextRange, Id>,
     pub(super) string_roots: Id,
     first_line: u32,
     kind: FunctionKind,
     locals: HashSet<String>,
+    directives: HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
     reads: BTreeSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
     private_names: Option<Rc<imre_ast::Names>>,
@@ -35,6 +37,27 @@ enum FunctionKind {
     Plain,
     Generator,
     Coroutine,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ScopeDirective {
+    Global,
+    Nonlocal,
+}
+
+impl ScopeDirective {
+    fn keyword(self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Nonlocal => "nonlocal",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum EnclosingBinding {
+    Local,
+    ClassCell,
 }
 
 enum Instruction {
@@ -303,6 +326,7 @@ struct CompiledStrings<'a, 'ctx> {
     roots: Vec<Id>,
     pending: Vec<&'a ast::Expr>,
     reads: &'ctx mut BTreeSet<String>,
+    directives: &'ctx HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
     exhausted: bool,
 }
 
@@ -448,9 +472,52 @@ impl<'a> CompiledStrings<'a, '_> {
         self.keep(id)
     }
 
+    /// Only defaults and the outer iterable of a comprehension are evaluated in this scope.
+    fn check_directive_reads(&mut self) -> Result<()> {
+        use ast::visitor::Visitor;
+        let roots = std::mem::take(&mut self.pending);
+        for &root in &roots {
+            self.visit_expr(root);
+        }
+        while let Some(expr) = self.pending.pop() {
+            match expr {
+                ast::Expr::Name(name) => {
+                    if let Some((kind, position)) = self.directives.get(name.id.as_str())
+                        && name.start() < *position
+                        && name.ctx == ast::ExprContext::Load
+                    {
+                        return Err(Error::new(
+                            "SyntaxError",
+                            format!(
+                                "name '{}' is used prior to {} declaration",
+                                name.id,
+                                kind.keyword()
+                            ),
+                        ));
+                    }
+                }
+                ast::Expr::Lambda(lambda) => {
+                    if let Some(parameters) = &lambda.parameters {
+                        self.visit_parameters(parameters);
+                    }
+                }
+                ast::Expr::ListComp(comp) => self.visit_expr(&comp.generators[0].iter),
+                ast::Expr::SetComp(comp) => self.visit_expr(&comp.generators[0].iter),
+                ast::Expr::DictComp(comp) => self.visit_expr(&comp.generators[0].iter),
+                ast::Expr::Generator(comp) => self.visit_expr(&comp.generators[0].iter),
+                _ => ast::visitor::walk_expr(self, expr),
+            }
+        }
+        self.pending = roots;
+        Ok(())
+    }
+
     fn scan(&mut self) -> Result<(bool, Vec<&'a ast::ExprLambda>)> {
         use ast::visitor::Visitor;
         let mut lambdas = Vec::new();
+        if !self.directives.is_empty() {
+            self.check_directive_reads()?;
+        }
         let mut class_cell = false;
         while let Some(expr) = self.pending.pop() {
             match expr {
@@ -579,6 +646,7 @@ impl Program {
         let mut nested_reads = BTreeSet::new();
         let mut strings = CompiledStrings {
             reads: &mut self.reads,
+            directives: &self.directives,
             heap,
             shared,
             spellings,
@@ -706,7 +774,7 @@ impl Program {
             }
         }
         let (class_cell, lambdas) = strings.scan()?;
-        self.class_cell = class_cell;
+        self.class_cell |= class_cell;
         self.lambdas
             .try_reserve(lambdas.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
@@ -754,15 +822,108 @@ impl Program {
             }
         }
         self.string_roots = strings.finish();
+        // Even a nonlocal that is only assigned or deleted needs an enclosing cell.
+        self.reads.extend(
+            self.directives
+                .iter()
+                .filter(|(_, (kind, _))| *kind == ScopeDirective::Nonlocal)
+                .map(|(name, _)| name.clone()),
+        );
         if self.class_attributes.is_some() {
+            self.reads.retain(|name| {
+                !matches!(self.directives.get(name), Some((ScopeDirective::Global, _)))
+            });
             // Methods skip the class namespace when resolving free variables.
             self.reads.retain(|name| !self.locals.contains(name));
             self.reads.extend(nested_reads);
         } else {
             self.reads.extend(nested_reads);
-            self.reads.retain(|name| !self.locals.contains(name));
+            self.reads.retain(|name| {
+                !self.locals.contains(name)
+                    && !matches!(self.directives.get(name), Some((ScopeDirective::Global, _)))
+            });
         }
         Ok((self.string_roots, &self.reads))
+    }
+
+    fn declare(&mut self, kind: ScopeDirective, names: &[ast::Identifier]) -> Result<()> {
+        for name in names {
+            let spelling = name.as_str();
+            let message = if self
+                .directives
+                .get(spelling)
+                .is_some_and(|(old, _)| *old != kind)
+            {
+                Some(format!("name '{spelling}' is nonlocal and global"))
+            } else if self.locals.contains(spelling) {
+                Some(format!(
+                    "name '{spelling}' is assigned to before {} declaration",
+                    kind.keyword()
+                ))
+            } else {
+                None
+            };
+            if let Some(message) = message {
+                return Err(Error::new("SyntaxError", message));
+            }
+            self.directives
+                .insert(name.to_string(), (kind, name.start()));
+        }
+        Ok(())
+    }
+
+    /// Validate nonlocals against lexical function scopes, including bindings later in the body.
+    fn resolve_directives(
+        &mut self,
+        enclosing: &dyn Fn(&str) -> Option<EnclosingBinding>,
+        module_globals: &mut HashSet<String>,
+    ) -> Result<()> {
+        self.locals
+            .retain(|name| !self.directives.contains_key(name));
+        for (name, (kind, _)) in &self.directives {
+            if *kind == ScopeDirective::Global {
+                module_globals.insert(name.clone());
+            } else if let Some(binding) = enclosing(name) {
+                if matches!(binding, EnclosingBinding::ClassCell) {
+                    self.class_nonlocal = true;
+                    self.class_cell = true;
+                }
+            } else {
+                let message = if self.name == "<module>" {
+                    "nonlocal declaration not allowed at module level".to_owned()
+                } else {
+                    format!("no binding for nonlocal '{name}' found")
+                };
+                return Err(Error::new("SyntaxError", message));
+            }
+        }
+        let function = self.name != "<module>" && self.class_attributes.is_none();
+        let bound = |name: &str| {
+            if self.class_attributes.is_some() && name == "__class__" {
+                Some(EnclosingBinding::ClassCell)
+            } else if function && self.locals.contains(name) {
+                Some(EnclosingBinding::Local)
+            } else if function
+                && matches!(self.directives.get(name), Some((ScopeDirective::Global, _)))
+            {
+                None
+            } else {
+                enclosing(name)
+            }
+        };
+        for (_, op) in &mut self.instructions {
+            if let Instruction::Define(definition) = op {
+                let child = Rc::get_mut(&mut definition.body).expect("newly lowered child code");
+                child.resolve_directives(&bound, module_globals)?;
+                if child.class_cell
+                    && function
+                    && matches!(enclosing("__class__"), Some(EnclosingBinding::ClassCell))
+                {
+                    self.class_cell = true;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn new(filename: Rc<str>, name: &str) -> Self {
@@ -772,12 +933,14 @@ impl Program {
             qualname: name.to_owned(),
             class_attributes: None,
             class_cell: false,
+            class_nonlocal: false,
             doc: None,
             literals: HashMap::new(),
             string_roots: NONE,
             first_line: 1,
             kind: FunctionKind::Plain,
             locals: HashSet::new(),
+            directives: HashMap::new(),
             reads: BTreeSet::new(),
             method_imports: Rc::default(),
             private_names: None,
@@ -878,6 +1041,14 @@ impl Program {
             let line = lines.partition_point(|n| *n <= stmt.start().to_usize()) as u32;
             let op = match stmt {
                 Stmt::Pass(_) => continue,
+                Stmt::Global(s) => {
+                    self.declare(ScopeDirective::Global, &s.names)?;
+                    continue;
+                }
+                Stmt::Nonlocal(s) => {
+                    self.declare(ScopeDirective::Nonlocal, &s.names)?;
+                    continue;
+                }
                 Stmt::Expr(s) => match self.lower_suspension(*s.value, line, function)? {
                     Some(expr) => Instruction::Eval(expr),
                     None => continue,
@@ -895,6 +1066,12 @@ impl Program {
                     let ast::Expr::Name(name) = &*s.target else {
                         return Err(unsupported("annotated assignment target"));
                     };
+                    if let Some((kind, _)) = self.directives.get(name.id.as_str()) {
+                        return Err(Error::new(
+                            "SyntaxError",
+                            format!("annotated name '{}' can't be {}", name.id, kind.keyword()),
+                        ));
+                    }
                     self.locals.insert(name.id.to_string());
                     // Local annotations establish the binding without evaluating the annotation.
                     let Some(value) = s.value else { continue };
@@ -990,9 +1167,6 @@ impl Program {
                         }));
                     }
                     let mut child = self.definition_body(&s.name, &s.decorator_list, line, lines);
-                    child
-                        .locals
-                        .extend(s.parameters.iter().map(|p| p.name().to_string()));
                     if s.is_async {
                         if imre_ast::code_flags::is_generator(&s.body) {
                             return Err(unsupported("async generator function"));
@@ -1000,6 +1174,16 @@ impl Program {
                         child.kind = FunctionKind::Coroutine;
                     }
                     child.lower(s.body, lines, true, None)?;
+                    for param in s.parameters.iter() {
+                        let name = param.name().as_str();
+                        if let Some((kind, _)) = child.directives.get(name) {
+                            return Err(Error::new(
+                                "SyntaxError",
+                                format!("name '{name}' is parameter and {}", kind.keyword()),
+                            ));
+                        }
+                        child.locals.insert(name.to_owned());
+                    }
                     self.locals.insert(s.name.to_string());
                     Instruction::Define(Definition {
                         binding: s.name.to_string(),
@@ -1418,6 +1602,14 @@ impl Context {
             parsed.syntax(),
         ));
         code.lower(parsed.into_syntax().body, &lines, false, None)?;
+        let mut module_globals = HashSet::new();
+        code.resolve_directives(&|_| None, &mut module_globals)?;
+        // A global declared by a nested block makes module assignments use the globals dictionary.
+        for name in module_globals {
+            code.directives
+                .entry(name)
+                .or_insert((ScopeDirective::Global, 0.into()));
+        }
         code.prepare_strings(
             &mut self.heap,
             &mut SharedConstants::default(),
@@ -1985,6 +2177,14 @@ impl Context {
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);
         }
+        // The prelinked generator was compiled in its enclosing lexical scope.
+        program.resolve_directives(
+            &|name| {
+                (!code.closure_supported || code.freevars.iter().any(|var| var == name))
+                    .then_some(EnclosingBinding::Local)
+            },
+            &mut HashSet::new(),
+        )?;
         program.prepare_strings(
             &mut self.heap,
             &mut SharedConstants::default(),
@@ -2277,6 +2477,32 @@ impl Context {
         let Body::Source(code) = self.code_object(owner).body.clone() else {
             unreachable!("source frame")
         };
+        if cursor.ip == 0 && !code.directives.is_empty() {
+            // A class body's own cell belongs to its methods. The body closes over its defining cell.
+            let class_cell = match frame_owner {
+                FrameOwner::Function(function) => match self.heap.get(function) {
+                    Value::Function { class_cell, .. } => *class_cell,
+                    _ => None,
+                },
+                _ => self.scope_data(scope).class_cell,
+            };
+            let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                unreachable!()
+            };
+            for (name, (kind, _)) in &code.directives {
+                if code.class_nonlocal && name == "__class__" {
+                    let cell = class_cell
+                        .ok_or_else(|| Error::new("NameError", "empty __class__ cell"))?;
+                    frame.closure.cells.insert(name.clone(), cell);
+                    continue;
+                }
+                let names = match kind {
+                    ScopeDirective::Global => &mut frame.globals,
+                    ScopeDirective::Nonlocal => &mut frame.closure.nonlocals,
+                };
+                names.insert(name.clone());
+            }
+        }
         if cursor.advanced.is_none() {
             self.heap.reserve_temporaries(2)?;
             self.heap.keep(owner);
