@@ -172,6 +172,7 @@
           "original"
         ],
         "returncode": 0,
+        "seconds": 36.703,
         "stderr": "",
         "stdout": "START test.test_typing.RevealTypeTests.test_reveal_type\nPASS test.test_typing.RevealTypeTests.test_reveal_type\n"
       }
@@ -210,6 +211,7 @@
           "original"
         ],
         "returncode": 0,
+        "seconds": 26.196,
         "stderr": "",
         "stdout": "START test.test_typing.RevealTypeTests.test_reveal_type\nPASS test.test_typing.RevealTypeTests.test_reveal_type\n"
       }
