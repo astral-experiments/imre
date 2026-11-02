@@ -183,6 +183,18 @@ def test_time_strptime():
         raise AssertionError("invalid hour")
 
 
+def test_datetime_strptime():
+    class Stamp(dt):
+        pass
+
+    stamp = Stamp.strptime("2004-12-01 -00:02:01.000003", "%Y-%m-%d %z")
+    assert type(stamp) is Stamp
+    assert stamp.isoformat() == "2004-12-01T00:00:00-00:02:01.000003"
+    named = dt.strptime("+1234 UTC", "%z %Z")
+    assert named.utcoffset() == timedelta(hours=12, minutes=34)
+    assert named.tzname() == "UTC"
+
+
 def test_time_of_day():
     midnight = time()
     assert type(midnight) is time and isinstance(midnight, time)
@@ -852,6 +864,7 @@ def current():
     test_now()
     test_time_fromisoformat()
     test_time_strptime()
+    test_datetime_strptime()
     test_time_of_day()
     test_http_date()
     test_module_exports()
