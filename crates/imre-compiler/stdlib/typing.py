@@ -38,6 +38,90 @@ def is_protocol(tp: type, /) -> _builtins.bool:
     )
 
 
+_TYPING_INTERNALS = frozenset({
+    '__parameters__', '__orig_bases__',  '__orig_class__',
+    '_is_protocol', '_is_runtime_protocol', '__protocol_attrs__',
+    '__non_callable_proto_members__', '__type_params__',
+})
+
+_SPECIAL_NAMES = frozenset({
+    '__abstractmethods__', '__annotations__', '__dict__', '__doc__',
+    '__init__', '__module__', '__new__', '__slots__',
+    '__subclasshook__', '__weakref__', '__class_getitem__',
+    '__match_args__', '__static_attributes__', '__firstlineno__',
+    '__annotate__', '__annotate_func__', '__annotations_cache__',
+})
+
+# These special attributes will be not collected as protocol members.
+EXCLUDED_ATTRIBUTES = _TYPING_INTERNALS | _SPECIAL_NAMES | {'_MutableMapping__marker'}
+
+
+_protocol_annotation_names = None
+
+
+def _freeze_protocol_members(cls, declared_annotations):
+    global _protocol_annotation_names
+    provider = cls.__dict__.get('__annotate_func__')
+    if declared_annotations and provider is not None:
+        # Key the fallback by the original generated provider. A replacement
+        # must supply its own annotations and the cache must not retain classes.
+        if _protocol_annotation_names is None:
+            from weakref import WeakKeyDictionary
+            _protocol_annotation_names = WeakKeyDictionary()
+        _protocol_annotation_names[provider] = tuple(declared_annotations)
+    cls.__protocol_attrs__ = _get_protocol_attrs(cls)
+
+
+def _get_protocol_attrs(cls):
+    """Collect protocol members from a protocol class objects.
+
+    This includes names actually defined in the class dictionary, as well
+    as names that appear in annotations. Special names (above) are skipped.
+    """
+    attrs = set()
+    for base in cls.__mro__[:-1]:  # without object
+        if base.__name__ in {'Protocol', 'Generic'}:
+            continue
+        try:
+            annotations = base.__annotations__
+        except Exception:
+            # The class builder records executed annotation declarations even
+            # when a forward reference prevents evaluating their values.
+            provider = getattr(base, '__annotate__', None)
+            if provider is None:
+                annotations = ()
+            else:
+                try:
+                    annotations = provider(3)  # annotationlib.Format.FORWARDREF
+                except NotImplementedError:
+                    if _protocol_annotation_names is None or provider not in _protocol_annotation_names:
+                        raise
+                    annotations = _protocol_annotation_names[provider]
+        for attr in (*base.__dict__, *annotations):
+            if not attr.startswith('_abc_') and attr not in EXCLUDED_ATTRIBUTES:
+                attrs.add(attr)
+    return attrs
+
+
+def get_protocol_members(tp: type, /) -> frozenset[str]:
+    """Return the set of members defined in a Protocol.
+
+    Example::
+
+        >>> from typing import Protocol, get_protocol_members
+        >>> class P(Protocol):
+        ...     def a(self) -> str: ...
+        ...     b: int
+        >>> get_protocol_members(P) == frozenset({'a', 'b'})
+        True
+
+    Raise a TypeError for arguments that are not Protocols.
+    """
+    if not is_protocol(tp):
+        raise TypeError(f'{tp!r} is not a Protocol')
+    return frozenset(tp.__protocol_attrs__)
+
+
 class IO(Generic[AnyStr]):
     __slots__ = ()
 
