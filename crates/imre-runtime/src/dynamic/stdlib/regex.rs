@@ -1120,6 +1120,53 @@ fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
     }
 }
 
+/// The engine searches bytes, while matches on code-point strings index the original subject.
+struct SearchSubject {
+    id: Id,
+    bytes_pattern: bool,
+    projection: Option<surrogate::Projection>,
+}
+
+impl SearchSubject {
+    fn new(ctx: &Context, pattern: &Pattern, id: Id, method: &str) -> Result<Self> {
+        let projection = match ctx.heap.get(ctx.scalar_value(id)) {
+            Value::SurrogateStr(points) if !pattern.bytes => Some(surrogate::Projection::new(
+                ctx.str_value(pattern.source).ok(),
+                &pattern.regex,
+                method,
+                points,
+            )?),
+            _ => None,
+        };
+        Ok(Self {
+            id,
+            bytes_pattern: pattern.bytes,
+            projection,
+        })
+    }
+
+    fn bytes<'a>(&'a self, ctx: &'a Context) -> Result<&'a [u8]> {
+        match &self.projection {
+            Some(p) => Ok(p.text.as_bytes()),
+            None => subject_bytes(ctx, self.id, self.bytes_pattern),
+        }
+    }
+
+    fn original(&self, span: Span) -> Span {
+        self.projection.as_ref().map_or(span, |p| p.original(span))
+    }
+
+    fn slice(&self, ctx: &mut Context, span: Span) -> Result<Id> {
+        if let Some(p) = &self.projection {
+            let points = ctx.string_codepoints(self.id)?;
+            let slice = crate::dynamic::copy_ids(&points[p.original(span).range()])?;
+            return Ok(ctx.text_codepoints(slice));
+        }
+        let data = &subject_bytes(ctx, self.id, self.bytes_pattern)?[span.range()];
+        Ok(ctx.alloc(group_value(data, self.bytes_pattern)))
+    }
+}
+
 /// Convert the Python character bounds before searching the original UTF-8 text.
 pub(super) fn search(
     ctx: &mut Context,
@@ -1165,19 +1212,8 @@ pub(super) fn search(
             ));
         }
     };
-    let projection = match ctx.heap.get(ctx.scalar_value(string)) {
-        Value::SurrogateStr(points) if !pattern.bytes => Some(surrogate::Projection::new(
-            ctx.str_value(pattern.source).ok(),
-            &pattern.regex,
-            method,
-            points,
-        )?),
-        _ => None,
-    };
-    let text = match &projection {
-        Some(p) => p.text.as_bytes(),
-        None => subject_bytes(ctx, string, pattern.bytes)?,
-    };
+    let subject = SearchSubject::new(ctx, &pattern, string, method)?;
+    let text = subject.bytes(ctx)?;
     let byte = |i: usize| {
         if pattern.bytes || i >= text.len() {
             i.min(text.len())
@@ -1250,7 +1286,7 @@ pub(super) fn search(
     }
     let last = pattern.last_capture(&text[..end], &captures);
     let spans = group_spans(&captures)
-        .map(|span| span.map(|s| projection.as_ref().map_or(s, |p| p.original(s))))
+        .map(|span| span.map(|s| subject.original(s)))
         .collect();
     Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
         last,
