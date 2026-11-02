@@ -1988,6 +1988,7 @@ def report(text):
             "boxed_logging_formatter.py",
             "boxed_logging_file.py",
             "boxed_logging_adapter.py",
+            "boxed_logging_filter.py",
             "boxed_logging_file_error.py",
             "boxed_class_attribute.py",
             "boxed_missing_attribute_owners.py",
