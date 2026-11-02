@@ -1258,6 +1258,7 @@ impl Context {
                             | "typing.ParamSpecKwargs"
                             | "constevaluator"
                             | "typing.TypeVarTuple"
+                            | "typing.TypeAliasType"
                             | "typing._UnpackGenericAlias"
                             | "NoDefaultType"
                             | "typing._GenericAlias"

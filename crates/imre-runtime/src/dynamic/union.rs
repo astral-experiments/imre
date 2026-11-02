@@ -85,7 +85,7 @@ fn accepts(ctx: &Context, id: Id) -> bool {
         || ctx.builtin_type_name(id) == Some("type")
         || matches!(
             ctx.heap.get(id),
-            Value::GenericAlias(_) | Value::TypeVar(_) | Value::Union(_)
+            Value::GenericAlias(_) | Value::TypeAlias { .. } | Value::TypeVar(_) | Value::Union(_)
         )
         || matches!(ctx.heap.get(id), Value::Native(n) if matches!(n.as_str(), "typing.Any" | "typing.Callable"))
 }
@@ -182,7 +182,10 @@ pub(super) fn binary(ctx: &mut Context, left: Id, right: Id) -> Option<Result<Id
     {
         return Some(make(ctx, &[left, right]));
     }
-    if ctx.builtin_type_name(left) == Some("type") || ctx.builtin_type_name(right) == Some("type") {
+    if [left, right].into_iter().any(|id| {
+        ctx.builtin_type_name(id) == Some("type")
+            || matches!(ctx.heap.get(id), Value::TypeAlias { .. })
+    }) {
         let type_name = |value| {
             ctx.builtin_type_name(value)
                 .unwrap_or_else(|| ctx.type_name(value))
