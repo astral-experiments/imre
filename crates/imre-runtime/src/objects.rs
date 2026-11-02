@@ -448,35 +448,6 @@ pub unsafe extern "C" fn imre_seq_take_index_proven(value: *const Object, at: us
     }
 }
 
-/// Borrows one concrete sequence word after its current bounds were proved.
-/// Zero remains an ordinary scalar or absent value, never an error sentinel.
-///
-/// # Safety
-/// `value` must be a non-null rooted exact sequence, and `at` a decoded native index
-/// strictly below its current length. No mutable storage access may overlap the
-/// call. Consume or acquire the returned word with its exact declared type before
-/// removing or replacing that element. This does not acquire a reference, and
-/// neither a storage reference nor a growable buffer pointer escapes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_seq_borrow_index_proven(value: *const Object, at: usize) -> usize {
-    // SAFETY: SequenceGetInBounds supplies a non-null exact sequence and proves
-    // its current bounds. Its two emission paths either acquire the result
-    // immediately or keep an unchanged caller root. Neither a storage reference
-    // nor a pointer into the movable buffer escapes this nonreentrant read.
-    unsafe {
-        (&*value).0.with(|storage| {
-            let Storage::Sequence(values) = storage else {
-                // Exact kind is part of the same caller proof as the index.
-                std::hint::unreachable_unchecked()
-            };
-            finish(
-                values.resolved().map(|rows| *rows.values.get_unchecked(at)),
-                0,
-            )
-        })
-    }
-}
-
 /// Exposes an immutable word buffer only for a compiler-proven readonly loop.
 /// Empty sequences may return a dangling, aligned pointer that must not be read.
 ///
@@ -2387,7 +2358,6 @@ mod tests {
                 }
                 let view = imre_seq_data_readonly(sequence);
                 for (index, &word) in words.iter().enumerate() {
-                    assert_eq!(imre_seq_borrow_index_proven(sequence, index), word);
                     assert_eq!(view.add(index).read(), word);
                 }
                 imre_object_release(sequence);
@@ -2451,7 +2421,7 @@ mod tests {
             let sequence = imre_seq_new(6);
             imre_seq_append(sequence, record as usize, 6);
             imre_record_release(record);
-            let saved = imre_seq_borrow_index_proven(sequence, 0) as *const usize;
+            let saved = imre_seq_data_readonly(sequence).read() as *const usize;
             imre_record_retain(saved);
             imre_record_release(imre_seq_pop(sequence) as *const usize);
             imre_object_release(sequence);
