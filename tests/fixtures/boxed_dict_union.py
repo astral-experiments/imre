@@ -1,3 +1,4 @@
+from collections import defaultdict
 from types import SimpleNamespace
 
 
@@ -19,6 +20,38 @@ def current():
             return other
 
     assert left | Right() is left
+
+    class Defaults(dict):
+        def __getitem__(self, key):
+            raise AssertionError("union with inherited dict iteration must use stored values")
+
+    defaults = Defaults(shared=left_value, fallback=left_value)
+    merged = defaults | right
+    assert type(merged) is dict and list(merged) == ["shared", "fallback", "right"]
+    assert merged["shared"] is right_value and merged["fallback"] is left_value
+    assert type(left | defaults) is dict and defaults | Right() == dict(defaults)
+    assert dict.__ror__(defaults, right)["shared"] is left_value
+    assert dict.__or__(defaults, []) is NotImplemented
+
+    class DeclinesUnion(dict):
+        def __or__(self, other):
+            return NotImplemented
+
+    declined = DeclinesUnion(left)
+    assert declined | right == left | right
+    try:
+        declined | declined
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("identical types must not retry the reflected union")
+
+    auto = defaultdict(list, shared=left_value)
+    for merged in (auto | right, right | auto):
+        assert type(merged) is defaultdict and merged.default_factory is list
+        assert merged["missing"] == [] and "missing" not in auto
+    assert (auto | right)["shared"] is right_value and (right | auto)["shared"] is left_value
+    assert type(dict.__or__(auto, right)) is dict
 
     class Target(dict):
         def __setitem__(self, key, value):

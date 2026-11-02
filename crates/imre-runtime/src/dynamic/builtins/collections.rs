@@ -863,6 +863,8 @@ pub(super) fn method(
     let slot = matches!(
         name,
         "dict.__init__"
+            | "dict.__or__"
+            | "dict.__ror__"
             | "dict.__ior__"
             | "dict.__eq__"
             | "dict.__repr__"
@@ -946,9 +948,12 @@ pub(super) fn method(
         let representation = ctx.checked_container_slot_repr(object, receiver)?;
         return Ok(ctx.text(representation));
     }
-    if name == "dict.__ior__" {
+    if matches!(name, "dict.__or__" | "dict.__ror__" | "dict.__ior__") {
         if !kwargs.is_empty() {
-            return Err(type_error("wrapper __ior__() takes no keyword arguments"));
+            return Err(type_error(format!(
+                "wrapper {}() takes no keyword arguments",
+                &name[5..]
+            )));
         }
         let [other] = args else {
             return Err(type_error(format!(
@@ -956,8 +961,21 @@ pub(super) fn method(
                 args.len()
             )));
         };
-        update(ctx, receiver, Some(*other), &[])?;
-        return Ok(object);
+        if name == "dict.__ior__" {
+            update(ctx, receiver, Some(*other), &[])?;
+            return Ok(object);
+        }
+        let Some(other_storage) = ctx.dict_storage(*other) else {
+            return Ok(NOT_IMPLEMENTED);
+        };
+        let (left, storage, right) = if name == "dict.__ror__" {
+            (*other, other_storage, object)
+        } else {
+            (object, receiver, *other)
+        };
+        let merged = copy_dict(ctx, left, storage)?;
+        update(ctx, merged, Some(right), &[])?;
+        return Ok(merged);
     }
     if name == "dict.__eq__" {
         if !kwargs.is_empty() {
