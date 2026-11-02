@@ -5220,7 +5220,7 @@ impl Context {
     fn owns_allocation(&self, base: Id) -> bool {
         match self.heap.get(base) {
             Value::Native(_) => true,
-            Value::Class { .. } if self.classes.get("itertools.starmap") == Some(&base) => true,
+            Value::Class { .. } if self.is_starmap_type(base) => true,
             // These bootstrapped classes inherit their allocator from the next base.
             Value::Class { name, scope, .. } => {
                 let mapping_abc = super::mapping_abc::bootstrapped(name)

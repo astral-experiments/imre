@@ -3236,9 +3236,15 @@ impl Context {
                 self.bootstrap_file_spec = make_spec;
             }
             if name == "itertools"
+                && self.config["bundled_root"]
+                    .as_str()
+                    .is_some_and(|root| path == std::path::Path::new(root).join("itertools.py"))
                 && let Some(class) = self.scope_name(scope, "starmap")
+                && let Value::Class { scope, .. } = *self.heap.get(class)
+                && let Value::Scope(frame) = self.heap.get_mut(scope)
+                && let Some(layout) = &mut frame.class_namespace
             {
-                self.classes.insert("itertools.starmap".into(), class);
+                layout.starmap_layout = true;
             }
             if name == "itertools"
                 && let Some(owner) = self.scope_name(scope, "batched")

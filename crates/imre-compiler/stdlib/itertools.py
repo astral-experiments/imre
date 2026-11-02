@@ -172,7 +172,7 @@ def _make_starmap(_allocate, _advance):
                 raise TypeError("starmap() takes no keyword arguments")
             if len(args) != 2:
                 raise TypeError(f"starmap expected 2 arguments, got {len(args)}")
-            return _allocate(cls, args[0], iter(args[1]))
+            return _allocate(__class__, cls, args[0], iter(args[1]))
 
         def __init__(self, *args, **kwargs):
             if (args or kwargs) and type(self).__init__ is not __class__.__init__:
@@ -184,7 +184,7 @@ def _make_starmap(_allocate, _advance):
             return self
 
         def __next__(self):
-            return _advance(self)
+            return _advance(__class__, self)
 
         def __reduce__(self):
             if type(self) is __class__:

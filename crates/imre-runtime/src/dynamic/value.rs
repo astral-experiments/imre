@@ -664,6 +664,8 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 /// Data retained by class namespaces after their body has run.
 #[derive(Clone, Default)]
 pub(super) struct ClassNamespace {
+    /// Instances use the native storage owned by this generation of itertools.starmap.
+    pub starmap_layout: bool,
     pub bases: Id,
     pub mro: Id,
     /// A name assigned through type's __name__ descriptor, including a str subclass.

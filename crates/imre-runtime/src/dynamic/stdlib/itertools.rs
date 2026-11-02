@@ -237,23 +237,28 @@ pub(super) fn cycle_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     Ok(item)
 }
 
+impl Context {
+    pub(in crate::dynamic) fn is_starmap_type(&self, class: Id) -> bool {
+        matches!(self.heap.get(class), Value::Class { scope, .. } if
+            self.scope_data(*scope).class_namespace.as_ref().is_some_and(|ns| ns.starmap_layout))
+    }
+}
+
 pub(super) fn starmap_allocate(
     ctx: &mut Context,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let [class, function, source] = args else {
+    let [base, class, function, source] = args else {
         return Err(Error::new(
             "TypeError",
             "invalid starmap allocation arguments",
         ));
     };
-    let Some(&base) = ctx.classes.get("itertools.starmap") else {
-        return Err(Error::new("TypeError", "starmap type is not initialized"));
-    };
     if !kwargs.is_empty()
+        || !ctx.is_starmap_type(*base)
         || !matches!(ctx.heap.get(*class), Value::Class { ancestors, .. }
-            if (*class == base || ancestors.contains(&base))
+            if (*class == *base || ancestors.contains(base))
                 && ancestors.iter().all(|a| !matches!(ctx.heap.get(*a), Value::Native(kind) if kind != "object")))
     {
         return Err(Error::new(
@@ -261,22 +266,22 @@ pub(super) fn starmap_allocate(
             "expected a starmap subclass with compatible layout",
         ));
     }
-    Ok(callable_iterator(ctx, base, *class, *function, *source))
+    Ok(callable_iterator(ctx, *base, *class, *function, *source))
 }
 
 /// Fetch one row, fully unpack it, then invoke the saved callable.
 pub(super) fn starmap_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     if kwargs.is_empty()
-        && let [receiver] = args
-        && let Some(base) = ctx.classes.get("itertools.starmap")
+        && let [base, receiver] = args
+        && ctx.is_starmap_type(*base)
         && let Value::Instance {
             member_values: Some(values),
             ..
         } = ctx.heap.get(*receiver)
         && let Some(state) = values.get(base)
         && let Value::Tuple(pair) = ctx.heap.get(*state)
+        && let &[source, function] = pair.as_slice()
     {
-        let (source, function) = (pair[0], pair[1]);
         let mark = ctx.heap.temporary_mark();
         let row = ctx
             .next_result(source)?

@@ -69,3 +69,24 @@ def current():
     else:
         raise AssertionError("accepted a non-iterable argument row")
     assert next(cursor) == 8
+
+    # Reimporting the module creates another class. Existing instances and
+    # constructors must keep referring to their original native layout.
+    import sys
+    old = itertools.starmap
+    existing = old(pow, [(3, 2)])
+    saved_module = sys.modules.pop("itertools")
+    try:
+        fresh = __import__("itertools").starmap
+        assert next(existing) == 9
+        assert list(old(pow, [(4, 2)])) == [16]
+        assert list(fresh(pow, [(2, 5)])) == [32]
+        for owner in (old, fresh):
+            try:
+                object.__new__(owner)
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("unsafe bare allocation of a starmap generation")
+    finally:
+        sys.modules["itertools"] = saved_module
