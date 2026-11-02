@@ -3446,7 +3446,10 @@ impl Context {
             }
             Value::Native(ref class)
                 if class == "bool"
-                    && matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes") =>
+                    && matches!(
+                        name,
+                        "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
+                    ) =>
             {
                 return Ok(self.builtin(&format!("int.{name}")));
             }
@@ -3506,8 +3509,11 @@ impl Context {
                     || (name == "__repr__"
                         && matches!(class.as_str(), "bool" | "int" | "float"))
                     || (class == "int"
-                        && matches!(name, "__add__" | "__index__" | "bit_length" | "to_bytes"))
-                    || (class == "float" && name == "as_integer_ratio")
+                        && matches!(
+                            name,
+                            "__add__" | "__index__" | "__trunc__" | "bit_length" | "to_bytes"
+                        ))
+                    || (class == "float" && matches!(name, "__trunc__" | "as_integer_ratio"))
                     || (class == "str"
                         && (name == "maketrans" || builtins::STR_METHODS.contains(&name))) =>
             {
@@ -5500,6 +5506,7 @@ impl Context {
                             | "float.__getformat__"
                             | "bool.__repr__"
                             | "float.__repr__"
+                            | "float.__trunc__"
                             | "float.as_integer_ratio"
                             | "getset_descriptor.__set__"
                             | "getset_descriptor.__delete__"
