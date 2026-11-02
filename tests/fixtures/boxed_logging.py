@@ -60,3 +60,47 @@ def current():
     assert silent.handle(None) is None
     assert silent.emit(None) is None
     silent.close()
+
+    original = logging.getLogRecordFactory()
+    recorded = []
+
+    class CustomRecord(logging.LogRecord):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            recorded.append(self)
+
+    try:
+        logging.setLogRecordFactory(CustomRecord)
+        payload = {"name": "access", "msg": "request %d", "args": (42,)}
+        record = logging.makeLogRecord(payload)
+        assert type(record) is CustomRecord and record.getMessage() == "request 42"
+        assert record.levelname == "Level None" and record.taskName is None
+        child.info("issued %s", "GET")
+        issued = recorded[-1]
+        assert issued.getMessage() == "issued GET"
+        assert issued.funcName == "current" and issued.lineno > 0
+        assert issued.pathname == current.__code__.co_filename
+
+        def helper():
+            child.info("context", extra={"user_id": "42"}, stacklevel=2)
+
+        class OverrideLog(logging.Logger):
+            def log(self, *args, **kwargs):
+                raise AssertionError("convenience method called overridden log")
+
+        OverrideLog("override", logging.INFO).info("normal info path")
+        assert recorded[-1].getMessage() == "normal info path"
+        helper()
+        assert recorded[-1].funcName == "current" and recorded[-1].user_id == "42"
+        record = child.makeRecord("access", logging.INFO, "app.py", 11, "ok", (), None,
+                                  extra={"request_id": 42})
+        assert record.request_id == 42 and record.module == "app"
+        try:
+            child.makeRecord("access", logging.INFO, "app.py", 11, "ok", (), None,
+                             extra={"message": "override"})
+        except KeyError:
+            pass
+        else:
+            raise AssertionError("accepted reserved field")
+    finally:
+        logging.setLogRecordFactory(original)
