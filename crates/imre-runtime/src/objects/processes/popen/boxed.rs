@@ -70,6 +70,7 @@ impl BoxedPopen {
     pub(crate) fn prepare_handles(
         streams: &[(u32, Option<Int>); 3],
         pipesize: &Int,
+        bufsize: &Int,
     ) -> Result<PreparedHandles> {
         let modes = streams.each_ref().map(|(mode, _)| *mode);
         let fds = streams
@@ -77,7 +78,11 @@ impl BoxedPopen {
             .map(|(_, fd)| fd.as_ref().map_or(-1, |fd| redirect_number(fd).0));
         // SAFETY: pipesize is the live Python int designated by kind 2.
         let capacity = unsafe { super::pipe_size::capacity(pipesize.0, WordKind::new(2)) }?;
-        ChildPipes::open(&modes, fds, capacity).map_err(errno_error)
+        let handles = ChildPipes::open(&modes, fds, capacity).map_err(errno_error)?;
+        if modes.contains(&1) {
+            pipe_buffer_size(bufsize)?;
+        }
+        Ok(handles)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -96,7 +101,6 @@ impl BoxedPopen {
         pipesize: Int,
         start_new_session: bool,
         keep: Vec<RawFd>,
-        warn_line_buffering: &mut dyn FnMut() -> Result<()>,
     ) -> std::result::Result<Self, BoxedLaunchError> {
         let mut words = Words::new(8);
         words
@@ -144,7 +148,6 @@ impl BoxedPopen {
             failure_site: Some(&mut site),
             direct,
             search_path,
-            warn_line_buffering: Some(warn_line_buffering),
             environment: env,
             boxed_child: Some(ChildAttributes {
                 new_session: start_new_session,

@@ -97,14 +97,18 @@ fn environment_argument(ctx: &mut Context, value: Id) -> Result<CString> {
     c_path(ctx, path, "embedded null byte")
 }
 
+/// Encode a filesystem spelling, preserving embedded NULs until a C API needs termination.
+pub(super) fn path_bytes(ctx: &mut Context, path: Id) -> Result<Vec<u8>> {
+    match ctx.heap.get(ctx.scalar_value(path)) {
+        Value::Bytes(bytes) => super::super::copy_ids(bytes),
+        Value::Str(_) | Value::SurrogateStr(_) => ctx.encode_os_path(path),
+        _ => unreachable!("fspath returns str or bytes"),
+    }
+}
+
 /// Terminate the validated filesystem spelling before evaluating any later Python argument.
 pub(super) fn c_path(ctx: &mut Context, path: Id, nul_error: &str) -> Result<CString> {
-    let encoded = match ctx.heap.get(ctx.scalar_value(path)) {
-        Value::Bytes(bytes) => CString::new(bytes.as_slice()),
-        Value::Str(_) | Value::SurrogateStr(_) => CString::new(ctx.encode_os_path(path)?),
-        _ => unreachable!("fspath returns str or bytes"),
-    };
-    encoded.map_err(|_| Error::new("ValueError", nul_error))
+    CString::new(path_bytes(ctx, path)?).map_err(|_| Error::new("ValueError", nul_error))
 }
 
 /// Read cryptographically secure bytes from the operating system.

@@ -41,6 +41,23 @@ def current():
             else:
                 raise AssertionError("missing warning before argument conversion")
 
+        for options, kind, expected in (
+            ({"env": {"bad=name": "x"}}, ValueError, "illegal environment variable name"),
+            ({"executable": "bad\x00"}, ValueError, "bad value(s) in fds_to_keep"),
+            ({"env": {"A": "bad\x00"}}, ValueError, "bad value(s) in fds_to_keep"),
+            ({"bufsize": 2 ** 47, "stdout": subprocess.PIPE}, OverflowError,
+             "Python int too large to convert to C int"),
+            ({"bufsize": 1, "stdout": subprocess.PIPE}, RuntimeWarning, "line buffering"),
+        ):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", RuntimeWarning)
+                try:
+                    subprocess.Popen([true], pass_fds=(-1,), **options)
+                except kind as exc:
+                    assert expected in str(exc)
+                else:
+                    raise AssertionError("invalid descriptor launched child")
+
         # On the fork path a false-valued iterable can still yield a non-inheritable fd.
         class Keep:
             def __bool__(self):
