@@ -221,6 +221,12 @@ def check_index():
     assert surrogate.index(Text("\ud800🦊"), None, -1) == 1
     assert str.index(surrogate, "🦊") == 2
     assert surrogate.index("", 4, 10**80) == 4
+    repeated = Text("a\ud800\ud800\ud800")
+    assert repeated.find(Text("\ud800\ud800")) == 1
+    assert repeated.rfind(Text("\ud800\ud800"), 1, 10**80) == 2
+    assert repeated.rfind("", 1, -1) == 3
+    assert repeated.rfind("", 5) == -1
+    assert "abc".find("\ud800") == "abc".rfind("\ud800") == -1
     for call in (
         lambda: surrogate.index("", 5),
         lambda: surrogate.index("", 2, 1),
