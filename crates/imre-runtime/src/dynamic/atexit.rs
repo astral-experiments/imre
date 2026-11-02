@@ -181,6 +181,8 @@ pub(super) fn run(ctx: &mut Context) {
             let kwargs = ctx.keyword_args(kwargs)?;
             ctx.call(func, args, kwargs)
         });
+        let release_result = ctx.heap.observes_released_roots()
+            && matches!(result, Ok(value) if ctx.heap.could_own_finalizer(value, false));
         if let Err(error) = result {
             unraisable::report(
                 ctx,
@@ -191,6 +193,10 @@ pub(super) fn run(ctx: &mut Context) {
             );
         }
         ctx.heap.release_temporaries_since(entry_mark);
+        // CPython drops each callback result before invoking the next callback.
+        if release_result {
+            ctx.collect_unreachable();
+        }
     }
     // CPython decrefs the snapshot before clearing live registrations. A callback
     // unregistered during execution can register another in __del__.
