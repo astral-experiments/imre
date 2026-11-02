@@ -8,8 +8,8 @@ import os as _os
 import errno as _errno
 from _thread import allocate_lock as _allocate_lock
 
-from _imre_tempfile import abspath as _abspath, check_text_options as _check_text_options
-from _imre_tempfile import finish_named as _finish_named, keep_named as _keep_named, open_named as _open_named
+from _imre_tempfile import abspath as _abspath
+from _imre_tempfile import finalize_at_shutdown as _finalize_at_shutdown
 from _imre_tempfile import mkdir as _mkdir, random_name as _random_name
 
 TMP_MAX = 20
@@ -274,6 +274,7 @@ def mktemp(suffix="", prefix=template, dir=None):
 
 
 # From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+@_finalize_at_shutdown
 class _TemporaryFileCloser:
     """A separate object allowing proper closing of a temporary file's
     underlying file object, without adding a __del__ method to the
@@ -281,7 +282,6 @@ class _TemporaryFileCloser:
 
     cleanup_called = False
     close_called = False
-    _native_guard = None
 
     def __init__(
         self,
@@ -300,10 +300,6 @@ class _TemporaryFileCloser:
     def cleanup(self, windows=(_os.name == 'nt'), unlink=_os.unlink):
         if not self.cleanup_called:
             self.cleanup_called = True
-            if self._native_guard is not None:
-                # The Python closer now owns unlinking. A later native guard drop
-                # must not unlink a replacement at the same path.
-                _keep_named(self._native_guard)
             try:
                 if not self.close_called:
                     self.close_called = True
@@ -405,60 +401,43 @@ class _TemporaryFileWrapper:
         for line in self.file:
             yield line
 
+# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
 def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
                        suffix=None, prefix=None, dir=None, delete=True, *,
                        errors=None, delete_on_close=True):
     prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
-    if not isinstance(mode, str):
-        raise TypeError("mode must be a string")
-    text_write = mode in ("w", "wt", "tw")
-    write_only = text_write or mode in ("wb", "bw")
-    if not write_only and (len(mode) != 3 or set(mode) not in ({"b", "+", "w"}, {"b", "+", "r"})):
-        if len(set(mode)) != len(mode) or any(c not in "xrwabt+" for c in mode):
-            raise ValueError(f"invalid mode: {mode!r}")
-        if "b" in mode and "t" in mode:
-            raise ValueError("can't have text and binary mode at once")
-        kinds = sum(c in "xrwa" for c in mode)
-        if not kinds:
-            raise ValueError("Must have exactly one of create/read/write/append mode and at most one plus")
-        if kinds != 1:
-            raise ValueError("must have exactly one of create/read/write/append mode")
-        raise NotImplementedError("NamedTemporaryFile supports write mode and binary update mode")
-    if buffering != -1:
-        raise NotImplementedError("NamedTemporaryFile supports default buffering")
-    if text_write:
+
+    flags = _bin_openflags
+
+    # Setting O_TEMPORARY in the flags causes the OS to delete
+    # the file when it is closed.  This is only supported by Windows.
+    if _os.name == 'nt' and delete and delete_on_close:
+        flags |= _os.O_TEMPORARY
+
+    if "b" not in mode:
         encoding = _io.text_encoding(encoding)
-        _check_text_options(encoding, errors, newline)
-    else:
-        if encoding is not None:
-            raise ValueError("binary mode doesn't take an encoding argument")
-        if errors is not None:
-            raise ValueError("binary mode doesn't take an errors argument")
-        if newline is not None:
-            raise ValueError("binary mode doesn't take a newline argument")
-    if write_only:
-        file, name = _create_file(dir, prefix, suffix, output_type, _open_named, delete_on_close, True)
-        try:
-            if text_write:
-                file = _io.TextIOWrapper(file, encoding, errors, newline)
-                file.mode = mode
-            return _TemporaryFileWrapper(file, name, delete, delete_on_close)
-        except BaseException:
-            try:
-                file.close()
-            finally:
-                _os.unlink(name)
-            raise
-    (file, closer), name = _create_file(dir, prefix, suffix, output_type, _open_named, delete_on_close)
+
+    name = None
+    def opener(*args):
+        nonlocal name
+        fd, name = _mkstemp_inner(dir, prefix, suffix, flags, output_type)
+        return fd
     try:
-        keep = not delete
-        wrapper = _TemporaryFileWrapper(file, name, delete, delete_on_close)
-        wrapper._closer._native_guard = closer
-        if keep:
-            _keep_named(closer)
-        return wrapper
-    except BaseException:
-        _finish_named(closer, name, True)
+        file = _io.open(dir, mode, buffering=buffering,
+                        newline=newline, encoding=encoding, errors=errors,
+                        opener=opener)
+        try:
+            raw = getattr(file, 'buffer', file)
+            raw = getattr(raw, 'raw', raw)
+            raw.name = name
+            return _TemporaryFileWrapper(file, name, delete, delete_on_close)
+        except:
+            file.close()
+            raise
+    except:
+        if name is not None and not (
+            _os.name == 'nt' and delete and delete_on_close):
+            _os.unlink(name)
         raise
 
 

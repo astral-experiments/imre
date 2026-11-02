@@ -44,11 +44,6 @@ impl FileState {
         Ok(data)
     }
 
-    /// Whether truncate is invoking the size object's index protocol on this stream.
-    pub(crate) fn random_truncating(&self) -> bool {
-        matches!(&self.stream, Some(Stream::Random(file)) if file.truncating_name.is_some())
-    }
-
     /// A size object's index method can call back into the same buffered stream.
     pub(crate) fn check_random_reentry(&self) -> Result<()> {
         if let Some(Stream::Random(file)) = &self.stream
