@@ -909,7 +909,10 @@ pub(super) enum Value {
         receiver: Id,
         explicit: bool,
     },
-    ClassMethod(Id),
+    ClassMethod {
+        callable: Id,
+        dictionary: Id,
+    },
     StaticMethod {
         callable: Id,
         dictionary: Id,
@@ -1138,7 +1141,7 @@ impl Value {
                 (DictViewKind::Items, true) => "odict_items",
                 (DictViewKind::Values, true) => "odict_values",
             },
-            Self::ClassMethod(_) => "classmethod",
+            Self::ClassMethod { .. } => "classmethod",
             Self::ThreadLocal(_) => super::thread_local::CLASS,
             Self::ThreadHandle(_) => "_thread._ThreadHandle",
             Self::HandlerLock(_) => super::thread_rlock::CLASS,
@@ -1229,7 +1232,6 @@ impl Value {
             }
             Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
-            Self::ClassMethod(callable) => visit.push(*callable),
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
@@ -1480,7 +1482,11 @@ impl Value {
             Self::Method {
                 callable, receiver, ..
             } => visit.extend([*callable, *receiver]),
-            Self::StaticMethod {
+            Self::ClassMethod {
+                callable,
+                dictionary,
+            }
+            | Self::StaticMethod {
                 callable,
                 dictionary,
             } => visit.extend([*callable, *dictionary]),

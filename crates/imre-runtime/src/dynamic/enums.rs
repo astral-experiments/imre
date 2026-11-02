@@ -303,7 +303,7 @@ impl Context {
             Value::Property(_)
                 | Value::Function { .. }
                 | Value::StaticMethod { .. }
-                | Value::ClassMethod(_)
+                | Value::ClassMethod { .. }
         ) {
             return Ok(true);
         }

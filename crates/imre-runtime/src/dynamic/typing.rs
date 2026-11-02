@@ -1835,7 +1835,7 @@ impl Context {
             if let Some(&function) = self.scope_data(scope).names.get(name)
                 && matches!(self.heap.get(function), Value::Function { .. })
             {
-                let method = self.alloc(Value::ClassMethod(function));
+                let method = super::method_decorator::class_method(self, function)?;
                 self.bind_local(scope, name, method);
             }
         }

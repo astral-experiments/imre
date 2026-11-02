@@ -691,7 +691,7 @@ impl Context {
                 explicit: false,
             }));
         }
-        if let Value::ClassMethod(callable) = *self.heap.get(value) {
+        if let Value::ClassMethod { callable, .. } = *self.heap.get(value) {
             return Ok(self.alloc(Value::Method {
                 callable,
                 receiver: owner,
@@ -1913,22 +1913,16 @@ impl Context {
                     }));
                 }
             }
-            Value::ClassMethod(callable) if name == "__isabstractmethod__" => {
-                return Ok(if self.is_abstract_method(callable)? {
-                    TRUE
-                } else {
-                    FALSE
-                });
+            Value::ClassMethod {
+                callable,
+                dictionary,
             }
-            Value::ClassMethod(callable) if matches!(name, "__func__" | "__wrapped__") => {
-                return Ok(callable);
-            }
-            Value::StaticMethod {
+            | Value::StaticMethod {
                 callable,
                 dictionary,
             } => {
                 if let Some(value) =
-                    super::static_method::attribute(self, callable, dictionary, name)?
+                    super::method_decorator::attribute(self, callable, dictionary, name)?
                 {
                     return Ok(value);
                 }
@@ -3637,8 +3631,8 @@ impl Context {
                 self.heap.get_mut(obj).property_mut().unwrap().doc = NONE;
                 Ok(())
             }
-            Value::StaticMethod { dictionary, .. } => {
-                super::static_method::update_attribute(self, obj, dictionary, name, None)
+            Value::StaticMethod { dictionary, .. } | Value::ClassMethod { dictionary, .. } => {
+                super::method_decorator::update_attribute(self, obj, dictionary, name, None)
             }
             Value::Module { scope, .. } => {
                 self.update_module_annotations(scope, name, None)?;
@@ -3912,9 +3906,9 @@ impl Context {
             Value::Function { fields, .. } => self.function_attr(obj, fields, "__dict__")?,
             Value::Raised(ref error) => error.trace.as_ref().and_then(|trace| trace.dictionary),
             Value::Partial { dictionary, .. } => dictionary,
-            Value::StaticMethod { dictionary, .. } | Value::Cached { dictionary, .. } => {
-                Some(dictionary)
-            }
+            Value::ClassMethod { dictionary, .. }
+            | Value::StaticMethod { dictionary, .. }
+            | Value::Cached { dictionary, .. } => Some(dictionary),
             Value::Class { scope, .. }
                 if self.classes.get(super::namespace::CLASS) != Some(&obj) =>
             {
@@ -4182,8 +4176,10 @@ impl Context {
             error.context = value;
             return Ok(());
         }
-        if let Value::StaticMethod { dictionary, .. } = *self.heap.get(obj) {
-            return super::static_method::update_attribute(
+        if let Value::StaticMethod { dictionary, .. } | Value::ClassMethod { dictionary, .. } =
+            *self.heap.get(obj)
+        {
+            return super::method_decorator::update_attribute(
                 self,
                 obj,
                 dictionary,

@@ -198,7 +198,7 @@ impl BuiltinDescriptor {
             "generator" => matches!(ctx.heap.get(receiver), Value::Generator { .. }),
             "object" => true,
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
-            "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod(_)),
+            "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod { .. }),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => {
                 ctx.instance_of(receiver, ctx.classes[super::namespace::CLASS])
@@ -382,7 +382,7 @@ pub(super) fn descriptor_get(
         ));
     };
     let slot = match ctx.heap.get(descriptor) {
-        Value::ClassMethod(_) if class == "classmethod" => None,
+        Value::ClassMethod { .. } if class == "classmethod" => None,
         Value::Native(symbol)
             if let Some(slot) = BuiltinDescriptor::lookup(symbol)
                 && slot.class() == class =>
