@@ -1,4 +1,5 @@
 use super::{Context, Error, Id, NONE, Result, Value, collections, type_error};
+use crate::dynamic::typing::{AliasKind, forwards_to_origin};
 use std::collections::BTreeSet;
 
 /// Apply the type's special method and sort a fresh list, preserving duplicates and comparison errors.
@@ -36,6 +37,19 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut names = BTreeSet::new();
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
+        Value::GenericAlias(alias) if matches!(alias.kind, AliasKind::Literal(_)) => {
+            let origin = alias.origin;
+            names.extend(alias.literal_fields().map(|(name, _)| name.to_owned()));
+            names.insert("__mro_entries__".to_owned());
+            let origin_names = call(ctx, &[origin], &[])?;
+            for key in ctx.items(origin_names)? {
+                let name = ctx.str_value(key)?;
+                if forwards_to_origin(name) {
+                    names.insert(name.to_owned());
+                }
+            }
+            ctx.builtin("object")
+        }
         Value::ParamSpec(_) => {
             names.extend(super::super::paramspec::names().map(str::to_owned));
             ctx.builtin("object")

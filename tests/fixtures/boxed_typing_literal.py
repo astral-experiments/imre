@@ -8,6 +8,18 @@ def current():
     print(Literal[1] == Literal[True], Literal[Literal[1], True, 1].__args__)
     print({Literal[1, 2]: "value"}[Literal[2, 1]])
 
+    class Origin:
+        marker = object()
+
+        def __dir__(self):
+            return ["marker", "__hidden__", "marker"]
+
+    alias = type(ssl_mode)(Origin(), (1,))
+    names = dir(alias)
+    assert {"__args__", "__parameters__", "__origin__", "_inst", "_name", "__mro_entries__", "__class__"} <= set(names)
+    assert names.count("marker") == 1 and "__hidden__" not in names
+    assert alias.marker is Origin.marker and alias._name is None and alias._inst is True
+
     class Key:
         def __hash__(self):
             if broken:

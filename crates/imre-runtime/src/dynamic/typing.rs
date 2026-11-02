@@ -135,6 +135,24 @@ pub(super) struct Alias {
     pub instantiable: bool,
 }
 
+impl Alias {
+    /// Instance fields stored by the boxed Literal alias.
+    pub(super) fn literal_fields(&self) -> [(&'static str, Id); 5] {
+        [
+            ("__args__", self.args),
+            ("__origin__", self.origin),
+            ("__parameters__", self.parameters),
+            ("_name", self.name.unwrap_or(NONE)),
+            ("_inst", if self.instantiable { TRUE } else { FALSE }),
+        ]
+    }
+}
+
+/// Typing aliases delegate non-dunder attribute names to the origin.
+pub(super) fn forwards_to_origin(name: &str) -> bool {
+    !(name.starts_with("__") && name.ends_with("__"))
+}
+
 #[derive(Default)]
 pub(super) struct Registry {
     alias_caches: [Option<Id>; 2],
@@ -901,6 +919,15 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             }
             _ => return None,
         },
+        Value::GenericAlias(a) if matches!(a.kind, AliasKind::Literal(_)) => {
+            if let Some((_, field)) = a.literal_fields().into_iter().find(|(key, _)| *key == name) {
+                field
+            } else if forwards_to_origin(name) {
+                return Some(ctx.lookup_attr(a.origin, name));
+            } else {
+                return None;
+            }
+        }
         Value::GenericAlias(a) => match name {
             "__typing_is_unpacked_typevartuple__" if a.kind == AliasKind::Unpack => {
                 if is_unpacked_pack(ctx, value) {
@@ -938,7 +965,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__args__" => a.args,
             "__origin__" => a.origin,
             "__parameters__" => a.parameters,
-            attr if a.name.is_some() && !(attr.starts_with("__") && attr.ends_with("__")) => {
+            attr if a.name.is_some() && forwards_to_origin(attr) => {
                 return Some(ctx.lookup_attr(a.origin, attr));
             }
             _ => return None,
