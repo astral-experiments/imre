@@ -697,7 +697,7 @@ class TestResult:
             if self.failfast:
                 self.stop()
 
-    def _recordException(self, case: TestCase, exc: Exception, detail: str) -> None:
+    def _recordException(self, case: TestCase, exc: BaseException, detail: str) -> None:
         if isinstance(exc, case.failureException):
             self.failures.append((case, detail))
             self._mark("F", "FAIL")

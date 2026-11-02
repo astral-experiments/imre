@@ -16,6 +16,16 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "unittest_method_skip_preserves_typed_call": ({
+        "main.py": (
+            "import unittest\n"
+            "class Case(unittest.TestCase):\n"
+            "    @unittest.skipUnless(False, 'feature required')\n"
+            "    def test_body(self): pass\n"
+            "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "second_base_has_storage": ({
         "main.py": (
             "class Left:\n    def __init__(self, x: int): self.left = x\n"

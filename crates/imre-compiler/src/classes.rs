@@ -325,6 +325,7 @@ fn unittest_skip_decorator(
     graph: &SourceGraph,
     module: usize,
     decorator: &ast::Decorator,
+    class_names: Option<&HashSet<String>>,
 ) -> Result<Option<SkipDecorator>, String> {
     let ast::Expr::Call(call) = &decorator.expression else {
         return Ok(None);
@@ -332,6 +333,13 @@ fn unittest_skip_decorator(
     let ast::Expr::Attribute(attr) = call.func.as_ref() else {
         return Ok(None);
     };
+    if class_names.is_some_and(|names| {
+        attr.value
+            .as_name_expr()
+            .is_none_or(|owner| names.contains(owner.id.as_str()))
+    }) {
+        return Ok(None);
+    }
     let Some(Binding::Module(owner)) = graph.resolve(module, &attr.value) else {
         return Ok(None);
     };
@@ -366,7 +374,7 @@ fn identity_skip_decorator(graph: &SourceGraph, module: usize, decorator: &ast::
     let ast::Expr::Attribute(attr) = &*call.func else {
         return false;
     };
-    let Ok(Some(skip)) = unittest_skip_decorator(graph, module, decorator) else {
+    let Ok(Some(skip)) = unittest_skip_decorator(graph, module, decorator, None) else {
         return false;
     };
     if !matches!(skip.reason, ast::Expr::StringLiteral(_))
@@ -500,7 +508,7 @@ fn collect_class(
     }
     let mut skip_decorators = Vec::new();
     for decorator in &node.decorator_list {
-        let Some(skip) = unittest_skip_decorator(graph, definition.module, decorator)? else {
+        let Some(skip) = unittest_skip_decorator(graph, definition.module, decorator, None)? else {
             skip_decorators.clear();
             break;
         };
@@ -784,6 +792,24 @@ fn collect_class(
                     );
                 }
                 let kind = if abstract_method {
+                    MethodKind::Instance
+                } else if let [decorator] = method.decorator_list.as_slice()
+                    && unittest_skip_decorator(
+                        graph,
+                        definition.module,
+                        decorator,
+                        Some(&class_bindings),
+                    )?
+                    .is_some()
+                {
+                    // The public decorator can wrap even a direct method call and evaluates
+                    // its arguments while the class namespace is being constructed.
+                    let error = module.error(
+                        decorator,
+                        "unittest method skips require native class construction",
+                    );
+                    graph.class_body_error.borrow_mut().get_or_insert(error);
+                    graph.check_decorated_method_calls.set(true);
                     MethodKind::Instance
                 } else {
                     method_kind(graph, definition.module, method, &class_bindings)?
