@@ -73,6 +73,24 @@ def test_class_constants():
         assert (cls.min, cls.max, cls.resolution) == (smallest, largest, step)
         assert smallest.min is cls.min and largest.max is cls.max
         assert smallest.resolution is cls.resolution
+    limit = timedelta(hours=23, minutes=59)
+    for edge, offset in [(timezone.min, -limit), (timezone.max, limit)]:
+        assert type(edge) is timezone and edge == timezone(offset)
+        assert edge.min is timezone.min and edge.max is timezone.max and edge.utc is UTC
+    assert UTC.utc is UTC is timezone.utc
+    for constant in ("min", "max", "utc"):
+        try:
+            setattr(timezone, constant, None)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError(constant)
+        try:
+            delattr(UTC, constant)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError(constant)
     assert dt.resolution is not time.resolution
     assert time.resolution is not timedelta.resolution
 

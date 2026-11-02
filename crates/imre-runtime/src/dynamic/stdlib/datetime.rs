@@ -185,6 +185,7 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
 impl Members {
     pub(in crate::dynamic) fn owns(&self, name: &str) -> bool {
         matches!(name, "__new__" | "min" | "max" | "resolution")
+            || (self.owner == "datetime.timezone" && name == "utc")
             || self.fields.contains(&name)
             || self.methods.contains(&name)
     }
@@ -200,6 +201,11 @@ pub(in crate::dynamic) fn install_members(ctx: &mut Context, class: &str) {
     }
     if class == "datetime.timezone" {
         ctx.builtin(TZINFO);
+        utc(ctx);
+        for (name, max) in [("min", false), ("max", true)] {
+            let id = store(ctx, Calendar::zone_limit(max), NONE);
+            ctx.builtins.insert(format!("{class}.{name}"), id);
+        }
     } else {
         ctx.builtin(&format!("{class}.__new__"));
     }
