@@ -577,7 +577,7 @@ impl Context {
     }
 
     /// Bind a native class method to the class through which it was retrieved.
-    fn bind_native_classmethod(&mut self, callable: Id, owner: Id) -> Id {
+    pub(super) fn bind_native_classmethod(&mut self, callable: Id, owner: Id) -> Id {
         self.alloc(Value::Method {
             callable,
             receiver: owner,
@@ -970,6 +970,7 @@ impl Context {
                             | stdlib::os::scandir::ITER
                             | super::thread_rlock::CLASS
                             | super::thread_lock::CLASS
+                            | value::REGEX_MATCH_TYPE
                             | value::REGEX_PATTERN_TYPE
                             | value::TEMPLATE_TYPE
                             | value::TEMPLATE_ITER_TYPE
@@ -2205,6 +2206,7 @@ impl Context {
                 if matches!(
                     class.as_str(),
                     "array.array"
+                        | value::REGEX_MATCH_TYPE
                         | value::REGEX_PATTERN_TYPE
                         | "_contextvars.Context"
                         | "_contextvars.ContextVar"
@@ -2221,6 +2223,11 @@ impl Context {
             {
                 let class = class.as_str().to_owned();
                 let (module, short) = class.rsplit_once('.').unwrap();
+                if class == value::REGEX_MATCH_TYPE
+                    && let Some(value) = stdlib::regex::match_class_attribute(self, obj, name)
+                {
+                    return Ok(value);
+                }
                 if class == "array.array" && matches!(name, "append" | "tolist" | "tobytes") {
                     return Ok(self.builtin(&format!("array.array.{name}")));
                 }
@@ -2239,7 +2246,10 @@ impl Context {
                         return Ok(NONE);
                     }
                     "__new__"
-                        if matches!(class.as_str(), KEY_WRAPPER | value::REGEX_PATTERN_TYPE) =>
+                        if matches!(
+                            class.as_str(),
+                            KEY_WRAPPER | value::REGEX_MATCH_TYPE | value::REGEX_PATTERN_TYPE
+                        ) =>
                     {
                         return Ok(self.builtin("object.__new__"));
                     }
@@ -3652,6 +3662,7 @@ impl Context {
                         | HashState::XOF_CLASS
                         | KEY_WRAPPER
                         | stdlib::flags::TYPE
+                        | value::REGEX_MATCH_TYPE
                         | value::REGEX_PATTERN_TYPE
                 ))
         {
@@ -4070,7 +4081,10 @@ impl Context {
         }
         let object = self.builtin("object");
         if let Value::Native(name) = self.heap.get(class)
-            && matches!(name.as_str(), KEY_WRAPPER | value::REGEX_PATTERN_TYPE)
+            && matches!(
+                name.as_str(),
+                KEY_WRAPPER | value::REGEX_MATCH_TYPE | value::REGEX_PATTERN_TYPE
+            )
         {
             return Err(Error::new(
                 "TypeError",
@@ -4391,6 +4405,7 @@ impl Context {
                     HashState::CLASS
                         | HashState::XOF_CLASS
                         | KEY_WRAPPER
+                        | value::REGEX_MATCH_TYPE
                         | value::REGEX_PATTERN_TYPE
                 ) =>
             {

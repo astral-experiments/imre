@@ -808,6 +808,11 @@ Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
 
 
+def _regex_match_alias():
+    from re import Match
+    return _SpecialGenericAlias(Match, 1, name="Match")
+
+
 def _substitute_alias_argument(arg, replacements):
     if isinstance(arg, type):
         return arg

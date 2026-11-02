@@ -428,6 +428,11 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("threading", "Lock") | ("_thread", "LockType") => ctx.builtin(super::thread_lock::CLASS),
         ("_weakref", name) if let Some(value) = super::weakref::export(ctx, name) => value,
         ("threading", "local") | ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
+        ("typing", "Match") => {
+            let typing = ctx.module("typing")?;
+            let factory = ctx.lookup_attr(typing, "_regex_match_alias")?;
+            ctx.call(factory, Vec::new(), Vec::new())?
+        }
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
         (
             "traceback",
@@ -1648,7 +1653,7 @@ pub(super) fn call(
     if let Some(operation) = name.strip_prefix("typing.") {
         return super::typing::call(ctx, operation, args, kwargs);
     }
-    if name == "types.GenericAlias" {
+    if matches!(name, "types.GenericAlias" | "Match.__class_getitem__") {
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
