@@ -1591,9 +1591,14 @@ impl Context {
         data.exec_locals.is_some()
             || data.exec_globals.is_some()
             || data.class_body_mapping().is_some()
-            || self
-                .scope_name(scope, name)
-                .is_some_and(|old| old != value && self.heap.could_own_finalizer(old, false))
+            || self.scope_name(scope, name).is_some_and(|old| {
+                old != value
+                    && self.heap.could_own_finalizer(old, false)
+                    && (data.namespace.is_some()
+                        || data.class_namespace.is_some()
+                        || data.class_body.is_some()
+                        || !self.heap.retains_replaced_operands(data, value, old))
+            })
     }
 
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {

@@ -2829,6 +2829,72 @@ impl Heap {
         true
     }
 
+    /// A replacement container can keep the old binding alive. Check one entry
+    /// by identity so the proof takes constant time and cannot run Python code.
+    fn retains_first_child(&self, container: Id, old: Id) -> bool {
+        match self.get(container) {
+            Value::List(items) | Value::Tuple(items) => items.first() == Some(&old),
+            Value::Dict(items) => items
+                .first()
+                .is_some_and(|&(key, value)| key == old || value == old),
+            _ => false,
+        }
+    }
+
+    /// An unpack target also drops the temporary roots used to evaluate its RHS.
+    /// Elide its sweep only if each discarded owner survives or has no observable release.
+    pub(super) fn retains_replaced_operands(&self, scope: &Scope, value: Id, old: Id) -> bool {
+        if !self.retains_first_child(value, old) {
+            return false;
+        }
+        let mut budget = 64;
+        self.frames
+            .last()
+            .unwrap()
+            .live
+            .iter()
+            .all(|&operand| self.kept_assignment_operand(scope, value, old, operand, &mut budget))
+    }
+
+    fn kept_assignment_operand(
+        &self,
+        scope: &Scope,
+        value: Id,
+        old: Id,
+        operand: Id,
+        budget: &mut usize,
+    ) -> bool {
+        if *budget == 0 {
+            return false;
+        }
+        *budget -= 1;
+        if operand == old
+            || operand == value
+            || scope
+                .names
+                .values()
+                .take(16)
+                .any(|&bound| bound == operand || self.retains_first_child(bound, operand))
+        {
+            return true;
+        }
+        if self.weak.contains_key(&operand) {
+            return false;
+        }
+        if self.finalizer_free_scalar(operand) {
+            return true;
+        }
+        let mut kept = |item| self.kept_assignment_operand(scope, value, old, item, budget);
+        match self.get(operand) {
+            Value::Range(_) | Value::RangeIterator(_) => true,
+            Value::List(items) | Value::Tuple(items) => items.iter().all(|&item| kept(item)),
+            Value::Dict(entries) if entries.ordered_nodes().is_empty() => {
+                entries.iter().all(|&(key, child)| kept(key) && kept(child))
+            }
+            _ => false,
+        }
+    }
+
     /// A scalar and a container of scalars cannot hold an output file.
     pub(super) fn could_own_finalizer(&self, id: Id, skip_bound: bool) -> bool {
         if self.finalizer_free_scalar(id) || (skip_bound && self.bound_in_active_frame(id)) {
