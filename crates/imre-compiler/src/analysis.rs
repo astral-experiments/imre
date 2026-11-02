@@ -667,9 +667,34 @@ impl Session {
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
-        scoped_builtin: bool,
+        calls: FallbackCalls,
         runtime_provider: Option<usize>,
     ) -> Result<(), String> {
+        let all_calls = matches!(calls, FallbackCalls::All);
+        self.set_fallback_rules(all_calls);
+        let provider = runtime_provider.map(|index| self.files[index]);
+        self.errors(skipped, overloads, all_calls, provider)?;
+        if let FallbackCalls::Entry(entry) = calls {
+            // Only the entry gained a new statement order. Imported modules retain
+            // the argument-checking policy they had before the guard.
+            self.set_fallback_rules(true);
+            let checked = CheckedFile::new(
+                &self.db,
+                self.files[entry],
+                skipped.map_or(&[][..], |ranges| ranges[entry].as_slice()),
+                overloads[entry].as_slice(),
+                true,
+                provider,
+            );
+            let errors = file_errors(&self.db, checked);
+            if !errors.is_empty() {
+                return Err(errors.join("\n"));
+            }
+        }
+        Ok(())
+    }
+
+    fn set_fallback_rules(&mut self, scoped_builtin: bool) {
         let mut rules = RuleSelection::default();
         let arguments = if scoped_builtin {
             CALL_ARGUMENT_RULES
@@ -688,8 +713,6 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(Arc::new(rules));
-        let runtime_provider = runtime_provider.map(|index| self.files[index]);
-        self.errors(skipped, overloads, scoped_builtin, runtime_provider)
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.
@@ -747,6 +770,13 @@ struct CheckedFile<'db> {
     scoped_builtin: bool,
     #[returns(copy)]
     runtime_provider: Option<File>,
+}
+
+/// Files in which a checked object fallback also enforces call arguments.
+pub(crate) enum FallbackCalls {
+    None,
+    Entry(usize),
+    All,
 }
 
 const CALL_ARGUMENT_RULES: &[&str] = &[
@@ -953,7 +983,11 @@ fn runtime_argument(
             })
     };
     match callee {
-        Type::Union(union) => union.elements(db).iter().copied().all(uses_runtime_provider),
+        Type::Union(union) => union
+            .elements(db)
+            .iter()
+            .copied()
+            .all(uses_runtime_provider),
         ty => uses_runtime_provider(ty),
     }
 }
