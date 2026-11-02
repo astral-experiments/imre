@@ -1076,6 +1076,9 @@ impl Context {
     }
 
     fn items(&mut self, id: Id) -> Result<Vec<Id>> {
+        if matches!(self.heap.get(id), Value::TypeVarTuple { .. }) {
+            return Ok(vec![typing::unpack_parameter(self, id)?]);
+        }
         if matches!(self.heap.get(id), Value::Generator { .. }) {
             let buffer = self.collect_generator(id, false)?;
             let Value::List(items) = self.heap.get_mut(buffer) else {

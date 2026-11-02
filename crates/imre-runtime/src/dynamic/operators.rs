@@ -2345,6 +2345,8 @@ impl Context {
             Value::Native(name) if matches!(name.as_str(), "typing.Any" | "typing.Callable") => {
                 name.clone()
             }
+            Value::TypeVarTuple { name, .. } => self.display(*name),
+            Value::NoDefault => "typing.NoDefault".to_owned(),
             Value::TypeVar(var) => {
                 let variance = if var.covariant {
                     "+"

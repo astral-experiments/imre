@@ -917,6 +917,8 @@ impl Context {
             Value::ItemGetter(_) => "operator.itemgetter",
             Value::StaticMethod { .. } => "staticmethod",
             Value::TypeVar(_) => "typing.TypeVar",
+            Value::TypeVarTuple { .. } => "typing.TypeVarTuple",
+            Value::NoDefault => "typing.NoDefaultType",
             Value::GenericAlias(alias) => alias.kind.class(),
             Value::Socket(_) => "socket.socket",
             Value::Union(_) => "typing.Union",
@@ -992,6 +994,9 @@ impl Context {
                             | "traceback"
                             | "frame"
                             | "typing.TypeVar"
+                            | "typing.TypeVarTuple"
+                            | "typing._UnpackGenericAlias"
+                            | "typing.NoDefaultType"
                             | "typing._GenericAlias"
                             | "typing._LiteralGenericAlias"
                             | "typing._CallableGenericAlias"

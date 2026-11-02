@@ -242,6 +242,15 @@ def Final(self, parameters):
 
 
 @_SpecialForm
+def Unpack(self, parameters):
+    """Unpack the types in a tuple or a variadic type parameter."""
+    item = _type_check(parameters, f"{self} accepts only single type.")
+    if isinstance(item, str):
+        raise NotImplementedError("string Unpack arguments require typing.ForwardRef")
+    return _typing._UnpackGenericAlias(self, (type(None) if item is None else item,))
+
+
+@_SpecialForm
 def Optional(self, parameters):
     """Optional[X] is equivalent to Union[X, None]."""
     arg = _type_check(parameters, f"{repr(self)} requires a single type.")

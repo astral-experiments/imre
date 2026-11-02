@@ -21,6 +21,7 @@ pub(super) enum AliasKind {
     Generic,
     Callable,
     AbcCallable,
+    Unpack,
     /// The frozen set of (value, type) pairs, or NONE for unhashable arguments.
     Literal(Id),
 }
@@ -33,11 +34,12 @@ impl AliasKind {
             Self::Callable => "typing._CallableGenericAlias",
             Self::AbcCallable => "collections.abc._CallableGenericAlias",
             Self::Literal(_) => "typing._LiteralGenericAlias",
+            Self::Unpack => "typing._UnpackGenericAlias",
         }
     }
 
     pub(super) fn is_typing_alias(self) -> bool {
-        matches!(self, Self::Generic | Self::Callable)
+        matches!(self, Self::Generic | Self::Callable | Self::Unpack)
     }
 
     pub(super) fn type_name(self) -> &'static str {
@@ -128,6 +130,7 @@ pub(super) struct Alias {
 #[derive(Default)]
 pub(super) struct Registry {
     alias_caches: [Option<Id>; 2],
+    no_default: Option<Id>,
     overloads: HashMap<(String, String), Vec<(u32, Id)>>,
 }
 
@@ -136,8 +139,25 @@ impl Registry {
         self.alias_caches
             .iter()
             .flatten()
+            .chain(self.no_default.iter())
             .chain(self.overloads.values().flatten().map(|(_, value)| value))
     }
+}
+
+pub(super) fn no_default(ctx: &mut Context) -> Id {
+    if let Some(value) = ctx.typing.no_default {
+        return value;
+    }
+    let value = ctx.alloc(Value::NoDefault);
+    ctx.typing.no_default = Some(value);
+    value
+}
+
+/// A pack iterates over one Unpack alias, exactly as an explicit Unpack[Ts] subscription.
+pub(super) fn unpack_parameter(ctx: &mut Context, pack: Id) -> Result<Id> {
+    let module = ctx.module("typing")?;
+    let unpack = ctx.lookup_attr(module, "Unpack")?;
+    ctx.get_item(unpack, pack)
 }
 
 pub(super) fn named_class(ctx: &mut Context, module: &str, name: &str) -> Id {
@@ -174,7 +194,7 @@ pub(super) fn variables(ctx: &Context, args: &[Id]) -> Vec<Id> {
     let mut vars = Vec::new();
     for &arg in args {
         let members = match ctx.heap.get(arg) {
-            Value::TypeVar(_) => std::slice::from_ref(&arg),
+            Value::TypeVar(_) | Value::TypeVarTuple { .. } => std::slice::from_ref(&arg),
             Value::GenericAlias(Alias { parameters, .. })
             | Value::Union(super::union::Union { parameters, .. }) => {
                 match ctx.heap.get(*parameters) {
@@ -526,10 +546,13 @@ pub(super) fn resolve_bases(ctx: &mut Context, bases: Id) -> Result<(Option<Id>,
 }
 
 fn alias_bases(ctx: &mut Context, id: Id, bases: Id) -> Result<Id> {
-    if matches!(ctx.heap.get(id), Value::TypeVar(_)) {
+    if matches!(
+        ctx.heap.get(id),
+        Value::TypeVar(_) | Value::TypeVarTuple { .. }
+    ) {
         return Err(Error::new(
             "TypeError",
-            "Cannot subclass an instance of TypeVar",
+            format!("Cannot subclass an instance of {}", ctx.type_name(id)),
         ));
     }
     if matches!(ctx.heap.get(id), Value::Native(name) if name == "typing.Callable") {
@@ -714,7 +737,9 @@ pub(super) fn class_parameters(
 
 pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Result<Id>> {
     let attr = match ctx.heap.get(value) {
-        Value::TypeVar(_) | Value::GenericAlias(_) if name == "__mro_entries__" => {
+        Value::TypeVar(_) | Value::TypeVarTuple { .. } | Value::GenericAlias(_)
+            if name == "__mro_entries__" =>
+        {
             let callable = ctx.builtin("typing.alias_mro_entries");
             ctx.alloc(Value::Method {
                 callable,
@@ -739,6 +764,24 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             let module = class.rsplit_once('.').unwrap().0.to_owned();
             ctx.text(module)
         }
+        Value::TypeVarTuple {
+            name: label,
+            module,
+            default,
+        } => match name {
+            "__name__" => *label,
+            "__module__" => *module,
+            "__default__" => *default,
+            "has_default" | "__reduce__" | "__iter__" => {
+                let callable = ctx.builtin(&format!("typing.TypeVarTuple.{name}"));
+                ctx.alloc(Value::Method {
+                    callable,
+                    receiver: value,
+                    explicit: false,
+                })
+            }
+            _ => return None,
+        },
         Value::TypeVar(var) => match name {
             "__name__" => var.name,
             "__module__" => var.module,
@@ -878,6 +921,37 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if operation == "TypeVarTuple" {
+        let [name, default] = super::builtins::bind_method_arguments(
+            "typevartuple",
+            args,
+            kwargs,
+            ["name", "default"],
+            1,
+        )?;
+        let name = name.ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                "typevartuple() missing required argument 'name' (pos 1)",
+            )
+        })?;
+        if ctx.str_value(name).is_err() {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "typevartuple() argument 'name' must be str, not {}",
+                    ctx.type_name(name)
+                ),
+            ));
+        }
+        let module = ctx.heap.caller_module();
+        let default = default.unwrap_or_else(|| no_default(ctx));
+        return Ok(ctx.alloc(Value::TypeVarTuple {
+            name,
+            module,
+            default,
+        }));
+    }
     if operation == "TypeVar" {
         return typevar(ctx, args, kwargs);
     }
@@ -929,6 +1003,46 @@ pub(super) fn call(
         ));
     }
     match (operation, args) {
+        ("NoDefaultType", []) => Ok(no_default(ctx)),
+        ("NoDefaultType", _) => Err(Error::new("TypeError", "NoDefaultType takes no arguments")),
+        ("TypeVarTuple.has_default", [pack])
+            if let Value::TypeVarTuple { default, .. } = ctx.heap.get(*pack) =>
+        {
+            Ok(if matches!(ctx.heap.get(*default), Value::NoDefault) {
+                FALSE
+            } else {
+                TRUE
+            })
+        }
+        ("TypeVarTuple.__reduce__", [pack])
+            if let Value::TypeVarTuple { name, .. } = ctx.heap.get(*pack) =>
+        {
+            Ok(*name)
+        }
+        ("TypeVarTuple.__iter__", [pack])
+            if matches!(ctx.heap.get(*pack), Value::TypeVarTuple { .. }) =>
+        {
+            ctx.iterator(*pack)
+        }
+        ("TypeVarTuple.has_default" | "TypeVarTuple.__reduce__" | "TypeVarTuple.__iter__", _) => {
+            Err(Error::new(
+                "TypeError",
+                format!("invalid arguments to {operation}"),
+            ))
+        }
+        ("_UnpackGenericAlias", [origin, args]) => {
+            if !matches!(ctx.heap.get(*args), Value::Tuple(items) if items.len() == 1) {
+                return Err(Error::new("TypeError", "Unpack requires one argument"));
+            }
+            Ok(allocate_alias(
+                ctx,
+                AliasKind::Unpack,
+                *origin,
+                *args,
+                None,
+                false,
+            ))
+        }
         ("Any", _) => Err(Error::new("TypeError", "Any cannot be instantiated")),
         ("_LiteralGenericAlias", [origin, parameters]) => literal_alias(ctx, *origin, *parameters),
         ("_LiteralGenericAlias", _) => Err(Error::new(
@@ -1167,6 +1281,8 @@ impl Context {
                 && matches!(
                     name.as_str(),
                     "typing.TypeVar"
+                        | "typing.TypeVarTuple"
+                        | "typing.NoDefaultType"
                         | "slice"
                         | "NoneType"
                         | "NotImplementedType"
