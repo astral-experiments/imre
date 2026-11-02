@@ -7258,6 +7258,13 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_deque_clear", &[&args[0].value]);
                 none()
             }
+            Builtin::DequeRotate => {
+                self.checked_line(format!(
+                    "call void @imre_deque_rotate(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
             Builtin::DequeReverse => {
                 self.void_call("imre_deque_reverse", &[&args[0].value]);
                 none()
@@ -9447,6 +9454,7 @@ declare ptr @imre_deque_copy(ptr)
 declare i64 @imre_deque_pop(ptr, i32)
 declare void @imre_deque_clear(ptr)
 declare void @imre_deque_reverse(ptr)
+declare void @imre_deque_rotate(ptr, i64)
 declare void @imre_deque_check_method_index(i64)
 declare i64 @imre_deque_get(ptr, i64)
 declare void @imre_deque_set(ptr, i64, i64)

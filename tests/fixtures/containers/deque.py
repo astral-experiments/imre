@@ -78,3 +78,9 @@ except TypeError as error:
 
 assert repr(deque([1, 2])) == 'deque([1, 2])'
 assert repr([deque(['a'], maxlen=3)]) == "[deque(['a'], maxlen=3)]"
+
+
+rotated = deque([1, 2, 3], maxlen=3)
+rotated.rotate()
+rotated.rotate(-2)
+assert list(rotated) == [2, 3, 1] and rotated.maxlen == 3

@@ -410,4 +410,41 @@ def current():
     else:
         raise AssertionError("count ignored a mutation in its final comparison")
 
+    check_rotation()
     print("deque passed")
+
+
+def check_rotation():
+    class Marker:
+        pass
+
+    marker = Marker()
+    reference = weakref.ref(marker)
+    queue = deque([marker, 1, 2], maxlen=3)
+    del marker
+    rotate = queue.rotate
+    assert rotate() is None and queue[1] is reference()
+
+    class Index:
+        def __index__(self):
+            queue.append(3)
+            return -1
+
+    deque.rotate(queue, Index())
+    assert list(queue) == [1, 3, reference()] and queue.maxlen == 3
+    for count in (0, len(queue)):
+        cursor = iter(queue)
+        queue.rotate(count)
+        try:
+            next(cursor)
+        except RuntimeError as error:
+            assert str(error) == "deque mutated during iteration"
+        else:
+            raise AssertionError("rotation did not invalidate a live iterator")
+    single = deque([1])
+    cursor = iter(single)
+    single.rotate()
+    assert next(cursor) == 1
+    queue.clear()
+    gc.collect()
+    assert reference() is None
