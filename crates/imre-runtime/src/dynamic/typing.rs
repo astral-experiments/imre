@@ -714,9 +714,6 @@ pub(super) fn class_parameters(
     original: Option<Id>,
     bases: &[Id],
 ) -> Result<()> {
-    if let Some(original) = original {
-        ctx.bind(scope, "__orig_bases__", original);
-    }
     let Some(&generic) = ctx.classes.get("typing.Generic") else {
         return Ok(());
     };
@@ -727,12 +724,21 @@ pub(super) fn class_parameters(
         Some(tuple) => ctx.items(tuple)?,
         None => bases.to_vec(),
     };
+    bind_generic_parameters(ctx, scope, generic, &raw)
+}
+
+pub(super) fn bind_generic_parameters(
+    ctx: &mut Context,
+    scope: Id,
+    generic: Id,
+    raw: &[Id],
+) -> Result<()> {
     if raw.contains(&generic) {
         return Err(Error::new("TypeError", "Cannot inherit from plain Generic"));
     }
-    let vars = variables(ctx, &raw);
+    let vars = variables(ctx, raw);
     let mut explicit = None;
-    for id in raw {
+    for &id in raw {
         if let Value::GenericAlias(a) = ctx.heap.get(id)
             && a.origin == generic
             && explicit.replace(a.parameters).is_some()
