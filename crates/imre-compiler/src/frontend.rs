@@ -3884,9 +3884,12 @@ impl<'a> Checker<'a> {
         {
             return self.groupby_iteration(loop_, call);
         }
-        let mut input = match self.unpacked_list_enumeration(loop_)? {
-            Some(input) => input,
-            None => self.iteration_input(&loop_.iter)?,
+        let mut input = if let Some(items) = self.environ_items_loop(&loop_.iter)? {
+            items
+        } else if let Some(input) = self.unpacked_list_enumeration(loop_)? {
+            input
+        } else {
+            self.iteration_input(&loop_.iter)?
         };
         input = self.fuse_splitlines(input);
         if let Iteration::Container {
@@ -7448,12 +7451,14 @@ impl<'a> Checker<'a> {
                 (Type::Bool, ExprKind::Compare(values, ops))
             }
             ast::Expr::Subscript(subscript) => {
-                if self.environ_item_type(&subscript.value) == Some(Type::Str) {
-                    let key = self.expr_expected(&subscript.slice, Type::Str)?;
+                if let Some(ty) = self.environ_item_type(&subscript.value) {
+                    let key = self.expr_expected(&subscript.slice, ty)?;
                     return Ok(Expr {
-                        ty: Type::Str,
+                        ty,
                         kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::EnvironIndex),
+                            Builtin::Process(ir::ProcessOperation::EnvironIndex {
+                                bytes: ty == Type::Bytes,
+                            }),
                             vec![key],
                         ),
                     });

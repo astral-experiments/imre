@@ -981,11 +981,14 @@ pub(crate) fn initial_environment() -> Vec<(Vec<u8>, Vec<u8>)> {
         .collect()
 }
 
+/// Borrow names without examining value bytes. The value pointer is only read by a
+/// consumer that actually needs that entry's value.
+///
 /// # Safety
 /// The array (possibly null) and its C strings must be live and immutable for `'a`.
-unsafe fn environment_entries<'a>(
+unsafe fn environment_names<'a>(
     mut entries: *const *const libc::c_char,
-) -> impl Iterator<Item = (&'a [u8], &'a [u8])> {
+) -> impl Iterator<Item = (&'a [u8], *const libc::c_char)> {
     std::iter::from_fn(move || {
         loop {
             // SAFETY: each live entry has a successor; the terminating pointer is null.
@@ -993,25 +996,45 @@ unsafe fn environment_entries<'a>(
             if entry.is_null() {
                 return None;
             }
-            // SAFETY: the non-null C string and the next pointer belong to the array.
-            let bytes = unsafe {
+            // SAFETY: search the live string only up to its first '=' or NUL.
+            let split = unsafe {
                 entries = entries.add(1);
-                CStr::from_ptr(entry).to_bytes()
+                libc::strchr(entry, i32::from(b'='))
             };
-            if let Some(split) = bytes.iter().position(|&byte| byte == b'=') {
-                return Some((&bytes[..split], &bytes[split + 1..]));
+            if !split.is_null() {
+                // SAFETY: split belongs to the same C string. Its suffix is NUL-terminated.
+                return Some(unsafe {
+                    let len = split.cast_const().offset_from(entry) as usize;
+                    (
+                        std::slice::from_raw_parts(entry.cast::<u8>(), len),
+                        split.add(1).cast_const(),
+                    )
+                });
             }
         }
     })
 }
 
+/// # Safety
+/// The array (possibly null) and its C strings must be live and immutable for `'a`.
+unsafe fn environment_entries<'a>(
+    entries: *const *const libc::c_char,
+) -> impl Iterator<Item = (&'a [u8], &'a [u8])> {
+    // SAFETY: each value points to the suffix of a string rooted for `'a`.
+    unsafe {
+        environment_names(entries).map(|(name, value)| (name, CStr::from_ptr(value).to_bytes()))
+    }
+}
+
 /// Inspect one POSIX environment value without allocating a temporary string.
 pub(super) fn with_environment_value<T>(key: &[u8], inspect: impl FnOnce(&[u8]) -> T) -> Option<T> {
     let _guard = ENVIRONMENT.lock().unwrap();
-    // SAFETY: the lock keeps the environment stable through the callback.
-    unsafe { environment_entries(native_environ()) }
-        .find(|(name, _)| *name == key)
-        .map(|(_, bytes)| inspect(bytes))
+    // SAFETY: the lock keeps the matching C string stable through the callback.
+    unsafe {
+        environment_names(native_environ())
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| inspect(CStr::from_ptr(value).to_bytes()))
+    }
 }
 
 /// Update the same process environment inherited by newly spawned children.
