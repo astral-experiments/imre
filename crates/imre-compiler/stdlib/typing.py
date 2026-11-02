@@ -122,59 +122,248 @@ def _typeddict_annotation_strings(annotations):
             for name, value in annotations.items()}
 
 
-def _typeddict_base_annotations(annotate, format):
-    if format == 2:
+class _TypedDictSymbol:
+    """An operand in a synthetic annotation namespace (see annotationlib._Stringifier)."""
+
+    __slots__ = ForwardRef.__slots__
+
+    def __repr__(self):
+        return "".join(t if type(t) is str else t[0] for t in self.__arg__)
+
+    def __hash__(self):
+        return id(self)
+
+    def __operand__(self, value, precedence=0):
+        if type(value) is _TypedDictSymbol:
+            tokens = value.__arg__
+            return ("(", *tokens, ")") if value.__forward_module__ < precedence else tokens
+        if type(value) in (list, tuple, set, dict):
+            if type(value) is set and not value:
+                return ("{*()}",)
+            opening, closing = ("[", "]") if type(value) is list else (
+                ("(", ")") if type(value) is tuple else ("{", "}"))
+            tokens = [opening]
+            for i, item in enumerate(value):
+                if i:
+                    tokens.append(", ")
+                tokens.extend(self.__operand__(item))
+                if type(value) is dict:
+                    tokens.append(": ")
+                    tokens.extend(self.__operand__(value[item]))
+            if type(value) is tuple and len(value) == 1:
+                tokens.append(",")
+            tokens.append(closing)
+            return tuple(tokens)
+        if self.__globals__.symbolic and value is ...:
+            return ("...",)
+        if self.__globals__.symbolic or value is None or type(value) in (str, int, float, bool, complex):
+            return (repr(value),)
+        # Real operands may have no name in the eventual evaluation namespace.
+        names = self.__globals__
+        key = f"__annotationlib_name_{names.next_id}__"
+        names.next_id += 1
+        return ((key, value),)
+
+    def __derived__(self, tokens, precedence=20):
+        return self.__globals__.symbol(tokens, self.__globals__.cells, precedence)
+
+    def __getattr__(self, name):
+        return self.__derived__((*self.__operand__(self, 20), ".", name))
+
+    def __getitem__(self, index):
+        tokens = [*self.__operand__(self, 20), "["]
+        items = index if isinstance(index, tuple) and index else (index,)
+        for i, item in enumerate(items):
+            if i:
+                tokens.append(", ")
+            if isinstance(item, slice):
+                if item.start is not None:
+                    tokens.extend(self.__operand__(item.start))
+                tokens.append(":")
+                if item.stop is not None:
+                    tokens.extend(self.__operand__(item.stop))
+                if item.step is not None:
+                    tokens.append(":")
+                    tokens.extend(self.__operand__(item.step))
+            else:
+                tokens.extend(self.__operand__(item))
+        if isinstance(index, tuple) and len(index) == 1:
+            tokens.append(",")
+        tokens.append("]")
+        return self.__derived__(tuple(tokens))
+
+    def __call__(self, *args, **kwargs):
+        tokens = [*self.__operand__(self, 20), "("]
+        for arg in args:
+            tokens.extend(self.__operand__(arg))
+            tokens.append(", ")
+        for key, value in kwargs.items():
+            tokens.extend((key, "="))
+            tokens.extend(self.__operand__(value))
+            tokens.append(", ")
+        if args or kwargs:
+            tokens.pop()
+        tokens.append(")")
+        return self.__derived__(tuple(tokens))
+
+    def __contains__(self, item):
+        if self.__arg__ == ("__conditional_annotations__",):
+            return True
+        raise NotImplementedError("symbolic annotation membership")
+
+    def __format__(self, spec):
+        raise TypeError("Cannot stringify annotation containing string formatting")
+
+    def _binary(op, precedence, *, reverse=False, comparison=False):
+        def binary(self, other):
+            left, right = (other, self) if reverse else (self, other)
+            return self.__derived__(
+                (*self.__operand__(left, precedence + comparison), f" {op} ",
+                 *self.__operand__(right, precedence + 1)), precedence)
+        return binary
+
+    __or__ = _binary("|", 6)
+    __ror__ = _binary("|", 6, reverse=True)
+    __eq__ = _binary("==", 5, comparison=True)
+    __ne__ = _binary("!=", 5, comparison=True)
+    __lt__ = _binary("<", 5, comparison=True)
+    __le__ = _binary("<=", 5, comparison=True)
+    __gt__ = _binary(">", 5, comparison=True)
+    __ge__ = _binary(">=", 5, comparison=True)
+    del _binary
+
+
+class _TypedDictNames(dict):
+    """Resolve missing names without modifying the provider's globals or cells."""
+
+    def symbol(self, tokens, cells, precedence=20):
+        value = _TypedDictSymbol()
+        value.__arg__ = tokens
+        value.__globals__ = self
+        value.__cell__ = cells
+        value.__forward_module__ = precedence
+        self.symbols.append(value)
+        return value
+
+    def __missing__(self, name):
+        return self.symbol((name,), self.cells)
+
+    def finish(self):
+        # Convert the actual operands as in CPython. They can be held inside a
+        # typing alias, an arbitrary container, or a callback's saved state.
+        for value in self.symbols:
+            tokens = value.__arg__
+            extras = dict(t for t in tokens if type(t) is tuple)
+            value.__arg__ = repr(value)
+            value.__ast_node__ = tokens if extras else None
+            value.__resolved_str_cache__ = None
+            value.__extra_names__ = extras or None
+            value.__globals__ = self.source_globals
+            value.__forward_module__ = None
+            value.__forward_is_class__ = self.is_class
+            value.__forward_is_argument__ = False
+            value.__owner__ = self.owner
+            _typing._finish_field_ref(value)
+        self.symbols.clear()
+
+
+def _typeddict_names(source_globals, cells, owner, known, is_class=None):
+    names = _TypedDictNames()
+    names.source_globals = source_globals
+    names.cells = cells
+    names.owner = owner
+    names.is_class = isinstance(owner, type) if is_class is None else is_class
+    names.symbolic = known is None
+    names.symbols = []
+    names.next_id = 1
+    if known is not None:
+        names.update(known)
+    return names
+
+
+def _typeddict_cell(value):
+    return (lambda: value).__closure__[0]
+
+
+def _typeddict_replay(annotate, owner, allow_evaluation):
+    from types import FunctionType
+    cells = (dict(zip(annotate.__code__.co_freevars, annotate.__closure__))
+             if annotate.__closure__ else None)
+    known = {**annotate.__builtins__, **annotate.__globals__} if allow_evaluation else None
+    names = _typeddict_names(annotate.__globals__, cells, owner, known)
+    closure = None
+    if cells:
+        new_cells = []
+        for name, cell in cells.items():
+            if allow_evaluation:
+                try:
+                    cell.cell_contents
+                except ValueError:
+                    value = names.symbol((name,), cell)
+                else:
+                    new_cells.append(cell)
+                    continue
+            elif name == "__classdict__":
+                # A miss here must fall through to the free variable or global.
+                value = {}
+            else:
+                value = names.symbol((name,), cell)
+            new_cells.append(_typeddict_cell(value))
+        closure = tuple(new_cells)
+    func = FunctionType(annotate.__code__, names, argdefs=annotate.__defaults__,
+                        closure=closure, kwdefaults=annotate.__kwdefaults__)
+    return func, names
+
+
+def _typeddict_base_annotations(annotate, format, owner=None):
+    from annotationlib import Format
+    if format == Format.VALUE_WITH_FAKE_GLOBALS:
         raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
     try:
         return annotate(format)
     except NotImplementedError:
         pass
 
-    if format == 1:
+    if format == Format.VALUE:
         raise RuntimeError("annotate function does not support VALUE format")
-    if format not in (3, 4):
+    if format not in (Format.FORWARDREF, Format.STRING):
         raise ValueError(f"Invalid format: {format!r}")
 
-    from annotationlib import Format
-    probe = annotate
     if format == Format.FORWARDREF:
-        # The forward-reference probe can read known names and closure cells,
-        # but assignments to its globals must not change the provider's module.
-        from types import FunctionType
-        namespace = dict(annotate.__globals__)
-        probe = FunctionType(annotate.__code__, namespace, argdefs=annotate.__defaults__,
-                             closure=annotate.__closure__, kwdefaults=annotate.__kwdefaults__)
+        probe, names = _typeddict_replay(annotate, owner, True)
+    else:
+        probe = annotate
     try:
-        probe(Format.VALUE_WITH_FAKE_GLOBALS)
+        result = probe(Format.VALUE_WITH_FAKE_GLOBALS)
     except NotImplementedError:
         values = annotate(Format.VALUE)
-        return _typeddict_annotation_strings(values) if format == 4 else values
+        return _typeddict_annotation_strings(values) if format == Format.STRING else values
     except Exception:
         pass
-    raise NotImplementedError("replaying an annotation provider with synthetic globals is unsupported")
+    else:
+        if format == Format.FORWARDREF:
+            names.finish()
+            return result
 
+    # Known names can themselves raise on evaluation. Re-run the provider with
+    # symbolic names, keeping its constants, control flow and exception behavior.
+    symbolic, names = _typeddict_replay(annotate, owner, False)
+    result = symbolic(Format.VALUE_WITH_FAKE_GLOBALS)
+    if format == Format.STRING:
+        return {key: value if isinstance(value, str) else
+                "..." if value is ... else repr(value) for key, value in result.items()}
+    names.finish()
+    return {key: value.evaluate(format=Format.FORWARDREF)
+            if isinstance(value, ForwardRef) else value for key, value in result.items()}
 
-def _typeddict_body_annotator(thunks):
-    # The class body annotation function is visible to descriptors in
-    # type.__new__, before the metaclass installs its merged provider.
-    def __annotate__(format):
-        if format > 2:
-            raise NotImplementedError(format)
-        return {key: thunk() for key, thunk in thunks.items()}
-    return __annotate__
-
-
-def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
+def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
     if not hasattr(cls, "__orig_bases__"):
         cls.__orig_bases__ = bases
 
-    # Validate concrete fields when the class is defined, retaining the original
-    # evaluators for later annotation requests in the declaring scope.
-    annotations = {}
-    for key, tp in fields.items():
-        if thunks is not None and key in thunks:
-            tp = thunks[key]()
-        annotations[key] = _typeddict_field(tp, cls.__module__, cls)
+    if own_annotate is not None:
+        fields = _typeddict_base_annotations(own_annotate, 3, cls)
+    annotations = {key: _typeddict_field(tp, cls.__module__, cls)
+                   for key, tp in fields.items()}
 
     def __annotate__(format):
         result = {}
@@ -183,21 +372,19 @@ def _configure_typeddict(cls, fields, total, thunks=None, bases=()):
                 continue
             annotate = base.__annotate__
             if annotate is not None:
-                result.update(_typeddict_base_annotations(annotate, format))
-        if thunks is not None and format == 2:
-            raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
-        if format == 4:
-            if thunks is not None:
-                raise NotImplementedError("TypedDict class STRING annotations require their source expressions")
-            result.update(_typeddict_annotation_strings(fields))
-            return result
-        if format in (1, 3):
-            for name, tp in annotations.items():
-                if thunks is not None and name in thunks:
-                    tp = _typeddict_field(thunks[name](), cls.__module__)
-                result[name] = tp
-            return result
-        raise NotImplementedError(format)
+                result.update(_typeddict_base_annotations(annotate, format, base))
+        if own_annotate is not None:
+            own = _typeddict_base_annotations(own_annotate, format, cls)
+            if format != 4:
+                own = {key: _typeddict_field(tp, cls.__module__) for key, tp in own.items()}
+        elif format == 4:
+            own = _typeddict_annotation_strings(fields)
+        elif format in (1, 3):
+            own = annotations
+        else:
+            raise NotImplementedError(format)
+        result.update(own)
+        return result
 
     cls.__annotate__ = __annotate__
     required = set()

@@ -51,8 +51,10 @@ impl Context {
         };
         let namespace = frame.class_namespace.get_or_insert_with(Default::default);
         let Some(scratch) = namespace.annotation_scratch else {
-            // TypedDict consumes the field-indexed view of the class body.
-            return self.op("annotate_deferred", scope, name, thunk);
+            return Err(Error::new(
+                "RuntimeError",
+                "annotation outside an executing class body",
+            ));
         };
         namespace.annotation_sites.get_or_insert_with(Default::default)
             .insert(offset, (name, thunk));
@@ -95,31 +97,29 @@ impl Context {
         scratch: Id,
     ) -> Result<(Id, Id)> {
         let fields = self.scope_name(scope, "__annotations__").unwrap_or(NONE);
-        let thunks = self.enable_class_annotation_provider(scope);
+        let annotate = if fields == scratch || fields == NONE {
+            self.scope_name(scope, "__annotate__")
+                .or_else(|| self.scope_name(scope, "__annotate_func__"))
+                .unwrap_or(NONE)
+        } else {
+            NONE
+        };
         self.heap.keep(fields);
-        self.heap.keep(thunks);
+        self.heap.keep(annotate);
         let key = self.heap.code_name("__annotations__");
         self.remove_binding(scope, "__annotations__", key)?;
-        if thunks != NONE {
-            let factory = self
-                .module_value("typing", "_typeddict_body_annotator")
-                .ok_or_else(|| Error::new("RuntimeError", "missing TypedDict body annotator"))?;
-            let annotate = self.call(factory, vec![thunks], Vec::new())?;
-            self.bind_local(scope, "__annotate_func__", annotate);
-        }
-        if fields == NONE {
-            return Ok((self.dict(Vec::new()), NONE));
-        }
-        Ok((fields, if fields == scratch { thunks } else { NONE }))
+        self.enable_class_annotation_provider(scope);
+        let fields = if fields == NONE { self.dict(Vec::new()) } else { fields };
+        Ok((fields, annotate))
     }
 
-    pub(super) fn enable_class_annotation_provider(&mut self, scope: Id) -> Id {
+    pub(super) fn enable_class_annotation_provider(&mut self, scope: Id) {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         let namespace = frame.class_namespace.get_or_insert_with(Default::default);
         namespace.provider_annotations = true;
-        namespace.annotation_thunks.take().unwrap_or(NONE)
+        namespace.annotation_sites = None;
     }
 
     pub(super) fn has_class_annotation_provider(&self, scope: Id) -> bool {
