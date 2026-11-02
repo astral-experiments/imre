@@ -1,7 +1,7 @@
 import os
 import posix
 import sys
-from os import supports_dir_fd, supports_effective_ids, supports_fd, supports_follow_symlinks
+from os import mkfifo, supports_dir_fd, supports_effective_ids, supports_fd, supports_follow_symlinks
 
 
 def current():
@@ -33,6 +33,10 @@ def current():
             pass
         else:
             raise AssertionError("invalid access argument accepted")
+    assert mkfifo is os.mkfifo and mkfifo is posix.mkfifo
+    assert mkfifo not in supports_fd and mkfifo not in supports_follow_symlinks
+    if sys.platform == "linux":
+        assert mkfifo in supports_dir_fd
     assert os.mkdir is posix.mkdir and os.mkdir in supports_dir_fd
     directory = os.path.dirname(__file__) or "."
     fd = os.open(directory, os.O_RDONLY)
@@ -42,6 +46,19 @@ def current():
         assert os.mkdir(child, mode=0o700, dir_fd=fd) is None
         try:
             assert os.access(child, os.X_OK, dir_fd=fd, effective_ids=True)
+            if mkfifo in supports_dir_fd:
+                fifo = child + b"/fifo"
+                assert mkfifo(path=fifo, mode=0o600, dir_fd=fd) is None
+                try:
+                    assert os.lstat(fifo, dir_fd=fd).st_mode & 0o170000 == 0o010000
+                    try:
+                        posix.mkfifo(fifo, dir_fd=fd)
+                    except FileExistsError as error:
+                        assert error.filename is None
+                    else:
+                        raise AssertionError("mkfifo accepted an existing FIFO")
+                finally:
+                    os.unlink(fifo, dir_fd=fd)
             executable = child + b"/program"
             program_fd = os.open(executable, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600, dir_fd=fd)
             try:
