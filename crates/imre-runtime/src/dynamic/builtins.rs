@@ -369,6 +369,7 @@ pub(super) const STR_METHODS: &[&str] = &[
     "expandtabs",
     "find",
     "format",
+    "index",
     "isalnum",
     "isascii",
     "isalpha",
