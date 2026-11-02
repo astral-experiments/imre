@@ -435,6 +435,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "loaded_module"
             | "members"
             | "metadata"
+            | "native_iterator"
+            | "slot_bases"
             | "slotted_type"
             | "retarget_class_cell",
         ) => ctx.builtin(&format!("{module}.{name}")),
@@ -1645,7 +1647,7 @@ pub(super) fn call(
                 let bases = ctx
                     .tuple_items(*bases)?
                     .ok_or_else(|| Error::new("TypeError", "expected a tuple of bases"))?;
-                return ctx.dataclass_from_namespace(name, bases, *members, "types", false, true);
+                return ctx.make_dataclass_type(name, bases, *members);
             }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
@@ -1688,6 +1690,10 @@ pub(super) fn call(
                 }
                 return Ok(FALSE);
             }
+            ("native_iterator", [obj], []) => {
+                return Ok(if ctx.is_native_iterator(*obj) { TRUE } else { FALSE });
+            }
+            ("slot_bases", [class], []) => return ctx.dataclass_slot_bases(*class),
             ("slotted_type", [old, namespace], []) => {
                 return ctx.slotted_dataclass(*old, *namespace);
             }

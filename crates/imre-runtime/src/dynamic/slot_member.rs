@@ -4,14 +4,133 @@ use super::{Context, Error, Id, Result, Value};
 use ruff_python_stdlib::identifiers::is_identifier;
 
 impl Context {
-    /// Construct the replacement for an ordinary object-root dataclass.
-    pub(super) fn slotted_dataclass(&mut self, old: Id, namespace: Id) -> Result<Id> {
+    /// Follow stored direct bases without invoking Python before field validation.
+    fn dataclass_slot_ancestors(&mut self, mut class: Id) -> Result<Vec<Id>> {
         let object = self.builtin("object");
+        let mut ancestors = Vec::new();
+        while class != object {
+            let unsupported = || {
+                Error::new(
+                    "NotImplementedError",
+                    "boxed slotted dataclasses require a single ordinary Python base",
+                )
+            };
+            let Value::Class {
+                scope,
+                metaclass: None,
+                namedtuple_fields: None,
+                ..
+            } = self.heap.get(class)
+            else {
+                return Err(unsupported());
+            };
+            let frame = self.scope_data(*scope);
+            // Assigning __bases__ in boxed classes can shadow, but cannot rebuild, their layout.
+            if frame.names.contains_key("__bases__") {
+                return Err(unsupported());
+            }
+            let layout = frame
+                .class_namespace
+                .as_deref()
+                .filter(|_| frame.class_cell.is_some())
+                .ok_or_else(unsupported)?;
+            let Value::Tuple(bases) = self.heap.get(layout.bases) else {
+                return Err(unsupported());
+            };
+            let [base] = bases.as_slice() else {
+                return Err(unsupported());
+            };
+            class = *base;
+            if class != object {
+                ancestors.push(class);
+            }
+        }
+        Ok(ancestors)
+    }
+
+    fn check_inherited_member_storage(&self, bases: &[Id]) -> Result<()> {
+        for &base in bases {
+            let Value::Class { scope, .. } = self.heap.get(base) else {
+                unreachable!()
+            };
+            let layout = self.scope_data(*scope).class_namespace.as_deref().unwrap();
+            if !layout.member_slots
+                && layout.slot_names.as_deref().is_some_and(|slots| {
+                    slots
+                        .iter()
+                        .any(|s| !matches!(s.as_str(), "__dict__" | "__weakref__"))
+                })
+            {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "inherited named slots require owner-bound member descriptors",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Supply the physical dict/weakref layout for bases that lack a slots declaration.
+    pub(super) fn dataclass_slot_bases(&mut self, old: Id) -> Result<Id> {
+        let bases = self.dataclass_slot_ancestors(old)?;
+        // Plain declarations cannot raise the late iterator error. Decline unsupported
+        // physical layouts here without modifying the class. Custom declarations must
+        // run only after field validation, and may have observable iterator semantics.
+        if bases.iter().all(|&base| {
+            let Value::Class { scope, .. } = self.heap.get(base) else {
+                return false;
+            };
+            self.scope_data(*scope)
+                .names
+                .get("__slots__")
+                .is_none_or(|&slots| {
+                    matches!(
+                        self.heap.get(slots),
+                        Value::None
+                            | Value::Str(_)
+                            | Value::List(_)
+                            | Value::Tuple(_)
+                            | Value::Set { .. }
+                            | Value::Dict(_)
+                    )
+                })
+        }) {
+            self.check_inherited_member_storage(&bases)?;
+        }
+        let mut entries = Vec::new();
+        for base in bases {
+            let mut implicit = Vec::new();
+            if self.class_instances_have_dict(base) {
+                implicit.push(self.text("__dict__"));
+            }
+            if self.class_instances_support_weakref(base) {
+                implicit.push(self.text("__weakref__"));
+            }
+            let implicit = self.alloc(Value::Tuple(implicit));
+            entries.push(self.alloc(Value::Tuple(vec![base, implicit])));
+        }
+        // An ordinary object-based class cannot participate in exception-name dispatch.
+        // A subsequent annotation, descriptor, or base-class hook can still raise.
+        let Value::Class { name, .. } = self.heap.get(old) else {
+            return Err(Error::new(
+                "TypeError",
+                "expected an ordinary dataclass type",
+            ));
+        };
+        let name = name.clone();
+        if self.classes.get(&name) == Some(&old) {
+            self.classes.remove(&name);
+            self.heap.weak_edge_removed(old);
+        }
+        Ok(self.alloc(Value::Tuple(entries)))
+    }
+
+    /// Construct the replacement using only layouts with real member storage.
+    pub(super) fn slotted_dataclass(&mut self, old: Id, namespace: Id) -> Result<Id> {
+        let ancestors = self.dataclass_slot_ancestors(old)?;
+        self.check_inherited_member_storage(&ancestors)?;
         let Value::Class {
-            scope: original,
-            metaclass: None,
-            ref ancestors,
-            ..
+            scope: original, ..
         } = *self.heap.get(old)
         else {
             return Err(Error::new(
@@ -19,40 +138,24 @@ impl Context {
                 "expected an ordinary dataclass type",
             ));
         };
-        if ancestors.as_slice() != [object] {
-            return Err(Error::new(
-                "NotImplementedError",
-                "boxed slotted dataclasses require an ordinary object-based class",
-            ));
-        }
         let name = self.class_name(old).to_owned();
         let module = self.scope_data(original).module.clone();
         let provider_annotations = self.has_class_annotation_provider(original);
-        let class = self.dataclass_from_namespace(
-            name.clone(),
-            Vec::new(),
+        self.dataclass_from_namespace(
+            name,
+            ancestors.into_iter().take(1).collect(),
             namespace,
             &module,
             true,
             provider_annotations,
-        )?;
-        if self.classes.get(&name) == Some(&old) {
-            // This object-root type does not participate in exception-name dispatch.
-            self.classes.remove(&name);
-            self.heap.weak_edge_removed(old);
-        }
-        Ok(class)
+        )
     }
 
-    /// Build a plain dataclass type, initializing descriptors before inherited subclass hooks.
-    pub(super) fn dataclass_from_namespace(
+    pub(super) fn make_dataclass_type(
         &mut self,
         name: String,
         bases: Vec<Id>,
         namespace: Id,
-        module: &str,
-        member_slots: bool,
-        provider_annotations: bool,
     ) -> Result<Id> {
         let object = self.builtin("object");
         for &base in &bases {
@@ -82,6 +185,19 @@ impl Context {
                 ));
             }
         }
+        self.dataclass_from_namespace(name, bases, namespace, "types", false, true)
+    }
+
+    /// Build a plain dataclass type, initializing descriptors before inherited subclass hooks.
+    fn dataclass_from_namespace(
+        &mut self,
+        name: String,
+        bases: Vec<Id>,
+        namespace: Id,
+        module: &str,
+        member_slots: bool,
+        provider_annotations: bool,
+    ) -> Result<Id> {
         let entries = self
             .dict_entries(namespace)
             .ok_or_else(|| Error::new("TypeError", "expected a class namespace dictionary"))?

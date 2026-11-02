@@ -58,4 +58,54 @@ def current():
     original_ref, replacement_ref = discarded()
     gc.collect()
     assert original_ref() is None and replacement_ref() is None
+    @dataclass(slots=True, weakref_slot=True)
+    class Parent:
+        x: int
+
+    @dataclass(slots=True, weakref_slot=True)
+    class Child(Parent):
+        x: int
+        y: int
+
+    child = Child(2, 3)
+    assert Child.__slots__ == ('y',)
+    assert Child.x is Parent.x and 'x' not in Child.__dict__
+    assert Parent.x.__get__(child) == 2 and child.y == 3
+    assert not hasattr(child, '__dict__') and weakref.ref(child)() is child
+
+    class IteratorSlots:
+        __slots__ = iter(('used',))
+
+    class Bad(IteratorSlots):
+        y: list = []
+
+    try:
+        dataclass(Bad, slots=True)
+    except ValueError as exc:
+        assert 'mutable default' in str(exc)
+    else:
+        raise AssertionError('slot inspection preceded field validation')
+
+    class Existing:
+        __slots__ = ()
+        y: list = []
+
+    try:
+        dataclass(Existing, slots=True)
+    except ValueError as exc:
+        assert 'mutable default' in str(exc)
+    else:
+        raise AssertionError('own slots preceded field validation')
+
+    class Late(IteratorSlots):
+        y: int
+
+    try:
+        dataclass(Late, slots=True)
+    except TypeError as exc:
+        assert str(exc) == "Slots of 'IteratorSlots' cannot be determined"
+        assert '__init__' in Late.__dict__
+    else:
+        raise AssertionError('accepted an iterator as an inherited slot declaration')
+
     print('replacement slots, class cell, state and initializer annotations')
