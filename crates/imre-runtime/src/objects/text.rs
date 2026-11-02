@@ -10,7 +10,9 @@ pub(crate) mod urlsplit;
 pub(crate) mod zfill;
 
 pub(crate) use expandtabs::expand_tabs;
-pub(crate) use lowercase::{capitalize, case_map, case_map_points, python_islower, python_istitle};
+pub(crate) use lowercase::{
+    Case, capitalize, case_map, case_map_points, python_islower, python_istitle,
+};
 pub(super) use lowercase::{lowercase, lowercase_chars};
 pub(crate) use normalization::normalize_unicode;
 
