@@ -4563,6 +4563,13 @@ impl Context {
     pub(super) fn object_ne(&mut self, object: Id, other: Id) -> Result<Id> {
         let class = self.exact_type(object)?;
         if let Some(slot) = self.class_attr(class, "__eq__") {
+            // Re-entering the same native descriptor cannot reach a Python equality hook.
+            if self.builtins.get("object.__ne__") == Some(&slot) {
+                return Err(Error::new(
+                    "RecursionError",
+                    "maximum recursion depth exceeded in comparison",
+                ));
+            }
             let method = self.bind_attribute(slot, object, class)?;
             let equal = self.call(method, vec![other], Vec::new())?;
             return if equal == value::NOT_IMPLEMENTED {
