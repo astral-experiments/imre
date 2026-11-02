@@ -685,6 +685,10 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
+        #[cfg(unix)]
+        ("os" | "posix", "getuid" | "getgid" | "getgroups") => {
+            ctx.builtin(&format!("posix.{name}"))
+        }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
         ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
         #[cfg(target_os = "linux")]
@@ -1394,6 +1398,9 @@ pub(super) fn call(
             | "sys.getfilesystemencodeerrors"
             | "posix.abort"
             | "posix.getpid"
+            | "posix.getuid"
+            | "posix.getgid"
+            | "posix.getgroups"
             | "sys._jit.is_available"
             | "sys._jit.is_enabled"
             | "sys._jit.is_active"
@@ -1435,6 +1442,15 @@ pub(super) fn call(
             #[cfg(unix)]
             "posix.abort" => unsafe { libc::abort() },
             "posix.getpid" => ctx.int(i64::from(std::process::id())),
+            "posix.getuid" => ctx.alloc(Value::Int(crate::objects::os::getuid())),
+            "posix.getgid" => ctx.alloc(Value::Int(crate::objects::os::getgid())),
+            "posix.getgroups" => {
+                let groups = crate::objects::os::getgroups()?
+                    .into_iter()
+                    .map(|group| ctx.alloc(Value::Int(group)))
+                    .collect();
+                ctx.alloc(Value::List(groups))
+            }
             "sys.getdefaultencoding" => ctx.default_encoding,
             "sys.get_int_max_str_digits" => {
                 ctx.int(i64::from(crate::integer_text::decimal_digit_limit()))
