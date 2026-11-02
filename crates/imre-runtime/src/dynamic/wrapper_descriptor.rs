@@ -93,12 +93,25 @@ impl BuiltinDescriptor {
             Some(("set", attr)) => Some((
                 "set",
                 attr,
-                &["__reduce__", "difference", "issubset", "union", "update"][..],
+                &[
+                    "__reduce__",
+                    "difference",
+                    "intersection",
+                    "issubset",
+                    "union",
+                    "update",
+                ][..],
             )),
             Some(("frozenset", attr)) => Some((
                 "frozenset",
                 attr,
-                &["__reduce__", "difference", "issubset", "union"][..],
+                &[
+                    "__reduce__",
+                    "difference",
+                    "intersection",
+                    "issubset",
+                    "union",
+                ][..],
             )),
             Some(("list", attr)) => Some(("list", attr, builtins::LIST_METHODS)),
             Some(("range", attr)) => Some(("range", attr, range::METHODS)),
