@@ -2,10 +2,13 @@
 
 import _socket
 import os
-from _socket import AF_INET, SOL_SOCKET
 from _socket import SOCK_DGRAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET
 from _socket import SOCK_STREAM, close, error, has_ipv6, socket
 
+if hasattr(_socket, "AF_INET"):
+    AF_INET = _socket.AF_INET
+if hasattr(_socket, "SOL_SOCKET"):
+    SOL_SOCKET = _socket.SOL_SOCKET
 if hasattr(_socket, "SO_REUSEADDR"):
     SO_REUSEADDR = _socket.SO_REUSEADDR
 if hasattr(_socket, "SO_REUSEPORT"):

@@ -1491,7 +1491,9 @@ impl IntrinsicModule {
                 _ => return None,
             }),
             (Self::Socket, "SocketType") => Intrinsic::ObjectRuntimeExport("socket.SocketType"),
-            (Self::Socket, "create_server") => Intrinsic::ObjectRuntimeExport("socket.create_server"),
+            (Self::Socket, "create_server") => {
+                Intrinsic::ObjectRuntimeExport("socket.create_server")
+            }
             (Self::Socket, "SO_REUSEPORT") => Intrinsic::ObjectRuntimeExport("socket.SO_REUSEPORT"),
             (Self::Socket, "has_dualstack_ipv6") => {
                 Intrinsic::ObjectRuntimeExport("socket.has_dualstack_ipv6")
