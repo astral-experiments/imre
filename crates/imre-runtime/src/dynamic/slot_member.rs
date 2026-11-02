@@ -30,6 +30,7 @@ impl Context {
         let provider_annotations = self.has_class_annotation_provider(original);
         let class = self.dataclass_from_namespace(
             name.clone(),
+            Vec::new(),
             namespace,
             &module,
             true,
@@ -43,16 +44,44 @@ impl Context {
         Ok(class)
     }
 
-    /// Build a fresh object-root type and initialize its member descriptors.
+    /// Build a plain dataclass type, initializing descriptors before inherited subclass hooks.
     pub(super) fn dataclass_from_namespace(
         &mut self,
         name: String,
+        bases: Vec<Id>,
         namespace: Id,
         module: &str,
         member_slots: bool,
         provider_annotations: bool,
     ) -> Result<Id> {
         let object = self.builtin("object");
+        for &base in &bases {
+            if base == object {
+                continue;
+            }
+            let ordinary = match self.heap.get(base) {
+                Value::Class {
+                    scope,
+                    metaclass: None,
+                    ancestors,
+                    ..
+                } if ancestors.as_slice() == [object] => {
+                    let frame = self.scope_data(*scope);
+                    frame.class_cell.is_some()
+                        && frame
+                            .class_namespace
+                            .as_ref()
+                            .is_some_and(|layout| layout.slot_names.is_none())
+                }
+                _ => false,
+            };
+            if !ordinary {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "boxed make_dataclass requires plain unslotted object-root bases",
+                ));
+            }
+        }
         let entries = self
             .dict_entries(namespace)
             .ok_or_else(|| Error::new("TypeError", "expected a class namespace dictionary"))?
@@ -71,19 +100,26 @@ impl Context {
             let key = self.str_value(key)?.to_owned();
             self.bind_local(scope, &key, value);
         }
-        let class = self.allocate_class(name, scope, vec![object])?;
+        let class = self.allocate_class(name, scope, bases)?;
         *self.heap.get_mut(cell) = Value::ClassCell(Some(class));
         self.install_weakref_descriptor(class, scope);
         self.initialize_class_members(class, scope)?;
+        let hook = self.super_attribute(class, class, class, "__init_subclass__")?;
+        self.call(hook, Vec::new(), Vec::new())?;
         Ok(class)
     }
 
-    /// A layout adding real object-valued slots must have one most-derived storage base.
+    /// Calendar payloads and object-valued slots require one most-derived storage base.
     pub(super) fn check_member_slot_bases(&mut self, bases: &[Id], ancestors: &[Id]) -> Result<()> {
         if bases.len() < 2
-            || !ancestors.iter().any(|&base| {
-                matches!(self.heap.get(base), Value::Class {scope,..}
-            if self.scope_data(*scope).class_namespace.as_ref().is_some_and(|ns| ns.member_slots))
+            || !ancestors.iter().any(|&base| match self.heap.get(base) {
+                Value::Native(name) => super::stdlib::datetime::members(name).is_some(),
+                Value::Class { scope, .. } => self
+                    .scope_data(*scope)
+                    .class_namespace
+                    .as_ref()
+                    .is_some_and(|ns| ns.member_slots),
+                _ => false,
             })
         {
             return Ok(());
@@ -95,6 +131,12 @@ impl Context {
             let candidate = lineage
                 .into_iter()
                 .find(|&owner| match self.heap.get(owner) {
+                    // SimpleNamespace stores its dictionary in the object itself.
+                    Value::Class { .. }
+                        if self.classes.get(super::namespace::CLASS) == Some(&owner) =>
+                    {
+                        true
+                    }
                     Value::Class { scope, .. } => self
                         .scope_data(*scope)
                         .class_namespace
@@ -103,13 +145,15 @@ impl Context {
                         .is_some_and(|slots| {
                             slots.iter().any(|s| s != "__dict__" && s != "__weakref__")
                         }),
-                    Value::Native(_) => owner != object,
+                    Value::Native(name) => {
+                        !matches!(name.as_str(), "object" | "enum.Enum" | "datetime.tzinfo")
+                    }
                     _ => false,
                 })
                 .unwrap_or(object);
-            if self.subclass(candidate, solid) {
+            if self.direct_subclass(candidate, solid) {
                 solid = candidate;
-            } else if !self.subclass(solid, candidate) {
+            } else if !self.direct_subclass(solid, candidate) {
                 return Err(Error::new(
                     "TypeError",
                     "multiple bases have instance lay-out conflict",

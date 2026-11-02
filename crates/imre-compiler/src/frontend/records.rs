@@ -999,6 +999,9 @@ impl Checker<'_> {
         node: &impl Ranged,
         diagnostic: &str,
     ) -> String {
+        if name == "object" && self.bundled_mock_class(class, "_PatchFactory") {
+            return self.object_runtime_export("unittest.mock.patch.object", node);
+        }
         if matches!(
             name,
             "assertIsInstance"

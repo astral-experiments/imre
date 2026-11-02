@@ -396,6 +396,7 @@ impl Context {
             Value::Str(s) => !s.is_empty(),
             Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
+            Value::MemoryView { .. } => !self.bytes_like(id)?.is_empty(),
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
             | Value::Dict(v)
@@ -737,6 +738,18 @@ impl Context {
             }
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
+            }
+            (Value::MemoryView { .. }, Value::Array(array)) => self
+                .bytes_like(a)
+                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
+            (Value::Array(array), Value::MemoryView { .. }) => self
+                .bytes_like(b)
+                .is_ok_and(|bytes| array.equals_unsigned_bytes(bytes)),
+            (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
+                match (self.bytes_like(a), self.bytes_like(b)) {
+                    (Ok(left), Ok(right)) => left == right,
+                    _ => false,
+                }
             }
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::SurrogateStr(a), Value::SurrogateStr(b)) => a == b,
@@ -2364,6 +2377,10 @@ impl Context {
                 output
             }
             Value::ByteArray(bytes) => self.bytearray_repr(id, bytes),
+            Value::MemoryView { owner, .. } => {
+                let state = if owner.is_some() { "" } else { "released " };
+                format!("<{state}memory at {id:#x}>")
+            }
             Value::Instance {
                 dictionary: Some(backing),
                 ..
@@ -2450,7 +2467,8 @@ impl Context {
             }
             Value::GetSetDescriptor { owner, name, .. }
                 if crate::objects::HashState::is_provider_class(owner)
-                    || *owner == super::value::TEMPLATE_TYPE =>
+                    || *owner == super::value::TEMPLATE_TYPE
+                    || stdlib::datetime::members(owner).is_some() =>
             {
                 format!("<attribute '{name}' of '{owner}' objects>")
             }
@@ -4030,28 +4048,38 @@ impl Context {
         self.truth(different)
     }
 
-    /// Call a container subclass override or its inherited native comparison.
-    fn container_compare_slot(
+    /// Call the first Python or native comparison slot in the receiver's MRO.
+    fn builtin_compare_slot(
         &mut self,
         name: &str,
         a: Id,
         b: Id,
-        set_order: bool,
+        native_order: bool,
     ) -> Result<Option<Id>> {
-        if set_order {
-            if !matches!(self.heap.get(self.scalar_value(a)), Value::Set { .. }) {
-                return self.operator_slot(a, name, b);
-            }
+        if native_order {
+            let receiver = self.heap.get(self.scalar_value(a));
+            let other = self.heap.get(self.scalar_value(b));
+            let compatible = match receiver {
+                Value::Set { .. } => matches!(other, Value::Set { .. }),
+                Value::Calendar { value, .. } if value.class() != "timezone" => {
+                    matches!(other, Value::Calendar { value: right, .. } if value.class() == right.class())
+                }
+                _ => return self.operator_slot(a, name, b),
+            };
             let class = self.exact_type(a)?;
-            // A mixin after set or frozenset in the MRO cannot displace its native slot.
             let native = self.find_in_mro(class, |base| match self.heap.get(base) {
-                Value::Native(kind) if matches!(kind.as_str(), "set" | "frozenset") => Some(true),
+                Value::Native(kind)
+                    if matches!(kind.as_str(), "set" | "frozenset")
+                        || stdlib::datetime::members(kind).is_some() =>
+                {
+                    Some(true)
+                }
                 _ => self.own_class_attr(base, name).map(|_| false),
             });
             if native != Some(true) {
                 return self.operator_slot(a, name, b);
             }
-            if !matches!(self.heap.get(self.scalar_value(b)), Value::Set { .. }) {
+            if !compatible {
                 return Ok(None);
             }
         } else if self.slot(a, name).is_some() {
@@ -4071,6 +4099,21 @@ impl Context {
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        if matches!(op, "==" | "!=")
+            && let Value::MemoryView { owner, .. } = self.heap.get(a)
+        {
+            if owner.is_some() {
+                self.check_buffer_exporter(b)?;
+            }
+            if owner.is_none()
+                || matches!(
+                    self.heap.get(self.scalar_value(b)),
+                    Value::Bytes(_) | Value::ByteArray(_) | Value::MemoryView { .. } | Value::Array(_)
+                )
+            {
+                return Ok(Some(builtins::boolean(self.equal(a, b) == (op == "=="))));
+            }
+        }
         if matches!(op, "==" | "!=")
             && matches!(self.heap.get(a), Value::Deque(_))
             && matches!(self.heap.get(b), Value::Deque(_))
@@ -4134,11 +4177,15 @@ impl Context {
         {
             return Ok(None);
         }
-        let set_order = matches!(op, "<" | "<=" | ">" | ">=")
+        let native_order = matches!(op, "<" | "<=" | ">" | ">=")
             && [a, b]
                 .into_iter()
-                .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
-        if inplace.is_empty() && (self.same_sequence_family(a, b) || set_order) {
+                .any(|id| match self.heap.get(self.scalar_value(id)) {
+                    Value::Set { .. } => true,
+                    Value::Calendar { value, .. } => value.class() != "timezone",
+                    _ => false,
+                });
+        if inplace.is_empty() && (self.same_sequence_family(a, b) || native_order) {
             let ac = self.exact_type(a)?;
             let bc = self.exact_type(b)?;
             // The proper subtype's reflected slot has priority, even when it is inherited.
@@ -4148,7 +4195,7 @@ impl Context {
                 [(left, a, b), (right, b, a)]
             };
             for (name, left, right) in slots {
-                if let Some(result) = self.container_compare_slot(name, left, right, set_order)? {
+                if let Some(result) = self.builtin_compare_slot(name, left, right, native_order)? {
                     return Ok(Some(result));
                 }
             }
@@ -4179,6 +4226,11 @@ impl Context {
         }
         if let Some(result) = self.operator_slot(a, left, b)? {
             return Ok(Some(result));
+        }
+        if matches!(op, "==" | "!=")
+            && matches!(self.heap.get(b), Value::MemoryView { owner: Some(_), .. })
+        {
+            self.check_buffer_exporter(a)?;
         }
         if !reflected_first && (ac != bc || inplace.is_empty()) {
             return self.operator_slot(b, right, a);

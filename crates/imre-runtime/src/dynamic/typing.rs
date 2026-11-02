@@ -431,7 +431,13 @@ pub(super) fn subscribe(ctx: &mut Context, target: Id, index: Id) -> Option<Resu
         Value::Native(n)
             if matches!(
                 n.as_str(),
-                "dict" | "list" | "tuple" | "set" | "type" | super::value::REGEX_PATTERN_TYPE
+                "dict"
+                    | "list"
+                    | "tuple"
+                    | "set"
+                    | "type"
+                    | super::value::REGEX_PATTERN_TYPE
+                    | super::value::REGEX_MATCH_TYPE
             ) =>
         {
             AliasKind::Builtin
@@ -708,9 +714,6 @@ pub(super) fn class_parameters(
     original: Option<Id>,
     bases: &[Id],
 ) -> Result<()> {
-    if let Some(original) = original {
-        ctx.bind(scope, "__orig_bases__", original);
-    }
     let Some(&generic) = ctx.classes.get("typing.Generic") else {
         return Ok(());
     };
@@ -721,12 +724,21 @@ pub(super) fn class_parameters(
         Some(tuple) => ctx.items(tuple)?,
         None => bases.to_vec(),
     };
+    bind_generic_parameters(ctx, scope, generic, &raw)
+}
+
+pub(super) fn bind_generic_parameters(
+    ctx: &mut Context,
+    scope: Id,
+    generic: Id,
+    raw: &[Id],
+) -> Result<()> {
     if raw.contains(&generic) {
         return Err(Error::new("TypeError", "Cannot inherit from plain Generic"));
     }
-    let vars = variables(ctx, &raw);
+    let vars = variables(ctx, raw);
     let mut explicit = None;
-    for id in raw {
+    for &id in raw {
         if let Value::GenericAlias(a) = ctx.heap.get(id)
             && a.origin == generic
             && explicit.replace(a.parameters).is_some()
@@ -826,6 +838,15 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             "__module__" => var.module,
             "__bound__" => var.bound,
             "__constraints__" => var.constraints,
+            "__default__" => no_default(ctx),
+            "has_default" => {
+                let callable = ctx.builtin("typing.TypeVar.has_default");
+                ctx.alloc(Value::Method {
+                    callable,
+                    receiver: value,
+                    explicit: false,
+                })
+            }
             "__infer_variance__" => {
                 if var.infer_variance {
                     TRUE
@@ -904,7 +925,42 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
     Some(Ok(attr))
 }
 
-fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+/// Create fresh compiler-declared type variables in a lexical scope shared by the class body and methods.
+pub(super) fn class_parameter_scope(ctx: &mut Context, outer: Id, names: Id) -> Result<Id> {
+    let enclosing = ctx.scope_data(outer);
+    let parent = if enclosing.class_body.is_some() {
+        enclosing.parent.unwrap_or(outer)
+    } else {
+        outer
+    };
+    let module = enclosing.module.clone();
+    let scope = ctx.scope(&module, Some(parent));
+    let typing = ctx.text("typing");
+    let mut params = Vec::new();
+    for (binding, name) in ctx
+        .dict_entries(names)
+        .expect("declared class type parameters")
+        .to_vec()
+    {
+        let param = typevar(ctx, &[name], &[("infer_variance".to_owned(), TRUE)], typing)?;
+        let binding = ctx.str_value(binding)?.to_owned();
+        ctx.bind(scope, &binding, param);
+        params.push(param);
+    }
+    let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+        unreachable!()
+    };
+    frame.closure.declared.extend(frame.names.keys().cloned());
+    frame.closure.declared_complete = true;
+    let declared = ctx.alloc(Value::Tuple(params.clone()));
+    ctx.bind(scope, ".type_params", declared);
+    let generic = named_class(ctx, "typing", "Generic");
+    let base = alias(ctx, AliasKind::Generic, generic, params)?;
+    ctx.bind(scope, ".generic_base", base);
+    Ok(scope)
+}
+
+fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)], module: Id) -> Result<Id> {
     let mut name = args.first().copied();
     let mut bound = NONE;
     let mut covariant = false;
@@ -965,7 +1021,6 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
             "Constraints cannot be combined with bound=...",
         ));
     }
-    let module = ctx.heap.caller_module();
     let constraints = ctx.alloc(Value::Tuple(constraints.to_vec()));
     Ok(ctx.alloc(Value::TypeVar(TypeVariable {
         name,
@@ -976,6 +1031,119 @@ fn typevar(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id
         contravariant,
         infer_variance,
     })))
+}
+
+/// Check a forward reference without evaluating names or converting the tree into Python AST objects.
+fn validate_forward_ref(source: &str) -> Result<()> {
+    use ruff_python_ast::token::TokenKind;
+    use ruff_python_ast::visitor::{self, Visitor};
+    use ruff_python_ast::{Expr, ExprContext};
+    use ruff_text_size::Ranged;
+    use std::collections::HashSet;
+
+    fn invalid_binding<'a>(mut names: impl Iterator<Item = &'a str>) -> bool {
+        let mut seen = HashSet::new();
+        names.any(|name| name == "__debug__" || !seen.insert(name))
+    }
+
+    #[derive(Default)]
+    struct Bindings {
+        invalid: bool,
+    }
+    impl<'a> Visitor<'a> for Bindings {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if self.invalid {
+                return;
+            }
+            self.invalid = match expr {
+                Expr::Call(call) => invalid_binding(
+                    call.arguments
+                        .keywords
+                        .iter()
+                        .filter_map(|kw| kw.arg.as_deref()),
+                ),
+                Expr::Lambda(lambda) => lambda.parameters.as_ref().is_some_and(|params| {
+                    invalid_binding(params.iter().map(|p| p.name().as_str()))
+                }),
+                Expr::Name(name) => name.ctx == ExprContext::Store && name.id == "__debug__",
+                Expr::Attribute(attr) => {
+                    attr.ctx == ExprContext::Store && attr.attr.as_str() == "__debug__"
+                }
+                _ => false,
+            };
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                visitor::walk_expr(self, expr)
+            });
+        }
+    }
+    if source.contains('\0') {
+        return Err(Error::new(
+            "SyntaxError",
+            "source code string cannot contain null bytes",
+        ));
+    }
+    // CPython's tokenizer caps the combined nesting of (), [] and {} at 200.
+    // Keep deeply nested input out of the recursive parser. Short references only lex once.
+    const MAX_NESTING: usize = 200;
+    if source.len() > MAX_NESTING {
+        let mut lexer =
+            ruff_python_parser::lexer::lex(source, ruff_python_parser::Mode::Expression);
+        let mut depth = 0_usize;
+        loop {
+            match lexer.next_token() {
+                TokenKind::Lpar | TokenKind::Lsqb | TokenKind::Lbrace => {
+                    depth += 1;
+                    if depth > MAX_NESTING {
+                        return Err(Error::new("SyntaxError", "too many nested parentheses"));
+                    }
+                }
+                TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => {
+                    depth = depth.saturating_sub(1)
+                }
+                TokenKind::EndOfFile | TokenKind::Unknown => break,
+                _ => {}
+            }
+        }
+    }
+    let parsed = ruff_python_parser::parse_expression(source)
+        .map_err(|error| Error::new("SyntaxError", error.to_string()))?;
+    let body = parsed.syntax().body.as_ref();
+    let invalid = match body {
+        Expr::Yield(_) => Some("'yield' outside function"),
+        Expr::YieldFrom(_) => Some("'yield from' outside function"),
+        Expr::Await(_) => Some("'await' outside function"),
+        _ => None,
+    };
+    if let Some(message) = invalid {
+        return Err(Error::new("SyntaxError", message));
+    }
+    // The grammar alone cannot validate nested coroutine/generator scopes or walrus
+    // bindings across comprehension scopes. Those require a compile-time symbol table.
+    let tokens = parsed.tokens();
+    let comprehension = tokens.iter().any(|t| t.kind() == TokenKind::For);
+    let lambda_body = body.as_lambda_expr().map(|lambda| lambda.body.range());
+    if tokens.iter().any(|token| match token.kind() {
+        TokenKind::Await | TokenKind::Async => true,
+        TokenKind::Yield => {
+            comprehension || !lambda_body.is_some_and(|r| r.contains_range(token.range()))
+        }
+        TokenKind::ColonEqual => comprehension,
+        _ => false,
+    }) {
+        return Err(Error::new(
+            "NotImplementedError",
+            "forward reference requires scope validation",
+        ));
+    }
+    let mut bindings = Bindings::default();
+    bindings.visit_expr(body);
+    if bindings.invalid {
+        return Err(Error::new(
+            "SyntaxError",
+            "invalid binding in forward reference",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn call(
@@ -1060,7 +1228,8 @@ pub(super) fn call(
         }));
     }
     if operation == "TypeVar" {
-        return typevar(ctx, args, kwargs);
+        let module = ctx.heap.caller_module();
+        return typevar(ctx, args, kwargs, module);
     }
     if operation == "cast" {
         let [typ, value] = super::builtins::bind("cast()", args, kwargs, ["typ", "val"])?;
@@ -1113,6 +1282,13 @@ pub(super) fn call(
         ("NoDefault.__reduce__", [value]) if matches!(ctx.heap.get(*value), Value::NoDefault) => {
             Ok(ctx.text("NoDefault"))
         }
+        ("TypeVar.has_default", [var]) if matches!(ctx.heap.get(*var), Value::TypeVar(_)) => {
+            Ok(FALSE)
+        }
+        ("TypeVar.has_default", _) => Err(Error::new(
+            "TypeError",
+            "TypeVar.has_default() takes no arguments",
+        )),
         ("TypeVarTuple.has_default", [pack])
             if let Value::TypeVarTuple { default, .. } = ctx.heap.get(*pack) =>
         {
@@ -1157,6 +1333,10 @@ pub(super) fn call(
             "TypeError",
             "_GenericAlias.__init__() requires an origin and arguments",
         )),
+        ("_validate_forward_ref", [text]) => {
+            validate_forward_ref(ctx.str_value(*text)?)?;
+            Ok(NONE)
+        }
         ("_eval_type_expression", [text, globals, locals]) => {
             ctx.eval_type_expression(*text, *globals, *locals)
         }
@@ -1461,6 +1641,7 @@ impl Context {
                             | "NotImplementedType"
                             | "ellipsis"
                             | super::value::REGEX_PATTERN_TYPE
+                            | super::value::REGEX_MATCH_TYPE
                             | super::value::TEMPLATE_ITER_TYPE
                             | super::value::TEMPLATE_TYPE
                             | super::value::INTERPOLATION_TYPE

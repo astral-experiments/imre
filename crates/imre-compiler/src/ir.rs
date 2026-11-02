@@ -1745,11 +1745,15 @@ pub(crate) enum StrDescriptor {
     IsDigit,
     ZFill,
     IsTitle,
+    Title,
+    SwapCase,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
         Some(match name {
             "lower" => Self::Lower,
+            "title" => Self::Title,
+            "swapcase" => Self::SwapCase,
             "strip" => Self::Strip,
             "lstrip" => Self::LStrip,
             "rstrip" => Self::RStrip,
@@ -1777,6 +1781,8 @@ impl StrDescriptor {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Lower => "lower",
+            Self::Title => "title",
+            Self::SwapCase => "swapcase",
             Self::Strip => "strip",
             Self::LStrip => "lstrip",
             Self::RStrip => "rstrip",
@@ -1824,6 +1830,9 @@ pub(crate) enum TextOperation {
     Lower,
     Upper,
     Capitalize,
+    CaseMap {
+        title: bool,
+    },
     /// True splits from the right.
     Split(bool),
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.

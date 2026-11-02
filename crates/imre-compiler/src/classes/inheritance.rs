@@ -56,6 +56,12 @@ pub(super) fn resolve(
                             module.error(argument, "codec base class requires object lowering")
                         );
                     }
+                    Some(Binding::Intrinsic(base)) if base.is_subclassable_calendar() => {
+                        graph.needs_object_runtime.set(true);
+                        return Err(
+                            module.error(argument, "calendar subclasses require object lowering")
+                        );
+                    }
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
                         if args.args.len() == 1 && args.keywords.is_empty() => {}
                     Some(Binding::Intrinsic(Intrinsic::Abc)) => {}

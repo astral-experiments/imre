@@ -97,3 +97,42 @@ def current():
             print(exc.start, exc.end, exc.reason)
         else:
             raise AssertionError("malformed input accepted")
+
+    class Mapped(str):
+        def title(self):
+            return "override"
+
+        def swapcase(self):
+            return "override"
+
+    word = Mapped("AΣ\ud800ß")
+    assert word.title() == word.swapcase() == "override"
+    title = str.title.__get__(word)
+    swapcase = str.swapcase.__get__(word)
+    assert title() == "Aς\ud800Ss" and type(title()) is str
+    assert swapcase() == "aς\ud800SS" and type(swapcase()) is str
+    assert "A\ud800Σ".title() == "A\ud800Σ"
+    assert "A\ud800Σ".swapcase() == "a\ud800σ"
+    signed = Mapped("!")
+    assert str.title(signed) is not str.title(signed)
+    assert str.swapcase(signed) is not str.swapcase(signed)
+    assert str.title.__objclass__ is str
+    assert str.swapcase.__text_signature__ == "($self, /)"
+    for method in (title, swapcase):
+        for args, kw in (((1,), {}), ((), {"unknown": True})):
+            try:
+                method(*args, **kw)
+            except TypeError as error:
+                assert "takes no " in str(error)
+            else:
+                raise AssertionError("unexpected accepted case-map arguments")
+
+    class Alias:
+        f = str.title
+
+    try:
+        Alias().f(1)
+    except TypeError as error:
+        assert str(error) == "descriptor 'title' for 'str' objects doesn't apply to a 'Alias' object"
+    else:
+        raise AssertionError("accepted a non-string descriptor receiver")

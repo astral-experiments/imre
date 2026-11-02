@@ -25,6 +25,8 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
     use crate::objects::exceptions::Kind;
     match name {
         "UnsupportedOperation" => Some(Kind::UnsupportedOperation),
+        "socket.gaierror" => Some(Kind::GaiError),
+        "socket.herror" => Some(Kind::HError),
         "binascii.Error" => Some(Kind::BinasciiError),
         "binascii.Incomplete" => Some(Kind::BinasciiIncomplete),
         _ => imre_ast::exceptions::boxed_builtin_kind(name),
@@ -281,6 +283,8 @@ pub(super) const LIST_METHODS: &[&str] = &[
     "index", "insert", "pop", "remove", "reverse", "sort",
 ];
 
+pub(super) const MEMORYVIEW_METHODS: &[&str] = &["release"];
+
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "__repr__",
     "append",
@@ -289,6 +293,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "endswith",
     "extend",
     "reverse",
+    "split",
     "startswith",
 ];
 
@@ -300,6 +305,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "rfind",
     "rsplit",
     "rstrip",
+    "split",
     "startswith",
     "translate",
 ];
@@ -337,6 +343,8 @@ pub(super) const STR_METHODS: &[&str] = &[
     "splitlines",
     "startswith",
     "strip",
+    "swapcase",
+    "title",
     "translate",
     "upper",
     "zfill",
@@ -398,6 +406,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "coroutine_wrapper"
         }
+        Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::ByteArray(_)
             if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
@@ -519,6 +528,12 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "selectors"
         }
+        Value::File(handle)
+            if attr == "read1"
+                && matches!(handle.as_ref(), super::stdlib::BinaryFile::Descriptor(fd) if fd.reading) =>
+        {
+            "file"
+        }
         Value::File(_)
             if matches!(
                 attr,
@@ -544,13 +559,18 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::RegexPattern(_)
             if matches!(
                 attr,
-                "findall" | "match" | "fullmatch" | "search" | "split" | "scanner"
+                "findall" | "finditer" | "match" | "fullmatch" | "search" | "split" | "scanner"
             ) =>
         {
             "pattern"
         }
         Value::RegexScanner { .. } if matches!(attr, "match" | "search") => "scanner",
-        Value::RegexMatch(_) if matches!(attr, "group" | "groups" | "start" | "end" | "span") => {
+        Value::RegexMatch(_)
+            if matches!(
+                attr,
+                "group" | "groups" | "groupdict" | "start" | "end" | "span"
+            ) =>
+        {
             "match"
         }
         Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
@@ -935,7 +955,10 @@ pub(super) fn call(
         }
         return Ok(NONE);
     }
-    if let Some((owner, method)) = name.split_once('.') {
+    // A module-qualified OSError subclass uses the exception constructor below.
+    if let Some((owner, method)) = name.split_once('.')
+        && exception_subclass(name, "OSError") != Some(true)
+    {
         return match owner {
             "coroutine" | "coroutine_wrapper" => {
                 positional(name, kwargs)?;
@@ -991,7 +1014,7 @@ pub(super) fn call(
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
             "bytes" | "bytearray" if method == "fromhex" => text::fromhex(ctx, name, args, kwargs),
-            "bytearray" if matches!(method, "decode" | "endswith" | "startswith") => {
+            "bytearray" if matches!(method, "decode" | "endswith" | "split" | "startswith") => {
                 text::method(ctx, owner, method, args, kwargs)
             }
             "str" | "bytes" => text::method(ctx, owner, method, args, kwargs),
@@ -1023,6 +1046,27 @@ pub(super) fn call(
             }
             "list" | "tuple" | "dict" | "set" | "frozenset" => {
                 collections::method(ctx, name, args, kwargs)
+            }
+            "memoryview" if method == "release" => {
+                positional(name, kwargs)?;
+                arity(name, args, 1, 1)?;
+                let exports = ctx
+                    .buffer_exports
+                    .iter()
+                    .filter(|&&view| view == args[0])
+                    .count();
+                if exports != 0 {
+                    let unit = if exports == 1 { "buffer" } else { "buffers" };
+                    return Err(Error::new(
+                        "BufferError",
+                        format!("memoryview has {exports} exported {unit}"),
+                    ));
+                }
+                let Value::MemoryView { owner, .. } = ctx.heap.get_mut(args[0]) else {
+                    return Err(type_error("expected memoryview"));
+                };
+                *owner = None;
+                Ok(NONE)
             }
             "slice" => super::slice::method(ctx, method, args, kwargs),
             "range" | "range_iterator" | "longrange_iterator" => {
@@ -1426,6 +1470,7 @@ pub(super) fn call(
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
                 Value::Bytes(v) | Value::ByteArray(v) => v.len(),
+                Value::MemoryView { .. } => ctx.bytes_like(args[0])?.len(),
                 Value::Range(range) => {
                     return range.len.to_i64().map(|n| ctx.int(n)).ok_or_else(|| {
                         Error::new(
@@ -1462,6 +1507,33 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::Filter {
                 predicate: *predicate,
                 input,
+            }))
+        }
+        "memoryview" => {
+            let [object] = bind(name, args, kwargs, ["object"])?;
+            let object = object.ok_or_else(|| {
+                type_error("memoryview() missing required argument 'object' (pos 1)")
+            })?;
+            ctx.check_buffer_exporter(object)?;
+            let owner = match ctx.heap.get(ctx.scalar_value(object)) {
+                Value::Bytes(_) => object,
+                Value::MemoryView { owner, .. } => Context::memoryview_owner(*owner)?,
+                Value::Array(_) | Value::ByteArray(_) => {
+                    return Err(Error::new(
+                        "NotImplementedError",
+                        "memoryview of a mutable buffer is unsupported",
+                    ));
+                }
+                _ => {
+                    return Err(type_error(format!(
+                        "memoryview: a bytes-like object is required, not '{}'",
+                        ctx.type_name(object)
+                    )));
+                }
+            };
+            Ok(ctx.alloc(Value::MemoryView {
+                owner: Some(owner),
+                hash: None,
             }))
         }
         "slice" => super::slice::construct(ctx, args, kwargs),
@@ -1567,7 +1639,36 @@ pub(super) fn call(
         "input" => {
             positional(name, kwargs)?;
             arity(name, args, 0, 0)?;
-            Ok(ctx.text(crate::sys::read_input_line()?))
+            crate::flush_stdout().map_err(crate::objects::errno_error)?;
+            let sys = match ctx.threads.system_module {
+                Some(sys) => sys,
+                None => ctx.module("sys")?,
+            };
+            let stdin = match ctx.lookup_attr(sys, "stdin") {
+                Ok(NONE) => return Err(Error::new("RuntimeError", "lost sys.stdin")),
+                Err(error) if ctx.is_attribute_error(&error) => {
+                    return Err(Error::new("RuntimeError", "lost sys.stdin"));
+                }
+                result => result?,
+            };
+            let readline = ctx.lookup_attr(stdin, "readline")?;
+            let line = ctx.call(readline, Vec::new(), Vec::new())?;
+            let stripped = match ctx.heap.get(ctx.scalar_value(line)) {
+                Value::Bytes(b) if !b.is_empty() => {
+                    b.strip_suffix(b"\n").map(|s| Value::Bytes(s.to_vec()))
+                }
+                Value::Str(s) if !s.is_empty() => {
+                    s.strip_suffix('\n').map(|s| Value::Str(s.to_owned()))
+                }
+                Value::SurrogateStr(s) if !s.is_empty() => s
+                    .strip_suffix(&[u32::from('\n')])
+                    .map(|s| Value::SurrogateStr(s.to_vec())),
+                Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_) => {
+                    return Err(Error::new("EOFError", "EOF when reading a line"));
+                }
+                _ => return Err(type_error("object.readline() returned non-string")),
+            };
+            Ok(stripped.map_or(line, |value| ctx.alloc(value)))
         }
         "print" => print::call(ctx, args, kwargs),
         "NoneType" | "NotImplementedType" | "ellipsis" => {

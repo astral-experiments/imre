@@ -54,6 +54,7 @@ pub(super) const NOT_IMPLEMENTED: Id = 4;
 const EMPTY_TUPLE: Id = 5;
 
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
+pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
 pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
 pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
@@ -727,6 +728,11 @@ pub(super) enum Value {
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
+    /// A contiguous read-only view keeps its original bytes exporter alive until release.
+    MemoryView {
+        owner: Option<Id>,
+        hash: Option<i64>,
+    },
     ByteArray(Vec<u8>),
     CodecInfo {
         entry: crate::objects::CodecInfo,
@@ -1045,6 +1051,7 @@ impl Value {
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
+            Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
             Self::File(file) => match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
@@ -1061,6 +1068,7 @@ impl Value {
             Self::List(_) => "list",
             Self::CallableIterator(_) => "callable_iterator",
             Self::RegexPattern(_) => REGEX_PATTERN_TYPE,
+            Self::RegexMatch(_) => REGEX_MATCH_TYPE,
             Self::RegexScanner { .. } => "_sre.SRE_Scanner",
             Self::Tuple(_) => "tuple",
             Self::Slice(_) => "slice",
@@ -1239,6 +1247,7 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::MemoryView { owner, .. } => visit.extend(owner),
             Self::Template {
                 strings,
                 interpolations,
