@@ -38,26 +38,6 @@ impl Context {
         Ok(self.closure_environment(parent, names, &cells))
     }
 
-    /// SETUP_ANNOTATIONS creates a class-local mapping without changing an enclosing cell.
-    pub(super) fn setup_class_annotations(&mut self, scope: Id) {
-        if self
-            .namespace_binding(self.scope_data(scope), "__annotations__")
-            .is_none()
-        {
-            let annotations = self.dict(Vec::new());
-            self.bind_namespace(scope, "__annotations__", annotations);
-        }
-    }
-
-    /// A stringized field uses the class namespace, then globals if that binding was deleted.
-    pub(super) fn store_class_annotation(&mut self, scope: Id, key: Id, value: Id) -> Result<()> {
-        let mapping = match self.namespace_binding(self.scope_data(scope), "__annotations__") {
-            Some(mapping) => mapping,
-            None => self.lookup(self.root_scope(scope), "__annotations__")?,
-        };
-        self.put_item(mapping, key, value)
-    }
-
     /// Record each executed ordinary declaration once, in lexical order.
     pub(super) fn record_class_annotation(
         &mut self,
@@ -76,7 +56,9 @@ impl Context {
                 "annotation outside an executing class body",
             ));
         };
-        namespace.annotation_sites.get_or_insert_with(Default::default)
+        namespace
+            .annotation_sites
+            .get_or_insert_with(Default::default)
             .insert(offset, (name, thunk));
         self.put_item(scratch, name, NONE)?;
         Ok(NONE)
@@ -102,7 +84,11 @@ impl Context {
         let key = self.heap.code_name("__annotations__");
         self.remove_binding(scope, "__annotations__", key)?;
         self.enable_class_annotation_provider(scope);
-        let fields = if fields == NONE { self.dict(Vec::new()) } else { fields };
+        let fields = if fields == NONE {
+            self.dict(Vec::new())
+        } else {
+            fields
+        };
         Ok((fields, annotate))
     }
 

@@ -14,8 +14,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use super::builtins::boolean;
+use super::stdlib::hashlib::digest::SharedHash;
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::SharedHash;
 use crate::objects::locks::{PrimitiveLock, thread_ident, timeout_float, timeout_int};
 
 type WorkerStatus = std::result::Result<(), String>;
@@ -294,6 +294,8 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
     let count = Arc::clone(&ctx.threads.count);
     let active = Arc::new(AtomicBool::new(true));
     let worker_active = Arc::clone(&active);
+    let fault_workers =
+        matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
     let thread = thread::Builder::new()
         .spawn(move || {
             // A failed bootstrap publishes no identity and contributes nothing to the live count.
@@ -302,6 +304,9 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
             let (python, acquire) = match operation {
                 Operation::Python(callback) => match callback.load() {
                     Ok((mut worker, function, arguments)) => {
+                        worker
+                            .heap
+                            .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
                         worker.threads.count = Arc::clone(&count);
                         worker.threads.private_context = true;
                         (Some((worker, function, arguments)), None)
@@ -351,7 +356,9 @@ fn launch(ctx: &Context, operation: Operation, detached_label: Option<String>) -
                 } else if let Some(lock) = acquire {
                     lock.acquire(true, None);
                 } else if let Some((hash, data)) = update {
-                    hash.lock().update(&data);
+                    hash.lock()
+                        .update(&data)
+                        .map_err(|error| error.to_string())?;
                 }
             }
             Ok(())
@@ -401,11 +408,20 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
     if let Value::Method {
         callable, receiver, ..
     } = *ctx.heap.get(target)
-        && let Value::Native(symbol) = ctx.heap.get(callable)
         && let Value::Tuple(pos) | Value::List(pos) = ctx.heap.get(args)
         && matches!(ctx.heap.get(kwargs), Value::Dict(entries) if entries.is_empty())
     {
-        let operation = match (ctx.heap.get(receiver), pos.as_slice()) {
+        let (symbol, storage) = match ctx.heap.get(callable) {
+            Value::Native(symbol) => (symbol.as_str(), receiver),
+            Value::HashMethod {
+                owner,
+                name: "update",
+            } if ctx.heap.get(receiver).instance_class() == Some(*owner) => {
+                ("hash.update", ctx.scalar_value(receiver))
+            }
+            _ => ("", receiver),
+        };
+        let operation = match (ctx.heap.get(storage), pos.as_slice()) {
             (Value::PrimitiveLock(lock), []) if symbol == "_thread.lock.acquire" => {
                 Some(Operation::Acquire {
                     lock: Arc::clone(lock),
@@ -413,7 +429,7 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
                 })
             }
             (value @ Value::Hash(hash), [id])
-                if super::builtins::method_name(value, "update").as_ref() == Some(symbol) =>
+                if super::builtins::method_name(value, "update").as_deref() == Some(symbol) =>
             {
                 if let Value::Bytes(data) = ctx.heap.get(*id) {
                     Some(Operation::UpdateHash {

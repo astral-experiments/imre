@@ -4,7 +4,6 @@ import warnings
 from _thread import RLock as _Lock
 from types import GenericAlias
 import weakref
-import _imre_logging as _native
 
 
 _lock = _Lock()
@@ -733,6 +732,12 @@ class Logger(Filterer):
         """
         if self.isEnabledFor(CRITICAL):
             self._log(CRITICAL, msg, args, **kwargs)
+
+    def __reduce__(self):
+        if getLogger(self.name) is not self:
+            import pickle
+            raise pickle.PicklingError('logger cannot be pickled')
+        return getLogger, (self.name,)
 
 
 # CPython 3.14.5 Lib/logging/__init__.py. See records.py for the license.

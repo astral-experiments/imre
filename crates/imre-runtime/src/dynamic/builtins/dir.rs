@@ -1,4 +1,5 @@
 use super::{Context, Error, Id, NONE, Result, Value, collections, type_error};
+use crate::dynamic::typing::{Alias, AliasKind, forwards_to_origin, literal_origin};
 use std::collections::BTreeSet;
 
 /// Apply the type's special method and sort a fresh list, preserving duplicates and comparison errors.
@@ -36,10 +37,44 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     let mut names = BTreeSet::new();
     let mut keys = Vec::new();
     let class = match ctx.heap.get(object) {
+        Value::GenericAlias(alias) if matches!(alias.kind, AliasKind::Literal(_)) => {
+            return literal_names(ctx, alias.clone());
+        }
+        Value::GenericAlias(alias) if alias.kind == AliasKind::Concatenate => {
+            let origin = alias.origin;
+            names.extend(alias.metadata().map(|(name, _)| name.to_owned()));
+            names.extend(["_inst", "_name", "copy_with", "__mro_entries__"].map(str::to_owned));
+            let origin_names = call(ctx, &[origin], &[])?;
+            ctx.heap.keep(origin_names);
+            let marker = ctx.text("__");
+            ctx.heap.keep(marker);
+            for name in ctx.items(origin_names)? {
+                if visible_origin_name(ctx, name, marker)? {
+                    keys.push(name);
+                }
+            }
+            ctx.builtin("object")
+        }
+        Value::ParamSpec(_) => {
+            names.extend(super::super::paramspec::names().map(str::to_owned));
+            ctx.builtin("object")
+        }
+        Value::Native(_) | Value::Method { .. }
+            if ctx.builtin_type_name(object) == Some("builtin_function_or_method") =>
+        {
+            ctx.builtin("builtin_function_or_method")
+        }
         Value::Class { .. } | Value::Native(_) => object,
+        Value::Count { .. }
+        | Value::Repeat(_)
+        | Value::Union(_)
+        | Value::Dict(_)
+        | Value::List(_)
+        | Value::Str(_)
+        | Value::SurrogateStr(_) => ctx.exact_type(object)?,
         Value::NamedTuple {
             class: Some(class), ..
-        } if *class == crate::dynamic::stdlib::os::stat::CLASS
+        } if crate::dynamic::stdlib::os::stat::layout(class).is_some()
             || crate::dynamic::stdlib::fixed_structseq::fixed_type(class).is_some() =>
         {
             ctx.builtin(class)
@@ -104,6 +139,64 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
     Ok(dictionary)
 }
 
+/// Literal delegates non-dunder names to its origin, including custom Python directory hooks.
+fn literal_names(ctx: &mut Context, alias: Alias) -> Result<Id> {
+    let (origin, nested) = literal_origin(ctx, alias.origin)?;
+    let mut names = call(ctx, &[origin], &[])?;
+    // Each enclosing alias filters the sorted dir() of the preceding alias.
+    for _ in 0..nested {
+        let merged = merge_literal_names(ctx, &alias, names)?;
+        names = collections::sorted(ctx, &[merged], &[])?;
+    }
+    merge_literal_names(ctx, &alias, names)
+}
+
+fn merge_literal_names(ctx: &mut Context, alias: &Alias, origin_names: Id) -> Result<Id> {
+    ctx.heap.keep(origin_names);
+    let fields = alias.literal_fields().map(|(name, _)| name);
+    let entries = fields
+        .into_iter()
+        .chain([
+            "__class__",
+            "__format__",
+            "__getstate__",
+            "__init_subclass__",
+            "__mro_entries__",
+        ])
+        .map(|name| (ctx.text(name), NONE))
+        .collect();
+    let names = ctx.dict(entries);
+    ctx.heap.keep(names);
+    let marker = ctx.text("__");
+    ctx.heap.keep(marker);
+    for name in ctx.items(origin_names)? {
+        if visible_origin_name(ctx, name, marker)? {
+            ctx.put_item(names, name, NONE)?;
+        }
+    }
+    Ok(names)
+}
+
+/// Keep exact Unicode string names on their native storage path, including lone surrogates.
+fn visible_origin_name(ctx: &mut Context, name: Id, marker: Id) -> Result<bool> {
+    match ctx.heap.get(name) {
+        Value::Str(text) => return Ok(forwards_to_origin(text)),
+        Value::SurrogateStr(points) => {
+            let underscores = [u32::from('_'); 2];
+            return Ok(!(points.starts_with(&underscores) && points.ends_with(&underscores)));
+        }
+        _ => {}
+    }
+    for method in ["startswith", "endswith"] {
+        let check = ctx.lookup_attr(name, method)?;
+        let matches = ctx.call(check, vec![marker], Vec::new())?;
+        if !ctx.truth(matches)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Collect each Python class's own names without evaluating class values or descriptors.
 fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result<()> {
     match ctx.heap.get(class) {
@@ -114,6 +207,71 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     .map(|&name| name.to_owned()),
             );
             names.extend(["__class__".to_owned(), "__doc__".to_owned()]);
+        }
+        Value::Native(name)
+            if matches!(
+                name.as_str(),
+                "builtin_function_or_method" | "dict" | "list" | "str"
+            ) =>
+        {
+            class_names(ctx, ctx.builtins["object"], names)?;
+            let (methods, slots): (&[&str], &[&str]) = match name.as_str() {
+                "builtin_function_or_method" => (
+                    &[],
+                    &[
+                        "__call__",
+                        "__module__",
+                        "__name__",
+                        "__qualname__",
+                        "__self__",
+                        "__text_signature__",
+                    ],
+                ),
+                "dict" => (
+                    super::DICT_METHODS,
+                    &["__class_getitem__", "__or__", "__reversed__", "__ror__"],
+                ),
+                "list" => (
+                    super::LIST_METHODS,
+                    &[
+                        "__class_getitem__",
+                        "__contains__",
+                        "__delitem__",
+                        "__getitem__",
+                        "__imul__",
+                        "__iter__",
+                        "__len__",
+                        "__mul__",
+                        "__reversed__",
+                        "__rmul__",
+                        "__setitem__",
+                    ],
+                ),
+                _ => {
+                    // Passive attribute lookup in the compiler uses the same public str names.
+                    names.extend(
+                        include_str!("../../../native/str-method-names.txt")
+                            .split_ascii_whitespace()
+                            .map(str::to_owned),
+                    );
+                    (
+                        &[],
+                        &[
+                            "__add__",
+                            "__contains__",
+                            "__getitem__",
+                            "__getnewargs__",
+                            "__iter__",
+                            "__len__",
+                            "__mod__",
+                            "__mul__",
+                            "__rmod__",
+                            "__rmul__",
+                        ],
+                    )
+                }
+            };
+            names.extend(methods.iter().chain(slots).map(|&name| name.to_owned()));
         }
         Value::Class {
             name: owner, scope, ..
@@ -132,7 +290,8 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                     ["__firstlineno__", "__static_attributes__", "__module__"].map(str::to_owned),
                 );
             }
-            if let Some(annotations) = ctx.namespace_binding(ctx.scope_data(scope_id), "__annotations__")
+            if let Some(annotations) =
+                ctx.namespace_binding(ctx.scope_data(scope_id), "__annotations__")
                 && ctx
                     .dict_entries(annotations)
                     .is_none_or(|entries| !entries.is_empty())
@@ -167,8 +326,19 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 names.extend(["__dict__".to_owned(), "__weakref__".to_owned()]);
             }
         }
-        Value::Native(name) if name == crate::dynamic::stdlib::os::stat::CLASS => {
-            struct_sequence_names(names, crate::dynamic::stdlib::os::stat::field_names());
+        Value::Native(_) if let Some(&dictionary) = ctx.native_type_dicts.get(&class) => {
+            class_names(ctx, ctx.builtins["object"], names)?;
+            for &(key, _) in ctx
+                .dict_entries(dictionary)
+                .expect("native class dictionary")
+            {
+                names.insert(ctx.str_value(key)?.to_owned());
+            }
+        }
+        Value::Native(name)
+            if let Some(layout) = crate::dynamic::stdlib::os::stat::layout(name) =>
+        {
+            struct_sequence_names(names, crate::dynamic::stdlib::os::stat::field_names(layout));
         }
         Value::Native(name)
             if let Some(class) = crate::dynamic::stdlib::fixed_structseq::fixed_type(name) =>

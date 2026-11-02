@@ -1,5 +1,5 @@
 //! Bind binary subprocess operations to the same child and files as typed Popen.
-use super::{Context, Error, Id, NONE, Result, Value, builtins, io, os, posixpath};
+use super::{Context, Error, FALSE, Id, NONE, Result, Value, builtins, io, os, posixpath};
 use crate::objects::BoxedPopen;
 
 pub(super) fn function(name: &str) -> bool {
@@ -94,6 +94,7 @@ fn environment(ctx: &mut Context, mapping: Id) -> Result<Option<Environment>> {
 fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     let &[
         args,
+        executable,
         stdin,
         stdout,
         stderr,
@@ -106,6 +107,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         encoding,
         errors,
         shell,
+        start_new_session,
     ] = values
     else {
         return Err(Error::new("TypeError", "invalid Popen launch operands"));
@@ -119,6 +121,11 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         // CPython opens text wrappers before the child can execute.
         io::text_options(ctx, encoding, errors, NONE)?;
     }
+    let pipesize = ctx.as_int(pipesize)?;
+    // A session argument can run Python during both spawn selection and fork conversion.
+    let handles = (executable != NONE || start_new_session != FALSE)
+        .then(|| BoxedPopen::prepare_handles(&streams, &pipesize))
+        .transpose()?;
     let shell = ctx.truth(shell)?;
     let spelling = matches!(
         ctx.heap.get(ctx.scalar_value(args)),
@@ -135,46 +142,113 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
             "path-like args is not allowed when shell is true",
         ));
     }
-    let items = if spelling || path_like {
+    let mut items = if spelling || path_like {
         vec![args]
     } else {
         ctx.items(args)?
     };
-    if items.is_empty() && !shell {
-        return Err(Error::new("IndexError", "list index out of range"));
-    }
-    let program = items.first().copied().unwrap_or(NONE);
+    // Truth-testing a shell override can mutate the original argument container.
     ctx.heap.reserve_temporaries(items.len())?;
     for &item in &items {
         ctx.heap.keep(item);
     }
-    let env = environment(ctx, env)?;
+    if shell {
+        // Preserve the shell's argv[0] until argv and executable are converted separately.
+        let shell_program = if executable != NONE && ctx.truth(executable)? {
+            executable
+        } else {
+            ctx.text(BoxedPopen::default_shell())
+        };
+        let option = ctx.text("-c");
+        items
+            .try_reserve(2)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        items.splice(..0, [shell_program, option]);
+    }
+    let program = if executable == NONE {
+        *items
+            .first()
+            .ok_or_else(|| Error::new("IndexError", "list index out of range"))?
+    } else {
+        executable
+    };
+    // CPython's dirname probe can call __fspath__ before the actual executable conversion.
+    let probed_directory = if handles.is_some() && BoxedPopen::probes_executable() {
+        let probe = posixpath::fspath(ctx, program)?;
+        match ctx.heap.get(ctx.scalar_value(probe)) {
+            Value::Str(s) => s.contains('/'),
+            Value::SurrogateStr(s) => s.contains(&u32::from('/')),
+            Value::Bytes(s) => s.contains(&b'/'),
+            _ => unreachable!("fspath returns str or bytes"),
+        }
+    } else {
+        false
+    };
+    let close_fds_flag = handles.as_ref().map(|_| ctx.truth(close_fds)).transpose()?;
+    let direct = match handles.as_ref().zip(close_fds_flag) {
+        Some((handles, close_fds)) => Some(
+            handles.uses_posix_spawn(probed_directory, cwd != NONE, close_fds, &streams)
+                && !ctx.truth(start_new_session)?,
+        ),
+        None => None,
+    };
+    // Fork snapshots environ before encoding the executable; posix_spawn packs it after argv.
+    let mut child_env = if direct == Some(true) {
+        None
+    } else {
+        environment(ctx, env)?
+    };
     let mut argv = Vec::new();
     argv.try_reserve_exact(items.len())
         .map_err(|_| Error::new("MemoryError", ""))?;
     // A direct launch reports the converted executable. Fork reports the original object.
-    let mut resolved_program = NONE;
+    let resolved_program = posixpath::fspath(ctx, program)?;
     ctx.heap.reserve_temporaries(1)?;
-    for item in items {
-        let spelling = posixpath::fspath(ctx, item)?;
-        if argv.is_empty() {
-            resolved_program = spelling;
-            ctx.heap.keep(spelling);
-        }
-        argv.push(os::c_path(ctx, spelling, "embedded null byte")?.into_bytes());
+    ctx.heap.keep(resolved_program);
+    let program_bytes = os::c_path(ctx, resolved_program, "embedded null byte")?.into_bytes();
+    let search_path = if direct == Some(false) && !program_bytes.contains(&b'/') {
+        let subprocess = ctx.module("subprocess")?;
+        let lookup = ctx.lookup_attr(subprocess, "_exec_search_path")?;
+        let paths = ctx.call(lookup, vec![env], Vec::new())?;
+        Some(path(ctx, paths)?)
+    } else {
+        None
+    };
+    let close_fds = match close_fds_flag {
+        Some(value) => value,
+        None => ctx.truth(close_fds)?,
+    };
+    let restore_signals = ctx.truth(restore_signals)?;
+    let new_session = direct != Some(true) && ctx.truth(start_new_session)?;
+    // On the prepared path, argv[0] is converted independently of the executable.
+    let (alternate, arguments) = if handles.is_some() {
+        (Some(program_bytes), items.as_slice())
+    } else {
+        argv.push(program_bytes);
+        (None, &items[1..])
+    };
+    for arg in arguments {
+        argv.push(path(ctx, *arg)?);
+    }
+    if direct == Some(true) {
+        child_env = environment(ctx, env)?;
     }
     let directory = (cwd != NONE).then(|| path(ctx, cwd)).transpose()?;
     let mut warning_error = None;
     let child = BoxedPopen::launch(
         argv,
+        alternate,
+        direct,
+        search_path,
         streams,
-        ctx.truth(close_fds)?,
-        ctx.truth(restore_signals)?,
+        handles,
+        close_fds,
+        restore_signals,
         directory,
-        env,
+        child_env,
         ctx.as_int(bufsize)?,
-        ctx.as_int(pipesize)?,
-        shell,
+        pipesize,
+        new_session,
         &mut || {
             let result = (|| -> Result<()> {
                 let warnings = ctx.module("warnings")?;
@@ -203,7 +277,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
             let error = failure.error.into();
             match failure.directory {
                 Some(true) => Err(ctx.with_errno_filename(error, cwd)?),
-                Some(false) if !shell => {
+                Some(false) => {
                     let filename = if failure.direct {
                         resolved_program
                     } else {
@@ -211,7 +285,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
                     };
                     Err(ctx.with_errno_filename(error, filename)?)
                 }
-                _ => Err(error),
+                None => Err(error),
             }
         }
     }
@@ -269,7 +343,7 @@ pub(super) fn call(
             .status(ctx.truth(poll)?)?
             .map_or(NONE, |n| ctx.int(i64::from(n)))),
         ("wait", &[seconds]) => Ok(child
-            .wait(timeout(ctx, seconds)?)?
+            .wait(timeout(ctx, seconds)?, || ctx.dispatch_signals())?
             .map_or(NONE, |n| ctx.int(i64::from(n)))),
         ("signal", &[number]) => {
             let number = ctx

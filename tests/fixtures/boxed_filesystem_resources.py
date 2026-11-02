@@ -1,6 +1,6 @@
 from io import BytesIO
 from importlib import resources
-from importlib.resources import contents, is_resource
+from importlib.resources import contents, is_resource, open_binary, open_text
 import warnings
 from importlib.resources.abc import ResourceReader, Traversable, TraversableResources, TraversalError
 import data.child
@@ -67,6 +67,16 @@ with warnings.catch_warnings(record=True) as caught:
 assert iter(children) is children and set(children) == {'message.txt'}
 assert resources.read_binary(data, 'nested', 'message.txt') == b'hello\n'
 assert resources.read_binary('data', 'nested/message.txt') == b'hello\n'
+with open_binary(data, 'nested', 'message.txt') as stream:
+    assert stream.read() == b'hello\n'
+with open_text('data', 'nested/message.txt') as stream:
+    assert stream.read() == 'hello\n'
+try:
+    open_text(data, 'nested', 'message.txt')
+except TypeError as exc:
+    assert "'encoding' argument required" in str(exc)
+else:
+    raise AssertionError('accepted omitted encoding with multiple path names')
 with resources.path('data', 'nested', 'message.txt') as existing:
     assert existing.read_bytes() == b'hello\n'
 assert existing.is_file()

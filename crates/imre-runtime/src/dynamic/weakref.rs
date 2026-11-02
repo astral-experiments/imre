@@ -209,13 +209,16 @@ impl Context {
             Value::Raised(error) => error
                 .class()
                 .is_some_and(|class| self.class_instances_support_weakref(class)),
-            Value::Class { .. }
+            Value::ParamSpec(_)
+            | Value::TypeVar(_)
+            | Value::Class { .. }
             | Value::Function { .. }
             | Value::Module { .. }
             | Value::Method { .. }
             | Value::Code(_)
             | Value::Set { .. }
             | Value::MemoryView { .. }
+            | Value::File(_)
             | Value::Partial { .. }
             | Value::HandlerLock(_)
             | Value::PrimitiveLock(_)

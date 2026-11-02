@@ -4,6 +4,35 @@ from urllib.parse import SplitResult, SplitResultBytes, unquote, unquote_plus, u
 
 
 def current():
+    urlsplit.cache_clear()
+    result = urlsplit("https://example.org/a")
+    assert urlsplit("https://example.org/a") is result
+    urlsplit("https://example.org/a", "", True)
+    urlsplit("https://example.org/a", "", 1)
+    assert tuple(urlsplit.cache_info()) == (1, 3, 128, 3)
+    assert urlsplit.__wrapped__("https://example.org/a") is not result
+    assert repr(urlsplit) == f"<functools._lru_cache_wrapper object at {id(urlsplit):#x}>"
+    assert repr(parse.urlparse) == f"<function urlparse at {id(parse.urlparse):#x}>"
+    urlsplit.cache_clear()
+    assert urlsplit("https://example.org/a") is not result
+
+    parse.clear_cache()
+    parse.quote_from_bytes(b'!/:', safe=b'/')
+    getter = parse._byte_quoter_factory(b'/')
+    assert getter(ord('!')) == '%21' and getter(ord('/')) == '/'
+    assert getter.__self__[ord(':')] == '%3A'
+    assert parse._byte_quoter_factory.cache_info().hits == 1
+    assert parse.urlencode.__defaults__[-1] is parse.quote_plus
+    assert set(parse.__all__) <= set(dir(parse))
+    original_quote = parse.quote
+    del parse.quote
+    try:
+        assert 'quote' not in dir(parse) and not hasattr(parse, 'quote')
+    finally:
+        parse.quote = original_quote
+    parse.clear_cache()
+    assert parse._byte_quoter_factory.cache_info().currsize == 0
+
     values = ["first", "old"]
     def change_next(value, safe, encoding=None, errors=None):
         if value == "first":
@@ -16,6 +45,18 @@ def current():
         result_type = parse.ParseResultBytes if isinstance(url, bytes) else parse.ParseResult
         print(type(parsed) is result_type, isinstance(parsed, result_type), tuple(parsed), parsed.params)
         print(parsed.geturl(), parse.urlunparse(parsed))
+    for parser, text_class, byte_class in (
+        (parse.urlsplit, SplitResult, SplitResultBytes),
+        (parse.urlparse, parse.ParseResult, parse.ParseResultBytes),
+    ):
+        text = parser('http://USER:pw@Example:80/Málaga;p?q#f')
+        binary = text.encode('utf-8')
+        assert type(text) is text_class and type(binary) is byte_class
+        assert binary.decode('utf-8') == text
+        assert binary.hostname == b'example' and binary.port == 80
+        assert binary.decode('utf-8').geturl() == text.geturl()
+        assert type(parser(b'https://example.test/')) is byte_class
+
     class CustomSplit(str):
         def lstrip(self, chars):
             return self

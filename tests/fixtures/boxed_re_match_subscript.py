@@ -30,4 +30,28 @@ def current():
             assert str(error) == "failed index"
         else:
             raise AssertionError("index exception was lost")
+    match = re.match(r"(?P<word>ab)(?P<tail>x)?", "ab")
+    assert "{word}:{tail}".format_map(match) == "ab:None"
+    try:
+        "{missing}".format_map(match)
+    except IndexError as error:
+        assert str(error) == "no such group"
+    else:
+        raise AssertionError("mapping lookup error was lost")
+    assert "{v:{spec}}".format_map({"v": 15, "spec": "x"}) == "f"
+    for template in ("{}", "{0}", "{v:{0}}"):
+        try:
+            template.format_map({"v": "x"})
+        except ValueError as error:
+            assert str(error) == "Format string contains positional fields"
+        else:
+            raise AssertionError("positional field accepted")
+    subject = chr(0x1f40d) + chr(0xd800) + chr(0xe000) + "Z"
+    pattern = re.compile(r"(?P<value>.)(.)(a)?")
+    match = pattern.fullmatch(subject, pos=1, endpos=3)
+    assert match.string is subject and match.span("value") == (1, 2)
+    assert match.groups() == (chr(0xd800), chr(0xe000), None)
+    assert pattern.search(subject, 3, 1) is None
+    assert re.match(r"..", subject).span() == (0, 2)
+    assert re.fullmatch(pattern=r".+z", string=subject, flags=re.I)[0] == subject
     print("text and bytes match groups passed")

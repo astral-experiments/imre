@@ -32,6 +32,21 @@ def current():
     assert child.level == logging.NOTSET and child.getEffectiveLevel() == logging.INFO
 
     handler = logging.StreamHandler(stream)
+    assert repr(handler) == "<StreamHandler (NOTSET)>"
+    stream.name = 2
+    assert repr(handler) == "<StreamHandler 2 (NOTSET)>"
+
+    class RenamingStream:
+        @property
+        def name(self):
+            logging.str = lambda name: "after lookup"
+            return "before lookup"
+
+    try:
+        assert repr(logging.StreamHandler(RenamingStream())) == "<StreamHandler after lookup (NOTSET)>"
+    finally:
+        del logging.str
+
     handler.name = "access-stream"
     assert logging.getHandlerByName("access-stream") is handler
     handler.name = "renamed-stream"

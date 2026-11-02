@@ -1,5 +1,6 @@
 """POSIX process handles for runtime-loaded Imre modules."""
 import _imre_subprocess as _process
+from _weakref import ref as _ref
 import io
 import selectors
 
@@ -23,10 +24,53 @@ def _cleanup():
     _process.cleanup()
 
 
+def _text_encoding():
+    import sys
+
+    if sys.flags.warn_default_encoding:
+        import warnings
+        frame = sys._getframe()
+        filename = frame.f_code.co_filename
+        stacklevel = 2
+        frame = frame.f_back
+        while frame is not None and frame.f_code.co_filename == filename:
+            stacklevel += 1
+            frame = frame.f_back
+        warnings.warn("'encoding' argument not specified.", EncodingWarning, stacklevel)
+    if sys.flags.utf8_mode:
+        return "utf-8"
+    from _locale import getencoding
+    return getencoding()
+
+
 def _decode(data, stream):
     if data is None:
         return None
     return data.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _exec_search_path(env):
+    """Read the POSIX search path independently of the child's saved environment."""
+    from os import environ, fsdecode, fsencode
+    if env is None:
+        env = environ
+    try:
+        path = env.get("PATH")
+    except TypeError:
+        path = None
+    try:
+        byte_path = env[b"PATH"]
+    except (KeyError, TypeError):
+        pass
+    else:
+        if path is not None:
+            raise ValueError("env cannot contain 'PATH' and b'PATH' keys")
+        path = byte_path
+    if path is None:
+        return b"/bin:/usr/bin"
+    if isinstance(path, bytes):
+        path = fsdecode(path)
+    return b":".join(fsencode(part) for part in path.split(":"))
 
 
 class Popen:
@@ -34,9 +78,7 @@ class Popen:
 
     def __init__(self, args, bufsize=-1, executable=None, stdin=None, stdout=None,
                  stderr=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True,
-                 universal_newlines=None, encoding=None, errors=None, text=None, pipesize=-1):
-        if executable is not None:
-            raise NotImplementedError("an alternate subprocess executable is unsupported")
+                 universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False, pipesize=-1):
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -56,10 +98,7 @@ class Popen:
         self.errors = errors
         self.text_mode = encoding or errors or text or universal_newlines
         if self.text_mode and encoding is None:
-            self.encoding = io.text_encoding(None, 2)
-            if self.encoding == "locale":
-                from _locale import getencoding
-                self.encoding = getencoding()
+            self.encoding = _text_encoding()
         line_buffering = self.text_mode and bufsize == 1
         if line_buffering:
             bufsize = -1
@@ -68,10 +107,10 @@ class Popen:
         self.args = args
         self.pipesize = pipesize
         self._sigint_wait_secs = 0.25
-        self._handle = _process.launch(args, stdin, stdout, stderr, close_fds,
+        self._handle = _process.launch(args, executable, stdin, stdout, stderr, close_fds,
                                        restore_signals, cwd, env, bufsize, pipesize,
                                        encoding if self.text_mode else None,
-                                       errors if self.text_mode else None, shell)
+                                       errors if self.text_mode else None, shell, start_new_session)
         try:
             self.stdin = _process.pipe(self._handle, 0)
             self.stdout = _process.pipe(self._handle, 1)
@@ -84,6 +123,8 @@ class Popen:
                     self.stdout = io.TextIOWrapper(self.stdout, encoding=self.encoding, errors=errors)
                 if self.stderr is not None:
                     self.stderr = io.TextIOWrapper(self.stderr, encoding=self.encoding, errors=errors)
+            self._stdin_ref = None if self.stdin is None else _ref(self.stdin)
+            self._replacement_output = None
         except BaseException:
             self.kill()
             _process.close_wait(self._handle)
@@ -129,26 +170,49 @@ class Popen:
                 input = None
         single_pipe = (timeout is None and not self._communication_started
                        and (self.stdin is None) + (self.stdout is None) + (self.stderr is None) >= 2)
+        same_stdin = self._stdin_ref is None if self.stdin is None else (
+            self._stdin_ref is not None and self._stdin_ref() is self.stdin)
+        replaced = self._replacement_output is not None or (not self._communication_started and not same_stdin)
         if single_pipe:
             reader = self.stdout or self.stderr
-            if isinstance(reader, io.TextIOWrapper):
-                # A direct read may already have decoded characters in this wrapper.
+            if reader:
                 data = reader.read()
                 reader.close()
                 self.wait()
                 return (data, None) if reader is self.stdout else (None, data)
-            if isinstance(self.stdin, io.TextIOWrapper):
+            if isinstance(self.stdin, io.TextIOWrapper) or (replaced and self.stdin):
                 if input:
                     try:
                         self.stdin.write(input)
                     except BrokenPipeError:
                         pass
-                # The native single-pipe path flushes and closes the shared binary pipe.
+                if replaced:
+                    try:
+                        self.stdin.close()
+                    except BrokenPipeError:
+                        pass
+                # The native path flushes and closes the original shared binary pipe.
                 input = None
+            if replaced:
+                self.wait()
+                return None, None
+        elif replaced:
+            return self._communicate_replaced_stdin(input, timeout)
         else:
             self._communication_started = True
             if self.text_mode and input is not None:
+                # A false input closes stdin before encoding. A BOM produced
+                # from an empty string is still validated, but the pipe is closed.
+                if not input:
+                    try:
+                        self.stdin.close()
+                    except BrokenPipeError:
+                        pass
                 input = input.encode(self.stdin.encoding, self.stdin.errors)
+                if not input:
+                    input = None
+                elif not isinstance(input, (bytes, bytearray)):
+                    input = memoryview(input)
         out, err, expired, remaining = _process.communicate(self._handle, input, timeout, use_select)
         if expired:
             error = TimeoutExpired(self.args, timeout if remaining is None else remaining,
@@ -158,6 +222,92 @@ class Popen:
         if self.text_mode and not single_pipe:
             out, err = _decode(out, self.stdout), _decode(err, self.stderr)
         return out, err
+
+    def _communicate_replaced_stdin(self, input, timeout):
+        # The process handle still owns its original pipe. Use the public stream's
+        # descriptor for readiness and writes, and leave the original pipe alone.
+        import os
+        import select
+        import time
+
+        deadline = None if timeout is None else time.monotonic() + timeout
+        if self._replacement_output is None:
+            self._replacement_output = [[], []]
+            self._replacement_input = b""
+            self._replacement_offset = 0
+            self._communication_started = True
+            if self.stdin:
+                try:
+                    self.stdin.flush()
+                except BrokenPipeError:
+                    pass
+                except ValueError:
+                    if not self.stdin.closed:
+                        raise
+                if input:
+                    if self.text_mode:
+                        input = input.encode(self.stdin.encoding, self.stdin.errors)
+                    self._replacement_input = input
+                else:
+                    try:
+                        self.stdin.close()
+                    except BrokenPipeError:
+                        pass
+        elif input:
+            raise ValueError("Cannot send input after starting communication")
+
+        # A caller may mutate the buffer before retrying a timed-out exchange.
+        # Snapshot non-byte-format views in byte order for this call's offset.
+        input_bytes = self._replacement_input
+        if not isinstance(input_bytes, (bytes, bytearray)):
+            input_bytes = bytes(memoryview(input_bytes))
+        output = self._replacement_output
+        with _PopenSelector() as selector:
+            pending = 0
+            if (self.stdin and not self.stdin.closed and
+                    self._replacement_offset < len(input_bytes)):
+                selector.register(self.stdin.fileno(), selectors.EVENT_WRITE, self.stdin)
+                pending += 1
+            for stream in (self.stdout, self.stderr):
+                if stream and not stream.closed:
+                    selector.register(stream.fileno(), selectors.EVENT_READ, stream)
+                    pending += 1
+            while pending:
+                remaining = None if deadline is None else deadline - time.monotonic()
+                ready = selector.select(remaining) if remaining is None or remaining > 0 else []
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutExpired(self.args, timeout,
+                                         output=b"".join(output[0]) if output[0] else None,
+                                         stderr=b"".join(output[1]) if output[1] else None)
+                for key, _ in ready:
+                    if key.data is self.stdin:
+                        offset = self._replacement_offset
+                        chunk = input_bytes[offset:offset + getattr(select, "PIPE_BUF", 512)]
+                        try:
+                            self._replacement_offset += os.write(key.fd, chunk)
+                        except BrokenPipeError:
+                            pass
+                        else:
+                            if self._replacement_offset < len(input_bytes):
+                                continue
+                    else:
+                        data = os.read(key.fd, 32768)
+                        output[0 if key.data is self.stdout else 1].append(data)
+                        if data:
+                            continue
+                    selector.unregister(key.fd)
+                    key.data.close()
+                    pending -= 1
+        try:
+            self.wait(timeout=None if deadline is None else deadline - time.monotonic())
+        except TimeoutExpired as exc:
+            exc.timeout = timeout
+            raise
+        stdout = None if self.stdout is None else b"".join(output[0])
+        stderr = None if self.stderr is None else b"".join(output[1])
+        if self.text_mode:
+            return _decode(stdout, self.stdout), _decode(stderr, self.stderr)
+        return stdout, stderr
 
     def send_signal(self, sig):
         _process.signal(self._handle, sig)

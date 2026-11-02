@@ -1,5 +1,6 @@
 import _codecs
 import codecs
+import copyreg
 import pickle
 
 
@@ -13,6 +14,26 @@ class WithProtocol:
 
     def __reduce__(self):
         raise AssertionError("called __reduce__ after __reduce_ex__")
+
+
+class InheritedProtocol(WithProtocol):
+    pass
+
+
+def registered_reducer(value):
+    return str, ("registered",)
+
+
+def check_registered_reducer(protocol):
+    copyreg.pickle(WithProtocol, registered_reducer)
+    try:
+        assert pickle.loads(pickle.dumps(WithProtocol(), protocol)) == "registered"
+        assert pickle.loads(pickle.dumps(InheritedProtocol(), protocol)) == ("rebuilt", protocol)
+    finally:
+        del copyreg.dispatch_table[WithProtocol]
+    assert pickle.loads(pickle.dumps(WithProtocol(), protocol)) == ("rebuilt", protocol)
+    for value in (Ellipsis, NotImplemented, type(None), type(Ellipsis), type(NotImplemented)):
+        assert pickle.loads(pickle.dumps(value, protocol)) is value
 
 
 class WithoutProtocol:
@@ -145,10 +166,13 @@ class LabeledTuple(tuple):
 
 
 def consume(streams):
+    assert pickle._loads is not pickle.loads
     for stream in streams:
-        obj, label = pickle.loads(stream)
-        assert type(obj) is LabeledTuple and obj == (3, 4)
-        assert obj.restored and obj.label is label and label["back"] is obj
+        for reader in (pickle.loads, pickle._loads):
+            obj, label = reader(stream)
+            assert type(obj) is LabeledTuple and obj == (3, 4)
+            assert obj.restored and obj.label is label and label["back"] is obj
+    assert pickle._loads(b"N.", encoding=None) is None
     for bad in (b".", b"!", b"h\x07.", b"N]b.", b"cbuiltins\nlist\n]\x81."):
         try:
             pickle.loads(bad)
@@ -206,6 +230,25 @@ def check_object_reducer():
     import copy
     import copyreg
 
+    class Legacy:
+        def __getnewargs__(self):
+            raise AssertionError("legacy reduction requested new arguments")
+
+    legacy = Legacy()
+    for protocol in (0, 1):
+        assert legacy.__reduce_ex__(protocol) == (copyreg._reconstructor, (Legacy, object, None))
+        legacy.value = [7]
+        constructor, args, state = legacy.__reduce_ex__(protocol)
+        assert constructor is copyreg._reconstructor and args == (Legacy, object, None)
+        assert state is legacy.__dict__ and state["value"] is legacy.value
+        del legacy.value
+        try:
+            Plain({}).__reduce_ex__(protocol)
+        except TypeError as error:
+            assert "__slots__" in str(error)
+        else:
+            raise AssertionError("legacy reduction accepted slots without a custom state hook")
+
     plain = Plain({})
     for protocol in (2, 3, 4, 5):
         constructor, args, state, listitems, dictitems = plain.__reduce_ex__(protocol)
@@ -236,7 +279,36 @@ class Outer:
 
 
 def check_global_names(protocol):
+    import _operator
+    import operator
+    import types
+
+    getitem = operator.getitem
+    assert getitem is _operator.getitem is operator.__getitem__
+    assert type(getitem) is types.BuiltinFunctionType
+    assert (getitem.__module__, getitem.__name__, getitem.__qualname__) == (
+        "_operator", "getitem", "getitem")
+    assert getitem.__self__ is _operator
+    data = pickle.dumps(getitem, protocol)
+    assert pickle.loads(data) is getitem
+    _operator.getitem = operator.setitem
+    try:
+        assert pickle.loads(data) is operator.setitem
+        try:
+            pickle.dumps(getitem, protocol)
+        except pickle.PicklingError:
+            pass
+        else:
+            raise AssertionError("accepted a replaced global")
+    finally:
+        _operator.getitem = getitem
+
     from collections import OrderedDict, UserDict, UserList, UserString
+    from datetime import date, datetime, timedelta
+
+    for cls in (date, datetime, timedelta):
+        assert cls.__module__ == "datetime" and cls.__qualname__ == cls.__name__
+        assert pickle.loads(pickle.dumps(cls, protocol)) is cls
 
     for cls in (Outer.Middle, Outer.Middle.Inner, OrderedDict, UserDict, UserList, UserString):
         for fix_imports in (True, False):
@@ -244,11 +316,44 @@ def check_global_names(protocol):
             assert pickle.loads(data, fix_imports=fix_imports) is cls
 
 
+class RecordFamily:
+    from typing import NamedTuple
+
+    class Record(NamedTuple):
+        left: object
+        right: object
+
+
+def check_namedtuple_reducer():
+    from copy import copy, deepcopy
+    import copyreg
+
+    shared = []
+    value = RecordFamily.Record(shared, shared)
+    assert value.__getnewargs__() == (shared, shared)
+    for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        if protocol < 2:
+            assert value.__reduce_ex__(protocol) == (
+                copyreg._reconstructor, (RecordFamily.Record, tuple, (shared, shared)))
+        else:
+            assert value.__reduce_ex__(protocol) == (
+                copyreg.__newobj__, (RecordFamily.Record, shared, shared), None, None, None)
+        restored = pickle.loads(pickle.dumps(value, protocol))
+        assert type(restored) is type(value)
+        assert restored.left is restored.right and restored.left is not shared
+
+    assert copy(value).left is shared
+    duplicate = deepcopy(value)
+    assert duplicate.left is duplicate.right and duplicate.left is not shared
+
+
 def produce():
+    check_namedtuple_reducer()
     check_object_reducer()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         check_global_names(protocol)
+        check_registered_reducer(protocol)
         check_reduction_state(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):

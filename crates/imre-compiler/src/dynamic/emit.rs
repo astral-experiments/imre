@@ -37,6 +37,7 @@ pub(crate) fn emit(
     modules: &[(String, PathBuf, String)],
     config: &str,
     keep_docstrings: bool,
+    bundled_root: &std::path::Path,
 ) -> Result<String, String> {
     let mut output = Output {
         keep_docstrings,
@@ -51,6 +52,12 @@ pub(crate) fn emit(
             .map_err(|err| format!("{}: {err}", path.display()))?;
         crate::analysis::check_star_import_scopes(source, &parsed.syntax().body)
             .map_err(|error| format!("{}:{error}", path.display()))?;
+        if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
+            let name = keyword.arg.as_ref().expect("repeated named argument");
+            let reason = format!("SyntaxError: keyword argument repeated: {name}");
+            let error = crate::frontend::error(source, keyword, &reason);
+            return Err(format!("{}:{error}", path.display()));
+        }
         let replacements = strings::literal_replacements(source, parsed.tokens());
         if output.keep_docstrings && !replacements.is_empty() {
             strings::check_docs(source, &parsed.syntax().body, &replacements)
@@ -60,6 +67,11 @@ pub(crate) fn emit(
             name.as_str()
         } else {
             name.rsplit_once('.').map_or("", |(parent, _)| parent)
+        };
+        let docs = if keep_docstrings && name == "collections" && path.starts_with(bundled_root) {
+            crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
+        } else {
+            None
         };
         let name = output.data(name.as_bytes());
         let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
@@ -76,12 +88,17 @@ pub(crate) fn emit(
             statements::type_parameters::check_nonlocals(source, &body)
                 .map_err(|error| format!("{}:{error}", path.display()))?;
         }
+        if let Some((expr, reason)) = imre_ast::type_alias_error(&body) {
+            let error = crate::frontend::error(source, expr, &format!("SyntaxError: {reason}"));
+            return Err(format!("{}:{error}", path.display()));
+        }
         if let Some(param) = &private_names.duplicate_type_parameter {
             let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
             let error = crate::frontend::error(source, param, &reason);
             return Err(format!("{}:{error}", path.display()));
         }
         let location = SourceMap {
+            docs,
             unit,
             has_templates,
             template_expressions,
@@ -104,7 +121,7 @@ pub(crate) fn emit(
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        let code = output.code(&location, String::new(), Body::Namespace(&body));
+        let code = output.code(&location, String::new(), Body::Namespace(&body), false);
         writeln!(
             main,
             "  call void @imre_dyn_register(ptr %ctx, ptr {name}, ptr {file}, ptr {code})"
@@ -121,7 +138,8 @@ pub(crate) fn emit(
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
-    GeneratorFunction(&'a [ast::Stmt]),
+    /// A suspended suite and whether it was declared with async def.
+    GeneratorFunction((&'a [ast::Stmt], bool)),
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
         Vec<(&'a str, &'a ast::Expr)>,
@@ -130,11 +148,13 @@ enum Body<'a> {
     AnnotationValue(&'a ast::Expr),
     AnnotationThunk(String, ruff_text_size::TextRange),
     Expression(&'a ast::Expr),
+    TypeAlias(&'a ast::Expr),
     Generator(&'a [ast::Comprehension], &'a ast::Expr),
     Unsupported(&'a ast::Stmt, &'static str),
 }
 
 struct SourceMap<'a> {
+    docs: Option<crate::modules::doctest::SealedDocs>,
     unit: usize,
     has_templates: bool,
     template_expressions: HashMap<ruff_text_size::TextSize, String>,
@@ -150,6 +170,16 @@ struct SourceMap<'a> {
 }
 
 impl SourceMap<'_> {
+    /// Keep documentation attached to the bundled definition, even when callers rebind its name.
+    fn docstring(&self, qualname: &str, body: &[ast::Stmt]) -> Option<String> {
+        crate::frontend::docstring(body).or_else(|| {
+            self.docs
+                .as_ref()?
+                .object_docstring(qualname)
+                .map(str::to_owned)
+        })
+    }
+
     fn line(&self, offset: ruff_text_size::TextSize) -> usize {
         self.newlines.partition_point(|&n| n < usize::from(offset)) + 1
     }
@@ -181,9 +211,10 @@ impl Output {
         prefix: String,
         body: Body<'_>,
         start: ruff_text_size::TextSize,
+        in_function: bool,
     ) -> String {
         let site = format!("@code_site{}", self.count);
-        let code = self.code(source, prefix, body);
+        let code = self.code(source, prefix, body, in_function);
         writeln!(
             self.constants,
             "{site} = private constant {{ ptr, ptr, i32 }} {{ ptr {code}, ptr {}, i32 {} }}",
@@ -226,7 +257,13 @@ impl Output {
         format!("@pos{index}")
     }
 
-    fn code(&mut self, source: &SourceMap<'_>, prefix: String, body: Body<'_>) -> String {
+    fn code(
+        &mut self,
+        source: &SourceMap<'_>,
+        prefix: String,
+        body: Body<'_>,
+        in_function: bool,
+    ) -> String {
         let name = format!("@code{}", self.count);
         self.count += 1;
         let module = matches!(body, Body::Namespace(_)) && prefix.is_empty();
@@ -234,6 +271,8 @@ impl Output {
             output: self,
             source,
             class_sites: None,
+            in_function,
+            declared_globals: Default::default(),
             annotation_lookup: false,
             class_locals: match &body {
                 Body::Namespace(stmts) if !prefix.is_empty() => {
@@ -258,7 +297,7 @@ impl Output {
         match body {
             Body::Namespace(stmts) => {
                 if f.output.keep_docstrings
-                    && let Some(doc) = crate::frontend::docstring(stmts)
+                    && let Some(doc) = f.source.docstring(f.prefix.trim_end_matches('.'), stmts)
                 {
                     let value = f.text(&doc);
                     f.bind("__doc__", &value);
@@ -267,11 +306,6 @@ impl Output {
                 if f.class_locals.is_some() && !f.source.string_annotations {
                     f.annotated_class_body(stmts);
                 } else {
-                    if f.class_locals.is_some()
-                        && statements::class_annotations::uses_annotations(stmts)
-                    {
-                        f.op("setup_annotations", &[&f.scope.clone()]);
-                    }
                     f.statements(stmts);
                 }
             }
@@ -296,8 +330,12 @@ impl Output {
                 let value = f.expr(expr);
                 f.end(&format!("ret i64 {value}"));
             }
-            Body::Expression(expr) => {
+            Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
+                if matches!(body, Body::TypeAlias(_)) {
+                    let format = f.lookup(".format");
+                    f.op("annotation_format", &[&format]);
+                }
                 let value = f.expr(expr);
                 f.end(&format!("ret i64 {value}"));
             }
@@ -334,6 +372,8 @@ struct Function<'a, 'p> {
     output: &'a mut Output,
     source: &'p SourceMap<'p>,
     prefix: String,
+    declared_globals: std::collections::BTreeSet<String>,
+    in_function: bool,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,
@@ -417,11 +457,15 @@ impl Function<'_, '_> {
 
     fn checked(&mut self, invocation: &str) -> String {
         let result = self.value(invocation);
+        self.check_error();
+        result
+    }
+
+    fn check_error(&mut self) {
         let failed = self.value("call i1 @imre_dyn_failed(ptr %ctx)");
         let next = self.name("b");
         self.branch(&failed, &self.error.clone(), &next);
         self.label(&next);
-        result
     }
 
     fn op(&mut self, name: &str, args: &[&str]) -> String {
@@ -589,6 +633,7 @@ impl Function<'_, '_> {
             "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
             self.source.file, self.caught.last().map_or("0", String::as_str)
         ));
+        self.check_error();
     }
 
     fn invoke(&mut self, callable: &str, values: &[&str]) -> String {

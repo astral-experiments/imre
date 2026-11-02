@@ -1,7 +1,7 @@
 """The loader protocol shared by importlib.abc and importlib.util."""
 
 import abc
-import _frozen_importlib as _bootstrap
+from . import _bootstrap
 
 
 class Loader(metaclass=abc.ABCMeta):

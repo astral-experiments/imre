@@ -11,24 +11,21 @@ use super::{Error, JsonNumber, KeyMemo, Kind, Node, Nodes, Object, Str, View, Wo
 const MAX_OPEN_CONTAINERS: usize = 50_000;
 
 /// A completed JSON value whose children already have handles in the caller's storage.
-pub(crate) enum DecodedJson<T> {
+pub(crate) enum DecodedJson<T, S> {
     Null,
     Bool(bool),
     Number(JsonNumber),
-    String(Str),
+    String(S),
     Array(Vec<T>),
-    Object(Vec<(Str, T)>),
+    Object(Vec<(S, T)>),
 }
 
-enum Frame<T> {
+enum Frame<T, S> {
     Array(Vec<T>),
-    Object {
-        fields: Vec<(Str, T)>,
-        key: Option<Str>,
-    },
+    Object { fields: Vec<(S, T)>, key: Option<S> },
 }
 
-impl<T> Frame<T> {
+impl<T, S> Frame<T, S> {
     fn close(&self) -> u8 {
         match self {
             Self::Array(_) => b']',
@@ -36,7 +33,11 @@ impl<T> Frame<T> {
         }
     }
 
-    fn key(&mut self, cursor: &mut Cursor<'_>) -> Result<(), Problem> {
+    fn key(
+        &mut self,
+        cursor: &mut Cursor<'_>,
+        string: &impl Fn(&str, usize) -> Result<S, Problem>,
+    ) -> Result<(), Problem> {
         if let Self::Object { key, .. } = self {
             if cursor.peek() != Some(b'"') {
                 return Err((
@@ -63,7 +64,7 @@ impl<T> Frame<T> {
         }
     }
 
-    fn finish(self) -> DecodedJson<T> {
+    fn finish(self) -> DecodedJson<T, S> {
         match self {
             Self::Array(items) => DecodedJson::Array(items),
             Self::Object { fields, .. } => DecodedJson::Object(fields),
@@ -97,9 +98,10 @@ fn string(token: &str, start: usize) -> Result<Str, Problem> {
         .map_err(|e| Problem::String(start, e))
 }
 
-fn parse<T>(
+fn parse<T, S>(
     text: &str,
-    mut build: impl FnMut(DecodedJson<T>) -> Result<T, Error>,
+    string: impl Fn(&str, usize) -> Result<S, Problem>,
+    mut build: impl FnMut(DecodedJson<T, S>) -> Result<T, Error>,
 ) -> Result<T, Problem> {
     let digit_limit = crate::integer_text::decimal_digit_limit();
     let mut cursor = Cursor {
@@ -125,7 +127,7 @@ fn parse<T>(
                     }
                 };
                 if cursor.peek() != Some(frame.close()) {
-                    frame.key(&mut cursor)?;
+                    frame.key(&mut cursor, &string)?;
                     push(&mut frames, frame)?;
                     continue;
                 }
@@ -179,7 +181,7 @@ fn parse<T>(
                         };
                         return Err((comma, message).into());
                     }
-                    frame.key(&mut cursor)?;
+                    frame.key(&mut cursor, &string)?;
                     break;
                 }
                 _ => return Err((cursor.pos, "Expecting ',' delimiter").into()),
@@ -189,12 +191,13 @@ fn parse<T>(
 }
 
 /// Parse bottom up so a typed arena and the boxed heap share token, number and error semantics.
-pub(crate) fn decode_json<T>(
+fn decode_json<T, S>(
     text: &str,
+    string: impl Fn(&str, usize) -> Result<S, Problem>,
     owner: impl FnOnce() -> Option<StrOwner>,
-    build: impl FnMut(DecodedJson<T>) -> Result<T, Error>,
+    build: impl FnMut(DecodedJson<T, S>) -> Result<T, Error>,
 ) -> Result<T, Error> {
-    parse(text, build).map_err(|problem| {
+    parse(text, string, build).map_err(|problem| {
         let (at, message) = match problem {
             Problem::Exhausted => {
                 return Error::new(Kind::RecursionError, "maximum recursion depth exceeded");
@@ -217,13 +220,28 @@ pub(crate) fn decode_json<T>(
     })
 }
 
+/// Boxed strings can preserve unpaired surrogate code points. Return each validated string's
+/// body span so the caller can decode it using its original storage.
+pub(crate) fn decode_json_tokens<T>(
+    text: &str,
+    owner: impl FnOnce() -> Option<StrOwner>,
+    build: impl FnMut(DecodedJson<T, std::ops::Range<usize>>) -> Result<T, Error>,
+) -> Result<T, Error> {
+    decode_json(
+        text,
+        |token, start| Ok(start + 1..start + token.len() - 1),
+        owner,
+        build,
+    )
+}
+
 pub(super) fn loads(
     text: &str,
     owner: impl FnOnce() -> Option<StrOwner>,
 ) -> Result<*const Object, Error> {
     let keys = KeyMemo::default();
     let mut nodes = Vec::new();
-    let index = decode_json(text, owner, |value| {
+    let index = decode_json(text, string, owner, |value| {
         let node = match value {
             DecodedJson::Null => Node::Null,
             DecodedJson::Bool(value) => Node::Bool(value),

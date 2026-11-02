@@ -1,12 +1,39 @@
 //! BufferedWriter retains the original FileIO and writes through its shared descriptor.
 
+use std::cell::Cell;
+
 use super::super::{builtins, files};
-use super::{Context, Error, FALSE, Id, NONE, Result, Value, descriptor_buffer, file_io};
+use super::{
+    Context, Error, FALSE, Id, MemoryStream, NONE, Result, Value, descriptor_buffer, file_io,
+};
 use files::BinaryFile;
+
+/// A raw callback must not switch the backing under a native operation already using it.
+#[derive(Default)]
+pub(super) struct ActiveCall(Cell<bool>);
+
+impl ActiveCall {
+    pub(super) fn check_idle(&self) -> Result<()> {
+        if self.0.get() {
+            return Err(Error::new(
+                "NotImplementedError",
+                "reinitializing a buffered writer during an active I/O operation is unsupported",
+            ));
+        }
+        Ok(())
+    }
+
+    fn run<T>(&self, f: impl FnOnce() -> T) -> T {
+        let previous = self.0.replace(true);
+        let result = f();
+        self.0.set(previous);
+        result
+    }
+}
 
 pub(super) const METHODS: &[&str] = &[
     "__init__", "raw", "closed", "name", "mode", "writable", "seekable", "isatty", "fileno",
-    "flush", "close", "tell", "seek", "write", "truncate",
+    "flush", "close", "tell", "seek", "write", "truncate", "detach",
 ];
 
 /// Path and standard writers own their fd internally and have no Python FileIO to delegate to.
@@ -29,13 +56,14 @@ fn truncate_file(ctx: &mut Context, buffer: Id, size: Option<Id>) -> Result<Id> 
 
 pub(super) fn call(
     ctx: &mut Context,
+    owner: &str,
     receiver: Id,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if name == "__init__" {
-        return descriptor_buffer::initialize(ctx, receiver, args, kwargs, false);
+        return descriptor_buffer::initialize(ctx, receiver, args, kwargs, owner);
     }
     if name == "truncate" {
         let count = args.len() + kwargs.len();
@@ -54,23 +82,39 @@ pub(super) fn call(
     } else if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
-            format!("BufferedWriter.{name}() takes no keyword arguments"),
+            format!("{owner}.{name}() takes no keyword arguments"),
         ));
     }
-    super::argument_count("BufferedWriter", name, args.len())?;
+    super::argument_count(owner, name, args.len())?;
     if name == "write" {
         files::output_bytes(ctx, args[0])?;
     }
-    if name == "readable" {
+    if name == "readable" && owner == "BufferedWriter" {
         return Ok(FALSE);
     }
     if name == "__exit__" {
         let close = ctx.lookup_attr(receiver, "close")?;
         return ctx.call(close, vec![], Vec::new());
     }
+    if let Some(writer) = super::bytes_writer::state(ctx, receiver) {
+        return writer.active.run(|| {
+            if name == "write" {
+                ctx.with_buffer_export(args[0], |ctx| writer.call(ctx, receiver, name, args))
+            } else {
+                writer.call(ctx, receiver, name, args)
+            }
+        });
+    }
     let Some(buffer) = descriptor_buffer::backing(ctx, receiver) else {
         return if name == "raw" {
-            Ok(NONE)
+            let raw = match ctx.heap.get(receiver) {
+                Value::Instance {
+                    memory_stream: Some(MemoryStream::UninitializedWriter(raw)),
+                    ..
+                } => *raw,
+                _ => None,
+            };
+            Ok(raw.unwrap_or(NONE))
         } else {
             Err(Error::new(
                 "ValueError",
@@ -78,6 +122,9 @@ pub(super) fn call(
             ))
         };
     };
+    if name == "detach" {
+        return Err(Error::new("UnsupportedOperation", "detach"));
+    }
     let Value::File(handle) = ctx.heap.get(buffer) else {
         unreachable!("BufferedWriter backing must be a binary file")
     };
@@ -89,9 +136,10 @@ pub(super) fn call(
         return Err(Error::new("ValueError", "truncate of closed file"));
     }
     if let BinaryFile::Descriptor(fd) = handle.as_ref() {
-        return match name {
+        return fd.active.run(|| match name {
             "raw" => Ok(fd.raw),
             "name" | "mode" => ctx.lookup_attr(fd.raw, name),
+            "truncate" if owner == "BufferedRandom" => fd.call(ctx, receiver, name, args, kwargs),
             "truncate" => {
                 fd.call(ctx, receiver, "flush", &[], &[])?;
                 let truncate = ctx.lookup_attr(fd.raw, "truncate")?;
@@ -116,7 +164,7 @@ pub(super) fn call(
                 }
             }
             _ => fd.call(ctx, receiver, name, args, kwargs),
-        };
+        });
     }
     let (path, mode) = handle
         .path_metadata()

@@ -23,9 +23,58 @@ def assertMultiLineEqual(self, first, second, msg=None):
 
 
 def assertEqual(self, first, second, msg=None):
-    if type(first) is str and type(second) is str:
-        return self.assertMultiLineEqual(first, second, msg)
+    first_type = type(first)
+    if first_type is type(second):
+        if first_type is str:
+            return self.assertMultiLineEqual(first, second, msg)
+        if first_type is set or first_type is frozenset:
+            self.assertSetEqual(first, second, msg=msg)
+            return
     return self._baseAssertEqual(first, second, msg)
+
+
+def assertSetEqual(self, set1, set2, msg=None):
+    """A set-specific equality assertion.
+
+    Args:
+        set1: The first set to compare.
+        set2: The second set to compare.
+        msg: Optional message to use on failure instead of a list of
+                differences.
+
+    assertSetEqual uses ducktyping to support different types of sets, and
+    is optimized for sets specifically (parameters must support a
+    difference method).
+    """
+    try:
+        difference1 = set1.difference(set2)
+    except TypeError as e:
+        self.fail('invalid type when attempting set difference: %s' % e)
+    except AttributeError as e:
+        self.fail('first argument does not support set difference: %s' % e)
+
+    try:
+        difference2 = set2.difference(set1)
+    except TypeError as e:
+        self.fail('invalid type when attempting set difference: %s' % e)
+    except AttributeError as e:
+        self.fail('second argument does not support set difference: %s' % e)
+
+    if not (difference1 or difference2):
+        return
+
+    lines = []
+    if difference1:
+        lines.append('Items in the first set but not the second:')
+        for item in difference1:
+            lines.append(repr(item))
+    if difference2:
+        lines.append('Items in the second set but not the first:')
+        for item in difference2:
+            lines.append(repr(item))
+
+    standardMsg = '\n'.join(lines)
+    self.fail(self._formatMessage(msg, standardMsg))
 
 
 def assertNotEqual(self, first, second, msg=None):
@@ -117,6 +166,17 @@ def assertNotIsSubclass(self, cls, superclass, msg=None):
     self.fail(self._formatMessage(msg, standardMsg))
 
 
+def assertHasAttr(self, obj, name, msg=None):
+    if not hasattr(obj, name):
+        if isinstance(obj, ModuleType):
+            standardMsg = f'module {obj.__name__!r} has no attribute {name!r}'
+        elif isinstance(obj, type):
+            standardMsg = f'type object {obj.__name__!r} has no attribute {name!r}'
+        else:
+            standardMsg = f'{type(obj).__name__!r} object has no attribute {name!r}'
+        self.fail(self._formatMessage(msg, standardMsg))
+
+
 def assertNotHasAttr(self, obj, name, msg=None):
     if hasattr(obj, name):
         if isinstance(obj, ModuleType):
@@ -141,6 +201,8 @@ def assertIsNot(self, expr1, expr2, msg=None):
 TestCase._baseAssertEqual = _baseAssertEqual
 TestCase.assertMultiLineEqual = assertMultiLineEqual
 TestCase.assertEqual = assertEqual
+assertSetEqual.__qualname__ = "TestCase.assertSetEqual"
+TestCase.assertSetEqual = assertSetEqual
 TestCase.assertNotEqual = assertNotEqual
 TestCase.assertLess = assertLess
 TestCase.assertLessEqual = assertLessEqual
@@ -150,6 +212,8 @@ TestCase.assertIsInstance = assertIsInstance
 TestCase.assertNotIsInstance = assertNotIsInstance
 TestCase.assertIsSubclass = assertIsSubclass
 TestCase.assertNotIsSubclass = assertNotIsSubclass
+assertHasAttr.__qualname__ = "TestCase.assertHasAttr"
+TestCase.assertHasAttr = assertHasAttr
 TestCase.assertNotHasAttr = assertNotHasAttr
 TestCase.assertIs = assertIs
 TestCase.assertIsNot = assertIsNot

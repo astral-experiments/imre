@@ -115,7 +115,7 @@ impl Session {
             (
                 "hashlib",
                 // Hash constructors accept data and its legacy string spelling, exclusively.
-                "from _hashlib import HASH as _Hash, HASHXOF as _Xof\nfrom typing import BinaryIO as _BinaryIO, Callable as _Callable\ndef file_digest(fileobj: _BinaryIO | None, digest: str | _Callable[[], _Hash], /, *, _bufsize: object = ...) -> _Hash: ...\nalgorithms_available: set[str]\nalgorithms_guaranteed: set[str]\ndef blake2b(data: bytes = b'', *, digest_size: int = ..., key: bytes = ..., salt: bytes = ..., person: bytes = ..., fanout: int = ..., depth: int = ..., leaf_size: int = ..., node_offset: int = ..., node_depth: int = ..., inner_size: int = ..., last_node: bool = ..., usedforsecurity: bool = ..., string: bytes = ...) -> _Hash: ...\ndef blake2s(data: bytes = b'', *, digest_size: int = ..., key: bytes = ..., salt: bytes = ..., person: bytes = ..., fanout: int = ..., depth: int = ..., leaf_size: int = ..., node_offset: int = ..., node_depth: int = ..., inner_size: int = ..., last_node: bool = ..., usedforsecurity: bool = ..., string: bytes = ...) -> _Hash: ...\ndef md5(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha1(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha224(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha384(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha512(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_224(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_384(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_512(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef shake_128(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Xof: ...\ndef shake_256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Xof: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\n",
+                "from _hashlib import HASH as _Hash, HASHXOF as _Xof, pbkdf2_hmac as pbkdf2_hmac, scrypt as scrypt\nfrom typing import BinaryIO as _BinaryIO, Callable as _Callable\ndef file_digest(fileobj: _BinaryIO | None, digest: str | _Callable[[], _Hash], /, *, _bufsize: object = ...) -> _Hash: ...\nalgorithms_available: set[str]\nalgorithms_guaranteed: set[str]\ndef blake2b(data: bytes = b'', *, digest_size: int = ..., key: bytes = ..., salt: bytes = ..., person: bytes = ..., fanout: int = ..., depth: int = ..., leaf_size: int = ..., node_offset: int = ..., node_depth: int = ..., inner_size: int = ..., last_node: bool = ..., usedforsecurity: bool = ..., string: bytes = ...) -> _Hash: ...\ndef blake2s(data: bytes = b'', *, digest_size: int = ..., key: bytes = ..., salt: bytes = ..., person: bytes = ..., fanout: int = ..., depth: int = ..., leaf_size: int = ..., node_offset: int = ..., node_depth: int = ..., inner_size: int = ..., last_node: bool = ..., usedforsecurity: bool = ..., string: bytes = ...) -> _Hash: ...\ndef md5(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha1(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha224(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha384(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha512(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_224(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_384(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef sha3_512(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\ndef shake_128(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Xof: ...\ndef shake_256(data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Xof: ...\ndef new(name: str, data: bytes = b'', *, usedforsecurity: bool = True, string: bytes = ...) -> _Hash: ...\n",
             ),
             (
                 "tomli",
@@ -376,6 +376,13 @@ impl Session {
             .load(&self.db)
     }
 
+    /// Resolve a source offset with the cached line index for the defining module.
+    pub(crate) fn source_line(&self, module: usize, offset: TextSize) -> u32 {
+        ruff_db::source::line_index(&self.db, self.files[module])
+            .line_index(offset)
+            .get() as u32
+    }
+
     /// Refresh the semantic AST after a source rewrite that preserves byte offsets.
     pub(crate) fn replace_source(&mut self, module: usize, source: String) -> ParsedModuleRef {
         let file = self.files[module];
@@ -449,6 +456,27 @@ impl Session {
         resolves_to_stdlib_function(&model, expression, owner, name)
     }
 
+    /// Recognize the sealed regex receiver even when its pattern cannot be lowered statically.
+    pub(crate) fn is_regex_pattern(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{Type, TypeDefinition};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let Some(ty @ Type::NominalInstance(_)) = expression.inferred_type(&model) else {
+            return false;
+        };
+        let Some(TypeDefinition::StaticClass(class)) =
+            ty.definition(&self.db, &model.program_environment())
+        else {
+            return false;
+        };
+        class.name(&self.db).as_deref() == Some("Pattern")
+            && class.file(&self.db).path(&self.db).is_vendored_path()
+            && model
+                .resolve_module(Some("re"), 0)
+                .and_then(|module| module.file(&self.db))
+                == Some(class.file(&self.db))
+    }
+
     pub(crate) fn data_attribute(&self, module: usize, expression: &ruff_python_ast::Expr) -> bool {
         use ty_python_semantic::types::Type as Ty;
         self.hint_reads.set(self.hint_reads.get() + 1);
@@ -456,6 +484,16 @@ impl Session {
         matches!(
             expression.inferred_type(&model),
             Some(Ty::NominalInstance(_) | Ty::LiteralValue(_))
+        )
+    }
+
+    pub(crate) fn is_typing_protocol(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_semantic::types::{SpecialFormType, Type as Ty};
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(
+            expression.inferred_type(&model),
+            Some(Ty::SpecialForm(SpecialFormType::Protocol))
         )
     }
 
@@ -630,6 +668,7 @@ impl Session {
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
         scoped_builtin: bool,
+        runtime_provider: Option<usize>,
     ) -> Result<(), String> {
         let mut rules = RuleSelection::default();
         let arguments = if scoped_builtin {
@@ -649,7 +688,8 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(Arc::new(rules));
-        self.errors(skipped, overloads, scoped_builtin)
+        let runtime_provider = runtime_provider.map(|index| self.files[index]);
+        self.errors(skipped, overloads, scoped_builtin, runtime_provider)
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.
@@ -661,7 +701,7 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(skipped, overloads, false)
+        self.errors(skipped, overloads, false, None)
     }
 
     fn errors(
@@ -669,6 +709,7 @@ impl Session {
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
         scoped_builtin: bool,
+        runtime_provider: Option<File>,
     ) -> Result<(), String> {
         let errors: Vec<_> = self
             .files
@@ -681,6 +722,7 @@ impl Session {
                     skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
                     overloads.get(index).map_or(&[][..], Vec::as_slice),
                     scoped_builtin,
+                    runtime_provider,
                 );
                 file_errors(&self.db, checked)
             })
@@ -703,6 +745,8 @@ struct CheckedFile<'db> {
     overloads: Vec<CheckedDiagnostic>,
     #[returns(copy)]
     scoped_builtin: bool,
+    #[returns(copy)]
+    runtime_provider: Option<File>,
 }
 
 const CALL_ARGUMENT_RULES: &[&str] = &[
@@ -831,7 +875,13 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                         skipped.iter().any(|scope| scope.contains_range(range))
                             || (checked.scoped_builtin(db)
                                 && CALL_ARGUMENT_RULES.contains(&diagnostic.id().as_str())
-                                && vendored_argument(db, file, range, diagnostic.id().as_str()))
+                                && runtime_argument(
+                                    db,
+                                    file,
+                                    range,
+                                    diagnostic.id().as_str(),
+                                    checked.runtime_provider(db),
+                                ))
                             // ty also reports implicit None returns at the annotation span.
                             || (diagnostic.id().as_str() == "invalid-return-type"
                                 && diagnostic.headline_message()
@@ -857,8 +907,14 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         .collect()
 }
 
-/// Leave argument conversion to Python only for calls proved to target vendored code.
-fn vendored_argument(db: &dyn Db, file: File, range: TextRange, rule: &str) -> bool {
+/// Leave argument conversion to Python for vendored code and its compiler-supplied adapter.
+fn runtime_argument(
+    db: &dyn Db,
+    file: File,
+    range: TextRange,
+    rule: &str,
+    runtime_provider: Option<File>,
+) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
     use ty_python_semantic::types::Type;
     let file = db.program_file(file);
@@ -888,14 +944,17 @@ fn vendored_argument(db: &dyn Db, file: File, range: TextRange, rule: &str) -> b
     let Some(callee) = call.func.inferred_type(&model) else {
         return false;
     };
-    let is_vendored = |ty: Type<'_>| {
+    let uses_runtime_provider = |ty: Type<'_>| {
         ty.definition(db, &model.program_environment())
             .and_then(|definition| definition.definition())
-            .is_some_and(|definition| definition.file(db).path(db).is_vendored_path())
+            .is_some_and(|definition| {
+                let file = definition.file(db);
+                file.path(db).is_vendored_path() || Some(file) == runtime_provider
+            })
     };
     match callee {
-        Type::Union(union) => union.elements(db).iter().copied().all(is_vendored),
-        ty => is_vendored(ty),
+        Type::Union(union) => union.elements(db).iter().copied().all(uses_runtime_provider),
+        ty => uses_runtime_provider(ty),
     }
 }
 
@@ -954,7 +1013,7 @@ fn contextmanager_annotation(db: &dyn Db, file: File, range: TextRange) -> bool 
     let index = ty_python_core::semantic_index(db, program);
     index
         .node_scope(NodeWithScopeRef::Function(function))
-        .is_generator_function(&index)
+        .is_generator_function(index)
         && resolves_to_stdlib_function(
             &SemanticModel::new(db, program),
             &decorator.expression,
@@ -1136,7 +1195,7 @@ impl AnalysisCache {
             && cached.same_files(fresh, inputs)
         {
             cached.update(fresh, inputs)?;
-            return cached.session.errors(skipped, overloads, false);
+            return cached.session.errors(skipped, overloads, false, None);
         }
         if self.hints.is_some() {
             // The quiet database must retain its inference with diagnostics disabled.
@@ -1565,7 +1624,11 @@ mod diagnostic_mode_tests {
         assert!(message.contains("not callable"), "{message}");
         // Entry profiles can skip a scope without changing its source or Salsa revision.
         let whole = TextRange::new(0.into(), 40.into());
-        assert!(session.errors(Some(&[vec![whole]]), &[], false).is_ok());
-        assert_eq!(session.errors(None, &[], false).unwrap_err(), message);
+        assert!(
+            session
+                .errors(Some(&[vec![whole]]), &[], false, None)
+                .is_ok()
+        );
+        assert_eq!(session.errors(None, &[], false, None).unwrap_err(), message);
     }
 }

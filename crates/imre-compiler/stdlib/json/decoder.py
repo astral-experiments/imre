@@ -135,7 +135,8 @@ WHITESPACE_STR = ' \t\n\r'
 
 
 def JSONObject(s_and_end, strict, scan_once, object_hook, object_pairs_hook,
-               memo=None, _w=WHITESPACE.match, _ws=WHITESPACE_STR):
+               memo=None, _w=WHITESPACE.match, _ws=WHITESPACE_STR, *,
+               _propagate_stop=False, _key_scanstring=None):
     s, end = s_and_end
     pairs = []
     pairs_append = pairs.append
@@ -165,7 +166,8 @@ def JSONObject(s_and_end, strict, scan_once, object_hook, object_pairs_hook,
                 "Expecting property name enclosed in double quotes", s, end)
     end += 1
     while True:
-        key, end = scanstring(s, end, strict)
+        read_key = scanstring if _key_scanstring is None else _key_scanstring
+        key, end = read_key(s, end, strict)
         key = memo_get(key, key)
         # To skip some function call overhead we optimize the fast paths where
         # the JSON key separator is ": " or just ":".
@@ -186,6 +188,8 @@ def JSONObject(s_and_end, strict, scan_once, object_hook, object_pairs_hook,
         try:
             value, end = scan_once(s, end)
         except StopIteration as err:
+            if _propagate_stop:
+                raise
             raise JSONDecodeError("Expecting value", s, err.value) from None
         pairs_append((key, value))
         try:
@@ -218,7 +222,8 @@ def JSONObject(s_and_end, strict, scan_once, object_hook, object_pairs_hook,
         pairs = object_hook(pairs)
     return pairs, end
 
-def JSONArray(s_and_end, scan_once, _w=WHITESPACE.match, _ws=WHITESPACE_STR):
+def JSONArray(s_and_end, scan_once, _w=WHITESPACE.match, _ws=WHITESPACE_STR, *,
+              _propagate_stop=False):
     s, end = s_and_end
     values = []
     nextchar = s[end:end + 1]
@@ -233,6 +238,8 @@ def JSONArray(s_and_end, scan_once, _w=WHITESPACE.match, _ws=WHITESPACE_STR):
         try:
             value, end = scan_once(s, end)
         except StopIteration as err:
+            if _propagate_stop:
+                raise
             raise JSONDecodeError("Expecting value", s, err.value) from None
         _append(value)
         nextchar = s[end:end + 1]

@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, date, datetime as dt, time, timedelta, timezone
+from datetime import UTC, date, datetime as dt, time, timedelta, timezone, tzinfo
 
 
 def test_module_exports():
@@ -73,6 +73,24 @@ def test_class_constants():
         assert (cls.min, cls.max, cls.resolution) == (smallest, largest, step)
         assert smallest.min is cls.min and largest.max is cls.max
         assert smallest.resolution is cls.resolution
+    limit = timedelta(hours=23, minutes=59)
+    for edge, offset in [(timezone.min, -limit), (timezone.max, limit)]:
+        assert type(edge) is timezone and edge == timezone(offset)
+        assert edge.min is timezone.min and edge.max is timezone.max and edge.utc is UTC
+    assert UTC.utc is UTC is timezone.utc
+    for constant in ("min", "max", "utc"):
+        try:
+            setattr(timezone, constant, None)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError(constant)
+        try:
+            delattr(UTC, constant)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError(constant)
     assert dt.resolution is not time.resolution
     assert time.resolution is not timedelta.resolution
 
@@ -122,6 +140,34 @@ def test_cookie_timestamp():
     print(str(before), str(shifted), int(lifetime.total_seconds()))
 
 
+def test_time_fromisoformat():
+    parse = time.fromisoformat
+    assert parse("T24:00:00.0000000Z").tzinfo is UTC
+    assert parse("12-00:00:00.123").tzinfo is UTC
+    assert parse("123456,1234567-01:02:03.4") == time(
+        12, 34, 56, 123456, timezone(-timedelta(hours=1, minutes=2, seconds=3, microseconds=400000))
+    )
+
+    class Clock(time):
+        pass
+
+    assert type(Clock().fromisoformat("07:59")) is Clock
+    assert Clock.fromisoformat("07:59") == time(7, 59)
+
+    class Capture(time):
+        def __new__(cls, *args):
+            return args
+
+    assert Capture.fromisoformat("25:01+00") == (25, 1, 0, 0, UTC)
+    for text in ("12:30:00.", "12:00+24", "24:00:01", "12\ud80000"):
+        try:
+            parse(text)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(text)
+
+
 def test_time_of_day():
     midnight = time()
     assert type(midnight) is time and isinstance(midnight, time)
@@ -151,6 +197,53 @@ def test_time_of_day():
         def __index__(self):
             return 17
     assert time(Hour()).hour == 17
+    extracted = combined.time()
+    assert type(extracted) is time and extracted.tzinfo is None and extracted.fold == 1
+    assert extracted == time(12, 34, 56, 7)
+    replaced = clock.replace(Hour(), microsecond=8)
+    assert replaced == time(17, 34, 56, 8, east) and replaced.fold == 1 and replaced.tzinfo is east
+    cleared = time.__replace__(clock, tzinfo=None, fold=0)
+    assert cleared == extracted and cleared.fold == 0 and clock.replace() is not clock
+
+    class Moment(dt):
+        @property
+        def hour(self):
+            raise AssertionError("used overridden hour")
+
+    assert type(Moment(1, 1, 1).time()) is time
+    for method, args, kwargs in (
+        (time.__replace__, (), {}), (time.replace, (object(),), {}),
+        (dt.time, (object(),), {}), (combined.time, (1,), {}), (combined.time, (), {"bad": 1}),
+    ):
+        try:
+            method(*args, **kwargs)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("invalid clock method arguments accepted")
+
+    calls = []
+    class Clock(time):
+        def __new__(cls, *args, **kwargs):
+            calls.append((args, kwargs))
+            return super().__new__(cls, *args, **kwargs)
+
+    child = Clock(1, fold=1)
+    assert type(child.replace(Hour())) is Clock
+    assert calls[-1] == ((17, 0, 0, 0, None), {"fold": 1})
+    assert child.replace(fold=0).fold == 0 and calls[-1] == ((1, 0, 0, 0, None), {})
+    for args, kwargs, error_type in (
+        ((24,), {}, ValueError), ((), {"fold": 2}, ValueError),
+        ((1 << 100,), {}, OverflowError), (("bad",), {}, TypeError),
+        ((0, 0, 0, 0, None, 1), {}, TypeError), ((1,), {"hour": 2}, TypeError),
+        ((), {"tzinfo": True}, TypeError), ((), {"span": 1}, TypeError),
+    ):
+        try:
+            clock.replace(*args, **kwargs)
+        except error_type:
+            pass
+        else:
+            raise AssertionError("invalid replacement accepted")
     for args, keywords in (
         ((24,), {}), ((0, 60), {}), ((0, 0, -1), {}), ((0, 0, 0, 1000000), {}),
         ((), {"fold": 2}), ((0, 0, 0, 0, True), {}), ((0, 0, 0, 0, None, 1), {}),
@@ -330,6 +423,26 @@ def test_timedelta_negation():
     assert timedelta.__neg__(custom) == timedelta(days=-1)
 
 
+def test_timedelta_remainder():
+    unit = timedelta(microseconds=3)
+    for left, right, quotient, remainder in ((7, 3, 2, 1), (-7, 3, -3, 2),
+                                             (7, -3, -3, -2), (-7, -3, 2, -1)):
+        a = timedelta(microseconds=left)
+        b = timedelta(microseconds=right)
+        assert a % b == timedelta(microseconds=remainder)
+        assert divmod(a, b) == (quotient, a % b)
+        assert b.__rdivmod__(a) == divmod(a, b)
+    assert divmod(timedelta.max, timedelta.resolution) == (86399999999999999999, timedelta(0))
+    assert timezone(unit).utcoffset(None) % timedelta(minutes=1) == unit
+    assert unit.__mod__(5) is NotImplemented
+    try:
+        divmod(unit, timedelta(0))
+    except ZeroDivisionError:
+        pass
+    else:
+        raise AssertionError("accepted zero timedelta divisor")
+
+
 def test_timedelta_positive_and_absolute():
     zero = timedelta()
     assert +zero is zero and abs(zero) is zero
@@ -450,6 +563,160 @@ def test_calendar_reduction():
     assert super(Mixed, item).__reduce_ex__(4) == 4
 
 
+def test_fixed_timezone_methods():
+    class Offset(timedelta):
+        pass
+
+    class Name(str):
+        def __repr__(self):
+            return "Name()"
+
+    class Stamp(dt):
+        pass
+
+    offset = Offset(hours=-2, microseconds=1)
+    name = Name("")
+    zone = timezone(offset, name)
+    foreign = Stamp(2020, 1, 1, tzinfo=UTC)
+    assert zone.utcoffset(foreign) is offset and zone.tzname(None) is name
+    assert str(zone) is name
+    assert repr(zone) == f"datetime.timezone({offset!r}, Name())"
+    assert repr(time(tzinfo=zone, fold=1)) == f"datetime.time(0, 0, tzinfo={zone!r}, fold=1)"
+    lone = timezone(timedelta(), "\ud800")
+    assert lone is not UTC and lone.tzname(None) == str(lone) == "\ud800"
+    assert repr(lone) == r"datetime.timezone(datetime.timedelta(0), '\ud800')"
+    assert lone.__getinitargs__()[1] is lone.tzname(None)
+    assert timezone.dst(zone, foreign) is None
+    assert timezone(offset).tzname(foreign) == "UTC-01:59:59.999999"
+    assert UTC.tzname(None) == "UTC"
+    for descriptor in (timezone.utcoffset, timezone.tzname, timezone.dst):
+        assert descriptor.__objclass__ is timezone
+        assert descriptor.__text_signature__ == "($self, object, /)"
+        try:
+            descriptor(zone, date(2020, 1, 1))
+        except TypeError as exc:
+            assert str(exc) == (descriptor.__name__
+                + "(dt) argument must be a datetime instance or None, not datetime.date")
+        else:
+            raise AssertionError("fixed timezone accepted a plain date")
+
+
+def test_custom_tzinfo():
+    offset = timedelta(seconds=29, microseconds=7)
+    calls = []
+
+    class Zone(tzinfo):
+        def utcoffset(self, value):
+            calls.append(value)
+            return offset
+
+    zone = Zone()
+    day = date(2000, 1, 2)
+    clock = time(0, 0, 29, 7, zone)
+    local = dt.combine(day, clock)
+    assert clock.tzinfo is local.tzinfo is zone
+    assert dt(2000, 1, 2, tzinfo=zone).tzinfo is zone and not calls
+    assert clock.utcoffset() is offset and local.utcoffset() is offset
+    assert len(calls) == 2 and calls[0] is None and calls[1] is local
+    assert clock.isoformat() == "00:00:29.000007+00:00:29.000007"
+    assert str(local) == "2000-01-02 00:00:29.000007+00:00:29.000007"
+
+    instant = dt(2000, 1, 2, tzinfo=UTC)
+    later = dt(2000, 1, 2, microsecond=1, tzinfo=UTC)
+    assert local == instant and instant == local and hash(local) == hash(instant)
+    assert local < later and later > local
+    try:
+        dt.combine(day, clock, tzinfo=Zone)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted a tzinfo class instead of an instance")
+
+
+def test_explicit_zone_conversion():
+    calls = []
+
+    class Zone(tzinfo):
+        def utcoffset(self, value):
+            return timedelta(minutes=-30)
+
+        def dst(self, value):
+            calls.append((value.hour, value.minute))
+            return timedelta(0)
+
+    zone = Zone()
+    result = dt.fromtimestamp(0, zone)
+    assert result.tzinfo is zone and (result.day, result.hour, result.minute) == (31, 23, 30)
+    assert calls == [(0, 0), (23, 30)]
+
+    class Child(dt):
+        pass
+
+    class Hook(Zone):
+        def fromutc(self, value):
+            return type(value), value.tzinfo is self, value.hour
+
+    assert Child.fromtimestamp(0, Hook()) == (Child, True, 0)
+    child = Child(2000, 1, 2)
+    assert child.fromtimestamp(0, Hook()) == (Child, True, 0)
+    assert type(child.combine(child, time())) is Child
+
+
+def test_astimezone_subtype():
+    constructed = []
+
+    class Child(dt):
+        def __new__(cls, *args, **kwargs):
+            value = dt.__new__(cls, *args, **kwargs)
+            constructed.append((value, value.tzinfo))
+            return value
+
+    class Target(tzinfo):
+        def fromutc(self, value):
+            return value
+
+    source = timezone(timedelta(hours=1))
+    target = Target()
+    result = Child(2000, 1, 1, 6, tzinfo=source, fold=1).astimezone(target)
+    intermediate, constructor_zone = constructed[1]
+    assert constructor_zone is source and result is intermediate
+    assert result.tzinfo is target and (result.hour, result.fold) == (5, 0)
+
+
+def test_tzinfo_reduction():
+    from datetime import tzinfo
+
+    assert timezone.__reduce__ is tzinfo.__reduce__
+    assert tzinfo().__reduce__() == (tzinfo, (), None)
+    assert UTC.__reduce__() == (timezone, (timedelta(0),), None)
+    offset = timedelta(minutes=7)
+    name = "east"
+    fixed = timezone(offset, name)
+    cls, args, state = fixed.__reduce__()
+    assert cls is timezone and args[0] is offset and args[1] is name and state is None
+
+    class Zone(tzinfo):
+        def __getinitargs__(self):
+            return self.arguments
+
+        def __getstate__(self):
+            return self.state
+
+    zone = Zone()
+    zone.arguments = []
+    zone.state = {}
+    cls, args, state = zone.__reduce_ex__(4)
+    assert cls is Zone and args is zone.arguments and state is zone.state
+
+    class Stateful(tzinfo):
+        pass
+
+    obj = Stateful()
+    obj.name = "east"
+    assert obj.__reduce__() == (Stateful, (), {"name": "east"})
+    assert obj.__reduce__()[2] is obj.__dict__
+
+
 def test_calendar_strftime():
     calls = []
 
@@ -488,11 +755,18 @@ def test_calendar_strftime():
 def current():
     test_calendar_strftime()
     test_calendar_reduction()
+    test_fixed_timezone_methods()
+    test_custom_tzinfo()
+    test_explicit_zone_conversion()
+    test_astimezone_subtype()
+    test_tzinfo_reduction()
     test_calendar_format()
     test_timedelta_negation()
     test_timedelta_positive_and_absolute()
+    test_timedelta_remainder()
     test_subclass_construction()
     test_now()
+    test_time_fromisoformat()
     test_time_of_day()
     test_http_date()
     test_module_exports()
@@ -513,6 +787,7 @@ def current():
         raise AssertionError("invalid timezone accepted")
     test_calendar_ordering()
     test_calendar_day_methods()
+    test_timestamp()
 
 
 def test_calendar_ordering():
@@ -574,6 +849,35 @@ def test_calendar_day_methods():
     assert date.ctime(value) == "Tue Dec 31 00:00:00 0030"
     assert date(1, 1, 1).ctime() == "Mon Jan  1 00:00:00 0001"
     assert value.isoweekday() == 2 and date(2024, 3, 3).isoweekday() == 7
+
+
+def test_timestamp():
+    import os
+    import time as clock
+
+    class Stamp(dt):
+        pass
+
+    offset = timezone(timedelta(microseconds=1))
+    assert Stamp(1970, 1, 1, tzinfo=offset).timestamp() == -0.000001
+    assert dt.timestamp(dt(1970, 1, 1, tzinfo=UTC)) == 0.0
+    if hasattr(clock, "tzset"):
+        saved = os.environ.get("TZ")
+        try:
+            os.environ["TZ"] = "UTC0"
+            clock.tzset()
+            assert dt(1969, 12, 31, 23, 59, 59, 999999).timestamp() == -1 + 999999 / 1000000
+            os.environ["TZ"] = "EST+05EDT,M3.2.0,M11.1.0"
+            clock.tzset()
+            for fold, gap, repeat in ((0, 1331451000, 1352007000), (1, 1331447400, 1352010600)):
+                assert dt(2012, 3, 11, 2, 30, fold=fold).timestamp() == gap
+                assert dt(2012, 11, 4, 1, 30, fold=fold).timestamp() == repeat
+        finally:
+            if saved is None:
+                del os.environ["TZ"]
+            else:
+                os.environ["TZ"] = saved
+            clock.tzset()
 
 
 if __name__ == "__main__":

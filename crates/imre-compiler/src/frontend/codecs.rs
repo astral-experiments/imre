@@ -34,14 +34,16 @@ impl Checker<'_> {
         class: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let args = self.arguments(
-            call,
-            &[
-                parameter("stream", Type::BinaryIO, None),
-                parameter("errors", Type::Str, Some(unpacking::string("strict"))),
-            ],
-            Some(class),
-        )?;
+        let params = [
+            parameter("stream", Type::BinaryIO, None),
+            parameter("errors", Type::Str, Some(unpacking::string("strict"))),
+        ];
+        let args = self.arguments_with(call, &params, Some(class), |checker, index, node| {
+            let value = checker.evaluated_argument(node)?;
+            checker
+                .coerce(value, params[index].ty, node)
+                .map_err(|_| checker.object_builtin_error("codec stream writer", node))
+        })?;
         // The factory protocol declares positional-only parameters. These concrete
         // codecs use the ordinary StreamWriter(stream, errors) initializer.
         for keyword in &call.arguments.keywords {

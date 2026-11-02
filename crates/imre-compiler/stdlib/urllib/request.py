@@ -13,14 +13,14 @@ import tempfile
 
 from email.message import Message
 from urllib.error import ContentTooShortError, HTTPError, URLError
-from urllib.response import addinfourl
+from urllib.response import addclosehook, addinfourl
 from urllib.parse import (
-    _splithost, _splitpasswd, _splitport, _splittag, _splittype, _splituser, quote, unquote, unquote_to_bytes, unwrap, urljoin, urlparse, urlsplit, urlunparse,
+    _splitattr, _splitvalue, _splithost, _splitpasswd, _splitport, _splittag, _splittype, _splituser, quote, unquote, unquote_to_bytes, unwrap, urljoin, urlparse, urlsplit, urlunparse,
 )
 
 
 __all__ = [
-    "Request", "OpenerDirector", "BaseHandler", "DataHandler", "FileHandler", "UnknownHandler",
+    "Request", "OpenerDirector", "BaseHandler", "DataHandler", "FileHandler", "FTPHandler", "UnknownHandler",
     "ProxyHandler", "HTTPHandler", "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
     "urlopen", "install_opener", "build_opener", "urlretrieve", "urlcleanup",
     "pathname2url", "url2pathname", "getproxies",
@@ -35,8 +35,7 @@ def urlopen(url, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
     """Open a URL or Request through the installed or default opener."""
     global _opener
     if context:
-        # The context selects a fresh opener. Only an HTTPS handler consumes it.
-        opener = build_opener()
+        opener = build_opener(HTTPSHandler(context=context))
     elif _opener is None:
         _opener = opener = build_opener()
     else:
@@ -396,14 +395,16 @@ class OpenerDirector:
 def build_opener(*handlers):
     """Create an opener object from a list of handlers.
 
-    The default opener supports HTTP, local files and data URLs.
+    The default opener supports HTTP, FTP, local files and data URLs.
 
     If any of the handlers passed as arguments are subclasses of the
     default handlers, the default handlers will not be used.
     """
     opener = OpenerDirector()
     default_classes = [ProxyHandler, UnknownHandler, HTTPHandler, HTTPDefaultErrorHandler, HTTPRedirectHandler, FileHandler,
-                       HTTPErrorProcessor, DataHandler]
+                       FTPHandler, HTTPErrorProcessor, DataHandler]
+    if hasattr(http.client, "HTTPSConnection"):
+        default_classes.append(HTTPSHandler)
     skip = set()
     for klass in default_classes:
         for check in handlers:
@@ -416,8 +417,7 @@ def build_opener(*handlers):
         default_classes.remove(klass)
 
     for klass in default_classes:
-        handler = _DefaultUnknownHandler() if klass is UnknownHandler else klass()
-        opener.add_handler(handler)
+        opener.add_handler(klass())
 
     for h in handlers:
         if isinstance(h, type):
@@ -782,17 +782,208 @@ class HTTPHandler(AbstractHTTPHandler):
     http_request = AbstractHTTPHandler.do_request_
 
 
+if hasattr(http.client, 'HTTPSConnection'):
+
+    class HTTPSHandler(AbstractHTTPHandler):
+
+        def __init__(self, debuglevel=None, context=None, check_hostname=None):
+            debuglevel = debuglevel if debuglevel is not None else http.client.HTTPSConnection.debuglevel
+            AbstractHTTPHandler.__init__(self, debuglevel)
+            if context is None:
+                http_version = http.client.HTTPSConnection._http_vsn
+                context = http.client._create_https_context(http_version)
+            if check_hostname is not None:
+                context.check_hostname = check_hostname
+            self._context = context
+
+        def https_open(self, req):
+            return self.do_open(http.client.HTTPSConnection, req,
+                                context=self._context)
+
+        https_request = AbstractHTTPHandler.do_request_
+
+    __all__.append('HTTPSHandler')
+
 
 class UnknownHandler(BaseHandler):
     def unknown_open(self, req):
         raise URLError('unknown url type: %s' % req.type)
 
 
-class _DefaultUnknownHandler(UnknownHandler):
-    def unknown_open(self, req):
-        if req.type in ("https", "ftp"):
-            raise NotImplementedError("urllib.request has no default %s handler" % req.type)
-        return super().unknown_open(req)
+class FTPHandler(BaseHandler):
+    def ftp_open(self, req):
+        import ftplib
+        import mimetypes
+        host = req.host
+        if not host:
+            raise URLError('ftp error: no host given')
+        host, port = _splitport(host)
+        if port is None:
+            port = ftplib.FTP_PORT
+        else:
+            port = int(port)
+
+        # username/password handling
+        user, host = _splituser(host)
+        if user:
+            user, passwd = _splitpasswd(user)
+        else:
+            passwd = None
+        host = unquote(host)
+        user = user or ''
+        passwd = passwd or ''
+
+        try:
+            host = socket.gethostbyname(host)
+        except OSError as msg:
+            raise URLError(msg)
+        path, attrs = _splitattr(req.selector)
+        dirs = path.split('/')
+        dirs = list(map(unquote, dirs))
+        dirs, file = dirs[:-1], dirs[-1]
+        if dirs and not dirs[0]:
+            dirs = dirs[1:]
+        fw = None
+        try:
+            fw = self.connect_ftp(user, passwd, host, port, dirs, req.timeout)
+            type = file and 'I' or 'D'
+            for attr in attrs:
+                attr, value = _splitvalue(attr)
+                if attr.lower() == 'type' and \
+                   value in ('a', 'A', 'i', 'I', 'd', 'D'):
+                    type = value.upper()
+            fp, retrlen = fw.retrfile(file, type)
+            headers = ""
+            mtype = mimetypes.guess_type(req.full_url)[0]
+            if mtype:
+                headers += "Content-type: %s\n" % mtype
+            if retrlen is not None and retrlen >= 0:
+                headers += "Content-length: %d\n" % retrlen
+            # Use the same MIME field parser as HTTP responses.
+            message = Message()
+            http.client.HTTPMessage._parse(message, io.StringIO(headers, newline="").readlines())
+            return addinfourl(fp, message, req.full_url)
+        except Exception as exp:
+            if fw is not None and not fw.keepalive:
+                fw.close()
+            if isinstance(exp, ftplib.all_errors):
+                raise URLError(f"ftp error: {exp}") from exp
+            raise
+
+    def connect_ftp(self, user, passwd, host, port, dirs, timeout):
+        return ftpwrapper(user, passwd, host, port, dirs, timeout,
+                          persistent=False)
+
+
+class ftpwrapper:
+    """Class used by open_ftp() for cache of open FTP connections."""
+
+    def __init__(self, user, passwd, host, port, dirs, timeout=None,
+                 persistent=True):
+        self.user = user
+        self.passwd = passwd
+        self.host = host
+        self.port = port
+        self.dirs = dirs
+        self.timeout = timeout
+        self.refcount = 0
+        self.keepalive = persistent
+        try:
+            self.init()
+        except:
+            self.close()
+            raise
+
+    def init(self):
+        import ftplib
+        self.busy = 0
+        self.ftp = ftplib.FTP()
+        self.ftp.connect(self.host, self.port, self.timeout)
+        self.ftp.login(self.user, self.passwd)
+        _target = '/'.join(self.dirs)
+        self.ftp.cwd(_target)
+
+    def retrfile(self, file, type):
+        import ftplib
+        self.endtransfer()
+        if type in ('d', 'D'): cmd = 'TYPE A'; isdir = 1
+        else: cmd = 'TYPE ' + type; isdir = 0
+        try:
+            self.ftp.voidcmd(cmd)
+        except ftplib.all_errors:
+            self.init()
+            self.ftp.voidcmd(cmd)
+        conn = None
+        if file and not isdir:
+            # Try to retrieve as a file
+            try:
+                cmd = 'RETR ' + file
+                conn, retrlen = self.ftp.ntransfercmd(cmd)
+            except ftplib.error_perm as reason:
+                if str(reason)[:3] != '550':
+                    raise URLError(f'ftp error: {reason}') from reason
+        if not conn:
+            # Set transfer mode to ASCII!
+            self.ftp.voidcmd('TYPE A')
+            # Try a directory listing. Verify that directory exists.
+            if file:
+                pwd = self.ftp.pwd()
+                try:
+                    try:
+                        self.ftp.cwd(file)
+                    except ftplib.error_perm as reason:
+                        raise URLError('ftp error: %r' % reason) from reason
+                finally:
+                    self.ftp.cwd(pwd)
+                cmd = 'LIST ' + file
+            else:
+                cmd = 'LIST'
+            conn, retrlen = self.ftp.ntransfercmd(cmd)
+        self.busy = 1
+
+        ftpobj = addclosehook(conn.makefile('rb'), self.file_close)
+        self.refcount += 1
+        conn.close()
+        # Pass back both a suitably decorated object and a retrieval length
+        return (ftpobj, retrlen)
+
+    def endtransfer(self):
+        if not self.busy:
+            return
+        self.busy = 0
+        try:
+            self.ftp.voidresp()
+        except ftperrors():
+            pass
+
+    def close(self):
+        self.keepalive = False
+        if self.refcount <= 0:
+            self.real_close()
+
+    def file_close(self):
+        self.endtransfer()
+        self.refcount -= 1
+        if self.refcount <= 0 and not self.keepalive:
+            self.real_close()
+
+    def real_close(self):
+        self.endtransfer()
+        try:
+            self.ftp.close()
+        except ftperrors():
+            pass
+
+
+_ftperrors = None
+
+def ftperrors():
+    """Return the set of errors raised by the FTP class."""
+    global _ftperrors
+    if _ftperrors is None:
+        import ftplib
+        _ftperrors = ftplib.all_errors
+    return _ftperrors
 
 
 class DataHandler(BaseHandler):

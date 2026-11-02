@@ -35,7 +35,7 @@ pub(super) fn call(
         }
         "find_spec" => {
             let name = text.to_owned();
-            ctx.find_spec(&name, &name, true)
+            ctx.find_spec(&name, &name, true, None)
         }
         _ => unreachable!(),
     }

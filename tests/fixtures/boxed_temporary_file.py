@@ -1,3 +1,4 @@
+import errno
 import os
 import tempfile
 from io import BytesIO
@@ -38,6 +39,44 @@ def current():
             print(str(error))
     print(other.closed)
 
+    original_open = os.open
+    original_unlink = os.unlink
+    try_tmpfile = tempfile._O_TMPFILE_WORKS
+    created = []
+
+    def track_open(path, flags, mode):
+        fd = original_open(path, flags, mode)
+        created.append((fd, path))
+        return fd
+
+    def interrupted_unlink(path):
+        assert path == created[0][1]
+        raise KeyboardInterrupt("unlink interrupted")
+
+    try:
+        tempfile._O_TMPFILE_WORKS = False
+        os.open = track_open
+        os.unlink = interrupted_unlink
+        try:
+            with TemporaryFile(dir="."):
+                raise AssertionError("unlink interruption was lost")
+        except KeyboardInterrupt as error:
+            assert str(error) == "unlink interrupted"
+    finally:
+        os.open = original_open
+        os.unlink = original_unlink
+        tempfile._O_TMPFILE_WORKS = try_tmpfile
+        for fd, path in created:
+            original_unlink(path)
+    assert len(created) == 1
+    try:
+        os.fstat(created[0][0])
+    except OSError as error:
+        assert error.errno == errno.EBADF
+    else:
+        os.close(created[0][0])
+        raise AssertionError("interrupted unlink leaked its file descriptor")
+
     # The comparison runner removes the created directories and files.
     for directory, prefix in (
         (".", "text-"),
@@ -76,3 +115,20 @@ def current():
         translated.write("left\r\nright\r")
         translated.seek(0)
         print(list(translated))
+
+    class Mode(str):
+        pass
+
+    with TemporaryFile(Mode("tw"), encoding="latin-1", newline="\r\n") as writer:
+        raw = writer.buffer.raw
+        print(writer.mode, type(writer.mode) is str, raw.mode, writer.fileno() == raw.name, writer.readable())
+        writer.write("é\n")
+        writer.flush()
+        os.lseek(raw.name, 0, os.SEEK_SET)
+        print(os.read(raw.name, 8))
+    print(raw.closed)
+    for mode, encoding in (("wr", None), ("w", "bad-encoding")):
+        try:
+            TemporaryFile(mode, encoding=encoding)
+        except (ValueError, LookupError) as error:
+            print(type(error).__name__, str(error))

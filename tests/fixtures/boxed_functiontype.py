@@ -17,6 +17,20 @@ def current():
     print(copied(), copied.__name__, copied.__qualname__, copied.__defaults__, copied.__kwdefaults__)
     print(copied.__globals__ is original.__globals__)
     namespace = {"marker": 7}
+    new = original.__new__
+    assert new is types.FunctionType.__new__ and new.__self__ is types.FunctionType
+    assert new.__qualname__ == "function.__new__" and new.__module__ is None
+    from _thread import _local
+    assert _local.__new__.__qualname__ == "_local.__new__"
+    direct = new(types.FunctionType, original.__code__, namespace, argdefs=(1,), kwdefaults={"y": 5})
+    assert direct() == 13 and direct.__globals__ is namespace
+    for args in ((), (original,), (dict,)):
+        try:
+            new(*args)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("function.__new__ accepted an invalid receiver")
     alternate = types.FunctionType(code=original.__code__, globals=namespace, argdefs=(1,), kwdefaults={"y": 5})
     print(alternate(), alternate.__globals__ is namespace)
     namespace["marker"] = 20

@@ -1,13 +1,97 @@
 use super::{Context, Error, Id, NONE, Result, Value, argument, builtins};
-use crate::objects::{HashState, SharedHash};
+use crate::objects::HashState;
+use digest::SharedHash;
 
 mod blake2;
+pub(crate) mod digest;
+mod kdf;
+pub(in crate::dynamic) mod md5;
+pub(crate) mod openssl;
+
+const UNSUPPORTED_DIGEST: &str = "_hashlib.UnsupportedDigestmodError";
+
+pub(in crate::dynamic) fn install_openssl(ctx: &mut Context, scope: Id) -> Result<()> {
+    let provider = openssl::required()?;
+    let class = if let Some(&class) = ctx.builtins.get(UNSUPPORTED_DIGEST) {
+        class
+    } else {
+        let fields = ctx.scope("_hashlib", None);
+        let module = ctx.text("_hashlib");
+        ctx.bind(fields, "__module__", module);
+        let name = ctx.text("UnsupportedDigestmodError");
+        ctx.bind(fields, "__qualname__", name);
+        ctx.bind(fields, "__doc__", NONE);
+        let base = ctx.builtin("ValueError");
+        let class = ctx.allocate_class("UnsupportedDigestmodError".into(), fields, vec![base])?;
+        ctx.builtins.insert(UNSUPPORTED_DIGEST.into(), class);
+        class
+    };
+    ctx.bind(scope, "UnsupportedDigestmodError", class);
+    for name in ["HASH", "new", "get_fips_mode", "pbkdf2_hmac", "scrypt"] {
+        if name != "scrypt" || provider.has_scrypt() {
+            let function = ctx.builtin(&format!("_hashlib.{name}"));
+            ctx.bind(scope, name, function);
+        }
+    }
+    let names = ctx.alloc(Value::Set {
+        entries: Default::default(),
+        frozen: true,
+    });
+    let mut constructors = Vec::new();
+    for &name in digest::NAMES {
+        let attr = format!("openssl_{name}");
+        let constructor = ctx.builtin(&format!("_hashlib.{attr}"));
+        ctx.bind(scope, &attr, constructor);
+        let key = ctx.text(name);
+        constructors.push((constructor, key));
+        if provider.digest(name).is_ok() {
+            builtins::set_add(ctx, names, key)?;
+        }
+    }
+    let constructors = ctx.dict(constructors);
+    let constructors = ctx.alloc(Value::MappingProxy(constructors));
+    ctx.bind(scope, "_constructors", constructors);
+    ctx.bind(scope, "openssl_md_meth_names", names);
+    Ok(())
+}
+
+pub(super) fn call_openssl(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    match name {
+        "pbkdf2_hmac" => kdf::pbkdf2_hmac(ctx, args, kwargs),
+        "scrypt" => kdf::scrypt(ctx, args, kwargs),
+        "get_fips_mode" => {
+            if !args.is_empty() || !kwargs.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "get_fips_mode() takes no arguments",
+                ));
+            }
+            let provider = openssl::required()?;
+            Ok(ctx.int(i64::from(provider.fips_mode())))
+        }
+        _ => digest::construct(ctx, name, args, kwargs),
+    }
+    .map_err(|mut error| {
+        if error.kind == UNSUPPORTED_DIGEST && error.class == NONE {
+            error.class = ctx.builtins[UNSUPPORTED_DIGEST];
+        }
+        error
+    })
+}
 
 /// Borrows the bytes of a boxed hash input, including mutable buffers.
 pub(super) fn buffer(ctx: &Context, id: Id) -> Result<&[u8]> {
     match ctx.heap.get(ctx.scalar_value(id)) {
-        Value::Bytes(data) | Value::ByteArray(data) => Ok(data),
-        Value::Array(array) => Ok(array.as_bytes()),
+        Value::Bytes(_)
+        | Value::ByteArray(_)
+        | Value::MemoryView { .. }
+        | Value::BytesIoBuffer { .. }
+        | Value::Array(_) => ctx.native_buffer_bytes(id),
         Value::Str(_) => Err(Error::new(
             "TypeError",
             "Strings must be encoded before hashing",
@@ -52,15 +136,31 @@ pub(super) fn hash(
     if matches!(name, "blake2b" | "blake2s") {
         return blake2::new(ctx, name, args, kwargs);
     }
+    fixed_hash(ctx, name, HashState::public_constructor(name), args, kwargs)
+}
+
+fn fixed_hash(
+    ctx: &mut Context,
+    name: &str,
+    class: Option<&'static str>,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    // The six SHA-3 types share CPython's sha3_224 Argument Clinic entry point.
+    let constructor = if class.is_some_and(|c| c.starts_with("_sha3.")) {
+        "sha3_224"
+    } else {
+        name
+    };
     let [data, flag, string] = builtins::bind_method_arguments(
-        name,
+        constructor,
         args,
         kwargs,
         ["data", "usedforsecurity", "string"],
         1,
     )?;
     let input = hash_input(ctx, data, flag, string)?;
-    let state = (HashState::provider(name)?.create)(input);
+    let state = HashState::provider(name)?.create(class, input);
     Ok(ctx.alloc(Value::Hash(SharedHash::new(state))))
 }
 
@@ -77,44 +177,15 @@ pub(super) fn algorithms(ctx: &mut Context) -> Result<Id> {
 }
 
 pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    // The public Python wrapper binds name before the provider binds the remaining arguments.
-    let name = super::option(args, 0, kwargs, "name")
-        .map_err(|_| {
-            Error::new(
-                "TypeError",
-                "__hash_new() got multiple values for argument 'name'",
-            )
-        })?
-        .ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                "__hash_new() missing 1 required positional argument: 'name'",
-            )
-        })?;
-    let blake = match ctx.str_value(name) {
-        Ok("blake2b") => Some("blake2b"),
-        Ok("blake2s") => Some("blake2s"),
-        _ => None,
-    };
-    if let Some(name) = blake {
-        let args = args.get(1..).unwrap_or_default();
-        if kwargs.iter().any(|(key, _)| key == "name") {
-            let remaining: Vec<_> = kwargs
-                .iter()
-                .filter(|(key, _)| key != "name")
-                .cloned()
-                .collect();
-            return blake2::new(ctx, name, args, &remaining);
-        }
-        return blake2::new(ctx, name, args, kwargs);
-    }
-    let [_, data, flag, string] = super::builtins::bind_method_arguments(
+    let [name, data, flag, string] = super::builtins::bind_method_arguments(
         "new",
         args,
         kwargs,
         ["name", "data", "usedforsecurity", "string"],
         2,
     )?;
+    let name =
+        name.ok_or_else(|| Error::new("TypeError", "new() missing required argument 'name'"))?;
     let name = ctx.str_value(name).map_err(|_| {
         let ty = if name == NONE {
             "None"
@@ -126,9 +197,10 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
             format!("new() argument 'name' must be str, not {ty}"),
         )
     })?;
+    let class = HashState::public_constructor(name);
     let provider = HashState::provider(name);
     let data = hash_input(ctx, data, flag, string)?;
-    let state = (provider?.create)(data);
+    let state = provider?.create(class, data);
     Ok(ctx.alloc(Value::Hash(SharedHash::new(state))))
 }
 
@@ -139,10 +211,10 @@ pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     let value = match name {
         "hash.update" => {
             let data = buffer(ctx, argument(args, 1)?)?;
-            hash.lock().update(data);
+            hash.lock().update(data)?;
             return Ok(NONE);
         }
-        "hash.copy" => Value::Hash(SharedHash::new(hash.lock().clone())),
+        "hash.copy" => Value::Hash(hash.lock().copy()?),
         _ => unreachable!("registered hash method"),
     };
     Ok(ctx.alloc(value))
@@ -159,15 +231,9 @@ pub(super) fn digest(
     };
     let hash = hash.clone();
     let positional = &args[1..];
-    let hex = method == "hexdigest";
-    let value = if hash.lock().is_xof() {
+    let length = if hash.lock().is_xof() {
         let [length] = builtins::bind_builtin_arguments(method, positional, kwargs, ["length"], 1)?;
-        let length = ctx.index_integer(length.expect("bound required length"))?;
-        if hex {
-            Value::Str(hash.lock().xof_hexdigest(&length)?.to_string())
-        } else {
-            Value::Bytes(hash.lock().xof_digest(&length)?)
-        }
+        Some(ctx.index_integer(length.expect("bound required length"))?)
     } else {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -184,15 +250,9 @@ pub(super) fn digest(
                 ),
             ));
         }
-        if hex {
-            Value::Str(hash.lock().hexdigest()?.to_string())
-        } else {
-            Value::Bytes(
-                hash.lock()
-                    .fixed_digest(method, |data| Ok(data.to_vec()))?,
-            )
-        }
+        None
     };
+    let value = hash.lock().digest(method, length.as_ref())?;
     Ok(ctx.alloc(value))
 }
 
@@ -268,22 +328,8 @@ fn update_from_file(ctx: &mut Context, file: Id, factory: Id, size: Option<Id>) 
         ctx.call(update, vec![data], Vec::new())?;
         return Ok(digest);
     }
-    let native_hash = matches!(ctx.heap.get(digest), Value::Hash(_));
-    if let Some(class) = ctx.heap.get(file).instance_class()
-        && ctx.heap.get(class).io_kind() == Some("BytesIO")
-    {
-        // A native digest consumes this snapshot synchronously. A Python update
-        // callback can observe the exported view and must take the getbuffer path.
-        if !native_hash {
-            return Err(Error::new(
-                "NotImplementedError",
-                "BytesIO.getbuffer requires a writable memoryview",
-            ));
-        }
-        let data = super::io::call(ctx, class, "getvalue", &[file], &[])?;
-        method(ctx, "hash.update", &[digest, data])?;
-        return Ok(digest);
-    }
+    let storage = ctx.scalar_value(digest);
+    let native_hash = matches!(ctx.heap.get(storage), Value::Hash(_));
     let readable = if has_attr(ctx, file, "readinto")? && has_attr(ctx, file, "readable")? {
         let read = ctx.lookup_attr(file, "readable")?;
         let value = ctx.call(read, Vec::new(), Vec::new())?;
@@ -338,10 +384,10 @@ fn read_chunks(ctx: &mut Context, file: Id, digest: Id, buf: Id, view: Option<Id
             // __eq__ and __index__ above can run Python and change the contents.
             let bytes = buffer(ctx, buf)?;
             let [_, end, _] = super::super::slice::normalize(bounds, bytes.len() as i64);
-            let Value::Hash(state) = ctx.heap.get(digest) else {
+            let Value::Hash(state) = ctx.heap.get(ctx.scalar_value(digest)) else {
                 unreachable!()
             };
-            state.lock().update(&bytes[..end as usize]);
+            state.lock().update(&bytes[..end as usize])?;
         }
         ctx.heap.release_temporaries_since(step);
         ctx.heap.reserve_slot_or_request_collection();
@@ -399,7 +445,11 @@ pub(super) fn provider_method(
             ),
         ));
     }
-    if let Some(attr @ ("name" | "block_size" | "digest_size")) = method_name.strip_prefix("get_") {
+    if let Some(
+        attr
+        @ ("name" | "block_size" | "digest_size" | "_rate_bits" | "_capacity_bits" | "_suffix"),
+    ) = method_name.strip_prefix("get_")
+    {
         return ctx.lookup_attr(receiver, attr);
     }
     match method_name {

@@ -13,6 +13,7 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
         start,
         end,
         retry,
+        ..
     } = *ctx.heap.get(scanner)
     else {
         return Err(Error::new(
@@ -121,12 +122,13 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
         // The Python translator validates the phrase before alternation. Passing
         // raw source to the backend can change token priority (e.g. x$|z) or
         // interpret Python literals inside a set as Rust class operations.
-        let parsed = imre_regex::translate_pattern(
+        let parsed = imre_regex::translate_pattern_with_line_mode(
             ctx.str_value(phrase)?,
             flags & VERBOSE != 0,
             super::alphabet(false, ascii, flags),
             flags & DOTALL != 0,
             flags & IGNORECASE == 0 || ascii,
+            flags & MULTILINE != 0,
         )
         .map_err(|message| {
             if syntax_diagnostic(ctx, phrase, flags).is_some() {
@@ -144,16 +146,12 @@ pub(super) fn compile_lexicon(ctx: &mut Context, lexicon: Id, flags: Option<Id>)
                 "scanner phrases with captures are unsupported",
             ));
         }
-        let mut source = parsed.source;
+        let source = parsed.source;
         if source.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
-            if flags & MULTILINE == 0 {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "terminal dollar in scanner phrases is unsupported",
-                ));
-            }
-            source.truncate(source.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
-            source.push('$');
+            return Err(Error::new(
+                "NotImplementedError",
+                "terminal dollar in scanner phrases is unsupported",
+            ));
         }
         branches.push(format!("({source})"));
     }

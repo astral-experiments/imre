@@ -20,9 +20,10 @@ mod random;
 pub(crate) use random::Random;
 mod seekable;
 mod text_memory;
-use seekable::Memory;
+pub(crate) use seekable::Memory;
 pub(super) use seekable::disk_offset;
 
+pub(crate) use buffered::peek_bytes;
 use buffered::{Input, Output};
 
 pub(super) type BoxedFile = allocator_api2::boxed::Box<FileState>;
@@ -146,8 +147,16 @@ impl FileState {
         }
     }
 
+    pub(super) fn take_pipe_read_ahead(&mut self) -> Result<Bytes> {
+        self.input()?.take_read_ahead()
+    }
+
     pub(super) fn read_pipe_once(&mut self, size: Option<usize>) -> Result<Bytes> {
         self.input()?.read_once(size)
+    }
+
+    pub(super) fn peek_pipe(&mut self) -> Result<Bytes> {
+        self.input()?.peek()
     }
 
     pub(super) fn read_pipe_line(&mut self, size: Option<usize>) -> Result<Bytes> {
@@ -344,6 +353,9 @@ impl FileState {
             ));
         }
         if self.kind == FileKind::BinaryRandom {
+            if size != 0 {
+                self.check_random_reentry()?;
+            }
             return self.read_bytes(usize::try_from(size).ok());
         }
         if size == 0 && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
@@ -609,6 +621,7 @@ fn with_errno_description(error: io::Error, build: impl FnOnce(Kind, i32, &str) 
     let kind = match errno {
         libc::EINPROGRESS | libc::EALREADY => Kind::BlockingIOError,
         libc::ECHILD => Kind::ChildProcessError,
+        libc::ESRCH => Kind::ProcessLookupError,
         libc::ESHUTDOWN => Kind::BrokenPipeError,
         _ => os_error_kind(error.kind()),
     };

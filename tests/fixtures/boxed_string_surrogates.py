@@ -12,7 +12,50 @@ class EchoSpec:
         return spec
 
 
+def affixes():
+    word = Text("é\udfff🙂")
+    assert word.startswith("é") and word.endswith("🙂")
+    assert not word.startswith("é🙂") and not word.endswith("é🙂")
+    assert word.startswith(Text("\udfff🙂"), 1)
+    assert word.endswith("é\udfff", 0, -1)
+    assert not word.startswith("\udffe", 1) and not word.endswith("\udffe🙂")
+    assert not "é🙂".startswith("\udfff") and not "é🙂".endswith("\udfff")
+    assert word.startswith(("", 0), 3) and not word.startswith("", 4)
+    assert word.endswith(("\udfff", "🙂", 0))
+    try:
+        word.startswith(("\udffe", 0, "é"))
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted a non-string tuple member")
+
+    seen = []
+
+    class Bound:
+        def __init__(self, value):
+            self.value = value
+
+        def __index__(self):
+            seen.append(self.value)
+            if self.value is None:
+                raise RuntimeError("bound sentinel")
+            return self.value
+
+    large = 10 ** 100
+    assert word.startswith("é", Bound(-large), Bound(large))
+    assert seen == [-large, large]
+    assert not word.endswith("", large, None)
+    seen.clear()
+    try:
+        word.endswith(0, Bound(0), Bound(None))
+    except RuntimeError as error:
+        assert str(error) == "bound sentinel" and seen == [0, None]
+    else:
+        raise AssertionError("affix type checked before end bound")
+
+
 def current():
+    affixes()
     low = "\udcff"
     high = "\U0000d800"
     path = "dir/" + low
@@ -44,6 +87,8 @@ def current():
     assert r"\udcff" == "\\udcff"
     assert [ord(char) for char in low + high + replacement] == [0xdcff, 0xd800, 0xfffd]
     assert "é" + low + "中" == "é\udcff中"
+    assert "[{}]".format(low + high) == "[" + low + high + "]"
+    assert "🙂{}é{!s}中".format(subtype, high) == "🙂" + low + "é" + high + "中"
     text = "é" + high + low
     assert text[1] == chr(0xd800)
     assert text[::-1] == low + high + "é"
@@ -136,3 +181,10 @@ def current():
         assert str(error) == "descriptor 'title' for 'str' objects doesn't apply to a 'Alias' object"
     else:
         raise AssertionError("accepted a non-string descriptor receiver")
+
+    # Match whole Python code points, including empty boundaries on either side of a surrogate.
+    pair = high + low
+    assert pair.replace(high, "x") == "x" + low
+    assert "aba".replace("a", high, count=1) == high + "ba"
+    assert pair.replace("", low) == low + high + low + low + low
+    assert pair.replace("missing", "x") is pair

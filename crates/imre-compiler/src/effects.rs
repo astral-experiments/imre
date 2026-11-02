@@ -97,21 +97,8 @@ fn block(body: &[Statement], functions: &[bool], targets: Context<'_>) -> bool {
                 || block(yes, functions, targets)
                 || block(no, functions, targets)
         }
-        Statement::While(test, body, orelse) => {
-            expression(test, functions, targets)
-                || block(body, functions, targets)
-                || block(orelse, functions, targets)
-        }
-        Statement::For {
-            args, body, orelse, ..
-        } => {
-            // The implicit step is exactly one. An explicit step is kept
-            // fallible even when a separate range proof could exclude zero.
-            !matches!(args.len(), 1 | 2)
-                || args.iter().any(|arg| expression(arg, functions, targets))
-                || block(body, functions, targets)
-                || block(orelse, functions, targets)
-        }
+        // Every native loop can propagate KeyboardInterrupt at its signal checkpoint.
+        Statement::While(..) | Statement::For { .. } => true,
         Statement::IterNext { .. } | Statement::Assert(_) | Statement::Raise(_) => true,
         Statement::Try {
             body,
@@ -556,7 +543,7 @@ def integers(values: list[int]) -> int:
     }
 
     #[test]
-    fn range_steps_and_default_arguments_keep_their_errors() {
+    fn native_loops_and_default_arguments_keep_their_errors() {
         let context = Context {
             calls: &Targets::default(),
             types: &Default::default(),
@@ -570,7 +557,7 @@ def integers(values: list[int]) -> int:
             body: Vec::new(),
             orelse: Vec::new(),
         };
-        assert!(!block(&[range(vec![Expr::integer(1)])], &[], context));
+        assert!(block(&[range(vec![Expr::integer(1)])], &[], context));
         assert!(block(
             &[range(vec![
                 Expr::integer(1),

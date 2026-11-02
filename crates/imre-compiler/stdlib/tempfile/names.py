@@ -2,6 +2,7 @@
 
 import functools as _functools
 import io as _io
+import sys as _sys
 import warnings as _warnings
 import os as _os
 import errno as _errno
@@ -9,7 +10,7 @@ from _thread import allocate_lock as _allocate_lock
 
 from _imre_tempfile import abspath as _abspath, check_text_options as _check_text_options
 from _imre_tempfile import finish_named as _finish_named, keep_named as _keep_named, open_named as _open_named
-from _imre_tempfile import mkdir as _mkdir, open_file as _open_file, random_name as _random_name
+from _imre_tempfile import mkdir as _mkdir, random_name as _random_name
 
 TMP_MAX = 20
 template = "tmp"
@@ -189,7 +190,10 @@ def _candidate_path(directory, prefix, suffix, name, output_type):
 
 
 def _mkstemp_inner(dir, pre, suf, flags, output_type):
-    return _create_file(dir, pre, suf, output_type, _os.open, flags, 0o600)
+    def open_candidate(path):
+        return _os.open(path, flags, 0o600)
+
+    return _create_file(dir, pre, suf, output_type, open_candidate)
 
 
 def _create_file(dir, pre, suf, output_type, create, *args):
@@ -197,6 +201,7 @@ def _create_file(dir, pre, suf, output_type, create, *args):
     names = _get_candidate_names()
     for _ in range(TMP_MAX):
         path = _candidate_path(dir, pre, suf, next(names), output_type)
+        _sys.audit("tempfile.mkstemp", path)
         try:
             result = create(path, *args)
         except FileExistsError:
@@ -457,10 +462,89 @@ def NamedTemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
         raise
 
 
-def TemporaryFile(mode="w+b", buffering=-1, encoding=None, newline=None,
-                  suffix=None, prefix=None, dir=None, *, errors=None):
-    if buffering != -1:
-        raise NotImplementedError("TemporaryFile supports default buffering")
-    prefix, suffix, dir, _ = _sanitize_params(prefix, suffix, dir)
-    return _open_file(mode, dir=_os.fspath(dir), prefix=prefix, suffix=suffix,
-                      encoding=encoding, errors=errors, newline=newline)
+# From CPython 3.14.5 Lib/tempfile.py. See ../docstrings/LICENSE.
+if _os.name != 'posix' or _sys.platform == 'cygwin':
+    # On non-POSIX and Cygwin systems, assume that we cannot unlink a file
+    # while it is open.
+    TemporaryFile = NamedTemporaryFile
+
+else:
+    # Is the O_TMPFILE flag available and does it work?
+    # The flag is set to False if os.open(dir, os.O_TMPFILE) raises an
+    # IsADirectoryError exception
+    _O_TMPFILE_WORKS = hasattr(_os, 'O_TMPFILE')
+
+    def TemporaryFile(mode='w+b', buffering=-1, encoding=None,
+                      newline=None, suffix=None, prefix=None,
+                      dir=None, *, errors=None):
+        """Create and return a temporary file.
+        Arguments:
+        'prefix', 'suffix', 'dir' -- as for mkstemp.
+        'mode' -- the mode argument to io.open (default "w+b").
+        'buffering' -- the buffer size argument to io.open (default -1).
+        'encoding' -- the encoding argument to io.open (default None)
+        'newline' -- the newline argument to io.open (default None)
+        'errors' -- the errors argument to io.open (default None)
+        The file is created as mkstemp() would do it.
+
+        Returns an object with a file-like interface.  The file has no
+        name, and will cease to exist when it is closed.
+        """
+        global _O_TMPFILE_WORKS
+
+        if "b" not in mode:
+            encoding = _io.text_encoding(encoding)
+
+        prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
+
+        flags = _bin_openflags
+        if _O_TMPFILE_WORKS:
+            fd = None
+            def opener(*args):
+                nonlocal fd
+                flags2 = (flags | _os.O_TMPFILE) & ~_os.O_CREAT
+                fd = _os.open(dir, flags2, 0o600)
+                return fd
+            try:
+                file = _io.open(dir, mode, buffering=buffering,
+                                newline=newline, encoding=encoding,
+                                errors=errors, opener=opener)
+                raw = getattr(file, 'buffer', file)
+                raw = getattr(raw, 'raw', raw)
+                raw.name = fd
+                return file
+            except IsADirectoryError:
+                # Linux kernel older than 3.11 ignores the O_TMPFILE flag:
+                # O_TMPFILE is read as O_DIRECTORY. Trying to open a directory
+                # with O_RDWR|O_DIRECTORY fails with IsADirectoryError, a
+                # directory cannot be open to write. Set flag to False to not
+                # try again.
+                _O_TMPFILE_WORKS = False
+            except OSError:
+                # The filesystem of the directory does not support O_TMPFILE.
+                # For example, OSError(95, 'Operation not supported').
+                #
+                # On Linux kernel older than 3.11, trying to open a regular
+                # file (or a symbolic link to a regular file) with O_TMPFILE
+                # fails with NotADirectoryError, because O_TMPFILE is read as
+                # O_DIRECTORY.
+                pass
+            # Fallback to _mkstemp_inner().
+
+        fd = None
+        def opener(*args):
+            nonlocal fd
+            fd, name = _mkstemp_inner(dir, prefix, suffix, flags, output_type)
+            try:
+                _os.unlink(name)
+            except BaseException as e:
+                _os.close(fd)
+                raise
+            return fd
+        file = _io.open(dir, mode, buffering=buffering,
+                        newline=newline, encoding=encoding, errors=errors,
+                        opener=opener)
+        raw = getattr(file, 'buffer', file)
+        raw = getattr(raw, 'raw', raw)
+        raw.name = fd
+        return file

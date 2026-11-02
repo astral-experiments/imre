@@ -1,13 +1,12 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 
 use super::Context;
-use crate::objects::exceptions::ExitStatus;
 
 pub(super) type Id = u64;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
@@ -102,7 +101,8 @@ pub(super) struct Error {
     // Keep the context reachable even if the optional traceback cannot be allocated.
     pub context: Id,
     pub trace: Option<allocator_api2::boxed::Box<Trace>>,
-    pub exit_status: Option<ExitStatus>,
+    /// Python object held by the writable SystemExit.code member.
+    pub exit_code: Id,
     pub import: Option<crate::shared::Shared<ImportFields>>,
 }
 
@@ -131,7 +131,7 @@ impl Error {
             os_args: None,
             context: NONE,
             trace: None,
-            exit_status: None,
+            exit_code: NONE,
             import: None,
         }
     }
@@ -182,10 +182,20 @@ impl Error {
         }
     }
 
+    /// SystemExit.__init__ keeps the previous code when called without arguments.
+    pub(super) fn initialize_exit_code(&mut self, args: &[Id]) {
+        match args {
+            [] => {}
+            [value] => self.exit_code = *value,
+            _ => self.exit_code = self.args.expect("initialized exception argument tuple"),
+        }
+    }
+
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.args
             .into_iter()
             .chain(self.class())
+            .chain((self.exit_code != NONE).then_some(self.exit_code))
             .chain((self.context != NONE).then_some(self.context))
             .chain(
                 self.decode
@@ -244,6 +254,12 @@ impl Context {
         } else {
             self.alloc(Value::Raised(error))
         }
+    }
+
+    /// Snapshot active Python code without materializing Python frame objects.
+    pub(super) fn publish_fault_frames(&self) {
+        self.heap
+            .publish_fault_frames(crate::fault_handler::generation());
     }
 
     /// Return the same Python frame to introspection and traceback construction.
@@ -457,7 +473,6 @@ impl Context {
             Value::Poll(_) => "select.poll",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
-            Value::CodecInfo { .. } => "CodecInfo",
             Value::Struct { .. } => "Struct",
             Value::NamedFileCloser(_) => "tempfile._TemporaryFileCloser",
             Value::BufferedRandom(..) => "_io.BufferedRandom",
@@ -467,6 +482,9 @@ impl Context {
             Value::NamedTuple { .. } => "tuple",
             Value::DefaultDict { .. } => "defaultdict",
             Value::TupleGetter { .. } => "_tuplegetter",
+            Value::ParamSpec(_) => "ParamSpec",
+            Value::ParamSpecMarker(kind, _) => kind.class().rsplit_once('.').unwrap().1,
+            Value::ConstEvaluator(_) => "constevaluator",
             Value::TypeVar(_) => "TypeVar",
             Value::TypeVarTuple { .. } => "TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.type_name(),
@@ -486,6 +504,10 @@ impl Context {
                 super::namespace::CLASS
             }
             Value::Instance { class, .. }
+            | Value::Class {
+                metaclass: Some(class),
+                ..
+            }
             | Value::Module {
                 constructor: Some(class),
                 ..
@@ -511,36 +533,46 @@ impl Context {
         error
     }
 
-    /// Keep the decoder's original object and offsets when crossing into boxed Python.
-    pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
-        let decoded = native.decode_args().map(|args| {
-            let encoding = self.text(args.encoding);
-            let object = self.alloc(Value::Bytes(args.object.to_vec()));
-            let reason = self.text(args.reason);
-            let values = vec![
-                encoding,
-                object,
-                self.int(args.start),
-                self.int(args.end),
-                reason,
-            ];
-            let state = DecodeState {
-                encoding,
-                object,
-                start: args.start,
-                end: args.end,
-                reason,
-            };
-            (self.alloc(Value::Tuple(values)), state)
-        });
+    /// Preserve a native Unicode error's original arguments and its mutable member fields.
+    fn codec_exception(&mut self, native: crate::Error, state: Option<DecodeState>) -> Error {
         let mut error = Error::from(native);
-        if error.kind == "UnicodeDecodeError"
-            && let Some((values, state)) = decoded
+        if matches!(&*error.kind, "UnicodeDecodeError" | "UnicodeEncodeError")
+            && let Some(state) = state
         {
-            error.args = Some(values);
+            let start = self.int(state.start);
+            let end = self.int(state.end);
+            error.args = Some(self.alloc(Value::Tuple(vec![
+                state.encoding,
+                state.object,
+                start,
+                end,
+                state.reason,
+            ])));
             error.decode = Some(Box::new(state));
         }
         error
+    }
+
+    pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
+        let state = native.decode_args().map(|args| DecodeState {
+            encoding: self.text(args.encoding),
+            object: self.alloc(Value::Bytes(args.object.to_vec())),
+            start: args.start,
+            end: args.end,
+            reason: self.text(args.reason),
+        });
+        self.codec_exception(native, state)
+    }
+
+    pub(super) fn encode_error(&mut self, native: crate::Error, input: Id) -> Error {
+        let state = native.encode_args().map(|args| DecodeState {
+            encoding: self.text(args.encoding),
+            object: input,
+            start: args.start,
+            end: args.end,
+            reason: self.text(args.reason),
+        });
+        self.codec_exception(native, state)
     }
 
     /// A subsequent failure on the same decode updates only the byte range and reason.
@@ -572,15 +604,7 @@ impl Context {
         }
         error.message = self.exception_message(&error);
         if kind == "SystemExit" {
-            error.exit_status = match args {
-                [] | [NONE] => Some(ExitStatus::Code(0)),
-                [code] => match self.heap.get(*code) {
-                    Value::Int(i) => Some(ExitStatus::from_i64(i.to_i64())),
-                    Value::Bool(b) => Some(ExitStatus::Code(i32::from(*b))),
-                    _ => None,
-                },
-                _ => None,
-            };
+            error.initialize_exit_code(args);
         }
         error
     }
@@ -602,6 +626,12 @@ impl From<crate::Error> for Error {
             Err(error) => return error,
         };
         let (kind, message) = error.into_parts();
+        let kind = match (kind, os_args.as_deref()) {
+            ("OSError", Some(super::os_error::Args::Native { source, .. })) => {
+                super::os_error::subclass(source.errno).unwrap_or(kind)
+            }
+            _ => kind,
+        };
         match message {
             Ok(message) => Self {
                 os_args,
@@ -646,7 +676,7 @@ pub(super) struct ClassNamespace {
     /// Scratch field dictionary used while a class body is executing.
     pub annotation_scratch: Option<Id>,
     /// Executed deferred sites in source order, including repeated field names.
-    pub annotation_sites: Option<Box<std::collections::BTreeMap<u32, (Id, Id)>>>,
+    pub annotation_sites: Option<std::collections::BTreeMap<u32, (Id, Id)>>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
@@ -681,6 +711,11 @@ pub(super) struct Scope {
 }
 
 impl Scope {
+    /// The class body's live dictionary, once exposed through Python code.
+    pub(super) fn class_body_mapping(&self) -> Option<Id> {
+        self.class_body.as_ref().and(self.namespace)
+    }
+
     /// type.__qualname__ lives outside the finished class dictionary.
     pub(super) fn binding_namespace(&self, name: &str) -> Option<Id> {
         self.namespace.filter(|_| {
@@ -706,6 +741,7 @@ pub(super) struct ExecGlobals {
 #[derive(Clone)]
 pub(super) struct BoxedTextFile {
     pub(super) file: crate::objects::TextFile,
+    pub(super) line_buffering: bool,
     pub(super) buffer: Option<Id>,
 }
 
@@ -730,7 +766,8 @@ pub(super) enum Value {
     Calendar {
         value: crate::objects::Calendar,
         tzinfo: Id,
-        // Preserve the fixed timezone name and its Python str subclass methods.
+        // Preserve a fixed zone's Python constructor objects, including subclasses.
+        tzoffset: Id,
         tzname: Id,
     },
     Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
@@ -760,24 +797,30 @@ pub(super) enum Value {
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
+    RawReadWindow(super::raw_read_window::Window),
+    BytesIoStorage(Option<std::rc::Rc<crate::objects::Memory>>),
+    BytesIoBuffer {
+        stream: Id,
+        storage: Id,
+    },
     /// A contiguous view retains its original exporter until release.
     MemoryView {
         owner: Option<Id>,
+        // An ownerless C buffer has private backing storage but exposes obj as None.
+        anonymous: bool,
+        layout: Option<super::memoryview::ViewLayout>,
+        readonly: bool,
         hash: Option<i64>,
     },
     ByteArray(Vec<u8>),
-    CodecInfo {
-        entry: crate::objects::CodecInfo,
-        decode: Id,
-    },
+    CodecEncoder(crate::objects::Codec),
     CodecDecoder(crate::objects::Codec),
-    Hash(crate::objects::SharedHash),
+    Hash(super::stdlib::hashlib::digest::SharedHash),
     Hmac(Hmac),
     Struct {
         format: String,
         layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
     },
-    LoggerHandle(std::rc::Rc<crate::objects::logging::Logger>),
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     Socket(crate::ObjectOwner),
@@ -862,18 +905,28 @@ pub(super) enum Value {
     },
     Class {
         /// Private layout tag for native I/O class generations.
-        io_kind: Option<&'static str>,
+        io_kind: Option<super::stdlib::io::NativeClass>,
+        /// Qualified name of a non-instantiable digest implementation type.
+        hash_type: Option<&'static str>,
         metaclass: Option<Id>,
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
         namedtuple_fields: Option<std::rc::Rc<[String]>>,
     },
+    ParamSpec(super::paramspec::ParamSpec),
+    ParamSpecMarker(super::paramspec::Marker, Id),
+    ConstEvaluator(Id),
+    TypeAlias {
+        name: Id,
+        definition: super::typing::AliasDefinition,
+    },
     TypeVar(super::typing::TypeVariable),
     TypeVarTuple {
         name: Id,
         module: Id,
         default: Id,
+        declared: bool,
     },
     NoDefault,
     GenericAlias(super::typing::Alias),
@@ -882,7 +935,7 @@ pub(super) enum Value {
         class: Id,
         fields: indexmap::IndexMap<String, Id>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<Box<HashMap<Id, Id>>>,
+        member_values: Option<HashMap<Id, Id>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
@@ -931,7 +984,10 @@ pub(super) enum Value {
         receiver: Id,
         explicit: bool,
     },
-    ClassMethod(Id),
+    ClassMethod {
+        callable: Id,
+        dictionary: Id,
+    },
     StaticMethod {
         callable: Id,
         dictionary: Id,
@@ -1022,10 +1078,17 @@ pub(super) enum Value {
     IoOpen {
         reader: Id,
         writer: Id,
+        random: Id,
+        unsupported: Id,
+    },
+    HashMethod {
+        owner: Id,
+        name: &'static str,
     },
     IoMethod {
         owner: Id,
         name: &'static str,
+        unsupported: Id,
     },
     ProcessHandle(crate::objects::BoxedPopen),
     File(crate::shared::Shared<super::stdlib::BinaryFile>),
@@ -1033,6 +1096,7 @@ pub(super) enum Value {
     RegexScanner {
         pattern: Id,
         subject: Id,
+        buffer_view: Option<Id>,
         start: Option<usize>,
         end: usize,
         retry: bool,
@@ -1076,13 +1140,8 @@ pub(super) struct CachedCall {
 impl Value {
     /// Class of a native file whose Python descriptors are installed by _io.
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
-        let name = self.file_class_name()?;
-        // BufferedRandom still uses its intrinsic methods rather than installed _io descriptors.
-        (name != "_io.BufferedRandom").then_some(name)
-    }
-
-    fn file_class_name(&self) -> Option<&'static str> {
         match self {
+            Self::BufferedRandom(..) => Some("_io.BufferedRandom"),
             Self::TextFile(_) => Some("_io.TextIOWrapper"),
             Self::File(file) => Some(match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing => {
@@ -1117,12 +1176,16 @@ impl Value {
             Self::Map { .. } => "map",
             Self::Filter { .. } => "filter",
             Self::Hash(state) => state.lock().class_name(),
+            Self::HashMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
+            Self::BytesIoStorage(_) => "_imre_bytesio_storage",
+            Self::BytesIoBuffer { .. } => "_io._BytesIOBuffer",
+            Self::RawReadWindow(_) => "_imre_raw_read_window",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
-            Self::File(_) | Self::TextFile(_) => return self.file_class_name(),
+            Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
             Self::ProcessHandle(_) => "_imre_subprocess.Handle",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::SequenceIterator { .. } => "iterator",
@@ -1162,6 +1225,7 @@ impl Value {
             Self::Coroutine(_) => "coroutine",
             Self::CoroutineWrapper(_) => "coroutine_wrapper",
             Self::NoDefault => "NoDefaultType",
+            Self::TypeAlias { .. } => "typing.TypeAliasType",
             Self::Class { .. } => "type",
             Self::DictView { kind, ordered, .. } => match (kind, ordered) {
                 (DictViewKind::Keys, false) => "dict_keys",
@@ -1171,7 +1235,7 @@ impl Value {
                 (DictViewKind::Items, true) => "odict_items",
                 (DictViewKind::Values, true) => "odict_values",
             },
-            Self::ClassMethod(_) => "classmethod",
+            Self::ClassMethod { .. } => "classmethod",
             Self::ThreadLocal(_) => super::thread_local::CLASS,
             Self::ThreadHandle(_) => "_thread._ThreadHandle",
             Self::HandlerLock(_) => super::thread_rlock::CLASS,
@@ -1189,9 +1253,23 @@ impl Value {
         })
     }
 
+    pub(super) fn hash_type(&self) -> Option<&'static str> {
+        match self {
+            Self::Class { hash_type, .. } => *hash_type,
+            _ => None,
+        }
+    }
+
     pub(super) fn io_kind(&self) -> Option<&'static str> {
         match self {
-            Self::Class { io_kind, .. } => *io_kind,
+            Self::Class {
+                io_kind: Some(super::stdlib::io::NativeClass::Named(name)),
+                ..
+            } => Some(name),
+            Self::Class {
+                io_kind: Some(super::stdlib::io::NativeClass::Pair { .. }),
+                ..
+            } => Some("BufferedRWPair"),
             _ => None,
         }
     }
@@ -1261,7 +1339,6 @@ impl Value {
             }
             Self::DictIterator(iter) => visit.extend(iter.dict),
             Self::FormatIterator { input, .. } => visit.push(*input),
-            Self::ClassMethod(callable) => visit.push(*callable),
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
@@ -1289,8 +1366,10 @@ impl Value {
                 visit.extend(extras.iter().map(|&(_, id)| id));
             }
             Self::Dict(entries) => {
+                visit.extend(entries.ordered_nodes().iter().map(|&(key, _)| key));
                 for (key, value) in entries {
-                    visit.extend([*value, *key]);
+                    visit.push(*value);
+                    visit.push(*key);
                 }
             }
             Self::DictView { dict, .. } | Self::MappingProxy(dict) => visit.push(*dict),
@@ -1313,6 +1392,9 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::BytesIoStorage(_) => {}
+            Self::BytesIoBuffer { stream, storage } => visit.extend([*stream, *storage]),
+            Self::RawReadWindow(window) => visit.push(window.backing),
             Self::MemoryView { owner, .. } => visit.extend(owner),
             Self::Template {
                 strings,
@@ -1332,7 +1414,12 @@ impl Value {
             Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
-            Self::Calendar { tzinfo, tzname, .. } => visit.extend([*tzinfo, *tzname]),
+            Self::Calendar {
+                tzinfo,
+                tzoffset,
+                tzname,
+                ..
+            } => visit.extend([*tzinfo, *tzoffset, *tzname]),
             Self::DefaultDict { factory, entries } => {
                 visit.push(*factory);
                 for (key, value) in entries {
@@ -1401,18 +1488,20 @@ impl Value {
                 fields,
                 ..
             } => {
-                visit.extend([*scope, *code, *defaults, *kwdefaults, *closure]);
+                visit.push(*scope);
+                visit.push(*code);
+                visit.push(*defaults);
+                visit.push(*kwdefaults);
+                visit.push(*closure);
                 visit.extend(class_cell);
                 fields.children(visit);
             }
             Self::Code(code) => {
-                visit.extend([
-                    code.name,
-                    code.qualname,
-                    code.doc,
-                    code.filename,
-                    code.parameters,
-                ]);
+                visit.push(code.name);
+                visit.push(code.qualname);
+                visit.push(code.doc);
+                visit.push(code.filename);
+                visit.push(code.parameters);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
                 if let Body::Source(program) = &code.body {
                     visit.push(program.string_roots);
@@ -1440,8 +1529,12 @@ impl Value {
                 scope,
                 ancestors,
                 metaclass,
+                io_kind,
                 ..
             } => {
+                if let Some(super::stdlib::io::NativeClass::Pair { reader, writer }) = io_kind {
+                    visit.extend([*reader, *writer]);
+                }
                 visit.extend(*metaclass);
                 visit.push(*scope);
                 visit.extend(ancestors);
@@ -1450,7 +1543,22 @@ impl Value {
                 name,
                 module,
                 default,
+                ..
             } => visit.extend([*name, *module, *default]),
+            Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
+            Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
+            Self::TypeAlias { name, definition } => {
+                visit.push(*name);
+                match *definition {
+                    super::typing::AliasDefinition::Lazy { evaluator, cached } => {
+                        visit.push(evaluator);
+                        visit.extend(cached);
+                    }
+                    super::typing::AliasDefinition::Eager { value, module } => {
+                        visit.extend([value, module]);
+                    }
+                }
+            }
             Self::TypeVar(var) => visit.extend([var.name, var.module, var.bound, var.constraints]),
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);
@@ -1487,11 +1595,30 @@ impl Value {
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::BufferedFile(file)) => visit.push(*file),
+                    Some(super::stdlib::io::MemoryStream::Reader(reader)) => {
+                        visit.extend(reader.raw.get());
+                        visit.push(reader.buffer);
+                    }
+                    Some(
+                        super::stdlib::io::MemoryStream::UninitializedReader(raw)
+                        | super::stdlib::io::MemoryStream::UninitializedWriter(raw),
+                    ) => visit.extend(raw),
+                    Some(super::stdlib::io::MemoryStream::BufferedBytes(writer)) => {
+                        visit.extend(writer.raw.get())
+                    }
+                    Some(super::stdlib::io::MemoryStream::Pair(pair)) => {
+                        visit.extend(pair.reader);
+                        visit.extend(pair.writer);
+                    }
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
+                        visit.push(stream.storage);
                         visit.extend(stream.snapshot.get())
                     }
                     Some(super::stdlib::io::MemoryStream::Wrapper(stream)) => {
                         stream.children(visit)
+                    }
+                    Some(super::stdlib::io::MemoryStream::Decoder(decoder)) => {
+                        visit.extend([decoder.delegate, decoder.errors]);
                     }
                     _ => {}
                 }
@@ -1509,7 +1636,11 @@ impl Value {
             Self::Method {
                 callable, receiver, ..
             } => visit.extend([*callable, *receiver]),
-            Self::StaticMethod {
+            Self::ClassMethod {
+                callable,
+                dictionary,
+            }
+            | Self::StaticMethod {
                 callable,
                 dictionary,
             } => visit.extend([*callable, *dictionary]),
@@ -1555,12 +1686,25 @@ impl Value {
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
-            Self::IoOpen { reader, writer } => visit.extend([*reader, *writer]),
-            Self::IoMethod { owner, .. } => visit.push(*owner),
-            Self::CodecInfo { decode, .. } => visit.push(*decode),
+            Self::IoOpen {
+                reader,
+                writer,
+                random,
+                unsupported,
+            } => visit.extend([*reader, *writer, *random, *unsupported]),
+            Self::IoMethod {
+                owner, unsupported, ..
+            } => visit.extend([*owner, *unsupported]),
+            Self::HashMethod { owner, .. } => visit.push(*owner),
             Self::RegexScanner {
-                pattern, subject, ..
-            } => visit.extend([*pattern, *subject]),
+                pattern,
+                subject,
+                buffer_view,
+                ..
+            } => {
+                visit.extend([*pattern, *subject]);
+                visit.extend(*buffer_view);
+            }
             Self::RegexPattern(pattern) => visit.push(pattern.source),
             Self::RegexMatch(m) => visit.extend([m.pattern, m.subject]),
             Self::File(file) => {
@@ -1582,10 +1726,10 @@ impl Value {
             | Self::Bytes(_)
             | Self::Array(_)
             | Self::ByteArray(_)
+            | Self::CodecEncoder(_)
             | Self::CodecDecoder(_)
             | Self::Struct { .. }
             | Self::Hash(_)
-            | Self::LoggerHandle(_)
             | Self::MetadataArchive(_)
             | Self::HandlerLock(_)
             | Self::ThreadHandle(_)
@@ -1622,7 +1766,7 @@ pub(super) struct DictIterator {
     position: usize,
     reverse: bool,
     remaining: usize,
-    order_state: Option<(usize, usize, usize)>,
+    order_state: Option<usize>,
 }
 
 impl DictIterator {
@@ -1665,7 +1809,7 @@ impl DictIterator {
         dict: Id,
         kind: DictViewKind,
         size: usize,
-        order_state: Option<(usize, usize, usize)>,
+        ordered: Option<(usize, usize)>,
         reverse_end: Option<usize>,
     ) -> Self {
         Self {
@@ -1674,8 +1818,8 @@ impl DictIterator {
             expected_len: Some(size),
             position: reverse_end.unwrap_or(0),
             reverse: reverse_end.is_some(),
-            remaining: size,
-            order_state,
+            remaining: ordered.map_or(size, |(_, count)| count),
+            order_state: ordered.map(|(revision, _)| revision),
         }
     }
 
@@ -1718,7 +1862,9 @@ impl DictIterator {
     /// Resolve the retained key through the dictionary, including user hash and equality hooks.
     fn ordered_index(ctx: &mut Context, storage: Id, key: Id) -> Result<usize> {
         let (_, index) = ctx.find_dictionary_key(storage, key, None)?;
-        index.ok_or_else(|| ctx.lookup_error("KeyError", key))
+        index
+            .filter(|&i| ctx.stored_entries(storage).ordered_rank(i).is_some())
+            .ok_or_else(|| ctx.lookup_error("KeyError", key))
     }
 
     /// Read a logical order rank or a plain dictionary slot, in the cursor's direction.
@@ -1733,10 +1879,10 @@ impl DictIterator {
             } else {
                 Some(position)
             };
-            rank.filter(|&rank| rank < entries.len()).map(|rank| {
-                let (key, value) = entries[entries.ordered_dense(rank)];
-                (rank, key, value)
-            })
+            let rank = rank?;
+            let &(key, _) = entries.ordered_nodes().get(rank)?;
+            // Ordered cursors resolve the retained key against the live dictionary.
+            Some((rank, key, NONE))
         } else if self.reverse {
             entries.before(position)
         } else {
@@ -1759,7 +1905,7 @@ impl DictIterator {
                 self.dict = None;
                 return Ok(None);
             }
-            if order != entries.order_state() || self.expected_len != Some(entries.len()) {
+            if order != entries.order_state() {
                 self.dict = None;
                 return Err(Error::new(
                     "RuntimeError",
@@ -1769,17 +1915,19 @@ impl DictIterator {
         }
         if self.expected_len != Some(entries.len()) {
             self.expected_len = None;
-            return Err(Error::new(
-                "RuntimeError",
-                "dictionary changed size during iteration",
-            ));
+            let message = if self.order_state.is_some() {
+                "OrderedDict changed size during iteration"
+            } else {
+                "dictionary changed size during iteration"
+            };
+            return Err(Error::new("RuntimeError", message));
         }
         let entry = self.entry_at(entries, self.position);
         let Some((position, mut key, value)) = entry else {
             self.dict = None;
             return Ok(None);
         };
-        if !self.reverse && self.remaining == 0 {
+        if self.order_state.is_none() && !self.reverse && self.remaining == 0 {
             self.dict = None;
             return Err(Error::new(
                 "RuntimeError",
@@ -1809,7 +1957,7 @@ impl DictIterator {
             }
         }
         self.position = if self.reverse { position } else { position + 1 };
-        self.remaining = self.remaining.saturating_sub(1);
+        self.remaining -= 1;
         Ok(Some((storage, key, value)))
     }
 }
@@ -1831,7 +1979,10 @@ struct Slot {
     trace: Cell<usize>,
     // Next in collection order while occupied, or next free slot while vacant.
     gc_next: Cell<usize>,
+    // Previous in collection order while occupied.
+    gc_prev: Cell<usize>,
     untracked_tuple: Cell<bool>,
+    may_have_buffer_views: bool,
     finalization: Finalization,
 }
 
@@ -1841,7 +1992,9 @@ impl Slot {
             value: Some(value),
             trace: Cell::new(UNMARKED),
             gc_next: Cell::new(UNMARKED),
+            gc_prev: Cell::new(UNMARKED),
             untracked_tuple: Cell::new(false),
+            may_have_buffer_views: false,
             finalization: Finalization::None,
         }
     }
@@ -1880,6 +2033,7 @@ impl GcOrder {
         } else {
             slots[self.tail].gc_next.set(id);
         }
+        slots[id].gc_prev.set(self.tail);
         self.tail = id;
         slots[id].gc_next.set(END);
     }
@@ -1889,11 +2043,24 @@ impl GcOrder {
         if id == END {
             return None;
         }
-        self.head = slots[id].gc_next.replace(UNMARKED);
-        if self.head == END {
-            self.tail = END;
-        }
+        self.remove(id, slots);
         Some(id)
+    }
+
+    /// Unlink an occupied slot while keeping survivors in collection order.
+    fn remove(&mut self, id: usize, slots: &[Slot]) {
+        let previous = slots[id].gc_prev.replace(UNMARKED);
+        let next = slots[id].gc_next.replace(UNMARKED);
+        if previous == END {
+            self.head = next;
+        } else {
+            slots[previous].gc_next.set(next);
+        }
+        if next == END {
+            self.tail = previous;
+        } else {
+            slots[next].gc_prev.set(previous);
+        }
     }
 }
 
@@ -1905,7 +2072,7 @@ pub(super) struct MarkQueue<'a> {
 }
 
 impl MarkQueue<'_> {
-    fn push(&mut self, id: Id) {
+    pub(super) fn push(&mut self, id: Id) {
         let slot = &self.slots[id as usize];
         if !slot.marked() {
             if let Some(order) = &mut self.ordered {
@@ -1983,16 +2150,16 @@ pub(super) struct Heap {
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
     pub(super) abc_registrations: Vec<[Id; 2]>,
-    // Protocol subclass results use weak keys just like ABC registrations.
-    pub(super) protocol_subclass_cache: HashMap<[Id; 2], bool>,
+    // ABC subclass results use weak keys just like ABC registrations.
+    pub(super) abc_subclass_cache: HashMap<[Id; 2], bool>,
     // Collecting weak registration pairs must not roll back the invalidation counter.
     pub(super) abc_cache_token: u64,
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
-    // Call-history markers belong to list storage and expire when it is collected.
-    pub(super) mock_call_lists: HashSet<Id>,
     frames: Vec<Frame>,
+    fault_generation: Cell<Option<u32>>,
+    fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
     // Worker heaps share the interpreter’s automatic cyclic collection setting.
     pub(super) automatic_gc: Arc<AtomicBool>,
@@ -2075,13 +2242,14 @@ impl Heap {
             linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
-            protocol_subclass_cache: HashMap::new(),
+            abc_subclass_cache: HashMap::new(),
             abc_cache_token: 0,
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),
-            mock_call_lists: HashSet::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
+            fault_generation: Cell::new(None),
+            fault_workers: RefCell::new(None),
             next_collection: 4096,
             automatic_gc: Arc::new(AtomicBool::new(true)),
             weak: HashMap::new(),
@@ -2312,6 +2480,7 @@ impl Heap {
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
             self.free_count -= 1;
             self.slots[index].value = Some(value);
+            self.slots[index].may_have_buffer_views = false;
             index
         } else {
             if self.slots.len() == self.slots.capacity() && self.slots.try_reserve(1).is_err() {
@@ -2470,10 +2639,26 @@ impl Heap {
             activation.object = *frame;
         }
         self.frames.push(activation);
+        if self.fault_frames_current() {
+            self.publish_fault_frame(self.python_depth() - 1);
+        }
     }
     /// Release the activation and report whether a returning function may have dropped a writer.
     pub fn leave(&mut self, value: Id, returning: bool) -> bool {
         let frame = self.frames.pop().expect("returning native activation");
+        let depth = self.python_depth();
+        if depth == 0 {
+            // Explicit dumps can publish a snapshot even while disabled.
+            if self.fault_generation.take().is_some() {
+                crate::fault_handler::truncate(0);
+            }
+        } else if self.fault_frames_current() {
+            crate::fault_handler::truncate(depth);
+            // The popped frame displaced this caller in the bounded native snapshot.
+            if let Some(index) = depth.checked_sub(crate::fault_handler::MAX_FRAMES) {
+                self.publish_fault_frame(index);
+            }
+        }
         let opened = frame.created_finalizer && self.tracks_finalizers();
         if opened {
             self.frames.last_mut().unwrap().created_finalizer = true;
@@ -2526,34 +2711,86 @@ impl Heap {
         self.frames.last().unwrap().live.len()
     }
 
+    fn finalizer_free_scalar(&self, id: Id) -> bool {
+        matches!(
+            self.get(id),
+            Value::None
+                | Value::Bool(_)
+                | Value::Int(_)
+                | Value::Float(_)
+                | Value::Complex(_)
+                | Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::ByteArray(_)
+                | Value::Native(_)
+        )
+    }
+
+    /// Release a private argument list containing scalar tuples at its original call boundary.
+    pub(super) fn discard_scalar_call(&mut self, mark: usize, result: Id, arguments: Id) -> bool {
+        if !self.tracks_finalizers() {
+            return false;
+        }
+        let Value::List(args) = self.get(arguments) else {
+            return false;
+        };
+        let weak = |id| self.has_weak_values && self.weak_edge(id);
+        let scalar = |id| self.finalizer_free_scalar(id) && !weak(id);
+        let flat = |items: &[Id]| items.len() <= 8 && items.iter().copied().all(scalar);
+        // Without a nested tuple the original discard need not truncate these temporaries.
+        if !(2..=8).contains(&args.len())
+            || !args
+                .iter()
+                .any(|&id| matches!(self.get(id), Value::Tuple(_)))
+            || weak(arguments)
+            || !args.iter().all(|&id| match self.get(id) {
+                Value::Tuple(items) => !weak(id) && flat(items),
+                _ => scalar(id),
+            })
+        {
+            return false;
+        }
+        let Some(dropped) = self.frames.last().unwrap().live.get(mark..) else {
+            return false;
+        };
+        if dropped.len() > 64 || !dropped.contains(&arguments) {
+            return false;
+        }
+        // Other operands may own resources or weak targets. Leave uncertain cases to the collector.
+        if !dropped.iter().all(|&id| {
+            id == arguments
+                || match self.get(id) {
+                    Value::Tuple(items) | Value::List(items) => !weak(id) && flat(items),
+                    Value::Dict(items) => !weak(id) && items.is_empty(),
+                    _ => scalar(id),
+                }
+        }) {
+            return false;
+        }
+        self.release_temporaries_since(mark);
+        if result != NONE {
+            self.keep(result);
+        }
+        true
+    }
+
     /// A scalar and a container of scalars cannot hold an output file.
     pub(super) fn could_own_finalizer(&self, id: Id, skip_bound: bool) -> bool {
-        let scalar = |id| {
-            matches!(
-                self.get(id),
-                Value::None
-                    | Value::Bool(_)
-                    | Value::Int(_)
-                    | Value::Float(_)
-                    | Value::Complex(_)
-                    | Value::Str(_)
-                    | Value::Bytes(_)
-                    | Value::ByteArray(_)
-                    | Value::Native(_)
-            )
-        };
-        if scalar(id) || (skip_bound && self.bound_in_active_frame(id)) {
+        if self.finalizer_free_scalar(id) || (skip_bound && self.bound_in_active_frame(id)) {
             return false;
         }
         match self.get(id) {
-            Value::List(values) | Value::Tuple(values) => values.iter().any(|&item| !scalar(item)),
+            Value::List(values) | Value::Tuple(values) => {
+                values.iter().any(|&item| !self.finalizer_free_scalar(item))
+            }
             Value::Dict(entries) => !entries.is_empty(),
             _ => true,
         }
     }
 
     /// Release an expression while preserving its result and earlier operands.
-    pub(super) fn discard_operands(&mut self, mark: usize, result: Id) -> bool {
+    pub(super) fn discard_operands(&mut self, mark: usize, result: Id, modules: Id) -> bool {
         if !self.tracks_finalizers() {
             return false;
         }
@@ -2566,12 +2803,18 @@ impl Heap {
             .skip(mark)
             .any(|&id| {
                 // A one-argument call roots its operand through a private list.
-                if let Value::List(items) = self.get(id)
-                    && let [item] = items.as_slice()
+                let operand = match self.get(id) {
+                    Value::List(items) if items.len() == 1 => items[0],
+                    _ => id,
+                };
+                // The import registry already keeps this exact module and its globals alive.
+                if matches!(self.get(operand), Value::Module { .. })
+                    && let Value::Dict(entries) = self.get(modules)
+                    && entries.iter().any(|&(_, module)| module == operand)
                 {
-                    return self.could_own_finalizer(*item, false);
+                    return false;
                 }
-                self.could_own_finalizer(id, false)
+                self.could_own_finalizer(operand, false)
             });
         if !could_own_finalizer {
             return false;
@@ -2594,7 +2837,7 @@ impl Heap {
 
     /// A consumed truth value cannot retain its receiver into the next operand.
     /// Earlier operands of enclosing expressions stay below this mark.
-    pub(super) fn discard_truth_operands(&mut self, mark: usize) -> bool {
+    pub(super) fn discard_truth_operands(&mut self, mark: usize, modules: Id) -> bool {
         let weak_release = self.has_weak_values
             && self
                 .frames
@@ -2604,7 +2847,7 @@ impl Heap {
                 .iter()
                 .skip(mark)
                 .any(|&id| self.weak_edge(id) && !self.bound_in_active_frame(id));
-        let finalizer_release = self.discard_operands(mark, NONE);
+        let finalizer_release = self.discard_operands(mark, NONE, modules);
         self.release_temporaries_since(mark);
         weak_release || finalizer_release
     }
@@ -2693,6 +2936,68 @@ impl Heap {
         })
     }
 
+    /// Python workers share this lifetime so a dump can see a blocked peer even before enable.
+    pub(super) fn begin_fault_worker(&self) -> Arc<()> {
+        let workers = self
+            .fault_workers
+            .borrow()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .unwrap_or_else(|| Arc::new(()));
+        self.observe_fault_workers(&workers);
+        workers
+    }
+
+    pub(super) fn observe_fault_workers(&self, workers: &Arc<()>) {
+        self.fault_workers.replace(Some(Arc::downgrade(workers)));
+        self.publish_fault_frames(crate::fault_handler::generation());
+    }
+
+    fn publish_fault_frame(&self, index: usize) {
+        let frame = &self.frames[index + 1];
+        let Value::Code(code) = self.get(frame.code) else {
+            unreachable!("Python frame owns its code");
+        };
+        let (Value::Str(filename), Value::Str(name)) =
+            (self.get(code.filename), self.get(code.name))
+        else {
+            unreachable!("code locations and names come from source text");
+        };
+        let line = frame
+            .location
+            .as_ref()
+            .map_or(code.first_line, |loc| loc.line);
+        crate::fault_handler::frame(index, filename, name, line);
+    }
+
+    fn publish_fault_frames(&self, generation: u32) {
+        let depth = self.python_depth();
+        for index in depth.saturating_sub(crate::fault_handler::MAX_FRAMES)..depth {
+            self.publish_fault_frame(index);
+        }
+        crate::fault_handler::truncate(depth);
+        self.fault_generation.set(Some(generation));
+    }
+
+    /// A new enable period needs all callers, including those already on the stack.
+    fn fault_frames_current(&mut self) -> bool {
+        let generation = crate::fault_handler::generation();
+        if generation == 0 {
+            let Some(workers) = self.fault_workers.get_mut() else {
+                return false;
+            };
+            if workers.strong_count() == 0 {
+                *self.fault_workers.get_mut() = None;
+                return false;
+            }
+        }
+        if self.fault_generation.get() != Some(generation) {
+            self.publish_fault_frames(generation);
+            return false;
+        }
+        true
+    }
+
     /// The first activation is a sentinel outside the Python frame stack.
     pub(super) fn python_depth(&self) -> usize {
         self.frames.len() - 1
@@ -2770,24 +3075,34 @@ impl Heap {
         reachable
     }
 
+    pub(super) fn note_buffer_view(&mut self, storage: Id) {
+        self.slots[storage as usize].may_have_buffer_views = true;
+    }
+
+    pub(super) fn may_have_buffer_views(&self, storage: Id) -> bool {
+        self.slots[storage as usize].may_have_buffer_views
+    }
+
     /// A view can be unreachable before the next sweep. Check its actual lifetime
-    /// before resizing a previously exported array, without running Python callbacks.
-    pub(super) fn has_live_array_view(
-        &self,
-        array: Id,
+    /// before resizing a previously exported buffer, without running Python callbacks.
+    pub(super) fn has_live_buffer_view(
+        &mut self,
+        storage: Id,
         roots: impl Iterator<Item = Id>,
     ) -> Result<bool> {
         let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark_reference_survivors(roots, &mut cycles);
+        self.mark_reference_survivors(roots, &mut cycles, None);
         let live = self.slots.iter().any(|slot| {
             slot.marked()
                 && matches!(slot.value, Some(Value::MemoryView { owner: Some(owner), .. })
-                    if owner == array || matches!(self.get(owner),
-                        Value::Instance { scalar: Some(storage), .. } if *storage == array))
+                    if owner == storage || matches!(self.get(owner),
+                        Value::Instance { scalar: Some(payload), .. } if *payload == storage)
+                        || matches!(self.get(owner), Value::BytesIoBuffer {storage: backing, ..} if *backing == storage))
         });
         for slot in &self.slots {
             slot.trace.set(UNMARKED);
         }
+        self.slots[storage as usize].may_have_buffer_views = live;
         Ok(live)
     }
 
@@ -2859,13 +3174,18 @@ impl Heap {
         roots: impl Iterator<Item = Id>,
         stdin: Option<&[Id; 3]>,
     ) -> Result<Option<Id>> {
-        // Input's wrapper and raw file usually survive every allocation checkpoint.
-        if let Some(chain) = stdin
-            && self
-                .ordinary_finalizers
-                .iter()
-                .all(|owner| chain.contains(owner))
-        {
+        // These owners are reachable through the current sys.__stdin__ even in a mixed set.
+        let mut remaining = self.ordinary_finalizers.len();
+        if let Some(chain) = stdin {
+            for (index, &id) in chain.iter().enumerate() {
+                if self.slots[id as usize].finalization == Finalization::Pending
+                    && !chain[..index].contains(&id)
+                {
+                    remaining -= 1;
+                }
+            }
+        }
+        if remaining == 0 {
             return Ok(None);
         }
         // A suspended caller keeps earlier operands live across a nested call.
@@ -2883,7 +3203,6 @@ impl Heap {
         // If the roots keep every pending finalizer alive, no finalizer can run.
         // Keep the visited links until the search ends so resetting a partial
         // trace costs only the slots it touched, even after a large heap peak.
-        let mut remaining = self.ordinary_finalizers.len();
         let mut visited = END;
         let mut pending = MarkQueue {
             slots: &self.slots,
@@ -2897,7 +3216,9 @@ impl Heap {
             let slot = &self.slots[id as usize];
             slot.trace.set(visited);
             visited = id as usize;
-            if slot.finalization == Finalization::Pending {
+            if slot.finalization == Finalization::Pending
+                && !stdin.is_some_and(|chain| chain.contains(&id))
+            {
                 remaining -= 1;
             }
             if remaining != 0 {
@@ -2918,7 +3239,7 @@ impl Heap {
         next
     }
 
-    /// Track a disk writer in the activation whose locals or return value may own it.
+    /// Track a file that must flush or close its descriptor when its last owner disappears.
     pub(super) fn alloc_file_writer(&mut self, file: Value) -> Result<Id> {
         self.file_writers
             .try_reserve(1)
@@ -3047,6 +3368,11 @@ impl Heap {
         {
             *lineno = line;
         }
+        if self.fault_frames_current()
+            && let Some(index) = self.python_depth().checked_sub(1)
+        {
+            crate::fault_handler::line(index, line);
+        }
     }
 
     /// A discarded owner or the allocation threshold has requested a sweep.
@@ -3111,20 +3437,51 @@ impl Heap {
             self.collect_next_statement = true;
             return None;
         };
-        self.mark_reference_survivors(globals, &mut cycles);
+        self.mark_reference_survivors(globals, &mut cycles, None);
         self.sweep()
     }
 
-    fn mark_reference_survivors(&self, globals: impl Iterator<Item = Id>, cycles: &mut CycleSet) {
+    fn mark_reference_survivors(
+        &self,
+        globals: impl Iterator<Item = Id>,
+        cycles: &mut CycleSet,
+        releasing: Option<Id>,
+    ) {
         // A weakref callback can drop an unrelated owner. Keep its graph intact
         // for Python dispatch when this sweep releases temporary callback roots.
-        self.mark(globals.chain(self.ordinary_finalizers.iter().copied()));
+        self.mark(
+            globals.chain(
+                self.ordinary_finalizers
+                    .iter()
+                    .copied()
+                    .filter(|id| Some(*id) != releasing),
+            ),
+        );
         self.identify_cycles(cycles);
         // Peeling leaves both cycles and their unreachable descendants. Every
         // strong child of a member is therefore already live or itself a member.
         for id in cycles.members() {
             self.slots[id as usize].trace.set(END);
         }
+    }
+
+    /// Test a single just-released strong edge. Other pending finalizers, roots and
+    /// uncollected cycles can still retain the child or return it to Python.
+    pub(super) fn released_last_finalizer_ref(
+        &self,
+        child: Id,
+        roots: impl Iterator<Item = Id>,
+    ) -> Result<bool> {
+        if self.slots[child as usize].finalization != Finalization::Pending {
+            return Ok(false);
+        }
+        let mut cycles = CycleSet::new(self.slots.len())?;
+        self.mark_reference_survivors(roots, &mut cycles, Some(child));
+        let last = !self.slots[child as usize].marked();
+        for slot in &self.slots {
+            slot.trace.set(UNMARKED);
+        }
+        Ok(last)
     }
 
     pub(super) fn full_collection_active(&self) -> bool {
@@ -3208,16 +3565,21 @@ impl Heap {
         } = cycles;
         unowned.clear();
         incoming.fill(0);
-        for slot in &self.slots {
+        for (id, slot) in self.slots.iter().enumerate() {
             if !slot.marked()
                 && let Some(value) = &slot.value
             {
+                // Count the candidate itself so that zero denotes a vacant or reachable slot.
+                incoming[id] += 1;
                 self.unreachable_children(value, |child| incoming[child] += 1);
             }
         }
-        for (id, slot) in self.slots.iter().enumerate() {
-            if !slot.marked() && slot.value.is_some() && incoming[id] == 0 {
-                unowned.push(id);
+        for (id, count) in incoming.iter_mut().enumerate() {
+            if *count != 0 {
+                *count -= 1;
+                if *count == 0 {
+                    unowned.push(id);
+                }
             }
         }
         while let Some(id) = unowned.pop() {
@@ -3242,7 +3604,7 @@ impl Heap {
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_full(globals, &mut cycles.work);
         self.identify_cycles(&mut cycles);
-        let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming));
+        let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
         cycles.cyclic_callbacks = callbacks.len();
         self.mark(cycles.members());
         if let Some(acyclic) = self.sweep() {
@@ -3252,12 +3614,38 @@ impl Heap {
         Ok(callbacks)
     }
 
-    fn clear_weak_targets(&mut self, cyclic: Option<&[usize]>) -> Vec<(Id, Id)> {
+    /// Expire one native deallocator's weakrefs before it releases any children.
+    /// The caller roots the owner, including weakrefs stored only in its own dict.
+    pub(super) fn clear_dealloc_weakrefs(
+        &mut self,
+        owner: Id,
+        roots: impl Iterator<Item = Id>,
+    ) -> Result<WeakCallbacks> {
+        if !self.weak.contains_key(&owner) {
+            return Ok(Vec::new());
+        }
+        let mut cycles = CycleSet::new(self.slots.len())?;
+        self.mark_reference_survivors(roots, &mut cycles, None);
+        let callbacks = self.clear_weak_targets(None, Some(owner));
+        for slot in &self.slots {
+            slot.trace.set(UNMARKED);
+        }
+        Ok(callbacks)
+    }
+
+    fn clear_weak_targets(
+        &mut self,
+        cyclic: Option<&[usize]>,
+        dealloc: Option<Id>,
+    ) -> WeakCallbacks {
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
         let mut callbacks = Vec::new();
         let live = &mut self.frames.last_mut().unwrap().live;
         self.weak.retain(|&target, refs| {
+            if dealloc.is_some_and(|owner| owner != target) {
+                return true;
+            }
             if let Some(cyclic) = cyclic {
                 if cyclic[target as usize] == 0 {
                     // A weakref in the isolate must lose even a live referent. A
@@ -3279,7 +3667,7 @@ impl Heap {
                 }
             } else {
                 refs.retain(|&id| self.slots[id as usize].marked());
-                if self.slots[target as usize].marked() {
+                if dealloc.is_none() && self.slots[target as usize].marked() {
                     return !refs.is_empty();
                 }
             }
@@ -3381,12 +3769,6 @@ impl Heap {
     }
 
     fn sweep(&mut self) -> Option<WeakCallbacks> {
-        let mut scan = std::mem::replace(&mut self.gc_order, GcOrder::EMPTY);
-        while let Some(id) = scan.pop(&self.slots) {
-            if self.slots[id].marked() {
-                self.gc_order.push(id, &self.slots);
-            }
-        }
         self.ordinary_finalizers
             .retain(|&id| self.slots[id as usize].marked());
         self.file_writers.retain(|&id| {
@@ -3401,22 +3783,22 @@ impl Heap {
         });
         self.interned
             .retain(|_, entry| self.slots[entry.id as usize].marked());
-        let callbacks = self.clear_weak_targets(None);
-        self.mock_call_lists
-            .retain(|&list| self.slots[list as usize].marked());
+        let callbacks = self.clear_weak_targets(None, None);
         self.abc_registrations.retain(|&[owner, member]| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
-        self.protocol_subclass_cache.retain(|&[owner, member], _| {
+        self.abc_subclass_cache.retain(|&[owner, member], _| {
             self.slots[owner as usize].marked() && self.slots[member as usize].marked()
         });
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
-        for (id, slot) in self.slots.iter_mut().enumerate() {
+        for id in 0..self.slots.len() {
+            let slot = &self.slots[id];
             if slot.trace.replace(UNMARKED) == UNMARKED && slot.value.is_some() {
+                self.gc_order.remove(id, &self.slots);
+                let slot = &mut self.slots[id];
                 slot.value = None;
                 self.immutable_hashes.remove(&(id as Id));
-                debug_assert_eq!(slot.gc_next.get(), UNMARKED);
                 slot.gc_next.set(self.free_head);
                 self.free_head = id;
                 self.free_count += 1;
@@ -3436,6 +3818,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn removing_heap_slots_preserves_collection_order() {
+        let original = [4, 2, 0, 3, 1, 5];
+        for mask in 0u8..(1 << original.len()) {
+            let slots = original.map(|_| Slot::new(Value::None));
+            let mut order = GcOrder::EMPTY;
+            for id in original {
+                order.push(id, &slots);
+            }
+            // Sweeping retires slots by index, independent of collection order.
+            for id in 0..slots.len() {
+                if mask & (1 << id) == 0 {
+                    order.remove(id, &slots);
+                }
+            }
+            let kept: Vec<_> = original
+                .into_iter()
+                .filter(|&id| mask & (1 << id) != 0)
+                .collect();
+            assert_eq!(order.tail, kept.last().copied().unwrap_or(END));
+            let remaining: Vec<_> = std::iter::from_fn(|| order.pop(&slots)).collect();
+            assert_eq!(remaining, kept);
+            assert!(
+                slots.iter().all(|slot| {
+                    slot.gc_prev.get() == UNMARKED && slot.gc_next.get() == UNMARKED
+                })
+            );
+        }
+    }
+
+    #[test]
     fn reuse_vacant_slots_without_disturbing_survivors() {
         let mut heap = Heap::new();
         let keep = heap.alloc(Value::List(Vec::new()));
@@ -3452,6 +3864,88 @@ mod tests {
         heap.collect([child].into_iter());
         assert!(matches!(heap.get(parent), Value::Tuple(items) if items == &[keep]));
         assert_eq!(heap.free_count, 0);
+    }
+
+    #[test]
+    fn scalar_call_releases_peers_and_preserves_uncertain_owners() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        let int_type = heap.alloc(Value::Native("int".into()));
+        let types = heap.alloc(Value::Tuple(vec![int_type]));
+        let owning = heap.alloc(Value::Tuple(vec![owner]));
+        let arguments = heap.alloc(Value::List(vec![TRUE, types]));
+        let mark = heap.temporary_mark();
+        assert!(!heap.discard_scalar_call(mark, TRUE, arguments));
+        heap.keep(arguments);
+        heap.keep(owning);
+        assert!(!heap.discard_scalar_call(mark, TRUE, arguments));
+        heap.release_temporaries_since(mark);
+        heap.keep(arguments);
+        heap.keep(types);
+        assert!(heap.discard_scalar_call(mark, TRUE, arguments));
+        assert_eq!(&heap.frames.last().unwrap().live[mark..], &[TRUE]);
+
+        let Value::List(items) = heap.get_mut(arguments) else {
+            unreachable!()
+        };
+        items[1] = owning;
+        heap.keep(arguments);
+        assert!(!heap.discard_scalar_call(mark, NONE, arguments));
+    }
+
+    #[test]
+    fn releasing_a_cached_module_cannot_finalize_its_globals() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        let module = heap.alloc(Value::Module {
+            name: "sample".into(),
+            scope: owner,
+            origin: None,
+            initializing: false,
+            locale_error: None,
+            constructor: None,
+        });
+        let modules = heap.alloc(Value::Dict(vec![(NONE, module)].into()));
+        let mark = heap.temporary_mark();
+        heap.keep(module);
+        assert!(!heap.discard_operands(mark, NONE, modules));
+        *heap.get_mut(modules) = Value::Dict(Default::default());
+        assert!(heap.discard_operands(mark, NONE, modules));
+    }
+
+    #[test]
+    fn released_child_stays_live_through_external_owners_and_cycles() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let child = heap.alloc(Value::List(Vec::new()));
+        let owner = heap.alloc(Value::List(vec![child]));
+        heap.register_finalizer(child);
+        heap.release_temporaries_since(mark);
+        assert!(
+            !heap
+                .released_last_finalizer_ref(child, [owner].into_iter())
+                .unwrap()
+        );
+        heap.register_finalizer(owner);
+        assert!(
+            !heap
+                .released_last_finalizer_ref(child, [].into_iter())
+                .unwrap()
+        );
+        heap.take_finalizer(owner, false);
+        *heap.get_mut(owner) = Value::List(vec![owner, child]);
+        assert!(
+            !heap
+                .released_last_finalizer_ref(child, [].into_iter())
+                .unwrap()
+        );
+        *heap.get_mut(owner) = Value::List(Vec::new());
+        assert!(
+            heap.released_last_finalizer_ref(child, [].into_iter())
+                .unwrap()
+        );
     }
 
     #[test]
@@ -3483,18 +3977,24 @@ mod tests {
     }
 
     #[test]
-    fn collected_mock_call_list_does_not_mark_a_reused_list_slot() {
+    fn mixed_input_owners_leave_unreachable_finalizers_eligible() {
         let mut heap = Heap::new();
-        let list = heap.alloc(Value::List(Vec::new()));
-        heap.mock_call_lists.insert(list);
-        heap.frames.last_mut().unwrap().live.clear();
+        let mark = heap.temporary_mark();
+        let indirect = heap.alloc(Value::List(Vec::new()));
+        let buffer = heap.alloc(Value::List(vec![indirect]));
+        let input = heap.alloc(Value::List(vec![buffer]));
+        let dead = heap.alloc(Value::List(Vec::new()));
+        for owner in [input, indirect, dead] {
+            heap.register_finalizer(owner);
+        }
+        heap.release_temporaries_since(mark);
 
-        heap.collect([list].into_iter());
-        assert!(heap.mock_call_lists.contains(&list));
-        heap.collect(std::iter::empty());
-        let ordinary = heap.alloc(Value::List(Vec::new()));
-        assert_eq!(ordinary, list);
-        assert!(!heap.mock_call_lists.contains(&ordinary));
+        // Only one distinct pending owner is proven by this chain.
+        let chain = [input, buffer, input];
+        let check = |roots| heap.acyclic_finalizer(roots, Some(&chain)).unwrap();
+        assert_eq!(check(vec![input].into_iter()), Some(dead));
+        assert_eq!(check(vec![input, dead].into_iter()), None);
+        assert_eq!(check(vec![input].into_iter()), Some(dead));
     }
 
     #[test]

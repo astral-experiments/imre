@@ -53,11 +53,15 @@ pub struct CommandFlags {
     pub safe_path: bool,
     pub no_user_site: bool,
     pub dont_write_bytecode: bool,
+    pub unbuffered: bool,
     /// A missing override lets the runtime select the mode from the startup locale.
     pub utf8_mode: Option<bool>,
     pub warn_default_encoding: bool,
     /// Warning options supplied on the command line.
     pub warnoptions: Vec<String>,
+    /// Ordered command-line operands used to construct sys._xoptions.
+    pub xoptions: Vec<String>,
+    pub faulthandler: bool,
 }
 
 /// The in-memory entry and launcher used by a Python-style `-c` invocation.
@@ -71,6 +75,10 @@ pub struct PythonCommand {
 pub struct CompileOptions {
     /// Compile the supplied command without creating a script in the caller's working directory.
     pub command: Option<PythonCommand>,
+    /// Canonical import name requested by the interpreter's `-m` entry.
+    pub module_entry: Option<String>,
+    /// Run __main__ from the command-line import path, retaining the operand as argv[0].
+    pub path_entry: bool,
     /// Flags and executable for a file launched through the Python command line.
     pub script_startup: Option<(CommandFlags, String)>,
     /// A file describing the branches to include in a closed executable.
@@ -229,6 +237,19 @@ fn object_fallback<T>(
     lower: impl FnOnce(&mut modules::SourceGraph) -> Result<T, String>,
     boxed: impl FnOnce(Compilation) -> T,
 ) -> Result<T, String> {
+    if options.module_entry.is_some() {
+        return dynamic::compile(
+            path,
+            module_root,
+            options,
+            true,
+            None,
+            Default::default(),
+            || Ok(()),
+        )?
+        .map(boxed)
+        .ok_or_else(|| "could not compile the module entry".to_owned());
+    }
     let (error, graph) = match options.load_graph(path, module_root, filesystem) {
         Ok(mut graph) => match lower(&mut graph) {
             Ok(value) => return Ok(value),
@@ -275,6 +296,10 @@ fn object_fallback<T>(
                 &overloads,
                 !graph.needs_object_runtime.get()
                     && graph.object_builtin_errors.borrow().contains(&error),
+                graph
+                    .modules
+                    .iter()
+                    .position(|module| module.is_bundled("socketserver")),
             )?;
         }
         Ok(())

@@ -14,13 +14,15 @@ mod progress;
 mod scanner;
 mod split;
 mod sub;
+mod surrogate;
 
 pub(super) use scanner::scanner_next;
 
+use assertions::{Guard, Kind};
 use progress::Matcher;
 pub(super) use split::pattern_split;
 use split::split;
-pub(super) use sub::pattern_sub;
+pub(super) use sub::{match_expand, pattern_sub};
 
 const IGNORECASE: i64 = 2;
 const LOCALE: i64 = 4;
@@ -64,6 +66,11 @@ pub(super) fn flag_attribute(ctx: &mut Context, name: &str) -> Result<Id> {
                 ctx.bind(scope, short, value);
             }
         }
+        let module = ctx.module("enum")?;
+        let repr = ctx.lookup_attr(module, "global_flag_repr")?;
+        ctx.bind(scope, "__repr__", repr);
+        let hex = ctx.builtin("hex");
+        ctx.bind(scope, "_numeric_repr_", hex);
         // CPython's RegexFlag explicitly uses object.__str__ to display its global name.
         let string = ctx.builtin("object.__str__");
         ctx.bind(scope, "__str__", string);
@@ -86,7 +93,7 @@ pub(in crate::dynamic) struct Pattern {
     bytes: bool,
     engine_source: String,
     regex: Matcher,
-    assertions: Vec<(String, Regex)>,
+    assertions: Vec<(String, Guard)>,
     full: OnceCell<std::result::Result<Matcher, String>>,
     split_retry: OnceCell<std::result::Result<regex_automata::nfa::thompson::NFA, String>>,
 }
@@ -124,6 +131,22 @@ impl Pattern {
         info.to_index(PatternID::ZERO, "imre.eol")
             .unwrap_or_else(|| info.group_len(PatternID::ZERO))
             - 1
+    }
+
+    /// Map public capture names to their one-based indices in pattern order.
+    pub(in crate::dynamic) fn group_index(&self, ctx: &mut Context) -> Result<Id> {
+        let info = self.regex.group_info();
+        let mut fields = Vec::new();
+        for index in 1..=self.group_count() {
+            if let Some(name) = info.to_name(PatternID::ZERO, index) {
+                fields.push((ctx.text(name.to_owned()), ctx.int(index as i64)));
+            }
+        }
+        if fields.is_empty() {
+            return Ok(ctx.dict(fields));
+        }
+        let mapping = ctx.dict(fields);
+        ctx.mapping_proxy(mapping)
     }
 
     fn match_error(&self, ctx: &mut Context, message: String) -> Error {
@@ -173,7 +196,8 @@ impl Pattern {
                     .unwrap_or(&self.engine_source);
                 let full = format!(r"(?:{source})\z");
                 if let Matcher::Lookahead(matcher) = &self.regex {
-                    return lookahead::Lookahead::new(&full, matcher.groups.clone())
+                    return matcher
+                        .with_source(&full)
                         .map(|m| Matcher::Lookahead(Box::new(m)));
                 }
                 build_regex(&full, self.bytes, self.engine_flags(), &self.assertions)
@@ -196,7 +220,7 @@ fn build_regex(
     source: &str,
     bytes: bool,
     flags: i64,
-    assertions: &[(String, Regex)],
+    assertions: &[(String, Guard)],
 ) -> std::result::Result<Matcher, String> {
     let syntax = syntax(bytes, flags);
     let mut builder = Regex::builder();
@@ -346,6 +370,8 @@ fn raw_pattern(pattern: &str, ascii: bool, flags: i64) -> Option<(String, bool)>
             continue;
         }
         let escaped = chars.next();
+        // Only the Python tokenizer knows the class context across verbose comments.
+        prefer_translation |= matches!(escaped, Some('0'..='7'));
         if ascii && let Some(class) = escaped.and_then(imre_regex::ascii_class) {
             result.push_str(class);
             continue;
@@ -449,36 +475,79 @@ fn pattern_error_at(
     }
 }
 
-/// A plain literal capture always participates and has exactly one possible spelling.
-fn repeated_literal_capture(pattern: &[u8], flags: i64, bytes: bool) -> Option<(usize, usize)> {
-    if flags & (IGNORECASE | LOCALE | VERBOSE) != 0 {
+/// Repeat a mandatory literal capture when its spelling compares like the captured text.
+fn repeated_literal_capture(pattern: &[u8], flags: i64, bytes: bool) -> Option<Vec<u8>> {
+    if flags & VERBOSE != 0 || flags & (IGNORECASE | LOCALE) == IGNORECASE | LOCALE {
         return None;
     }
-    let capture = pattern.strip_prefix(b"(")?;
-    let (name, body) = if let Some(named) = capture.strip_prefix(b"?P<") {
-        let end = named.iter().position(|&b| b == b'>')?;
-        let name = std::str::from_utf8(&named[..end]).ok()?;
-        if !group_names::valid(name, bytes) {
+    let plain = |s: &[u8]| !s.iter().any(|b| br"\.^$*+?{}[]|()".contains(b));
+    let mut groups = Vec::new();
+    let mut rest = pattern;
+    while let Some(capture) = rest.strip_prefix(b"(") {
+        if capture.starts_with(b"?P=") {
+            break;
+        }
+        let (name, body) = if let Some(named) = capture.strip_prefix(b"?P<") {
+            let end = named.iter().position(|&b| b == b'>')?;
+            let name = std::str::from_utf8(&named[..end]).ok()?;
+            if !group_names::valid(name, bytes) {
+                return None;
+            }
+            (Some(name.as_bytes()), &named[end + 1..])
+        } else {
+            (None, capture)
+        };
+        let close = body.iter().position(|&b| b == b')')?;
+        let literal = &body[..close];
+        if !plain(literal) {
             return None;
         }
-        (Some(name.as_bytes()), &named[end + 1..])
+        groups.push((name, literal));
+        rest = &body[close + 1..];
+    }
+    let (literal, tail) = if let Some(digits) = rest.strip_prefix(br"\") {
+        let [first @ b'1'..=b'9', tail @ ..] = digits else {
+            return None;
+        };
+        // Three octal digits are a character escape, even when that capture exists.
+        if matches!(digits, [b'0'..=b'7', b'0'..=b'7', b'0'..=b'7', ..]) {
+            return None;
+        }
+        let mut number = usize::from(first - b'0');
+        let tail = if let [second @ b'0'..=b'9', tail @ ..] = tail {
+            number = number * 10 + usize::from(second - b'0');
+            tail
+        } else {
+            tail
+        };
+        (groups.get(number - 1)?.1, tail)
     } else {
-        (None, capture)
+        let name = rest.strip_prefix(b"(?P=")?.strip_suffix(b")")?;
+        (groups.iter().find(|g| g.0 == Some(name))?.1, &[][..])
     };
-    let close = body.iter().position(|&b| b == b')')?;
-    let reference = &body[close + 1..];
-    if reference != br"\1"
-        && !(name.is_some()
-            && reference
-                .strip_prefix(b"(?P=")
-                .and_then(|r| r.strip_suffix(b")"))
-                == name)
+    if literal.is_empty() || !plain(tail) {
+        return None;
+    }
+    // Unicode literals match a wider class than a backreference's lowercase comparison.
+    // Of the ASCII literals, I/i admit dotless i and S/s admit long s.
+    if !bytes
+        && flags & (ASCII | IGNORECASE) == IGNORECASE
+        && literal
+            .iter()
+            .any(|b| !b.is_ascii() || matches!(b, b'I' | b'i' | b'S' | b's'))
     {
         return None;
     }
-    let literal = &body[..close];
-    (!literal.is_empty() && !literal.iter().any(|b| br"\.^$*+?{}[]|()".contains(b)))
-        .then_some((pattern.len() - body.len(), reference.len()))
+    Some([&pattern[..pattern.len() - rest.len()], literal, tail].concat())
+}
+
+fn locale_dependent(source: &str, flags: i64) -> bool {
+    flags & LOCALE != 0
+        && (flags & IGNORECASE != 0
+            || source
+                .as_bytes()
+                .windows(2)
+                .any(|pair| matches!(pair, br"\w" | br"\W" | br"\b" | br"\B")))
 }
 
 fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
@@ -541,48 +610,39 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
             "unsupported native regular expression flags",
         ));
     }
-    let (mut source, spelling): (String, &[u8]) = match ctx.heap.get(id) {
-        Value::Bytes(value) => (byte_pattern(value), value),
-        _ => {
-            let text = ctx.str_value(id)?;
-            (text.to_owned(), text.as_bytes())
-        }
+    let spelling = match ctx.heap.get(id) {
+        Value::Bytes(value) => value.as_slice(),
+        _ => ctx.str_value(id)?.as_bytes(),
     };
-    if let Some((start, suffix)) = repeated_literal_capture(spelling, flags, bytes) {
-        // Keep group 1 and repeat its engine spelling, including any escaped high bytes.
-        source.truncate(source.len() - suffix);
-        source.extend_from_within(start..source.len() - 1);
-    }
+    let repeated = repeated_literal_capture(spelling, flags, bytes);
+    let spelling = repeated.as_deref().unwrap_or(spelling);
+    let source = if bytes {
+        byte_pattern(spelling)
+    } else {
+        std::str::from_utf8(spelling)
+            .expect("text pattern")
+            .to_owned()
+    };
     let ascii = bytes || flags & ASCII != 0;
     // Byte escapes have a separate grammar. Unicode IGNORECASE must fold
     // the literal guard without extending Python's word-category membership.
     let literal_guards = !bytes && (flags & IGNORECASE == 0 || ascii);
     let translate = |spelling: &str| {
-        let mut translated = imre_regex::translate_pattern(
+        imre_regex::translate_pattern_with_line_mode(
             spelling,
             flags & VERBOSE != 0,
             alphabet(bytes, ascii, flags),
             flags & DOTALL != 0,
             literal_guards,
-        )?
-        .source;
-        if flags & MULTILINE != 0 && translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
-            translated.truncate(translated.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
-            translated.push('$');
-        }
-        Ok(translated)
+            flags & MULTILINE != 0,
+        )
+        .map(|parsed| parsed.source)
     };
     let build = |source: String| {
         let matcher = build_regex(&source, bytes, flags, &[])?;
         Ok((source, matcher))
     };
-    let backtrack = |error| {
-        if bytes {
-            Err(error)
-        } else {
-            lookahead::compile(&source, flags, error)
-        }
-    };
+    let backtrack = |error| lookahead::compile(&source, flags, bytes, error);
     let global_verbose = source.starts_with("(?x)");
     let prepared = if let Some((raw, prefer_translation)) = raw_pattern(&source, ascii, flags) {
         let original = || {
@@ -620,40 +680,90 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     let mut assertions = Vec::new();
     let (engine_source, regex) = prepared
         .or_else(|original| {
-            let Some(extracted) = assertions::extract(&source, flags & VERBOSE != 0)? else {
+            let Some(extracted) = assertions::extract(&source, flags & VERBOSE != 0, bytes)? else {
                 return Err(original);
+            };
+            let expected_groups = if extracted
+                .guards
+                .iter()
+                .any(|(_, kind, _)| *kind != Kind::Ahead)
+            {
+                // Validate Python widths before HIR simplification can discard an impossible branch.
+                let (_, groups) = imre_regex::lookahead_source(
+                    &source,
+                    flags & VERBOSE != 0,
+                    alphabet(bytes, ascii, flags),
+                    flags & DOTALL != 0,
+                )?;
+                if locale_dependent(&source, flags) {
+                    return Err(original);
+                }
+                Some(groups)
+            } else {
+                None
             };
             let syntax = syntax(bytes, flags);
             let mut guards = Vec::new();
-            for (name, body) in extracted.guards {
+            for (name, kind, body) in extracted.guards {
                 let mut translated = translate(&body)?;
                 // Matching the guard only needs a boolean. A terminal dollar still admits a
                 // final newline, but its private capture is unnecessary in this submatcher.
                 if translated.ends_with(imre_regex::FINAL_NEWLINE_ANCHOR) {
+                    if kind != Kind::Ahead {
+                        // The optional consumed newline is not part of Python's lookbehind width.
+                        return Err("terminal dollar in a bytes lookbehind is unsupported".into());
+                    }
                     translated.truncate(translated.len() - imre_regex::FINAL_NEWLINE_ANCHOR.len());
                     translated.push_str(r"(?:\n)?\z");
                 }
                 let hir = regex_automata::util::syntax::parse_with(&translated, &syntax)
                     .map_err(|err| err.to_string())?;
                 // Bound the work done each time the main NFA visits a zero-width assertion.
-                if hir
-                    .properties()
+                let properties = hir.properties();
+                let invalid = if kind == Kind::Ahead {
+                    "lookahead requires a capture-free pattern of at most 256 bytes"
+                } else {
+                    "lookbehind requires a fixed-width pattern of at most 256 bytes"
+                };
+                let width = properties
                     .maximum_len()
-                    .is_none_or(|width| width > 256)
-                    || hir.properties().explicit_captures_len() != 0
-                {
-                    return Err(
-                        "lookahead requires a capture-free pattern of at most 256 bytes".into(),
-                    );
+                    .filter(|width| *width <= 256)
+                    .ok_or(invalid)?;
+                if kind != Kind::Ahead && properties.minimum_len() != Some(width) {
+                    return Err("look-behind requires fixed-width pattern".into());
+                }
+                if kind != Kind::NegativeBehind && properties.explicit_captures_len() != 0 {
+                    return Err(if kind == Kind::Ahead {
+                        invalid
+                    } else {
+                        "positive lookbehind requires a capture-free pattern"
+                    }
+                    .into());
                 }
                 let guard = Regex::builder()
                     .configure(Regex::config().utf8_empty(!bytes))
                     .build_from_hir(&hir)
                     .map_err(|err| err.to_string())?;
-                guards.push((name, guard));
+                guards.push((
+                    name,
+                    Guard {
+                        regex: guard,
+                        kind,
+                        width,
+                    },
+                ));
             }
             let source = translate(&extracted.source)?;
             let matcher = build_regex(&source, bytes, flags, &guards)?;
+            if let Some(expected) = expected_groups
+                && !matcher
+                    .group_info()
+                    .pattern_names(PatternID::ZERO)
+                    .filter(|name| *name != Some("imre.eol"))
+                    .eq(expected.iter().map(Option::as_deref))
+            {
+                return Err("lookbehind would change the Python capture groups".into());
+            }
             assertions = guards;
             Ok((source, matcher))
         })
@@ -801,6 +911,10 @@ impl Match {
         let Some(span) = self.spans[index] else {
             return Ok(default);
         };
+        if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(self.subject)) {
+            let value = crate::dynamic::copy_ids(&points[span.range()])?;
+            return Ok(ctx.text_codepoints(value));
+        }
         let bytes = self.pattern(ctx).bytes;
         let text = subject_bytes(ctx, self.subject, bytes)?;
         // A bytearray may have changed size since the search.
@@ -813,7 +927,12 @@ impl Match {
         let Some(span) = self.spans[index] else {
             return Ok((-1, -1));
         };
-        if self.pattern(ctx).bytes {
+        if self.pattern(ctx).bytes
+            || matches!(
+                ctx.heap.get(ctx.scalar_value(self.subject)),
+                Value::SurrogateStr(_)
+            )
+        {
             return Ok((span.start as i64, span.end as i64));
         }
         let text = ctx.str_value(self.subject)?;
@@ -864,29 +983,6 @@ fn group_value(data: &[u8], bytes: bool) -> Value {
             String::from_utf8(data.to_vec()).expect("text regex captures end at UTF-8 boundaries"),
         )
     }
-}
-
-fn capture(
-    ctx: &mut Context,
-    pattern: Id,
-    regex: &Matcher,
-    bytes: bool,
-    subject: Id,
-    input: impl FnOnce(&[u8]) -> Input<'_>,
-) -> Result<Id> {
-    let text = subject_bytes(ctx, subject, bytes)?;
-    let mut captures = regex.create_captures();
-    regex
-        .captures(input(text), &mut captures)
-        .map_err(|message| Error::new("RuntimeError", message))?;
-    if !captures.is_match() {
-        return Ok(NONE);
-    }
-    Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
-        pattern,
-        subject,
-        spans: group_spans(&captures).collect(),
-    }))))
 }
 
 fn subject_bytes(ctx: &Context, id: Id, bytes: bool) -> Result<&[u8]> {
@@ -965,7 +1061,19 @@ pub(super) fn search(
             ));
         }
     };
-    let text = subject_bytes(ctx, string, pattern.bytes)?;
+    let projection = match ctx.heap.get(ctx.scalar_value(string)) {
+        Value::SurrogateStr(points) if !pattern.bytes => Some(surrogate::Projection::new(
+            ctx.str_value(pattern.source).ok(),
+            &pattern.regex,
+            method,
+            points,
+        )?),
+        _ => None,
+    };
+    let text = match &projection {
+        Some(p) => p.text.as_bytes(),
+        None => subject_bytes(ctx, string, pattern.bytes)?,
+    };
     let byte = |i: usize| {
         if pattern.bytes || i >= text.len() {
             i.min(text.len())
@@ -986,22 +1094,21 @@ pub(super) fn search(
         return findall(ctx, &pattern, &text, start);
     }
     if matches!(method, "scanner" | "finditer") {
-        // Resizing a bytearray or releasing a view requires a persistent scanner export.
-        if matches!(
-            ctx.heap.get(ctx.scalar_value(string)),
-            Value::ByteArray(_) | Value::MemoryView { .. }
-        ) {
-            return Err(Error::new(
-                "NotImplementedError",
-                format!(
-                    "exporting a {} to a regex scanner is unsupported",
-                    ctx.type_name(string)
-                ),
-            ));
-        }
+        let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
+            // Keep the export alive for the scanner's lifetime. A Match keeps only the subject.
+            Value::ByteArray(_) => Some(ctx.new_memoryview(string)?),
+            Value::MemoryView { .. } => {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "exporting a memoryview to a regex scanner is unsupported",
+                ));
+            }
+            _ => None,
+        };
         let scanner = ctx.alloc(Value::RegexScanner {
             pattern: receiver,
             subject: string,
+            buffer_view,
             start: Some(start),
             end,
             retry: false,
@@ -1018,19 +1125,33 @@ pub(super) fn search(
         }
         return Ok(NONE);
     }
-    let matcher = pattern
-        .matcher(method == "fullmatch")
-        .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?;
+    let matcher = match pattern.matcher(method == "fullmatch") {
+        Ok(matcher) => matcher,
+        Err(message) => return Err(pattern_error(ctx, pattern.source, pattern.flags, message)),
+    };
     let anchored = if method == "search" {
         Anchored::No
     } else {
         Anchored::Yes
     };
-    capture(ctx, receiver, matcher, pattern.bytes, string, |text| {
-        Input::new(&text[..end])
-            .range(start..end)
-            .anchored(anchored)
-    })
+    let input = Input::new(&text[..end])
+        .range(start..end)
+        .anchored(anchored);
+    let mut captures = matcher.create_captures();
+    matcher
+        .captures(input, &mut captures)
+        .map_err(|message| Error::new("RuntimeError", message))?;
+    if !captures.is_match() {
+        return Ok(NONE);
+    }
+    let spans = group_spans(&captures)
+        .map(|span| span.map(|s| projection.as_ref().map_or(s, |p| p.original(s))))
+        .collect();
+    Ok(ctx.alloc(Value::RegexMatch(Rc::new(Match {
+        pattern: receiver,
+        subject: string,
+        spans,
+    }))))
 }
 
 pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
@@ -1064,21 +1185,9 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
             _ => unreachable!(),
         });
     }
-    let Value::RegexPattern(pattern) = ctx.heap.get(first) else {
-        return Err(Error::new(
-            "TypeError",
-            "expected compiled regular expression",
-        ));
-    };
-    let pattern = Rc::clone(pattern);
-    let regex = pattern
-        .matcher(name == "re.fullmatch")
-        .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?;
-    let subject = argument(args, 1)?;
     match name {
-        "re.match" | "re.fullmatch" => capture(ctx, first, regex, pattern.bytes, subject, |text| {
-            Input::new(text).anchored(Anchored::Yes)
-        }),
+        "re.match" => search(ctx, "match", args, &[]),
+        "re.fullmatch" => search(ctx, "fullmatch", args, &[]),
         _ => Err(Error::new(
             "AttributeError",
             format!("no regex operation {name}"),

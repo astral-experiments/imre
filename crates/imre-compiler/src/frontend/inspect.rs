@@ -89,13 +89,9 @@ fn builtin_plain_name(ty: Type, name: &str) -> bool {
         Type::Int | Type::Bool => {
             return INT_ATTRIBUTES.iter().any(|&(attr, _)| attr == name);
         }
-        Type::Str | Type::StrLiteral(_) => concat!(
-            "capitalize casefold center count encode endswith expandtabs find format format_map index ",
-            "isalnum isalpha isascii isdecimal isdigit isidentifier islower isnumeric isprintable isspace ",
-            "istitle isupper join ljust lower lstrip maketrans partition removeprefix removesuffix replace ",
-            "rfind rindex rjust rpartition rsplit rstrip split splitlines startswith strip swapcase title ",
-            "translate upper zfill",
-        ),
+        Type::Str | Type::StrLiteral(_) => {
+            include_str!("../../../imre-runtime/native/str-method-names.txt")
+        }
         _ => unreachable!(),
     };
     names

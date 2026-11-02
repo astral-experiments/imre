@@ -2,11 +2,54 @@ import errno
 import io
 import os
 import subprocess
+from pathlib import Path
 from subprocess import Popen
 
 
+def ignored_signals(restore):
+    with Popen(["cat", "/proc/self/status"], stdout=subprocess.PIPE,
+               restore_signals=restore) as child:
+        data, _ = child.communicate()
+        assert child.returncode == 0
+    return next(line for line in data.split(b"\n") if line.startswith(b"SigIgn:"))
+
+
 def current():
+    # Check before any writes initialize the runtime's standard streams.
+    if os.path.exists("/proc/self/status"):
+        inherited = ignored_signals(False)
+        assert ignored_signals(True) != inherited
+        assert ignored_signals(False) == inherited
     assert subprocess.Popen is Popen and Popen.__module__ == "subprocess"
+    args = ["imre-argv-zero", "-c", 'printf "%s" "$0"']
+    with Popen(args, executable=b"./sh", cwd="/bin", stdout=subprocess.PIPE) as child:
+        assert child.args is args
+        assert child.stdout.read() == b"imre-argv-zero"
+        assert child.wait() == 0
+
+    class ChangingExecutable:
+        def __init__(self):
+            self.calls = 0
+
+        def __fspath__(self):
+            self.calls += 1
+            return "/bin/false" if self.calls == 1 else "/bin/true"
+
+    changing = ChangingExecutable()
+    with Popen(["ignored"], executable=changing, cwd=".") as child:
+        print("changing executable", changing.calls, child.wait())
+
+    with Popen("exit 47", shell=True, executable="/bin/false") as child:
+        assert child.wait() == 1
+
+    executable = Path("null/child")
+    try:
+        Popen(["/bin/true"], executable=executable, cwd="/dev")
+    except NotADirectoryError as exc:
+        assert exc.errno == errno.ENOTDIR and exc.filename is executable
+    else:
+        raise AssertionError("launched a program below /dev/null")
+
     text = subprocess.run(["/bin/sh", "-c", "printf 'one\\r\\ntwo\\r'"],
                           text=True, capture_output=True, check=True)
     assert text.stdout == "one\ntwo\n" and text.stderr == "" and text.returncode == 0

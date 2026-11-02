@@ -56,6 +56,100 @@ def escape(pattern):
         return pattern.translate(_special_chars_map).encode('latin1')
 
 
+from re import compile as _compile, split as _split
+
+
+class _ZeroSentinel(int):
+    pass
+_zero_sentinel = _ZeroSentinel()
+
+def sub(pattern, repl, string, *args, count=_zero_sentinel, flags=_zero_sentinel):
+    """Return the string obtained by replacing the leftmost
+    non-overlapping occurrences of the pattern in string by the
+    replacement repl.  repl can be either a string or a callable;
+    if a string, backslash escapes in it are processed.  If it is
+    a callable, it's passed the Match object and must return
+    a replacement string to be used."""
+    if args:
+        if count is not _zero_sentinel:
+            raise TypeError("sub() got multiple values for argument 'count'")
+        count, *args = args
+        if args:
+            if flags is not _zero_sentinel:
+                raise TypeError("sub() got multiple values for argument 'flags'")
+            flags, *args = args
+            if args:
+                raise TypeError("sub() takes from 3 to 5 positional arguments "
+                                "but %d were given" % (5 + len(args)))
+
+        import warnings
+        warnings.warn(
+            "'count' is passed as positional argument",
+            DeprecationWarning, stacklevel=2
+        )
+
+    return _compile(pattern, flags).sub(repl, string, count)
+sub.__text_signature__ = '(pattern, repl, string, count=0, flags=0)'
+
+def subn(pattern, repl, string, *args, count=_zero_sentinel, flags=_zero_sentinel):
+    """Return a 2-tuple containing (new_string, number).
+    new_string is the string obtained by replacing the leftmost
+    non-overlapping occurrences of the pattern in the source
+    string by the replacement repl.  number is the number of
+    substitutions that were made. repl can be either a string or a
+    callable; if a string, backslash escapes in it are processed.
+    If it is a callable, it's passed the Match object and must
+    return a replacement string to be used."""
+    if args:
+        if count is not _zero_sentinel:
+            raise TypeError("subn() got multiple values for argument 'count'")
+        count, *args = args
+        if args:
+            if flags is not _zero_sentinel:
+                raise TypeError("subn() got multiple values for argument 'flags'")
+            flags, *args = args
+            if args:
+                raise TypeError("subn() takes from 3 to 5 positional arguments "
+                                "but %d were given" % (5 + len(args)))
+
+        import warnings
+        warnings.warn(
+            "'count' is passed as positional argument",
+            DeprecationWarning, stacklevel=2
+        )
+
+    return _compile(pattern, flags).subn(repl, string, count)
+subn.__text_signature__ = '(pattern, repl, string, count=0, flags=0)'
+
+def split(pattern, string, *args, maxsplit=_zero_sentinel, flags=_zero_sentinel):
+    """Split the source string by the occurrences of the pattern,
+    returning a list containing the resulting substrings.  If
+    capturing parentheses are used in pattern, then the text of all
+    groups in the pattern are also returned as part of the resulting
+    list.  If maxsplit is nonzero, at most maxsplit splits occur,
+    and the remainder of the string is returned as the final element
+    of the list."""
+    if args:
+        if maxsplit is not _zero_sentinel:
+            raise TypeError("split() got multiple values for argument 'maxsplit'")
+        maxsplit, *args = args
+        if args:
+            if flags is not _zero_sentinel:
+                raise TypeError("split() got multiple values for argument 'flags'")
+            flags, *args = args
+            if args:
+                raise TypeError("split() takes from 2 to 4 positional arguments "
+                                "but %d were given" % (4 + len(args)))
+
+        import warnings
+        warnings.warn(
+            "'maxsplit' is passed as positional argument",
+            DeprecationWarning, stacklevel=2
+        )
+
+    return _split(pattern, string, maxsplit, flags)
+split.__text_signature__ = '(pattern, string, maxsplit=0, flags=0)'
+
 class Scanner:
     def __init__(self, lexicon, flags=0):
         from re import _compile_scanner

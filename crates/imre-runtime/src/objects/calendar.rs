@@ -48,15 +48,19 @@ pub unsafe extern "C" fn imre_calendar_zoneoffset(z: *const Object) -> *const Ob
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_calendar_zone_limit(max: bool) -> *const Object {
+    crate::ObjectOwner::into_raw(zone_limit(max))
+}
+
+fn zone_limit(max: bool) -> crate::ObjectOwner {
     thread_local! {
         static MIN:crate::ObjectOwner=owner(Value::Zone{offset:owner(Value::Delta(-86_340_000_000)),name:None});
         static MAX:crate::ObjectOwner=owner(Value::Zone{offset:owner(Value::Delta(86_340_000_000)),name:None});
     }
-    crate::ObjectOwner::into_raw(if max {
+    if max {
         MAX.with(crate::ObjectOwner::clone)
     } else {
         MIN.with(crate::ObjectOwner::clone)
-    })
+    }
 }
 /// # Safety
 /// The rooted objects have the same exact calendar class. Naive/aware ordering raises.
@@ -362,7 +366,10 @@ fn write_named_repr(
             if *fold != 0 && matches!(v, Value::Date { .. }) {
                 out.write_str(", fold=1")?;
             }
-            if let Some(z) = zone {
+            // A boxed clock appends the actual Python tzinfo's repr to its civil fields.
+            if name.is_none()
+                && let Some(z) = zone
+            {
                 out.write_str(", tzinfo=")?;
                 with(z, |v| write_repr(v, out))?;
             }
@@ -784,8 +791,11 @@ pub unsafe extern "C" fn imre_calendar_shift(
 ) -> *const Object {
     // SAFETY: both typed operands remain rooted until the new calendar value is built.
     let (dt, d) = unsafe { (object(dt), object(d)) };
-    let n = delta(d);
-    rc_result(with(dt, |dt| match dt {
+    rc_result(shift(dt, delta(d), sub))
+}
+
+fn shift(dt: &Object, n: i128, sub: bool) -> Result<crate::ObjectOwner, Error> {
+    with(dt, |dt| match dt {
         Value::DateOnly(ord) => {
             // date arithmetic uses timedelta.days, even when the fractional day is negative.
             let days = n.div_euclid(DAY);
@@ -800,7 +810,7 @@ pub unsafe extern "C" fn imre_calendar_shift(
         }
         Value::Delta(left) => shift_delta(*left, n, sub),
         _ => unreachable!(),
-    }))
+    })
 }
 /// Negating the minimum representable day is valid, but a fractional maximum day can overflow.
 fn negate_delta(value: &Object) -> Result<crate::ObjectOwner, Error> {

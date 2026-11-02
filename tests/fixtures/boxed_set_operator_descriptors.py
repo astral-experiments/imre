@@ -22,6 +22,7 @@ def current():
             ("sub", "-", {1} if owner is set else {3}, {3} if owner is set else {1}),
             ("and", "&", {2}, {2}),
             ("or", "|", {1, 2, 3}, {1, 2, 3}),
+            ("xor", "^", {1, 3}, {1, 3}),
         ):
             for prefix, answer in (("", expected), ("r", reversed_expected)):
                 slot_name = "__" + prefix + name + "__"
@@ -49,7 +50,7 @@ def current():
                         raise AssertionError("invalid set operator call accepted")
 
     assert left == {1, 2} and right == {2, 3}
-    for name, expected in (("__iand__", {2}), ("__ior__", {1, 2, 3}), ("__isub__", {1})):
+    for name, expected in (("__iand__", {2}), ("__ior__", {1, 2, 3}), ("__isub__", {1}), ("__ixor__", {1, 3})):
         target = Subset([1, 2])
         slot = getattr(set, name)
         assert slot(target, [2]) is NotImplemented
@@ -117,7 +118,7 @@ def current():
         def __eq__(self, other):
             raise ValueError("colliding keys")
 
-    for slot in (set.__sub__, set.__or__, set.__and__):
+    for slot in (set.__sub__, set.__or__, set.__and__, set.__xor__):
         try:
             slot({Collision()}, {Collision()})
         except ValueError as error:

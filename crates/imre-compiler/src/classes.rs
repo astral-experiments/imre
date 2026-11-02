@@ -203,6 +203,23 @@ impl Classes {
                     {
                         continue;
                     }
+                    // A runtime server subclass also uses its mixins as Python classes.
+                    // Select its provider before inferring fixed layouts for those mixins.
+                    if let Some(base) = node.arguments.iter().flat_map(|args| &args.args).find(
+                        |base| {
+                            graph.resolve(module_id, base)
+                                == Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS))
+                        },
+                    ) {
+                        let error =
+                            module.error(base, "socketserver base class requires object lowering");
+                        graph.class_body_error.replace(Some(error.clone()));
+                        graph
+                            .object_builtin_errors
+                            .borrow_mut()
+                            .insert(error.clone());
+                        return Err(error);
+                    }
                     ids.insert(definition, source_nodes.len());
                     let mut record = std::borrow::Cow::Borrowed(node);
                     if resolved.layouts.contains(&definition) {
@@ -1272,11 +1289,17 @@ pub(crate) fn method_kind(
     class_names: &HashSet<String>,
 ) -> Result<MethodKind, String> {
     let module = &graph.modules[module_id];
+    let unsupported = |error: String| {
+        if graph.command_startup.is_some() {
+            graph.class_body_error.replace(Some(error.clone()));
+        }
+        Err(error)
+    };
     let [decorator] = method.decorator_list.as_slice() else {
         return if method.decorator_list.is_empty() {
             Ok(MethodKind::Instance)
         } else {
-            Err(module.error(method, "method decorators cannot be stacked"))
+            unsupported(module.error(method, "method decorators cannot be stacked"))
         };
     };
     if graph.resolve(module_id, &decorator.expression)
@@ -1310,7 +1333,7 @@ pub(crate) fn method_kind(
     {
         return Ok(MethodKind::PropertySetter);
     }
-    Err(module.error(
+    unsupported(module.error(
         decorator,
         "unsupported method decorator on a fixed-layout class",
     ))

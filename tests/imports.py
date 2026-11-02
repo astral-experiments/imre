@@ -16,12 +16,34 @@ IMPORT = "from helper import f\nprint(f(2))\n"
 
 
 REJECTED = {
+    "urlopen_keeps_typed_call_check": ({
+        "main.py": (
+            "from urllib.request import urlopen\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(urlopen('data:,hello').read())\n"
+            "print(typed('wrong'))\n"
+        ),
+    }, "expected int, got str"),
+    "unused_warn_preserves_typed_arguments": ({
+        "main.py": (
+            "from warnings import warn\n"
+            "def identity(n: int) -> int: return n\n"
+            "identity('wrong')\n"
+        ),
+    }, "expected int, got str"),
     "codeop_import_keeps_return_check": ({
         "main.py": 'import codeop\ndef wrong() -> int:\n    return "invalid return"\nwrong()\n',
     }, "invalid-return-type"),
     "function_wildcard": ({
         "main.py": "def invalid():\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
+    "warning_scope_keeps_call_contracts": ({
+        "main.py": (
+            "import warnings\n"
+            "def identity(n: int) -> int: return n\n"
+            "with warnings.catch_warnings(record=True):\n    identity('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "class_wildcard": ({
         "main.py": "class Invalid:\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
@@ -161,6 +183,10 @@ REJECTED = {
         "main.py": "from helper import chosen\n",
         "helper.py": "if False:\n    def chosen():\n        return 1\n",
     }, "no static binding"),
+    "conditional_uninitialized_export": ({
+        "main.py": "from helper import selected\n",
+        "helper.py": "if True:\n    selected: int\nelse:\n    selected = 1\n",
+    }, 'no static binding "selected"'),
     "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
     "unused_resource_function": ({
@@ -247,6 +273,13 @@ REJECTED = {
     "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
     "py_compile_shadow": ({"main.py": "import py_compile\n", "py_compile.py": HELPER}, 'shadowing is unsupported: "py_compile"'),
     "token_shadow": ({"main.py": "import token\n", "token.py": HELPER}, 'shadowing is unsupported: "token"'),
+    "email_address_parser_unknown_name": ({
+        "main.py": "from email._header_value_parser import missing_parser\n",
+    }, "unsupported sealed standard-library export"),
+    "unused_email_address_parser_keeps_types": ({
+        "main.py": "from email._header_value_parser import get_addr_spec\n"
+                   "def identity(n: int) -> int: return n\nidentity('wrong')\n",
+    }, "expected int, got str"),
     "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
     "opcode_unknown_operation": ({"main.py": "from _opcode import not_an_opcode_operation\n"}, "not_an_opcode_operation"),
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
@@ -258,6 +291,17 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "urllib_request_and_error": {
+        "main.py": (
+            "import urllib.request\n"
+            "from urllib.error import URLError\n"
+            "from urllib.request import Request\n"
+            "with urllib.request.urlopen(Request('data:,one%20two')) as response:\n"
+            "    print(response.geturl(), response.read())\n"
+            "try: urllib.request.urlopen('nohandler://host')\n"
+            "except URLError as error: print(error.reason)\n"
+        ),
+    },
     "token_named_helper": {
         "main.py": "from helper import read\nprint(read())\n",
         "helper.py": "from token import EXACT_TOKEN_TYPES, tok_name\ndef read():\n    return tok_name[EXACT_TOKEN_TYPES[':=']]\n",
@@ -275,6 +319,10 @@ ACCEPTED = {
             "assert type(compiler) is Compile\n"
             "assert compiler.flags == codeop.PyCF_DONT_IMPLY_DEDENT | codeop.PyCF_ALLOW_INCOMPLETE_INPUT\n"
         ),
+    },
+    "warn_named_helper": {
+        "main.py": "from helper import current\ncurrent()\n",
+        "helper.py": (FIXTURES.parent / "boxed_warnings.py").read_text(),
     },
     "codeop_named_helper": {
         "main.py": "from helper import flags\nprint(flags())\n",
@@ -429,6 +477,12 @@ ACCEPTED = {
             "else:\n    token = initialize()\n"
         ),
     },
+    "record_warnings": {
+        "main.py": (
+            "import warnings\n"
+            "with warnings.catch_warnings(record=True) as caught:\n    assert caught == []\n"
+        ),
+    },
     "contextmanager_generator_annotation": {
         "helper.py": (
             "from contextlib import contextmanager as manager\n"
@@ -566,6 +620,16 @@ ACCEPTED = {
         "stat/__init__.py": "invalid shadow package!\n",
         "stat/S_IRWXU.py": "invalid shadow member!\n",
     },
+    "email_address_parsers": {
+        "main.py": (
+            "from email._header_value_parser import get_addr_spec, get_angle_addr as angle\n"
+            "import email._header_value_parser as parser\n"
+            "assert angle is parser.get_angle_addr\n"
+            "for parse, value in ((get_addr_spec, 'user@example.org SIZE=32'), (angle, '<>')):\n"
+            "    address, rest = parse(value)\n"
+            "    print(address.addr_spec, rest)\n"
+        ),
+    },
     "zip_source_spec": {
         "main.py": (
             "import sys\nimport zipimport\nfrom importlib import import_module, invalidate_caches\n"
@@ -590,10 +654,20 @@ ACCEPTED = {
             "    with open(finder.archive, \"wb\") as archive:\n"
             "        archive.write(replacement)\n"
             "    assert finder.find_spec(\"stored\") is None\n"
-            "    assert invalidate_caches() is None\n"
+            "    names = ('importlib', 'importlib._bootstrap', 'importlib._bootstrap_external',\n"
+            "             '_frozen_importlib', '_frozen_importlib_external')\n"
+            "    saved = {key: sys.modules.pop(key) for key in names}\n"
+            "    sys.modules['_frozen_importlib'] = sys.modules['_frozen_importlib_external'] = None\n"
+            "    try:\n"
+            "        source = import_module('importlib')\n"
+            "        assert source._bootstrap_external is not saved['_frozen_importlib_external']\n"
+            "        assert source.invalidate_caches() is None\n"
+            "    finally:\n"
+            "        sys.modules.update(saved)\n"
             "    assert finder.find_spec(\"deflated\") is None\n"
             "    assert finder.find_spec(\"stored\").loader is finder\n"
             "    assert finder.get_data(\"stored/message.txt\") == b\"hello\"\n"
+            "    assert invalidate_caches() is None\n"
             "finally:\n"
             "    del finder.invalidate_caches\n"
             "    with open(finder.archive, \"wb\") as archive:\n"
@@ -658,6 +732,12 @@ ACCEPTED = {
             "try:\n    SourceFileLoader('other', path + '.missing').get_code('other')\n"
             "except FileNotFoundError as exc:\n    print(exc.filename == path + '.missing')\n"
         ),
+    },
+    "namespace_resource_spec": {
+        "main.py": (FIXTURES.parent / "boxed_namespace_resource_spec.py").read_text(),
+        "first/acme/data.txt": "first",
+        "second/acme/data.txt": "second",
+        "second/acme/only.txt": "second",
     },
     "multiplexed_resources": {
         "main.py": (FIXTURES.parent / "boxed_multiplexed_resources.py").read_text(),
@@ -801,6 +881,15 @@ ACCEPTED = {
             "else:\n    def other():\n        return 'unreachable'\n"
         ),
     },
+    "conditional_package_value": {
+        "main.py": "from helper import selected as chosen\nimport helper\nprint(chosen, helper.selected)\n",
+        "helper/__init__.py": (
+            "import sys\n"
+            "if sys.platform == 'win32':\n    selected = 'windows'\n"
+            "elif sys.platform == 'linux':\n    selected = 'linux'\n"
+            "else:\n    selected = None\n"
+        ),
+    },
     "conditional_function_then_definition": {
         "main.py": "from helper import selected\nprint(selected())\n",
         "helper.py": (
@@ -935,6 +1024,10 @@ def main() -> None:
                 continue
             case = temporary / name
             write_files(case, files)
+            if name == "namespace_resource_spec" and os.name == "posix":
+                with ZipFile(case / "portions.zip", "w") as archive:
+                    archive.writestr("acme/", b"")
+                    archive.writestr("only_archive/", b"")
             if name == "zip_source_spec":
                 if os.name != "posix":
                     continue
@@ -956,7 +1049,10 @@ def main() -> None:
                            *build_flags]
                 if args.sanitize:
                     command.append("--sanitize")
-                require_success(run(command, temporary, timeout=build_timeout))
+                # Optimizing the bundled address parser and warnings modules can take several minutes.
+                slow_optimized = name in {"email_address_parsers", "record_warnings", "warn_named_helper"}
+                timeout = 300 if slow_optimized and level > 0 else build_timeout
+                require_success(run(command, temporary, timeout=timeout))
                 result = run([str(executable)], temporary)
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)

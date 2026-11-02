@@ -62,7 +62,14 @@ class Mixed:
 
 
 def current():
+    import _io
     operation = dir
+    names = operation(len)
+    print(names)
+    for value in (_io.open, [].append, type(len)):
+        result = operation(value)
+        assert result == names and result is not names
+    assert '__self__' not in operation(Child)
     value = Child()
     value.stored = 3
     print(operation(object()), operation(object) == operation(object()))

@@ -85,7 +85,7 @@ pub(super) fn local_fold(seconds: i64) -> Result<i32, Error> {
 
 /// Solve local_seconds(utc) == wall using the two offsets bracketing a clock
 /// transition, as in CPython's local_to_seconds.
-fn local_candidate(wall: i64, fold: bool) -> Result<i64, Error> {
+pub(super) fn local_candidate(wall: i64, fold: bool) -> Result<i64, Error> {
     let a = local_seconds(wall)? - wall;
     let first = wall - a;
     let first_local = local_seconds(first)?;

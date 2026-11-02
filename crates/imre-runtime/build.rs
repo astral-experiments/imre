@@ -74,7 +74,9 @@ fn main() {
     let path = out_dir.join("errno.c");
     std::fs::write(&path, c).unwrap();
     println!("cargo:rerun-if-changed=native/locale_decode.c");
+    println!("cargo:rerun-if-changed=native/faulthandler.c");
     cc::Build::new()
+        .file("native/faulthandler.c")
         .file(path)
         .file("native/locale_decode.c")
         .compile("imre_errno_headers");

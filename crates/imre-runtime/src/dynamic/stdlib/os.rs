@@ -1,5 +1,7 @@
 pub(in crate::dynamic) mod scandir;
 pub(in crate::dynamic) mod stat;
+#[cfg(target_os = "linux")]
+pub(super) mod statvfs;
 
 use std::ffi::CString;
 
@@ -24,7 +26,16 @@ pub(in crate::dynamic) fn install_capabilities(
         ),
         (
             "supports_fd",
-            &["chdir", "chmod", "listdir", "scandir", "stat", "utime"][..],
+            &[
+                "chdir",
+                "chmod",
+                "listdir",
+                "scandir",
+                "stat",
+                #[cfg(target_os = "linux")]
+                "statvfs",
+                "utime",
+            ][..],
         ),
         (
             "supports_follow_symlinks",
@@ -55,7 +66,7 @@ pub(in crate::dynamic) fn install_capabilities(
     Ok(())
 }
 
-/// The posix module caches this dictionary. os.environ wraps the same byte keys and values.
+/// Copy current POSIX environment bytes for the cached dictionary or an explicit reload.
 pub(super) fn environment(ctx: &mut Context) -> Id {
     let entries = crate::objects::initial_environment()
         .into_iter()
@@ -305,29 +316,20 @@ pub(super) fn change_environment(
     let posix = ctx.module("posix")?;
     ctx.lookup_attr(posix, "environ")?;
     let key = environment_argument(ctx, args[0])?;
-    let status = if set {
-        let value = environment_argument(ctx, args[1])?;
-        if key.as_bytes().contains(&b'=') {
-            return Err(Error::new(
-                "ValueError",
-                "illegal environment variable name",
-            ));
-        }
-        // SAFETY: the standalone interpreter runs Python on one thread. setenv copies its inputs.
-        unsafe { libc::setenv(key.as_ptr(), value.as_ptr(), 1) }
+    let value = if set {
+        Some(environment_argument(ctx, args[1])?)
     } else {
-        // SAFETY: key stays terminated and live through the synchronous unsetenv call.
-        unsafe { libc::unsetenv(key.as_ptr()) }
+        None
     };
-    if status != 0 {
-        return Err(crate::objects::errno_error(std::io::Error::last_os_error()).into());
-    }
+    crate::objects::change_environment(&key, value.as_deref())?;
     Ok(NONE)
 }
 
 mod chmod;
 mod links;
 mod mkfifo;
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod scheduler;
 mod unlink;
 mod utime;
 
@@ -337,6 +339,7 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
         name,
         "access"
             | "open"
+            | "getsid"
             | "waitpid"
             | "rename"
             | "replace"
@@ -348,12 +351,14 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "mkdir"
             | "mkfifo"
             | "chmod"
+            | "fchmod"
             | "chdir"
             | "utime"
             | "dup"
             | "dup2"
             | "isatty"
             | "lseek"
+            | "ftruncate"
             | "pipe"
             | "read"
             | "write"
@@ -364,7 +369,8 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             | "set_inheritable"
             | "link"
             | "symlink"
-    ) || (cfg!(target_os = "linux") && name == "sendfile")
+    ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
+        || (cfg!(target_os = "linux") && name == "sendfile")
 }
 
 /// Convert an index argument before issuing the descriptor syscall.
@@ -444,6 +450,10 @@ fn directory_fd(ctx: &mut Context, value: Option<Id>) -> Result<i32> {
         )
     })?;
     Ok(native::directory_fd_number(&fd)?)
+}
+
+fn audit_fd(ctx: &mut Context, fd: i32) -> Id {
+    ctx.int(i64::from(if fd == libc::AT_FDCWD { -1 } else { fd }))
 }
 
 /// Bind the path and keyword-only directory descriptor in Argument Clinic order.
@@ -648,6 +658,10 @@ fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     } else {
         libc::AT_FDCWD
     };
+    if !ctx.audit_hooks.is_empty() {
+        let audit_flags = ctx.int(i64::from(flags | libc::O_CLOEXEC));
+        super::audit::event(ctx, "open", &[path, NONE, audit_flags])?;
+    }
     match native::open_at(&pathname, flags, mode, dir_fd) {
         Ok(fd) => Ok(ctx.int(i64::from(fd))),
         Err(error) => {
@@ -689,6 +703,9 @@ pub(super) fn descriptor(
     }
     if name == "chmod" {
         return chmod::call(ctx, args, kwargs);
+    }
+    if name == "fchmod" {
+        return chmod::fchmod(ctx, args, kwargs);
     }
     if matches!(name, "mkdir" | "mkfifo") {
         return create_node(ctx, name, args, kwargs);
@@ -751,11 +768,78 @@ pub(super) fn descriptor(
         native::close(c_int(ctx, fd)?)?;
         return Ok(NONE);
     }
+    #[cfg(unix)]
+    if name == "waitstatus_to_exitcode" {
+        let [Some(status)] = builtins::bind_builtin_arguments(name, args, kwargs, ["status"], 1)?
+        else {
+            unreachable!("status is required")
+        };
+        let status = c_int(ctx, status)?;
+        let code = if libc::WIFEXITED(status) {
+            libc::WEXITSTATUS(status)
+        } else if libc::WIFSIGNALED(status) {
+            -libc::WTERMSIG(status)
+        } else if libc::WIFSTOPPED(status) {
+            return Err(Error::new(
+                "ValueError",
+                format!(
+                    "process stopped by delivery of signal {}",
+                    libc::WSTOPSIG(status)
+                ),
+            ));
+        } else {
+            return Err(Error::new(
+                "ValueError",
+                format!("invalid wait status: {status}"),
+            ));
+        };
+        return Ok(ctx.int(i64::from(code)));
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    if name == "getppid" {
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("posix.getppid() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        // SAFETY: getppid reads the calling process's parent PID and takes no arguments.
+        return Ok(ctx.int(i64::from(unsafe { libc::getppid() })));
+    }
+    if name == "kill" {
+        let [pid, signal] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("kill expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let pid = c_int(ctx, *pid)?;
+        let signal = ssize_t(ctx, *signal)?;
+        let audit_pid = ctx.int(i64::from(pid));
+        let audit_signal = ctx.int(signal as i64);
+        super::audit::event(ctx, "os.kill", &[audit_pid, audit_signal])?;
+        // CPython audits the full Py_ssize_t, then narrows it to the POSIX int.
+        native::kill(pid, signal as libc::c_int)?;
+        ctx.dispatch_signals()?;
+        return Ok(NONE);
+    }
+    if name == "getsid" {
+        let [pid] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "posix.getsid() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let sid = native::getsid(c_int(ctx, *pid)?)?;
+        return Ok(ctx.int(i64::from(sid)));
     }
     if name == "waitpid" {
         let [pid, options] = args else {
@@ -771,7 +855,7 @@ pub(super) fn descriptor(
         result
             .try_reserve_exact(2)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for value in native::waitpid(pid, options)? {
+        for value in native::waitpid(pid, options, || ctx.dispatch_signals())? {
             result.push(ctx.int(i64::from(value)));
         }
         return Ok(ctx.alloc(Value::Tuple(result)));
@@ -802,17 +886,44 @@ pub(super) fn descriptor(
         let fd = c_int(ctx, *fd)?;
         return if name == "read" {
             let length = ssize_t(ctx, *data)?;
-            Ok(ctx.alloc(Value::Bytes(native::read(fd, length)?)))
+            let bytes = native::read(fd, length, || ctx.dispatch_signals())?;
+            Ok(ctx.alloc(Value::Bytes(bytes)))
         } else {
-            // The synchronous syscall borrows the buffer after fd conversion.
-            // It cannot reenter Python, so mutable storage cannot resize underneath it.
-            let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
-                Value::Array(array) => array.as_bytes(),
-                _ => ctx.bytes_like(*data)?,
-            };
-            let count = native::write(fd, bytes)?;
-            Ok(ctx.int(count as i64))
+            // Keep the exporter alive and its size fixed while a handler runs.
+            // Reborrow on retry so in-place changes made by the handler are visible.
+            ctx.with_buffer_export(*data, |ctx| {
+                loop {
+                    let bytes = match ctx.heap.get(ctx.scalar_value(*data)) {
+                        Value::Array(array) => array.as_bytes(),
+                        _ => ctx.bytes_like(*data)?,
+                    };
+                    if let Some(count) = native::try_write(fd, bytes)? {
+                        return Ok(ctx.int(count as i64));
+                    }
+                    ctx.dispatch_signals()?;
+                }
+            })
         };
+    }
+    if name == "ftruncate" {
+        let [fd, length] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("ftruncate expected 2 arguments, got {}", args.len()),
+            ));
+        };
+        let fd = c_int(ctx, *fd)?;
+        let length = file_offset(ctx, *length)?;
+        let audit_fd = ctx.int(i64::from(fd));
+        let audit_length = ctx.int(length);
+        super::audit::event(ctx, "os.truncate", &[audit_fd, audit_length])?;
+        loop {
+            match native::truncate(fd, length) {
+                Ok(()) => return Ok(NONE),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(super::os_error(error)),
+            }
+        }
     }
     if name == "lseek" {
         let [fd, position, whence] = args else {

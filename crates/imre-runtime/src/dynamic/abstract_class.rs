@@ -127,14 +127,36 @@ impl Context {
         self.bind(scope, "__module__", module);
         let qualname = self.text("ABCMeta");
         self.bind(scope, "__qualname__", qualname);
+        let callable = self.builtin("abc.ABCMeta.__new__");
+        let dictionary = self.dict(Vec::new());
+        let new = self.alloc(Value::StaticMethod {
+            callable,
+            dictionary,
+        });
+        self.bind(scope, "__new__", new);
         let register = self.builtin("abc.register");
         self.bind(scope, "register", register);
+        for name in [
+            "__instancecheck__",
+            "__subclasscheck__",
+            "_abc_registry_clear",
+            "_abc_caches_clear",
+        ] {
+            let check = self.builtin(&format!("abc.{name}"));
+            self.bind(scope, name, check);
+        }
         let base = self.builtin("type");
         let meta = self
             .allocate_class("ABCMeta".into(), scope, vec![base])
             .expect("type has a consistent MRO");
         self.builtins.insert("abc.ABCMeta".into(), meta);
         meta
+    }
+
+    pub(super) fn is_abc_metaclass(&self, class: Id) -> bool {
+        self.builtins
+            .get("abc.ABCMeta")
+            .is_some_and(|&abc| self.direct_subclass(class, abc))
     }
 
     pub(super) fn is_bundled_abc(&self, class: Id) -> bool {
@@ -146,7 +168,7 @@ impl Context {
         else {
             return false;
         };
-        (metaclass.is_some() && metaclass.as_ref() == self.builtins.get("abc.ABCMeta"))
+        metaclass.is_some_and(|meta| self.is_abc_metaclass(meta))
             // Protocol's synthetic layout still inherits ABCMeta's hooks and registry.
             || (metaclass.is_none()
                 && self.classes.get("typing.Protocol").is_some_and(|p| ancestors.contains(p)))

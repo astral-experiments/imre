@@ -4,6 +4,22 @@ use crate::dynamic::builtins::bind;
 use crate::objects::Calendar;
 use crate::objects::time::{ClockParts, LocalTime, wall_time, wall_time_ns};
 
+/// Install the snapshot of local standard and daylight time exported by time.
+pub(in crate::dynamic) fn install_timezone(ctx: &mut Context, scope: Id) -> Result<()> {
+    let [(standard, std_name), (summer, dst_name)] = crate::objects::time::timezone_samples()?;
+    let std_name = ctx.text(std_name);
+    let dst_name = ctx.text(dst_name);
+    let names = ctx.alloc(Value::Tuple(vec![std_name, dst_name]));
+    let zone = ctx.int(standard);
+    let altzone = ctx.int(summer);
+    let daylight = ctx.int(i64::from(standard != summer));
+    ctx.bind(scope, "timezone", zone);
+    ctx.bind(scope, "altzone", altzone);
+    ctx.bind(scope, "daylight", daylight);
+    ctx.bind(scope, "tzname", names);
+    Ok(())
+}
+
 const FIELDS: [&str; 9] = [
     "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday", "tm_isdst",
 ];
@@ -149,6 +165,7 @@ pub(super) fn call(
         "monotonic" => "time.monotonic",
         "perf_counter" => "time.perf_counter",
         "mktime" => "time.mktime",
+        "tzset" => "time.tzset",
         _ => name,
     };
     if !kwargs.is_empty() {
@@ -169,8 +186,8 @@ pub(super) fn call(
                 ));
             };
             audit::event(ctx, "time.sleep", args)?;
-            if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(*seconds)) {
-                crate::objects::time::sleep_float(*value)?;
+            let nanos = if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(*seconds)) {
+                crate::objects::time::sleep_float_ns(*value)?
             } else {
                 let overflow = || {
                     Error::new(
@@ -196,12 +213,12 @@ pub(super) fn call(
                     }
                     Err(error) => return Err(error),
                 };
-                let nanos = seconds
+                seconds
                     .to_i64()
                     .and_then(|n| n.checked_mul(1_000_000_000))
-                    .ok_or_else(overflow)?;
-                crate::objects::time::sleep_ns(nanos)?;
-            }
+                    .ok_or_else(overflow)?
+            };
+            crate::objects::time::sleep_ns(nanos, || ctx.dispatch_signals())?;
             Ok(NONE)
         }
         "time" if args.is_empty() => Ok(ctx.alloc(Value::Float(wall_time()))),
@@ -219,7 +236,20 @@ pub(super) fn call(
                 crate::objects::time::monotonic_time().map_err(crate::objects::errno_error)?;
             Ok(ctx.alloc(Value::Float(stamp.as_secs_f64())))
         }
-        "time" | "time_ns" | "monotonic" | "perf_counter" => Err(Error::new(
+        "tzset" if args.is_empty() => {
+            let module = ctx.module("time")?;
+            let Value::Module { scope, .. } = *ctx.heap.get(module) else {
+                return Err(Error::new("TypeError", "time must be a module"));
+            };
+            unsafe extern "C" {
+                fn tzset();
+            }
+            // SAFETY: POSIX tzset has no arguments and refreshes libc's local-time rules.
+            unsafe { tzset() };
+            install_timezone(ctx, scope)?;
+            Ok(NONE)
+        }
+        "time" | "time_ns" | "monotonic" | "perf_counter" | "tzset" => Err(Error::new(
             "TypeError",
             format!("{function}() takes no arguments ({} given)", args.len()),
         )),

@@ -1,4 +1,10 @@
 # From CPython 3.14.5 Lib/hashlib.py (PSF-2.0). See stdlib/docstrings/LICENSE.
+__all__ = (
+    'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512', 'blake2b', 'blake2s',
+    'sha3_224', 'sha3_256', 'sha3_384', 'sha3_512', 'shake_128', 'shake_256',
+    'new', 'algorithms_guaranteed', 'algorithms_available', 'file_digest',
+)
+
 __builtin_constructor_cache = {}
 
 
@@ -44,3 +50,70 @@ def __get_builtin_constructor(name):
         return constructor
 
     raise ValueError('unsupported hash type ' + name)
+
+
+__block_openssl_constructor = {'blake2b', 'blake2s'}
+__sha3_provider_names = {
+    'sha3_224', 'sha3_256', 'sha3_384', 'sha3_512',
+    'shake_128', 'shake_256',
+}
+
+
+def __hash_new(name, *args, **kwargs):
+    """new(name, data=b'') - Return a new hashing object using the named algorithm;
+    optionally initialized with data (which must be a bytes-like object).
+    """
+    if name in __block_openssl_constructor or name in __sha3_provider_names:
+        return __get_builtin_constructor(name)(*args, **kwargs)
+    if isinstance(name, str) and str.lower(name) in {'md5', 'ssl3-md5', '1.2.840.113549.2.5'}:
+        if _hashlib is not None:
+            try:
+                return _hashlib.new(name, *args, **kwargs)
+            except ValueError:
+                pass
+        elif name not in {'MD5', 'md5'}:
+            # Imre also supports OpenSSL's MD5 aliases with its portable backend.
+            name = 'md5'
+        return __get_builtin_constructor(name)(*args, **kwargs)
+    return _native_new(name, *args, **kwargs)
+
+
+new = __hash_new
+del __hash_new
+
+
+# The named constructors keep the provider selected at import time. new()
+# looks up the live builtin constructor each time, as in CPython's fallback.
+for __func_name in __block_openssl_constructor | __sha3_provider_names:
+    try:
+        globals()[__func_name] = __get_builtin_constructor(__func_name)
+    except ValueError:
+        pass
+del __func_name
+
+
+try:
+    import _hashlib
+except ImportError:
+    _hashlib = None
+
+try:
+    _hashlib.openssl_md5(usedforsecurity=False)
+except (AttributeError, ValueError):
+    try:
+        md5 = __get_builtin_constructor('md5')
+    except ValueError:
+        pass
+else:
+    md5 = _hashlib.openssl_md5
+
+try:
+    from _hashlib import pbkdf2_hmac
+    __all__ += ('pbkdf2_hmac',)
+except ImportError:
+    pass
+
+try:
+    from _hashlib import scrypt
+except ImportError:
+    pass

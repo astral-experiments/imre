@@ -231,8 +231,12 @@ def main():
         suite = defaultTestLoader.loadTestsFromNames([_convert_name(name) for name in names], module)
     else:
         suite = defaultTestLoader.loadTestsFromModule(module)
-    runner._runSuite(suite)
-    runner._finish()
+    result = TextTestRunner(verbosity=runner.verbose, failfast=runner.failfast).run(suite)
+    if not result.wasSuccessful():
+        sys.exit(1)
+    if not result.testsRun and not result.skipped:
+        sys.exit(5)
+    sys.exit(0)
 
 
 import unittest.case as case

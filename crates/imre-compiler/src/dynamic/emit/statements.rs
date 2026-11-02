@@ -17,6 +17,7 @@ struct ClosureNames {
     globals: std::collections::BTreeSet<String>,
     nonlocals: std::collections::BTreeSet<String>,
     in_comprehension: bool,
+    include_nested_reads: bool,
     incomplete: bool,
     locals_incomplete: bool,
 }
@@ -45,6 +46,21 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Stmt::FunctionDef(f) => {
                 self.locals.insert(f.name.to_string());
                 self.incomplete = true;
+                if self.include_nested_reads {
+                    // A name used only by a nested function can be free in this function too.
+                    let mut child = Self {
+                        include_nested_reads: true,
+                        ..Self::default()
+                    };
+                    child.visit_body(&f.body);
+                    child
+                        .locals
+                        .extend(f.parameters.iter().map(|param| param.name().to_string()));
+                    self.reads.extend(child.nonlocals);
+                    self.reads.extend(child.reads.into_iter().filter(|name| {
+                        !child.locals.contains(name) && !child.globals.contains(name)
+                    }));
+                }
                 // Loading a name or a literal cannot introduce a binding in the
                 // defining frame. Keep the conservative fallback for other expressions.
                 for decorator in &f.decorator_list {
@@ -196,6 +212,7 @@ impl Function<'_, '_> {
         let mut globals = Globals::default();
         globals.visit_body(suite);
         for name in globals.0 {
+            self.declared_globals.insert(name.to_owned());
             let name = self.code_name(name);
             self.op("declare_global", &[&self.scope.clone(), &name]);
         }
@@ -227,6 +244,24 @@ impl Function<'_, '_> {
                     }
                 }
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
+                ast::Stmt::TypeAlias(v)
+                    if self.prefix.is_empty()
+                        && v.type_params.is_none()
+                        && let Some(name) = v.name.as_name_expr() =>
+                {
+                    let evaluator = self.define(
+                        v.start(),
+                        name.id.as_str(),
+                        false,
+                        None,
+                        None,
+                        None,
+                        Body::TypeAlias(&v.value),
+                    );
+                    let label = self.code_name(name.id.as_str());
+                    let alias = self.op("type_alias", &[&label, &evaluator]);
+                    self.bind(name.id.as_str(), &alias);
+                }
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     let chained = v.targets.len() > 1;
@@ -275,12 +310,14 @@ impl Function<'_, '_> {
                                 self.source,
                                 String::new(),
                                 Body::AnnotationValue(&v.annotation),
+                                false,
                             );
                             let code = self.output.definition(
                                 self.source,
                                 String::new(),
                                 Body::AnnotationThunk(value.clone(), v.annotation.range()),
                                 v.annotation.start(),
+                                false,
                             );
                             self.remember_annotation(v, name.id.as_str(), &value);
                             let name = self.text("__annotate__");
@@ -316,18 +353,20 @@ impl Function<'_, '_> {
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
                     let generator = imre_ast::code_flags::is_generator(&v.body);
-                    let body = if v.is_async {
+                    let body = if v.is_async && generator {
                         Body::Unsupported(stmt, "async function")
-                    } else if generator {
-                        Body::GeneratorFunction(&v.body)
+                    } else if v.is_async || generator {
+                        Body::GeneratorFunction((&v.body, v.is_async))
                     } else {
                         Body::Statements(&v.body)
                     };
                     let function = self.define(
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
+                        self.declared_globals.contains(v.name.as_str()),
                         Some(&v.parameters),
                         v.returns.as_deref(),
+                        crate::dynamic::function_type_params(v).filter(|_| self.prefix.is_empty()),
                         body,
                     );
                     if v.is_async && !generator {
@@ -346,34 +385,15 @@ impl Function<'_, '_> {
                     let outer = self.scope.clone();
                     let mut outer_class_locals = None;
                     let parameter_scope = v.type_params.as_deref().map(|params| {
-                        let names = self.op("dict", &[]);
-                        for param in params {
-                            let ast::TypeParam::TypeVar(typevar) = param else {
-                                self.unsupported("variadic class type parameters");
-                                continue;
-                            };
-                            if typevar.bound.is_some() || typevar.default.is_some() {
-                                self.unsupported("class type parameter bounds and defaults");
-                            }
-                            let binding = self.code_name(typevar.name.as_str());
-                            let name =
-                                self.code_name(self.source.private_names.definition(&typevar.name));
-                            self.op("put", &[&names, &binding, &name]);
-                        }
-                        let scope = self.op("class_parameter_scope", &[&outer, &names]);
+                        let scope = self.parameter_scope(&outer, params, true);
                         self.scope = self.op("class_base_scope", &[&scope, &outer]);
                         outer_class_locals = self.class_locals.take();
                         scope
                     });
                     let bases = self.op("list", &[]);
                     let kwargs = if let Some(args) = v.arguments.as_deref() {
-                        if args
-                            .keywords
-                            .iter()
-                            .any(|kw| !matches!(kw.arg.as_deref(), Some("total" | "metaclass")))
-                            || args.keywords.len() > 1
-                        {
-                            self.unsupported("class keyword arguments");
+                        if args.keywords.iter().any(|kw| kw.arg.is_none()) {
+                            self.unsupported("expanded class keyword arguments");
                         }
                         self.arguments(&bases, args, "0")
                     } else {
@@ -385,8 +405,10 @@ impl Function<'_, '_> {
                         self.op("append", &[&bases, &generic]);
                     }
                     let init = self.define(
-                        v.start(),
+                        v.decorator_list.first().map_or(v.start(), Ranged::start),
                         self.source.private_names.definition(&v.name),
+                        self.declared_globals.contains(v.name.as_str()),
+                        None,
                         None,
                         None,
                         Body::Namespace(&v.body),
@@ -571,28 +593,59 @@ impl Function<'_, '_> {
         self.op("import", &[&self.scope.clone(), &name])
     }
 
+    fn parameter_scope(&mut self, outer: &str, params: &ast::TypeParams, class: bool) -> String {
+        let names = self.op("dict", &[]);
+        for param in params {
+            if param.default().is_some()
+                || matches!(param, ast::TypeParam::TypeVar(v) if v.bound.is_some())
+            {
+                self.unsupported("class type parameter bounds and defaults");
+            }
+            let binding = self.code_name(param.name().as_str());
+            let name = self.code_name(self.source.private_names.definition(param.name()));
+            let declaration = match param {
+                ast::TypeParam::TypeVar(_) => name,
+                ast::TypeParam::TypeVarTuple(_) => self.op("class_typevartuple", &[&name]),
+                ast::TypeParam::ParamSpec(_) => self.op("class_paramspec", &[&name]),
+            };
+            self.op("put", &[&names, &binding, &declaration]);
+        }
+        let op = if class {
+            "class_parameter_scope"
+        } else {
+            "function_parameter_scope"
+        };
+        self.op(op, &[outer, &names])
+    }
+
     pub(super) fn define(
         &mut self,
         start: TextSize,
         name: &str,
+        global: bool,
         params: Option<&ast::Parameters>,
         returns: Option<&ast::Expr>,
+        type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> String {
-        let qualname = format!("{}{name}", self.prefix);
+        let qualname = if global {
+            name.to_owned()
+        } else {
+            format!("{}{name}", self.prefix)
+        };
         let prefix = if matches!(body, Body::Namespace(_)) {
             format!("{qualname}.")
         } else {
             format!("{qualname}.<locals>.")
         };
         let doc = match &body {
-            Body::Statements(stmts) | Body::GeneratorFunction(stmts)
+            Body::Statements(stmts) | Body::GeneratorFunction((stmts, _))
                 if self.output.keep_docstrings =>
             {
-                crate::frontend::docstring(stmts)
+                self.source.docstring(&qualname, stmts)
             }
             Body::Unsupported(ast::Stmt::FunctionDef(f), _) if self.output.keep_docstrings => {
-                crate::frontend::docstring(&f.body)
+                self.source.docstring(&qualname, &f.body)
             }
             _ => None,
         };
@@ -607,7 +660,7 @@ impl Function<'_, '_> {
                 if params.is_some_and(|p| p.kwarg.is_some()) {
                     flags |= VARKEYWORDS;
                 }
-                if self.prefix.contains(".<locals>.") {
+                if type_params.is_some() || self.in_function {
                     flags |= NESTED;
                 }
                 if !self.prefix.is_empty() && !self.prefix.ends_with(".<locals>.") {
@@ -623,7 +676,8 @@ impl Function<'_, '_> {
                     flags |= HAS_DOCSTRING;
                 }
                 let kind = match &body {
-                    Body::GeneratorFunction(_) | Body::Generator(..) => GENERATOR,
+                    Body::GeneratorFunction((_, true)) => COROUTINE,
+                    Body::GeneratorFunction((_, false)) | Body::Generator(..) => GENERATOR,
                     Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
                     Body::Unsupported(ast::Stmt::FunctionDef(f), _) if f.is_async => {
                         if is_generator(&f.body) {
@@ -641,6 +695,10 @@ impl Function<'_, '_> {
         let entries = params.map_or_else(Vec::new, |p| {
             crate::frontend::parameter_annotations(p, returns)
         });
+        let outer = self.scope.clone();
+        let scope = type_params
+            .map(|params| self.parameter_scope(&outer, params, false))
+            .unwrap_or(outer);
         let annotate = if entries.is_empty() {
             "0".into()
         } else {
@@ -656,7 +714,7 @@ impl Function<'_, '_> {
             );
             use imre_ast::code_flags::*;
             let mut annotation_flags = OPTIMIZED | NEWLOCALS;
-            if self.prefix.contains(".<locals>.") {
+            if type_params.is_some() || self.in_function {
                 annotation_flags |= NESTED;
             }
             if self.source.string_annotations {
@@ -681,11 +739,12 @@ impl Function<'_, '_> {
                 String::new(),
                 Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
+                false,
             );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
             let defaults = self.op("dict", &[]);
-            self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", self.scope))
+            self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 {defaults}, i64 {aqname}, i64 0, i64 0, i1 true)", scope))
         };
         let qualname = self.text(&qualname);
         let mut signature =
@@ -693,10 +752,28 @@ impl Function<'_, '_> {
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
         }
+        if let Body::Namespace(stmts) = &body {
+            signature["postponed_annotations"] = json!(
+                self.source.string_annotations
+                    && imre_ast::annotations::has_variable_annotation(stmts)
+            );
+            signature["needs_class_cell"] = json!(imre_ast::class_cell::needed(
+                stmts,
+                self.source.string_annotations
+            ));
+            signature["needs_dict_cell"] = json!(imre_ast::class_cell::dict_needed(
+                stmts,
+                self.source.string_annotations
+            ));
+            signature["static_attributes"] = json!(imre_ast::class_attributes::static_attributes(
+                stmts,
+                &self.source.private_names
+            ));
+        }
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
-        let generator = if let Body::GeneratorFunction(stmts) = &body {
+        let generator = if let Body::GeneratorFunction((stmts, is_async)) = &body {
             if !self.source.method_imports.is_empty() {
                 signature["method_imports"] = json!(self.source.method_imports);
             }
@@ -713,14 +790,18 @@ impl Function<'_, '_> {
                 " "
             };
             // Slice the suite as written so indentation inside multiline strings survives.
-            let text = format!("def _():\n{indent}{}", &self.source.text[start..end]);
+            let header = if *is_async { "async def" } else { "def" };
+            let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
             Some((self.output.data(text.as_bytes()), self.source.line(first)))
         } else {
             None
         };
-        let mut closure_names = ClosureNames::default();
+        let mut closure_names = ClosureNames {
+            include_nested_reads: matches!(&body, Body::Statements(_) | Body::GeneratorFunction(_)),
+            ..ClosureNames::default()
+        };
         match &body {
-            Body::Statements(stmts) | Body::GeneratorFunction(stmts) => {
+            Body::Statements(stmts) | Body::GeneratorFunction((stmts, _)) => {
                 closure_names.visit_body(stmts)
             }
             Body::Namespace(stmts) => {
@@ -731,7 +812,7 @@ impl Function<'_, '_> {
                 // Methods and nested classes can still capture the enclosing frame.
                 closure_names.incomplete = true;
             }
-            Body::Expression(expr) => closure_names.visit_expr(expr),
+            Body::Expression(expr) | Body::TypeAlias(expr) => closure_names.visit_expr(expr),
             _ => closure_names.incomplete = true,
         }
         if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns) {
@@ -746,12 +827,26 @@ impl Function<'_, '_> {
                 signature["thread_bound_lock_field"] = json!(field);
             }
         }
-        let code = self.output.definition(self.source, prefix, body, start);
         let defaults = self.op("dict", &[]);
+        if matches!(body, Body::TypeAlias(_)) {
+            signature["posonly"] = json!([".format"]);
+            let format = self.text(".format");
+            let value_format = self.integer(1);
+            self.op("put", &[&defaults, &format, &value_format]);
+        }
+        let in_function = self.in_function || !matches!(body, Body::Namespace(_));
+        let code = self
+            .output
+            .definition(self.source, prefix, body, start, in_function);
         signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
+        let scalar = |expr: &ast::Expr| {
+            scalar_annotation(expr).filter(|name| {
+                !type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == *name))
+            })
+        };
         if generator.is_none() {
-            signature["return_type"] = json!(returns.and_then(scalar_annotation));
+            signature["return_type"] = json!(returns.and_then(scalar));
         }
         if let Some(p) = params {
             self.output
@@ -764,12 +859,7 @@ impl Function<'_, '_> {
             ] {
                 for arg in args {
                     let name = arg.parameter.name.as_str();
-                    if let Some(ty) = arg
-                        .parameter
-                        .annotation
-                        .as_deref()
-                        .and_then(scalar_annotation)
-                    {
+                    if let Some(ty) = arg.parameter.annotation.as_deref().and_then(scalar) {
                         signature["types"][name] = json!(ty);
                     }
                     signature[group].as_array_mut().unwrap().push(json!(name));
@@ -813,7 +903,13 @@ impl Function<'_, '_> {
         signature["scope_locals_complete"] = json!(!closure_names.locals_incomplete);
         let sig = self.text(&signature.to_string());
         let name = self.code_name(name);
-        let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", self.scope));
+        let function = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", scope));
+        if type_params.is_some() {
+            let key = self.code_name(".type_params");
+            let params = self.op("lookup", &[&scope, &key]);
+            let key = self.code_name("__type_params__");
+            self.op("setattr", &[&function, &key, &params]);
+        }
         if let Some((source, line)) = generator {
             self.line(&format!("call void @imre_dyn_generator_body(ptr %ctx, i64 {function}, ptr {source}, i32 {line})"));
         }
@@ -1265,8 +1361,8 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     }
     let mut captures = ClassCell(false);
     match body {
-        Body::Statements(stmts) | Body::GeneratorFunction(stmts) => captures.visit_body(stmts),
-        Body::Expression(expr) => captures.visit_expr(expr),
+        Body::Statements(stmts) | Body::GeneratorFunction((stmts, _)) => captures.visit_body(stmts),
+        Body::Expression(expr) | Body::TypeAlias(expr) => captures.visit_expr(expr),
         Body::Generator(generators, element) => {
             for (index, generator) in generators.iter().enumerate() {
                 if index != 0 {

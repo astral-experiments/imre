@@ -133,6 +133,25 @@ impl Checker<'_> {
                     }
                     self.fixed_class_attributes(id)
                 } else {
+                    if matches!(
+                        self.resolve(base),
+                        Some(crate::modules::Binding::Intrinsic(Intrinsic::PICKLER))
+                    ) {
+                        return Err(self.object_runtime_export("pickle.Pickler", base));
+                    }
+                    if matches!(
+                        self.resolve(base),
+                        Some(crate::modules::Binding::Intrinsic(
+                            Intrinsic::SOCKETSERVER_CLASS
+                        ))
+                    ) {
+                        let error = self.scoped_builtin_error("socketserver base class", base);
+                        self.graph.class_body_error.replace(Some(error.clone()));
+                        return Err(error);
+                    }
+                    if self.graph.is_protocol_base(self.module, base) {
+                        return Err(self.object_runtime_export("typing.Protocol", base));
+                    }
                     if let Some(crate::modules::Binding::Intrinsic(kind)) = self.resolve(base)
                         && kind.is_subclassable_calendar()
                     {

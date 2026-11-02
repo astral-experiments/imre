@@ -39,6 +39,16 @@ pub(super) fn call(
             ),
         ));
     };
+    if operation == "isqrt" {
+        let n = ctx.index_integer(value)?;
+        if n.big().sign() == num_bigint::Sign::Minus {
+            return Err(Error::new(
+                "ValueError",
+                "isqrt() argument must be nonnegative",
+            ));
+        }
+        return Ok(ctx.alloc(Value::Int(crate::Int::new(n.big().sqrt()))));
+    }
     if operation == "isnan" {
         return Ok(builtins::boolean(as_double(ctx, value)?.is_nan()));
     }

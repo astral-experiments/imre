@@ -5,7 +5,7 @@ use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::ops::Range;
 
 use super::super::exceptions::Result;
-use super::{Bytes, Error, close_file, errno_error};
+use super::{Bytes, Error, FileState, Kind, Stream, close_file, errno_error};
 
 pub(crate) struct Random<F = File> {
     file: F,
@@ -16,6 +16,75 @@ pub(crate) struct Random<F = File> {
     pos: usize,
     read_end: usize,
     dirty: Option<Range<usize>>,
+    truncating_name: Option<String>,
+}
+
+impl FileState {
+    pub(crate) fn random_peek(&mut self) -> Result<Bytes> {
+        self.check_random_reentry()?;
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "peek of closed file"));
+        };
+        file.peek()
+    }
+
+    /// Return buffered bytes or make one read through the retained anonymous file.
+    pub(crate) fn random_read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
+        self.check_random_reentry()?;
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "read of closed file"));
+        };
+        let size = file.read_once_size(size);
+        let mut data = Vec::new();
+        data.try_reserve_exact(size)
+            .map_err(|_| Error::allocation())?;
+        data.resize(size, 0);
+        let count = file.read_once(&mut data).map_err(errno_error)?;
+        data.truncate(count);
+        Ok(data)
+    }
+
+    /// Whether truncate is invoking the size object's index protocol on this stream.
+    pub(crate) fn random_truncating(&self) -> bool {
+        matches!(&self.stream, Some(Stream::Random(file)) if file.truncating_name.is_some())
+    }
+
+    /// A size object's index method can call back into the same buffered stream.
+    pub(crate) fn check_random_reentry(&self) -> Result<()> {
+        if let Some(Stream::Random(file)) = &self.stream
+            && let Some(name) = &file.truncating_name
+        {
+            return Err(Error::new(
+                Kind::RuntimeError,
+                format!("reentrant call inside <_io.BufferedRandom name={name}>"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Flush and rewind to the logical cursor before converting the optional Python size.
+    pub(crate) fn begin_random_truncate(&mut self, name: Option<String>) -> Result<()> {
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "truncate of closed file"));
+        };
+        file.flush().map_err(errno_error)?;
+        file.truncating_name = name;
+        Ok(())
+    }
+
+    /// Release the reentrancy guard even if size conversion failed. A resize preserves the cursor.
+    pub(crate) fn finish_random_truncate(&mut self, size: Option<i64>) -> Result<()> {
+        let Some(Stream::Random(file)) = &mut self.stream else {
+            return Err(Error::new(Kind::ValueError, "truncate of closed file"));
+        };
+        file.truncating_name = None;
+        if let Some(size) = size {
+            let size = u64::try_from(size)
+                .map_err(|_| errno_error(io::Error::from_raw_os_error(libc::EINVAL)))?;
+            file.file.set_len(size).map_err(errno_error)?;
+        }
+        Ok(())
+    }
 }
 
 impl<F: Read + Write + Seek> Random<F> {
@@ -32,6 +101,7 @@ impl<F: Read + Write + Seek> Random<F> {
             pos: 0,
             read_end: 0,
             dirty: None,
+            truncating_name: None,
         })
     }
 
@@ -102,8 +172,16 @@ impl<F: Read + Write + Seek> Random<F> {
                 return Ok(target);
             }
         }
+        self.seek_raw(|raw| raw.seek(target.map_or(at, SeekFrom::Start)))
+    }
+
+    /// A failed raw seek leaves unread bytes available at the logical cursor.
+    pub(crate) fn seek_raw(
+        &mut self,
+        seek: impl FnOnce(&mut F) -> io::Result<u64>,
+    ) -> io::Result<u64> {
         self.write_back()?;
-        let position = self.file.seek(target.map_or(at, SeekFrom::Start))?;
+        let position = seek(&mut self.file)?;
         self.reset();
         Ok(position)
     }
@@ -153,8 +231,20 @@ impl<F: Read + Write + Seek> Random<F> {
         Ok(offset)
     }
 
-    pub(crate) fn capacity(&self) -> usize {
-        self.buffer.len()
+    /// BufferedRandom synchronizes pending writes and refills from its logical cursor.
+    pub(crate) fn peek(&mut self) -> Result<Bytes> {
+        self.flush().map_err(errno_error)?;
+        super::peek_bytes(self)
+    }
+
+    /// A read1 with read-ahead returns only the buffered prefix, regardless of the limit.
+    pub(crate) fn read_once_size(&self, limit: Option<usize>) -> usize {
+        let size = limit.unwrap_or(self.buffer.len());
+        if self.pos < self.read_end {
+            size.min(self.read_end - self.pos)
+        } else {
+            size
+        }
     }
 
     /// Read buffered data or issue a single raw read without reading ahead.

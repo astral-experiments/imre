@@ -2,12 +2,91 @@
 
 import builtins as _builtins
 import functools
+import sys as _sys
 import typing as _typing
-from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping
-from collections import defaultdict as _defaultdict
+from _collections_abc import Generator as _Generator, Iterable as _Iterable
+from _collections_abc import Mapping as _Mapping, MutableMapping as _MutableMapping, Sequence as _Sequence
+from collections import Counter as _Counter, defaultdict as _defaultdict
+from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
+from abc import abstractmethod
 from annotationlib import ForwardRef, _make_forward_ref
 from functools import lru_cache
+from _typing import _idfunc
 from typing import Any, Callable, Generic, Protocol, TypeVar
+
+
+# From CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def _caller(depth=1, default='__main__'):
+    try:
+        return _sys._getframemodulename(depth + 1) or default
+    except AttributeError:  # For platforms without _getframemodulename()
+        pass
+    try:
+        return _sys._getframe(depth + 1).f_globals.get('__name__', default)
+    except (AttributeError, ValueError):  # For platforms without _getframe()
+        pass
+    return None
+
+class NewType:
+    """NewType creates simple unique types with almost zero runtime overhead.
+
+    NewType(name, tp) is considered a subtype of tp
+    by static type checkers. At runtime, NewType(name, tp) returns
+    a dummy callable that simply returns its argument.
+
+    Usage::
+
+        UserId = NewType('UserId', int)
+
+        def name_by_id(user_id: UserId) -> str:
+            ...
+
+        UserId('user')          # Fails type check
+
+        name_by_id(42)          # Fails type check
+        name_by_id(UserId(42))  # OK
+
+        num = UserId(5) + 1     # type: int
+    """
+
+    __call__ = _idfunc
+
+    def __init__(self, name, tp):
+        self.__qualname__ = name
+        if '.' in name:
+            name = name.rpartition('.')[-1]
+        self.__name__ = name
+        self.__supertype__ = tp
+        def_mod = _caller()
+        if def_mod != 'typing':
+            self.__module__ = def_mod
+
+    def __mro_entries__(self, bases):
+        # We defined __mro_entries__ to get a better error message
+        # if a user attempts to subclass a NewType instance. bpo-46170
+        superclass_name = self.__name__
+
+        class Dummy:
+            def __init_subclass__(cls):
+                subclass_name = cls.__name__
+                raise TypeError(
+                    f"Cannot subclass an instance of NewType. Perhaps you were looking for: "
+                    f"`{subclass_name} = NewType({subclass_name!r}, {superclass_name})`"
+                )
+
+        return (Dummy,)
+
+    def __repr__(self):
+        return f'{self.__module__}.{self.__qualname__}'
+
+    def __reduce__(self):
+        return self.__qualname__
+
+    def __or__(self, other):
+        return _typing.Union[self, other]
+
+    def __ror__(self, other):
+        return _typing.Union[other, self]
 
 
 T = TypeVar("T")
@@ -213,6 +292,84 @@ def _protocol_instance(cls, instance):
     return True
 
 
+# Runtime protocols from CPython 3.14.5 Lib/typing.py.
+@runtime_checkable
+class SupportsInt(Protocol):
+    """An ABC with one abstract method __int__."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __int__(self) -> int:
+        pass
+
+
+@runtime_checkable
+class SupportsFloat(Protocol):
+    """An ABC with one abstract method __float__."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __float__(self) -> float:
+        pass
+
+
+@runtime_checkable
+class SupportsComplex(Protocol):
+    """An ABC with one abstract method __complex__."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __complex__(self) -> complex:
+        pass
+
+
+@runtime_checkable
+class SupportsBytes(Protocol):
+    """An ABC with one abstract method __bytes__."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __bytes__(self) -> bytes:
+        pass
+
+
+@runtime_checkable
+class SupportsIndex(Protocol):
+    """An ABC with one abstract method __index__."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __index__(self) -> int:
+        pass
+
+
+@runtime_checkable
+class SupportsAbs[T](Protocol):
+    """An ABC with one abstract method __abs__ that is covariant in its return type."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __abs__(self) -> T:
+        pass
+
+
+@runtime_checkable
+class SupportsRound[T](Protocol):
+    """An ABC with one abstract method __round__ that is covariant in its return type."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __round__(self, ndigits: int = 0) -> T:
+        pass
+
+
 class IO(Generic[AnyStr]):
     __slots__ = ()
 
@@ -281,7 +438,7 @@ def _annotation_type_repr(value):
     return repr(value)
 
 
-def _typeddict_annotation_strings(annotations):
+def _annotation_strings(annotations):
     return {name: value if isinstance(value, str) else _annotation_type_repr(value)
             for name, value in annotations.items()}
 
@@ -487,7 +644,7 @@ def _typeddict_replay(annotate, owner, allow_evaluation):
     return func, names
 
 
-def _typeddict_base_annotations(annotate, format, owner=None):
+def _call_annotate(annotate, format, owner=None):
     from annotationlib import Format
     if format == Format.VALUE_WITH_FAKE_GLOBALS:
         raise ValueError("The VALUE_WITH_FAKE_GLOBALS format is for internal use only")
@@ -509,7 +666,7 @@ def _typeddict_base_annotations(annotate, format, owner=None):
         result = probe(Format.VALUE_WITH_FAKE_GLOBALS)
     except NotImplementedError:
         values = annotate(Format.VALUE)
-        return _typeddict_annotation_strings(values) if format == Format.STRING else values
+        return _annotation_strings(values) if format == Format.STRING else values
     except Exception:
         pass
     else:
@@ -528,12 +685,153 @@ def _typeddict_base_annotations(annotate, format, owner=None):
     return {key: value.evaluate(format=Format.FORWARDREF)
             if isinstance(value, ForwardRef) else value for key, value in result.items()}
 
+
+_sentinel = object()
+
+
+def _make_eager_annotate(types=_sentinel):
+    if types is _sentinel:
+        return lambda format: {}
+    checked = {key: _type_check(value, f"field {key} annotation must be a type")
+               for key, value in types.items()}
+
+    def annotate(format):
+        if format in (1, 3):
+            return checked
+        if format == 4:
+            return _annotation_strings(types)
+        raise NotImplementedError(format)
+
+    return annotate
+
+
+# Functional NamedTuple from CPython 3.14.5 Lib/typing.py.
+def NamedTuple(typename, fields=_sentinel, /, **kwargs):
+    """Typed version of namedtuple.
+
+    Usage::
+
+        class Employee(NamedTuple):
+            name: str
+            id: int
+
+    This is equivalent to::
+
+        Employee = collections.namedtuple('Employee', ['name', 'id'])
+
+    The resulting class has an extra __annotations__ attribute, giving a
+    dict that maps field names to types.  (The field names are also in
+    the _fields attribute, which is part of the namedtuple API.)
+    An alternative equivalent functional syntax is also accepted::
+
+        Employee = NamedTuple('Employee', [('name', str), ('id', int)])
+    """
+    from collections import namedtuple
+
+    if fields is _sentinel:
+        if kwargs:
+            deprecated_thing = "Creating NamedTuple classes using keyword arguments"
+            deprecation_msg = (
+                "{name} is deprecated and will be disallowed in Python {remove}. "
+                "Use the class-based or functional syntax instead."
+            )
+        else:
+            deprecated_thing = "Failing to pass a value for the 'fields' parameter"
+            example = f"`{typename} = NamedTuple({typename!r}, [])`"
+            deprecation_msg = (
+                "{name} is deprecated and will be disallowed in Python {remove}. "
+                "To create a NamedTuple class with 0 fields "
+                "using the functional syntax, "
+                "pass an empty list, e.g. "
+            ) + example + "."
+    elif fields is None:
+        if kwargs:
+            raise TypeError(
+                "Cannot pass `None` as the 'fields' parameter "
+                "and also specify fields using keyword arguments"
+            )
+        else:
+            deprecated_thing = "Passing `None` as the 'fields' parameter"
+            example = f"`{typename} = NamedTuple({typename!r}, [])`"
+            deprecation_msg = (
+                "{name} is deprecated and will be disallowed in Python {remove}. "
+                "To create a NamedTuple class with 0 fields "
+                "using the functional syntax, "
+                "pass an empty list, e.g. "
+            ) + example + "."
+    elif kwargs:
+        raise TypeError("Either list of fields or keywords"
+                        " can be provided to NamedTuple, not both")
+    if fields is _sentinel or fields is None:
+        import warnings
+        warnings._deprecated(deprecated_thing, message=deprecation_msg, remove=(3, 15))
+        fields = kwargs.items()
+    types = {n: _type_check(t, f"field {n} annotation must be a type")
+             for n, t in fields}
+    field_names = [n for n, _ in fields]
+
+    annotate = _make_eager_annotate(types)
+    nt = namedtuple(typename, field_names, defaults=(), module=_caller())
+    nt.__annotate__ = nt.__new__.__annotate__ = annotate
+    nt.__orig_bases__ = (NamedTuple,)
+    return nt
+
+
+def _namedtuple_mro_entries(bases):
+    assert NamedTuple in bases
+    return (_typing._NamedTuple,)
+
+
+NamedTuple.__mro_entries__ = _namedtuple_mro_entries
+
+
+def _namedtuple_set_names(cls, namespace):
+    typename = cls.__name__
+    for name, value in namespace.items():
+        if name in ('__new__', '__init__', '__slots__', '__getnewargs__',
+                    '_fields', '_field_defaults', '_make', '_replace', '_asdict', '_source'):
+            raise AttributeError('Cannot overwrite NamedTuple attribute ' + name)
+        if name in ('__module__', '__name__', '__annotations__', '__annotate__',
+                    '__annotate_func__', '__annotations_cache__'):
+            continue
+        if name not in cls._fields:
+            setattr(cls, name, value)
+        try:
+            set_name = type(value).__set_name__
+        except AttributeError:
+            continue
+        try:
+            set_name(value, cls, name)
+        except BaseException as exc:
+            exc.add_note(
+                f"Error calling __set_name__ on {type(value).__name__!r} "
+                f"instance {name!r} in {typename!r}"
+            )
+            raise
+
+
+def _namedtuple_generic_getitem(cls, args):
+    return _specialize_generic_alias(_typing._GenericAlias(cls, cls.__parameters__), args)
+
+
+def _namedtuple_annotate(original):
+    # Check field types at declaration time, even if a name is still undefined.
+    def annotate(format):
+        values = _call_annotate(original, format)
+        if format == 4:
+            return values
+        return {name: _type_check(value, f"field {name} annotation must be a type")
+                for name, value in values.items()}
+
+    return annotate
+
+
 def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
     if not hasattr(cls, "__orig_bases__"):
         cls.__orig_bases__ = bases
 
     if own_annotate is not None:
-        fields = _typeddict_base_annotations(own_annotate, 3, cls)
+        fields = _call_annotate(own_annotate, 3, cls)
     annotations = {key: _typeddict_field(tp, cls.__module__, cls)
                    for key, tp in fields.items()}
 
@@ -544,13 +842,13 @@ def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
                 continue
             annotate = base.__annotate__
             if annotate is not None:
-                result.update(_typeddict_base_annotations(annotate, format, base))
+                result.update(_call_annotate(annotate, format, base))
         if own_annotate is not None:
-            own = _typeddict_base_annotations(own_annotate, format, cls)
+            own = _call_annotate(own_annotate, format, cls)
             if format != 4:
                 own = {key: _typeddict_field(tp, cls.__module__) for key, tp in own.items()}
         elif format == 4:
-            own = _typeddict_annotation_strings(fields)
+            own = _annotation_strings(fields)
         elif format in (1, 3):
             own = annotations
         else:
@@ -595,10 +893,7 @@ def _configure_typeddict(cls, fields, total, own_annotate=None, bases=()):
     cls.__total__ = total
 
 
-_typeddict_sentinel = object()
-
-
-def TypedDict(typename, fields=_typeddict_sentinel, /, *, total=True):
+def TypedDict(typename, fields=_sentinel, /, *, total=True):
     """A simple typed namespace. At runtime it is equivalent to a plain dict.
 
     TypedDict creates a dictionary type such that a type checker will expect all
@@ -653,10 +948,10 @@ def TypedDict(typename, fields=_typeddict_sentinel, /, *, total=True):
             username: str      # the "username" key can be changed
 
     """
-    if fields is _typeddict_sentinel or fields is None:
+    if fields is _sentinel or fields is None:
         import warnings
 
-        if fields is _typeddict_sentinel:
+        if fields is _sentinel:
             deprecated_thing = "Failing to pass a value for the 'fields' parameter"
         else:
             deprecated_thing = "Passing `None` as the 'fields' parameter"
@@ -717,6 +1012,25 @@ def assert_type(val, typ, /):
     return val
 
 
+def reveal_type[T](obj: T, /) -> T:
+    """Ask a static type checker to reveal the inferred type of an expression.
+
+    When a static type checker encounters a call to ``reveal_type()``,
+    it will emit the inferred type of the argument::
+
+        x: int = 1
+        reveal_type(x)
+
+    Running a static type checker (e.g., mypy) on this example
+    will produce output similar to 'Revealed type is "builtins.int"'.
+
+    At runtime, the function prints the runtime type of the
+    argument and returns the argument unchanged.
+    """
+    print(f"Runtime type is {type(obj).__name__!r}", file=_sys.stderr)
+    return obj
+
+
 _ASSERT_NEVER_REPR_MAX_LENGTH = 100
 
 
@@ -766,6 +1080,41 @@ def final(f):
 
 
 # Based on CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
+def override(method, /):
+    """Indicate that a method is intended to override a method in a base class.
+
+    Usage::
+
+        class Base:
+            def method(self) -> None:
+                pass
+
+        class Child(Base):
+            @override
+            def method(self) -> None:
+                super().method()
+
+    When this decorator is applied to a method, the type checker will
+    validate that it overrides a method or attribute with the same name on a
+    base class.  This helps prevent bugs that may occur when a base class is
+    changed without an equivalent change to a child class.
+
+    There is no runtime checking of this property. The decorator attempts to
+    set the ``__override__`` attribute to ``True`` on the decorated object to
+    allow runtime introspection.
+
+    See PEP 698 for details.
+    """
+    try:
+        method.__override__ = True
+    except (AttributeError, TypeError):
+        # Skip the attribute silently if it is not writable.
+        # AttributeError happens if the object has __slots__ or a
+        # read-only property, TypeError if it's a builtin class.
+        pass
+    return method
+
+
 def no_type_check(arg):
     """Decorator to indicate that annotations are not type hints.
 
@@ -841,6 +1190,10 @@ class _Final:
     __module__ = __name__
     __slots__ = ("__weakref__",)
 
+    def __init_subclass__(cls, /, *args, **kwds):
+        if '_root' not in kwds:
+            raise TypeError("Cannot subclass special typing classes")
+
 
 class _NotIterable:
     __module__ = __name__
@@ -848,7 +1201,7 @@ class _NotIterable:
     __iter__ = None
 
 
-class _SpecialForm(_Final, _NotIterable):
+class _SpecialForm(_Final, _NotIterable, _root=True):
     __module__ = __name__
     __slots__ = ("_name", "__doc__", "_getitem")
 
@@ -1006,7 +1359,16 @@ def TypeAlias(self, parameters):
     raise TypeError(f"{self} is not subscriptable")
 
 
-def _type_check(arg, message, *, allow_special_forms=False):
+def _type_convert(arg, module=None, *, allow_special_forms=False, owner=None):
+    if arg is None:
+        return type(None)
+    if isinstance(arg, str):
+        return _make_forward_ref(arg, module, owner, is_class=allow_special_forms)
+    return arg
+
+
+def _type_check(arg, message, is_argument=True, module=None, *, allow_special_forms=False, owner=None):
+    arg = _type_convert(arg, module, allow_special_forms=allow_special_forms, owner=owner)
     protocol = getattr(_typing, "Protocol", None)
     if isinstance(arg, _SpecialForm) and arg in (LiteralString, NoReturn, Never, Self, TypeAlias):
         return arg
@@ -1018,7 +1380,7 @@ def _type_check(arg, message, *, allow_special_forms=False):
     if (
         origin is _typing.Generic
         or (protocol is not None and origin is protocol)
-        or (not allow_special_forms and (origin is ClassVar or origin is Final))
+        or (not allow_special_forms and (origin is ClassVar or (is_argument and origin is Final)))
     ):
         raise TypeError(f"{repr(arg)} is not valid as type argument")
     if type(arg) is tuple:
@@ -1094,6 +1456,131 @@ def ReadOnly(self, parameters):
 
 
 @_SpecialForm
+def TypeGuard(self, parameters):
+    """Special typing construct for marking user-defined type predicate functions.
+
+    ``TypeGuard`` can be used to annotate the return type of a user-defined
+    type predicate function.  ``TypeGuard`` only accepts a single type argument.
+    At runtime, functions marked this way should return a boolean.
+
+    ``TypeGuard`` aims to benefit *type narrowing* -- a technique used by static
+    type checkers to determine a more precise type of an expression within a
+    program's code flow.  Usually type narrowing is done by analyzing
+    conditional code flow and applying the narrowing to a block of code.  The
+    conditional expression here is sometimes referred to as a "type predicate".
+
+    Sometimes it would be convenient to use a user-defined boolean function
+    as a type predicate.  Such a function should use ``TypeGuard[...]`` or
+    ``TypeIs[...]`` as its return type to alert static type checkers to
+    this intention. ``TypeGuard`` should be used over ``TypeIs`` when narrowing
+    from an incompatible type (e.g., ``list[object]`` to ``list[int]``) or when
+    the function does not return ``True`` for all instances of the narrowed type.
+
+    Using  ``-> TypeGuard[NarrowedType]`` tells the static type checker that
+    for a given function:
+
+    1. The return value is a boolean.
+    2. If the return value is ``True``, the type of its argument
+       is ``NarrowedType``.
+
+    For example::
+
+         def is_str_list(val: list[object]) -> TypeGuard[list[str]]:
+             '''Determines whether all objects in the list are strings'''
+             return all(isinstance(x, str) for x in val)
+
+         def func1(val: list[object]):
+             if is_str_list(val):
+                 # Type of ``val`` is narrowed to ``list[str]``.
+                 print(" ".join(val))
+             else:
+                 # Type of ``val`` remains as ``list[object]``.
+                 print("Not a list of strings!")
+
+    Strict type narrowing is not enforced -- ``TypeB`` need not be a narrower
+    form of ``TypeA`` (it can even be a wider form) and this may lead to
+    type-unsafe results.  The main reason is to allow for things like
+    narrowing ``list[object]`` to ``list[str]`` even though the latter is not
+    a subtype of the former, since ``list`` is invariant.  The responsibility of
+    writing type-safe type predicates is left to the user.
+
+    ``TypeGuard`` also works with type variables.  For more information, see
+    PEP 647 (User-Defined Type Guards).
+    """
+    item = _type_check(parameters, f'{self} accepts only single type.')
+    return _typing._GenericAlias(self, (item,))
+
+
+@_SpecialForm
+def TypeIs(self, parameters):
+    """Special typing construct for marking user-defined type predicate functions.
+
+    ``TypeIs`` can be used to annotate the return type of a user-defined
+    type predicate function.  ``TypeIs`` only accepts a single type argument.
+    At runtime, functions marked this way should return a boolean and accept
+    at least one argument.
+
+    ``TypeIs`` aims to benefit *type narrowing* -- a technique used by static
+    type checkers to determine a more precise type of an expression within a
+    program's code flow.  Usually type narrowing is done by analyzing
+    conditional code flow and applying the narrowing to a block of code.  The
+    conditional expression here is sometimes referred to as a "type predicate".
+
+    Sometimes it would be convenient to use a user-defined boolean function
+    as a type predicate.  Such a function should use ``TypeIs[...]`` or
+    ``TypeGuard[...]`` as its return type to alert static type checkers to
+    this intention.  ``TypeIs`` usually has more intuitive behavior than
+    ``TypeGuard``, but it cannot be used when the input and output types
+    are incompatible (e.g., ``list[object]`` to ``list[int]``) or when the
+    function does not return ``True`` for all instances of the narrowed type.
+
+    Using  ``-> TypeIs[NarrowedType]`` tells the static type checker that for
+    a given function:
+
+    1. The return value is a boolean.
+    2. If the return value is ``True``, the type of its argument
+       is the intersection of the argument's original type and
+       ``NarrowedType``.
+    3. If the return value is ``False``, the type of its argument
+       is narrowed to exclude ``NarrowedType``.
+
+    For example::
+
+        from typing import assert_type, final, TypeIs
+
+        class Parent: pass
+        class Child(Parent): pass
+        @final
+        class Unrelated: pass
+
+        def is_parent(val: object) -> TypeIs[Parent]:
+            return isinstance(val, Parent)
+
+        def run(arg: Child | Unrelated):
+            if is_parent(arg):
+                # Type of ``arg`` is narrowed to the intersection
+                # of ``Parent`` and ``Child``, which is equivalent to
+                # ``Child``.
+                assert_type(arg, Child)
+            else:
+                # Type of ``arg`` is narrowed to exclude ``Parent``,
+                # so only ``Unrelated`` is left.
+                assert_type(arg, Unrelated)
+
+    The type inside ``TypeIs`` must be consistent with the type of the
+    function's argument; if it is not, static type checkers will raise
+    an error.  An incorrectly written ``TypeIs`` function can lead to
+    unsound behavior in the type system; it is the user's responsibility
+    to write such functions in a type-safe manner.
+
+    ``TypeIs`` also works with type variables.  For more information, see
+    PEP 742 (Narrowing types with ``TypeIs``).
+    """
+    item = _type_check(parameters, f'{self} accepts only single type.')
+    return _typing._GenericAlias(self, (item,))
+
+
+@_SpecialForm
 def ClassVar(self, parameters):
     """Special type construct to mark class variables."""
     item = _type_check(parameters, f"{self} accepts only single type.", allow_special_forms=True)
@@ -1109,6 +1596,70 @@ def Final(self, parameters):
     if isinstance(item, str):
         raise NotImplementedError("string Final arguments require typing.ForwardRef")
     return _typing._GenericAlias(self, (type(None) if item is None else item,))
+
+
+@_SpecialForm
+def Concatenate(self, parameters):
+    """Special form for annotating higher-order functions.
+
+    ``Concatenate`` can be used in conjunction with ``ParamSpec`` and
+    ``Callable`` to represent a higher-order function which adds, removes or
+    transforms the parameters of a callable.
+
+    For example::
+
+        Callable[Concatenate[int, P], int]
+
+    See PEP 612 for detailed information.
+    """
+    if parameters == ():
+        raise TypeError("Cannot take a Concatenate of no types.")
+    if not isinstance(parameters, tuple):
+        parameters = (parameters,)
+    if not (parameters[-1] is ... or isinstance(parameters[-1], _typing.ParamSpec)):
+        raise TypeError("The last parameter to Concatenate should be a "
+                        "ParamSpec variable or ellipsis.")
+    msg = "Concatenate[arg, ...]: each arg must be a type."
+    parameters = (*(_type_check(p, msg) for p in parameters[:-1]), parameters[-1])
+    return _typing._ConcatenateGenericAlias(self, parameters)
+
+
+def _is_param_expr(arg):
+    return arg is ... or isinstance(arg, (tuple, list, _typing.ParamSpec, _typing._ConcatenateGenericAlias))
+
+
+def _paramspec_subst(self, arg):
+    if isinstance(arg, (list, tuple)):
+        arg = tuple(_type_check(a, "Expected a type.") for a in arg)
+    elif not _is_param_expr(arg):
+        raise TypeError(f"Expected a list of types, an ellipsis, "
+                        f"ParamSpec, or Concatenate. Got {arg}")
+    return arg
+
+
+def _paramspec_prepare_subst(self, alias, args):
+    params = alias.__parameters__
+    i = params.index(self)
+    if i == len(args) and self.has_default():
+        args = (*args, self.__default__)
+    if i >= len(args):
+        raise TypeError(f"Too few arguments for {alias}")
+    # Special case where Z[[int, str, bool]] == Z[int, str, bool] in PEP 612.
+    if len(params) == 1 and not _is_param_expr(args[0]):
+        assert i == 0
+        args = (args,)
+    # Convert lists to tuples to help other libraries cache the results.
+    elif isinstance(args[i], list):
+        args = (*args[:i], tuple(args[i]), *args[i+1:])
+    return args
+
+
+def _concatenate_copy_with(self, params):
+    if isinstance(params[-1], (list, tuple)):
+        return (*params[:-1], *params[-1])
+    if isinstance(params[-1], _typing._ConcatenateGenericAlias):
+        params = (*params[:-1], *params[-1].__args__)
+    return type(self)(self.__origin__, params, name=self._name, inst=self._inst)
 
 
 @_SpecialForm
@@ -1167,7 +1718,7 @@ class _SpecialGenericAlias(_NotIterable):
     """A named typing alias for a builtin collection."""
     __module__ = __name__
 
-    def __init__(self, origin, nparams, *, inst=True, name=None):
+    def __init__(self, origin, nparams, *, inst=True, name=None, defaults=()):
         if name is None:
             name = origin.__name__
         self.__origin__ = origin
@@ -1175,6 +1726,7 @@ class _SpecialGenericAlias(_NotIterable):
         self.__qualname__ = name
         self._inst = inst
         self._nparams = nparams
+        self._defaults = defaults
         self.__slots__ = None
         module = "" if origin.__module__ == "builtins" else origin.__module__ + "."
         self.__doc__ = f"Deprecated alias to {module}{origin.__qualname__}."
@@ -1193,7 +1745,7 @@ class _SpecialGenericAlias(_NotIterable):
         raise AttributeError(attr)
 
     def __setattr__(self, attr, value):
-        if (attr.startswith("__") and attr.endswith("__")) or attr in ("_name", "_inst", "_nparams"):
+        if (attr.startswith("__") and attr.endswith("__")) or attr in ("_name", "_inst", "_nparams", "_defaults"):
             object.__setattr__(self, attr, value)
         else:
             setattr(self.__origin__, attr, value)
@@ -1212,9 +1764,13 @@ class _SpecialGenericAlias(_NotIterable):
         if not isinstance(params, tuple):
             params = (params,)
         args = tuple(_alias_type_arg(p) for p in params)
-        if len(args) != self._nparams:
+        missing = self._nparams - len(args)
+        if 0 < missing <= len(self._defaults):
+            args += self._defaults[-missing:]
+        elif missing:
+            expected = f"at least {self._nparams - len(self._defaults)}" if self._defaults else self._nparams
             count = "many" if len(args) > self._nparams else "few"
-            raise TypeError(f"Too {count} arguments for {self}; actual {len(args)}, expected {self._nparams}")
+            raise TypeError(f"Too {count} arguments for {self}; actual {len(args)}, expected {expected}")
         return self.copy_with(args)
 
     @lru_cache
@@ -1276,6 +1832,9 @@ Tuple.__doc__ = \
 
     To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
     """
+Awaitable = _SpecialGenericAlias(_Awaitable, 1)
+AsyncIterator = _SpecialGenericAlias(_AsyncIterator, 1)
+Generator = _SpecialGenericAlias(_Generator, 3, defaults=(type(None), type(None)))
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
 Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
 Type = _SpecialGenericAlias(type, 1, name="Type", inst=False)
@@ -1302,9 +1861,40 @@ Type.__doc__ = \
 
     At this point the type checker knows that joe has type BasicUser.
     """
+Counter = _SpecialGenericAlias(_Counter, 1)
 DefaultDict = _SpecialGenericAlias(_defaultdict, 2, name="DefaultDict")
+Sequence = _SpecialGenericAlias(_Sequence, 1)
 Mapping = _SpecialGenericAlias(_Mapping, 2, name="Mapping")
 MutableMapping = _SpecialGenericAlias(_MutableMapping, 2, name="MutableMapping")
+Iterable = _SpecialGenericAlias(_Iterable, 1, name="Iterable")
+
+
+# Reconstruction callables and arguments used by CPython's typing alias reducers.
+def _reduce_generic_alias(alias):
+    from operator import getitem
+    origin = globals()[alias._name] if alias._name else alias.__origin__
+    args = tuple(alias.__args__)
+    if len(args) == 1 and not isinstance(args[0], tuple):
+        args, = args
+    return getitem, (origin, args)
+
+
+def _reduce_callable_alias(alias):
+    from operator import getitem
+    args = alias.__args__
+    if not (len(args) == 2 and (args[0] is ... or isinstance(args[0], (list, tuple, _typing.ParamSpec)))):
+        args = list(args[:-1]), args[-1]
+    return getitem, (Callable, args)
+
+
+def _substitute_alias_arguments(args, replacements):
+    result = []
+    for arg in args:
+        if not isinstance(arg, type) and getattr(arg, "__typing_is_unpacked_typevartuple__", False) is True:
+            result.extend(replacements[arg.__args__[0]])
+        else:
+            result.append(_substitute_alias_argument(arg, replacements))
+    return tuple(result)
 
 
 def _substitute_alias_argument(arg, replacements):
@@ -1312,18 +1902,64 @@ def _substitute_alias_argument(arg, replacements):
         return arg
     for parameter, value in replacements.items():
         if arg is parameter:
+            if isinstance(parameter, _typing.TypeVarTuple):
+                raise TypeError("Substitution of bare TypeVarTuple is not supported")
             return value
     parameters = getattr(arg, '__parameters__', ())
     if not parameters:
         return arg
     from types import GenericAlias
     if type(arg) is GenericAlias:
-        return GenericAlias(arg.__origin__, tuple(
-            _substitute_alias_argument(item, replacements) for item in arg.__args__
-        ))
+        return GenericAlias(arg.__origin__, _substitute_alias_arguments(arg.__args__, replacements))
     if _typing.get_origin(arg) is _typing.Union:
-        return _typing.Union[tuple(_substitute_alias_argument(item, replacements) for item in arg.__args__)]
-    return arg[tuple(replacements[p] for p in parameters)]
+        return _typing.Union[_substitute_alias_arguments(arg.__args__, replacements)]
+    subargs = []
+    for parameter in parameters:
+        if isinstance(parameter, _typing.TypeVarTuple):
+            subargs.extend(replacements[parameter])
+        else:
+            subargs.append(replacements[parameter])
+    return arg[tuple(subargs)]
+
+
+def _unpack_alias_args(args):
+    expanded = []
+    for arg in args:
+        unpacked = getattr(arg, "__typing_unpacked_tuple_args__", None)
+        if unpacked is not None and not (unpacked and unpacked[-1] is ...):
+            expanded.extend(unpacked)
+        else:
+            expanded.append(arg)
+    return tuple(expanded)
+
+
+def _prepare_typevartuple(pack, alias, args):
+    # A single pack consumes the arguments between the fixed parameters.
+    params = alias.__parameters__
+    index = params.index(pack)
+    left = index
+    right = len(params) - index - 1
+    if any(isinstance(p, _typing.TypeVarTuple) for p in params[index + 1:]):
+        raise TypeError(f"More than one TypeVarTuple parameter in {alias}")
+    unbounded = False
+    fill = None
+    for i, arg in enumerate(args):
+        unpacked = None if isinstance(arg, type) else getattr(arg, "__typing_unpacked_tuple_args__", None)
+        if unpacked and len(unpacked) == 2 and unpacked[-1] is ...:
+            if unbounded:
+                raise TypeError("More than one unpacked arbitrary-length tuple argument")
+            unbounded = True
+            fill = unpacked[0]
+            left = min(left, i)
+            right = min(right, len(args) - i - 1)
+    if not unbounded and len(args) < left + right:
+        raise TypeError(f"Too few arguments for {alias}; actual {len(args)}, expected at least {len(params) - 1}")
+    end = len(args) - right
+    grouped = args[left:end]
+    if not grouped and pack.has_default():
+        grouped = _unpack_alias_args((pack.__default__,))
+    return (args[:left] + (fill,) * (index - left) + (tuple(grouped),)
+            + (fill,) * (len(params) - right - left - index - 1) + args[end:])
 
 
 def _specialize_generic_alias_uncached(alias, args):
@@ -1334,28 +1970,42 @@ def _specialize_generic_alias_uncached(alias, args):
         raise TypeError(f"{alias} is not a generic class")
     if not isinstance(args, tuple):
         args = (args,)
-    if any(isinstance(p, _typing.TypeVarTuple) for p in parameters):
-        raise NotImplementedError("specializing a variadic alias requires parameter-pack substitution")
-    expanded = []
-    for arg in args:
-        unpacked = getattr(arg, "__typing_unpacked_tuple_args__", None)
-        if unpacked is not None and not (unpacked and unpacked[-1] is ...):
-            expanded.extend(unpacked)
-        else:
-            expanded.append(arg)
+    expanded = _unpack_alias_args(_type_convert(arg) for arg in args)
+    for parameter in parameters:
+        if isinstance(parameter, _typing.TypeVarTuple):
+            expanded = _prepare_typevartuple(parameter, alias, expanded)
+        elif isinstance(parameter, _typing.ParamSpec):
+            expanded = parameter.__typing_prepare_subst__(alias, expanded)
     if len(expanded) != len(parameters):
         which = "few" if len(expanded) < len(parameters) else "many"
         expected = f"at least {len(expanded) + 1}" if which == "few" else str(len(parameters))
         raise TypeError(f"Too {which} arguments for {alias}; actual {len(expanded)}, expected {expected}")
     replacements = {}
     for parameter, arg in zip(parameters, expanded):
+        if isinstance(parameter, _typing.TypeVarTuple):
+            replacements[parameter] = arg
+            continue
+        if isinstance(parameter, _typing.ParamSpec):
+            replacements[parameter] = parameter.__typing_subst__(arg)
+            continue
         arg = _alias_type_arg(arg)
         if _typing.get_origin(arg) is Unpack:
             raise TypeError(f"{arg} is not valid as type argument")
         replacements[parameter] = arg
-    args = tuple(_substitute_alias_argument(arg, replacements) for arg in alias.__args__)
-    if isinstance(alias, _AnnotatedAlias):
+    args = _substitute_alias_arguments(alias.__args__, replacements)
+    if isinstance(alias, _typing.Union):
+        return _typing.Union[args]
+    if isinstance(alias, (_AnnotatedAlias, _typing._ConcatenateGenericAlias)):
         return alias.copy_with(args)
+    if type(alias) is _typing._CallableGenericAlias:
+        # typing flattens each substituted tuple, even one in the result position.
+        flat = tuple(item for arg in args for item in (arg if isinstance(arg, tuple) else (arg,)))
+        return _typing._CallableGenericAlias(alias.__origin__, flat, name="Callable")
+    if alias.__origin__ is _typing.get_origin(Callable):
+        # collections.abc.Callable rebuilds its argument list separately from its result.
+        if not isinstance(args[0], (tuple, list)):
+            args = (args[:-1], args[-1])
+        return alias.__origin__[args]
     return _typing._GenericAlias(alias.__origin__, args, name=alias._name, inst=alias._inst)
 
 
@@ -1369,7 +2019,7 @@ def _specialize_generic_alias(alias, args):
         return _specialize_generic_alias_uncached(alias, args)
 
 
-class _TypedCacheSpecialForm(_SpecialForm):
+class _TypedCacheSpecialForm(_SpecialForm, _root=True):
     __module__ = __name__
 
     @lru_cache
@@ -1505,6 +2155,10 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, forward
         return value
     args = getattr(value, '__args__', ())
     resolved = tuple(_resolve_hint(a, globalns, localns, owner, seen, include_extras, forwardrefs) for a in args)
+    if isinstance(value, _AnnotatedAlias):
+        if not include_extras:
+            return resolved[0]
+        return value if resolved == args else value.copy_with(resolved)
     if not include_extras:
         for name in ('Required', 'NotRequired', 'ReadOnly'):
             if origin is getattr(_typing, name, None):
@@ -1684,6 +2338,10 @@ def __getattr__(attr):
     if attr in {"Pattern", "Match"}:
         import re
         alias = _SpecialGenericAlias(getattr(re, attr), 1)
-        globals()[attr] = alias
-        return alias
-    raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
+    elif attr in {"ContextManager", "AsyncContextManager"}:
+        import contextlib
+        alias = _SpecialGenericAlias(getattr(contextlib, f"Abstract{attr}"), 2, name=attr, defaults=(bool | None,))
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
+    globals()[attr] = alias
+    return alias

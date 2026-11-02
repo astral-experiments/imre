@@ -409,7 +409,7 @@ impl Cache {
             .command
             .as_ref()
             .map(|command| blake3::hash(command.source.as_bytes()).to_hex().to_string());
-        let file = if command_hash.is_none() {
+        let file = if command_hash.is_none() && options.module_entry.is_none() {
             Some(entry.canonicalize().ok()?)
         } else {
             None
@@ -420,6 +420,8 @@ impl Cache {
             (
                 file,
                 command_hash,
+                &options.module_entry,
+                options.path_entry,
                 options.python_startup(),
                 options.runtime_imports,
                 &options.extension_paths,

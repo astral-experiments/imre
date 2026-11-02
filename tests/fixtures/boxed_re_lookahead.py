@@ -2,6 +2,18 @@ import re
 
 
 def current():
+    for flags in (0, re.L):
+        guard = re.compile(b"(?<!abc)(d.f)", flags)
+        assert guard.search(b"abcdefdof", 3, 6) is None
+        assert guard.search(b"xbcdefdof", 3, 6).span(1) == (3, 6)
+        groups = re.compile(b"^([ab]*?)(?<!(?P<before>a))(?P<end>c)", flags)
+        match = groups.fullmatch(b"abc")
+        assert match.groups() == (b"ab", None, b"c") and match.span("before") == (-1, -1)
+        assert groups.groupindex["end"] == 3 and groups.search(b"ac") is None
+        high = re.compile(b"(?<=\xff\x80)(.)", flags)
+        assert high.match(b"\xff\x80x", 2, 3).group(1) == b"x"
+        assert high.match(b"\xff\x81x", 2, 3) is None
+
     probe = re.compile(r"(?=(?P<a>.)(?P<b>.))(?P<first>.)")
     found = probe.search("xé中!", 1, 3)
     assert re.match(r"(?=(?P<é>x))", "x").group("é") == "x"
@@ -61,3 +73,26 @@ def current():
     assert boundary.search("a中", 1) is None
     assert re.fullmatch(r"\B(?=$)", "").span() == (0, 0)
     assert [m.start() for m in re.finditer(r"\B(?=.)", "a_\u200d!")] == [1, 3]
+
+    # Lookbehind can read and capture before pos. The assertion consumes no input.
+    p = re.compile(r"(?<=\A(?P<prefix>é|𐀀))(b)")
+    m = p.fullmatch("𐀀b!", 1, 2)
+    assert m.groups() == ("𐀀", "b") and m.span() == (1, 2) and m.span("prefix") == (0, 1)
+    assert p.search("xéb", 2) is None
+    assert re.fullmatch(r"ab(?<=b)cd", "abcd").span() == (0, 4)
+    assert re.fullmatch(r"ab(?<!b)cd", "abcd") is None
+    assert re.search(r"(?<!x{2})z", "z").span() == (0, 1)
+    assert re.search(r"(ab)\1(?<=\1)c", "ababc").groups() == ("ab",)
+    assert re.match(r"(?:(a)|(x))b(?<=(?(2)x|b))c", "abc").groups() == ("a", None)
+    assert re.search(r"(?<=(?:a{2}|bb))c", "aac").span() == (2, 3)
+    assert re.search(r"(?<!(?:a{2}|bb))c", "bbc") is None
+    assert re.search(r"(?<!(?:a{2}|bb))c", "abc").span() == (2, 3)
+    assert re.match(r"(a{2}|bb)c(?<=\1c)", "aac").groups() == ("aa",)
+    for invalid in (r"(?<=x*)z", r"(?<!é|ab)z", r"(?<=a{1,2})", r"(a+)(?<=\1)",
+                    r"(?<=(a)\1)", r"(?<=(?(1)x|y))(a)"):
+        try:
+            re.compile(invalid)
+        except re.PatternError:
+            pass
+        else:
+            raise AssertionError(invalid)

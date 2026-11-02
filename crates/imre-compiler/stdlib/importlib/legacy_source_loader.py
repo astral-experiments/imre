@@ -1,8 +1,103 @@
 """Legacy direct loading with a SourceFileLoader, including replacement modules."""
 
 import sys
-from _imre_importlib import warn_legacy_load as _warn_legacy_load
+from _thread import RLock
+from _imre_importlib import (
+    _import_lock,
+    create_native_module as _create_native_module,
+    exec_native_module as _exec_native_module,
+    native_spec_info as _native_spec_info,
+    warn_import as _warn_import,
+)
+from _imre_importlib import import_module as _native_import, warn_legacy_load as _warn_legacy_load
 from os import altsep, sep
+
+
+_NEEDS_LOADING = object()
+_module_locks = {}
+
+
+class _ModuleLockManager:
+    """Hold a reentrant lock for this name within the bootstrap's module registry."""
+
+    def __init__(self, name):
+        self._name = name
+
+    def __enter__(self):
+        # Keep the entry alive for waiters, but release the registry lock before
+        # acquiring the module lock or running any loader code.
+        with _import_lock:
+            lock, users = _module_locks.get(self._name, (None, 0))
+            self._lock = lock if lock is not None else RLock()
+            _module_locks[self._name] = (self._lock, users + 1)
+        try:
+            self._lock.acquire()
+        except BaseException:
+            self._drop_user()
+            raise
+
+    def _drop_user(self):
+        with _import_lock:
+            lock, users = _module_locks[self._name]
+            if users == 1:
+                del _module_locks[self._name]
+            else:
+                _module_locks[self._name] = (lock, users - 1)
+
+    def __exit__(self, *exc):
+        self._lock.release()
+        self._drop_user()
+
+
+def _warning_module():
+    import warnings
+    return warnings
+
+
+_is_frozen = __name__ == "_frozen_importlib"
+if not _is_frozen:
+    _bootstrap_external = None
+
+
+def _setup(sys_module, _imp_module):
+    # The native resolver owns the active finder registry.
+    global sys, _imp
+    sys = sys_module
+    _imp = _imp_module
+
+
+def _find_and_load(name, import_):
+    return _native_import(name, None if _is_frozen else globals())
+
+
+def _import_warning(message, line):
+    _warn_import(None if _is_frozen else globals(), message, line)
+
+
+class _NativeImporter:
+    """Find and initialize the modules provided by this native interpreter."""
+
+    @classmethod
+    def find_spec(cls, fullname, path=None, target=None):
+        info = _native_spec_info(fullname, path, cls is _BundledImporter)
+        if info is None:
+            return None
+        origin, locations = info
+        spec = ModuleSpec(fullname, cls, origin=origin)
+        spec.submodule_search_locations = locations
+        return spec
+
+    @staticmethod
+    def create_module(spec):
+        return _create_native_module(spec.name)
+
+    @staticmethod
+    def exec_module(module):
+        _exec_native_module(module)
+
+
+class _BundledImporter(_NativeImporter):
+    """Find bundled Python sources after entries on the application's path."""
 
 
 def _new_module(name):
@@ -46,7 +141,7 @@ def _move_to_end(spec):
 
 
 def _load_module_shim(loader, fullname):
-    _warn_legacy_load()
+    _warn_legacy_load(None if _is_frozen else globals())
     spec = _loader_spec(fullname, loader)
     if fullname in sys.modules:
         module = sys.modules[fullname]

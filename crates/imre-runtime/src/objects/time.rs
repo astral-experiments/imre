@@ -9,28 +9,68 @@ use super::{
     words::WordKind,
 };
 use std::ffi::CStr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::io;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
-/// Suspend the calling thread for a checked Python timeout in nanoseconds.
-pub(crate) fn sleep_ns(nanos: i64) -> Result<(), Error> {
+/// A signal delivered to the sleeping thread interrupts the native wait. A
+/// returning handler resumes against the same deadline, including callback time.
+pub(crate) fn sleep_ns<E: From<Error>>(
+    nanos: i64,
+    mut dispatch: impl FnMut() -> Result<(), E>,
+) -> Result<(), E> {
     if nanos < 0 {
-        return Err(Error::new(
-            Kind::ValueError,
-            "sleep length must be non-negative",
-        ));
+        return Err(Error::new(Kind::ValueError, "sleep length must be non-negative").into());
     }
-    if nanos == 0 {
-        std::thread::yield_now();
-    } else {
-        std::thread::sleep(std::time::Duration::from_nanos(nanos as u64));
+    let deadline =
+        monotonic_time().map_err(super::errno_error)? + Duration::from_nanos(nanos as u64);
+    dispatch()?;
+    loop {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let delay = deadline;
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let delay = deadline.saturating_sub(monotonic_time().map_err(super::errno_error)?);
+        let when = libc::timespec {
+            tv_sec: delay.as_secs().try_into().map_err(|_| {
+                Error::new(
+                    Kind::OverflowError,
+                    "timestamp out of range for platform time_t",
+                )
+            })?,
+            tv_nsec: delay.subsec_nanos().into(),
+        };
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        // SAFETY: clock_nanosleep reads this absolute CLOCK_MONOTONIC timestamp.
+        let status = unsafe {
+            libc::clock_nanosleep(
+                libc::CLOCK_MONOTONIC,
+                libc::TIMER_ABSTIME,
+                &when,
+                std::ptr::null_mut(),
+            )
+        };
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        // SAFETY: nanosleep reads this relative delay; no remaining-time result is needed.
+        let status = if unsafe { libc::nanosleep(&when, std::ptr::null_mut()) } < 0 {
+            io::Error::last_os_error()
+                .raw_os_error()
+                .expect("nanosleep sets errno")
+        } else {
+            0
+        };
+        if status == 0 {
+            return dispatch();
+        }
+        if status != libc::EINTR {
+            return Err(super::errno_error(io::Error::from_raw_os_error(status)).into());
+        }
+        dispatch()?;
     }
-    Ok(())
 }
 
 /// CPython rounds a positive floating-point timeout up to a whole nanosecond.
-pub(crate) fn sleep_float(seconds: f64) -> Result<(), Error> {
+pub(crate) fn sleep_float_ns(seconds: f64) -> Result<i64, Error> {
     if seconds.is_nan() {
         return Err(Error::new(
             Kind::ValueError,
@@ -49,7 +89,7 @@ pub(crate) fn sleep_float(seconds: f64) -> Result<(), Error> {
     } else {
         nanos.ceil()
     };
-    sleep_ns(rounded as i64)
+    Ok(rounded as i64)
 }
 
 /// Signed nanoseconds since the Unix epoch, without rounding through floating point.
@@ -78,6 +118,33 @@ pub(crate) fn monotonic_time() -> std::io::Result<std::time::Duration> {
         stamp.tv_sec as u64,
         stamp.tv_nsec as u32,
     ))
+}
+
+/// Sample local time half a year apart, as CPython does on Unix with tm_gmtoff.
+pub(crate) fn timezone_samples() -> Result<[(i64, String); 2], Error> {
+    const YEAR: i64 = (365 * 24 + 6) * 3600;
+    let january = wall_time() as i64 / YEAR * YEAR;
+    let sample = |stamp| -> Result<_, Error> {
+        let tm = timed::civil(stamp, false)?;
+        if !(-48 * 3600..=48 * 3600).contains(&tm.tm_gmtoff) {
+            return Err(Error::new(Kind::RuntimeError, "invalid GMT offset"));
+        }
+        let name: &[u8] = if tm.tm_zone.is_null() {
+            b"   "
+        } else {
+            // SAFETY: libc supplies the NUL-terminated abbreviation for this conversion.
+            unsafe { CStr::from_ptr(tm.tm_zone) }.to_bytes()
+        };
+        // CPython copies at most nine bytes of each abbreviation before decoding.
+        let name = super::codecs::Codec::Utf8 { signature: false }
+            .decode(&name[..name.len().min(9)], None)?;
+        Ok((-tm.tm_gmtoff, name))
+    };
+    let mut zones = [sample(january)?, sample(january + YEAR / 2)?];
+    if zones[0].0 < zones[1].0 {
+        zones.swap(0, 1);
+    }
+    Ok(zones)
 }
 
 /// The nine sequence fields and two named timezone attributes of a civil time.

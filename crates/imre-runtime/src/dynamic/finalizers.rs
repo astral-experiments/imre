@@ -20,7 +20,9 @@ impl Context {
             let Some(owner) = heap.acyclic_finalizer(roots, stdin.as_ref())? else {
                 break;
             };
-            self.dispatch_finalizer(owner);
+            if !super::stdlib::io::deallocate_exact_pair(self, owner)? {
+                self.dispatch_finalizer(owner);
+            }
             finalized = true;
         }
         Ok(finalized)
