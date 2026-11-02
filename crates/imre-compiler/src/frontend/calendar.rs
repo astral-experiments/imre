@@ -100,6 +100,7 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
             receiver,
             Type::Calendar(C::Date | C::DateTime) | Type::ClockTime
         ),
+        "fromisoformat" => receiver == Type::ClockTime,
         "ctime" | "isoweekday" => matches!(receiver, Type::Calendar(C::Date | C::DateTime)),
         _ => false,
     }
