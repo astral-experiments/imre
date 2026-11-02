@@ -22,6 +22,52 @@ unsafe fn missing(key: usize, bytes: bool, encoded: Cow<'_, [u8]>) {
     super::super::exceptions::raise_key_from_none(original, encoded);
 }
 
+/// # Safety
+/// The native environment array and all its entries stay immutable through the call.
+unsafe fn environment_keys(entries: *const *const libc::c_char) -> Result<crate::ObjectOwner> {
+    let mut seen = std::collections::HashSet::new();
+    let mut keys = super::super::words::Words::new(8);
+    // SAFETY: all borrowed names stay rooted until the snapshot is complete.
+    for (name, _) in unsafe { environment_names(entries) } {
+        seen.try_reserve(1).map_err(|_| Error::allocation())?;
+        if seen.insert(name) {
+            keys.values
+                .try_reserve(1)
+                .map_err(|_| Error::allocation())?;
+            let key = super::super::bytes::owned_input(name)?;
+            keys.values.push(crate::BytesOwner::into_raw(key) as usize);
+        }
+    }
+    Ok(keys.into_object())
+}
+
+/// Snapshot raw keys in first-insertion order, for lazy environment iteration.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_environ_keys() -> *const Object {
+    let _guard = ENVIRONMENT.lock().unwrap();
+    // SAFETY: the lock keeps the native array stable until all keys are copied.
+    let result = unsafe { environment_keys(native_environ()) };
+    finish(result.map(crate::ObjectOwner::into_raw), std::ptr::null())
+}
+
+/// Look up an exact bytes key, retaining its identity in a missing-key exception.
+///
+/// # Safety
+/// The caller roots the key and takes ownership of a non-null result.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_environb_index(key: *const Bytes) -> *const Bytes {
+    // SAFETY: the caller roots an exact bytes object throughout the lookup.
+    let name = unsafe { &*key }.as_slice();
+    match with_environment_value(name, super::super::bytes::owned_input) {
+        Some(value) => finish(value.map(crate::BytesOwner::into_raw), std::ptr::null()),
+        None => {
+            // SAFETY: the original key is still rooted and has the indicated kind.
+            unsafe { missing(key as usize, true, Cow::Borrowed(name)) };
+            std::ptr::null()
+        }
+    }
+}
+
 /// Look up a text key using the codec selected at interpreter startup.
 ///
 /// # Safety
@@ -77,4 +123,46 @@ pub unsafe extern "C" fn imre_environ_delete(key: *const std::ffi::c_void, bytes
         Ok(())
     };
     finish(remove(), ());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_owns_distinct_raw_names_in_first_seen_order() {
+        let entries = CStrings::new(
+            [
+                b"B=left=right".as_slice(),
+                b"\xff=\xfe",
+                b"=empty",
+                b"B=\xff",
+                b"malformed",
+            ]
+            .into_iter()
+            .map(|entry| CString::new(entry).unwrap())
+            .collect(),
+        )
+        .ok()
+        .unwrap();
+        // SAFETY: all environment pointers refer to the C strings owned by entries.
+        let keys = unsafe { environment_keys(entries.pointers.as_ptr()) }
+            .ok()
+            .unwrap();
+        drop(entries);
+        // SAFETY: the returned exact bytes list is live and immutable during inspection.
+        unsafe {
+            keys.0.with(|storage| {
+                let Storage::Sequence(keys) = storage else {
+                    panic!("snapshot must be a list");
+                };
+                keys.check_kind(8);
+                let raw = keys
+                    .values
+                    .iter()
+                    .map(|&key| (&*(key as *const Bytes)).as_slice());
+                assert!(raw.eq([b"B".as_slice(), b"\xff", b""]));
+            });
+        }
+    }
 }
