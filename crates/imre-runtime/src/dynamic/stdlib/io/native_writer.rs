@@ -151,6 +151,14 @@ pub(super) fn call(
                 _ => None,
             };
             Ok(raw.unwrap_or(NONE))
+        } else if matches!(
+            ctx.heap.get(receiver),
+            Value::Instance {
+                memory_stream: Some(MemoryStream::DetachedWriter),
+                ..
+            }
+        ) {
+            Err(Error::new("ValueError", "raw stream has been detached"))
         } else {
             Err(Error::new(
                 "ValueError",
@@ -159,7 +167,7 @@ pub(super) fn call(
         };
     };
     if name == "detach" {
-        return Err(Error::new("UnsupportedOperation", "detach"));
+        return descriptor_buffer::detach_writer(ctx, receiver);
     }
     let Value::File(handle) = ctx.heap.get(buffer) else {
         unreachable!("BufferedWriter backing must be a binary file")

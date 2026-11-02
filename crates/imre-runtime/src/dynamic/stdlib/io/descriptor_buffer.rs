@@ -46,10 +46,9 @@ pub(super) fn explicit_reader_raw(ctx: &Context, receiver: Id) -> Option<Id> {
     (fd.reading && !fd.writing).then_some(fd.raw)
 }
 
-/// Argument conversion precedes invalidation. During writable() raw still names
-/// the outgoing stream; after it succeeds raw names the replacement even on error.
-fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -> Result<()> {
-    let previous = match ctx.heap.get(receiver) {
+/// Disarm native drop before giving up the writer's current backing.
+fn retire_writer(ctx: &Context, receiver: Id) -> Result<Option<Id>> {
+    let raw = match ctx.heap.get(receiver) {
         Value::Instance {
             memory_stream: Some(MemoryStream::BufferedBytes(writer)),
             ..
@@ -62,7 +61,7 @@ fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -
             ..
         } => *raw,
         Value::Instance {
-            memory_stream: None,
+            memory_stream: Some(MemoryStream::DetachedWriter) | None,
             ..
         } => None,
         _ => {
@@ -80,6 +79,13 @@ fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -
             Some(fd.raw)
         }
     };
+    Ok(raw)
+}
+
+/// Argument conversion precedes invalidation. During writable() raw still names
+/// the outgoing stream; after it succeeds raw names the replacement even on error.
+fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -> Result<()> {
+    let previous = retire_writer(ctx, receiver)?;
     let raw = replacement.or(previous);
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         unreachable!()
@@ -91,6 +97,28 @@ fn invalidate_writer(ctx: &mut Context, receiver: Id, replacement: Option<Id>) -
         ctx.heap.weak_edge_removed(old);
     }
     Ok(())
+}
+
+/// A flush override may reinitialize or detach this writer before returning.
+pub(super) fn detach_writer(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    if !wrapper_fallback(ctx, receiver).is_some_and(|(_, fd, _)| fd.writing && !fd.reading) {
+        return Err(Error::new("UnsupportedOperation", "detach"));
+    }
+    let flush = ctx.lookup_attr(receiver, "flush")?;
+    ctx.call(flush, Vec::new(), Vec::new())?;
+    let raw = retire_writer(ctx, receiver)?;
+    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    *memory_stream = Some(MemoryStream::DetachedWriter);
+    let raw = raw.ok_or_else(|| {
+        Error::new(
+            "SystemError",
+            "detach returned NULL without setting an exception",
+        )
+    })?;
+    ctx.heap.weak_edge_removed(raw);
+    Ok(raw)
 }
 
 /// A successful nested __init__ in tell() supplies the final raw and buffer.
