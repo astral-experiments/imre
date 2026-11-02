@@ -8803,6 +8803,7 @@ declare ptr @imre_subprocess_quote_argument(i64, i32)
 @imre_os_o_directory = external constant i64
 @imre_os_o_nofollow = external constant i64
 @imre_os_o_nonblock = external constant i64
+@imre_os_o_path = external constant i64
 @imre_os_o_tmpfile = external constant i64
 @imre_os_seek_set = external constant i64
 @imre_os_seek_cur = external constant i64

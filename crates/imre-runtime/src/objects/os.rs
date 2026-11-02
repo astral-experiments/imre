@@ -121,9 +121,9 @@ descriptor_constants! { descriptor_constant -> i32;
     imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
     imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
 }
-// The Linux posix initializer installs this flag in the live module dictionary.
+// The Linux posix initializer installs these flags in the live module dictionary.
 #[cfg(target_os = "linux")]
-descriptor_constants! { imre_os_o_tmpfile = O_TMPFILE }
+descriptor_constants! { imre_os_o_path = O_PATH, imre_os_o_tmpfile = O_TMPFILE }
 
 descriptor_constants! { poll_constant -> i16;
     imre_os_pollin = POLLIN, imre_os_pollpri = POLLPRI, imre_os_pollout = POLLOUT,

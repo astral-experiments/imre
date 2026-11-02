@@ -2548,6 +2548,7 @@ impl IntrinsicModule {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Windows)
             }
             (Self::Fcntl, "fcntl") => Intrinsic::ObjectRuntimeExport("fcntl.fcntl"),
+            (Self::Fcntl, "FD_CLOEXEC") => Intrinsic::ObjectRuntimeExport("fcntl.FD_CLOEXEC"),
             (Self::Fcntl, "F_GETFD") => Intrinsic::ObjectRuntimeExport("fcntl.F_GETFD"),
             (Self::Fcntl, "F_SETFD") => Intrinsic::ObjectRuntimeExport("fcntl.F_SETFD"),
             (Self::Fcntl, "F_GETFL") => Intrinsic::ObjectRuntimeExport("fcntl.F_GETFL"),
