@@ -2924,9 +2924,7 @@ impl Context {
     }
 
     pub(super) fn dict_named_item(&self, dict: Id, name: &str) -> Option<Id> {
-        self.dict_entries(dict)?.iter().find_map(|&(key, value)| {
-            matches!(self.heap.get(key), Value::Str(k) if k == name).then_some(value)
-        })
+        self.heap.dict_named_item(dict, name)
     }
 
     /// Attach the name at the failed lookup, leaving exceptions raised by Python code alone.

@@ -2434,6 +2434,16 @@ def report(text):
         reinit_writer = fixtures / "io_buffered_writer_reinitialize.py"
         reinit_path = root / "reinitialized-writer.bin"
         compare("-IB", reinit_writer, reinit_path, native_args=("run", reinit_writer, "--quiet", "--", reinit_path))
+        compare(
+            "-IB", "-c",
+            "import atexit, sys, weakref\n"
+            "class Observer:\n"
+            "    def __del__(self):\n"
+            "        print('finalizer', sys.is_finalizing(), kept is self, ref() is None)\n"
+            "kept = Observer()\n"
+            "ref = weakref.ref(kept)\n"
+            "atexit.register(lambda: print('atexit', sys.is_finalizing(), ref() is kept))",
+        )
         callback_writer = fixtures / "io_buffered_writer_callbacks.py"
         compare("-IB", callback_writer, native_args=("run", callback_writer, "--quiet"))
         shutdown_writer = fixtures / "io_buffered_writer_shutdown.py"
