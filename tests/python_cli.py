@@ -2317,6 +2317,8 @@ def report(text):
             "boxed_redirect_streams.py",
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",
+            "boxed_itertools_type_namespaces.py",
+            "boxed_itertools_cursor_repr.py",
             "boxed_itertools_chain.py",
             "boxed_itertools_cycle.py",
             "boxed_itertools_batched.py",
