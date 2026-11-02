@@ -49,7 +49,7 @@ def _template_constant(value):
 
     if isinstance(value, tuple):
         if len(value) == 1:
-            return "(" + simple(value[0]) + ",)"
+            return "".join(("(", simple(value[0]), ",)"))
         return "(" + ", ".join(simple(item) for item in value) + ")"
     return "..." if value is ... else simple(value)
 
@@ -68,16 +68,15 @@ def _template_constructor(template):
 
 def _template_interpolation(part):
     expression = part.expression
-    text = "{ " if expression.startswith("{") else "{"
-    text += expression
+    parts = ["{ " if expression.startswith("{") else "{", expression]
     if part.conversion:
-        text += "!" + part.conversion
+        parts.extend(("!", chr(ord(part.conversion))))
     if part.format_spec:
         spec = part.format_spec.replace("{", "{{").replace("}", "}}")
         spec = spec.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
-        spec = spec.replace("\n", "\\n")
-        text += ":" + spec
-    return text + "}"
+        parts.extend((":", spec.replace("\n", "\\n")))
+    parts.append("}")
+    return "".join(parts)
 
 
 def _quoted_template(parts):

@@ -26,8 +26,20 @@ def current():
 
     from string.templatelib import Interpolation, Template
 
+    class Token(str):
+        def __radd__(self, other):
+            raise AssertionError("template formatting concatenated user values")
+
+    class Value:
+        def __repr__(self):
+            return Token("shown")
+
     literal = Template("a{", Interpolation(1, "{x: y}", "r", "{spec}"))
     assert module.type_repr(literal) == "t'a{{{ {x: y}!r:{{spec}}}'"
+    assert module.type_repr(Template(Interpolation(0, Token("await v"), Token("s")))) == "t'{await v!s}'"
+    assert module.type_repr(Template(Interpolation((Value(),), ""))) == (
+        "Template(Interpolation((shown,), '', None, ''))"
+    )
     fallback = Template(Interpolation(..., "ok"), Interpolation(1, "x +"))
     assert module.annotations_to_string({"a": fallback}) == {
         "a": "Template(Interpolation(..., 'ok', None, ''), Interpolation(1, 'x +', None, ''))"
