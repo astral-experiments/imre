@@ -3442,6 +3442,14 @@ impl Context {
             {
                 self.classes.insert("re.PatternError".into(), class);
             }
+            if name == "_collections_abc"
+                && self.typing.abc_callable_reducer.is_none()
+                && self.config["bundled_root"].as_str().is_some_and(|root| {
+                    path == std::path::Path::new(root).join("_collections_abc.py")
+                })
+            {
+                self.typing.abc_callable_reducer = self.scope_name(scope, "_reduce_callable_alias");
+            }
             if name == "typing"
                 && self.typing.callable_factory.is_none()
                 && self.config["bundled_root"]
