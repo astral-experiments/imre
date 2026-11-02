@@ -2436,6 +2436,7 @@ def report(text):
             "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
             "boxed_thread_bound_lock.py",
             "boxed_thread_captured_acquire.py",
+            "boxed_thread_finalization.py",
             "boxed_thread_hash_update.py",
         ):
             thread_fixture = fixtures / name
