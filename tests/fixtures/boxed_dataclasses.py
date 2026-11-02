@@ -179,6 +179,14 @@ def current():
     assert repr(InitVar[int]) == "dataclasses.InitVar[int]"
     assert repr(InitVar[list[int]]) == "dataclasses.InitVar[list[int]]"
     assert repr(InitVar[int | str]) == "dataclasses.InitVar[int | str]"
+    assert Entry.__init__.__globals__ is globals()
+    assert repr(Entry.__init__.__defaults__[0]) == "<factory>"
+    marker = Entry.__init__.__kwdefaults__["options"]
+    Entry.__init__.__kwdefaults__["options"] = "custom"
+    try:
+        assert Entry("changed").options == "custom"
+    finally:
+        Entry.__init__.__kwdefaults__["options"] = marker
     a = Entry("root")
     b = Entry(name="root")
     assert a == b and not (a != b) and a.label() == "ROOT"
