@@ -4,6 +4,15 @@ import re
 def current():
     from string import Template
 
+    high = chr(0xd800)
+    assert "<%-4.2s>" % ("é" + high + "a") == "<é" + high + "  >"
+    members = "[%s]" % ("é" + high)
+    for char in ("é", high):
+        assert re.fullmatch(members, char).group() == char
+    assert re.fullmatch(members, chr(0xf0000)) is None
+    assert re.fullmatch("[^" + high + "]", chr(0xf0000))
+    assert re.fullmatch("[^" + high + "]", high) is None
+
     for flags in (re.I, re.I | re.X):
         pattern = re.compile(r"(?P<ascii>(?a:[a-z]))(?P<unicode>[a-z])", flags)
         assert pattern.fullmatch("KK").groups() == ("K", "K")
