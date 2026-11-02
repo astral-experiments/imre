@@ -2090,6 +2090,7 @@ def report(text):
             "boxed_email_addresses.py",
             "boxed_http_message.py",
             "boxed_time.py",
+            "boxed_time_timezone.py",
             "boxed_time_strftime.py",
             "boxed_codecs.py",
             "boxed_buffered_partial_write.py",
