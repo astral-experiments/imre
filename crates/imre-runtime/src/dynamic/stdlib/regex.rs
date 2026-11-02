@@ -615,7 +615,9 @@ pub(super) fn search(
         Anchored::Yes
     };
     capture(ctx, matcher, pattern.bytes, string, |text| {
-        Input::new(&text[..end]).range(start..end).anchored(anchored)
+        Input::new(&text[..end])
+            .range(start..end)
+            .anchored(anchored)
     })
 }
 
@@ -657,11 +659,9 @@ pub(super) fn call(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
         .map_err(|message| pattern_error(ctx, pattern.source, pattern.flags, message))?;
     let subject = argument(args, 1)?;
     match name {
-        "re.match" | "re.fullmatch" => {
-            capture(ctx, regex, pattern.bytes, subject, |text| {
-                Input::new(text).anchored(Anchored::Yes)
-            })
-        }
+        "re.match" | "re.fullmatch" => capture(ctx, regex, pattern.bytes, subject, |text| {
+            Input::new(text).anchored(Anchored::Yes)
+        }),
         "pattern.findall" => {
             let text = subject_bytes(ctx, subject, pattern.bytes)?.to_vec();
             let mut found = Vec::new();
