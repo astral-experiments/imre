@@ -121,7 +121,10 @@ pub(crate) fn emit(
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     Statements(&'a [ast::Stmt]),
-    GeneratorFunction(&'a [ast::Stmt]),
+    SuspendedFunction {
+        suite: &'a [ast::Stmt],
+        is_async: bool,
+    },
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
         Vec<(&'a str, &'a ast::Expr)>,
@@ -274,7 +277,7 @@ impl Output {
                 f.declare_globals(stmts);
                 f.statements(stmts);
             }
-            Body::GeneratorFunction(_) => {}
+            Body::SuspendedFunction { .. } => {}
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class),
             Body::Unsupported(stmt, reason) => {

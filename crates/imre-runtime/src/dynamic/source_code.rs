@@ -2846,8 +2846,10 @@ impl Context {
     }
 
     pub(super) fn call_source(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
-        let kind = match &self.code_object(code).body {
+        let definition = self.code_object(code);
+        let kind = match &definition.body {
             Body::Source(program) => program.kind,
+            Body::PendingGenerator { .. } if definition.coroutine => FunctionKind::Coroutine,
             Body::PendingGenerator { .. } => FunctionKind::Generator,
             Body::Native(_) => unreachable!("source function"),
         };
@@ -2926,7 +2928,11 @@ impl Context {
         program.template_expressions = Rc::new(template_expressions);
         program.private_names = private_names;
         program.first_line = code.first_line;
-        program.kind = FunctionKind::Generator;
+        program.kind = if def.is_async {
+            FunctionKind::Coroutine
+        } else {
+            FunctionKind::Generator
+        };
         program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
         for (line, _) in &mut program.instructions {
             *line = body_line + line.saturating_sub(2);

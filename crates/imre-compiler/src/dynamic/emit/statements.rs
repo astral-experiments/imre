@@ -316,10 +316,13 @@ impl Function<'_, '_> {
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
                     let generator = imre_ast::code_flags::is_generator(&v.body);
-                    let body = if v.is_async {
+                    let body = if v.is_async && generator {
                         Body::Unsupported(stmt, "async function")
-                    } else if generator {
-                        Body::GeneratorFunction(&v.body)
+                    } else if v.is_async || generator {
+                        Body::SuspendedFunction {
+                            suite: &v.body,
+                            is_async: v.is_async,
+                        }
                     } else {
                         Body::Statements(&v.body)
                     };
@@ -586,7 +589,7 @@ impl Function<'_, '_> {
             format!("{qualname}.<locals>.")
         };
         let doc = match &body {
-            Body::Statements(stmts) | Body::GeneratorFunction(stmts)
+            Body::Statements(stmts) | Body::SuspendedFunction { suite: stmts, .. }
                 if self.output.keep_docstrings =>
             {
                 crate::frontend::docstring(stmts)
@@ -623,7 +626,11 @@ impl Function<'_, '_> {
                     flags |= HAS_DOCSTRING;
                 }
                 let kind = match &body {
-                    Body::GeneratorFunction(_) | Body::Generator(..) => GENERATOR,
+                    Body::SuspendedFunction { is_async: true, .. } => COROUTINE,
+                    Body::SuspendedFunction {
+                        is_async: false, ..
+                    }
+                    | Body::Generator(..) => GENERATOR,
                     Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
                     Body::Unsupported(ast::Stmt::FunctionDef(f), _) if f.is_async => {
                         if is_generator(&f.body) {
@@ -696,7 +703,11 @@ impl Function<'_, '_> {
         if params.is_some() && uses_class_cell(&body) {
             signature["class_cell"] = json!(true);
         }
-        let generator = if let Body::GeneratorFunction(stmts) = &body {
+        let generator = if let Body::SuspendedFunction {
+            suite: stmts,
+            is_async,
+        } = &body
+        {
             if !self.source.method_imports.is_empty() {
                 signature["method_imports"] = json!(self.source.method_imports);
             }
@@ -713,14 +724,15 @@ impl Function<'_, '_> {
                 " "
             };
             // Slice the suite as written so indentation inside multiline strings survives.
-            let text = format!("def _():\n{indent}{}", &self.source.text[start..end]);
+            let header = if *is_async { "async def" } else { "def" };
+            let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
             Some((self.output.data(text.as_bytes()), self.source.line(first)))
         } else {
             None
         };
         let mut closure_names = ClosureNames::default();
         match &body {
-            Body::Statements(stmts) | Body::GeneratorFunction(stmts) => {
+            Body::Statements(stmts) | Body::SuspendedFunction { suite: stmts, .. } => {
                 closure_names.visit_body(stmts)
             }
             Body::Namespace(stmts) => {
@@ -1265,7 +1277,9 @@ fn uses_class_cell(body: &Body<'_>) -> bool {
     }
     let mut captures = ClassCell(false);
     match body {
-        Body::Statements(stmts) | Body::GeneratorFunction(stmts) => captures.visit_body(stmts),
+        Body::Statements(stmts) | Body::SuspendedFunction { suite: stmts, .. } => {
+            captures.visit_body(stmts)
+        }
         Body::Expression(expr) => captures.visit_expr(expr),
         Body::Generator(generators, element) => {
             for (index, generator) in generators.iter().enumerate() {
