@@ -392,24 +392,7 @@ impl Checker<'_> {
                     Some(Expr::boolean(false)),
                 ));
             }
-            let arguments =
-                self.arguments_with(call, &params, Some(receiver), |checker, index, arg| {
-                    if index == 0 {
-                        checker.expr(arg)
-                    } else {
-                        checker.expr_expected(arg, Type::Bool)
-                    }
-                })?;
-            // All argument expressions run before pathlib asks for the spelling of other.
-            let (scope, args) = self.held_path_arguments(arguments);
-            let at = call.arguments.find_argument_value("other", 0).unwrap();
-            return Ok(scope.finish(self.relative_path_operation(
-                op,
-                result,
-                &args,
-                args[1].clone(),
-                at,
-            )?));
+            return self.path_method_with_operand(call, receiver, &params, op, result);
         }
         if matches!(name, "match" | "full_match") {
             let full = name == "full_match";
@@ -427,24 +410,13 @@ impl Checker<'_> {
                     Some(default),
                 ),
             ];
-            let arguments =
-                self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
-                    if index == 0 {
-                        let pattern = checker.expr(value)?;
-                        if pattern.ty.is_path() {
-                            Ok(pattern)
-                        } else {
-                            checker.path_text(pattern, value)
-                        }
-                    } else {
-                        checker.expr_expected(value, optional_bool)
-                    }
-                })?;
-            return Ok(self.ordered_path_operation(
+            return self.path_method_with_operand(
+                call,
+                receiver,
+                &params,
                 PathOperation::Match { full },
                 Type::Bool,
-                arguments,
-            ));
+            );
         }
         if matches!(name, "joinpath" | "with_segments") {
             return self.path_segments(call, receiver.ty, Some((receiver, name == "joinpath")));
@@ -871,7 +843,32 @@ impl Checker<'_> {
         Ok(self.ordered_path_operation(PathOperation::TemporaryDirectory, Type::Str, arguments))
     }
 
-    fn relative_path_operation(
+    fn path_method_with_operand(
+        &mut self,
+        call: &ast::ExprCall,
+        receiver: Expr,
+        params: &[calls::Parameter],
+        op: PathOperation,
+        result: Type,
+    ) -> Result<Expr, String> {
+        let arguments =
+            self.arguments_with(call, params, Some(receiver), |checker, index, value| {
+                if index == 0 {
+                    checker.expr(value)
+                } else {
+                    checker.expr_expected(value, params[index].ty)
+                }
+            })?;
+        // pathlib evaluates every argument before inspecting the operand's path protocol.
+        let (scope, args) = self.held_path_arguments(arguments);
+        let at = call
+            .arguments
+            .find_argument_value(&params[0].name, 0)
+            .unwrap();
+        Ok(scope.finish(self.path_operand_operation(op, result, &args, args[1].clone(), at)?))
+    }
+
+    fn path_operand_operation(
         &mut self,
         op: PathOperation,
         result: Type,
@@ -880,7 +877,7 @@ impl Checker<'_> {
         at: &ast::Expr,
     ) -> Result<Expr, String> {
         if let Some(selected) = self.map_path_protocol_arms(&other, at, |checker, arm| {
-            checker.relative_path_operation(op, result, args, arm, at)
+            checker.path_operand_operation(op, result, args, arm, at)
         })? {
             return Ok(selected);
         }
@@ -924,7 +921,10 @@ impl Checker<'_> {
                 | Type::Bool => self.constructor_part(other, at, ty)?,
                 _ => self.path_text(other, at)?,
             };
-            if let Type::PurePath(flavor) = ty {
+            if matches!(op, PathOperation::Match { .. }) {
+                // The text matcher parses a spelling in the receiver's flavour.
+                text
+            } else if let Type::PurePath(flavor) = ty {
                 let base = operation(PathOperation::PureNew(flavor), ty, vec![]);
                 operation(PathOperation::Join, ty, vec![base, text])
             } else {
