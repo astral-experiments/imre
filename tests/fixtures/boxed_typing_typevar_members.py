@@ -9,6 +9,7 @@ def current():
         assert member.__objclass__ is TypeVar and member.__name__ == name
         assert member.__get__(None, TypeVar) is member
         assert member.__get__(variable, TypeVar) is (name == "__covariant__")
+        assert type(member).__get__(member, variable) is getattr(variable, name)
         for write in (lambda: setattr(variable, name, False),
                       lambda: delattr(variable, name)):
             try:

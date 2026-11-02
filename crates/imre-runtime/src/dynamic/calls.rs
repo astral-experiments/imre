@@ -2028,9 +2028,13 @@ impl Context {
                 "__objclass__" => return Ok(self.builtin(super::namedtuple::GETTER)),
                 _ => {}
             },
-            Value::Native(ref class) if class == "member_descriptor" && name == "__module__" => {
-                return Ok(self.text("builtins"));
-            }
+            Value::Native(ref class) if class == "member_descriptor" => match name {
+                "__module__" => return Ok(self.text("builtins")),
+                name if super::namedtuple::MEMBER_SLOTS.contains(&name) => {
+                    return Ok(self.builtin(&format!("member_descriptor.{name}")));
+                }
+                _ => {}
+            },
             Value::TupleGetter { doc, .. } if name == "__doc__" => return Ok(doc.unwrap_or(NONE)),
             Value::WeakrefDescriptor(owner) => match name {
                 "__objclass__" => return Ok(owner),
