@@ -16,12 +16,19 @@ fn initialize(ty: Type, receiver: Option<Expr>, bound: Expr) -> Expr {
     }
 }
 
+/// These deque slots invoke Python protocols in the boxed runtime.
+fn boxed_method(name: &str) -> bool {
+    matches!(
+        name,
+        "__repr__" | "__add__" | "__mul__" | "__rmul__" | "__imul__"
+            | "__lt__" | "__le__" | "__eq__" | "__ne__" | "__gt__" | "__ge__"
+    )
+}
+
 impl Checker<'_> {
     pub(super) fn boxed_deque_descriptor(&self, attr: &ast::ExprAttribute) -> bool {
-        matches!(
-            attr.attr.as_str(),
-            "__add__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__"
-        ) && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::Deque))
+        boxed_method(attr.attr.as_str())
+            && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::Deque))
     }
 
     /// Check each supplied expression before handing the invocation to the native descriptor.
@@ -52,12 +59,10 @@ impl Checker<'_> {
         element: Type,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if boxed_method(name) {
+            return Err(self.scoped_builtin_error(&format!("collections.deque.{name}"), attribute));
+        }
         let (builtin, parameters, returns) = match name {
-            "__add__" | "__repr__" | "__mul__" | "__rmul__" | "__imul__" => {
-                return Err(
-                    self.scoped_builtin_error(&format!("collections.deque.{name}"), attribute)
-                );
-            }
             "maxlen" => {
                 return Ok(Expr {
                     ty: self.types.optional(Type::Int),
@@ -386,7 +391,7 @@ impl Checker<'_> {
         element: Type,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
-        if matches!(name, "__repr__" | "__add__" | "__mul__" | "__rmul__" | "__imul__") {
+        if boxed_method(name) {
             return self.boxed_deque_call(name, call);
         }
         if name == "__init__" {
