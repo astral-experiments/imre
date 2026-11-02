@@ -1,2 +1,2 @@
-from _frozen_importlib import ModuleSpec
-from _frozen_importlib_external import SourceFileLoader
+from ._bootstrap import ModuleSpec
+from ._bootstrap_external import SourceFileLoader

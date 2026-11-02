@@ -1,13 +1,33 @@
 """Import modules registered with the native loader."""
 
 
+import _imp
 import sys
 from _imre_importlib import import_module as _import_module
-from _frozen_importlib import ModuleSpec as _ModuleSpec
-import _frozen_importlib_external as _bootstrap_external
 
-_bootstrap_external.__name__ = "importlib._bootstrap_external"
-_bootstrap_external.__package__ = "importlib"
+try:
+    import _frozen_importlib as _bootstrap
+except ImportError:
+    from . import _bootstrap
+    _bootstrap._setup(sys, _imp)
+else:
+    _bootstrap.__name__ = "importlib._bootstrap"
+    _bootstrap.__package__ = "importlib"
+    sys.modules["importlib._bootstrap"] = _bootstrap
+
+try:
+    import _frozen_importlib_external as _bootstrap_external
+except ImportError:
+    from . import _bootstrap_external
+    _bootstrap_external._set_bootstrap_module(_bootstrap)
+    _bootstrap._bootstrap_external = _bootstrap_external
+else:
+    _bootstrap_external.__name__ = "importlib._bootstrap_external"
+    _bootstrap_external.__package__ = "importlib"
+    sys.modules["importlib._bootstrap_external"] = _bootstrap_external
+
+__import__ = _bootstrap.__import__
+_ModuleSpec = _bootstrap.ModuleSpec
 
 
 def invalidate_caches():
