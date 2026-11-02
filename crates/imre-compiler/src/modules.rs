@@ -396,6 +396,7 @@ pub(crate) enum IntrinsicModule {
     Inspect,
     Linecache,
     Locale,
+    LocaleNative,
     Functools,
     Fnmatch,
     Time,
@@ -856,7 +857,8 @@ impl IntrinsicModule {
             "_contextvars" => Some(Self::ContextVarsNative),
             "inspect" => Some(Self::Inspect),
             "linecache" => Some(Self::Linecache),
-            "locale" | "_locale" => Some(Self::Locale),
+            "locale" => Some(Self::Locale),
+            "_locale" => Some(Self::LocaleNative),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
             "fnmatch" => Some(Self::Fnmatch),
@@ -1392,7 +1394,38 @@ impl IntrinsicModule {
             (Self::SysJit, "is_available") => Intrinsic::SysJitPredicate("_jit.is_available"),
             (Self::SysJit, "is_enabled") => Intrinsic::SysJitPredicate("_jit.is_enabled"),
             (Self::SysJit, "is_active") => Intrinsic::SysJitPredicate("_jit.is_active"),
-            (Self::Locale, "getencoding") => Intrinsic::SysEncoding(SysEncoding::Locale),
+            (Self::Locale | Self::LocaleNative, "getencoding") => {
+                Intrinsic::SysEncoding(SysEncoding::Locale)
+            }
+            (Self::Locale, "getlocale") => Intrinsic::ObjectRuntimeExport("locale.getlocale"),
+            (Self::Locale, "setlocale") => Intrinsic::ObjectRuntimeExport("locale.setlocale"),
+            (Self::LocaleNative, "setlocale") => {
+                Intrinsic::ObjectRuntimeExport("_locale.setlocale")
+            }
+            (Self::Locale | Self::LocaleNative, "Error") => {
+                Intrinsic::ObjectRuntimeExport("_locale.Error")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_ALL") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_ALL")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_COLLATE") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_COLLATE")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_CTYPE") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_CTYPE")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_MESSAGES") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_MESSAGES")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_MONETARY") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_MONETARY")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_NUMERIC") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_NUMERIC")
+            }
+            (Self::Locale | Self::LocaleNative, "LC_TIME") => {
+                Intrinsic::ObjectRuntimeExport("_locale.LC_TIME")
+            }
             (Self::Sys, "getdefaultencoding") => Intrinsic::SysEncoding(SysEncoding::Default),
             (Self::Sys, "getfilesystemencoding") => Intrinsic::SysEncoding(SysEncoding::Filesystem),
             (Self::Sys, "getfilesystemencodeerrors") => {
