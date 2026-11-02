@@ -4862,18 +4862,8 @@ impl Context {
         ordinary
     }
 
-    /// Look up native backing fields on either side of ordinary dictionary materialization.
     pub(super) fn raw_instance_field(&self, obj: Id, name: &str) -> Option<Id> {
-        let Value::Instance {
-            fields, namespace, ..
-        } = self.heap.get(obj)
-        else {
-            return None;
-        };
-        fields
-            .get(name)
-            .copied()
-            .or_else(|| self.dict_named_item(self.dict_storage((*namespace)?)?, name))
+        self.heap.raw_instance_field(obj, name)
     }
 
     /// Return the live instance dictionary for default object state, bypassing attribute hooks.
