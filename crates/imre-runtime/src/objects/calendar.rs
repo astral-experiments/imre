@@ -362,7 +362,10 @@ fn write_named_repr(
             if *fold != 0 && matches!(v, Value::Date { .. }) {
                 out.write_str(", fold=1")?;
             }
-            if let Some(z) = zone {
+            // A boxed clock appends the actual Python tzinfo's repr to its civil fields.
+            if name.is_none()
+                && let Some(z) = zone
+            {
                 out.write_str(", tzinfo=")?;
                 with(z, |v| write_repr(v, out))?;
             }
