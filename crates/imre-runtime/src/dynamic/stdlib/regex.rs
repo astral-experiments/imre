@@ -212,20 +212,21 @@ fn byte_pattern(bytes: &[u8]) -> String {
 // Python uses str.isalnum() plus "_" for \w and includes four additional
 // ASCII separators in Unicode whitespace. The nested classes also work
 // when these escapes occur inside a bracketed class in the input.
-fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> String {
+fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> (String, bool) {
+    let mut literal_brace = false;
     let mut result = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
     let mut in_class = false;
     while let Some(c) = chars.next() {
         if c != '\\' {
-            if c == '{'
-                && !in_class
-                && chars.peek() == Some(&',')
-                && chars.clone().skip(1).find(|c| !c.is_ascii_digit()) == Some('}')
-            {
-                // Python treats an omitted lower bound as zero, including in {,}.
-                result.push_str("{0");
-                continue;
+            if c == '{' && !in_class {
+                if !imre_regex::starts_counted_repeat(chars.clone()) {
+                    literal_brace = true;
+                } else if chars.peek() == Some(&',') {
+                    // Python treats an omitted lower bound as zero, including in {,}.
+                    result.push_str("{0");
+                    continue;
+                }
             }
             if c == '$' && !in_class && !multiline && chars.peek().is_none() {
                 result.push_str(imre_regex::FINAL_NEWLINE_ANCHOR);
@@ -279,7 +280,7 @@ fn python_escapes(pattern: &str, ascii: bool, multiline: bool) -> String {
             }
         }
     }
-    result
+    (result, literal_brace)
 }
 
 /// Report offsets in the user's spelling before byte escaping, case folding or verbose translation.
@@ -340,6 +341,19 @@ fn repeats_literal_capture(pattern: &[u8], flags: i64) -> bool {
     flags & (IGNORECASE | LOCALE | VERBOSE) == 0
         && !body.is_empty()
         && !body.iter().any(|byte| br"\.^$*+?{}[]|()".contains(byte))
+}
+
+fn alphabet(bytes: bool, ascii: bool, flags: i64) -> imre_regex::Alphabet {
+    use imre_regex::Alphabet;
+    if bytes {
+        Alphabet::Bytes
+    } else if ascii {
+        Alphabet::Ascii
+    } else if flags & IGNORECASE != 0 {
+        Alphabet::UnicodeIgnoreCase
+    } else {
+        Alphabet::Unicode
+    }
 }
 
 fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
@@ -404,10 +418,10 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
     // the literal guard without extending Python's word-category membership.
     let literal_guards = !bytes && (flags & IGNORECASE == 0 || ascii);
     let translate = || {
-        let mut translated = imre_regex::translate_for_runtime(
+        let mut translated = imre_regex::translate_pattern(
             &source,
             flags & VERBOSE != 0,
-            ascii,
+            alphabet(bytes, ascii, flags),
             flags & DOTALL != 0,
             literal_guards,
         )?
@@ -426,15 +440,19 @@ fn compiled(ctx: &mut Context, id: Id, flags: Option<Id>) -> Result<Id> {
         Ok((source, matcher))
     };
     let prepared = if flags & VERBOSE != 0 {
-        translate()
+        translate().and_then(build)
     } else {
-        imre_regex::preserve_zero_repeat_groups(python_escapes(
-            &source,
-            ascii,
-            flags & MULTILINE != 0,
-        ))
+        let (raw, literal_brace) = python_escapes(&source, ascii, flags & MULTILINE != 0);
+        let original = || imre_regex::preserve_zero_repeat_groups(raw).and_then(build);
+        if literal_brace {
+            // The subset parser checks adjacent quantifiers before quoting a Python literal.
+            // Keep accepted engine syntax such as an inline verbose comment containing '{'.
+            translate().and_then(build).or_else(|_| original())
+        } else {
+            original()
+        }
     };
-    let (engine_source, regex) = match prepared.and_then(build) {
+    let (engine_source, regex) = match prepared {
         Ok(pair) => pair,
         // Retry unsupported engine syntax with the shared Python subset translator.
         Err(original)
