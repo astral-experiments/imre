@@ -68,6 +68,16 @@ impl Pattern {
     }
 }
 
+/// Only these alternatives apply a sequence test to the match subject itself.
+fn tests_subject_sequence(pattern: &ast::Pattern) -> bool {
+    match pattern {
+        ast::Pattern::MatchSequence(_) => true,
+        ast::Pattern::MatchAs(p) => p.pattern.as_deref().is_some_and(tests_subject_sequence),
+        ast::Pattern::MatchOr(p) => p.patterns.iter().any(tests_subject_sequence),
+        _ => false,
+    }
+}
+
 fn not(value: Expr) -> Expr {
     Expr {
         ty: Type::Bool,
@@ -108,6 +118,13 @@ impl Checker<'_> {
                     "an unguarded irrefutable pattern must be the last case",
                 ));
             }
+        }
+        if let ast::Expr::Call(call) = &*branch.subject
+            && self.unshadowed_builtin(&call.func, "range")
+            && branch.cases.iter().any(|case| tests_subject_sequence(&case.pattern))
+        {
+            self.iteration_input(&branch.subject)?;
+            return Err(self.scoped_builtin_error("range sequence pattern", &*branch.subject));
         }
         let mut value = self.typed_expr(&branch.subject)?;
         let exhaustive = self.enum_exhaustive(value.ty, &branch.cases);
@@ -601,6 +618,9 @@ impl Checker<'_> {
     ) -> Result<Pattern, String> {
         let element = self.types.element(value.ty);
         let fields = self.types.fields(value.ty);
+        if matches!(value.ty, Type::Class(_) | Type::Deque(_) | Type::VarTuple(_)) {
+            return Err(self.scoped_builtin_error("sequence pattern", sequence));
+        }
         if element.is_none() && fields.is_none() {
             return Err(error(
                 self.source,
@@ -612,19 +632,6 @@ impl Checker<'_> {
             .patterns
             .iter()
             .position(|pattern| matches!(pattern, ast::Pattern::MatchStar(_)));
-        if sequence
-            .patterns
-            .iter()
-            .filter(|pattern| matches!(pattern, ast::Pattern::MatchStar(_)))
-            .count()
-            > 1
-        {
-            return Err(error(
-                self.source,
-                sequence,
-                "a sequence pattern can contain only one starred rest",
-            ));
-        }
         let fixed = sequence.patterns.len() - usize::from(star.is_some());
         if fields.as_ref().is_some_and(|fields| fields.len() < fixed) {
             return Err(error(
@@ -995,7 +1002,16 @@ impl Checker<'_> {
                 }
                 Vec::new()
             }
-            ast::Pattern::MatchSequence(pattern) => pattern.patterns.iter().collect(),
+            ast::Pattern::MatchSequence(pattern) => {
+                if pattern.patterns.iter().filter(|p| p.is_match_star()).count() > 1 {
+                    return Err(error(
+                        self.source,
+                        pattern,
+                        "a sequence pattern can contain only one starred rest",
+                    ));
+                }
+                pattern.patterns.iter().collect()
+            }
             ast::Pattern::MatchMapping(pattern) => {
                 if let Some(name) = &pattern.rest {
                     add(name)?;

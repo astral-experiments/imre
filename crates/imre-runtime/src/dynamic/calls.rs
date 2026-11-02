@@ -5568,6 +5568,7 @@ impl Context {
                 metaclass,
                 io_kind,
                 hash_type,
+                pattern_flags,
             } => {
                 let mut copied_name = String::new();
                 copied_name
@@ -5580,6 +5581,7 @@ impl Context {
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 copied_ancestors.extend_from_slice(ancestors);
                 Value::Class {
+                    pattern_flags: *pattern_flags,
                     metaclass: *metaclass,
                     io_kind: *io_kind,
                     hash_type: *hash_type,

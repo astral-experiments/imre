@@ -906,6 +906,8 @@ pub(super) enum Value {
         running: bool,
     },
     Class {
+        /// Type-level sequence and mapping pattern eligibility, independent of ABC membership.
+        pattern_flags: super::collection_pattern::PatternFlags,
         /// Private layout tag for native I/O class generations.
         io_kind: Option<super::stdlib::io::NativeClass>,
         /// Qualified name of a non-instantiable digest implementation type.
@@ -2232,6 +2234,58 @@ impl Frame {
 }
 
 impl Heap {
+    /// Propagate a successful ABC registration to existing nominal subclasses.
+    /// The graph lasts only for this update, so it cannot keep dead classes alive.
+    pub(super) fn set_registered_pattern_flags(
+        &mut self,
+        class: Id,
+        flags: super::collection_pattern::PatternFlags,
+    ) {
+        if !matches!(self.get(class), Value::Class { pattern_flags, .. } if *pattern_flags != flags)
+        {
+            // Registration leaves immutable builtin classes and same-kind subtrees alone.
+            return;
+        }
+        let mut children: HashMap<Id, Vec<Id>> = HashMap::new();
+        for (index, slot) in self.slots.iter().enumerate() {
+            let Some(Value::Class {
+                scope, ancestors, ..
+            }) = slot.value.as_ref()
+            else {
+                continue;
+            };
+            let Value::Scope(data) = self.get(*scope) else {
+                unreachable!()
+            };
+            let bases = match &data.class_namespace {
+                Some(ns) => {
+                    let Value::Tuple(bases) = self.get(ns.bases) else {
+                        continue;
+                    };
+                    bases.as_slice()
+                }
+                // Native AST classes store their single base first in the lineage.
+                None => ancestors.get(..1).unwrap_or_default(),
+            };
+            for &base in bases {
+                children.entry(base).or_default().push(index as Id);
+            }
+        }
+        let mut pending = vec![class];
+        while let Some(current) = pending.pop() {
+            let Value::Class { pattern_flags, .. } = self.get_mut(current) else {
+                unreachable!()
+            };
+            if *pattern_flags == flags {
+                continue;
+            }
+            *pattern_flags = flags;
+            if let Some(derived) = children.remove(&current) {
+                pending.extend(derived);
+            }
+        }
+    }
+
     /// Bytes reserved beside each boxed value in a slab slot, including alignment.
     pub(super) fn size_overhead() -> usize {
         size_of::<Slot>() - size_of::<Value>()

@@ -7,6 +7,7 @@ mod atexit;
 mod builtins;
 mod calls;
 mod class_annotations;
+mod collection_pattern;
 mod complex;
 mod defaultdict;
 mod deque;

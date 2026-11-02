@@ -292,7 +292,8 @@ impl Context {
                 super::builtins::set_add(self, methods, key)?;
             }
         }
-        self.set_abstract_methods(scope, methods)
+        self.set_abstract_methods(scope, methods)?;
+        self.init_pattern_flags(class, scope)
     }
 
     pub(super) fn set_abstract_methods(&mut self, scope: Id, methods: Id) -> Result<()> {

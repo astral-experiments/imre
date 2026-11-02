@@ -134,7 +134,9 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
             ctx.scope_data(module).names[spec.base]
         };
         let ancestors = ctx.lineage(base);
+        let pattern_flags = ctx.class_pattern_flags(base);
         let class = ctx.alloc(Value::Class {
+            pattern_flags,
             namedtuple_fields: None,
             io_kind: None,
             hash_type: None,
