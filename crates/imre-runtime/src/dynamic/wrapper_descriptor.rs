@@ -145,6 +145,7 @@ impl BuiltinDescriptor {
             Some((class, attr)) if let Some(layout) = stdlib::os::stat::layout(class) => {
                 Some((layout.class, attr, &["__reduce__"][..]))
             }
+            Some(("typing.TypeAliasType", attr)) => Some(("typing.TypeAliasType", attr, &["__reduce__"][..])),
             Some(("slice", attr)) => Some(("slice", attr, slice::METHODS)),
             _ => None,
         };
@@ -307,6 +308,7 @@ impl BuiltinDescriptor {
             owner if typing::ParameterClass::lookup(owner).is_some() => {
                 ctx.builtin_type_name(receiver) == Some(owner)
             }
+            "typing.TypeAliasType" => matches!(ctx.heap.get(receiver), Value::TypeAlias { .. }),
             "typing.Union" => matches!(ctx.heap.get(receiver), Value::Union(_)),
             "object" => true,
             "type" => ctx.is_type_object(receiver),

@@ -2096,6 +2096,8 @@ impl Context {
         }
         if let Some(class) = typing::ParameterClass::lookup(name) {
             class.install(self, value);
+        } else {
+            typing::install_alias_class(self, name, value);
         }
         if builtins::is_exception(name) {
             self.builtin(&format!("{}.__new__", builtins::exception_new_owner(name)));
