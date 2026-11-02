@@ -20,3 +20,8 @@ selected_ordinals	revision	python_optimization	rust_runtime_profile	passed	faile
 79	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	dev (debug=0)	0	0	1	0	0	Ran 1 test in 2.468s	FAILED (errors=1)	1
 79	eb628d6ca8f72c61224be2a45a44b17444539887	O0	dev (debug=0)	1	0	0	0	0	Ran 1 test in 4.861s	OK	0
 79	eb628d6ca8f72c61224be2a45a44b17444539887	O3	dev (debug=0)	1	0	0	0	0	Ran 1 test in 3.596s	OK	0
+55	5607950ef232dad16d75c0cf53101d9649d89115	reference	n/a	1	0	0	0	0	Ran 1 test in 0.001s	OK	0
+55	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O0	dev (debug=0)	0	0	1	0	0	Ran 1 test in 1.699s	FAILED (errors=1)	1
+55	c88c4bf3af090e7b83a7ee72402ebbd7bb9befed	O3	dev (debug=0)	0	0	1	0	0	Ran 1 test in 4.177s	FAILED (errors=1)	1
+55	463b9fe28ccc91606dd5f5c402e7493df08a2d8f	O0	dev (debug=0)	1	0	0	0	0	Ran 1 test in 2.242s	OK	0
+55	463b9fe28ccc91606dd5f5c402e7493df08a2d8f	O3	dev (debug=0)	1	0	0	0	0	Ran 1 test in 3.113s	OK	0
