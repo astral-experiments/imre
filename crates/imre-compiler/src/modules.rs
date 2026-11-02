@@ -222,6 +222,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/code.py and Lib/codeop.py. See stdlib/docstrings/LICENSE.
         "code" => Some(("code.py", include_str!("../stdlib/code.py"))),
         "codecs" => Some(("codecs.py", include_str!("../stdlib/codecs.py"))),
+        "encodings" => Some((
+            "encodings/__init__.py",
+            include_str!("../stdlib/encodings/__init__.py"),
+        )),
         "codeop" => Some(("codeop.py", include_str!("../stdlib/codeop.py"))),
         "keyword" => Some(("keyword.py", KEYWORD_SOURCE)),
         "token" => Some(("token.py", include_str!("../stdlib/token.py"))),
@@ -1190,6 +1194,9 @@ impl IntrinsicModule {
             (Self::Codecs | Self::CodecsNative, "register") => Intrinsic::ObjectRuntimeExport("_codecs.register"),
             (Self::Codecs | Self::CodecsNative, "unregister") => Intrinsic::ObjectRuntimeExport("_codecs.unregister"),
             (Self::CodecsNative, "lookup") => Intrinsic::ObjectRuntimeExport("_codecs.lookup"),
+            (Self::CodecsNative, "_imre_native_search") => {
+                Intrinsic::ObjectRuntimeExport("_codecs._imre_native_search")
+            }
             (Self::CodecsNative, "encode") => Intrinsic::ObjectRuntimeExport("_codecs.encode"),
             (Self::Pickle, "Pickler") => Intrinsic::PICKLER,
             (Self::Pickle, "dumps") => Intrinsic::ObjectRuntimeExport("pickle.dumps"),

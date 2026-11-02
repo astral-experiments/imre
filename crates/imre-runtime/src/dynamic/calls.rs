@@ -27,6 +27,7 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     let (module, function) = symbol.split_once('.')?;
     match module {
         "_typing" if function == "_idfunc" => Some((module, function)),
+        "encodings" if function == "search_function" => Some((module, function)),
         "posix"
             if !function.contains('.')
                 && !matches!(
@@ -718,6 +719,7 @@ impl Context {
                 | Value::Cached { .. }
                 | Value::Partial { .. }
                 | Value::Native(_)
+                | Value::CodecEncoder(_)
                 | Value::CodecDecoder(_)
                 | Value::IoMethod { .. }
                 | Value::IoOpen { .. }
@@ -1303,6 +1305,7 @@ impl Context {
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
             Value::Instance { class, .. }
+            | Value::CodecInfo { class, .. }
             | Value::Class {
                 metaclass: Some(class),
                 ..
@@ -3237,9 +3240,13 @@ impl Context {
             }
             Value::CodecInfo {
                 ref entry,
+                class,
+                encode,
                 decode,
                 text_encoding_override,
             } => match name {
+                "__class__" => return Ok(class),
+                "encode" => return Ok(encode),
                 "_is_text_encoding" => return Ok(text_encoding_override.unwrap_or(TRUE)),
                 "name" => return Ok(self.text(entry.codec().name())),
                 "decode" => return Ok(decode),
@@ -5475,6 +5482,7 @@ impl Context {
                     object: Some(object),
                 }))
             }
+            Value::CodecEncoder(codec) => stdlib::codecs::entry_encode(self, codec, &args, &kwargs),
             Value::CodecDecoder(codec) => stdlib::codecs::decode(self, codec, &args, &kwargs),
             Value::IoOpen { reader, writer, random } => {
                 stdlib::io::open_from_module(self, reader, writer, random, &args, &kwargs)

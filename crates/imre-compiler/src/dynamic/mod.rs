@@ -855,6 +855,7 @@ pub(crate) fn compile(
         "codeop",
         "copyreg",
         "datetime",
+        "encodings",
         "enum",
         "genericpath",
         "hashlib",

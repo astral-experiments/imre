@@ -444,6 +444,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("codecs" | "_codecs", "encode" | "decode" | "register" | "unregister" | "lookup" | "escape_decode" | "utf_16_ex_decode") => {
             ctx.builtin(&format!("codecs.{name}"))
         }
+        ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
         ("math", "trunc" | "floor" | "ceil" | "modf" | "gcd" | "isnan" | "isqrt") => {
             ctx.builtin(&format!("math.{name}"))
@@ -2071,6 +2072,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("time.") {
         return time::call(ctx, method, args, kwargs);
+    }
+    if name == "encodings.search_function" {
+        return codecs::native_search(ctx, args, kwargs);
     }
     if let Some(function) = name.strip_prefix("codecs.") {
         return match function {

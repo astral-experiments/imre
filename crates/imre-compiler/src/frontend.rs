@@ -9013,6 +9013,9 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::UnicodeNormalize { check })) => {
                 return self.unicode_normalize(call, check);
             }
+            Some(Binding::Intrinsic(Intrinsic::CodecInfoClass)) => {
+                return Err(self.object_runtime_export("codecs.CodecInfo", call));
+            }
             Some(Binding::Intrinsic(Intrinsic::CodecLookup)) => return self.codec_lookup(call),
             Some(Binding::Intrinsic(Intrinsic::SocketGetFqdn)) => {
                 let params = [parameter(

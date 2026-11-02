@@ -11,7 +11,7 @@ use ruff_python_literal::format::{
 };
 
 use super::super::operators::append_rendered_text;
-use super::super::stdlib::codecs::{decode_named, encode_text};
+use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
 use crate::objects::{python_whitespace, split_parts, translate, visit_line_fields as split_lines};
@@ -185,7 +185,11 @@ pub(super) fn construct(
                     if encoding_id.is_none() {
                         return Err(type_error("string argument without an encoding"));
                     }
-                    encode_text(ctx, value.unwrap(), encoding_id, errors)?
+                    let result = encode_text_object(ctx, value.unwrap(), encoding_id, errors)?;
+                    if name == "bytes" {
+                        return Ok(result);
+                    }
+                    ctx.bytes_like(result)?.to_vec()
                 }
                 _ if encoding_id.is_some() => {
                     return Err(type_error("encoding without a string argument"));
@@ -1432,8 +1436,7 @@ pub(super) fn method(
         return if name == "decode" {
             decode_named(ctx, ctx.scalar_value(receiver), encoding, errors)
         } else {
-            let b = encode_text(ctx, receiver, encoding, errors)?;
-            Ok(ctx.alloc(Value::Bytes(b)))
+            encode_text_object(ctx, receiver, encoding, errors)
         };
     }
     if name == "zfill" {

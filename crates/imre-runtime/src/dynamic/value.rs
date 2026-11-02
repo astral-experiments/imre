@@ -793,10 +793,13 @@ pub(super) enum Value {
     },
     ByteArray(Vec<u8>),
     CodecInfo {
+        class: Id,
+        encode: Id,
         entry: crate::objects::CodecInfo,
         decode: Id,
         text_encoding_override: Option<Id>,
     },
+    CodecEncoder(crate::objects::Codec),
     CodecDecoder(crate::objects::Codec),
     Hash(super::stdlib::hashlib::digest::SharedHash),
     Hmac(Hmac),
@@ -1235,7 +1238,7 @@ impl Value {
 
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
-            Self::Instance { class, .. } => Some(*class),
+            Self::Instance { class, .. } | Self::CodecInfo { class, .. } => Some(*class),
             Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
@@ -1623,11 +1626,13 @@ impl Value {
             Self::IoOpen { reader, writer, random } => visit.extend([*reader, *writer, *random]),
             Self::IoMethod { owner, .. } => visit.push(*owner),
             Self::CodecInfo {
+                class,
+                encode,
                 decode,
                 text_encoding_override,
                 ..
             } => {
-                visit.push(*decode);
+                visit.extend([*class, *encode, *decode]);
                 visit.extend(*text_encoding_override);
             }
             Self::RegexScanner {
@@ -1654,6 +1659,7 @@ impl Value {
             | Self::Bytes(_)
             | Self::Array(_)
             | Self::ByteArray(_)
+            | Self::CodecEncoder(_)
             | Self::CodecDecoder(_)
             | Self::Struct { .. }
             | Self::Hash(_)
