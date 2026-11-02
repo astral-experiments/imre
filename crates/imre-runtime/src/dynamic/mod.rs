@@ -2128,6 +2128,10 @@ impl Context {
                 let jit = stdlib::jit_module(self)?;
                 self.bind(scope, "_jit", jit);
             }
+            "re" => {
+                let pattern = self.builtin(value::REGEX_PATTERN_TYPE);
+                self.bind(scope, "Pattern", pattern);
+            }
             "array" => {
                 let array = self.builtin("array.array");
                 self.bind(scope, "array", array);
