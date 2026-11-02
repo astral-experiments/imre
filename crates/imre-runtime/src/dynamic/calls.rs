@@ -2787,9 +2787,9 @@ impl Context {
             },
             Value::RegexScanner { pattern, .. } if name == "pattern" => return Ok(pattern),
             Value::RegexMatch(ref m) if matches!(name, "pos" | "endpos") => {
-                return m.window_position(self, name == "endpos");
+                return std::rc::Rc::clone(m).window_position(self, name == "endpos");
             }
-            Value::RegexMatch(ref m) if name == "regs" => return m.regs(self),
+            Value::RegexMatch(ref m) if name == "regs" => return std::rc::Rc::clone(m).regs(self),
             Value::RegexMatch(ref m) if name == "re" => return Ok(m.pattern),
             Value::RegexMatch(ref m) if name == "string" => return Ok(m.subject),
             Value::RegexMatch(ref m) if matches!(name, "lastindex" | "lastgroup") => {
