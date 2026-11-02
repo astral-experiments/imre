@@ -779,7 +779,15 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             }
         },
         Err(error) if ctx.is_os_error(&error) && error.args.is_some() => {
-            ctx.report_os_error(error);
+            if stdlib::traceback::chain_link(&error).is_some() {
+                stdlib::traceback::report_chain(&mut ctx, error);
+            } else {
+                ctx.report_os_error(error);
+            }
+            1
+        }
+        Err(error) if stdlib::traceback::chain_link(&error).is_some() => {
+            stdlib::traceback::report_chain(&mut ctx, error);
             1
         }
         Err(mut error) => {

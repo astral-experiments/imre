@@ -1098,6 +1098,23 @@ def main():
         assert text_close.returncode == 0, text_close.stderr
         assert (text_close.stdout, text_close.stderr) == (expected.stdout, expected.stderr)
 
+        chained = root / "chained.py"
+        chained.write_text(
+            "import sys\n"
+            "sys.tracebacklimit = 0\n"
+            "try:\n"
+            "    try:\n"
+            "        raise ValueError('inner')\n"
+            "    except ValueError:\n"
+            "        raise RuntimeError('middle')\n"
+            "except RuntimeError as exc:\n"
+            "    raise OSError(28, 'outer') from exc\n"
+        )
+        expected = run(sys.executable, "-B", chained)
+        actual = run(imre, "run", chained, "--runtime-imports", "--quiet")
+        assert expected.returncode == actual.returncode == 1
+        assert actual.stderr == expected.stderr, (actual.stderr, expected.stderr)
+
         string_io = root / "string_io.py"
         string_io.write_bytes((Path(__file__).with_name("fixtures") / "boxed_string_io.py").read_bytes())
         expected = run(sys.executable, "-B", string_io)
