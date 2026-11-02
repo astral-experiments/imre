@@ -26,9 +26,12 @@ def _make_skipped_test(methodname, exception, suiteClass):
     @_unittest.skip(str(exception))
     def testSkipped(self):
         pass
-    attrs = {methodname: testSkipped}
-    TestClass = type("ModuleSkipped", (_unittest.TestCase,), attrs)
-    return suiteClass((TestClass(methodname),))
+
+    class ModuleSkipped(_unittest.TestCase):
+        __qualname__ = "ModuleSkipped"
+
+    setattr(ModuleSkipped, methodname, testSkipped)
+    return suiteClass((ModuleSkipped(methodname),))
 
 
 def _splitext(path):
