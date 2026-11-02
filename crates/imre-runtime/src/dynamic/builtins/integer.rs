@@ -11,6 +11,24 @@ pub(super) fn add(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     Ok(ctx.alloc(Value::Int(sum)))
 }
 
+/// Both read-only rational fields use the stored integer, bypassing subclass conversions.
+pub(super) fn rational_field(ctx: &mut Context, field: &str, args: &[Id]) -> Result<Id> {
+    let [receiver] = *args else {
+        return Err(type_error("expected one integer getset receiver"));
+    };
+    let value = ctx.scalar_value(receiver);
+    match ctx.heap.get(value) {
+        Value::Int(_) | Value::Bool(_) if field == "denominator" => Ok(ctx.int(1)),
+        Value::Int(_) if value == receiver => Ok(value),
+        Value::Int(number) => Ok(ctx.alloc(Value::Int(number.clone()))),
+        Value::Bool(bit) => Ok(ctx.int(i64::from(*bit))),
+        _ => Err(type_error(format!(
+            "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
+            ctx.type_name(receiver)
+        ))),
+    }
+}
+
 pub(super) fn bit_length(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let (&receiver, args) = args
         .split_first()
