@@ -237,6 +237,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "string/__init__.py",
             include_str!("../stdlib/string/cpython.py"),
         )),
+        "string.templatelib" => Some((
+            "string/templatelib.py",
+            include_str!("../stdlib/string/templatelib.py"),
+        )),
         "http" => Some((
             "http/__init__.py",
             include_str!("../stdlib/http/__init__.py"),

@@ -1149,7 +1149,22 @@ pub(super) fn call(
         })?;
         return ctx.abc_check_methods(class, args.get(1..).unwrap_or_default());
     }
-    if matches!(name, os::scandir::ENTRY | os::scandir::ITER) {
+    if name == "string.templatelib.Template.get_values" {
+        let [receiver] = args else {
+            unreachable!("template values getter")
+        };
+        return ctx.read_member(super::value::TEMPLATE_TYPE, "values", *receiver);
+    }
+    if matches!(
+        name,
+        super::value::TEMPLATE_TYPE | super::value::INTERPOLATION_TYPE
+    ) {
+        return super::templatelib::construct(ctx, name, args, kwargs);
+    }
+    if matches!(
+        name,
+        os::scandir::ENTRY | os::scandir::ITER | super::value::TEMPLATE_ITER_TYPE
+    ) {
         return Err(Error::new(
             "TypeError",
             format!("cannot create '{name}' instances"),

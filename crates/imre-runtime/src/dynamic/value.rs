@@ -51,6 +51,11 @@ pub(super) const FALSE: Id = 1;
 pub(super) const TRUE: Id = 2;
 pub(super) const ELLIPSIS: Id = 3;
 pub(super) const NOT_IMPLEMENTED: Id = 4;
+const EMPTY_TUPLE: Id = 5;
+
+pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
+pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
+pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Location {
@@ -650,6 +655,21 @@ pub(super) enum Value {
     DirEntry(super::stdlib::os::scandir::Entry),
     Selector(std::rc::Rc<std::cell::RefCell<super::stdlib::readiness::Selector>>),
     Slice([Id; 3]),
+    Template {
+        strings: Id,
+        interpolations: Id,
+    },
+    TemplateIter {
+        strings: Id,
+        interpolations: Id,
+        from_strings: bool,
+    },
+    Interpolation {
+        value: Id,
+        expression: Id,
+        conversion: Id,
+        format_spec: Id,
+    },
     Range(super::range::Range),
     RangeIterator(super::range::Cursor),
     Str(String),
@@ -979,6 +999,9 @@ impl Value {
             Self::CallableIterator(_) => "callable_iterator",
             Self::Tuple(_) => "tuple",
             Self::Slice(_) => "slice",
+            Self::Template { .. } => TEMPLATE_TYPE,
+            Self::TemplateIter { .. } => TEMPLATE_ITER_TYPE,
+            Self::Interpolation { .. } => INTERPOLATION_TYPE,
             Self::Range(_) => "range",
             Self::Scandir(_) => super::stdlib::os::scandir::ITER,
             Self::DirEntry(_) => super::stdlib::os::scandir::ENTRY,
@@ -1151,6 +1174,21 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::Template {
+                strings,
+                interpolations,
+            }
+            | Self::TemplateIter {
+                strings,
+                interpolations,
+                ..
+            } => visit.extend([*strings, *interpolations]),
+            Self::Interpolation {
+                value,
+                expression,
+                conversion,
+                format_spec,
+            } => visit.extend([*value, *expression, *conversion, *format_spec]),
             Self::Range(_) | Self::RangeIterator(_) => {}
             Self::AstWalk { queue, .. } => visit.extend(queue),
             Self::Enumerate { input, .. } => visit.push(*input),
@@ -1734,6 +1772,7 @@ impl CycleSet {
 pub(super) struct Heap {
     slots: Vec<Slot>,
     gc_order: GcOrder,
+    linked_string_constants: HashMap<i64, Id>,
     full_collection: Option<CycleSet>,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
     interned: HashMap<crate::StrOwner, InternedString>,
@@ -1818,9 +1857,11 @@ impl Heap {
                 Slot::new(Value::Bool(true)),
                 Slot::new(Value::Ellipsis),
                 Slot::new(Value::NotImplemented),
+                Slot::new(Value::Tuple(Vec::new())),
             ],
             gc_order: GcOrder::EMPTY,
             full_collection: None,
+            linked_string_constants: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
             free_head: END,
@@ -1994,10 +2035,31 @@ impl Heap {
         self.alloc_slot(value)
     }
 
+    /// Linked code owns these immutable constants for the lifetime of its context.
+    pub(super) fn linked_string_constant(
+        &mut self,
+        slot: Id,
+        build: impl FnOnce(&mut Self) -> Id,
+    ) -> Id {
+        let Value::Int(key) = self.get(slot) else {
+            unreachable!("compiler constant slot")
+        };
+        let key = key.to_i64().expect("compiler constant slot fits in i64");
+        if let Some(&value) = self.linked_string_constants.get(&key) {
+            return value;
+        }
+        let value = build(self);
+        self.linked_string_constants.insert(key, value);
+        value
+    }
+
     /// Packing an array skips tracking when its elements all have non-GC types.
     /// Even an untracked child tuple has a GC type. A folded literal belongs to
     /// the code constants and cannot itself be garbage owned by a cycle.
     pub(super) fn packed_tuple(&mut self, items: Vec<Id>, constant: bool) -> Id {
+        if items.is_empty() {
+            return EMPTY_TUPLE;
+        }
         let untracked = constant
             || items.iter().all(|&child| {
                 !matches!(self.get(child), Value::Tuple(_) | Value::Native(_))
@@ -2433,7 +2495,8 @@ impl Heap {
     fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut MarkQueue<'_>) {
         pending.extend(globals);
         pending.extend(self.full_collection_members());
-        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED]);
+        pending.extend(self.linked_string_constants.values().copied());
+        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED, EMPTY_TUPLE]);
         pending.extend(
             self.interned
                 .values()

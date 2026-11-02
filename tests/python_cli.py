@@ -1613,6 +1613,7 @@ def report(text):
             "boxed_typing_tuple.py",
             "boxed_typing_mapping.py",
             "boxed_formatter.py",
+            "boxed_template_literals.py",
             "boxed_re_ascii.py",
             "boxed_re_verbose.py",
             "boxed_re_split.py",
