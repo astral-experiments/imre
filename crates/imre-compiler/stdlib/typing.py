@@ -1836,6 +1836,8 @@ Awaitable = _SpecialGenericAlias(_Awaitable, 1)
 AsyncIterator = _SpecialGenericAlias(_AsyncIterator, 1)
 Generator = _SpecialGenericAlias(_Generator, 3, defaults=(type(None), type(None)))
 List = _SpecialGenericAlias(list, 1, name="List", inst=False)
+Set = _SpecialGenericAlias(set, 1, name="Set", inst=False)
+FrozenSet = _SpecialGenericAlias(frozenset, 1, name="FrozenSet", inst=False)
 Dict = _SpecialGenericAlias(dict, 2, name="Dict", inst=False)
 Type = _SpecialGenericAlias(type, 1, name="Type", inst=False)
 Type.__doc__ = \
