@@ -1,4 +1,4 @@
-//! Sum identical scalar struct rows in a single step when binary64 addition is exact.
+//! Fold uniform runs and repeated cycles of pure scalar-row projections when binary64 addition is exact.
 use super::*;
 
 struct RunSum<'a> {
@@ -86,7 +86,7 @@ fn run_sum<'a>(module: &Module, test: &Expr, body: &'a [Statement]) -> Option<Ru
 
 impl Emitter<'_, '_> {
     /// Advance over the current read-only run after copying its observable loop target.
-    /// Dense storage and a receiver that differs from the snapshot take the original loop.
+    /// A dense or replaced receiver follows the ordinary traversal.
     pub(super) fn struct_run_loop(
         &mut self,
         test: &Expr,
@@ -126,7 +126,17 @@ impl Emitter<'_, '_> {
         let compressed = self.instruction(format!("or i1 {sparse}, {repeated}"));
         let eligible = self.instruction(format!("and i1 {same}, {compressed}"));
         let (condition, visit) = (self.label(), self.label());
-        self.branch(&eligible, &condition, ordinary);
+        let other = self.label();
+        self.branch(&eligible, &condition, &other);
+        self.start(&other);
+        // Uniform and sparse views have already dispatched above. Only a
+        // matching periodic view can reuse a complete cycle of projections.
+        let masked = self.instruction(format!("icmp ne i64 {index_mask}, -1"));
+        let cyclic = self.instruction(format!("and i1 {same}, {masked}"));
+        let cycle = self.label();
+        self.branch(&cyclic, &cycle, ordinary);
+        self.start(&cycle);
+        self.periodic_struct_sum(&plan, body, &view.length.operand, &index_mask, ordinary);
         self.start(&condition);
         let more = self.while_condition(test, false);
         self.branch(&more, &visit, exhausted);
@@ -161,12 +171,87 @@ impl Emitter<'_, '_> {
         self.jump(&condition);
         true
     }
+
+    /// Execute the first cycle in source order. Each projected term must satisfy
+    /// the same exact-addition bound for the entire remaining traversal. Failure
+    /// resumes at the untouched suffix with the accumulator and row already correct.
+    fn periodic_struct_sum(
+        &mut self,
+        plan: &RunSum<'_>,
+        body: &[Statement],
+        tagged_length: &str,
+        mask: &str,
+        ordinary: &str,
+    ) {
+        let cursor = self.borrow_slot(plan.cursor);
+        let tagged = self.instruction(format!("trunc i64 {} to i1", cursor.operand));
+        let at = self.instruction(format!("lshr i64 {}, 1", cursor.operand));
+        let length = self.instruction(format!("lshr i64 {tagged_length}, 1"));
+        let inside = self.instruction(format!("icmp ule i64 {at}, {length}"));
+        let valid = self.instruction(format!("and i1 {tagged}, {inside}"));
+        let remaining = self.instruction(format!("sub i64 {length}, {at}"));
+        let period = self.instruction(format!("add i64 {mask}, 1"));
+        let half = self.instruction(format!("lshr i64 {remaining}, 1"));
+        let multiple = self.instruction(format!("icmp uge i64 {half}, {period}"));
+        let enough = self.instruction(format!("and i1 {valid}, {multiple}"));
+        let (start, visit, checked, skip) =
+            (self.label(), self.label(), self.label(), self.label());
+        self.branch(&enough, &start, ordinary);
+        self.start(&start);
+        let initial = self.borrow_slot(plan.accumulator);
+        let end = self.instruction(format!("add i64 {at}, {period}"));
+        let exact = self.entry_alloca("i1");
+        self.line(format!("store i1 true, ptr {exact}"));
+        self.jump(&visit);
+        self.start(&visit);
+        self.block(&body[..2]);
+        let sum = self.borrow_slot(plan.accumulator);
+        let term = self.expr(plan.term);
+        let added = self.instruction(format!("fadd double {}, {}", sum.operand, term.operand));
+        self.line(format!(
+            "store double {added}, ptr %local{}",
+            plan.accumulator
+        ));
+        let fits = self.instruction(format!(
+            "call i1 @imre_exact_fadd_bound(double {}, double {}, i64 {remaining})",
+            initial.operand, term.operand
+        ));
+        let previous = self.instruction(format!("load i1, ptr {exact}"));
+        let all = self.instruction(format!("and i1 {previous}, {fits}"));
+        self.line(format!("store i1 {all}, ptr {exact}"));
+        let next = self.borrow_slot(plan.cursor);
+        let next = self.instruction(format!("lshr i64 {}, 1", next.operand));
+        let complete = self.instruction(format!("icmp eq i64 {next}, {end}"));
+        self.branch(&complete, &checked, &visit);
+        self.start(&checked);
+        self.branch(&all, &skip, ordinary);
+        self.start(&skip);
+        let rest = self.instruction(format!("sub i64 {length}, {end}"));
+        let cycles = self.instruction(format!("udiv i64 {rest}, {period}"));
+        let count = self.instruction(format!("uitofp i64 {cycles} to double"));
+        let delta = self.instruction(format!("fsub double {added}, {}", initial.operand));
+        let product = self.instruction(format!("fmul double {delta}, {count}"));
+        let bulk = self.instruction(format!("fadd double {added}, {product}"));
+        // A zero-delta cycle has reached a fixed point, including the sign of zero.
+        let fixed = self.instruction(format!("fcmp oeq double {delta}, 0.0"));
+        let result = self.instruction(format!("select i1 {fixed}, double {added}, double {bulk}"));
+        self.line(format!(
+            "store double {result}, ptr %local{}",
+            plan.accumulator
+        ));
+        let tail = self.instruction(format!("and i64 {rest}, {mask}"));
+        let resume = self.instruction(format!("sub i64 {length}, {tail}"));
+        let shifted = self.instruction(format!("shl i64 {resume}, 1"));
+        let tagged = self.instruction(format!("or i64 {shifted}, 1"));
+        self.line(format!("store i64 {tagged}, ptr %local{}", plan.cursor));
+        self.jump(ordinary);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn uniform_runs_require_a_pure_independent_float_term() {
+    fn run_folds_require_a_pure_independent_float_term() {
         let source = r#"
 from imre import struct
 @struct
@@ -205,5 +290,7 @@ print(fallible(rows))
 "#;
         let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
         assert_eq!(llvm.matches("call double @imre_repeat_fadd(").count(), 1);
+        // One bound check belongs to the uniform helper and one to the eligible cyclic loop.
+        assert_eq!(llvm.matches("call i1 @imre_exact_fadd_bound(").count(), 2);
     }
 }

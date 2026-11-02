@@ -3,8 +3,9 @@ use super::super::Object;
 use super::super::exceptions::Result;
 use super::super::files::errno_with_filenames;
 use super::syscall_path;
-use rustix::fs::{AtFlags, CWD, linkat, readlinkat, symlinkat};
-use std::ffi::OsString;
+use rustix::fs::{AtFlags, CWD, linkat, readlinkat_raw, symlinkat};
+use std::ffi::{CStr, OsString};
+use std::io;
 use std::os::unix::ffi::OsStringExt;
 
 /// Read the stored target without following the link.
@@ -14,9 +15,34 @@ use std::os::unix::ffi::OsStringExt;
 pub(in crate::objects) unsafe fn readlink(path: *const Object) -> Result<OsString> {
     // SAFETY: tag 2 selects the caller's rooted Path and its original text.
     let (path, name) = unsafe { syscall_path(path.cast(), 2, "readlink", "path") }?;
-    let target = readlinkat(CWD, path.as_c_str(), Vec::new())
-        .map_err(|e| errno_with_filenames(e.into(), Some(name), None))?;
-    Ok(OsString::from_vec(target.into_bytes()))
+    readlink_at(&path, libc::AT_FDCWD)
+        .map(OsString::from_vec)
+        .map_err(|e| errno_with_filenames(e, Some(name), None))
+}
+
+/// Read a link using the same MAXPATHLEN limit as CPython's POSIX os.readlink.
+pub(crate) fn readlink_at(path: &CStr, dir_fd: i32) -> io::Result<Vec<u8>> {
+    let mut target = [0u8; libc::PATH_MAX as usize];
+    let count = if dir_fd == libc::AT_FDCWD {
+        readlinkat_raw(CWD, path, &mut target[..])?
+    } else {
+        // Python accepts arbitrary integers, including closed descriptors. These cannot
+        // be represented by BorrowedFd; let the kernel validate the descriptor.
+        // SAFETY: path is NUL-terminated, and target is writable up to its passed length.
+        let count = unsafe {
+            libc::readlinkat(
+                dir_fd,
+                path.as_ptr(),
+                target.as_mut_ptr().cast(),
+                target.len(),
+            )
+        };
+        if count < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        count as usize
+    };
+    Ok(target[..count].to_vec())
 }
 
 /// Convert both original filenames in order. CheckSymlink runs before a user flag's truth method.

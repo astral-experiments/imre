@@ -39,6 +39,8 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
             Some(("_functools", function))
         }
         "_thread" if matches!(function, "allocate" | "allocate_lock") => Some((module, function)),
+        #[cfg(target_os = "linux")]
+        "_signal" if function == "sigpending" => Some((module, function)),
         "_contextvars" if function == "copy_context" => Some((module, function)),
         "_io" if function == "text_encoding" => Some((module, function)),
         "zlib" if function == "adler32" => Some((module, function)),
@@ -1814,6 +1816,9 @@ impl Context {
                 match name {
                     "__name__" | "__qualname__" => return Ok(self.text(function.to_owned())),
                     "__module__" => return Ok(self.text(module.to_owned())),
+                    "__doc__" if symbol == "_signal.sigpending" => {
+                        return Ok(self.text("Examine pending signals.\n\nReturns a set of signal numbers that are pending for delivery to\nthe calling thread."));
+                    }
                     "__doc__" if symbol == "_thread.allocate" => {
                         return Ok(self.text("An obsolete synonym of allocate_lock()."));
                     }
@@ -1879,6 +1884,7 @@ impl Context {
                         if matches!(
                             symbol.as_str(),
                             "posix.getpid"
+                                | "_signal.sigpending"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
                                 | "_thread._count"
@@ -3948,6 +3954,7 @@ impl Context {
             dictionary,
             property,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
             fields: Default::default(),
             scalar: None,
@@ -3959,6 +3966,14 @@ impl Context {
     fn allocation_base(&self, class: Id) -> Option<Id> {
         self.find_in_mro(class, |base| match self.heap.get(base) {
             Value::Native(_) => Some(base),
+            // Generic and Protocol are bootstrapped with a class namespace, but
+            // inherit object.__new__ and do not supply native instance storage.
+            Value::Class { .. }
+                if self.classes.get("typing.Generic") == Some(&base)
+                    || self.classes.get("typing.Protocol") == Some(&base) =>
+            {
+                None
+            }
             Value::Class { scope, .. } if self.scope_data(*scope).class_cell.is_none() => {
                 Some(base)
             }
@@ -4064,6 +4079,7 @@ impl Context {
             dictionary: None,
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }
@@ -4110,6 +4126,7 @@ impl Context {
             scalar: Some(text),
             property: None,
             weak_reference: None,
+            cycle: None,
             memory_stream: None,
         }))
     }

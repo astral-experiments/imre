@@ -840,6 +840,7 @@ pub(super) enum Value {
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
         weak_reference: Option<Box<super::weakref::Reference>>,
+        cycle: Option<Box<super::stdlib::itertools::Cycle>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
@@ -1375,6 +1376,7 @@ impl Value {
                 dictionary,
                 scalar,
                 weak_reference,
+                cycle,
                 memory_stream,
                 property,
             } => {
@@ -1383,6 +1385,9 @@ impl Value {
                 }
                 if let Some(reference) = weak_reference {
                     visit.push(reference.callback);
+                }
+                if let Some(cycle) = cycle {
+                    cycle.children(visit);
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
@@ -2803,14 +2808,26 @@ impl Heap {
         let active = self.caught_exception(caught);
         let frame = self.frames.last_mut().unwrap();
         frame.active = active;
-        if let Some(id) = frame.object
-            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
-        {
-            *lineno = location.line;
-        }
+        let line = location.line;
         frame.location = Some(location);
         frame.live.clear();
         frame.live.extend(live);
+        self.set_statement_line(line);
+    }
+
+    /// A match statement can execute separate pattern and guard expressions in one step.
+    pub(super) fn set_statement_line(&mut self, line: u32) {
+        let frame = self.frames.last_mut().unwrap();
+        frame
+            .location
+            .as_mut()
+            .expect("active source location")
+            .line = line;
+        if let Some(id) = frame.object
+            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
+        {
+            *lineno = line;
+        }
     }
 
     /// A discarded owner or the allocation threshold has requested a sweep.
