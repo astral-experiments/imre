@@ -1,4 +1,63 @@
-use super::{Context, Error, Id, NONE, Result, Value};
+use super::super::value::NOT_IMPLEMENTED;
+use super::{Context, Error, Id, NONE, Result, TRUE, Value};
+
+/// Pack one Cartesian row and advance its exact integer indices. Foreign state uses Python's protocols.
+pub(super) fn product_advance(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let ([receiver, pools, indices], []) = (args, kwargs) else {
+        return Err(Error::new(
+            "TypeError",
+            "expected a product cursor, pools, and indices",
+        ));
+    };
+    let (Value::List(pools), Value::List(digits)) = (ctx.heap.get(*pools), ctx.heap.get(*indices))
+    else {
+        return Ok(NOT_IMPLEMENTED);
+    };
+    if pools.len() != digits.len() {
+        return Ok(NOT_IMPLEMENTED);
+    }
+
+    let mut row = Vec::new();
+    let mut carry = None;
+    for (position, (&pool, &digit)) in pools.iter().zip(digits).enumerate() {
+        let (Value::Tuple(pool), Value::Int(digit)) = (ctx.heap.get(pool), ctx.heap.get(digit))
+        else {
+            return Ok(NOT_IMPLEMENTED);
+        };
+        let Some(index) = digit.as_small().and_then(|i| usize::try_from(i).ok()) else {
+            return Ok(NOT_IMPLEMENTED);
+        };
+        let Some(&value) = pool.get(index) else {
+            return Ok(NOT_IMPLEMENTED);
+        };
+        row.try_reserve(1)
+            .map_err(|_| crate::Error::memory_error())?;
+        row.push(value);
+        // The rightmost position with a successor advances; every following position resets.
+        if index + 1 < pool.len() {
+            carry = Some((position, index + 1));
+        }
+    }
+
+    let row = ctx.alloc(Value::Tuple(row));
+    let next = carry.map(|(position, index)| (position, ctx.int(index as i64)));
+    let zero = ctx.int(0);
+    let Value::List(digits) = ctx.heap.get_mut(*indices) else {
+        unreachable!("validated product indices")
+    };
+    if let Some((position, value)) = next {
+        digits[position] = value;
+        digits[position + 1..].fill(zero);
+    } else {
+        digits.fill(zero);
+        ctx.set_attr(*receiver, "_stopped", TRUE)?;
+    }
+    Ok(row)
+}
 
 /// Advance the current child, obtaining another from the outer iterator only on exhaustion.
 pub(super) fn chain_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {

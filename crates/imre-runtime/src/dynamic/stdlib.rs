@@ -1674,6 +1674,9 @@ pub(super) fn call(
         }
         return Ok(result);
     }
+    if name == "_imre_itertools._product_advance" {
+        return itertools::product_advance(ctx, args, kwargs);
+    }
     if name == "_imre_itertools._chain_next" {
         return itertools::chain_next(ctx, args, kwargs);
     }

@@ -25,6 +25,15 @@ def current():
     assert saved == (item, item) and next(alias, None) is None
     assert list(product()) == [()] and list(product(None, repeat=0)) == [()]
 
+    class LabelledProduct(product):
+        def __next__(self):
+            return super().__next__() + ("label",)
+
+    assert list(LabelledProduct(range(2), [item], "ab")) == [
+        (0, item, "a", "label"), (0, item, "b", "label"),
+        (1, item, "a", "label"), (1, item, "b", "label"),
+    ]
+
     class Broken:
         def __iter__(self):
             raise RuntimeError("opening pool")
