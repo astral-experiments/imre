@@ -83,6 +83,10 @@ pub(in crate::dynamic) fn members(class: &str) -> Option<Members> {
             &[
                 "__bool__",
                 "__neg__",
+                "__add__",
+                "__radd__",
+                "__sub__",
+                "__rsub__",
                 "__mul__",
                 "__rmul__",
                 "__truediv__",
@@ -316,7 +320,7 @@ fn nearest_quotient(ctx: &Context, numerator: Id, denominator: Id) -> Result<cra
     )))
 }
 
-fn scale_delta(
+fn delta_binary(
     ctx: &mut Context,
     method: &str,
     args: &[Id],
@@ -344,12 +348,27 @@ fn scale_delta(
             format!("wrapper {name}() takes no keyword arguments"),
         ));
     }
-    let &[factor] = args else {
+    let &[other] = args else {
         return Err(Error::new(
             "TypeError",
             format!("expected 1 argument, got {}", args.len()),
         ));
     };
+    if matches!(name, "__add__" | "__radd__" | "__sub__" | "__rsub__") {
+        let Some(other) = calendar(ctx, other, "timedelta") else {
+            return Ok(crate::dynamic::value::NOT_IMPLEMENTED);
+        };
+        let result = match name {
+            "__sub__" => duration.shift_duration(&other, true),
+            "__rsub__" => other.shift_duration(&duration, true),
+            _ => duration.shift_duration(&other, false),
+        }?;
+        return Ok(store(ctx, result, NONE));
+    }
+    scale_delta(ctx, name, &duration, other)
+}
+
+fn scale_delta(ctx: &mut Context, name: &str, duration: &Calendar, factor: Id) -> Result<Id> {
     let us = ctx.alloc(Value::Int(crate::Int::new(
         duration.delta_microseconds().into(),
     )));
@@ -441,12 +460,16 @@ pub(super) fn call(
         "date.strftime" => strftime::format(ctx, "date", args, kwargs),
         "time.strftime" => strftime::format(ctx, "time", args, kwargs),
         "time" => time(ctx, args, kwargs),
-        "timedelta.__mul__"
+        "timedelta.__add__"
+        | "timedelta.__radd__"
+        | "timedelta.__sub__"
+        | "timedelta.__rsub__"
+        | "timedelta.__mul__"
         | "timedelta.__rmul__"
         | "timedelta.__truediv__"
         | "timedelta.__rtruediv__"
         | "timedelta.__floordiv__"
-        | "timedelta.__rfloordiv__" => scale_delta(ctx, method, args, kwargs),
+        | "timedelta.__rfloordiv__" => delta_binary(ctx, method, args, kwargs),
         "datetime.combine" => {
             let [day, clock, tz] = bind("combine", args, kwargs, ["date", "time", "tzinfo"])?;
             let day = required(day, "combine()", "date", 1)?;

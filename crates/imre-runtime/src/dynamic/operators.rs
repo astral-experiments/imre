@@ -4007,7 +4007,11 @@ impl Context {
         }
         let method = if matches!(
             name,
-            "__mul__"
+            "__add__"
+                | "__radd__"
+                | "__sub__"
+                | "__rsub__"
+                | "__mul__"
                 | "__rmul__"
                 | "__truediv__"
                 | "__rtruediv__"
@@ -4233,7 +4237,7 @@ impl Context {
         };
         let class = |id| {
             self.heap.get(id).instance_class().or_else(|| {
-                if matches!(op, "*" | "/" | "//") {
+                if matches!(op, "+" | "-" | "*" | "/" | "//") {
                     self.timedelta_slot_class(id)
                 } else {
                     None
