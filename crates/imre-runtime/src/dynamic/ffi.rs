@@ -1545,14 +1545,14 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        if self.heap.discard_truth_operands(mark) {
+        if self.heap.discard_truth_operands(mark, self.modules) {
             self.collect_unreachable();
         }
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
     pub(super) fn finish_call_operands(&mut self, mark: usize, result: Id) {
-        if self.heap.discard_operands(mark, result) {
+        if self.heap.discard_operands(mark, result, self.modules) {
             self.collect_unreachable();
         }
     }

@@ -4430,7 +4430,7 @@ impl Context {
 
     /// Retain only an expression's result and the roots that preceded its evaluation.
     fn keep_source_result(&mut self, mark: usize, value: Id) -> Result<Id> {
-        let collect = self.heap.discard_truth_operands(mark);
+        let collect = self.heap.discard_truth_operands(mark, self.modules);
         self.heap.reserve_temporaries(1)?;
         self.heap.keep(value);
         if collect {
@@ -4646,7 +4646,7 @@ impl Context {
         match result {
             Ok(set) => self.keep_source_result(mark, set),
             Err(error) => {
-                let collect = self.heap.discard_truth_operands(mark);
+                let collect = self.heap.discard_truth_operands(mark, self.modules);
                 for root in error.roots() {
                     self.heap.keep(root);
                 }
@@ -4811,7 +4811,7 @@ impl Context {
                             .and_then(|iterable| self.extend_source_items(&mut items, iterable, None));
                         // Only yielded values outlive this operand. Release the iterator before
                         // evaluating the next tuple element or dispatching a weakref callback.
-                        let collect = self.heap.discard_truth_operands(mark);
+                        let collect = self.heap.discard_truth_operands(mark, self.modules);
                         match &expanded {
                             Ok(()) => {
                                 for &value in &items[first..] {
