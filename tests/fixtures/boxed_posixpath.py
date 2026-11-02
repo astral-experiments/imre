@@ -187,6 +187,78 @@ def current():
         os.fspath = original
     assert calls == ["werkzeug/serving.py"] * 4 + ["serving.py"]
 
+    with open(Path(__file__), "rb", -1, None, None, None) as stream:
+        assert stream.read(6) == b"import"
+    with open(Path(__file__), encoding="utf-8", errors=None, newline=None) as stream:
+        assert stream.readline() == "import genericpath\n"
+    class DescriptorPath:
+        def __index__(self):
+            return fd
+
+        def __fspath__(self):
+            raise AssertionError("open selected the pathname of a valid descriptor")
+
+    fd = os.open(__file__, os.O_RDONLY)
+    try:
+        with open(DescriptorPath(), "rb", closefd=False) as stream:
+            assert stream.fileno() == fd
+            assert stream.read(6) == b"import"
+        assert os.lseek(fd, 0, os.SEEK_SET) == 0
+    finally:
+        os.close(fd)
+    fd = os.open(__file__, os.O_RDONLY)
+    with open(DescriptorPath(), "rb") as stream:
+        assert stream.read(6) == b"import"
+    try:
+        os.fstat(fd)
+    except OSError:
+        pass
+    else:
+        os.close(fd)
+        raise AssertionError("closing a buffered reader left its owned descriptor open")
+
+    path = "imre-boxed-buffer-position"
+    with open(path, "xb") as stream:
+        stream.write(b"abcdefghij")
+    try:
+        for refresh, target, whence, position, next_byte, raw_position in (
+            (False, 6, os.SEEK_SET, 6, b"g", 0),
+            (True, 6, os.SEEK_SET, 6, b"g", 10),
+            (True, 2, os.SEEK_CUR, 0, b"d", 0),
+            (False, 13, os.SEEK_CUR, 4, b"e", 10),
+            (False, 14, os.SEEK_SET, 14, b"", 14),
+        ):
+            with open(os.open(path, os.O_RDONLY), "rb") as stream:
+                assert stream.read(1) == b"a"
+                os.lseek(stream.fileno(), 0, os.SEEK_SET)
+                if refresh:
+                    assert stream.tell() == 0
+                assert stream.seek(target, whence) == position
+                assert stream.read(1) == next_byte
+                assert os.lseek(stream.fileno(), 0, os.SEEK_CUR) == raw_position
+
+        fd = os.open(path, os.O_WRONLY)
+        stream = open(fd, "wb")
+        stream.write(b"XX")
+        stream.raw.close()
+        replacement = os.open(path, os.O_RDWR)
+        try:
+            assert replacement == fd
+            assert stream.close() is None
+            with open(replacement, "rb", 0, closefd=False) as borrowed:
+                assert borrowed.read() == b"abcdefghij"
+        finally:
+            os.close(replacement)
+    finally:
+        os.unlink(path)
+
+    # Conversion runs before incompatible binary options are rejected.
+    try:
+        open(Raises(), "rb", -1, None, "replace", None)
+    except RuntimeError as exc:
+        assert str(exc) == "method call"
+    else:
+        raise AssertionError("open ignored the failing filesystem protocol")
     assert os.fsdecode(Path(b"caf\xc3\xa9")) == "café"
     assert not os.path.isfile(Path("missing\0file"))
 

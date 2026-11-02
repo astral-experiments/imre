@@ -4,9 +4,11 @@ use super::super::builtins::zeroed_bytes;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 
 mod buffered_io;
+mod descriptor_buffer;
+pub(in crate::dynamic) use descriptor_buffer::BufferedFd;
 mod bytes_io;
 mod file_io;
-pub(in crate::dynamic) use file_io::open_raw;
+pub(in crate::dynamic) use file_io::open;
 mod text_wrapper;
 
 #[derive(Clone)]
