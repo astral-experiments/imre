@@ -117,6 +117,7 @@ pub(crate) struct Context {
     sorting_lists: Vec<Id>,
     // Container ancestors visible to a reentrant Python __repr__.
     repr_ancestors: Vec<Id>,
+    repr_sequence_words: Option<usize>,
     token_missing: Id,
     native_code_objects: HashMap<usize, Id>,
     source_builtins: Option<Id>,
