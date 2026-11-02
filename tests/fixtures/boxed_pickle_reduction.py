@@ -153,6 +153,7 @@ def produce():
     check_object_reducer()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        check_reduction_state(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
             try:
@@ -173,3 +174,27 @@ def produce():
         value = (shared, shared, reduced, reduced, WithoutProtocol(), (), dictionary_cases(protocol),
                  (b"", payload[:-1], payload, payload, ReducedBytes(b"x")))
         print(list(pickle.dumps(value, protocol)))
+
+
+class Stateful:
+    def __init__(self, links):
+        self.links = links
+        self.restorations = 0
+
+    def __reduce__(self):
+        return type(self), (self.links,), self.state
+
+    def __setstate__(self, state):
+        self.state = state
+        self.restorations += 1
+
+
+def check_reduction_state(protocol):
+    links = {}
+    obj = Stateful(links)
+    links["owner"] = obj
+    obj.state = {"links": links, "owner": obj}
+    restored, state = pickle.loads(pickle.dumps((obj, obj.state), protocol))
+    assert restored.state is state and restored.restorations == 1
+    assert state["owner"] is restored and state["links"] is restored.links
+    assert restored.links["owner"] is restored
