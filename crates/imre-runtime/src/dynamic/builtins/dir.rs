@@ -158,7 +158,7 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             if scope
                 .class_namespace
                 .as_ref()
-                .is_some_and(|ns| ns.annotation_thunks.is_some())
+                .is_some_and(|ns| ns.annotation_sites.is_some() || ns.annotation_thunks.is_some())
             {
                 names.insert("__annotate_func__".to_owned());
             }

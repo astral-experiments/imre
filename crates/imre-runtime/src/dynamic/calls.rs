@@ -2917,29 +2917,35 @@ impl Context {
                         .unwrap_or_else(|| self.heap.packed_tuple(Vec::new(), false)));
                 }
                 if name == "__annotations__"
-                    && let Some(thunks) = self
+                    && let Some(sites) = self
                         .scope_data(scope)
                         .class_namespace
                         .as_ref()
-                        .and_then(|c| c.annotation_thunks)
+                        .and_then(|namespace| namespace.annotation_sites.as_ref())
                 {
-                    let entries = self.dict_entries(thunks).unwrap().to_vec();
-                    let mapping = self
-                        .own_class_attr(obj, name)
-                        .ok_or_else(|| self.missing_attribute(obj, name))?;
-                    let mut evaluated = Vec::with_capacity(entries.len());
-                    for (key, thunk) in entries {
-                        let value = self.call(thunk, Vec::new(), Vec::new())?;
-                        evaluated.push((key, value));
+                    let sites: Vec<_> = sites.values().copied().collect();
+                    // An annotation can replace __annotations__ and collect the old thunks.
+                    let mark = self.heap.temporary_mark();
+                    for &(key, thunk) in &sites {
+                        self.heap.keep(key);
+                        self.heap.keep(thunk);
                     }
-                    for (key, value) in evaluated {
-                        self.put_item(mapping, key, value)?;
-                    }
-                    let Value::Scope(frame) = self.heap.get_mut(scope) else {
-                        unreachable!()
-                    };
-                    frame.class_namespace.as_mut().unwrap().annotation_thunks = None;
-                    return Ok(mapping);
+                    let mapping = self.dict(Vec::new());
+                    self.heap.keep(mapping);
+                    let result = (|| {
+                        for (key, thunk) in sites {
+                            let value = self.call(thunk, Vec::new(), Vec::new())?;
+                            self.put_item(mapping, key, value)?;
+                        }
+                        self.bind_local(scope, name, mapping);
+                        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                            unreachable!("class scope")
+                        };
+                        frame.class_namespace.as_mut().unwrap().annotation_sites = None;
+                        Ok(mapping)
+                    })();
+                    self.heap.release_temporaries_since(mark);
+                    return result;
                 }
                 if name == "__name__" {
                     let assigned = self
@@ -3351,8 +3357,7 @@ impl Context {
                             .scope_data(scope)
                             .class_namespace
                             .as_ref()
-                            .and_then(|c| c.annotation_thunks)
-                            .is_some() =>
+                            .is_some_and(|namespace| namespace.annotation_sites.is_some()) =>
                     {
                         Error::new("AttributeError", "__annotations__")
                     }
@@ -4069,7 +4074,7 @@ impl Context {
                     && let Value::Scope(data) = self.heap.get_mut(scope)
                     && let Some(namespace) = &mut data.class_namespace
                 {
-                    namespace.annotation_thunks = None;
+                    namespace.annotation_sites = None;
                 }
                 self.bind(scope, name, value);
                 if name == "__del__" {
@@ -5286,8 +5291,21 @@ impl Context {
         }
         let annotations = self.dict(Vec::new());
         self.bind_local(scope, "__annotations__", annotations);
+        if typed_dict_meta.is_none()
+            && let Value::Scope(frame) = self.heap.get_mut(scope)
+        {
+            frame.class_namespace.get_or_insert_with(Default::default).annotation_scratch = Some(annotations);
+        }
         self.execute(code, scope, FrameOwner::Function(body))?;
+        let explicit_annotations = self.scope_name(scope, "__annotations__")
+            .is_some_and(|value| value != annotations);
         if let Value::Scope(frame) = self.heap.get_mut(scope) {
+            if let Some(namespace) = &mut frame.class_namespace {
+                namespace.annotation_scratch = None;
+                if explicit_annotations {
+                    namespace.annotation_sites = None;
+                }
+            }
             frame.globals.clear();
             frame.closure.nonlocals.clear();
         }

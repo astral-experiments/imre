@@ -276,7 +276,8 @@ impl Function<'_, '_> {
                             let sig = self.text("{}");
                             let defaults = self.op("dict", &[]);
                             let thunk = self.checked(&format!("call i64 @imre_dyn_def_from_site(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
-                            self.op("annotate_deferred", &[&self.scope.clone(), &key, &thunk]);
+                            let offset = v.start().to_u32();
+                            self.checked(&format!("call i64 @imre_dyn_class_annotation(ptr %ctx, i64 {}, i64 {key}, i64 {thunk}, i32 {offset})", self.scope));
                         } else {
                             let value =
                                 if self.class_locals.is_some() && self.source.string_annotations {
