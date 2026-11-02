@@ -1391,7 +1391,8 @@ impl Context {
                 ));
             }
             if let Value::Native(name) = self.heap.get(base)
-                && (crate::objects::HashState::is_provider_class(name)
+                && (super::stdlib::fixed_structseq::fixed_type(name).is_some()
+                    || crate::objects::HashState::is_provider_class(name)
                     || matches!(
                         name.as_str(),
                         "typing.TypeVar"

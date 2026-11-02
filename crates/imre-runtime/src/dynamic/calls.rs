@@ -802,10 +802,9 @@ impl Context {
         if let (Value::Native(child), Value::Native(parent)) =
             (self.heap.get(class), self.heap.get(target))
         {
-            if matches!(
-                child.as_str(),
-                stdlib::hash_info::TYPE | stdlib::flags::TYPE
-            ) && parent == "tuple"
+            if (child == stdlib::flags::TYPE
+                || stdlib::fixed_structseq::fixed_type(child).is_some())
+                && parent == "tuple"
             {
                 return true;
             }
@@ -1073,7 +1072,8 @@ impl Context {
                 class:
                     Some(
                         class @ ("time.struct_time"
-                        | stdlib::hash_info::TYPE
+                        | stdlib::fixed_structseq::HASH_INFO
+                        | stdlib::fixed_structseq::TERMINAL_SIZE
                         | stdlib::flags::TYPE
                         | stdlib::os::stat::CLASS),
                     ),
@@ -1237,7 +1237,8 @@ impl Context {
                     class:
                         Some(
                             class @ ("time.struct_time"
-                            | stdlib::hash_info::TYPE
+                            | stdlib::fixed_structseq::HASH_INFO
+                            | stdlib::fixed_structseq::TERMINAL_SIZE
                             | stdlib::flags::TYPE),
                         ),
                     ..
@@ -2380,8 +2381,12 @@ impl Context {
                     return Ok(value);
                 }
             }
-            Value::Native(ref class) if class == stdlib::hash_info::TYPE => {
-                if let Some(value) = stdlib::hash_info::type_attribute(self, name, true) {
+            Value::Native(ref symbol)
+                if let Some(class) = stdlib::fixed_structseq::fixed_type(symbol) =>
+            {
+                if let Some(value) =
+                    stdlib::fixed_structseq::type_attribute(self, class, name, true)
+                {
                     return Ok(value);
                 }
             }
@@ -2769,7 +2774,10 @@ impl Context {
                     }
                 }
                 if let Some(
-                    owner @ ("time.struct_time" | stdlib::hash_info::TYPE | stdlib::flags::TYPE),
+                    owner @ ("time.struct_time"
+                    | stdlib::fixed_structseq::HASH_INFO
+                    | stdlib::fixed_structseq::TERMINAL_SIZE
+                    | stdlib::flags::TYPE),
                 ) = class
                     && name == "__class__"
                 {
@@ -2785,8 +2793,9 @@ impl Context {
                     && let Some(value) = stdlib::flags::type_attribute(self, name, false)
                 {
                     return Ok(value);
-                } else if class == Some(stdlib::hash_info::TYPE)
-                    && let Some(value) = stdlib::hash_info::type_attribute(self, name, false)
+                } else if let Some(owner) = class.and_then(stdlib::fixed_structseq::fixed_type)
+                    && let Some(value) =
+                        stdlib::fixed_structseq::type_attribute(self, owner, name, false)
                 {
                     return Ok(value);
                 }
@@ -3225,15 +3234,20 @@ impl Context {
     }
 
     fn writable_attribute_member(&mut self, obj: Id, name: &str) -> Option<Id> {
-        if matches!(
-            self.heap.get(obj),
-            Value::NamedTuple {
-                class: Some(stdlib::os::stat::CLASS),
-                ..
-            }
-        ) && let Some(member) = stdlib::os::stat::member(self, name)
+        if let Value::NamedTuple {
+            class: Some(owner), ..
+        } = *self.heap.get(obj)
         {
-            return Some(member);
+            let member = if owner == stdlib::os::stat::CLASS {
+                stdlib::os::stat::member(self, name)
+            } else if let Some(class) = stdlib::fixed_structseq::fixed_type(owner) {
+                stdlib::fixed_structseq::member(self, class, name)
+            } else {
+                None
+            };
+            if member.is_some() {
+                return member;
+            }
         }
         if matches!(
             self.heap.get(obj),
@@ -4075,8 +4089,8 @@ impl Context {
                 "TypeError",
                 "cannot create 'sys.flags' instances",
             )),
-            Value::Native(name) if name == stdlib::hash_info::TYPE => {
-                stdlib::hash_info::construct(self, &args, &kwargs)
+            Value::Native(name) if let Some(class) = stdlib::fixed_structseq::fixed_type(&name) => {
+                stdlib::fixed_structseq::construct(self, class, &args, &kwargs)
             }
             Value::Native(name) if name == "object.__new__" => self.new_object(&args, &kwargs),
             Value::Native(name) if name == "int.__new__" => self.new_int(&args, &kwargs),

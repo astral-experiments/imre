@@ -17,11 +17,11 @@ mod csv;
 pub(super) mod datetime;
 mod email;
 mod files;
+pub(super) mod fixed_structseq;
 pub(super) mod flags;
 mod fnmatch;
 mod formatters;
 pub(super) mod functools;
-pub(super) mod hash_info;
 mod hashlib;
 mod hmac;
 mod inspect;
@@ -518,7 +518,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             full_version(ctx)?,
             compiler_version(ctx)
         )),
-        ("sys", "hash_info") => hash_info::current(ctx),
+        ("sys", "hash_info") => fixed_structseq::current_hash_info(ctx),
         ("sys", "version_info") => version_info(ctx, &full_version(ctx)?)?,
         ("sys", "implementation") => {
             let name = ctx.text("imre");
@@ -552,6 +552,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             ctx.builtin(&format!("posix.{name}"))
         }
         ("os" | "posix", "DirEntry") => ctx.builtin(os::scandir::ENTRY),
+        ("os" | "posix", "terminal_size") => ctx.builtin(fixed_structseq::TERMINAL_SIZE),
         ("os" | "posix", "stat_result") => ctx.builtin(os::stat::CLASS),
         ("os" | "posix", name @ ("stat" | "lstat" | "fstat")) => {
             ctx.builtin(&format!("posix.{name}"))
