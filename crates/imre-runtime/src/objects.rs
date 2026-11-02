@@ -107,7 +107,7 @@ pub(crate) use text::{chr_scalar, short_string};
 pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
-mod warnings;
+pub(crate) mod warnings;
 pub(crate) use warnings::{runtime_warning, unclosed_scandir};
 mod words;
 mod zipfile;
