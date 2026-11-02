@@ -1736,7 +1736,7 @@ def report(text):
             "boxed_threading_deprecated_accessors.py",
             "boxed_lowlevel_thread.py", "boxed_lowlevel_thread_roots.py",
             "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
-            "boxed_threading_condition_event.py",
+            "boxed_threading_condition_event.py", "boxed_thread_captured_lock.py",
         ):
             thread_fixture = fixtures / name
             compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
