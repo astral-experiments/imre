@@ -2203,6 +2203,7 @@ impl Context {
                 "difference",
                 "intersection",
                 "issubset",
+                "symmetric_difference",
                 "union",
                 "update",
             ],
@@ -2212,6 +2213,7 @@ impl Context {
                 "difference",
                 "intersection",
                 "issubset",
+                "symmetric_difference",
                 "union",
             ],
             "bytearray" => {

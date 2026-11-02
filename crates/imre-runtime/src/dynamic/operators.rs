@@ -3658,7 +3658,7 @@ impl Context {
 
     /// Binary XOR starts with the right table and toggles left keys, so its right
     /// residents get the first comparison. In-place XOR toggles the left table.
-    fn set_xor(&mut self, left: Id, right: Id, inplace: bool) -> Result<Id> {
+    pub(super) fn set_xor(&mut self, left: Id, right: Id, inplace: bool) -> Result<Id> {
         let frozen = matches!(self.heap.get(left), Value::Set { frozen: true, .. });
         let (result, source) = if inplace && !frozen {
             if left == right {
@@ -3667,11 +3667,12 @@ impl Context {
             }
             (left, right)
         } else {
-            let Value::Set { entries, .. } = self.heap.get(right) else {
-                unreachable!()
-            };
-            let entries = entries.try_clone()?;
-            (self.alloc(Value::Set { entries, frozen }), left)
+            let result = self.alloc(Value::Set {
+                entries: Default::default(),
+                frozen,
+            });
+            builtins::update_set(self, result, right)?;
+            (result, left)
         };
         self.visit_set_operand(source, true, |ctx, key, hash| {
             let roots = ctx.heap.temporary_mark();
