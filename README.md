@@ -118,7 +118,7 @@ branches. Skipped tests count toward the suite size only.
 | `datetime` | 636 | 1,098 | The intact development build ran all 1,098 registrations under the reference resource settings. Both levels passed 628, errored on 416 and skipped 54. Eight additional originals passed on earlier focused builds. |
 | `fnmatch` | 24 | 24 | Complete suite on `main`, all 24 passed. |
 | `functools` | 91 | 329 | The intact 325-case primary module passed 89 in all four modes. Two more original cases passed in separate runs. |
-| `hashlib` | 67 | 82 | Four earlier complete public runs passed 48/82. Two additional SHAKE originals pass at both levels on public main with the 256 official vectors cached. CPython passes the same inputs, and default-resource runs skip both. |
+| `hashlib` | 69 | 82 | The complete KDFTests class passes in both native modes at O0 and O3 with OpenSSL, adding PBKDF2 and scrypt. The two SHAKE originals also pass at both levels with 256 official vectors each. [KDF results](benchmarks/cpython_stdlib/full/hashlib/kdf-linux.tsv) |
 | `importlib` | 223 | 1,346 | All 86 runnable originals across three intact metadata files passed at O0 and O3, with one stock skip. Other public runs paired 113 of 126 disk-backed resources originals and 16 genuine loader and finder originals. Default discovery still has zero original successes. |
 | `io` | 112 | 1,038 | The public stateful-decoder original passed in ordinary and boxed O0/O3 and was already among the 112 credited cases. All four builds of the intact 667-case test_io module compiled. Discovery stops at io.BufferedReader. |
 | `itertools` | 112 | 138 | The 112 passes come from selected runs. Three original numeric methods and the original batched doctest added four cases, each verified at both levels with a failing control. The last intact public run stopped during import. |
@@ -136,7 +136,7 @@ branches. Skipped tests count toward the suite size only.
 | `typing` | 107 | 712 | The complete TypedDictTests class passed 32 of 32 originals. The complete NamedTupleTests class ran all 21 and passed five at both levels on public main. Their overlap with the historical 107 remains unknown, so the count is unchanged. |
 | `unittest` | 275 | 1,090 | The intact package passed 160 cases. On public #3601, the unchanged test_assertions and test_case files ran all 150 originals with runtime imports. Their 109 paired passes added 81 distinct cases. Another 34 original mock methods passed in focused runs. |
 | `urllib` | 161 | 178 | Both native import modes match 158 original parent successes on macOS and Linux at O0 and O3. Five quoting originals account for the latest gain. Three historical-only successes bring the total to 161. Both whole native suites exit 1, and the child-only roundtrips case remains excluded. |
-| **Total** | **5,867** | **13,328** | **3 complete suites on `main`** |
+| **Total** | **5,869** | **13,328** | **3 complete suites on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
