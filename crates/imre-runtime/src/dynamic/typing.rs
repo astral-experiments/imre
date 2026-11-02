@@ -1420,7 +1420,8 @@ pub(super) fn call(
             if !matches!(ctx.heap.get(*left), Value::ParamSpecMarker(kind, _) if kind.class() == owner)
             {
                 let actual = match ctx.heap.get(*left) {
-                    Value::ParamSpecMarker(kind, _) => kind.class(),
+                    Value::ParamSpec(_) | Value::ParamSpecMarker(_, _) | Value::TypeVar(_)
+                    | Value::TypeVarTuple { .. } => ctx.builtin_type_name(*left).unwrap(),
                     _ => ctx.type_name(*left),
                 };
                 return Err(Error::new(
