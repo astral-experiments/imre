@@ -2199,6 +2199,11 @@ impl SearchRoots {
     }
 }
 
+/// These public names are supplied by the boxed unittest.mock module.
+pub(crate) fn boxed_mock_export(name: &str) -> bool {
+    matches!(name, "sentinel" | "DEFAULT" | "ANY" | "MagicMock" | "seal")
+}
+
 impl SourceModule {
     fn local_value(&self, id: ModuleId, statement: &ast::Stmt) -> Option<DefinitionId> {
         let name = value_name(statement)?;
@@ -2235,11 +2240,6 @@ impl SourceModule {
 
     /// A type-only import in a native stub does not add a member to the C module.
     fn export(&self, name: &str) -> Option<Binding> {
-        if self.is_bundled("unittest.mock") && matches!(name, "seal" | "MagicMock") {
-            return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
-                "unittest.mock boxed mock exports",
-            )));
-        }
         if self.is_bundled("unittest") {
             let export = match name {
                 "registerResult" => Some("unittest.registerResult"),
@@ -2250,9 +2250,9 @@ impl SourceModule {
                 return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(export)));
             }
         }
-        if self.is_bundled("unittest.mock") && matches!(name, "sentinel" | "DEFAULT") {
+        if self.is_bundled("unittest.mock") && boxed_mock_export(name) {
             return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
-                "unittest.mock sentinel objects",
+                "unittest.mock objects",
             )));
         }
         let binding = *self.bindings.get(name)?;
@@ -4397,7 +4397,10 @@ impl<'a> Loader<'a> {
             )),
             // The boxed email package is intrinsic. Typed child modules need a package root.
             "email" => Some(("email/__init__.py", "")),
-            "email.message" => Some(("email/message.py", include_str!("../stdlib/email/message.py"))),
+            "email.message" => Some((
+                "email/message.py",
+                include_str!("../stdlib/email/message.py"),
+            )),
             "unittest" => Some((
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),
