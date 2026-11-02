@@ -44,8 +44,7 @@ pub(super) fn call(
             ),
         ));
     };
-    let target = ctx.scalar_value(*buffer);
-    let Value::ByteArray(bytes) = ctx.heap.get(target) else {
+    let Some((target, span)) = ctx.writable_byte_span(*buffer) else {
         let kind = if *buffer == NONE {
             "None"
         } else {
@@ -56,7 +55,7 @@ pub(super) fn call(
             format!("{name}() argument must be read-write bytes-like object, not {kind}"),
         ));
     };
-    let capacity = bytes.len();
+    let capacity = span.len();
     // Keep the destination exported while looking up and calling the reader override.
     let data = ctx.with_buffer_export(target, |ctx| {
         let method = if name == "readinto1" { "read1" } else { "read" };
@@ -77,6 +76,6 @@ pub(super) fn call(
             format!("read() returned too much data: {capacity} bytes requested, {count} returned"),
         ));
     }
-    destination[..count].copy_from_slice(bytes);
+    destination[span.start..span.start + count].copy_from_slice(bytes);
     Ok(ctx.int(count as i64))
 }

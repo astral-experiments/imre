@@ -365,6 +365,7 @@ impl Context {
             Value::Zip { .. } => "zip",
             Value::Count { .. } => "count",
             Value::Repeat(_) => "repeat",
+            Value::MemoryView(_) => "memoryview",
             Value::Array(_) => "array.array",
             Value::Bytes(_) => "bytes",
             Value::ByteArray(_) => "bytearray",
@@ -680,6 +681,7 @@ pub(super) enum Value {
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
+    MemoryView(Option<super::memoryview::View>),
     ByteArray(Vec<u8>),
     CodecInfo {
         entry: crate::objects::CodecInfo,
@@ -998,6 +1000,11 @@ impl Value {
 
     fn children(&self, visit: &mut MarkQueue<'_>) {
         match self {
+            Self::MemoryView(view) => {
+                if let Some(view) = view {
+                    visit.extend([view.backing, view.exporter]);
+                }
+            }
             Self::Deque(ring) => visit.extend(&ring.items),
             Self::SequenceIterator { source, .. } | Self::ReverseSequence { source, .. } => {
                 visit.extend(*source)
@@ -1201,6 +1208,10 @@ impl Value {
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
+                    }
+                    Some(super::stdlib::io::MemoryStream::Reader(reader)) => {
+                        visit.push(reader.buffer);
+                        visit.extend(reader.raw.get())
                     }
                     Some(super::stdlib::io::MemoryStream::Wrapper(stream)) => {
                         stream.children(visit)

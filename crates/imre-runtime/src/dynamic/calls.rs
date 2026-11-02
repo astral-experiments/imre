@@ -895,6 +895,7 @@ impl Context {
             | Value::PrimitiveLock(_) => self.type_name(obj),
             Value::TextFile(_) => "_io.TextIOWrapper",
             Value::DefaultDict { .. } => "collections.defaultdict",
+            Value::MemoryView(_) => "memoryview",
             Value::ByteArray(_) => "bytearray",
             Value::Map { .. } => "map",
             Value::Filter { .. } => "filter",
@@ -1025,6 +1026,10 @@ impl Context {
     pub(super) fn exact_type(&mut self, obj: Id) -> Result<Id> {
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
+            Value::File(_) if self.type_name(obj) == "_io.BufferedReader" => {
+                self.module("io")?;
+                Ok(self.builtins["_io.BufferedReader"])
+            }
             Value::TextFile(_) => {
                 self.module("io")?;
                 Ok(self.builtins["_io.TextIOWrapper"])
@@ -1092,7 +1097,9 @@ impl Context {
             .builtin_type_name(value)
             .and_then(|name| self.builtins.get(name))
             && (super::mapping_abc::registered_subclass(self, *actual, class)
-                || matches!(self.heap.get(value), Value::TextFile(_))
+                || (matches!(self.heap.get(value), Value::TextFile(_))
+                    || matches!(self.heap.get(value), Value::File(_))
+                        && self.type_name(value) == "_io.BufferedReader")
                     && self.direct_subclass(*actual, class))
         {
             return true;
@@ -1124,6 +1131,7 @@ impl Context {
                     || self.raised_error_matches(error, class)
             }
             ("array.array", Value::Array(_))
+            | ("memoryview", Value::MemoryView(_))
             | ("bytearray", Value::ByteArray(_))
             | ("object", _)
             | ("bool", Value::Bool(_))
@@ -1460,6 +1468,11 @@ impl Context {
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr_for_call(&mut self, obj: Id, name: &str, for_call: bool) -> Result<Id> {
+        if matches!(self.heap.get(obj), Value::MemoryView(_))
+            && let Some(value) = self.view_property(obj, name)?
+        {
+            return Ok(value);
+        }
         if let Value::Union(union) = *self.heap.get(obj) {
             match name {
                 "__args__" => return Ok(union.args),
@@ -2387,6 +2400,11 @@ impl Context {
             {
                 let owner = builtins::format_owner(class);
                 return Ok(self.builtin(&format!("{owner}.__format__")));
+            }
+            Value::Native(ref class)
+                if class == "memoryview" && super::memoryview::METHODS.contains(&name) =>
+            {
+                return Ok(self.builtin(&format!("memoryview.{name}")));
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "bytes" | "bytearray")
@@ -3894,6 +3912,7 @@ impl Context {
                                 | "tuple"
                                 | "bytes"
                                 | "bytearray"
+                                | "memoryview"
                                 | "range"
                                 | "range_iterator"
                                 | "longrange_iterator"

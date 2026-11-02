@@ -479,15 +479,19 @@ pub(super) fn call(
     if name == "write" {
         ctx.bytes_like(args[0])?;
     }
-    if name == "readinto" && !matches!(ctx.heap.get(args[0]), Value::ByteArray(_)) {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "readinto() argument 1 must be read-write bytes-like object, not {}",
-                ctx.type_name(args[0])
-            ),
-        ));
-    }
+    let target = if name == "readinto" {
+        Some(ctx.writable_byte_span(args[0]).ok_or_else(|| {
+            Error::new(
+                "TypeError",
+                format!(
+                    "readinto() argument 1 must be read-write bytes-like object, not {}",
+                    ctx.type_name(args[0])
+                ),
+            )
+        })?)
+    } else {
+        None
+    };
     let whence = if name == "seek" && args.len() == 2 {
         ctx.index_integer(args[1])?
             .to_i64()
@@ -553,10 +557,11 @@ pub(super) fn call(
         }
         "readinto" => {
             raw.check_direction(true)?;
-            let Value::ByteArray(buf) = ctx.heap.get_mut(args[0]) else {
+            let (storage, span) = target.expect("readinto has validated the destination buffer");
+            let Value::ByteArray(buf) = ctx.heap.get_mut(storage) else {
                 unreachable!()
             };
-            Ok(read_into(fd, buf)?.map_or(NONE, |n| ctx.int(n as i64)))
+            Ok(read_into(fd, &mut buf[span])?.map_or(NONE, |n| ctx.int(n as i64)))
         }
         "write" => {
             raw.check_direction(false)?;

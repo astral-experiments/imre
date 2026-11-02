@@ -162,4 +162,26 @@ def current():
         raise AssertionError("reader resized the exported bytearray")
     dest.clear()
     assert io.StringIO("π").getvalue() == "π"
+    class Raw(io.RawIOBase):
+        def readable(self):
+            return True
+
+        def readinto(self, target):
+            assert type(target) is memoryview and target.obj is None
+            self.view = target
+            target[:4] = b"abcd"
+            return 4
+
+    class Reader(io.BufferedReader):
+        def read(self, size=-1):
+            return b"seen:" + super().read(size)
+
+    raw = Raw()
+    reader = Reader(raw, buffer_size=4)
+    assert reader.raw is raw and reader.peek() == b"abcd"
+    raw.view[1:3] = b"xy"
+    assert reader.read(4) == b"seen:axyd"
+    reader.close()
+    assert reader.closed and raw.closed
+
     print("BytesIO retains native stream position and immutable snapshots")
