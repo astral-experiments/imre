@@ -721,7 +721,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "_CacheInfo") => functools::cache_info_type(ctx)?,
         ("functools", "WRAPPER_ASSIGNMENTS") => tuple_text(ctx, functools::ASSIGNED),
         ("functools", "WRAPPER_UPDATES") => tuple_text(ctx, functools::UPDATED),
-        ("posixpath", "dirname") => ctx.builtin("os.path.dirname"),
         ("os" | "posix", "getcwd" | "getcwdb" | "strerror") if cfg!(unix) => {
             ctx.builtin(&format!("posix.{name}"))
         }
@@ -2639,7 +2638,6 @@ pub(super) fn call(
         "sys.exit"
         | "sysconfig.get_preferred_scheme"
         | "os.confstr"
-        | "os.path.dirname"
         | "struct.calcsize"
         | "_string.formatter_parser"
         | "_string.formatter_field_name_split"
@@ -2916,10 +2914,6 @@ pub(super) fn call(
                 }
             }
             return Err(ctx.exception("SystemExit", args));
-        }
-        "os.path.dirname" => {
-            let path = ctx.str_value(argument(args, 0)?)?;
-            return Ok(ctx.text(posixpath::dirname(path).to_owned()));
         }
         "file.__enter__" | "file.__exit__" => {
             let receiver = argument(args, 0)?;
