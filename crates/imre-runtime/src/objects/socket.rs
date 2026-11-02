@@ -551,6 +551,130 @@ pub(crate) fn getnameinfo(
     Ok((decode(&host)?, decode(&service)?))
 }
 
+enum Service<'a> {
+    Name(&'a CStr),
+    Port(u16),
+}
+
+/// Copy the requested field while the platform's service entry is still valid.
+fn with_service<T>(
+    key: Service<'_>,
+    protocol: Option<&CStr>,
+    read: impl FnOnce(&libc::servent) -> Result<T>,
+) -> Result<T> {
+    let proto = protocol.map_or(ptr::null(), CStr::as_ptr);
+    let missing = match key {
+        Service::Name(_) => "service/proto not found",
+        Service::Port(_) => "port/proto not found",
+    };
+
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn getservbyname_r(
+                name: *const libc::c_char,
+                proto: *const libc::c_char,
+                entry: *mut libc::servent,
+                buffer: *mut libc::c_char,
+                size: usize,
+                result: *mut *mut libc::servent,
+            ) -> libc::c_int;
+            fn getservbyport_r(
+                port: libc::c_int,
+                proto: *const libc::c_char,
+                entry: *mut libc::servent,
+                buffer: *mut libc::c_char,
+                size: usize,
+                result: *mut *mut libc::servent,
+            ) -> libc::c_int;
+        }
+
+        let mut entry = std::mem::MaybeUninit::uninit();
+        // NSS can need more space for aliases. Keep its scratch storage pointer-aligned.
+        let mut buffer = Vec::<usize>::new();
+        let mut words = 1024 / size_of::<usize>();
+        loop {
+            buffer
+                .try_reserve_exact(words)
+                .map_err(|_| Error::memory_error())?;
+            let bytes = buffer.capacity() * size_of::<usize>();
+            let buf = buffer.as_mut_ptr().cast();
+            let mut result = ptr::null_mut();
+            // SAFETY: both C strings are live or NULL, and the output and scratch storage
+            // remain valid until the requested field has been copied.
+            let rc = unsafe {
+                match key {
+                    Service::Name(name) => getservbyname_r(
+                        name.as_ptr(),
+                        proto,
+                        entry.as_mut_ptr(),
+                        buf,
+                        bytes,
+                        &raw mut result,
+                    ),
+                    Service::Port(port) => getservbyport_r(
+                        i32::from(port.to_be()),
+                        proto,
+                        entry.as_mut_ptr(),
+                        buf,
+                        bytes,
+                        &raw mut result,
+                    ),
+                }
+            };
+            if rc == libc::ERANGE {
+                words = buffer
+                    .capacity()
+                    .checked_mul(2)
+                    .ok_or_else(Error::memory_error)?;
+                continue;
+            }
+            if rc != 0 || result.is_null() {
+                return Err(Error::new(Kind::OSError, missing));
+            }
+            // SAFETY: a successful lookup initialized this entry in our live storage.
+            return read(unsafe { &*result });
+        }
+    }
+    #[cfg(target_vendor = "apple")]
+    {
+        // SAFETY: Darwin keeps the returned item in thread-local storage. Copy the field
+        // before another service lookup can replace it; neither reader calls back into Python.
+        unsafe {
+            let result = match key {
+                Service::Name(name) => libc::getservbyname(name.as_ptr(), proto),
+                Service::Port(port) => libc::getservbyport(i32::from(port.to_be()), proto),
+            };
+            read(
+                result
+                    .as_ref()
+                    .ok_or_else(|| Error::new(Kind::OSError, missing))?,
+            )
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_vendor = "apple")))]
+    Err(Error::new(
+        Kind::NotImplementedError,
+        "service lookup requires Linux or Darwin",
+    ))
+}
+
+pub(crate) fn service_by_name(name: &CStr, protocol: Option<&CStr>) -> Result<u16> {
+    with_service(Service::Name(name), protocol, |entry| {
+        Ok(u16::from_be(entry.s_port as u16))
+    })
+}
+
+pub(crate) fn service_by_port(port: u16, protocol: Option<&CStr>) -> Result<String> {
+    with_service(Service::Port(port), protocol, |entry| {
+        // SAFETY: the service entry owns a NUL-terminated canonical name.
+        let name = unsafe { CStr::from_ptr(entry.s_name) }.to_bytes();
+        std::str::from_utf8(name)
+            .map(str::to_owned)
+            .map_err(|err| super::bytes::decode_error(name, err))
+    })
+}
+
 /// Darwin's mDNS resolver also puts the owner of the PTR query in h_aliases.
 /// Only exclude the owner of this address, preserving other dotted aliases.
 #[cfg(any(target_vendor = "apple", test))]
