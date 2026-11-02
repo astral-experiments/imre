@@ -426,7 +426,7 @@ impl Context {
             Value::Str(s) => !s.is_empty(),
             Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
-            Value::MemoryView { .. } => !self.bytes_like(id)?.is_empty(),
+            Value::MemoryView { .. } => self.view_layout(id)?.len != 0,
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
             | Value::Dict(v)
@@ -810,31 +810,7 @@ impl Context {
             (Value::Int(_) | Value::Bool(_), Value::Float(f)) => {
                 crate::floats::compare(&self.as_int(a).unwrap(), *f) == 0
             }
-            (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => {
-                match (self.buffer_storage(a), self.buffer_storage(b)) {
-                    (Ok(Value::RawReadWindow(w)), Ok(Value::Array(array)))
-                    | (Ok(Value::Array(array)), Ok(Value::RawReadWindow(w))) => {
-                        self.window_bytes(*w).is_ok_and(|bytes| array.equals_unsigned_bytes(bytes))
-                    }
-                    (Ok(Value::RawReadWindow(_)), _) | (_, Ok(Value::RawReadWindow(_))) => {
-                        matches!((self.bytes_like(a), self.bytes_like(b)), (Ok(a), Ok(b)) if a == b)
-                    }
-                    (Ok(Value::Array(a)), Ok(Value::Array(b))) => a.equals_numeric_array(b),
-                    (
-                        Ok(Value::Array(array)),
-                        Ok(Value::Bytes(bytes) | Value::ByteArray(bytes)),
-                    )
-                    | (
-                        Ok(Value::Bytes(bytes) | Value::ByteArray(bytes)),
-                        Ok(Value::Array(array)),
-                    ) => array.equals_unsigned_bytes(bytes),
-                    (
-                        Ok(Value::Bytes(a) | Value::ByteArray(a)),
-                        Ok(Value::Bytes(b) | Value::ByteArray(b)),
-                    ) => a == b,
-                    _ => false,
-                }
-            }
+            (Value::MemoryView { .. }, _) | (_, Value::MemoryView { .. }) => self.memoryview_equal(a, b),
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::SurrogateStr(a), Value::SurrogateStr(b)) => a == b,
             (Value::Bytes(a) | Value::ByteArray(a), Value::Bytes(b) | Value::ByteArray(b)) => {
@@ -2835,6 +2811,9 @@ impl Context {
         if self.raw_read_window(obj).is_some() {
             return self.raw_view_get(obj, key);
         }
+        if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            return self.memoryview_get(obj, key);
+        }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.get_item(target, key));
@@ -3060,7 +3039,11 @@ impl Context {
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
         if self.raw_read_window(obj).is_some() {
+            if self.view_is_readonly(obj)? { return Err(Error::new("TypeError", "cannot modify read-only memory")); }
             return self.raw_view_set(obj, key, val);
+        }
+        if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            return self.memoryview_set(obj, key, val);
         }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
@@ -4725,13 +4708,7 @@ impl Context {
             {
                 // A live floating-point view compares its elements even with itself:
                 // a NaN is unequal. Container identity shortcuts still apply separately.
-                let equal = if a == b
-                    && let Ok(Value::Array(array)) = self.buffer_storage(a)
-                {
-                    array.equals_numeric_array(array)
-                } else {
-                    self.equal(a, b)
-                };
+                let equal = self.memoryview_equal(a, b);
                 return Ok(Some(builtins::boolean(equal == (op == "=="))));
             }
         }
@@ -4943,6 +4920,9 @@ impl Context {
     }
 
     pub(super) fn delete_item(&mut self, obj: Id, key: Id) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
+            return self.memoryview_delete(obj);
+        }
         let target = self.weak_proxy_target(obj)?;
         if target != obj {
             return self.proxy_subscript(target, |ctx| ctx.delete_item(target, key));

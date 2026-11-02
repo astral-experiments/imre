@@ -5,7 +5,7 @@ use zlib_rs::{DeflateConfig, DeflateFlush, InflateConfig, InflateFlush, ReturnCo
 use zlib_rs::{c_api::z_stream, deflate, inflate};
 
 fn buffer(ctx: &Context, data: Id) -> Result<&[u8]> {
-    if let Value::Array(array) = ctx.buffer_storage(data)? {
+    if let Value::Array(array) = ctx.heap.get(ctx.scalar_value(data)) {
         Ok(array.as_bytes())
     } else {
         ctx.bytes_like(data)

@@ -1,11 +1,11 @@
 //! Boxed access to the native, seekable in-memory binary file.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::io::SeekFrom;
 use std::rc::Rc;
 
 use super::{Context, Error, FALSE, Id, MemoryStream, NONE, Result, TRUE, Value};
-use crate::objects::FileState;
+use crate::objects::Memory;
 
 pub(super) const METHODS: &[&str] = &[
     "__init__",
@@ -22,6 +22,7 @@ pub(super) const METHODS: &[&str] = &[
     "seek",
     "tell",
     "getvalue",
+    "getbuffer",
     "isatty",
     "closed",
     "close",
@@ -32,7 +33,7 @@ pub(super) const METHODS: &[&str] = &[
 ];
 
 pub(in crate::dynamic) struct BytesIo {
-    file: RefCell<FileState>,
+    pub(in crate::dynamic) storage: Id,
     // The heap traces the boxed immutable snapshot until a write replaces its contents.
     pub(in crate::dynamic) snapshot: Cell<Option<Id>>,
 }
@@ -47,44 +48,67 @@ pub(super) fn copy_bytes(data: &[u8]) -> Result<Vec<u8>> {
 }
 
 impl BytesIo {
-    fn empty() -> Self {
-        Self {
-            file: RefCell::new(FileState::bytes_io(crate::BytesOwner::new(Vec::new()))),
-            snapshot: Cell::new(None),
+    fn new(ctx: &mut Context) -> Self {
+        let data = crate::BytesOwner::new(Vec::new());
+        Self { storage: ctx.alloc(Value::BytesIoStorage(Some(Rc::new(Memory::new(data))))), snapshot: Cell::new(None) }
+    }
+
+    fn file<'a>(&self, ctx: &'a Context) -> Result<&'a Memory> {
+        match ctx.heap.get(self.storage) {
+            Value::BytesIoStorage(Some(file)) => Ok(file),
+            _ => Err(Error::new("ValueError", "I/O operation on closed file.")),
+        }
+    }
+
+    fn file_mut<'a>(&self, ctx: &'a mut Context) -> Result<&'a mut Memory> {
+        match ctx.heap.get_mut(self.storage) {
+            Value::BytesIoStorage(Some(file)) => Ok(Rc::make_mut(file)),
+            _ => Err(Error::new("ValueError", "I/O operation on closed file.")),
         }
     }
 
     fn getvalue(&self, ctx: &mut Context) -> Result<Id> {
-        let bytes = self.file.borrow_mut().memory_value()?;
-        if let Some(id) = self.snapshot.get() {
-            return Ok(id);
-        }
-        let id = ctx.alloc(Value::Bytes(copy_bytes(&bytes)?));
-        self.snapshot.set(Some(id));
+        self.file(ctx)?;
+        let exported = ctx.buffer_is_exported(self.storage)?;
+        if !exported && let Some(id) = self.snapshot.get() { return Ok(id); }
+        let data = copy_bytes(self.file(ctx)?.bytes())?;
+        let id = ctx.alloc(Value::Bytes(data));
+        if !exported { self.snapshot.set(Some(id)); }
         Ok(id)
     }
 
     fn read(&self, ctx: &mut Context, limit: Option<usize>, line: bool) -> Result<Id> {
-        let data = self.file.borrow_mut().read_memory_bytes(limit, line)?;
-        if let Some(bytes) = data {
-            return Ok(ctx.alloc(Value::Bytes(bytes)));
+        if let Some(data) = self.file_mut(ctx)?.read_memory_bytes(limit, line)? {
+            return Ok(ctx.alloc(Value::Bytes(data)));
         }
         let value = self.getvalue(ctx)?;
-        self.file.borrow_mut().seek(SeekFrom::End(0))?;
+        self.file_mut(ctx)?.seek(SeekFrom::End(0))?;
         Ok(value)
     }
 
-    pub(super) fn write(&self, data: &[u8]) -> Result<()> {
-        self.file.borrow_mut().write_bytes(data)?;
-        if !data.is_empty() {
-            self.snapshot.set(None);
-        }
+    pub(super) fn write(&self, ctx: &mut Context, data: &[u8]) -> Result<()> {
+        self.file(ctx)?;
+        ctx.check_bytearray_resize(self.storage)?;
+        self.file_mut(ctx)?.write(data)?;
+        if !data.is_empty() { self.snapshot.set(None); }
         Ok(())
     }
 
+    fn write_input(&self, ctx: &mut Context, input: Id) -> Result<usize> {
+        ctx.check_buffer_exporter(input)?;
+        ctx.native_buffer_bytes(input)?;
+        self.file(ctx)?;
+        ctx.with_buffer_export(input, |ctx| {
+            ctx.check_bytearray_resize(self.storage)?;
+            let bytes = copy_bytes(ctx.native_buffer_bytes(input)?)?;
+            self.file_mut(ctx)?.write(&bytes)?;
+            if !bytes.is_empty() { self.snapshot.set(None); }
+            Ok(bytes.len())
+        })
+    }
+
     fn readlines(&self, ctx: &mut Context, hint: Option<Id>) -> Result<Id> {
-        let mut file = self.file.borrow_mut();
-        file.flush()?;
+        self.file(ctx)?;
         let limit = match hint {
             None | Some(NONE) => 0,
             Some(id) => ctx
@@ -106,7 +130,8 @@ impl BytesIo {
         let mut lines = Vec::new();
         let mut size = 0;
         loop {
-            let line = file.read_line_bytes()?;
+            let id = self.read(ctx, None, true)?;
+            let line = ctx.bytes_like(id)?;
             if line.is_empty() {
                 break;
             }
@@ -114,7 +139,7 @@ impl BytesIo {
             lines
                 .try_reserve(1)
                 .map_err(|_| crate::Error::allocation())?;
-            lines.push(ctx.alloc(Value::Bytes(line)));
+            lines.push(id);
             if limit > 0 && size >= limit as usize {
                 break;
             }
@@ -122,7 +147,7 @@ impl BytesIo {
         Ok(ctx.alloc(Value::List(lines)))
     }
 
-    fn init(&self, ctx: &Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    fn init(&self, ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         let count = args.len() + kwargs.len();
         if count > 1 {
             return Err(Error::new(
@@ -141,22 +166,20 @@ impl BytesIo {
         } else {
             args.first().copied().unwrap_or(NONE)
         };
-        let mut file = self.file.borrow_mut();
-        // CPython resets an open stream even if the new buffer is invalid.
-        if !file.closed() {
-            *file = Self::empty().file.into_inner();
+        if let Ok(file) = self.file_mut(ctx) {
+            file.reset_position_and_size();
         }
         self.snapshot.set(None);
+        ctx.check_bytearray_resize(self.storage)?;
         if initial != NONE {
-            let data = ctx.bytes_like(initial)?;
-            if !matches!(ctx.heap.get(initial), Value::Bytes(_)) && file.closed() {
-                file.flush()?;
-            }
-            let data = crate::BytesOwner::try_new(copy_bytes(data)?)
-                .map_err(|_| crate::Error::allocation())?;
-            *file = FileState::bytes_io(data);
             if matches!(ctx.heap.get(initial), Value::Bytes(_)) {
+                let bytes = crate::BytesOwner::try_new(copy_bytes(ctx.bytes_like(initial)?)?)
+                    .map_err(|_| crate::Error::allocation())?;
+                *ctx.heap.get_mut(self.storage) = Value::BytesIoStorage(Some(Rc::new(Memory::new(bytes))));
                 self.snapshot.set(Some(initial));
+            } else {
+                self.write_input(ctx, initial)?;
+                self.file_mut(ctx)?.seek(SeekFrom::Start(0))?;
             }
         }
         Ok(NONE)
@@ -171,15 +194,16 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
-        unreachable!()
+    let stream = match ctx.heap.get(receiver) {
+        Value::Instance { memory_stream: Some(MemoryStream::Bytes(stream)), .. } => stream.clone(),
+        Value::Instance { memory_stream: None, .. } => {
+            let stream = Rc::new(BytesIo::new(ctx));
+            let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else { unreachable!() };
+            *memory_stream = Some(MemoryStream::Bytes(stream.clone()));
+            stream
+        }
+        _ => return Err(Error::new("TypeError", "incompatible memory stream layout")),
     };
-    let MemoryStream::Bytes(stream) =
-        memory_stream.get_or_insert_with(|| MemoryStream::Bytes(Rc::new(BytesIo::empty())))
-    else {
-        return Err(Error::new("TypeError", "incompatible memory stream layout"));
-    };
-    let stream = Rc::clone(stream);
     if name == "__init__" {
         return stream.init(ctx, args, kwargs);
     }
@@ -231,36 +255,40 @@ pub(super) fn call(
         }
         "truncate" => {
             // Unlike read, truncate checks the stream before it invokes the size's __index__.
-            stream.file.borrow_mut().flush()?;
+            stream.file(ctx)?;
+            ctx.check_bytearray_resize(stream.storage)?;
             let size = match args.first().copied() {
                 None | Some(NONE) => None,
                 Some(id) => Some(ctx.index_integer(id)?.to_i64().ok_or_else(|| {
                     Error::new("OverflowError", "Python int too large to convert to C long")
                 })?),
             };
-            let (size, changed) = stream.file.borrow_mut().truncate_memory(size)?;
+            // A size hook may have acquired a new export after the initial guard.
+            let retain_storage = ctx.buffer_is_exported(stream.storage)?;
+            let (size, changed) = stream.file_mut(ctx)?.truncate_memory(size, retain_storage)?;
             if changed {
                 stream.snapshot.set(None);
             }
             Ok(ctx.int(size as i64))
         }
         "write" => {
-            let input = ctx.bytes_like(args[0])?;
-            stream.write(input)?;
-            Ok(ctx.int(input.len() as i64))
+            let n = stream.write_input(ctx, args[0])?;
+            Ok(ctx.int(n as i64))
         }
         "readlines" => stream.readlines(ctx, args.first().copied()),
         "writelines" => {
-            stream.file.borrow_mut().flush()?;
+            stream.file(ctx)?;
             let iterator = ctx.iterator(args[0])?;
             while let Some(line) = ctx.next_item(iterator)? {
-                stream.write(ctx.bytes_like(line)?)?;
+                stream.write_input(ctx, line)?;
             }
             Ok(NONE)
         }
         "readinto" => {
-            let buffer = super::super::files::readinto_bytes(ctx, args[0])?;
-            let count = stream.file.borrow_mut().read_into(buffer)?;
+            let len = super::super::files::readinto_bytes(ctx, args[0])?.len();
+            let data = stream.file_mut(ctx)?.read(Some(len))?;
+            let count = data.len();
+            super::super::files::readinto_bytes(ctx, args[0])?[..count].copy_from_slice(&data);
             Ok(ctx.int(count as i64))
         }
         "seek" => {
@@ -280,22 +308,24 @@ pub(super) fn call(
             } else {
                 0
             };
-            let pos = stream.file.borrow_mut().seek_memory(offset, whence)?;
+            let pos = stream.file_mut(ctx)?.seek_memory(offset, whence)?;
             Ok(ctx.int(pos as i64))
         }
-        "tell" => Ok(ctx.int(stream.file.borrow_mut().seek(SeekFrom::Current(0))? as i64)),
+        "tell" => { let pos = stream.file_mut(ctx)?.seek(SeekFrom::Current(0))?; Ok(ctx.int(pos as i64)) },
         "getvalue" => stream.getvalue(ctx),
-        "closed" => Ok(if stream.file.borrow().closed() {
+        "getbuffer" => {
+            stream.file(ctx)?;
+            let owner = ctx.alloc(Value::BytesIoBuffer { stream: receiver, storage: stream.storage });
+            ctx.new_memoryview(owner)
+        }
+        "closed" => Ok(if stream.file(ctx).is_err() {
             TRUE
         } else {
             FALSE
         }),
         "close" => {
-            stream
-                .file
-                .borrow_mut()
-                .close()
-                .map_err(crate::objects::errno_error)?;
+            ctx.check_bytearray_resize(stream.storage)?;
+            *ctx.heap.get_mut(stream.storage) = Value::BytesIoStorage(None);
             stream.snapshot.set(None);
             Ok(NONE)
         }
@@ -304,7 +334,7 @@ pub(super) fn call(
             ctx.call(close, Vec::new(), Vec::new())
         }
         "flush" | "__enter__" | "isatty" | "readable" | "writable" | "seekable" => {
-            stream.file.borrow_mut().flush()?;
+            stream.file(ctx)?;
             Ok(match name {
                 "flush" => NONE,
                 "__enter__" => receiver,

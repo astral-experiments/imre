@@ -297,11 +297,7 @@ impl Reader {
                         else {
                             unreachable!("distinct buffered readinto source and destination")
                         };
-                        let dest = match dest {
-                            Value::ByteArray(bytes) => bytes.as_mut_slice(),
-                            Value::Array(array) => array.as_bytes_mut()?,
-                            _ => unreachable!("writable contiguous destination"),
-                        };
+                        let dest = Context::mutable_storage_bytes(dest)?;
                         dest[start..start + n].copy_from_slice(&bytes[offset..offset + n]);
                     }
                     self.pos.set(offset + n);

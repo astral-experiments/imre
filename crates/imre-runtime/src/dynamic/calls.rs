@@ -1144,6 +1144,7 @@ impl Context {
             Value::Partial { .. } => "functools.partial",
             Value::Cached { .. } => "functools._lru_cache_wrapper",
             Value::KeyWrapper { .. } => KEY_WRAPPER,
+            Value::BytesIoBuffer { .. } => "_io._BytesIOBuffer",
             Value::PartialPlaceholder => "functools._PlaceholderType",
             Value::Count { .. } => "itertools.count",
             Value::Repeat(_) => "itertools.repeat",
@@ -1241,6 +1242,7 @@ impl Context {
                             | "weakref.ProxyType"
                             | "weakref.CallableProxyType"
                             | super::thread_local::CLASS
+                            | "_io._BytesIOBuffer"
                             | stdlib::os::scandir::ENTRY
                             | stdlib::os::scandir::ITER
                             | super::thread_rlock::CLASS
@@ -1448,6 +1450,7 @@ impl Context {
             | (super::deque::REVERSE_ITERATOR, Value::DequeIterator { reverse: true, .. })
             | ("itertools.repeat", Value::Repeat(_))
             | (super::thread_local::CLASS, Value::ThreadLocal(_))
+            | ("_io._BytesIOBuffer", Value::BytesIoBuffer { .. })
             | (stdlib::os::scandir::ENTRY, Value::DirEntry(_))
             | (stdlib::os::scandir::ITER, Value::Scandir(_))
             | (super::thread_rlock::CLASS, Value::HandlerLock(_))
@@ -2106,18 +2109,16 @@ impl Context {
                 owner, anonymous, ..
             } if matches!(
                 name,
-                "obj" | "readonly" | "nbytes" | "itemsize" | "format" | "shape"
+                "obj" | "readonly" | "nbytes" | "itemsize" | "format" | "shape" | "ndim" | "strides" | "suboffsets" | "c_contiguous" | "f_contiguous" | "contiguous"
             ) =>
             {
                 let owner = Self::memoryview_owner(owner)?;
-                let (format, width, len, readonly) = match self.heap.get(self.scalar_value(owner)) {
-                    Value::Array(array) => {
-                        let (format, width) = array.view_layout();
-                        (format, width, array.len(), false)
-                    }
-                    Value::RawReadWindow(w) => ("B", 1, self.window_bytes(*w)?.len(), false),
-                    Value::ByteArray(bytes) => ("B", 1, bytes.len(), false),
-                    _ => ("B", 1, self.bytes_like(owner)?.len(), true),
+                let view = self.view_layout(obj)?;
+                let len = view.len;
+                let (format, width, readonly) = match self.heap.get(self.view_storage_id(owner)) {
+                    Value::Array(array) => { let (fmt,w) = array.view_layout(); (fmt,w,false) },
+                    Value::Bytes(_) => ("B",1,true),
+                    _ => ("B",1,false),
                 };
                 return Ok(match name {
                     "obj" => {
@@ -2127,7 +2128,11 @@ impl Context {
                             owner
                         }
                     }
-                    "readonly" => builtins::boolean(readonly),
+                    "readonly" => builtins::boolean(readonly || self.view_is_readonly(obj)?),
+                    "ndim" => self.int(1),
+                    "strides" => { let stride = self.int(view.stride.wrapping_mul(width as i64)); self.alloc(Value::Tuple(vec![stride])) },
+                    "suboffsets" => self.alloc(Value::Tuple(vec![])),
+                    "contiguous" | "c_contiguous" | "f_contiguous" => builtins::boolean(len <= 1 || view.stride == 1),
                     "nbytes" => self.int((len * width) as i64),
                     "itemsize" => self.int(width as i64),
                     "format" => self.text(format),
@@ -2812,6 +2817,11 @@ impl Context {
                     return Ok(attr);
                 }
             }
+            Value::Native(ref class) if class == "_io._BytesIOBuffer" => match name {
+                "__module__" => return Ok(self.text("_io")),
+                "__name__" | "__qualname__" => return Ok(self.text("_BytesIOBuffer")),
+                _ => {}
+            },
             Value::DirEntry(ref entry) if name == "name" => return Ok(entry.name),
             Value::DirEntry(ref entry) if name == "path" => return Ok(entry.path),
             Value::DirEntry(_) if matches!(name, "__new__" | "__reduce__" | "__reduce_ex__") => {
@@ -5033,6 +5043,7 @@ impl Context {
                     | value::REGEX_PATTERN_TYPE
                     | value::REGEX_MATCH_TYPE
                     | stdlib::os::scandir::ENTRY
+                    | "_io._BytesIOBuffer"
             )
         {
             return Err(Error::new(

@@ -784,11 +784,15 @@ pub(super) enum Value {
     Array(super::array::Array),
     Bytes(Vec<u8>),
     RawReadWindow(super::raw_read_window::Window),
+    BytesIoStorage(Option<std::rc::Rc<crate::objects::Memory>>),
+    BytesIoBuffer { stream: Id, storage: Id },
     /// A contiguous view retains its original exporter until release.
     MemoryView {
         owner: Option<Id>,
         // An ownerless C buffer has private backing storage but exposes obj as None.
         anonymous: bool,
+        layout: Option<super::memoryview::ViewLayout>,
+        readonly: bool,
         hash: Option<i64>,
     },
     ByteArray(Vec<u8>),
@@ -1149,6 +1153,8 @@ impl Value {
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
+            Self::BytesIoStorage(_) => "_imre_bytesio_storage",
+            Self::BytesIoBuffer { .. } => "_io._BytesIOBuffer",
             Self::RawReadWindow(_) => "_imre_raw_read_window",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
@@ -1349,6 +1355,8 @@ impl Value {
             }
             Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
+            Self::BytesIoStorage(_) => {}
+            Self::BytesIoBuffer { stream, storage } => visit.extend([*stream, *storage]),
             Self::RawReadWindow(window) => visit.push(window.backing),
             Self::MemoryView { owner, .. } => visit.extend(owner),
             Self::Template {
@@ -1546,6 +1554,7 @@ impl Value {
                         visit.extend(pair.writer);
                     }
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
+                        visit.push(stream.storage);
                         visit.extend(stream.snapshot.get())
                     }
                     Some(super::stdlib::io::MemoryStream::Wrapper(stream)) => {
@@ -2972,7 +2981,8 @@ impl Heap {
             slot.marked()
                 && matches!(slot.value, Some(Value::MemoryView { owner: Some(owner), .. })
                     if owner == storage || matches!(self.get(owner),
-                        Value::Instance { scalar: Some(payload), .. } if *payload == storage))
+                        Value::Instance { scalar: Some(payload), .. } if *payload == storage)
+                        || matches!(self.get(owner), Value::BytesIoBuffer {storage: backing, ..} if *backing == storage))
         });
         for slot in &self.slots {
             slot.trace.set(UNMARKED);
