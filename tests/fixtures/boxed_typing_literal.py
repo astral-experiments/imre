@@ -12,7 +12,8 @@ def current():
         marker = object()
 
         def __dir__(self):
-            return ["marker", "__hidden__", "marker"]
+            key = chr(0xdca2)
+            return ["marker", "__hidden__", "marker", key, key]
 
     alias = type(ssl_mode)(Origin(), (1,))
     names = dir(alias)
@@ -21,6 +22,7 @@ def current():
     assert fields | methods | {"__class__"} <= set(names)
     assert all(callable(getattr(alias, name)) for name in methods)
     assert names.count("marker") == 1 and "__hidden__" not in names
+    assert names.count(chr(0xdca2)) == 1
     assert alias.marker is Origin.marker and alias._name is None and alias._inst is True
 
     class InvalidOrigin:

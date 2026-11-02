@@ -1,5 +1,5 @@
 use super::{Context, Error, Id, NONE, Result, Value, collections, type_error};
-use crate::dynamic::typing::{Alias, AliasKind, literal_origin};
+use crate::dynamic::typing::{Alias, AliasKind, forwards_to_origin, literal_origin};
 use std::collections::BTreeSet;
 
 /// Apply the type's special method and sort a fresh list, preserving duplicates and comparison errors.
@@ -144,16 +144,31 @@ fn merge_literal_names(ctx: &mut Context, alias: &Alias, origin_names: Id) -> Re
     let marker = ctx.text("__");
     ctx.heap.keep(marker);
     for name in ctx.items(origin_names)? {
-        for method in ["startswith", "endswith"] {
-            let check = ctx.lookup_attr(name, method)?;
-            let matches = ctx.call(check, vec![marker], Vec::new())?;
-            if !ctx.truth(matches)? {
-                ctx.put_item(names, name, NONE)?;
-                break;
-            }
+        if visible_origin_name(ctx, name, marker)? {
+            ctx.put_item(names, name, NONE)?;
         }
     }
     Ok(names)
+}
+
+/// Keep exact Unicode string names on their native storage path, including lone surrogates.
+fn visible_origin_name(ctx: &mut Context, name: Id, marker: Id) -> Result<bool> {
+    match ctx.heap.get(name) {
+        Value::Str(text) => return Ok(forwards_to_origin(text)),
+        Value::SurrogateStr(points) => {
+            let underscores = [u32::from('_'); 2];
+            return Ok(!(points.starts_with(&underscores) && points.ends_with(&underscores)));
+        }
+        _ => {}
+    }
+    for method in ["startswith", "endswith"] {
+        let check = ctx.lookup_attr(name, method)?;
+        let matches = ctx.call(check, vec![marker], Vec::new())?;
+        if !ctx.truth(matches)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Collect each Python class's own names without evaluating class values or descriptors.

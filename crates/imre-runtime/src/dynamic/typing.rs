@@ -162,7 +162,7 @@ pub(super) fn literal_origin(ctx: &Context, mut origin: Id) -> Result<(Id, usize
 }
 
 /// Typing aliases delegate non-dunder attribute names to the origin.
-fn forwards_to_origin(name: &str) -> bool {
+pub(super) fn forwards_to_origin(name: &str) -> bool {
     !(name.starts_with("__") && name.ends_with("__"))
 }
 
