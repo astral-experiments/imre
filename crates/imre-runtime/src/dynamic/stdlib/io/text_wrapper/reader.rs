@@ -83,6 +83,10 @@ impl Reader {
         raw.try_reserve(bytes.len())
             .map_err(|_| crate::Error::allocation())?;
         raw.extend_from_slice(bytes);
+        if matches!(codec, Codec::RawUnicodeEscape) && !end {
+            let ready = crate::objects::raw_unicode_escape::complete_prefix(&raw);
+            self.tail = raw.split_off(ready);
+        }
         let utf8 = matches!(codec, Codec::Utf8 { .. });
         if utf8
             && !end

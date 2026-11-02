@@ -4,7 +4,7 @@ use std::collections::HashMap;
 mod surrogate_utf8;
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::{Codec, CodecInfo, Object, StrEncoder, Utf16Order};
+use crate::objects::{Codec, CodecInfo, DecodeIssue, Object, StrEncoder, Utf16Order, raw_unicode_escape};
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
@@ -269,6 +269,9 @@ pub(in crate::dynamic) fn encode_text(
     }
     let errors = errors.to_owned();
     match encoder {
+        StrEncoder::Registered(Codec::RawUnicodeEscape) => Ok(raw_unicode_escape::encode(
+            ctx.string_codepoints(id)?.iter().copied(),
+        )?),
         StrEncoder::Utf16(order) => encode_utf16_codepoints(ctx, id, order, &errors),
         StrEncoder::Registered(Codec::Utf8 { signature }) => {
             ctx.encode_utf8_codepoints(id, signature, &errors)
@@ -371,6 +374,7 @@ pub(super) fn transform(
         let encoder = match codec {
             Codec::Utf8 { .. } => "utf_8",
             Codec::Ascii => "ascii",
+            Codec::RawUnicodeEscape => "raw_unicode_escape",
             Codec::Latin1 => "latin_1",
             Codec::CodePage(_) => "charmap",
         };
@@ -396,6 +400,10 @@ pub(in crate::dynamic) fn decode_bytes(
         .unwrap_or("strict");
     if name.contains('\0') {
         return Err(Error::new("ValueError", "embedded null character"));
+    }
+    if matches!(codec, Codec::RawUnicodeEscape) {
+        let name = name.to_owned();
+        return ctx.with_buffer_export(input, |ctx| decode_raw_escape(ctx, input, &name, true));
     }
     if let Codec::Utf8 { signature } = codec
         && name == "surrogateescape"
@@ -470,8 +478,47 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
     let Some(issue) = crate::objects::utf8_prefix(&mut text, data, 0)? else {
         return Ok(ctx.text(text));
     };
-    let mut points: Vec<u32> = text.chars().map(u32::from).collect();
+    let points: Vec<u32> = text.chars().map(u32::from).collect();
     let raised = ctx.decode_error(issue.error(data));
+    resume_registered(ctx, name, points, raised, |points, data, position| {
+        text.clear();
+        let issue = crate::objects::utf8_prefix(&mut text, data, position)?;
+        points
+            .try_reserve(text.len())
+            .map_err(|_| crate::Error::allocation())?;
+        points.extend(text.chars().map(u32::from));
+        Ok(issue)
+    })
+}
+
+fn decode_raw_escape(ctx: &mut Context, input: Id, name: &str, complete: bool) -> Result<Id> {
+    let mut points = Vec::new();
+    let prefix = |points: &mut Vec<u32>, data: &[u8], position: usize| {
+        let end = if complete {
+            data.len()
+        } else {
+            raw_unicode_escape::complete_prefix(data)
+        };
+        if position >= end {
+            return Ok(None);
+        }
+        Ok(raw_unicode_escape::prefix(points, &data[..end], position)?)
+    };
+    let data = ctx.bytes_like(input)?;
+    let Some(issue) = prefix(&mut points, data, 0)? else {
+        return Ok(ctx.text_codepoints(points));
+    };
+    let raised = ctx.decode_error(issue.error(data));
+    resume_registered(ctx, name, points, raised, prefix)
+}
+
+fn resume_registered(
+    ctx: &mut Context,
+    name: &str,
+    mut points: Vec<u32>,
+    raised: Error,
+    mut prefix: impl FnMut(&mut Vec<u32>, &[u8], usize) -> Result<Option<DecodeIssue>>,
+) -> Result<Id> {
     if raised.decode.is_none() {
         return Err(raised);
     }
@@ -523,12 +570,7 @@ fn registered_utf8(ctx: &mut Context, input: Id, name: &str, signature: bool) ->
                 format!("position {position} from error handler out of bounds"),
             ));
         }
-        text.clear();
-        let issue = crate::objects::utf8_prefix(&mut text, data, position as usize)?;
-        points
-            .try_reserve(text.len())
-            .map_err(|_| crate::Error::allocation())?;
-        points.extend(text.chars().map(u32::from));
+        let issue = prefix(&mut points, data, position as usize)?;
         let Some(issue) = issue else {
             return Ok(ctx.text_codepoints(points));
         };
@@ -544,12 +586,14 @@ pub(in crate::dynamic) fn decode(
 ) -> Result<Id> {
     let function = match codec {
         Codec::Latin1 => "latin_1_decode",
+        Codec::RawUnicodeEscape => "raw_unicode_escape_decode",
         Codec::Ascii => "ascii_decode",
         Codec::Utf8 { .. } => "utf_8_decode",
         Codec::CodePage(_) => "charmap_decode",
     };
+    let mut complete = true;
     let (input, errors) = match codec {
-        Codec::Latin1 | Codec::Ascii => {
+        Codec::RawUnicodeEscape | Codec::Latin1 | Codec::Ascii => {
             if !kwargs.is_empty() {
                 return Err(type_error(format!(
                     "_codecs.{function}() takes no keyword arguments"
@@ -558,6 +602,10 @@ pub(in crate::dynamic) fn decode(
             match args {
                 [input] => (*input, None),
                 [input, errors] => (*input, Some(*errors)),
+                [input, errors, final_] if matches!(codec, Codec::RawUnicodeEscape) => {
+                    complete = ctx.truth(*final_)?;
+                    (*input, Some(*errors))
+                }
                 [] => {
                     return Err(type_error(format!(
                         "{function} expected at least 1 argument, got 0"
@@ -565,7 +613,12 @@ pub(in crate::dynamic) fn decode(
                 }
                 _ => {
                     return Err(type_error(format!(
-                        "{function} expected at most 2 arguments, got {}",
+                        "{function} expected at most {} arguments, got {}",
+                        if matches!(codec, Codec::RawUnicodeEscape) {
+                            3
+                        } else {
+                            2
+                        },
                         args.len()
                     )));
                 }
@@ -611,7 +664,12 @@ pub(in crate::dynamic) fn decode(
             )
         }
     };
-    let consumed = ctx.bytes_like(input)?.len();
+    let data = ctx.bytes_like(input)?;
+    let consumed = if complete {
+        data.len()
+    } else {
+        raw_unicode_escape::complete_prefix(data)
+    };
     let policy = match errors {
         None | Some(NONE) => None,
         Some(id) => {
@@ -627,7 +685,16 @@ pub(in crate::dynamic) fn decode(
             Some(id)
         }
     };
-    let text = decode_bytes(ctx, codec, input, policy)?;
+    let text = if complete {
+        decode_bytes(ctx, codec, input, policy)?
+    } else {
+        let name = policy
+            .map(|id| ctx.str_value(id))
+            .transpose()?
+            .unwrap_or("strict")
+            .to_owned();
+        ctx.with_buffer_export(input, |ctx| decode_raw_escape(ctx, input, &name, false))?
+    };
     let length = ctx.alloc(Value::Int(crate::Int::from_usize(consumed)));
     Ok(ctx.alloc(Value::Tuple(vec![text, length])))
 }

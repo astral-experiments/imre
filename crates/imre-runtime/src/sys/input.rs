@@ -34,7 +34,7 @@ fn complete_prefix(bytes: &[u8]) -> usize {
 
 impl Input {
     fn fill(&mut self, reader: &mut impl Read, settings: &encoding::Settings) -> Result<()> {
-        let mut bytes = [0; CHUNK + 3];
+        let mut bytes = [0; CHUNK + 9];
         let prefix = self.pending.len();
         bytes[..prefix].copy_from_slice(&self.pending);
         let count = loop {
@@ -47,6 +47,8 @@ impl Input {
         let data = &bytes[..prefix + count];
         let ready = if !self.eof && matches!(settings.codec, Codec::Utf8 { .. }) {
             complete_prefix(data)
+        } else if !self.eof && matches!(settings.codec, Codec::RawUnicodeEscape) {
+            crate::objects::raw_unicode_escape::complete_prefix(data)
         } else {
             data.len()
         };

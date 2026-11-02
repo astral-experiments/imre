@@ -6,8 +6,38 @@ class EchoDecoder(codecs.IncrementalDecoder):
         return self.errors, input, final
 
 
+def check_raw_unicode_escape():
+    name = "raw-unicode-escape"
+    codec = codecs.lookup("raw_unicode_escape")
+    assert codec.name == name
+    text = "ÿ\\nĀ🍏" + chr(0xd800)
+    wire = b"\xff\\n\\u0100\\U0001f34f\\ud800"
+    assert codecs.encode(text, name) == wire
+    assert wire.decode(name) == text
+    assert str(wire, name) == text
+    assert codec.decode(br"\\u0061") == (r"\\u0061", 7)
+    assert codec.decode(br"\\\u0061") == (r"\\" + "a", 8)
+    assert codec.decode(br"X\u12", "strict", False) == ("X", 1)
+    assert codec.decode(b"\xff\\", "strict", False) == ("ÿ", 1)
+    assert codec.decode(br"\x41\n") == (r"\x41\n", 6)
+    for data, end, reason in [(br"a\u1Z", 4, r"truncated \uXXXX escape"),
+                              (br"a\U00110000", 11, r"\Uxxxxxxxx out of range")]:
+        try:
+            data.decode(name)
+        except UnicodeDecodeError as exc:
+            assert (exc.encoding, exc.object, exc.start, exc.end, exc.reason) == (
+                "rawunicodeescape", data, 1, end, reason)
+        else:
+            raise AssertionError("malformed raw escape accepted")
+    assert br"\u0Z".decode(name, "replace") == "�Z"
+    assert br"\u0Z".decode(name, "ignore") == "Z"
+    codecs.register_error("raw_resume", lambda exc: ("!", exc.end + 1))
+    assert br"X\u0ZY".decode(name, "raw_resume") == "X!Y"
+
+
 def current():
     utf16_encoders()
+    check_raw_unicode_escape()
     decoder = codecs.IncrementalDecoder(errors="replace")
     assert decoder.errors == "replace"
     assert decoder.getstate() == (b"", 0)

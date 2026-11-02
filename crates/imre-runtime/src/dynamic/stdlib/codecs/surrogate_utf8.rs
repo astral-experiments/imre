@@ -22,6 +22,11 @@ impl Context {
             Codec::Utf8 { signature: true } => {
                 return self.encode_utf8_codepoints(id, true, "surrogateescape");
             }
+            Codec::RawUnicodeEscape => {
+                return Ok(crate::objects::raw_unicode_escape::encode(
+                    self.string_codepoints(id)?.iter().copied(),
+                )?);
+            }
             _ => {}
         }
         let points = self.string_codepoints(id)?;

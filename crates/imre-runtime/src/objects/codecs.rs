@@ -1,7 +1,8 @@
 //! Native text codecs shared by the registry and text files.
+pub(crate) mod raw_unicode_escape;
 pub(super) mod writer;
 
-use super::bytes::{Utf8Issue, ascii_decode_error, owned_input};
+use super::bytes::{DecodeIssue, ascii_decode_error, owned_input};
 use super::charmaps::Charmap;
 use super::exceptions::Result;
 use super::{Bytes, Error, Kind, Object, Storage, StorageCell, Str, finish, object};
@@ -36,7 +37,7 @@ static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"))
 static CP424: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(5, "cp424"));
 static CP437: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(6, "cp437"));
 
-const CODEC_NAMES: [&str; 7] = [
+const CODEC_NAMES: [&str; 8] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -44,6 +45,7 @@ const CODEC_NAMES: [&str; 7] = [
     "cp1251",
     "cp424",
     "cp437",
+    "raw-unicode-escape",
 ];
 
 thread_local! {
@@ -299,6 +301,7 @@ fn encode_key(encoding: &str, errors: &str) -> Result<String> {
 pub(crate) enum Codec {
     Utf8 { signature: bool },
     Latin1,
+    RawUnicodeEscape,
     Ascii,
     CodePage(&'static CodePage),
 }
@@ -311,6 +314,7 @@ impl Codec {
             Self::Utf8 { signature: false } => 2,
             Self::Utf8 { signature: true } => 3,
             Self::CodePage(page) => page.index,
+            Self::RawUnicodeEscape => 7,
         }
     }
 
@@ -337,6 +341,7 @@ impl Codec {
 
     fn by_key(key: &str, value: &str) -> Result<Self> {
         match key {
+            "raw_unicode_escape" => Ok(Self::RawUnicodeEscape),
             "utf8" | "utf_8" | "u8" | "utf" | "utf8_ucs2" | "utf8_ucs4" | "cp65001" => {
                 Ok(Self::Utf8 { signature: false })
             }
@@ -389,6 +394,12 @@ impl Codec {
         points
             .try_reserve_exact(data.len())
             .map_err(|_| Error::allocation())?;
+        if matches!(self, Self::RawUnicodeEscape) {
+            if let Some(issue) = raw_unicode_escape::prefix(&mut points, data, 0)? {
+                return Err(issue.error(data));
+            }
+            return Ok(points);
+        }
         if matches!(self, Self::Utf8 { .. }) {
             points.extend(super::interpreter_stdlib::fsdecode(data));
             return Ok(points);
@@ -398,7 +409,7 @@ impl Codec {
                 Self::Ascii => byte.is_ascii().then(|| char::from(byte)),
                 Self::Latin1 => Some(char::from(byte)),
                 Self::CodePage(page) => page.decode.decode(byte),
-                Self::Utf8 { .. } => unreachable!(),
+                Self::Utf8 { .. } | Self::RawUnicodeEscape => unreachable!(),
             };
             points.push(match ch {
                 Some(ch) => u32::from(ch),
@@ -422,6 +433,32 @@ impl Codec {
         text.try_reserve_exact(capacity)
             .map_err(|_| Error::allocation())?;
         match self {
+            Self::RawUnicodeEscape => {
+                let mut points = Vec::new();
+                let mut offset = 0;
+                loop {
+                    let issue = raw_unicode_escape::prefix(&mut points, data, offset)?;
+                    for point in points.drain(..) {
+                        let ch = char::from_u32(point).ok_or_else(|| {
+                            Error::new(
+                                Kind::NotImplementedError,
+                                "typed strings cannot store surrogate code points",
+                            )
+                        })?;
+                        text.try_reserve(ch.len_utf8())
+                            .map_err(|_| Error::allocation())?;
+                        text.push(ch);
+                    }
+                    let Some(issue) = issue else { return Ok(text) };
+                    if errors == Some("surrogateescape") {
+                        return Err(issue.error(data));
+                    }
+                    decoding_error(&mut text, errors, &data[issue.start..issue.end], || {
+                        issue.error(data)
+                    })?;
+                    offset = issue.end;
+                }
+            }
             Self::Latin1 => {
                 text.extend(data.iter().copied().map(char::from));
                 Ok(text)
@@ -477,7 +514,7 @@ impl Codec {
             Self::Ascii => ch.is_ascii().then_some(ch as u8),
             Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
             Self::CodePage(page) => page.encode.get(&ch).copied(),
-            Self::Utf8 { .. } => unreachable!("UTF-8 is a multibyte encoding"),
+            Self::Utf8 { .. } | Self::RawUnicodeEscape => unreachable!("not a single-byte codec"),
         }
     }
 
@@ -486,7 +523,7 @@ impl Codec {
             Self::Ascii => ("ascii", "ordinal not in range(128)"),
             Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
             Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
-            Self::Utf8 { .. } => unreachable!("UTF-8 is a multibyte encoding"),
+            Self::Utf8 { .. } | Self::RawUnicodeEscape => unreachable!("not a single-byte codec"),
         }
     }
 
@@ -497,6 +534,9 @@ impl Codec {
         error_input: impl FnOnce() -> Result<StrOwner>,
     ) -> Result<Cow<'a, [u8]>> {
         let (codec, reason) = match self {
+            Self::RawUnicodeEscape => {
+                return raw_unicode_escape::encode(text.chars().map(u32::from)).map(Cow::Owned);
+            }
             Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
             Self::Utf8 { signature: true } => {
                 let mut out = Vec::new();
@@ -642,11 +682,11 @@ pub(crate) fn utf8_prefix(
     text: &mut String,
     data: &[u8],
     offset: usize,
-) -> Result<Option<Utf8Issue>> {
+) -> Result<Option<DecodeIssue>> {
     let (valid, issue) = match std::str::from_utf8(&data[offset..]) {
         Ok(valid) => (valid, None),
         Err(error) => {
-            let issue = Utf8Issue::new(data, offset, error);
+            let issue = DecodeIssue::new(data, offset, error);
             // The validator has already checked this prefix.
             (
                 std::str::from_utf8(&data[offset..issue.start]).unwrap(),

@@ -29,8 +29,9 @@ pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
 mod chainmap;
 mod charmaps;
 mod codecs;
+pub(crate) use bytes::DecodeIssue;
 pub(crate) use codecs::{
-    Codec, CodecInfo, StrEncoder, Utf16Order, decoding_error, unknown_handler, utf8_prefix,
+    Codec, CodecInfo, StrEncoder, Utf16Order, decoding_error, raw_unicode_escape, unknown_handler, utf8_prefix,
 };
 mod contexts;
 mod contextvars;
