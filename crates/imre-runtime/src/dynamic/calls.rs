@@ -373,7 +373,7 @@ impl Context {
                         && matches!(name, "__reduce__" | "__replace__"))
                     || (kind == "function" && name == "__call__")
                     || (kind == "builtin_function_or_method" && name == "__reduce__")
-                    || (kind == "set" && name == "update")
+                    || (kind == "set" && matches!(name, "intersection_update" | "update"))
                     || (matches!(name, "__repr__" | "__reduce__" | "difference" | "intersection" | "issubset" | "symmetric_difference" | "union")
                         && matches!(kind.as_str(), "set" | "frozenset")) =>
             {
@@ -3898,6 +3898,7 @@ impl Context {
                             | "pop"
                             | "remove"
                             | "difference_update"
+                            | "intersection_update"
                             | "symmetric_difference_update"
                             | "update"
                     ) =>

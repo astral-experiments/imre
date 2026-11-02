@@ -897,6 +897,7 @@ pub(super) fn method(
                     | "set.pop"
                     | "set.remove"
                     | "set.difference_update"
+                    | "set.intersection_update"
                     | "set.symmetric_difference_update"
                     | "set.update"
             ) || name.ends_with(".issubset")
@@ -943,6 +944,7 @@ pub(super) fn method(
             | "set.pop"
             | "set.remove"
             | "set.difference_update"
+            | "set.intersection_update"
             | "set.symmetric_difference_update"
             | "set.update"
     ) {
@@ -1053,6 +1055,7 @@ pub(super) fn method(
             | "set.pop"
             | "set.remove"
             | "set.difference_update"
+            | "set.intersection_update"
             | "set.symmetric_difference_update"
             | "set.update"
             | "frozenset.copy"
@@ -1222,6 +1225,11 @@ pub(super) fn method(
         }
         "set.intersection" | "frozenset.intersection" => set_intersection(ctx, receiver, args),
         "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
+        "set.intersection_update" => {
+            let result = set_intersection(ctx, receiver, args)?;
+            ctx.replace_set_entries(receiver, result);
+            Ok(NONE)
+        }
         "set.symmetric_difference" | "frozenset.symmetric_difference" => {
             let other = super::one_positional_arg(name, args, kwargs)?;
             ctx.set_xor(receiver, other, false)

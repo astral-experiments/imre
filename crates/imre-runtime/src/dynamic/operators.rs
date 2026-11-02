@@ -3961,19 +3961,24 @@ impl Context {
             Ok(())
         })?;
         if mutate {
-            let Value::Set { entries, .. } = self.heap.get_mut(result) else {
-                unreachable!()
-            };
-            let selected = std::mem::take(entries);
-            let Value::Set { entries, .. } = self.heap.get_mut(left) else {
-                unreachable!()
-            };
-            for (key, _) in std::mem::replace(entries, selected) {
-                self.heap.weak_edge_removed(key);
-            }
+            self.replace_set_entries(left, result);
             return Ok(left);
         }
         Ok(result)
+    }
+
+    /// Install the completed intersection before releasing any of the receiver's old keys.
+    pub(super) fn replace_set_entries(&mut self, receiver: Id, result: Id) {
+        let Value::Set { entries, .. } = self.heap.get_mut(result) else {
+            unreachable!()
+        };
+        let selected = std::mem::take(entries);
+        let Value::Set { entries, .. } = self.heap.get_mut(receiver) else {
+            unreachable!()
+        };
+        for (key, _) in std::mem::replace(entries, selected) {
+            self.heap.weak_edge_removed(key);
+        }
     }
 
     /// Identify the dictionary views with set-like membership and comparison slots.

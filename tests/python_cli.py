@@ -2948,6 +2948,7 @@ for name in ("md4", "ripemd160"):
             "boxed_set_operator_descriptors.py",
             "boxed_set_union.py",
             "boxed_set_difference_update.py",
+            "boxed_set_intersection_update.py",
             "boxed_set_symmetric_difference_update.py",
             "boxed_set_difference.py",
             "boxed_set_intersection.py",
