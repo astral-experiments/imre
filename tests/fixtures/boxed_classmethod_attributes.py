@@ -20,6 +20,24 @@ class Child(Base):
 
 
 def current():
+    class Auto:
+        def __class_getitem__(cls, key):
+            return cls, key
+
+        def __init_subclass__(cls):
+            pass
+
+        @classmethod
+        def explicit(cls):
+            return cls
+
+    class Derived(Auto):
+        pass
+
+    assert vars(vars(Auto)["__class_getitem__"]) == {}
+    assert vars(vars(Auto)["__init_subclass__"]) == {}
+    assert vars(vars(Auto)["explicit"])["__name__"] == "explicit"
+    assert Derived[str] == (Derived, str)
     outer = Base.__dict__["outer"]
     inner = Base.__dict__["inner"]
     assert outer.__final__ is True and not hasattr(outer.__func__, "__final__")

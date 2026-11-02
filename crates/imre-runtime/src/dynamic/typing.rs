@@ -1835,7 +1835,11 @@ impl Context {
             if let Some(&function) = self.scope_data(scope).names.get(name)
                 && matches!(self.heap.get(function), Value::Function { .. })
             {
-                let method = super::method_decorator::class_method(self, function)?;
+                let dictionary = self.dict(Vec::new());
+                let method = self.alloc(Value::ClassMethod {
+                    callable: function,
+                    dictionary,
+                });
                 self.bind_local(scope, name, method);
             }
         }
