@@ -1478,6 +1478,7 @@ impl Value {
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::BufferedFile(file)) => visit.push(*file),
+                    Some(super::stdlib::io::MemoryStream::BufferedBytes(writer)) => visit.extend(writer.raw.get()),
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
                         visit.extend(stream.snapshot.get())
                     }
