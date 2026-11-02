@@ -2726,6 +2726,12 @@ impl Context {
                 if self.threads.system_module.is_none() {
                     self.bind(scope, "modules", self.modules);
                 }
+                let byteorder = self.text(if cfg!(target_endian = "little") {
+                    "little"
+                } else {
+                    "big"
+                });
+                self.bind(scope, "byteorder", byteorder);
                 for name in [
                     "audit",
                     "addaudithook",
