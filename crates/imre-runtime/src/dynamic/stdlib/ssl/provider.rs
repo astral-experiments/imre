@@ -19,6 +19,7 @@ const X509_V_FLAG_TRUSTED_FIRST: c_ulong = 0x8000;
 const X509_V_FLAG_X509_STRICT: c_ulong = 0x20;
 const X509_V_FLAG_PARTIAL_CHAIN: c_ulong = 0x80000;
 const X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS: c_uint = 4;
+pub(super) const HOSTFLAG_NEVER_CHECK_SUBJECT: c_uint = 0x20;
 const SSL_ERROR_SSL: c_int = 1;
 const SSL_ERROR_WANT_READ: c_int = 2;
 const SSL_ERROR_WANT_WRITE: c_int = 3;
@@ -29,11 +30,15 @@ macro_rules! functions {
     ($($name:ident($($arg:ty),*) -> $ret:ty;)+) => {
         #[allow(non_snake_case)]
         struct Api {
+            has_psk: bool,
             $($name: unsafe extern "C" fn($($arg),*) -> $ret,)+
         }
         impl Api {
             fn symbols(handle: NonNull<c_void>) -> Option<Self> {
                 Some(Self {
+                    // OpenSSL omits this callback entry point in OPENSSL_NO_PSK builds.
+                    // SAFETY: query the same live handle as the TLS entry points.
+                    has_psk: !unsafe { libc::dlsym(handle.as_ptr(), c"SSL_CTX_set_psk_client_callback".as_ptr()) }.is_null(),
                     $($name: {
                         let name = concat!(stringify!($name), "\0");
                         // SAFETY: the live libssl handle includes its libcrypto dependency.
@@ -77,7 +82,11 @@ functions! {
     SSL_new(Handle) -> Handle;
     SSL_free(Handle) -> ();
     SSL_set_fd(Handle, c_int) -> c_int;
-    SSL_set_hostflags(Handle, c_uint) -> ();
+    X509_VERIFY_PARAM_get_hostflags(Handle) -> c_uint;
+    X509_VERIFY_PARAM_set_hostflags(Handle, c_uint) -> ();
+    SSL_session_reused(Handle) -> c_int;
+    SSL_get_finished(Handle, Handle, usize) -> usize;
+    SSL_get_peer_finished(Handle, Handle, usize) -> usize;
     SSL_get0_param(Handle) -> Handle;
     a2i_IPADDRESS(*const c_char) -> Handle;
     ASN1_STRING_length(Handle) -> c_int;
@@ -191,6 +200,13 @@ impl Context {
         {
             return Err(api.error("SSL_CTX_set_min_proto_version"));
         }
+        // SAFETY: SSL_new inherits these flags from the context's owned parameters.
+        unsafe {
+            (api.X509_VERIFY_PARAM_set_hostflags)(
+                (api.SSL_CTX_get0_param)(handle.as_ptr()),
+                X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS,
+            )
+        };
         ctx.add_verify_flags(X509_V_FLAG_TRUSTED_FIRST)?;
         ctx.set_ciphers(CIPHERS)?;
         Ok(ctx)
@@ -292,6 +308,32 @@ impl Context {
             return Err(Failure::Other("No cipher can be selected.".into()));
         }
         Ok(())
+    }
+
+    pub(crate) fn hostname_checks_common_name(&self) -> bool {
+        // SAFETY: OpenSSL owns the verification parameters for this live SSL_CTX.
+        let flags = unsafe {
+            (self.api.X509_VERIFY_PARAM_get_hostflags)((self.api.SSL_CTX_get0_param)(
+                self.handle.as_ptr(),
+            ))
+        };
+        flags & HOSTFLAG_NEVER_CHECK_SUBJECT == 0
+    }
+
+    pub(crate) fn set_hostname_checks_common_name(&mut self, enabled: bool) {
+        // SAFETY: update only the common-name bit on this live SSL_CTX.
+        unsafe {
+            let param = (self.api.SSL_CTX_get0_param)(self.handle.as_ptr());
+            let flags = (self.api.X509_VERIFY_PARAM_get_hostflags)(param);
+            (self.api.X509_VERIFY_PARAM_set_hostflags)(
+                param,
+                if enabled {
+                    flags & !HOSTFLAG_NEVER_CHECK_SUBJECT
+                } else {
+                    flags | HOSTFLAG_NEVER_CHECK_SUBJECT
+                },
+            );
+        }
     }
 
     pub(crate) fn security_level(&self) -> i32 {
@@ -399,10 +441,9 @@ impl Session {
                     "invalid or unsupported server hostname".into(),
                 ));
             }
-            // SAFETY: OpenSSL copies the terminated name in both calls. Host flags match
-            // CPython's default. IP literals took the separate verification path above.
+            // SAFETY: OpenSSL copies the terminated name in both calls. Host flags
+            // are inherited from the context. IP literals took the separate verification path above.
             unsafe {
-                (api.SSL_set_hostflags)(ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
                 if (api.SSL_set1_host)(ssl, name.as_ptr()) != 1 {
                     return Err(api.error("SSL_set1_host"));
                 }
@@ -488,6 +529,27 @@ impl Session {
                 }
             }
         }
+    }
+
+    pub(crate) fn channel_binding(&self) -> Option<Vec<u8>> {
+        let ssl = self.handle.as_ptr();
+        // SAFETY: this SSL is a connected client. Like CPython, select our Finished
+        // for a full handshake and the peer's Finished for a resumed handshake.
+        let finished = if unsafe { (self.api.SSL_session_reused)(ssl) } == 0 {
+            self.api.SSL_get_finished
+        } else {
+            self.api.SSL_get_peer_finished
+        };
+        // SAFETY: a zero-length output requests the full size. The SSL is exclusively
+        // borrowed across both calls, so no handshake can change the Finished message.
+        let len = unsafe { finished(ssl, ptr::null_mut(), 0) };
+        if len == 0 {
+            return None;
+        }
+        let mut bytes = vec![0; len];
+        // SAFETY: OpenSSL copies at most the supplied buffer length.
+        unsafe { finished(ssl, bytes.as_mut_ptr().cast(), len) };
+        Some(bytes)
     }
 
     pub(crate) fn sendall(&mut self, mut bytes: &[u8]) -> Result<(), Failure> {
