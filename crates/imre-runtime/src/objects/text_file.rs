@@ -104,6 +104,10 @@ impl TextFile {
         unsafe { self.0.0.with(|storage| storage.file().fileno()) }
     }
 
+    pub(crate) fn isatty(&self) -> Result<bool> {
+        Ok(super::os::isatty(self.fileno()?))
+    }
+
     pub(crate) fn write(&self, value: &str) -> Result<()> {
         // SAFETY: the text writer uses no Python callbacks during this borrow.
         unsafe { self.0.0.with_mut(|storage| storage.file_mut().write(value)) }
