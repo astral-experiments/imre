@@ -2124,6 +2124,7 @@ def report(text):
             "boxed_io_exports.py",
             "boxed_io_reimport.py",
             "boxed_fileio_opener.py",
+            "boxed_open_opener.py",
             "boxed_io_text_encoding.py",
             "boxed_locale.py",
             "boxed_locale_error.py",
