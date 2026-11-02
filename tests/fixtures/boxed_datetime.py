@@ -568,7 +568,8 @@ def test_fixed_timezone_methods():
         pass
 
     class Name(str):
-        pass
+        def __repr__(self):
+            return "Name()"
 
     class Stamp(dt):
         pass
@@ -578,6 +579,13 @@ def test_fixed_timezone_methods():
     zone = timezone(offset, name)
     foreign = Stamp(2020, 1, 1, tzinfo=UTC)
     assert zone.utcoffset(foreign) is offset and zone.tzname(None) is name
+    assert str(zone) is name
+    assert repr(zone) == f"datetime.timezone({offset!r}, Name())"
+    assert repr(time(tzinfo=zone, fold=1)) == f"datetime.time(0, 0, tzinfo={zone!r}, fold=1)"
+    lone = timezone(timedelta(), "\ud800")
+    assert lone is not UTC and lone.tzname(None) == str(lone) == "\ud800"
+    assert repr(lone) == r"datetime.timezone(datetime.timedelta(0), '\ud800')"
+    assert lone.__getinitargs__()[1] is lone.tzname(None)
     assert timezone.dst(zone, foreign) is None
     assert timezone(offset).tzname(foreign) == "UTC-01:59:59.999999"
     assert UTC.tzname(None) == "UTC"

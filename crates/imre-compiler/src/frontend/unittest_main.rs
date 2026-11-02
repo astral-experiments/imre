@@ -179,24 +179,6 @@ impl Checker<'_> {
                     "native unittest does not yet support custom result hooks or decorated tests",
                 ));
             }
-            if ancestor.node.body.iter().any(
-                |stmt| matches!(stmt, ast::Stmt::FunctionDef(f) if f.name.as_str() == "__init__"),
-            ) {
-                return Err(error(
-                    self.source,
-                    call,
-                    "native unittest requires the inherited TestCase initializer",
-                ));
-            }
-        }
-        if let Some(init) = class.initializer
-            && class.method_origins[init] != base
-        {
-            return Err(error(
-                self.source,
-                call,
-                "native unittest requires the inherited TestCase initializer",
-            ));
         }
         Ok(())
     }
@@ -444,6 +426,8 @@ impl Checker<'_> {
         if !methods.is_empty() {
             self.validate_unittest_case(call, id)?;
         }
+        let mut constructor = call.clone();
+        constructor.arguments.keywords = Default::default();
         for name in methods {
             let contains = Expr {
                 ty: Type::Bool,
@@ -468,17 +452,17 @@ impl Checker<'_> {
             } else {
                 contains
             };
-            // validate_unittest_case established the inherited TestCase initializer.
-            // Pass its real methodName so construction observes the selected method.
-            let init = self.classes.methods[id]["__init__"].id;
-            self.calls.insert(init);
-            let case = Expr {
-                ty: Type::Class(id),
-                kind: ExprKind::Construct {
-                    initializer: init,
-                    args: ir::CallArgs::positional(vec![unpacking::string(&name)]),
-                },
-            };
+            // Bind the selected name through the case's real initializer, including
+            // inherited parameter defaults and argument packs.
+            constructor.arguments.args = [ast::StringLiteral {
+                range: call.range(),
+                node_index: ast::AtomicNodeIndex::NONE,
+                value: name.as_str().into(),
+                flags: ast::StringLiteralFlags::empty(),
+            }
+            .into()]
+            .into();
+            let case = self.construct(&constructor, id)?;
             let add = self.record_slot(
                 suite_class,
                 self.local(group),

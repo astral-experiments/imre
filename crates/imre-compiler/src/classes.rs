@@ -20,7 +20,7 @@ pub(crate) use constants::ClassValue;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
 pub(crate) use exception_forwarders::ForwardingInitializer;
 pub(crate) use exceptions::explicit_message_initializer;
-pub(crate) use inheritance::{super_init, super_method};
+pub(crate) use inheritance::{direct_base_init, super_init, super_method};
 
 pub(crate) const EXCEPTION_ARGS_SLOT: &str = "<exception arguments>";
 
@@ -1158,6 +1158,17 @@ fn collect_class(
             },
             exception_layout,
             &mut init_hooks,
+            |call| {
+                base.is_some_and(|(_, parent)| {
+                    direct_base_init(
+                        graph,
+                        definition.module,
+                        parent.definition,
+                        &methods[initializer],
+                        call,
+                    )
+                })
+            },
             |name| hook_writes(name, None),
         )?;
     }
@@ -1354,6 +1365,7 @@ fn check_initializer(
     layout: InitializerFields<'_>,
     exception_layout: bool,
     hooks: &mut init_hooks::Hooks,
+    direct_base: impl Fn(&ast::ExprCall) -> bool,
     lookup: impl Fn(&str) -> Option<Result<Vec<String>, String>>,
 ) -> Result<bool, String> {
     let InitializerFields {
@@ -1463,7 +1475,7 @@ fn check_initializer(
             }
             ast::Stmt::Expr(value)
                 if let ast::Expr::Call(call) = &*value.value
-                    && super_init(call) =>
+                    && (super_init(call) || direct_base(call)) =>
             {
                 if called_super
                     || inherited
@@ -1486,6 +1498,7 @@ fn check_initializer(
                     .arguments
                     .args
                     .iter()
+                    .skip(usize::from(!super_init(call)))
                     .chain(call.arguments.keywords.iter().map(|kw| &kw.value))
                 {
                     let mut use_self = SelfUse(receiver, None, &initialized);
@@ -1525,10 +1538,16 @@ fn check_initializer(
         let mut self_use = SelfUse(receiver, None, &initialized);
         self_use.visit_expr(&assignment.value);
         if let Some(expression) = self_use.1 {
-            return Err(module.error(
-                expression,
-                "__init__ cannot expose self before construction or read an uninitialized field",
-            ));
+            if let Some(name) = init_hooks::receiver_call(&assignment.value, receiver, true)
+                && matches!(lookup(name), Some(Ok(writes)) if writes.is_empty())
+            {
+                hooks.entry(name.to_owned()).or_default();
+            } else {
+                return Err(module.error(
+                    expression,
+                    "__init__ cannot expose self before construction or read an uninitialized field",
+                ));
+            }
         }
         let mut targets = Vec::new();
         for target in &assignment.targets {
@@ -1538,6 +1557,22 @@ fn check_initializer(
             if let ast::Expr::Name(name) = target {
                 if name.id == receiver {
                     return Err(module.error(target, "an initializer cannot rebind its receiver"));
+                }
+                continue;
+            }
+            if let ast::Expr::Subscript(item) = target
+                && let ast::Expr::Attribute(field) = &*item.value
+                && matches!(&*field.value, ast::Expr::Name(name) if name.id == receiver)
+                && declared.contains(field.attr.as_str())
+            {
+                // Storing an item reads the container and its index. It initializes no field.
+                let mut use_self = SelfUse(receiver, None, &initialized);
+                use_self.visit_expr(target);
+                if let Some(expr) = use_self.1 {
+                    return Err(module.error(
+                        expr,
+                        "a subscript assignment cannot expose self or read an uninitialized field",
+                    ));
                 }
                 continue;
             }

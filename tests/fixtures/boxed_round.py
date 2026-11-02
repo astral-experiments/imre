@@ -10,6 +10,22 @@ class Index:
 
 
 def current():
+    class FancyInt(int):
+        def __int__(self):
+            raise AssertionError("int descriptor invoked the override")
+
+    class FancyFloat(float):
+        def __round__(self, *args):
+            raise AssertionError("float descriptor invoked the override")
+
+    big = 10**42
+    assert int.__int__(big) is big and int.__abs__(big) is big
+    assert int.__float__(FancyInt(17)) == 17.0
+    assert type(int.__int__(True)) is int
+    assert float.__int__(FancyFloat(-1.5)) == -1
+    assert float.__round__(FancyFloat(25), Index()) == 20.0
+    assert bool.__round__ is int.__round__
+
     f = round
     obj = Recorder()
     obj.__round__ = lambda: 99

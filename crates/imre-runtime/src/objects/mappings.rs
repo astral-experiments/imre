@@ -452,6 +452,27 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         Ok(Some(entry))
     }
 
+    /// Transfer the most recently inserted resident pair without hashing its key again.
+    fn pop_last(&mut self) -> Option<(OwnedWord, V)> {
+        // A failed pop must preserve vacant slots that active cursors can see after a refill.
+        if self.index.is_empty() {
+            return None;
+        }
+        let entry = loop {
+            if let Some(entry) = self.entries.pop()? {
+                break entry;
+            }
+        };
+        let position = self.entries.len();
+        self.index
+            .find_entry(entry.hash, |&i| i == position)
+            .expect("resident dictionary entry")
+            .remove();
+        // SAFETY: removal transfers the stored key's only table owner.
+        let key = unsafe { OwnedWord::from_owned(entry.key.into_word(), WordKind::new(K::KIND)) };
+        Some((key, entry.value))
+    }
+
     fn compact(&mut self) {
         if self.entries.len() < 32 || self.entries.len() - self.index.len() <= self.index.len() {
             return;
@@ -2598,6 +2619,38 @@ pub unsafe extern "C" fn imre_dict_try_pop(
     unsafe { out.write(value.into_word()) };
     1
 }
+/// Remove the last resident pair, preserving both owners for the returned tuple.
+///
+/// # Safety
+/// The caller roots the exact dictionary and provides independent output slots.
+/// Only a successful call writes to the slots, transferring one owner to each.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_dict_popitem(
+    dictionary: *const Object,
+    key_out: *mut usize,
+    value_out: *mut usize,
+) {
+    // SAFETY: the removed key roots its cache lookup and the dictionary owns the value.
+    let pair = unsafe {
+        object(dictionary).0.with_mut(|storage| {
+            let mapping = storage.dictionary_mut();
+            let (key, value) = table!(&mut mapping.tables, table => table.pop_last())?;
+            mapping.update_ascii_int(key.word, 0);
+            mapping.keys_changed();
+            Some((key, OwnedWord::from_owned(value, mapping.value_kind)))
+        })
+    };
+    if let Some((key, value)) = pair {
+        // SAFETY: each output slot receives one independently owned word.
+        unsafe {
+            key_out.write(key.into_word());
+            value_out.write(value.into_word());
+        }
+    } else {
+        Error::string_key(Str::from("popitem(): dictionary is empty")).raise();
+    }
+}
+
 /// # Safety
 /// The exact dictionary, key, and (unless required) value-typed default must
 /// remain rooted. An absent required key sets KeyError; otherwise return one owner.
@@ -3196,6 +3249,11 @@ mod tests {
             assert!(result.position(42, &key).is_some());
         }
         assert!(source.position(42, &69).is_none());
+        for key in (70..90).rev() {
+            assert_eq!(source.pop_last().unwrap().0.word, key);
+            assert!(source.position(42, &key).is_none());
+        }
+        assert!(source.pop_last().is_none());
     }
 
     #[test]
@@ -3582,6 +3640,45 @@ mod tests {
             drop(saved);
         }
         assert!(value_weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn popitem_transfers_both_owners_and_leaves_outputs_untouched_on_empty() {
+        let key = StrOwner::new(Str::from("last"));
+        let value = StrOwner::new(Str::from("value"));
+        let weak = [StrOwner::downgrade(&key), StrOwner::downgrade(&value)];
+        // SAFETY: the dictionary and both inputs are exact strings. Successful
+        // output words are reclaimed once, after the dictionary is released.
+        unsafe {
+            let dictionary = crate::ObjectOwner::from_raw(imre_dict_new(3, 3));
+            let pointer = crate::ObjectOwner::as_ptr(&dictionary);
+            imre_dict_set(
+                pointer,
+                StrOwner::as_ptr(&key) as usize,
+                StrOwner::as_ptr(&value) as usize,
+            );
+            drop((key, value));
+            let (mut key, mut value) = (0, 0);
+            imre_dict_popitem(pointer, &mut key, &mut value);
+            let pair = (
+                StrOwner::from_raw(key as *const Str),
+                StrOwner::from_raw(value as *const Str),
+            );
+            let (mut key, mut value) = (15, 27);
+            imre_dict_popitem(pointer, &mut key, &mut value);
+            assert_eq!((key, value), (15, 27));
+            let error = crate::ObjectOwner::from_raw(imre_error_take());
+            assert_eq!(
+                imre_exception_matches(crate::ObjectOwner::as_ptr(&error), Kind::KeyError as u32),
+                1
+            );
+            let message =
+                StrOwner::from_raw(imre_exception_message(crate::ObjectOwner::as_ptr(&error)));
+            assert_eq!(message.as_str(), "'popitem(): dictionary is empty'");
+            drop(dictionary);
+            assert_eq!((pair.0.as_str(), pair.1.as_str()), ("last", "value"));
+        }
+        assert!(weak.iter().all(|owner| owner.upgrade().is_none()));
     }
 
     #[test]

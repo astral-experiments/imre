@@ -24,6 +24,41 @@ def current():
         else:
             raise AssertionError("invalid array initialization did not raise")
 
+    import sys
+    import warnings
+
+    for code in ("h", "H", "I", "l", "L"):
+        a = array(code)
+        bits = a.itemsize * 8
+        signed = code.islower()
+        lo = -(1 << (bits - 1)) if signed else 0
+        hi = (1 << (bits - int(signed))) - 1
+        a.append(lo)
+        a.append(hi)
+        assert a.typecode == code and list(a) == [lo, hi]
+        raw = lo.to_bytes(a.itemsize, sys.byteorder, signed=signed)
+        raw += hi.to_bytes(a.itemsize, sys.byteorder, signed=signed)
+        assert a.tobytes() == raw and array(code, raw).tolist() == [lo, hi]
+        for bad in (lo - 1, hi + 1):
+            try:
+                a.append(bad)
+            except OverflowError:
+                pass
+            else:
+                raise AssertionError("out-of-range array element accepted")
+    if array("L").itemsize == 8:
+        n = 1 << 53
+        assert memoryview(array("L", [n+1])) != memoryview(array("L", [n]))
+        assert memoryview(array("L", [n+1])) != memoryview(array("d", [float(n)]))
+        assert memoryview(array("L", [n])) == memoryview(array("d", [float(n)]))
+
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always", DeprecationWarning)
+        a = array("u", "A😀")
+        assert a.typecode == "u" and list(a) == ["A", "😀"]
+        assert array("w", a).tobytes() == a.tobytes()
+        assert len(seen) == 1 and seen[0].category is DeprecationWarning
+
     for code in ("b", "B", "i", "f", "d"):
         owner = array(code, [65, 66])
         view = memoryview(owner)
@@ -172,3 +207,18 @@ def current():
             raise RuntimeError("list initialization uses indexing")
 
     assert list(array("i", EmptyList([4,5]))) == [4,5]
+
+    from io import BytesIO
+    sample = array('i', [0x12345678])
+    source = BytesIO(sample.tobytes())
+    appended = array('i')
+    try:
+        appended.fromfile(source, 2)
+    except EOFError:
+        pass
+    else:
+        raise AssertionError("expected a short array read")
+    assert appended.tolist() == sample.tolist()
+    with memoryview(appended) as view:
+        assert array.byteswap(appended) is None
+        assert view.tobytes() == sample.tobytes()[::-1]

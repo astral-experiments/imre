@@ -113,3 +113,124 @@ try:
 finally:
     os.unlink(path)
 print("BufferedRandom checked")
+
+
+class ShortRaw(io.BytesIO):
+    def __init__(self, data):
+        super().__init__(data)
+        self.writes = []
+        self.refuse = False
+
+    def write(self, data):
+        if self.refuse:
+            self.refuse = False
+            raise OSError("retry me")
+        count = min(len(data), 2)
+        self.writes.append((self.tell(), bytes(data[:count])))
+        return super().write(data[:count])
+
+
+with ShortRaw(b"abcdefgh") as raw:
+    f = io.BufferedRandom(raw, 5)
+    assert f.raw is raw and f.read(1) == b"a" and raw.tell() == 5
+    assert f.write(b"123") == 3 and raw.writes == []
+    assert f.seek(-2, 1) == 2 and f.read1(2) == b"23"
+    raw.refuse = True
+    try:
+        f.flush()
+    except OSError as error:
+        assert error.args == ("retry me",)
+    else:
+        raise AssertionError("raw write failure lost")
+    f.flush()
+    assert raw.writes == [(1, b"12"), (3, b"3")]
+    assert raw.tell() == 4 and raw.getvalue() == b"a123efgh"
+    assert f.detach() is raw and not raw.closed
+print("BufferedRandom raw callbacks checked")
+with io.BytesIO(b"abcdef") as raw:
+    f = io.BufferedRandom(raw, 3)
+    assert f.read(1) == b"a"
+    raw.seek(1)
+    raw.write(b"X")
+    raw.seek(3)
+    assert f.peek() == b"Xcd"
+    f.seek(0)
+    assert f.write(b"ABC") == 3
+    assert raw.getvalue() == b"ABCdef"
+    f.close()
+
+
+class Reenter(io.BytesIO):
+    target = None
+
+    @property
+    def closed(self):
+        if self.target is not None:
+            target = self.target
+            self.target = None
+            try:
+                target.write(b"X")
+            except RuntimeError:
+                self.rejected = True
+            else:
+                raise AssertionError("reentrant write accepted")
+        return super().closed
+
+
+with Reenter() as raw:
+    f = io.BufferedRandom(raw, 4)
+    raw.target = f
+    assert f.write(b"A") == 1 and raw.rejected
+    f.flush()
+    assert raw.getvalue() == b"A"
+    f.close()
+for method in ("readinto", "readinto1"):
+    with io.BytesIO() as raw:
+        f = io.BufferedRandom(raw, 4)
+        assert f.write(b"XY") == 2 and raw.getvalue() == b""
+        assert getattr(f, method)(bytearray(0)) == 0
+        assert raw.getvalue() == b"XY"
+        f.close()
+
+
+class BlockedRaw(io.BytesIO):
+    blocked = False
+
+    def write(self, data):
+        if self.blocked:
+            return None
+        return super().write(data)
+
+
+with BlockedRaw(b"abcdefgh") as raw:
+    f = io.BufferedRandom(raw, 6)
+    assert f.read(3) == b"abc" and f.write(b"X") == 1 and f.seek(1) == 1
+    raw.blocked = True
+    try:
+        f.write(b"01234567")
+    except BlockingIOError as error:
+        assert error.characters_written == 5
+    else:
+        raise AssertionError("blocked preflush accepted too much")
+    assert f.tell() == 6
+    raw.blocked = False
+    f.flush()
+    assert f.tell() == raw.tell() == 9
+    assert raw.getvalue() == b"abcX01234"
+    assert f.write(b"Z") == 1
+    f.flush()
+    assert raw.getvalue() == b"abcX01234Z"
+    assert f.seek(8) == 8 and f.read() == b"4Z"
+    f.close()
+
+# Older native TemporaryFile wrappers own their descriptor internally.
+# A refused detach must leave the stream alive and closeable.
+temporary = tempfile.TemporaryFile("w+b")
+try:
+    raw = temporary.detach()
+except io.UnsupportedOperation:
+    assert not temporary.closed
+    temporary.close()
+else:
+    assert not raw.closed
+    raw.close()

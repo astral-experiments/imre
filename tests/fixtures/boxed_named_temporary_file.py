@@ -1,4 +1,5 @@
 import gc
+import io
 import os
 import warnings
 import tempfile
@@ -76,6 +77,13 @@ def current():
         raise AssertionError("missing parent")
     # Fail after exclusive creation, even when successful files would be retained.
     saved = []
+    opened = []
+    real_open = io.open
+
+    def recording_open(*args, **kwargs):
+        stream = real_open(*args, **kwargs)
+        opened.append(stream)
+        return stream
 
     def interrupt(stream, name, *policy):
         saved.append((stream, name))
@@ -83,6 +91,7 @@ def current():
 
     original = tempfile._TemporaryFileWrapper
     tempfile._TemporaryFileWrapper = interrupt
+    io.open = recording_open
     try:
         for delete in (False, True):
             try:
@@ -92,8 +101,10 @@ def current():
             else:
                 raise AssertionError("constructor error was lost")
             stream, name = saved[-1]
+            assert opened.pop() is stream
             assert stream.closed and not os.path.exists(name)
     finally:
+        io.open = real_open
         tempfile._TemporaryFileWrapper = original
 
     with warnings.catch_warnings(record=True) as seen:

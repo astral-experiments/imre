@@ -29,6 +29,8 @@ mod types;
 mod verify;
 mod version;
 mod watch;
+mod zip_entry;
+pub use zip_entry::is_zip_path;
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};

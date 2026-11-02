@@ -259,12 +259,25 @@ pub(super) fn initialize(
     }
     let handle = match native_raw(ctx, raw, methods, owner) {
         Ok(handle) => handle,
+        Err(_) if owner == "BufferedRandom" => {
+            if backing(ctx, receiver).is_some() || super::buffered_reader::has_state(ctx, receiver)
+            {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "BufferedRandom reinitialization is unsupported",
+                ));
+            }
+            return super::buffered_reader::install(ctx, receiver, raw, capacity, true);
+        }
         Err(_) if owner == "BufferedWriter" => {
             return super::bytes_writer::initialize(ctx, receiver, raw, capacity as usize, revived);
         }
         Err(error) => return Err(error),
     };
-    if backing(ctx, receiver).is_some() || super::bytes_writer::state(ctx, receiver).is_some() {
+    if backing(ctx, receiver).is_some()
+        || super::bytes_writer::state(ctx, receiver).is_some()
+        || owner == "BufferedRandom" && super::buffered_reader::has_state(ctx, receiver)
+    {
         return Err(Error::new(
             "NotImplementedError",
             format!("{owner} reinitialization is unsupported"),

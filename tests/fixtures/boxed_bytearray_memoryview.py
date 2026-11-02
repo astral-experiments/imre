@@ -36,4 +36,77 @@ def current():
     other.release()
     data.append(100)
     assert bytes(data) == b"Abcd"
+    unsigned_cast()
     print("bytearray memoryview")
+
+
+def unsigned_cast():
+    from io import BytesIO
+
+    data = array("i", b"AAAABBBBCCCCDDDD")
+    original = memoryview(data)
+    sub = original[1:3]
+    view = sub.cast(format="B", shape=[8])
+    original.release()
+    sub.release()
+    assert view.obj is data and view.format == "B" and view.shape == (8,)
+    assert view.itemsize == 1 and view.nbytes == 8 and view.strides == (1,)
+    assert view[:4] == b"BBBB" and bytes(view[4:]) == b"CCCC"
+    assert BytesIO(b"XYZ").readinto(view[2:5]) == 3
+    assert data.tobytes() == b"AAAABBXYZCCCDDDD"
+    assert view[::2] == b"BXZC"
+    empty = view[:0:2]
+    assert not empty.c_contiguous and bytes(empty) == b""
+    try:
+        BytesIO(b"x").readinto(empty)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("read into a noncontiguous cast slice")
+    empty.release()
+    assert view[:1:2].c_contiguous
+    part = view[1:4].cast("@B")
+    assert part.format == "@B" and part[0] == ord("B")
+    assert part.shape == (3,) and part.obj is data
+    view.release()
+    part[0] = ord("P")
+    part[1:] = b"QR"
+    assert data.tobytes() == b"AAAABPQRZCCCDDDD"
+    try:
+        data.append(1)
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("cast slice failed to hold exporter")
+    only = part.toreadonly()
+    try:
+        hash(only)
+    except TypeError as err:
+        assert "unhashable type" in str(err)
+    else:
+        raise AssertionError("hashed a view whose exporter is unhashable")
+    only.release()
+    part.release()
+    data.append(1)
+    try:
+        part.cast("B")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("cast released view")
+    ro = memoryview(b"abcd")[1:].cast("B")
+    assert ro.readonly and ro == b"bcd" and hash(ro) == hash(b"bcd")
+    try:
+        ro[0] = 0
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("wrote readonly cast")
+    for source, args, error in [(memoryview(data)[::2], ("B",), TypeError),
+                                (ro, ("=B",), ValueError), (ro, ("B", [2]), TypeError)]:
+        try:
+            source.cast(*args)
+        except error:
+            pass
+        else:
+            raise AssertionError("accepted invalid cast")

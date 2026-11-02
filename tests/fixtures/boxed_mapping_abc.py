@@ -91,7 +91,71 @@ def dynamic_collection_classes():
             raise AssertionError("instantiated an abstract collection")
 
 
+def callable_classes():
+    from abc import ABCMeta
+    from typing import Callable as TypingCallable, get_origin
+    from collections.abc import Callable
+
+    assert get_origin(TypingCallable) is Callable
+    assert type(Callable) is ABCMeta and Callable.__abstractmethods__ == frozenset({"__call__"})
+
+    class Incomplete(Callable):
+        pass
+
+    class Concrete(Callable):
+        def __call__(self, *args, **kwargs):
+            return super().__call__(*args, **kwargs)
+
+    class Masked(Concrete):
+        __call__ = None
+
+    class Shadowed:
+        __call__ = None
+
+    class InstanceOnly:
+        pass
+
+    value = InstanceOnly()
+    value.__call__ = lambda: True
+    for item in (value, Shadowed(), [], None):
+        assert Callable.__subclasshook__(type(item)) is NotImplemented
+        assert not isinstance(item, Callable) and not issubclass(type(item), TypingCallable)
+    assert callable(Shadowed()) and not isinstance(Shadowed(), TypingCallable)
+    from operator import attrgetter
+    from struct import Struct
+    for abc in (Callable, TypingCallable):
+        assert isinstance(attrgetter("name"), abc)
+        assert not isinstance(Struct("B"), abc)
+
+    class Reported:
+        @property
+        def __class__(self):
+            raise NotImplementedError("reported class")
+
+    try:
+        isinstance(Reported(), Callable)
+    except NotImplementedError as exc:
+        assert str(exc) == "reported class"
+    else:
+        raise AssertionError("suppressed the reported class error")
+    assert Concrete()(4, key=3) is False
+    assert get_origin(Callable[[int], bool]) is Callable
+    assert get_origin(TypingCallable[..., int]) is Callable
+    for item in (lambda: 1, len, list.append, [].append, Concrete().__call__, type, staticmethod(len)):
+        assert isinstance(item, Callable) and issubclass(type(item), Callable)
+    assert issubclass(Masked, Callable) and isinstance(Masked(), Callable)
+    assert Callable.register(InstanceOnly) is InstanceOnly
+    assert isinstance(value, TypingCallable) and issubclass(InstanceOnly, Callable)
+    try:
+        Incomplete()
+    except TypeError as exc:
+        assert "__call__" in str(exc)
+    else:
+        raise AssertionError("instantiated abstract Callable subclass")
+
+
 def current():
+    callable_classes()
     hashable_classes()
     dynamic_collection_classes()
     from collections.abc import Collection, Container, Iterable, Sized
