@@ -962,7 +962,8 @@ def check_pickle_reductions(imre, root, run):
 def check_unittest_main_names(imre, root, run):
     source = root / "selected_tests.py"
     source.write_text(
-        "import unittest\n"
+        "import importlib\n"
+        "unittest = importlib.import_module('unittest')\n"
         "class Cases(unittest.TestCase):\n"
         "    def test_a(self): print('a')\n"
         "    def test_b(self): print('b')\n"
@@ -984,6 +985,7 @@ def check_unittest_main_names(imre, root, run):
         assert filtered.returncode == 5 and not filtered.stdout, filtered
     missing = run(executable, "-v", "Cases.test_missing")
     assert missing.returncode == 1 and "_FailedTest" in missing.stderr, missing
+    assert missing.stderr.rstrip().endswith("FAILED (errors=1)"), missing
 
 
 def check_unittest_file_discovery(imre, root, run):
