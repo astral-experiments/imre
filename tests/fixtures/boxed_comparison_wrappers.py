@@ -21,7 +21,19 @@ def current():
             return object.__new__(cls)
 
     assert WithNew.__init__ is object.__init__
-    assert WithNew(1).__init__() is None
+    c = WithNew(1)
+    assert c.__init__(2, allowed=True) is None
+
+    class WithInit(WithNew):
+        def __init__(self, arg):
+            pass
+
+    try:
+        object.__init__(WithInit(1), 1)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError('object initializer accepted subclass initializer arguments')
 
     class Plain:
         pass

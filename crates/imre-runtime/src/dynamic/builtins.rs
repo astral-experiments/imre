@@ -1445,14 +1445,18 @@ pub(super) fn call(
         }
         if args.len() != 1 || !kwargs.is_empty() {
             if let Some(&receiver) = args.first() {
-                let tuple = ctx.builtin("tuple");
-                if ctx.instance_of(receiver, tuple) {
-                    let class = ctx.exact_type(receiver)?;
-                    if ctx
-                        .class_attr(class, "__init__")
-                        .is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__"))
+                let class = ctx.exact_type(receiver)?;
+                let init = ctx.class_attr(class, "__init__");
+                if init.is_none_or(|init| Some(&init) == ctx.builtins.get("object.__init__")) {
+                    let new = ctx.class_attr(class, "__new__").map(|slot| match *ctx.heap.get(slot) {
+                        Value::StaticMethod { callable, .. } => callable,
+                        _ => slot,
+                    });
+                    let tuple = ctx.builtin("tuple");
+                    if ctx.instance_of(receiver, tuple)
+                        || new.is_some_and(|new| Some(&new) != ctx.builtins.get("object.__new__"))
                     {
-                        // Tuple subtypes consume their constructor arguments in __new__.
+                        // The allocator consumed the arguments; the inherited initializer does nothing.
                         return Ok(NONE);
                     }
                 }
