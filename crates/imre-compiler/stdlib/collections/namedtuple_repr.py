@@ -1,15 +1,14 @@
-_namedtuple_factory = namedtuple
+import sys as _sys
 
 
 def namedtuple(typename, field_names, *, rename=False, defaults=None, module=None):
     result = _namedtuple_factory(typename, field_names, rename=rename, defaults=defaults, module=module)
     if module is None:
-        import sys
         try:
-            module = sys._getframemodulename(1) or "__main__"
+            module = _sys._getframemodulename(1) or "__main__"
         except AttributeError:
             try:
-                module = sys._getframe(1).f_globals.get("__name__", "__main__")
+                module = _sys._getframe(1).f_globals.get("__name__", "__main__")
             except (AttributeError, ValueError):
                 pass
         if module is not None:
