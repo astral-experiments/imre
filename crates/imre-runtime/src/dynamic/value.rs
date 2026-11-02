@@ -1100,6 +1100,7 @@ pub(super) enum Value {
         pattern: Id,
         subject: Id,
         buffer_view: Option<Id>,
+        initial_start: usize,
         start: Option<usize>,
         end: usize,
         retry: bool,
@@ -1715,7 +1716,10 @@ impl Value {
                 visit.extend(*buffer_view);
             }
             Self::RegexPattern(pattern) => visit.push(pattern.source),
-            Self::RegexMatch(m) => visit.extend([m.pattern, m.subject]),
+            Self::RegexMatch(m) => {
+                visit.extend([m.pattern, m.subject]);
+                visit.extend(m.cached_regs.get().copied());
+            }
             Self::File(file) => {
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
@@ -2762,7 +2766,7 @@ impl Heap {
             && callable.is_none_or(|f| matches!(self.get(f), Value::Native(_)) && !weak(f))
             && (pattern(value)
                 || matches!(self.get(value), Value::RegexMatch(m)
-                    if !weak(value) && text(m.subject) && pattern(m.pattern)))
+                    if m.cached_regs.get().is_none() && !weak(value) && text(m.subject) && pattern(m.pattern)))
     }
 
     /// Release inert call arguments and peers at the same boundary as the general discard.

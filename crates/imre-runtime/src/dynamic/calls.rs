@@ -2786,6 +2786,10 @@ impl Context {
                 }
             },
             Value::RegexScanner { pattern, .. } if name == "pattern" => return Ok(pattern),
+            Value::RegexMatch(ref m) if matches!(name, "pos" | "endpos") => {
+                return m.window_position(self, name == "endpos");
+            }
+            Value::RegexMatch(ref m) if name == "regs" => return m.regs(self),
             Value::RegexMatch(ref m) if name == "re" => return Ok(m.pattern),
             Value::RegexMatch(ref m) if name == "string" => return Ok(m.subject),
             Value::RegexMatch(ref m) if matches!(name, "lastindex" | "lastgroup") => {
@@ -4090,6 +4094,22 @@ impl Context {
         }
     }
 
+    fn check_match_attribute_write(&self, obj: Id, name: &str) -> Result<()> {
+        if matches!(self.heap.get(obj), Value::RegexMatch(_)) {
+            match name {
+                "pos" | "endpos" => return Err(Error::new("AttributeError", "readonly attribute")),
+                "regs" => {
+                    return Err(Error::new(
+                        "AttributeError",
+                        "attribute 'regs' of 're.Match' objects is not writable",
+                    ));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     fn check_zone_constant_write(&self, obj: Id, name: &str) -> Result<()> {
         if matches!(name, "utc" | "min" | "max")
             && matches!(self.heap.get(obj), Value::Calendar { value, .. } if value.class() == "timezone")
@@ -4164,6 +4184,7 @@ impl Context {
         if let Some(result) = super::paramspec::update(self, obj, name, None) {
             return result;
         }
+        self.check_match_attribute_write(obj, name)?;
         self.check_zone_constant_write(obj, name)?;
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;
@@ -4803,6 +4824,7 @@ impl Context {
                 "custom ABCMeta construction and subclass checks are unsupported",
             ));
         }
+        self.check_match_attribute_write(obj, name)?;
         self.check_zone_constant_write(obj, name)?;
         self.check_template_write(obj, name)?;
         super::namespace::check_class_write(self, obj, name)?;

@@ -10,6 +10,7 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
     let Value::RegexScanner {
         pattern,
         subject,
+        initial_start,
         start,
         end,
         retry,
@@ -84,6 +85,8 @@ pub(in crate::dynamic::stdlib) fn scanner_next(
         pattern,
         subject,
         spans,
+        window: Span::from(initial_start..end),
+        cached_regs: OnceCell::new(),
     }))))
 }
 

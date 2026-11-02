@@ -1183,6 +1183,8 @@ pub(in crate::dynamic) struct Match {
     pub(in crate::dynamic) pattern: Id,
     pub(in crate::dynamic) subject: Id,
     spans: Vec<Option<Span>>,
+    window: Span,
+    pub(in crate::dynamic) cached_regs: OnceCell<Id>,
 }
 
 impl Match {
@@ -1278,9 +1280,13 @@ impl Match {
     }
 
     fn bounds(&self, ctx: &Context, index: usize) -> Result<(i64, i64)> {
-        let Some(span) = self.spans[index] else {
-            return Ok((-1, -1));
-        };
+        match self.spans[index] {
+            Some(span) => self.span_bounds(ctx, span),
+            None => Ok((-1, -1)),
+        }
+    }
+
+    fn span_bounds(&self, ctx: &Context, span: Span) -> Result<(i64, i64)> {
         if self.pattern(ctx).bytes
             || matches!(
                 ctx.heap.get(ctx.scalar_value(self.subject)),
@@ -1293,6 +1299,31 @@ impl Match {
         let start = text[..span.start].chars().count() as i64;
         let end = start + text[span.range()].chars().count() as i64;
         Ok((start, end))
+    }
+
+    pub(in crate::dynamic) fn window_position(&self, ctx: &mut Context, end: bool) -> Result<Id> {
+        let offset = if end {
+            self.window.end
+        } else {
+            self.window.start
+        };
+        let (position, _) = self.span_bounds(ctx, Span::from(offset..offset))?;
+        Ok(ctx.int(position))
+    }
+
+    pub(in crate::dynamic) fn regs(&self, ctx: &mut Context) -> Result<Id> {
+        if let Some(&regs) = self.cached_regs.get() {
+            return Ok(regs);
+        }
+        let mut groups = Vec::new();
+        for index in 0..self.spans.len() {
+            let (start, end) = self.bounds(ctx, index)?;
+            let start = ctx.int(start);
+            let end = ctx.int(end);
+            groups.push(ctx.alloc(Value::Tuple(vec![start, end])));
+        }
+        let regs = ctx.alloc(Value::Tuple(groups));
+        Ok(*self.cached_regs.get_or_init(|| regs))
     }
 }
 
@@ -1533,6 +1564,7 @@ pub(super) fn search(
             pattern: receiver,
             subject: string,
             buffer_view,
+            initial_start: start,
             start: Some(start),
             end,
             retry: false,
@@ -1577,6 +1609,8 @@ pub(super) fn search(
         pattern: receiver,
         subject: string,
         spans,
+        window: subject.original(Span::from(start..end)),
+        cached_regs: OnceCell::new(),
     }))))
 }
 
