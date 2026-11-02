@@ -383,10 +383,29 @@ impl Context {
                 x.to_ne_bytes().to_vec()
             });
         }
-        let n = self.index_value(value)?.ok_or_else(invalid_type)?;
+        let n = match self.index_value(value) {
+            Ok(Some(n)) => n,
+            Ok(None) => return Err(invalid_type()),
+            Err(err) => {
+                // CPython's fix_error_int also translates exceptions raised by __index__.
+                let type_error = self.builtin("TypeError");
+                if self.raised_error_matches(&err, type_error) {
+                    return Err(invalid_type());
+                }
+                let overflow = self.builtin("OverflowError");
+                let value_error = self.builtin("ValueError");
+                if self.raised_error_matches(&err, overflow)
+                    || self.raised_error_matches(&err, value_error)
+                {
+                    return Err(invalid_value());
+                }
+                return Err(err);
+            }
+        };
         Ok(match format {
             "B" => vec![n.big().to_u8().ok_or_else(invalid_value)?],
             "b" => vec![n.big().to_i8().ok_or_else(invalid_value)? as u8],
+            "q" => n.to_i64().ok_or_else(invalid_value)?.to_ne_bytes().to_vec(),
             "i" => n
                 .big()
                 .to_i32()
