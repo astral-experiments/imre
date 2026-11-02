@@ -753,7 +753,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("struct", "Struct" | "calcsize" | "pack" | "unpack" | "error")
         | ("base64", "urlsafe_b64encode" | "urlsafe_b64decode")
         | ("json", "dump" | "dumps" | "loads")
-        | ("_json", "_imre_encode_one_shot" | "encode_basestring" | "encode_basestring_ascii")
+        | ("_json", "_imre_encode_one_shot")
         | ("random", "random" | "choice")
         | ("codecs", "decode" | "lookup" | "register_error" | "lookup_error")
         | ("gc", "collect")
