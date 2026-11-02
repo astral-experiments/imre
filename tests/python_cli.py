@@ -2485,6 +2485,7 @@ def report(text):
             "boxed_sequence_order.py",
             "boxed_tuple_index.py",
             "boxed_json_containers.py",
+            "boxed_json_scanner.py",
             "boxed_json_decoder.py",
             "boxed_json_module_doc.py",
             "boxed_json_encoder.py",
