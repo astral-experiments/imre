@@ -81,6 +81,28 @@ def current():
     passed.run(result)
     assert result.unexpectedSuccesses == [passed] and result.shouldStop
 
+    class StopRecorder(unittest.TestResult):
+        def stop(self):
+            stops.append((len(self.failures), len(self.errors), len(self.unexpectedSuccesses)))
+            super().stop()
+
+    for enabled in (False, True):
+        observer = StopRecorder()
+        if enabled:
+            observer.failfast = True
+        else:
+            del observer.failfast
+        stops = []
+        error = (ValueError, ValueError("detail"), None)
+        observer.addFailure(failed, error)
+        observer.addError(failed, error)
+        observer.addSubTest(failed, failed, None)
+        observer.addSubTest(failed, failed, error)
+        observer.addUnexpectedSuccess(passed)
+        assert len(observer.failures) == 1 and len(observer.errors) == 2
+        assert observer.unexpectedSuccesses == [passed] and observer.shouldStop == enabled
+        assert stops == ([(0, 0, 0), (1, 0, 0), (1, 1, 0), (1, 2, 0)] if enabled else [])
+
     for name, test in (("addExpectedFailure", failed), ("addUnexpectedSuccess", passed)):
         observer = unittest.TestResult()
         setattr(observer, name, None)
