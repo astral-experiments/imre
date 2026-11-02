@@ -295,7 +295,7 @@ class TestCase(_SuiteMember):
         elif second is None:
             difference = _inequality_message(repr(first), "None")
         else:
-            self.assertMultiLineEqual(first, second, msg)
+            self.assertMultiLineEqual(first, second, msg=msg)
             return
         raise self.failureException(self._formatMessage(msg, difference))
 
@@ -366,7 +366,7 @@ class TestCase(_SuiteMember):
                                msg: str | None = None) -> None:
         if isinstance(first, str):
             if isinstance(second, str):
-                self.assertMultiLineEqual(first, second, msg)
+                self.assertMultiLineEqual(first, second, msg=msg)
                 return
         elif isinstance(second, list):
             self.assertListEqual(first, second, msg)
