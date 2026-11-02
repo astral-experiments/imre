@@ -2871,6 +2871,7 @@ def report(text):
             "boxed_itertools_groupby.py",
             "boxed_itertools_filterfalse.py",
             "boxed_itertools_takewhile.py",
+            "boxed_itertools_dropwhile.py",
             "boxed_starmap_subclass.py",
             "boxed_object_new.py",
             "boxed_module_type.py",
