@@ -58,8 +58,55 @@ def check_inheritance():
     assert formats == [1, 1, 3, 4]
 
 
+def check_required_keys():
+    from typing import NotRequired, Required, get_args, get_origin
+
+    nested = "(" * 200 + "T" + ")" * 200
+    assert Required[nested].__args__[0].__forward_arg__ == nested
+    try:
+        Required["(" + nested + ")"]
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("accepted 201 nested delimiters in a forward reference")
+
+    for form in (Required, NotRequired):
+        alias = form[int]
+        assert alias is form[int] and get_origin(alias) is form
+        assert alias.__args__ == get_args(alias) == (int,)
+        assert form[None].__args__ == (type(None),)
+        assert repr(alias) == f"typing.{form.__name__}[int]"
+        for invalid in (Required, (int,), (int, str)):
+            try:
+                form[invalid]
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("accepted an invalid qualifier argument")
+
+    class ExplicitKeys:
+        def __bool__(self):
+            raise AssertionError("qualified fields consulted total")
+
+    Parent = TypedDict("Parent", {"must": NotRequired[Required[int]], "may": NotRequired[str]},
+                       total=ExplicitKeys())
+    assert Parent.__required_keys__ == {"must"} and Parent.__optional_keys__ == {"may"}
+    assert Parent.__annotations__["must"] is NotRequired[Required[int]]
+    assert Parent.__annotate__(4)["may"] == "typing.NotRequired[str]"
+
+    class Child(Parent, total=False):
+        must: NotRequired[bytes]
+        may: Required[None]
+        extra: int
+
+    assert Child.__required_keys__ == {"may"} and Child.__optional_keys__ == {"must", "extra"}
+    assert Child.__annotations__ == {"must": NotRequired[bytes], "may": Required[None], "extra": int}
+    assert Child() == {}
+
+
 def current():
     check_inheritance()
+    check_required_keys()
 
     class Film(TypedDict):
         title: str
